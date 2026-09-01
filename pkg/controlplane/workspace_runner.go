@@ -28,7 +28,7 @@ func (s *Server) resolveWorkspaceRunnerTarget(r *http.Request) (*workspaceRunner
 		return nil, nil
 	}
 	if strings.TrimSpace(r.URL.Query().Get("cwd")) != "" {
-		return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("cwd is not accepted for a remote runner workspace")}
+		return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("cwd is not accepted for runner-wide workspace tools")}
 	}
 	if s == nil || s.runnerRegistry == nil {
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner registry is unavailable"}

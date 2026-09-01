@@ -883,6 +883,51 @@ func TestOpenRunSupportsRunnerConcurrencyAndEnforcesConversationAffinity(t *test
 	assert.Empty(t, runner.ActiveRunIDs)
 }
 
+func TestOpenRunOutsideStartupWorkspacePreservesRunnerManifestDigest(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:       registration.RunnerID,
+		Generation:     registration.Generation,
+		State:          protocol.RunnerStateIdle,
+		ManifestDigest: "sha256:startup",
+	}))
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		switch method {
+		case protocol.MethodRunOpen:
+			request := params.(protocol.RunOpenParams)
+			manifest := runnerpayload.Manifest{
+				ProtocolVersion:  protocol.Version,
+				RunnerID:         registration.RunnerID,
+				RunID:            request.RunID,
+				Generation:       registration.Generation,
+				WorkingDirectory: "/work/other-project",
+			}
+			digest, digestErr := runnerpayload.ComputeManifestDigest(manifest)
+			require.NoError(t, digestErr)
+			manifest.Digest = digest
+			*result.(*runnerpayload.Manifest) = manifest
+		case protocol.MethodRunClose:
+			return nil
+		default:
+			return fmt.Errorf("unexpected method %s", method)
+		}
+		return nil
+	}
+
+	params := testRunOpenParams("run-one", "conversation-one")
+	params.CWD = "/work/other-project"
+	manifest, err := registry.OpenRun(t.Context(), registration.RunnerID, params)
+	require.NoError(t, err)
+	assert.Equal(t, "/work/other-project", manifest.WorkingDirectory)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, "sha256:startup", runner.ManifestDigest)
+	require.NoError(t, registry.CloseRun(t.Context(), params.RunID, RunStatusSucceeded, nil))
+}
+
 func TestOpenRunKeepsLegacyRunnerCapacityOne(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
@@ -2119,6 +2164,8 @@ func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 	}{
 		{name: "protocol", manifest: func() runnerpayload.Manifest { value := base; value.ProtocolVersion++; return withDigest(value) }(), wantError: "protocol version"},
 		{name: "identity", manifest: func() runnerpayload.Manifest { value := base; value.RunnerID = "other"; return withDigest(value) }(), wantError: "identity"},
+		{name: "working directory", manifest: func() runnerpayload.Manifest { value := base; value.WorkingDirectory = ""; return withDigest(value) }(), wantError: "working directory"},
+		{name: "expected working directory", manifest: withDigest(base), wantError: "does not match expected"},
 		{name: "unnamed tool", manifest: func() runnerpayload.Manifest {
 			value := base
 			value.Tools = []runnerpayload.ToolDefinition{{Placement: "environment"}}
@@ -2159,7 +2206,11 @@ func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			require.ErrorContains(t, validateManifest(test.manifest, "runner-one", params, 2), test.wantError)
+			testParams := params
+			if test.name == "expected working directory" {
+				testParams.ExpectedCWD = "/work/other"
+			}
+			require.ErrorContains(t, validateManifest(test.manifest, "runner-one", testParams, 2), test.wantError)
 		})
 	}
 

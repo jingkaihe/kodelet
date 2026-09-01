@@ -86,6 +86,7 @@ type ChatEvent struct {
 	Kind             string                          `json:"kind"`
 	ConversationID   string                          `json:"conversation_id,omitempty"`
 	ConversationName string                          `json:"conversation_name,omitempty"`
+	CWD              string                          `json:"cwd,omitempty"`
 	Role             string                          `json:"role,omitempty"`
 	Delta            string                          `json:"delta,omitempty"`
 	Content          any                             `json:"content,omitempty"`
@@ -354,11 +355,9 @@ func runDefaultChat(
 
 	var llmConfig llmtypes.Config
 	var resolvedCWD string
+	var expectedCWD string
 	var environmentProfile string
 	if strings.TrimSpace(req.RunnerID) != "" {
-		if strings.TrimSpace(req.CWD) != "" {
-			return sessionID, errors.New("cwd cannot be used with a remote runner")
-		}
 		llmConfig, environmentProfile, err = ResolveRemoteConfigWithReasoningAndEnvironmentProfile(
 			ctx,
 			sessionID,
@@ -366,6 +365,9 @@ func runDefaultChat(
 			strings.TrimSpace(req.ReasoningEffort),
 			strings.TrimSpace(req.EnvironmentProfile),
 		)
+		if err == nil {
+			resolvedCWD, expectedCWD = resolveRemoteWorkingDirectory(req.CWD, llmConfig.WorkingDirectory)
+		}
 	} else {
 		if strings.TrimSpace(req.EnvironmentProfile) != "" {
 			return sessionID, errors.New("environmentProfile requires a remote runner")
@@ -425,14 +427,20 @@ func runDefaultChat(
 		_ = environment.Close(closeCtx)
 	}()
 	runSpec := agentenv.RunSpec{
-		ConversationID:     sessionID,
-		EnvironmentProfile: environmentProfile,
-		Config:             llmConfig,
-		InvokedBy:          invokedBy,
+		ConversationID:           sessionID,
+		EnvironmentProfile:       environmentProfile,
+		ExpectedWorkingDirectory: expectedCWD,
+		Config:                   llmConfig,
+		InvokedBy:                invokedBy,
 	}
 	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
 	if err != nil {
 		return sessionID, err
+	}
+	if environment.IsOpen() {
+		if effectiveCWD := strings.TrimSpace(environment.Manifest().WorkingDirectory); effectiveCWD != "" {
+			llmConfig.WorkingDirectory = effectiveCWD
+		}
 	}
 	if commandResult.Matched {
 		switch commandResult.Action {
@@ -440,7 +448,7 @@ func runDefaultChat(
 			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, strings.TrimSpace(req.RunnerID), environmentProfile, message, commandResult.Response, imageInputs); err != nil {
 				return sessionID, err
 			}
-			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
+			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
 				logger.G(ctx).WithError(err).Debug("failed to send extension command conversation event")
 			}
 			if strings.TrimSpace(commandResult.Response) != "" {
@@ -548,6 +556,7 @@ func runDefaultChat(
 	if err := sink.Send(ChatEvent{
 		Kind:           "conversation",
 		ConversationID: sessionID,
+		CWD:            llmConfig.WorkingDirectory,
 		Role:           "assistant",
 	}); err != nil {
 		logger.G(ctx).WithError(err).Debug("failed to send initial conversation event")
@@ -881,6 +890,7 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		config, err := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), err
 	}
 
@@ -894,7 +904,11 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 
 	record, err := service.GetConversation(ctx, conversationID)
 	if err != nil {
+		if !errors.Is(err, convtypes.ErrConversationNotFound) {
+			return llmtypes.Config{}, "", errors.Wrap(err, "failed to load remote conversation")
+		}
 		config, configErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), configErr
 	}
 	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
@@ -905,8 +919,17 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}
-	config.WorkingDirectory = ""
+	config.WorkingDirectory = strings.TrimSpace(record.CWD)
 	return config, environmentProfile, nil
+}
+
+func resolveRemoteWorkingDirectory(requestedCWD, storedCWD string) (string, string) {
+	requestedCWD = strings.TrimSpace(requestedCWD)
+	storedCWD = strings.TrimSpace(storedCWD)
+	if requestedCWD == "" {
+		requestedCWD = storedCWD
+	}
+	return requestedCWD, storedCWD
 }
 
 // NormalizeEnvironmentProfile maps blank and the reserved default name to runner base configuration.

@@ -280,6 +280,9 @@ const getRecentWorkspaces = (conversations: Conversation[]): string[] => {
   [...conversations]
     .sort((left, right) => getConversationTimestamp(right) - getConversationTimestamp(left))
     .some((conversation) => {
+      if (conversation.runnerId) {
+        return false;
+      }
       const cwd = conversation.cwd?.trim();
       if (cwd) {
         workspaces.add(cwd);
@@ -560,6 +563,7 @@ const ChatPage: React.FC = () => {
     conversationId: string;
     runnerId: string;
     environmentProfile?: string;
+    cwd?: string;
   } | null>(null);
   const extensionWidgetVersionsRef = useRef<Record<string, UIWidgetVersion>>({});
   const extensionWidgetRevisionRef = useRef<string | null>(null);
@@ -1839,7 +1843,7 @@ const ChatPage: React.FC = () => {
   }, [requestCwdSuggestions]);
 
   useEffect(() => {
-    if (conversationId || !controlPlaneWorkspaceEnabled) {
+    if (conversationId || newChatRunnerDraft || !controlPlaneWorkspaceEnabled) {
       requestCwdSuggestions.cancel();
       cwdInputFocusedRef.current = false;
       setCwdSuggestions([]);
@@ -1869,7 +1873,7 @@ const ChatPage: React.FC = () => {
     cwdSuggestionSkipQueryRef.current = null;
 
     requestCwdSuggestions(cwdQuery);
-  }, [controlPlaneWorkspaceEnabled, conversationId, cwdQuery, requestCwdSuggestions]);
+  }, [controlPlaneWorkspaceEnabled, conversationId, cwdQuery, newChatRunnerDraft, requestCwdSuggestions]);
 
   const handleSelectConversation = (nextConversationId: string) => {
     closeMobileSidebar();
@@ -2186,6 +2190,11 @@ const ChatPage: React.FC = () => {
     const requestRunnerID = existingOptimisticRemoteConversation?.runnerId || selectedRunnerID;
     const requestEnvironmentProfile =
       existingOptimisticRemoteConversation?.environmentProfile || selectedEnvironmentProfile;
+    const requestCWD = existingOptimisticRemoteConversation
+      ? existingOptimisticRemoteConversation.cwd
+      : isNewConversation
+        ? selectedCWD.trim() || undefined
+        : undefined;
     setStartingNewConversation(false);
     if (isNewConversation) {
       optimisticRemoteConversationRef.current = requestRunnerID
@@ -2193,6 +2202,7 @@ const ChatPage: React.FC = () => {
             conversationId: targetConversationId,
             runnerId: requestRunnerID,
             environmentProfile: requestEnvironmentProfile || undefined,
+            cwd: requestCWD,
           }
         : null;
       setActiveConversationId(targetConversationId);
@@ -2260,13 +2270,14 @@ const ChatPage: React.FC = () => {
             persistentWidgets: true,
             persistentSurfaces: false,
           },
-          cwd: conversationId || requestRunnerID ? undefined : currentCWDLabel || undefined,
+          cwd: requestCWD,
         },
         {
           signal: controller.signal,
           onEvent: (event: ChatStreamEvent) => {
             if (event.kind === 'conversation' && event.conversation_id) {
               const streamedId = event.conversation_id;
+              const effectiveCWD = event.cwd?.trim() || currentCWDLabel;
               const previousStreamedId = streamedConversationId;
               const shouldAdoptStreamedConversation =
                 viewedConversationIdRef.current === viewConversationIdAtStart ||
@@ -2285,10 +2296,16 @@ const ChatPage: React.FC = () => {
                 optimisticRemoteConversationRef.current = {
                   ...optimisticRemoteConversationRef.current,
                   conversationId: streamedId,
+                  cwd: effectiveCWD || optimisticRemoteConversationRef.current.cwd,
                 };
               }
               if (shouldAdoptStreamedConversation) {
                 setActiveConversationId(streamedId);
+                setConversation((currentConversation) =>
+                  currentConversation
+                    ? { ...currentConversation, id: streamedId, cwd: effectiveCWD }
+                    : currentConversation
+                );
               }
               if (
                 previousStreamedId &&
@@ -2319,7 +2336,7 @@ const ChatPage: React.FC = () => {
                       messageCount: 1,
                       summary: userPreview,
                       preview: userPreview,
-                      cwd: currentCWDLabel,
+                      cwd: effectiveCWD,
                       runnerId: selectedRunnerID || undefined,
                       environmentProfile: selectedRunnerID
                         ? selectedEnvironmentProfile || undefined
@@ -2680,7 +2697,10 @@ const ChatPage: React.FC = () => {
 
   const currentCWDLabel = useMemo(() => {
     if (currentRunnerID) {
-      return currentRunner?.workspace.path || conversation?.cwd || 'Remote runner';
+      if (conversationId) {
+        return workspaceConversation?.cwd || currentRunner?.workspace.path || 'Remote runner';
+      }
+      return selectedCWD || currentRunner?.workspace.path || 'Remote runner';
     }
     if (isStartedConversationAwaitingLoad) {
       return selectedCWD || chatSettings.defaultCWD || '';
@@ -3134,7 +3154,7 @@ const ChatPage: React.FC = () => {
     setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
     setSelectedRunnerID(newChatRunnerDraft);
     setSelectedEnvironmentProfile(newChatRunnerDraft ? newChatEnvironmentProfileDraft.trim() : '');
-    setSelectedCWD(newChatRunnerDraft ? '' : cwdQuery.trim());
+    setSelectedCWD(cwdQuery.trim());
     cwdSuggestionSkipQueryRef.current = null;
     requestCwdSuggestions.cancel();
     cwdSuggestionRequestRef.current += 1;
@@ -3144,7 +3164,9 @@ const ChatPage: React.FC = () => {
     setNewChatDialogOpen(false);
   };
 
-  const workspacePanelCWDLabel = currentCWDLabel || chatSettings.defaultCWD || '';
+  const workspacePanelCWDLabel = isRemoteConversation
+    ? currentRunner?.workspace.path || ''
+    : currentCWDLabel || chatSettings.defaultCWD || '';
   const conversationSearchReturnFocusSelector = mobileLayout
     ? '[data-testid="sidebar-attached-toggle-mobile"]'
     : sidebarVisible
@@ -3204,7 +3226,9 @@ const ChatPage: React.FC = () => {
           onCwdInputChange={handleCwdInputChange}
           onCwdInputFocus={() => {
             cwdInputFocusedRef.current = true;
-            setCwdSuggestionsOpen(cwdQuery.trim().length > 0 && cwdSuggestions.length > 0);
+            setCwdSuggestionsOpen(
+              !newChatRunnerDraft && cwdQuery.trim().length > 0 && cwdSuggestions.length > 0
+            );
           }}
           onCwdInputKeyDown={handleCwdInputKeyDown}
           onProfileDraftChange={handleNewChatProfileDraftChange}
@@ -3215,6 +3239,9 @@ const ChatPage: React.FC = () => {
           onRecentWorkspaceSelect={handleRecentWorkspaceSelect}
           onRunnerDraftChange={(runnerId) => {
             setNewChatRunnerDraft(runnerId);
+            const nextCWD = runnerId ? '' : chatSettings.defaultCWD || '';
+            setCwdQuery(nextCWD);
+            cwdSuggestionSkipQueryRef.current = nextCWD;
             if (!runnerId) {
               setNewChatEnvironmentProfileDraft('');
             }
@@ -3421,7 +3448,11 @@ const ChatPage: React.FC = () => {
               setNewChatRunnerDraft(selectedRunnerID);
               setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
               setCwdQuery(
-                controlPlaneWorkspaceEnabled ? selectedCWD || chatSettings.defaultCWD || '' : ''
+                selectedRunnerID
+                  ? selectedCWD
+                  : controlPlaneWorkspaceEnabled
+                    ? selectedCWD || chatSettings.defaultCWD || ''
+                    : ''
               );
               setNewChatDialogOpen(true);
             }}

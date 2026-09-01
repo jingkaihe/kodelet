@@ -83,7 +83,6 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	if r.runnerID != "" {
 		request.RunnerID = r.runnerID
 	}
-	request.CWD = ""
 	request.ClientCapabilities = &ChatClientCapabilities{
 		InteractiveUI: controlPlaneSupportsInteractiveUI(ctx),
 	}

@@ -721,6 +721,72 @@ func TestServiceBackgroundLeaseRetainsAndReattachesRunnerResources(t *testing.T)
 	assert.Equal(t, 1, releasedCount)
 }
 
+func TestServiceBackgroundReattachValidatesRequestedCWD(t *testing.T) {
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "nested")
+	require.NoError(t, os.Mkdir(nested, 0o755))
+	other := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	provider := &reusableIsolatedRuntimeProvider{runtime: runtime}
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: provider,
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, service.Close())
+		require.NoError(t, runtime.Close())
+	})
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID:          "run-1",
+		ConversationID: "conversation-1",
+		CWD:            "nested",
+		ExpectedCWD:    nested,
+	})
+
+	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "subagent", Generation: 7}}
+	runOneCtx := service.decorateRunContext(t.Context(), "run-1", "conversation-1")
+	lease, err := service.AcquireBackgroundTask(runOneCtx, source, extensions.BackgroundTaskAcquireRequest{Description: "subagent worker"})
+	require.NoError(t, err)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID:          "run-2",
+		ConversationID: "conversation-1",
+		CWD:            "nested",
+		ExpectedCWD:    nested,
+	})
+	assert.Equal(t, nested, manifest.WorkingDirectory)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-2"})
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID:          "run-3",
+		ConversationID: "conversation-1",
+		CWD:            other,
+		ExpectedCWD:    nested,
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeConflict, rpcErr.Code)
+	assert.Contains(t, rpcErr.Message, "conversation is bound to working directory")
+	service.mu.Lock()
+	resources := service.backgrounds["conversation-1"]
+	service.mu.Unlock()
+	require.NotNil(t, resources)
+	assert.Empty(t, resources.attachedRunID)
+
+	released, err := service.ReleaseBackgroundTask(runOneCtx, source, extensions.BackgroundTaskReleaseRequest(lease))
+	require.NoError(t, err)
+	require.NotNil(t, released.AfterResponse)
+	released.AfterResponse()
+	select {
+	case <-resources.cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("background resources were not released")
+	}
+}
+
 func TestServiceCloseReleasesOutstandingBackgroundResources(t *testing.T) {
 	runtime := extensions.EmptyRuntime()
 	provider := &reusableIsolatedRuntimeProvider{runtime: runtime}
@@ -1290,13 +1356,13 @@ func TestServiceCreatesEnvironmentInsideExecutionInstanceAndCleansItUp(t *testin
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
 	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
-		RunID: "run-1", ConversationID: "conversation-1",
+		RunID: "run-1", ConversationID: "conversation-1", CWD: "/requested/workspace",
 	})
 
 	assert.Equal(t, instanceWorkspace, environmentWorkspace)
 	assert.Equal(t, instanceWorkspace, manifest.WorkingDirectory)
 	require.Len(t, provider.specs, 1)
-	assert.Equal(t, ExecutionInstanceSpec{RunID: "run-1", ConversationID: "conversation-1"}, provider.specs[0])
+	assert.Equal(t, ExecutionInstanceSpec{RunID: "run-1", ConversationID: "conversation-1", CWD: "/requested/workspace"}, provider.specs[0])
 	require.Len(t, provider.instances, 1)
 	assert.False(t, provider.instances[0].closed)
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
@@ -1446,19 +1512,85 @@ func TestServiceManifestProbeCleanupFailureDoesNotPoisonRunner(t *testing.T) {
 
 func TestDirectWorkspaceInstanceProviderReturnsFreshHandles(t *testing.T) {
 	workspace := t.TempDir()
+	relativeWorkspace := filepath.Join(workspace, "nested")
+	require.NoError(t, os.Mkdir(relativeWorkspace, 0o755))
+	outsideWorkspace := t.TempDir()
+	homeWorkspace := t.TempDir()
+	t.Setenv("HOME", homeWorkspace)
 	provider, err := NewDirectWorkspaceInstanceProvider(workspace)
 	require.NoError(t, err)
 
 	first, err := provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-1"})
 	require.NoError(t, err)
-	second, err := provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-2"})
+	second, err := provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-2", CWD: "nested"})
+	require.NoError(t, err)
+	outside, err := provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-3", CWD: outsideWorkspace})
+	require.NoError(t, err)
+	home, err := provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-4", CWD: "~"})
 	require.NoError(t, err)
 
 	assert.NotSame(t, first, second)
 	assert.Equal(t, workspace, first.WorkingDirectory())
-	assert.Equal(t, workspace, second.WorkingDirectory())
+	assert.Equal(t, relativeWorkspace, second.WorkingDirectory())
+	assert.Equal(t, outsideWorkspace, outside.WorkingDirectory())
+	assert.Equal(t, homeWorkspace, home.WorkingDirectory())
 	require.NoError(t, first.Close(t.Context()))
 	require.NoError(t, second.Close(t.Context()))
+	require.NoError(t, outside.Close(t.Context()))
+	require.NoError(t, home.Close(t.Context()))
+
+	_, err = provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-missing", CWD: filepath.Join(workspace, "missing")})
+	require.ErrorContains(t, err, "cwd directory does not exist")
+	_, err = provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-other-home", CWD: "~another-user/project"})
+	require.ErrorContains(t, err, "supports only ~ or ~/")
+}
+
+func TestServiceResolvesRequestedCWDBeforeCheckingConversationBinding(t *testing.T) {
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "nested")
+	require.NoError(t, os.Mkdir(nested, 0o755))
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID:          "run-1",
+		ConversationID: "conversation-1",
+		CWD:            "nested",
+		ExpectedCWD:    nested,
+	})
+	assert.Equal(t, nested, manifest.WorkingDirectory)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+}
+
+func TestServiceRejectsChangedConversationCWD(t *testing.T) {
+	workspace := t.TempDir()
+	other := t.TempDir()
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID:          "run-1",
+		ConversationID: "conversation-1",
+		CWD:            other,
+		ExpectedCWD:    workspace,
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeConflict, rpcErr.Code)
+	assert.Contains(t, rpcErr.Message, "conversation is bound to working directory")
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, runIDs)
 }
 
 func TestServiceRunCancelPropagatesToActiveToolOperation(t *testing.T) {

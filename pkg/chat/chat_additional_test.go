@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,11 +206,16 @@ func (r *recordingEnvironmentResolver) ResolveEnvironment(_ context.Context, req
 
 type directCommandEnvironment struct {
 	agentenv.Environment
-	request agentenv.CommandRequest
-	result  agentenv.CommandResult
+	request  agentenv.CommandRequest
+	result   agentenv.CommandResult
+	manifest agentenv.Manifest
 }
 
-func (e *directCommandEnvironment) IsOpen() bool { return false }
+func (e *directCommandEnvironment) IsOpen() bool {
+	return strings.TrimSpace(e.manifest.WorkingDirectory) != ""
+}
+func (e *directCommandEnvironment) Manifest() agentenv.Manifest { return e.manifest }
+func (e *directCommandEnvironment) Close(context.Context) error { return nil }
 func (e *directCommandEnvironment) ExecuteCommand(_ context.Context, request agentenv.CommandRequest) (agentenv.CommandResult, error) {
 	e.request = request
 	return e.result, nil
@@ -335,6 +341,7 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 		convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot, Initiator: &initiator},
 	)
 	child.ID = "conversation-remote-command"
+	child.CWD = "/runner/other-project"
 	child.Provider = "anthropic"
 	child.Metadata[RunnerIDMetadataKey] = "runner-one"
 	child.Metadata[EnvironmentProfileMetadataKey] = "gpu"
@@ -343,13 +350,16 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	require.NoError(t, store.Save(t.Context(), child))
 	require.NoError(t, store.Close())
 
-	environment := &directCommandEnvironment{result: agentenv.CommandResult{
-		Matched:     true,
-		Action:      agentenv.CommandActionRespond,
-		CommandName: "runner-status",
-		Response:    "runner ready",
-		Display:     "/runner-status",
-	}}
+	environment := &directCommandEnvironment{
+		manifest: agentenv.Manifest{WorkingDirectory: "/runner/other-project"},
+		result: agentenv.CommandResult{
+			Matched:     true,
+			Action:      agentenv.CommandActionRespond,
+			CommandName: "runner-status",
+			Response:    "runner ready",
+			Display:     "/runner-status",
+		},
+	}
 	resolver := &recordingEnvironmentResolver{environment: environment}
 	runner := NewDefaultChatRunner("")
 	runner.SetEnvironmentResolver(resolver)
@@ -366,7 +376,7 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	assert.Equal(t, "conversation-remote-command", conversationID)
 	assert.Equal(t, "runner-one", resolver.request.RunnerID)
 	assert.Equal(t, conversationID, resolver.conversationID)
-	assert.Empty(t, resolver.config.WorkingDirectory)
+	assert.Equal(t, "/runner/other-project", resolver.config.WorkingDirectory)
 	assert.Equal(t, "/runner-status", environment.request.Message)
 	assert.Equal(t, "gpu", environment.request.RunSpec.EnvironmentProfile)
 	assert.Equal(t, "subagent", environment.request.RunSpec.InvokedBy)
@@ -379,12 +389,27 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	record, err := service.GetConversation(t.Context(), conversationID)
 	require.NoError(t, err)
+	assert.Equal(t, "/runner/other-project", record.CWD)
 	assert.Equal(t, "runner-one", record.Metadata[RunnerIDMetadataKey])
 	assert.Equal(t, "gpu", record.Metadata[EnvironmentProfileMetadataKey])
 
 	config, err := ResolveRemoteConfigWithReasoning(t.Context(), "", "", "high")
 	require.NoError(t, err)
 	assert.Equal(t, "high", config.ReasoningEffort)
+}
+
+func TestResolveRemoteWorkingDirectoryPinsExistingConversation(t *testing.T) {
+	requested, expected := resolveRemoteWorkingDirectory("", "/runner/project")
+	assert.Equal(t, "/runner/project", requested)
+	assert.Equal(t, "/runner/project", expected)
+
+	requested, expected = resolveRemoteWorkingDirectory(" backend ", "/runner/project/backend")
+	assert.Equal(t, "backend", requested)
+	assert.Equal(t, "/runner/project/backend", expected)
+
+	requested, expected = resolveRemoteWorkingDirectory(" ../other ", "")
+	assert.Equal(t, "../other", requested)
+	assert.Empty(t, expected)
 }
 
 func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {

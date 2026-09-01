@@ -1417,7 +1417,7 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
   });
 
-  it('selects a remote runner and omits control-plane cwd features', async () => {
+  it('selects a remote runner and sends an explicit runner-host cwd', async () => {
     mockGetRunners.mockResolvedValue({
       runners: [makeRunner()],
     });
@@ -1434,7 +1434,8 @@ describe('ChatPage', () => {
       target: { value: 'gpu' },
     });
     expect(screen.getByText('/runner/kodelet')).toBeVisible();
-    expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
+    const cwdInput = screen.getByLabelText('Working directory');
+    fireEvent.change(cwdInput, { target: { value: '/runner/other-project' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
 
@@ -1448,16 +1449,13 @@ describe('ChatPage', () => {
       expect.objectContaining({
         runnerId: 'runner-1',
         environmentProfile: 'gpu',
+        cwd: '/runner/other-project',
         clientCapabilities: {
           interactiveUI: true,
           persistentWidgets: true,
           persistentSurfaces: false,
         },
       }),
-      expect.any(Object)
-    );
-    expect(mockStreamChat).toHaveBeenCalledWith(
-      expect.not.objectContaining({ cwd: expect.anything() }),
       expect.any(Object)
     );
   });
@@ -1574,6 +1572,9 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../other-project' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'first attempt' },
@@ -1600,6 +1601,7 @@ describe('ChatPage', () => {
       expect.objectContaining({
         conversationId: preallocatedId,
         runnerId: 'runner-1',
+        cwd: '../other-project',
       })
     );
   });
@@ -1786,6 +1788,14 @@ describe('ChatPage', () => {
     mockGetConversations.mockResolvedValue({
       conversations: [
         {
+          id: 'conv-remote',
+          createdAt: '2023-01-01T00:00:00Z',
+          updatedAt: '2023-01-07T00:00:00Z',
+          messageCount: 1,
+          cwd: '/runner/remote-only',
+          runnerId: 'runner-1',
+        },
+        {
           id: 'conv-1',
           createdAt: '2023-01-01T00:00:00Z',
           updatedAt: '2023-01-06T00:00:00Z',
@@ -1829,7 +1839,7 @@ describe('ChatPage', () => {
         },
       ],
       hasMore: false,
-      total: 6,
+      total: 7,
       limit: 10,
       offset: 0,
     });
@@ -1847,6 +1857,7 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: '/workspace/a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '/workspace/e' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '/workspace/f' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '/runner/remote-only' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '/workspace/b' }));
     await waitFor(() => {

@@ -345,6 +345,17 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			"working_directory": result.WorkingDirectory,
 		}).Info("runner run opened")
 	}()
+	requestedCWD := strings.TrimSpace(params.CWD)
+	resolvedRequestedCWD := requestedCWD
+	if requestedCWD != "" {
+		if resolver, ok := s.instanceProvider.(ExecutionInstanceWorkingDirectoryResolver); ok {
+			var err error
+			resolvedRequestedCWD, err = resolver.ResolveWorkingDirectory(ctx, requestedCWD)
+			if err != nil {
+				return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve requested runner working directory")
+			}
+		}
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -373,6 +384,14 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		if resources.variant != variant {
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.Errorf("background resources use runner profile %q, not %q", firstNonEmpty(resources.variant, "default"), firstNonEmpty(variant, "default"))
+		}
+		if resolvedRequestedCWD != "" && resolvedRequestedCWD != resources.workingDirectory {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("conversation is bound to working directory %q, not %q", resources.workingDirectory, resolvedRequestedCWD)
+		}
+		if expectedCWD := strings.TrimSpace(params.ExpectedCWD); expectedCWD != "" && expectedCWD != resources.workingDirectory {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("conversation is bound to working directory %q, not %q", expectedCWD, resources.workingDirectory)
 		}
 		resources.attachedRunID = params.RunID
 		resources.lastRunID = params.RunID
@@ -411,9 +430,14 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	defer s.unlockSnapshot()
 	if resources == nil {
+		instanceCWD := params.CWD
+		if resolvedRequestedCWD != "" {
+			instanceCWD = resolvedRequestedCWD
+		}
 		instance, err := s.instanceProvider.Create(operationCtx, ExecutionInstanceSpec{
 			RunID:          params.RunID,
 			ConversationID: params.ConversationID,
+			CWD:            instanceCWD,
 		})
 		if err != nil {
 			s.failOpen(run)
@@ -428,6 +452,11 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
 			s.failOpen(run)
 			return runnerpayload.Manifest{}, errors.New("runner execution instance returned an empty working directory")
+		}
+		if expectedCWD := strings.TrimSpace(params.ExpectedCWD); expectedCWD != "" && workingDirectory != expectedCWD {
+			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Errorf("conversation is bound to working directory %q, not %q", expectedCWD, workingDirectory)
 		}
 		runtimeLeaseCtx, runtimeLeaseCancel := context.WithCancel(s.ctx)
 		resources = &runnerBackgroundResources{
@@ -542,7 +571,9 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	run.environment = environment
 	run.manifest = wireManifest
 	run.opening = false
-	s.lastManifestDigest = wireManifest.Digest
+	if workingDirectory == s.workspace {
+		s.lastManifestDigest = wireManifest.Digest
+	}
 	s.mu.Unlock()
 	return wireManifest, nil
 }
@@ -1411,7 +1442,7 @@ func rpcResult(result any, err error) (any, *protocol.RPCError) {
 		code = protocol.ErrorCodeUnavailable
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):
 		code = protocol.ErrorCodeBusy
-	case strings.Contains(message, "another"), strings.Contains(message, "already"):
+	case strings.Contains(message, "another"), strings.Contains(message, "already"), strings.Contains(message, "is bound to working directory"):
 		code = protocol.ErrorCodeConflict
 	case strings.Contains(message, "required"), strings.Contains(message, "invalid"), strings.Contains(message, "unsupported"):
 		code = protocol.ErrorCodeInvalidParams

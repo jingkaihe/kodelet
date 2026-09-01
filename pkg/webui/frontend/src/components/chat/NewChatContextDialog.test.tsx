@@ -125,7 +125,7 @@ describe('NewChatContextDialog', () => {
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 
-  it('selects an available runner and replaces local cwd controls', () => {
+  it('selects an available runner and accepts a runner-host cwd', () => {
     const props = renderDialog({
       runners: [
         {
@@ -146,11 +146,15 @@ describe('NewChatContextDialog', () => {
         },
       ],
       runnerIdDraft: 'runner-1',
+      cwdQuery: '',
     });
 
     expect(screen.getByText('/workspace/kodelet')).toBeVisible();
     expect(screen.getByLabelText('Runner profile')).toBeVisible();
-    expect(screen.queryByTestId('cwd-input')).not.toBeInTheDocument();
+    const cwdInput = screen.getByTestId('cwd-input');
+    expect(cwdInput).toHaveAttribute('placeholder', '/workspace/kodelet');
+    fireEvent.change(cwdInput, { target: { value: '/workspace/other-project' } });
+    expect(props.onCwdInputChange).toHaveBeenCalledWith('/workspace/other-project');
     fireEvent.change(screen.getByLabelText('Runner profile'), {
       target: { value: 'gpu' },
     });

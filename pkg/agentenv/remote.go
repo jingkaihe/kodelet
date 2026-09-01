@@ -108,6 +108,8 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 	params := protocol.RunOpenParams{
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
+		CWD:            strings.TrimSpace(spec.Config.WorkingDirectory),
+		ExpectedCWD:    strings.TrimSpace(spec.ExpectedWorkingDirectory),
 		Agent: protocol.AgentDescriptor{
 			Provider:           spec.Config.Provider,
 			Model:              spec.Config.Model,

@@ -1135,8 +1135,10 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	now = r.now().UTC()
 	runCandidate.UpdatedAt = now
 	runnerCandidate = cloneRunnerEntry(current)
-	runnerCandidate.ManifestDigest = manifest.Digest
-	runnerCandidate.ManifestChanged = false
+	if manifest.WorkingDirectory == current.Workspace.Path {
+		runnerCandidate.ManifestDigest = manifest.Digest
+		runnerCandidate.ManifestChanged = false
+	}
 	runnerCandidate.UpdatedAt = now
 	if err := r.persistRunnerAndRunLocked(runnerCandidate, &runCandidate); err != nil {
 		r.mu.Unlock()
@@ -1940,6 +1942,12 @@ func validateManifest(manifest runnerpayload.Manifest, runnerID string, params p
 	}
 	if manifest.RunnerID != runnerID || manifest.RunID != params.RunID || manifest.Generation != generation {
 		return errors.New("runner manifest identity does not match opened run")
+	}
+	if strings.TrimSpace(manifest.WorkingDirectory) == "" {
+		return errors.New("runner manifest working directory is required")
+	}
+	if expectedCWD := strings.TrimSpace(params.ExpectedCWD); expectedCWD != "" && manifest.WorkingDirectory != expectedCWD {
+		return errors.Errorf("runner manifest working directory %q does not match expected %q", manifest.WorkingDirectory, expectedCWD)
 	}
 	reserved := make(map[string]struct{}, len(params.ReservedToolNames))
 	for _, name := range params.ReservedToolNames {

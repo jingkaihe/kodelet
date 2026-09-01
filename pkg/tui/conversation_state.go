@@ -141,11 +141,13 @@ func (m *model) createNewConversationAt(cwd string) tea.Cmd {
 	m.nextConversationKey++
 	key := fmt.Sprintf("new:%d", m.nextConversationKey)
 	defaults := m.conversationDefaults
-	if !m.remote {
-		if cwd = strings.TrimSpace(cwd); cwd != "" {
-			defaults.cwd = cwd
-			defaults.requestedCWD = cwd
-		}
+	if m.remote {
+		defaults.cwd = m.remoteDefaultCWD
+		defaults.requestedCWD = ""
+	}
+	if cwd = strings.TrimSpace(cwd); cwd != "" {
+		defaults.cwd = cwd
+		defaults.requestedCWD = cwd
 	}
 	state := newConversationState(key, "", false, defaults)
 	if !m.remote {
@@ -176,22 +178,21 @@ func (m *model) openNewConversationPrompt(initialCWD string) tea.Cmd {
 
 	baseCWD := m.newConversationDefaultCWD()
 	if m.remote {
-		message := "The server or runner will select the working directory."
+		value := strings.TrimSpace(initialCWD)
+		helpText := "Leave blank to use the execution environment's default working directory. Relative paths and ~ are resolved on the execution host."
 		if strings.TrimSpace(baseCWD) != "" {
-			message = "Working directory: " + displayCWD(baseCWD)
-		}
-		helpText := "The server or runner owns this workspace."
-		if requestedCWD := strings.TrimSpace(initialCWD); requestedCWD != "" {
-			helpText = fmt.Sprintf("Requested working directory %q cannot be used because the server or runner owns this workspace.", requestedCWD)
+			helpText = fmt.Sprintf("Leave blank to use %s. Relative paths and ~ are resolved on the execution host.", displayCWD(baseCWD))
 		}
 		return m.openUIPrompt(uiPromptState{
-			mode:             uiPromptConfirm,
-			origin:           uiPromptNewConversation,
-			title:            "New conversation",
-			message:          message,
-			helpText:         helpText,
-			submitButtonText: "Create",
-			cancelButtonText: cancelButtonText,
+			mode:                   uiPromptInput,
+			origin:                 uiPromptNewConversation,
+			title:                  "New conversation",
+			message:                "Working directory",
+			helpText:               helpText,
+			defaultValue:           value,
+			submitButtonText:       "Create",
+			cancelButtonText:       cancelButtonText,
+			newConversationCWDBase: baseCWD,
 		})
 	}
 
@@ -214,6 +215,9 @@ func (m *model) openNewConversationPrompt(initialCWD string) tea.Cmd {
 }
 
 func (m model) newConversationDefaultCWD() string {
+	if m.remote {
+		return strings.TrimSpace(m.remoteDefaultCWD)
+	}
 	if !m.remote && m.conversationState != nil {
 		if cwd := strings.TrimSpace(slashCommandCWDForState(m.conversationState)); cwd != "" {
 			return cwd
@@ -234,6 +238,9 @@ func (m *model) refreshNewConversationPromptCWD(cwd string) {
 		}
 		inputUnchanged := prompt.input.Value() == prompt.defaultValue
 		prompt.newConversationCWDBase = cwd
+		if m.remote {
+			continue
+		}
 		prompt.defaultValue = displayCWD(cwd)
 		if inputUnchanged {
 			prompt.input.SetValue(prompt.defaultValue)

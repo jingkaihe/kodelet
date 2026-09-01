@@ -108,13 +108,13 @@ func newModel(ctx context.Context, config Config) model {
 	conversationSource, _ := runner.(chat.ConversationSource)
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD
-	if cwd == "" {
+	if cwd == "" && config.Remote {
+		cwd = strings.TrimSpace(config.DefaultCWD)
+	}
+	if cwd == "" && !config.Remote {
 		if wd, err := os.Getwd(); err == nil {
 			cwd = wd
 		}
-	}
-	if config.Remote {
-		requestedCWD = ""
 	}
 	messageHistoryStore, _ := messagehistory.NewStore()
 	conversationID := strings.TrimSpace(config.ConversationID)
@@ -185,6 +185,7 @@ func newModel(ctx context.Context, config Config) model {
 		runner:                runner,
 		conversationSource:    conversationSource,
 		remote:                config.Remote,
+		remoteDefaultCWD:      strings.TrimSpace(config.DefaultCWD),
 		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),
 		profileSettings:       cloneProfileSettings(config.ProfileSettings),
 		extensionRuntimes:     extensionRuntimes,

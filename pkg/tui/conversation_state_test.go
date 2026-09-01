@@ -905,11 +905,11 @@ func TestInitialHistoryRefreshesSuspendedNewConversationPromptCWD(t *testing.T) 
 	}
 }
 
-func TestRemoteNewConversationPromptConfirmsOwnedWorkspace(t *testing.T) {
+func TestRemoteNewConversationPromptUsesEnvironmentDefault(t *testing.T) {
 	m := newModel(context.Background(), Config{
-		CWD:    "~/runner/kodelet",
-		Runner: &recordingRunner{},
-		Remote: true,
+		DefaultCWD: "~/runner/kodelet",
+		Runner:     &recordingRunner{},
+		Remote:     true,
 	})
 	t.Cleanup(m.cancel)
 	m.conversationPicker = &conversationPickerState{}
@@ -919,8 +919,10 @@ func TestRemoteNewConversationPromptConfirmsOwnedWorkspace(t *testing.T) {
 
 	require.NotNil(t, m.activeUIPrompt)
 	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
-	assert.Equal(t, uiPromptConfirm, m.activeUIPrompt.mode)
-	assert.Contains(t, m.activeUIPrompt.message, "~/runner/kodelet")
+	assert.Equal(t, uiPromptInput, m.activeUIPrompt.mode)
+	assert.Equal(t, "Working directory", m.activeUIPrompt.message)
+	assert.Contains(t, m.activeUIPrompt.helpText, "~/runner/kodelet")
+	assert.Empty(t, m.activeUIPrompt.input.Value())
 	assert.Equal(t, "Back", m.activeUIPrompt.cancelButtonText)
 	require.NotNil(t, m.conversationPicker)
 
@@ -934,7 +936,7 @@ func TestRemoteNewConversationPromptConfirmsOwnedWorkspace(t *testing.T) {
 	assert.Empty(t, m.requestedCWD)
 }
 
-func TestRemoteNewConversationPromptShowsRejectedCWDOverride(t *testing.T) {
+func TestRemoteNewConversationPromptAcceptsCWDOverride(t *testing.T) {
 	m := newModel(context.Background(), Config{Runner: &recordingRunner{}, Remote: true})
 	t.Cleanup(m.cancel)
 	m.conversationDefaults.cwd = ""
@@ -943,10 +945,14 @@ func TestRemoteNewConversationPromptShowsRejectedCWDOverride(t *testing.T) {
 
 	require.NotNil(t, m.activeUIPrompt)
 	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
-	assert.Equal(t, uiPromptConfirm, m.activeUIPrompt.mode)
-	assert.Equal(t, "The server or runner will select the working directory.", m.activeUIPrompt.message)
-	assert.Contains(t, m.activeUIPrompt.helpText, "/tmp/client-workspace")
-	assert.Contains(t, m.activeUIPrompt.helpText, "cannot be used")
+	assert.Equal(t, uiPromptInput, m.activeUIPrompt.mode)
+	assert.Equal(t, "/tmp/client-workspace", m.activeUIPrompt.input.Value())
+	assert.Contains(t, m.activeUIPrompt.helpText, "execution host")
+
+	cmd := m.submitUIPrompt()
+	require.NotNil(t, cmd)
+	assert.Equal(t, "/tmp/client-workspace", m.cwd)
+	assert.Equal(t, "/tmp/client-workspace", m.requestedCWD)
 }
 
 func TestConversationPickerRendersLoadingErrorAndEmptyState(t *testing.T) {

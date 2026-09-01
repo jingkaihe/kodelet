@@ -51,6 +51,7 @@ var chatCmd = &cobra.Command{
 		}
 		var chatRunner chatpkg.ChatRunner
 		var remoteRunner *chatpkg.ControlPlaneChatRunner
+		var remoteDefaultCWD string
 		remote := usesControlPlaneChat(config)
 		if strings.TrimSpace(config.Runner) != "" {
 			selectedRunner, workspace, remoteErr := prepareRemoteChatRunner(ctx, config)
@@ -60,7 +61,7 @@ var chatCmd = &cobra.Command{
 			}
 			remoteRunner = selectedRunner
 			chatRunner = remoteRunner
-			config.CWD = workspace
+			remoteDefaultCWD = workspace
 		} else if remote {
 			selectedRunner, remoteErr := prepareServerChatRunner(config)
 			if remoteErr != nil {
@@ -120,8 +121,8 @@ var chatCmd = &cobra.Command{
 			profile = remoteProfile
 			profileOptions = options
 			profileSettings = settings
-			if strings.TrimSpace(config.CWD) == "" {
-				config.CWD = defaultCWD
+			if strings.TrimSpace(remoteDefaultCWD) == "" {
+				remoteDefaultCWD = defaultCWD
 			}
 			if selected, ok := remoteProfileSettings(settings, profile); ok {
 				reasoningEffortOptions = selected.ReasoningEffortOptions
@@ -149,6 +150,7 @@ var chatCmd = &cobra.Command{
 			ReasoningEffortOptions:  reasoningEffortOptions,
 			ReasoningEffortExplicit: reasoningEffortExplicit,
 			CWD:                     config.CWD,
+			DefaultCWD:              remoteDefaultCWD,
 			Theme:                   config.Theme,
 			Runner:                  chatRunner,
 			Remote:                  remote,
@@ -227,9 +229,6 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if config == nil || strings.TrimSpace(config.Runner) == "" {
 		return nil, "", errors.New("runner selector is required")
 	}
-	if strings.TrimSpace(config.CWD) != "" {
-		return nil, "", errors.New("--cwd cannot be used with --runner because the runner owns its workspace")
-	}
 	if config.NoExtensions || config.NoTools {
 		return nil, "", errors.New("--no-extensions and --no-tools are local-only options and cannot be used with --runner")
 	}
@@ -266,9 +265,6 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 func prepareServerChatRunner(config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, error) {
 	if config == nil {
 		return nil, errors.New("chat configuration is required")
-	}
-	if strings.TrimSpace(config.CWD) != "" {
-		return nil, errors.New("--cwd cannot be used with --server because the control plane owns the working directory")
 	}
 	if config.NoExtensions || config.NoTools {
 		return nil, errors.New("--no-extensions and --no-tools are local-only options and cannot be used with --server")

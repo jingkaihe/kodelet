@@ -569,6 +569,11 @@ func (m *model) submitUIPrompt() tea.Cmd {
 			return nil
 		}
 		if prompt.origin == uiPromptNewConversation {
+			if m.remote {
+				cwd := strings.TrimSpace(value)
+				focusCmd := m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: cwd})
+				return tea.Batch(focusCmd, m.createNewConversationAt(cwd))
+			}
 			cwd, err := resolveNewConversationCWD(value, prompt.newConversationCWDBase)
 			if err != nil {
 				return m.addUINotification(uiNotification{

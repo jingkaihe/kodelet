@@ -41,7 +41,7 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		assert.Equal(t, "runner-1", payload.RunnerID)
 		assert.Equal(t, "runner-work", payload.EnvironmentProfile)
-		assert.Empty(t, payload.CWD)
+		assert.Equal(t, "/local/path", payload.CWD)
 		require.NotNil(t, payload.ClientCapabilities)
 		assert.False(t, payload.ClientCapabilities.InteractiveUI)
 		w.Header().Set("Content-Type", "application/x-ndjson")

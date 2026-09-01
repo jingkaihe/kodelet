@@ -4,19 +4,19 @@
 
 Implemented through Phase 3, including multiple concurrent logical runs and capability-gated Web UI Git diff and terminal access on one workspace-bound runner. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
 
-The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, or network namespaces. Remote Web UI and TUI conversations are supported, including control-plane conversation browsing and resume; `kodelet run --runner` remains disabled pending a broader one-shot client contract. The runner provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. Concurrent runs are therefore allowed and receive separate run state and extension runtimes, but they intentionally share the workspace filesystem, host processes, network, and ports.
+The current implementation preserves the design's direct-host constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, or network namespaces. Remote Web UI and TUI conversations are supported, including control-plane conversation browsing and resume; `kodelet run --runner` remains disabled pending a broader one-shot client contract. The runner provisions every run through an `ExecutionInstanceProvider`, and the built-in provider returns a fresh lifecycle handle backed by the conversation's selected host directory, defaulting to the registered startup workspace. Concurrent runs therefore receive separate run state and extension runtimes but intentionally share the host filesystem, processes, network, and ports.
 
 The implemented robustness model includes generation-fenced open reconciliation, immediate control-plane cancellation of every active run when a runner connection is lost or replaced, a context-backed run-lease watchdog, run-set heartbeats, asynchronous bounded manifest refresh, symmetric message-size enforcement, bounded handler-draining peer shutdown, pending-to-durable conversation affinity, and run-isolated extension runtime leases.
 
 ## Summary
 
-This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process bound to exactly one canonical workspace directory and exposes that workspace as a remote agent environment containing context, tools, skills, extension behavior, and workspace-local commands.
+This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process identified by one canonical startup workspace. That workspace is its default working directory and the root of runner-wide terminal and Git-diff operations, while each conversation may select any directory accessible to the runner process as its execution CWD.
 
 The runner initiates one persistent WebSocket connection to the control plane. Messages use JSON-RPC 2.0 encoded as one JSON object per WebSocket text frame. The connection carries runner registration, heartbeats, run manifests, extension lifecycle proxy calls, tool execution and progress, cancellation, extension UI requests, and workspace-scoped Web UI operations such as Git diff and terminal sessions.
 
 At the start of each top-level run, the runner returns a versioned environment manifest. The manifest contains a snapshot of workspace context such as `AGENTS.md`, runner-scoped skill and tool definitions, extension-provided resources, and relevant workspace configuration. The control plane pins that manifest for the complete run. Changes discovered by later manifest beats apply to subsequent runs rather than mutating an active run's prompt or tool catalog.
 
-The implementation executes runner-side tools directly in the registered workspace and permits multiple active runs per runner while retaining one active top-level run per conversation. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces, so concurrent runs can observe and modify the same files and can contend for host-level resources.
+The implementation executes runner-side tools directly in the conversation's selected host directory and permits multiple active runs per runner while retaining one active top-level run per conversation. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces, so concurrent runs can observe and modify shared host files and can contend for host-level resources.
 
 Each runner has a stable opaque control-plane ID, mutable display metadata, host metadata, and one live connection generation. Startup takes an OS-backed advisory file lock for the canonical workspace and records diagnostic PID metadata in that locked file, preventing two local runner processes from serving the same workspace while allowing crash-safe recovery.
 
@@ -48,7 +48,7 @@ Kodelet will use the following model:
 1. `kodelet serve` acts as the control plane and client-facing API.
 2. The control plane owns provider clients, provider-native conversation state, the complete model/tool continuation loop, goals, steering, usage accounting, and conversation persistence.
 3. `kodelet runner start` starts a long-running process bound to the command's canonical current working directory.
-4. A runner owns exactly one workspace and never accepts an arbitrary workspace path from the control plane.
+4. A runner has exactly one canonical startup workspace for identity, locking, defaults, terminal access, and Git diff, while an assigned conversation may request any working directory accessible to the runner process.
 5. Runner startup takes an exclusive OS-backed advisory file lock for its canonical workspace. The locked file contains diagnostic metadata such as PID, but lock ownership rather than file existence or PID state determines whether a runner is active.
 6. The control plane assigns each runner a stable opaque ID. Hostname, workspace basename, and optional display name are metadata rather than identity, and registration is deduplicated by authenticated owner, stable host instance ID, and canonical workspace path.
 7. The runner discovers and hosts workspace context, runner-scoped skills, runner tools, workspace plugins, extension processes, extension commands, and extension lifecycle handlers.
@@ -81,7 +81,6 @@ The initial implementation will not:
 - provide process or network isolation;
 - serialize or otherwise coordinate concurrent workspace mutations between runs;
 - run several unrelated workspaces from one runner process;
-- dynamically select an arbitrary CWD for an assigned run;
 - provide port forwarding, public preview URLs, or artifact transfer protocols;
 - transparently retry a runner tool whose side effects are uncertain after connection loss;
 - provide multi-tenant or untrusted-code isolation;
@@ -101,7 +100,7 @@ A long-running Kodelet process permanently bound to one canonical workspace dire
 
 ### Workspace
 
-The runner's canonical startup directory and the source of workspace-local code, configuration, context, skills, plugins, extensions, commands, and dependencies. Workspace is an intrinsic property of the runner rather than an independently schedulable resource in the initial design.
+The runner's canonical startup directory. It defines runner identity, the advisory lock, the default CWD, runner configuration and environment-profile definitions, and runner-wide terminal and Git-diff operations. A run's selected working directory may differ and supplies that run's local code, context, skills, plugins, extension and command discovery, and dependencies.
 
 ### Run
 
@@ -319,7 +318,7 @@ control plane creates run and selects conversation's runner
     ↓
 control plane → runner: run.open
     ↓
-runner initializes or acquires its workspace extension runtime; a new runtime dispatches session.start and resources.discover
+runner initializes or acquires the selected CWD's extension runtime; a new runtime dispatches session.start and resources.discover
     ↓
 runner snapshots context, skills, tools, commands, extensions, and config
     ↓
@@ -539,7 +538,7 @@ Model profiles and runner environment profiles are separate namespaces:
 - `profile` selects a control-plane model profile. The control plane resolves provider, model, reasoning policy, provider-native capabilities, and control-plane tool policy from its own configuration.
 - `environmentProfile` selects a runner-local configuration profile. The runner resolves that name from its own global and workspace configuration before discovering the run manifest. Blank or `default` selects the runner's base configuration.
 - Selecting a model profile never implicitly selects a same-named runner profile, and the runner never uses the model profile as a local configuration lookup key.
-- After runner identity, readiness, availability, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and reuse it but cannot select a different runner or environment profile.
+- After runner identity, readiness, availability, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The runner returns the effective canonical CWD, which conversation persistence locks alongside the runner and environment profile. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and CWD and reuse them but cannot select a different runner, environment profile, or working directory.
 
 Runner profiles are defined under the separate `environment_profiles` configuration namespace on the runner host:
 
@@ -663,6 +662,7 @@ The control plane opens a run with a request:
   "params": {
     "runId": "run_123",
     "conversationId": "conv_456",
+    "cwd": "../another-project",
     "agent": {
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
@@ -682,7 +682,7 @@ The control plane opens a run with a request:
 
 The runner returns the full pinned manifest in the response. Returning the manifest as the `run.open` result makes successful environment initialization a prerequisite for starting the central model loop.
 
-The runner receives provider and model identifiers because some environment tools and extension call contexts are model-sensitive, but it does not receive provider credentials. `agent.profile` remains model-context metadata; only `agent.environmentProfile` selects runner-local configuration. If command execution changes recipe metadata, subsequent lifecycle requests carry the effective call context for that run.
+The runner resolves `cwd` on its own host before constructing the environment. Blank selects the canonical startup workspace, relative paths are resolved from that workspace, and absolute paths or `~` may select any directory accessible to the runner process. The canonical result is returned as `manifest.workingDirectory` and pinned to the conversation. The runner receives provider and model identifiers because some environment tools and extension call contexts are model-sensitive, but it does not receive provider credentials. `agent.profile` remains model-context metadata; only `agent.environmentProfile` selects runner-local configuration. If command execution changes recipe metadata, subsequent lifecycle requests carry the effective call context for that run.
 
 ### Tool execution and updates
 
@@ -936,11 +936,11 @@ The registry restores every nonterminal run plus a bounded recent terminal histo
 
 ### Cleanup timeout policy
 
-The direct-workspace runner scopes unconfirmed environment or execution-instance cleanup to the affected run. It cancels that run, waits and cleans up within bounded deadlines, reports any timeout or close failure, and then removes the run from its active set without placing the whole service in an error latch. The control plane records the run as lost and permits later work, including another run for the same conversation. An operation that ignores cancellation or a resource that fails to close can therefore overlap later work in the shared workspace; this is an explicit consequence of the trusted cooperating-agent model, and resulting filesystem, process, or port conflicts surface through the later client operation.
+The direct-host runner scopes unconfirmed environment or execution-instance cleanup to the affected run. It cancels that run, waits and cleans up within bounded deadlines, reports any timeout or close failure, and then removes the run from its active set without placing the whole service in an error latch. The control plane records the run as lost and permits later work, including another run for the same conversation. An operation that ignores cancellation or a resource that fails to close can therefore overlap later work on the shared host; this is an explicit consequence of the trusted cooperating-agent model, and resulting filesystem, process, or port conflicts surface through the later client operation.
 
 ## Security Model
 
-The control plane and runners are assumed to be operated by one user or trusted team. The runner core, extensions, tools, shell commands, workspace processes, and other processes running as the runner operating-system user belong to one runner-host trust domain. The direct-workspace runner does not attempt to isolate these processes from each other. Human OIDC identities may have different capabilities through `user`, `terminal`, `runner-admin`, and `admin` roles, but conversations, runner execution, and active chat state remain shared rather than tenant-isolated.
+The control plane and runners are assumed to be operated by one user or trusted team. The runner core, extensions, tools, shell commands, workspace processes, and other processes running as the runner operating-system user belong to one runner-host trust domain. The direct-host runner does not attempt to isolate these processes from each other. Human OIDC identities may have different capabilities through `user`, `terminal`, `runner-admin`, and `admin` roles, but conversations, runner execution, and active chat state remain shared rather than tenant-isolated.
 
 Connections across hosts require WSS and runner authentication during the WebSocket upgrade. Runner authentication modes are `token`, `enrollment`, and `none`. Token mode retains the distinct legacy shared runner token. Enrollment mode accepts only browser-approved per-runner credentials. None mode is for trusted local-only deployments.
 
@@ -991,6 +991,8 @@ The runner binds to the canonical current directory. The initial command does no
 ```bash
 kodelet runner start --server https://kodelet.example --name kodelet-gpu
 ```
+
+The startup workspace is the default rather than an execution boundary. New conversations may select a relative CWD resolved from that workspace, `~` resolved from the runner user's home directory, or any absolute directory accessible to the runner process. The runner canonicalizes and validates the selected directory, and the resulting path is pinned to the conversation.
 
 ### Selecting a runner
 
@@ -1063,7 +1065,7 @@ Run A: localhost:3000, localhost:5432
 Run B: localhost:3000, localhost:5432
 ```
 
-The implementation includes a provider interface and a non-isolating direct-workspace provider. No isolated environment implementation, provisioning mechanism, state-transfer mechanism, port publication model, resource policy, or artifact model is selected by this document.
+The implementation includes a provider interface and a non-isolating direct-host provider. No isolated environment implementation, provisioning mechanism, state-transfer mechanism, port publication model, resource policy, or artifact model is selected by this document.
 
 Ephemeral must not imply that useful workspace changes disappear. Before same-workspace concurrent runs are enabled, the environment provider needs an explicit durability and conflict model for source edits, generated artifacts, and services. Possible mechanisms include a durable mounted workspace, promoted snapshots, patches, or commits, but this document deliberately does not select one. Without such a mechanism, a later run cannot reliably observe changes made by an earlier run.
 
@@ -1151,7 +1153,7 @@ The transport package remains a dependency leaf: `agentenv` does not import the 
 
 ### Future phase: ephemeral execution instances
 
-- Use the existing execution-instance provider interface to add an isolated backend; the initial direct-workspace provider only supplies lifecycle and cleanup symmetry.
+- Use the existing execution-instance provider interface to add an isolated backend; the initial direct-host provider only supplies lifecycle and cleanup symmetry.
 - Create one fresh execution instance per top-level run.
 - Discover the manifest and execute tools and extensions inside that instance.
 - Destroy the instance when the run ends.
@@ -1173,9 +1175,9 @@ The application still requires run IDs, request correlation, generation fencing,
 
 This would more closely match current behavior but introduces repeated runner round trips, makes instructions change during a run, and weakens stable provider prompt prefixes. The selected design snapshots context at `run.open` and applies changes to the next run.
 
-### One runner serving multiple workspaces
+### One runner registration per selectable directory
 
-This is not selected because Kodelet resources and configuration are strongly associated with one CWD. A workspace-bound runner gives users a clear execution identity and prevents arbitrary remote path selection.
+This is not selected because runner identity and execution CWD serve different purposes. The startup workspace provides a stable runner identity and sensible default, while conversation-level CWD selection avoids requiring one long-running process and registration for every directory available to the same trusted host account.
 
 ### Per-run ephemeral execution instances in the first release
 

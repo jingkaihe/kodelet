@@ -38,9 +38,9 @@ func TestNewModelSharesPersistentExtensionRuntimeManagerWithDefaultRunner(t *tes
 func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing.T) {
 	runner := &recordingRunner{}
 	m := newModel(context.Background(), Config{
-		CWD:    "~/runner/kodelet",
-		Runner: runner,
-		Remote: true,
+		DefaultCWD: "~/runner/kodelet",
+		Runner:     runner,
+		Remote:     true,
 	})
 	t.Cleanup(m.cancel)
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
@@ -55,6 +55,19 @@ func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing
 
 	m.createNewConversation()
 	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "theme"}, slashCommandNames(m.slashCommands))
+}
+
+func TestNewModelRemoteModeKeepsExplicitRequestedCWD(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		CWD:        "../other-project",
+		DefaultCWD: "~/runner/kodelet",
+		Runner:     &recordingRunner{},
+		Remote:     true,
+	})
+	t.Cleanup(m.cancel)
+
+	assert.Equal(t, "../other-project", m.cwd)
+	assert.Equal(t, "../other-project", m.requestedCWD)
 }
 
 func TestDisplayCWDPreservesServerCompactedWorkspace(t *testing.T) {

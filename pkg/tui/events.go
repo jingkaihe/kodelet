@@ -12,6 +12,12 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 	if event.ConversationID != "" {
 		m.conversationID = event.ConversationID
 	}
+	if cwd := strings.TrimSpace(event.CWD); cwd != "" {
+		m.cwd = cwd
+		if m.remote {
+			m.requestedCWD = cwd
+		}
+	}
 	if strings.TrimSpace(event.ConversationName) != "" {
 		m.title = strings.TrimSpace(event.ConversationName)
 	}

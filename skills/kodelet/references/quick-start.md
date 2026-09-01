@@ -65,9 +65,10 @@ kodelet chat
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --resume CONVERSATION_ID
 kodelet chat --theme catppuccin-latte
+kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 
-The default `auto` theme selects Catppuccin Latte for light terminal profiles and Catppuccin Mocha for dark terminal profiles. Use `--theme` at startup or `/theme` in the TUI; custom `*.theme` files belong in `~/.kodelet/themes`. Before sending the first message, use `Ctrl+T` to change profile and `Ctrl+Y` or the clickable `effort:` label to choose an allowed reasoning effort. Persisted conversations restore and lock their configuration snapshot on resume.
+The default `auto` theme selects Catppuccin Latte for light terminal profiles and Catppuccin Mocha for dark terminal profiles. Use `--theme` at startup or `/theme` in the TUI; custom `*.theme` files belong in `~/.kodelet/themes`. Before sending the first message, use `Ctrl+T` to change profile and `Ctrl+Y` or the clickable `effort:` label to choose an allowed reasoning effort. For runner-backed chats, `--cwd` selects a directory on the runner host; blank uses the runner startup workspace, relative paths resolve from it, and absolute paths or `~` resolve on the runner. Persisted conversations restore and lock their configuration snapshot and effective CWD on resume.
 
 ### Web UI
 

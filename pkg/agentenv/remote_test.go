@@ -172,17 +172,23 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 		Capabilities: runnerpayload.EnvironmentCapabilities{ToolUpdates: true, Commands: true},
 	}
 
-	environment := NewRemoteEnvironment(controller, "runner-1", WithRemoteRunIDGenerator(func() (string, error) {
-		return "run-1", nil
-	}))
+	environment := NewRemoteEnvironment(
+		controller,
+		"runner-1",
+		WithRemoteRunIDGenerator(func() (string, error) {
+			return "run-1", nil
+		}),
+	)
 	manifest, err := environment.Open(t.Context(), RunSpec{
-		ConversationID:     "conversation-1",
-		EnvironmentProfile: "runner-workspace",
+		ConversationID:           "conversation-1",
+		EnvironmentProfile:       "runner-workspace",
+		ExpectedWorkingDirectory: "/runner/other-project",
 		Config: llmtypes.Config{
-			Provider:   "openai",
-			Model:      "gpt-test",
-			Profile:    "workspace",
-			RecipeName: "initial",
+			Provider:         "openai",
+			Model:            "gpt-test",
+			Profile:          "workspace",
+			RecipeName:       "initial",
+			WorkingDirectory: " /runner/other-project ",
 		},
 		InvokedBy: "subagent",
 	})
@@ -190,6 +196,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.True(t, environment.IsOpen())
 	assert.Equal(t, "runner-1", controller.openRunnerID)
 	assert.Equal(t, "conversation-1", controller.openParams.ConversationID)
+	assert.Equal(t, "/runner/other-project", controller.openParams.CWD)
+	assert.Equal(t, "/runner/other-project", controller.openParams.ExpectedCWD)
 	assert.Equal(t, "workspace", controller.openParams.Agent.Profile)
 	assert.Equal(t, "runner-workspace", controller.openParams.Agent.EnvironmentProfile)
 	assert.Equal(t, "subagent", controller.openParams.Agent.InvokedBy)

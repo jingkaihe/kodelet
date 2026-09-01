@@ -349,6 +349,8 @@ type ClientCapabilities struct {
 type RunOpenParams struct {
 	RunID              string             `json:"runId"`
 	ConversationID     string             `json:"conversationId"`
+	CWD                string             `json:"cwd,omitempty"`
+	ExpectedCWD        string             `json:"expectedCwd,omitempty"`
 	Agent              AgentDescriptor    `json:"agent"`
 	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
 	ReservedToolNames  []string           `json:"reservedToolNames"`

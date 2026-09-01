@@ -28,6 +28,7 @@ type Config struct {
 	ReasoningEffortOptions  []string
 	ReasoningEffortExplicit bool
 	CWD                     string
+	DefaultCWD              string
 	Theme                   string
 	Runner                  chat.ChatRunner
 	Remote                  bool
@@ -224,6 +225,7 @@ type model struct {
 	runner             chat.ChatRunner
 	conversationSource chat.ConversationSource
 	remote             bool
+	remoteDefaultCWD   string
 	environmentProfile string
 	profileSettings    map[string]ProfileSettings
 	extensionRuntimes  *extensions.RuntimeManager

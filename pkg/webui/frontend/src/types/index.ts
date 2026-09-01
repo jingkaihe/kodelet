@@ -447,6 +447,7 @@ export interface ChatStreamEvent {
     | 'done'
     | 'error';
   conversation_id?: string;
+  cwd?: string;
   role?: 'user' | 'assistant';
   delta?: string;
   content?: string | ContentBlock[];

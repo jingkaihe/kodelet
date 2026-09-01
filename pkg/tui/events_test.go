@@ -56,6 +56,25 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	assert.Contains(t, m.entries[0].blocks[3].text, "model error")
 }
 
+func TestApplyChatEventAdoptsRunnerCanonicalCWD(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		CWD:        "../other-project",
+		DefaultCWD: "/runner/workspace",
+		Runner:     &recordingRunner{},
+		Remote:     true,
+	})
+	t.Cleanup(m.cancel)
+
+	m.applyChatEvent(chat.ChatEvent{
+		Kind:           "conversation",
+		ConversationID: "conversation-1",
+		CWD:            "/runner/other-project",
+	})
+
+	assert.Equal(t, "/runner/other-project", m.cwd)
+	assert.Equal(t, "/runner/other-project", m.requestedCWD)
+}
+
 func TestApplyChatEventReplacesToolUpdateWithFinalResult(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

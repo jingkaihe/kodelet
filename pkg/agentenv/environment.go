@@ -143,11 +143,12 @@ func (m Manifest) ToolNames() []string {
 
 // RunSpec describes the central run opening this environment.
 type RunSpec struct {
-	ConversationID     string
-	EnvironmentProfile string
-	Config             llmtypes.Config
-	Metadata           map[string]any
-	InvokedBy          string
+	ConversationID           string
+	EnvironmentProfile       string
+	ExpectedWorkingDirectory string
+	Config                   llmtypes.Config
+	Metadata                 map[string]any
+	InvokedBy                string
 }
 
 // Clone returns a copy safe for retention by an environment implementation.

@@ -232,7 +232,40 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     </span>
                   </label>
                   <div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
-                    <span className="new-chat-field-label">Runner workspace</span>
+                    <label className="new-chat-field-label" htmlFor="new-chat-cwd">
+                      Working directory
+                    </label>
+                    <div className="new-chat-directory-shell">
+                      <FolderOpen
+                        aria-hidden="true"
+                        className="new-chat-directory-icon"
+                        strokeWidth={1.6}
+                      />
+                      <input
+                        aria-label="Working directory"
+                        autoCapitalize="off"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control"
+                        data-testid="cwd-input"
+                        id="new-chat-cwd"
+                        onBlur={onCwdInputBlur}
+                        onChange={(event) => onCwdInputChange(event.target.value)}
+                        onFocus={onCwdInputFocus}
+                        onKeyDown={onCwdInputKeyDown}
+                        placeholder={selectedRunner.workspace.path}
+                        ref={cwdInputRef}
+                        spellCheck={false}
+                        type="text"
+                        value={cwdQuery}
+                      />
+                    </div>
+                    <span className="new-chat-recent-workspace-parent">
+                      Optional. Relative paths and ~ are resolved on the runner host.
+                    </span>
+                  </div>
+                  <div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
+                    <span className="new-chat-field-label">Default runner workspace</span>
                     <div className="new-chat-directory-shell">
                       <FolderOpen
                         aria-hidden="true"

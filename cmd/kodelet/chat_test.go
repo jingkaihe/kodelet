@@ -153,6 +153,7 @@ func TestPrepareRemoteChatRunnerSelectsAvailableRunner(t *testing.T) {
 		Server:       server.URL,
 		AuthToken:    "secret",
 		ResumeConvID: "conversation-1",
+		CWD:          "/runner/other-project",
 	})
 
 	require.NoError(t, err)
@@ -176,10 +177,7 @@ func TestPrepareRemoteChatRunnerRejectsBusyLegacyRunner(t *testing.T) {
 }
 
 func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {
-	_, _, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", CWD: "/tmp/project"})
-	require.ErrorContains(t, err, "--cwd cannot be used")
-
-	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", NoTools: true})
+	_, _, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", NoTools: true})
 	require.ErrorContains(t, err, "local-only options")
 }
 
@@ -198,8 +196,9 @@ func TestPrepareServerChatRunnerAndModeSelection(t *testing.T) {
 	runner, err := prepareServerChatRunner(config)
 	require.NoError(t, err)
 	assert.NotNil(t, runner)
-	_, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, CWD: "/tmp/project"})
-	require.ErrorContains(t, err, "control plane owns")
+	runner, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, CWD: "/tmp/project"})
+	require.NoError(t, err)
+	assert.NotNil(t, runner)
 	_, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, NoTools: true})
 	require.ErrorContains(t, err, "local-only")
 }
