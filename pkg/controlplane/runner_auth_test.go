@@ -353,6 +353,9 @@ func TestRunnerDPoPTargetURLUsesForwardedExternalAddress(t *testing.T) {
 
 	assert.Equal(t, "https://kodelet.example:8443/control"+protocol.Endpoint, runnerDPoPTargetURL(request))
 
+	request.Header.Set("X-Forwarded-Proto", "wss")
+	assert.Equal(t, "https://kodelet.example:8443/control"+protocol.Endpoint, runnerDPoPTargetURL(request))
+
 	request.Header.Set("X-Forwarded-Host", "attacker.example/path")
 	request.Header.Set("X-Forwarded-Prefix", "control")
 	assert.Equal(t, "https://runner-backend.internal"+protocol.Endpoint, runnerDPoPTargetURL(request))

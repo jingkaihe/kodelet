@@ -752,7 +752,8 @@ func setWebUIAuthCookie(w http.ResponseWriter, r *http.Request, authToken string
 }
 
 func isHTTPSRequest(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(firstForwardedValue(r.Header.Get("X-Forwarded-Proto")), "https")
+	forwardedProto := firstForwardedValue(r.Header.Get("X-Forwarded-Proto"))
+	return r.TLS != nil || strings.EqualFold(forwardedProto, "https") || strings.EqualFold(forwardedProto, "wss")
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code
