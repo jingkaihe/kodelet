@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.43-beta
+
+Added per-conversation working directories for workspace runners in the Web UI and remote TUI, with runner-host path resolution, validation, persistence, and startup-workspace defaults while terminal and Git diff remain rooted at the runner workspace.
+
+Added Claude Fable 5.1 support for Anthropic API and subscription requests, including adaptive and xhigh reasoning, original-detail image input, and token pricing.
+
+Improved remote chat and control-plane reliability by preserving editable optimistic context until server confirmation, recognizing proxied `wss` connections as secure, and keeping long queued guidance aligned.
+
+Updated Anthropic, gRPC, browserslist, and related dependencies.
+
 ## 0.5.42-beta
 
 Added a multi-architecture control-plane container image for Linux amd64 and arm64, published to GitHub Container Registry from version tags with provenance and SBOM attestations.
