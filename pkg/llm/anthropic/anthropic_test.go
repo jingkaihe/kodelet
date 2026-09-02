@@ -1073,6 +1073,11 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "fable 5.1 supports thinking",
+			model:    anthropic.ModelClaudeFable5_1,
+			expected: true,
+		},
+		{
 			name:     "fable 5 supports thinking",
 			model:    anthropic.ModelClaudeFable5,
 			expected: true,
@@ -1137,6 +1142,15 @@ func TestThinkingConfigForModel(t *testing.T) {
 
 	t.Run("fable 5 uses adaptive thinking", func(t *testing.T) {
 		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeFable5)
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Nil(t, config.GetBudgetTokens())
+		require.NotNil(t, config.GetType())
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
+
+	t.Run("fable 5.1 uses adaptive thinking", func(t *testing.T) {
+		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeFable5_1)
 		require.True(t, ok)
 		require.NotNil(t, config.OfAdaptive)
 		assert.Nil(t, config.GetBudgetTokens())
@@ -1214,6 +1228,12 @@ func TestValidateThinkingConfigForModel(t *testing.T) {
 		assert.ErrorContains(t, err, "does not support disabling adaptive thinking")
 	})
 
+	t.Run("fable 5.1 rejects disabled adaptive thinking", func(t *testing.T) {
+		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeFable5_1)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "does not support disabling adaptive thinking")
+	})
+
 	t.Run("opus 4.7 allows disabled adaptive thinking", func(t *testing.T) {
 		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
 		assert.NoError(t, err)
@@ -1247,6 +1267,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			model:      anthropic.ModelClaudeOpus4_7,
 			configured: "minimal",
 			expected:   anthropic.OutputConfigEffortLow,
+			ok:         true,
+		},
+		{
+			name:       "fable 5.1 supports xhigh",
+			model:      anthropic.ModelClaudeFable5_1,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
 			ok:         true,
 		},
 		{

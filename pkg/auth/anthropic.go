@@ -59,10 +59,11 @@ type AnthropicAccountInfo struct {
 }
 
 const (
-	anthropicClientID      = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	anthropicAuthEndpoint  = "https://claude.ai/oauth/authorize"
-	anthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
-	anthropicTokenEndpoint = "https://console.anthropic.com/v1/oauth/token"
+	anthropicClientID            = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	anthropicAuthEndpoint        = "https://claude.ai/oauth/authorize"
+	anthropicRedirectURI         = "https://console.anthropic.com/oauth/code/callback"
+	anthropicTokenEndpoint       = "https://console.anthropic.com/v1/oauth/token"
+	anthropicClaudeCodeUserAgent = "claude-cli/2.1.251 (external, cli)"
 
 	// tokenRefreshThreshold is the duration before token expiry when we should refresh
 	tokenRefreshThreshold = 10 * time.Minute
@@ -630,7 +631,7 @@ func AnthropicHeader(ctx context.Context, alias string) ([]option.RequestOption,
 		return nil, errors.Wrap(err, "failed to get access token for Anthropic header")
 	}
 	return []option.RequestOption{
-		option.WithHeader("User-Agent", "claude-cli/2.1.2 (external, cli)"),
+		option.WithHeader("User-Agent", anthropicClaudeCodeUserAgent),
 		option.WithAuthToken(accessToken),
 		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
 		option.WithHeaderDel("X-Api-Key"),
@@ -641,7 +642,7 @@ func AnthropicHeader(ctx context.Context, alias string) ([]option.RequestOption,
 // This is useful when you already have the token and want to avoid another lookup.
 func AnthropicHeaderWithToken(accessToken string) []option.RequestOption {
 	return []option.RequestOption{
-		option.WithHeader("User-Agent", "claude-cli/2.1.2 (external, cli)"),
+		option.WithHeader("User-Agent", anthropicClaudeCodeUserAgent),
 		option.WithAuthToken(accessToken),
 		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
 		option.WithHeaderDel("X-Api-Key"),

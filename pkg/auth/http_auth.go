@@ -79,7 +79,7 @@ func AnthropicSubscriptionAuthorizer(alias string) HTTPAuthorizer {
 			return errors.Wrap(err, "failed to get anthropic access token")
 		}
 
-		req.Header.Set("User-Agent", "claude-cli/2.1.2 (external, cli)")
+		req.Header.Set("User-Agent", anthropicClaudeCodeUserAgent)
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		req.Header.Add("anthropic-beta", "oauth-2025-04-20")
 		req.Header.Del("X-Api-Key")

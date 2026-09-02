@@ -983,6 +983,7 @@ func anthropicReasoningEffort(configured string, supportsXhigh bool) (anthropic.
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus5,
 		anthropic.ModelClaudeOpus4_8,
@@ -997,6 +998,7 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 
 func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 	alwaysOnAdaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
 		modelClaudeMythosPreview,
 	}
@@ -1006,6 +1008,7 @@ func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 
 func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus5,
 		anthropic.ModelClaudeOpus4_8,
@@ -1017,6 +1020,7 @@ func isXhighEffortModel(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
 		modelClaudeMythosPreview,
 

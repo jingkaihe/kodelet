@@ -33,12 +33,13 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 	"gpt-5.4-mini":  {},
 	"gpt-5.3-codex": {},
 	// Anthropic models with automatic high-resolution image input.
-	"claude-fable-5":  {},
-	"claude-mythos-5": {},
-	"claude-opus-5":   {},
-	"claude-opus-4-8": {},
-	"claude-opus-4-7": {},
-	"claude-sonnet-5": {},
+	"claude-fable-5-1": {},
+	"claude-fable-5":   {},
+	"claude-mythos-5":  {},
+	"claude-opus-5":    {},
+	"claude-opus-4-8":  {},
+	"claude-opus-4-7":  {},
+	"claude-sonnet-5":  {},
 }
 
 const (

@@ -98,7 +98,7 @@ func TestAnthropicSubscriptionAuthorizer(t *testing.T) {
 	err = AnthropicSubscriptionAuthorizer("work").Authorize(req)
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer anthropic-access-token", req.Header.Get("Authorization"))
-	assert.Equal(t, "claude-cli/2.1.2 (external, cli)", req.Header.Get("User-Agent"))
+	assert.Equal(t, "claude-cli/2.1.251 (external, cli)", req.Header.Get("User-Agent"))
 	assert.Equal(t, "oauth-2025-04-20", req.Header.Get("anthropic-beta"))
 	assert.Empty(t, req.Header.Get("X-Api-Key"))
 }
