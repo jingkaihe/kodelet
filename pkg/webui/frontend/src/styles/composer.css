@@ -219,7 +219,7 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   border: 1px solid rgba(176, 174, 165, 0.18);
-  border-radius: 999px;
+  border-radius: 1rem;
   background: rgba(236, 229, 216, 0.46);
   padding: 0.28rem 0.62rem 0.3rem 0.48rem;
   color: rgba(20, 20, 19, 0.62);

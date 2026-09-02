@@ -31,6 +31,18 @@ type Story = StoryObj<typeof meta>;
 
 export const QueuedGuidance: Story = {};
 
+export const LongQueuedGuidance: Story = {
+	args: {
+		messages: [
+			{
+				role: "user",
+				content:
+					"Investigate the failed provider request, compare the installed client version with the minimum supported release, verify whether any authentication headers need to change, inspect the request-building path for model-specific behavior, confirm the migration guidance against the current SDK source, and report the required, recommended, and informational follow-up work with evidence before continuing. Include the exact error details, affected model capability checks, and any compatibility risks that should be addressed in a later cleanup.",
+			},
+		],
+	},
+};
+
 export const Empty: Story = {
 	args: {
 		messages: [],
