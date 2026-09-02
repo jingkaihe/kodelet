@@ -32,6 +32,14 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:    0.0000003,  // $0.30 per million tokens
 		ContextWindow:        1_000_000,
 	},
+	anthropic.ModelClaudeFable5_1: {
+		Input:                0.000010,   // $10.00 per million tokens
+		Output:               0.000050,   // $50.00 per million tokens
+		PromptCachingWrite5m: 0.0000125,  // $12.50 per million tokens
+		PromptCachingWrite1h: 0.000020,   // $20.00 per million tokens
+		PromptCachingRead:    0.00000025, // $0.25 per million tokens
+		ContextWindow:        1_000_000,
+	},
 	anthropic.ModelClaudeFable5: {
 		Input:                0.000010,  // $10.00 per million tokens
 		Output:               0.000050,  // $50.00 per million tokens
@@ -156,6 +164,8 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	lowerModel := strings.ToLower(model)
 	if strings.Contains(lowerModel, "claude-sonnet-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5]
+	} else if strings.Contains(lowerModel, "claude-fable-5-1") {
+		return ModelPricingMap[anthropic.ModelClaudeFable5_1]
 	} else if strings.Contains(lowerModel, "claude-fable-5") {
 		return ModelPricingMap[anthropic.ModelClaudeFable5]
 	} else if strings.Contains(lowerModel, "claude-opus-5") {

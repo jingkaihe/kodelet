@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
-	github.com/anthropics/anthropic-sdk-go v1.61.0
+	github.com/anthropics/anthropic-sdk-go v1.69.0
 	github.com/avast/retry-go/v4 v4.6.1
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/charmbracelet/bubbles v1.0.0
