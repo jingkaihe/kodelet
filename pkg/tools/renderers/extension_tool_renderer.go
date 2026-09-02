@@ -12,12 +12,28 @@ type ExtensionToolRenderer struct{}
 
 // RenderCLI renders extension tool execution results in CLI format.
 func (r *ExtensionToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
+	var meta tools.ExtensionToolMetadata
+	metadataOK := tools.ExtractMetadata(result.Metadata, &meta)
+	if presentation, _, ok := tools.ExtractExtensionToolPresentation(&result); ok {
+		var output strings.Builder
+		output.WriteString(presentation.Summary)
+		if !result.Success && strings.TrimSpace(result.Error) != "" {
+			fmt.Fprintf(&output, "\n\nError: %s", result.Error)
+		}
+		body := presentation.Body
+		if !presentation.HasBody() {
+			body = meta.Output
+		}
+		if strings.TrimSpace(body) != "" && (result.Success || strings.TrimSpace(body) != strings.TrimSpace(result.Error)) {
+			output.WriteString("\n\n")
+			output.WriteString(body)
+		}
+		return output.String()
+	}
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)
 	}
-
-	var meta tools.ExtensionToolMetadata
-	if !tools.ExtractMetadata(result.Metadata, &meta) {
+	if !metadataOK {
 		return "Error: Invalid metadata type for extension tool"
 	}
 

@@ -110,6 +110,33 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
 - Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`; multi-line widgets use their first line as a foldable summary in the TUI.
 
+#### Tool presentation data
+
+Extension tools can attach a generic presentation contract to final results and live updates through `data.presentation`. The TypeScript SDK exports `ToolPresentation` for the presentation object and `ExtensionToolData` for the containing data object; `ExtensionToolData` also accepts arbitrary extension-specific keys.
+
+```typescript
+import type { ExtensionToolData, ToolPresentation } from "kodelet";
+
+const presentation: ToolPresentation = {
+  summary: "Weather ready",
+  body: "**London:** cloudy",
+  format: "markdown",
+};
+
+const updateData: ExtensionToolData = {
+  progress: 0.5,
+  presentation: { summary: "Fetching weather" },
+};
+await ctx.update("Fetching the full London forecast", updateData);
+
+return {
+  content: "Weather for London: cloudy",
+  data: { location: "London", presentation },
+};
+```
+
+`summary` controls the compact tool label. When `body` is present, it overrides the content shown in the expanded tool UI; only an omitted body falls back to the result or update `content`. `format` may be `"text"` or `"markdown"` and defaults to text when omitted. Presentation metadata is advisory and does not replace model-facing content, tool status, errors, or provenance. Kodelet validates it as untrusted input, sanitizes Markdown, ignores malformed presentations, and may truncate bodies to the configured extension output limit.
+
 Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
 
 Extensions that sanitize `tool.result` should apply the same policy in `tool.update`; Kodelet suppresses streaming snapshots when a result-subscribing extension does not also subscribe to updates. If an update sanitizer errors or returns invalid output, Kodelet drops that transient snapshot rather than exposing unsanitized output.

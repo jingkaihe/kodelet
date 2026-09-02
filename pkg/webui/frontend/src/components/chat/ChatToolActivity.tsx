@@ -21,7 +21,11 @@ import {
   formatTaskRunElapsed,
   getTaskRunSnapshot,
 } from '../tool-renderers/TaskRunRenderer';
-import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
+import {
+  getExtensionToolPresentation,
+  normalizeToolName,
+  ReferenceCodeBlock,
+} from '../tool-renderers/reference';
 
 interface ChatToolActivityProps {
   tools: ChatRenderToolCall[];
@@ -239,6 +243,14 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const input = parseToolInput(toolCall.input);
   const metadata = getMetadataRecord(toolCall.result);
+  const presentation = getExtensionToolPresentation(toolCall.result);
+  if (presentation) {
+    return presentation.summary;
+  }
+  const taskRun = getTaskRunSnapshot(toolCall.result);
+  if (taskRun) {
+    return taskRun.title;
+  }
 
   switch (normalizedToolName) {
     case 'bash':
@@ -280,12 +292,6 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
         pattern && path ? `${pattern} in ${path}` : pattern || path
       );
     }
-
-    case 'code_search':
-      return formatToolSummary('Code search', getStringField(input, 'query'));
-
-    case 'subagent':
-      return formatToolSummary('Delegated task', getStringField(input, 'task'));
 
     case 'glob_tool': {
       const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');

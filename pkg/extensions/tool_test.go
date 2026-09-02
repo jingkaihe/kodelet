@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -138,6 +140,41 @@ func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {
 	assert.False(t, failureStructured.Success)
 	require.True(t, tooltypes.ExtractMetadata(failureStructured.Metadata, &metadata))
 	assert.Equal(t, "weather", metadata.ExtensionID)
+}
+
+func TestToolResultNormalizesAndBoundsPresentationData(t *testing.T) {
+	tool := &Tool{maxOutput: 96}
+	result := tool.resultFromExecution(ToolExecutionResult{
+		Content: "queued",
+		Data: map[string]any{
+			"request_id": "req-123",
+			"presentation": map[string]any{
+				"summary": "  Follow up\nparser-reviewer  ",
+				"body":    strings.Repeat("界", 100),
+				"format":  "MARKDOWN",
+				"future":  true,
+			},
+		},
+	}, 0)
+
+	structured := result.StructuredData()
+	presentation, metadata, ok := tooltypes.ExtractExtensionToolPresentation(&structured)
+	require.True(t, ok)
+	assert.Equal(t, "Follow up parser-reviewer", presentation.Summary)
+	assert.Equal(t, "markdown", presentation.Format)
+	assert.LessOrEqual(t, len(presentation.Body), 96)
+	assert.True(t, utf8.ValidString(presentation.Body))
+	assert.Contains(t, presentation.Body, "[TRUNCATED")
+	assert.Equal(t, "req-123", metadata.Data["request_id"])
+	assert.Equal(t, true, metadata.Data["presentation"].(map[string]any)["future"])
+
+	invalid := tool.resultFromExecution(ToolExecutionResult{Data: map[string]any{
+		"preserved":    true,
+		"presentation": map[string]any{"summary": "Unsafe\x1b[31m label"},
+	}}, 0).StructuredData()
+	require.True(t, tooltypes.ExtractMetadata(invalid.Metadata, &metadata))
+	assert.Equal(t, true, metadata.Data["preserved"])
+	assert.NotContains(t, metadata.Data, "presentation")
 }
 
 func TestShouldRestartAfterCallError(t *testing.T) {

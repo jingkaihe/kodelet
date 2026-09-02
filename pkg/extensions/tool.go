@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -130,8 +131,98 @@ func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime tim
 		executionTime: executionTime,
 		result:        content,
 		err:           result.Error,
-		data:          result.Data,
+		data:          normalizeExtensionResultData(result.Data, t.maxOutput),
 	}
+}
+
+func normalizeExtensionResultData(data map[string]any, maxOutput int) map[string]any {
+	raw, exists := data["presentation"]
+	if !exists {
+		return data
+	}
+
+	normalized := make(map[string]any, len(data))
+	for key, value := range data {
+		normalized[key] = value
+	}
+
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		delete(normalized, "presentation")
+		return normalized
+	}
+	var presentationData map[string]any
+	if err := json.Unmarshal(payload, &presentationData); err != nil || presentationData == nil {
+		delete(normalized, "presentation")
+		return normalized
+	}
+	if rawBody, ok := presentationData["body"]; ok {
+		body, ok := rawBody.(string)
+		if !ok {
+			delete(normalized, "presentation")
+			return normalized
+		}
+		presentationData["body"] = truncateExtensionPresentationBody(body, maxOutput)
+	}
+
+	presentation, ok := tooltypes.ParseExtensionToolPresentation(presentationData)
+	if !ok {
+		delete(normalized, "presentation")
+		return normalized
+	}
+	presentationData["summary"] = presentation.Summary
+	if _, exists := presentationData["format"]; exists {
+		presentationData["format"] = presentation.Format
+	}
+	if presentation.HasBody() {
+		presentationData["body"] = presentation.Body
+	}
+	normalized["presentation"] = presentationData
+	return normalized
+}
+
+func normalizeStructuredExtensionPresentation(result tooltypes.StructuredToolResult, maxOutput int) tooltypes.StructuredToolResult {
+	var metadata tooltypes.ExtensionToolMetadata
+	if !tooltypes.ExtractMetadata(result.Metadata, &metadata) {
+		return result
+	}
+	metadata.Data = normalizeExtensionResultData(metadata.Data, maxOutput)
+	if _, ok := result.Metadata.(*tooltypes.ExtensionToolMetadata); ok {
+		result.Metadata = &metadata
+	} else {
+		result.Metadata = metadata
+	}
+	return result
+}
+
+func truncateExtensionPresentationBody(body string, maxOutput int) string {
+	limit := tooltypes.MaxExtensionToolPresentationBodyBytes
+	if maxOutput > 0 && maxOutput < limit {
+		limit = maxOutput
+	}
+	if len(body) <= limit {
+		return body
+	}
+
+	const notice = "\n\n[TRUNCATED - Presentation exceeded extension max output limit]"
+	if limit <= len(notice) {
+		return validUTF8Prefix(body, limit)
+	}
+	return validUTF8Prefix(body, limit-len(notice)) + notice
+}
+
+func validUTF8Prefix(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end]
 }
 
 // TracingKVs returns tracing attributes for the tool.

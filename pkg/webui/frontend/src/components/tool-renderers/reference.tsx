@@ -1,6 +1,72 @@
 import React from 'react';
 import { marked } from 'marked';
+import type { ExtensionToolMetadata, ToolPresentation, ToolResult } from '../../types';
 import { cn, detectLanguageFromPath, escapeHtml, formatFileSize, formatDuration } from '../../utils';
+
+const MAX_TOOL_PRESENTATION_SUMMARY_LENGTH = 160;
+const MAX_TOOL_PRESENTATION_BODY_LENGTH = 102400;
+const textEncoder = new TextEncoder();
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const hasBoundedLength = (value: string, maximum: number): boolean =>
+  Array.from(value).length <= maximum;
+
+const hasBoundedByteLength = (value: string, maximum: number): boolean =>
+  textEncoder.encode(value).length <= maximum;
+
+const hasInvisibleSummaryFormatting = (value: string): boolean => /\p{Cf}/u.test(value);
+
+const hasUnsafeSummaryControls = (value: string): boolean => /\p{Cc}/u.test(value);
+
+export const getExtensionToolPresentation = (
+  toolResult?: ToolResult
+): ToolPresentation | undefined => {
+  if (
+    toolResult?.metadataType &&
+    toolResult.metadataType.trim().toLowerCase() !== 'extension_tool'
+  ) {
+    return undefined;
+  }
+  const metadata = toolResult?.metadata as ExtensionToolMetadata | undefined;
+  const raw = metadata?.data?.presentation;
+  if (!isRecord(raw) || typeof raw.summary !== 'string') {
+    return undefined;
+  }
+
+  const summary = raw.summary.replace(/\s+/g, ' ').trim();
+  if (
+    !summary ||
+    !hasBoundedLength(summary, MAX_TOOL_PRESENTATION_SUMMARY_LENGTH) ||
+    hasInvisibleSummaryFormatting(raw.summary) ||
+    hasUnsafeSummaryControls(summary)
+  ) {
+    return undefined;
+  }
+  if (raw.body !== undefined && typeof raw.body !== 'string') {
+    return undefined;
+  }
+  if (
+    typeof raw.body === 'string' &&
+    !hasBoundedByteLength(raw.body, MAX_TOOL_PRESENTATION_BODY_LENGTH)
+  ) {
+    return undefined;
+  }
+  if (raw.format !== undefined && typeof raw.format !== 'string') {
+    return undefined;
+  }
+  const format = raw.format?.trim().toLowerCase() || 'text';
+  if (format !== 'text' && format !== 'markdown') {
+    return undefined;
+  }
+
+  return {
+    summary,
+    body: raw.body,
+    format,
+  };
+};
 
 export const normalizeToolName = (toolName: string): string => {
   if (toolName === 'grep') {

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import ExtensionToolRenderer from './ExtensionToolRenderer';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolResult } from '../../types';
+import ExtensionToolRenderer from './ExtensionToolRenderer';
 
 describe('ExtensionToolRenderer', () => {
   afterEach(() => {
@@ -27,6 +27,210 @@ describe('ExtensionToolRenderer', () => {
     expect(container.querySelector('.tool-code-block code')?.textContent).toBe(
       '{\n  "branch": "main",\n  "changes": 0\n}'
     );
+  });
+
+  it('renders generic markdown presentation without exposing unrelated metadata', () => {
+    const toolResult: ToolResult = {
+      toolName: 'send_instruction',
+      success: true,
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'send_instruction',
+        executionTime: 125000000,
+        output: 'Started run run_456.',
+        data: {
+          agent_id: 'agt_123',
+          run_id: 'run_456',
+          conversation_id: 'conv_789',
+          presentation: {
+            summary: 'Follow up parser-reviewer',
+            body: 'Review **parser recovery** and the retry path.',
+            format: 'markdown',
+          },
+        },
+      },
+    };
+
+    const { container } = render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('Follow up parser-reviewer')).not.toBeInTheDocument();
+    expect(screen.queryByText('agt_123')).not.toBeInTheDocument();
+    expect(screen.queryByText('run_456')).not.toBeInTheDocument();
+    expect(screen.queryByText('conv_789')).not.toBeInTheDocument();
+    expect(screen.queryByText('Task')).not.toBeInTheDocument();
+    expect(screen.getByText('parser recovery')).toBeInTheDocument();
+    expect(container.querySelector('.extension-presentation-body strong')).toHaveTextContent(
+      'parser recovery'
+    );
+    expect(container.querySelector('.tool-terminal')).not.toBeInTheDocument();
+    expect(screen.queryByText('send_instruction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Started run run_456.')).not.toBeInTheDocument();
+  });
+
+  it('sanitizes generic markdown presentation bodies', () => {
+    const toolResult: ToolResult = {
+      toolName: 'redirect_worker',
+      success: true,
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'redirect_worker',
+        output: 'Queued update.',
+        data: {
+          agent_id: 'agt_123',
+          run_id: 'run_456',
+          conversation_id: 'conv_789',
+          presentation: {
+            summary: 'Steer parser-reviewer',
+            body: '<img src=x onerror="alert(1)">Focus on [unsafe](javascript:alert(1)) handling.',
+            format: 'markdown',
+          },
+        },
+      },
+    };
+
+    const { container } = render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('Steer parser-reviewer')).not.toBeInTheDocument();
+    expect(screen.queryByText('agt_123')).not.toBeInTheDocument();
+    expect(screen.queryByText('run_456')).not.toBeInTheDocument();
+    expect(screen.queryByText('conv_789')).not.toBeInTheDocument();
+    expect(screen.queryByText('Message')).not.toBeInTheDocument();
+    const renderedMessage = container.querySelector('.extension-presentation-body');
+    expect(renderedMessage).toHaveTextContent('Focus on unsafe handling.');
+    expect(renderedMessage?.querySelector('a')).toBeNull();
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal')).not.toBeInTheDocument();
+  });
+
+  it('uses extension output when presentation omits a body', () => {
+    const toolResult: ToolResult = {
+      toolName: 'observe_worker',
+      success: true,
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'observe_worker',
+        output: '**Inspection complete.**',
+        data: {
+          presentation: {
+            summary: 'Wait for parser-reviewer',
+            format: 'markdown',
+          },
+        },
+      },
+    };
+
+    const { container } = render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('Wait for parser-reviewer')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal')).toHaveTextContent('**Inspection complete.**');
+    expect(container.querySelector('.extension-presentation-body strong')).toBeNull();
+  });
+
+  it('does not fall back to extension output when presentation supplies an empty body', () => {
+    const toolResult: ToolResult = {
+      toolName: 'observe_worker',
+      success: true,
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'observe_worker',
+        output: 'Internal worker details.',
+        data: {
+          presentation: {
+            summary: 'Wait for parser-reviewer',
+            body: '',
+          },
+        },
+      },
+    };
+
+    render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(
+      screen.getByText('Extension tool completed without presentation details.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Internal worker details.')).not.toBeInTheDocument();
+  });
+
+  it('keeps host errors visible alongside presentation content', () => {
+    const toolResult: ToolResult = {
+      toolName: 'redirect_worker',
+      success: false,
+      error: 'The worker is no longer running.',
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'redirect_worker',
+        output: 'Internal worker details.',
+        data: {
+          presentation: {
+            summary: 'Steer parser-reviewer',
+            body: 'Focus on parser recovery.',
+          },
+        },
+      },
+    };
+
+    render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('Steer parser-reviewer')).not.toBeInTheDocument();
+    expect(screen.getByText('The worker is no longer running.')).toBeInTheDocument();
+    expect(screen.getByText('Focus on parser recovery.')).toBeInTheDocument();
+    expect(screen.queryByText('Internal worker details.')).not.toBeInTheDocument();
+  });
+
+  it('does not repeat a host error through the presentation fallback body', () => {
+    const toolResult: ToolResult = {
+      toolName: 'cancel_worker',
+      success: false,
+      error: 'The worker could not be canceled.',
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'cancel_worker',
+        output: 'The worker could not be canceled.',
+        data: {
+          presentation: {
+            summary: 'Cancel parser-reviewer',
+          },
+        },
+      },
+    };
+
+    render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.getAllByText('The worker could not be canceled.')).toHaveLength(1);
+    expect(
+      screen.queryByText('Extension tool completed without presentation details.')
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to normal rendering for unsafe presentation metadata', () => {
+    const toolResult: ToolResult = {
+      toolName: 'send_instruction',
+      success: true,
+      metadata: {
+        type: 'extension_tool',
+        extensionID: 'worker-tools',
+        toolName: 'send_instruction',
+        output: 'Normal extension output.',
+        data: {
+          presentation: {
+            summary: 'Follow up \u202eparser-reviewer',
+            body: 'This body must not replace normal output.',
+          },
+        },
+      },
+    };
+
+    render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('send_instruction')).toBeInTheDocument();
+    expect(screen.getByText('Normal extension output.')).toBeInTheDocument();
+    expect(screen.queryByText('This body must not replace normal output.')).not.toBeInTheDocument();
   });
 
   it('renders accumulated task activity while the tool is running', () => {

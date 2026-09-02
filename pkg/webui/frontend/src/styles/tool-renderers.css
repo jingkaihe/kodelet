@@ -172,6 +172,30 @@
   color: rgba(20, 20, 19, 0.62);
 }
 
+.extension-presentation-detail {
+  gap: 0.46rem;
+}
+
+.extension-presentation-body {
+  max-height: 26rem;
+  overflow: auto;
+  color: rgba(20, 20, 19, 0.72);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.56;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-compact-markdown.extension-presentation-body {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: normal;
+}
+
 .read-conversation-detail {
   gap: 0.52rem;
 }
@@ -447,4 +471,3 @@
   font-size: 0.83rem;
   color: #5f5a50;
 }
-

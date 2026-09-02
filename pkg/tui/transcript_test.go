@@ -148,6 +148,164 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	require.Len(t, regions, 6)
 }
 
+func TestRenderTranscriptUsesGenericExtensionPresentation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	presentationTool := func(name, summary, body, output string) toolCall {
+		return toolCall{
+			name:   name,
+			input:  `{"agent_id":"agt_123"}`,
+			result: "Extension Tool: " + name + " (worker)\n\n" + output,
+			done:   true,
+			structured: &tooltypes.StructuredToolResult{
+				ToolName: name,
+				Success:  true,
+				Metadata: &tooltypes.ExtensionToolMetadata{
+					ToolName: name,
+					Output:   output,
+					Data: map[string]any{
+						"presentation": map[string]any{
+							"summary": summary,
+							"body":    body,
+							"format":  "markdown",
+						},
+					},
+				},
+			},
+		}
+	}
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{
+				presentationTool(
+					"launch_worker",
+					"Spawn parser-reviewer",
+					"Review the parser and tests",
+					"Started run_456 for agt_123",
+				),
+				presentationTool(
+					"inventory_workers",
+					"List agents",
+					"- **parser-reviewer** — completed",
+					"Agent inventory including agt_123",
+				),
+				presentationTool(
+					"send_instruction",
+					"Follow up parser-reviewer",
+					"Review **the parser**\nand tests",
+					"Started run_456 for agt_123",
+				),
+				presentationTool(
+					"redirect_worker",
+					"Steer parser-reviewer",
+					"Focus on error handling",
+					"Queued update for agt_123",
+				),
+				presentationTool(
+					"stop_worker",
+					"Cancel parser-reviewer",
+					"The agent is permanently canceled.",
+					"Canceled agt_123",
+				),
+			},
+		}},
+	}}
+
+	content, regions := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "Spawn parser-reviewer ▸")
+	assert.Contains(t, plain, "List agents ▸")
+	assert.Contains(t, plain, "Follow up parser-reviewer ▸")
+	assert.Contains(t, plain, "Steer parser-reviewer ▸")
+	assert.Contains(t, plain, "Cancel parser-reviewer ▸")
+	assert.NotContains(t, plain, "Review the parser and tests")
+	assert.NotContains(t, plain, "Focus on error handling")
+	assert.NotContains(t, plain, "permanently canceled")
+	assert.NotContains(t, plain, "agt_123")
+	assert.NotContains(t, plain, "run_456")
+	assert.NotContains(t, plain, "Ran 5 tools")
+	require.Len(t, regions, 5)
+
+	m.entries[0].blocks[0].tools[2].expanded = true
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "Follow up parser-reviewer ▾")
+	assert.Contains(t, plain, "Review the parser")
+	assert.Contains(t, plain, "and tests")
+	assert.NotContains(t, plain, "Started run_456")
+	assert.NotContains(t, plain, "run_456")
+	assert.NotContains(t, plain, "Extension Tool: send_instruction")
+	assert.NotContains(t, plain, "input: {\"agent_id\"")
+
+	m.entries[0].blocks[0].tools[2].expanded = false
+	m.entries[0].blocks[0].tools[3].expanded = true
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "Steer parser-reviewer ▾")
+	assert.Contains(t, plain, "Focus on error handling")
+	assert.NotContains(t, plain, "Queued update for agt_123")
+	assert.NotContains(t, plain, "agt_123")
+}
+
+func TestTaskRunPresentationControlsCompactLabel(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 40
+	m.resize()
+
+	tool := toolCall{
+		name: "observe_worker",
+		structured: &tooltypes.StructuredToolResult{
+			ToolName: "observe_worker",
+			Success:  true,
+			Metadata: &tooltypes.ExtensionToolMetadata{
+				ToolName: "observe_worker",
+				Data: map[string]any{
+					"presentation": map[string]any{"summary": "Wait for parser-reviewer"},
+					"taskRun": map[string]any{
+						"version": 1, "revision": 1, "kind": "worker", "status": "running", "phase": "working",
+						"title": "Waiting for a background worker", "detail": "reviewing parser tests", "elapsedMs": 1000,
+						"counts": map[string]any{"succeeded": 1, "failed": 0, "running": 1},
+						"activities": []any{map[string]any{
+							"id": "activity-1", "sequence": 1, "kind": "bash", "label": "Run parser tests", "status": "running",
+						}},
+					},
+				},
+			},
+		},
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{tool}}}}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Contains(t, plain, "Wait for parser-reviewer… ▾")
+	assert.NotContains(t, plain, "reviewing parser tests")
+	assert.Contains(t, plain, "Run parser tests")
+
+	tool.done = true
+	tool.expanded = false
+	metadata := tool.structured.Metadata.(*tooltypes.ExtensionToolMetadata)
+	metadata.Output = "Parser review complete."
+	taskRun := metadata.Data["taskRun"].(map[string]any)
+	taskRun["status"] = "completed"
+	taskRun["phase"] = "completed"
+	taskRun["counts"].(map[string]any)["running"] = 0
+	m.entries[0].blocks[0].tools[0] = tool
+
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "Wait for parser-reviewer ▸")
+	assert.NotContains(t, plain, "2 actions")
+	assert.NotContains(t, plain, "Parser review complete.")
+}
+
 func TestRenderTranscriptPreservesIndentedToolOutput(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

@@ -280,7 +280,7 @@ func (r *Runtime) dispatchToolOutput(ctx context.Context, eventName string, call
 			}
 			continue
 		}
-		currentOutput = modified
+		currentOutput = normalizeStructuredExtensionPresentation(modified, r.config.MaxOutputSize)
 		modifiedOutput = true
 	}
 

@@ -173,6 +173,175 @@ describe('ChatToolActivity', () => {
     expect(getToolSummary(openPageCall)).toBe('Open page: URL unavailable');
   });
 
+  it('uses generic extension presentation summaries without body previews', () => {
+    const spawnCall: ChatRenderToolCall = {
+      callId: 'spawn-1',
+      name: 'launch_worker',
+      input: '{"name":"parser-reviewer","task":"Review the parser and tests"}',
+      result: {
+        toolName: 'launch_worker',
+        success: true,
+        metadata: {
+          data: {
+            presentation: {
+              summary: 'Spawn parser-reviewer',
+              body: 'Review the parser and tests',
+            },
+          },
+        },
+      },
+    };
+    const listCall: ChatRenderToolCall = {
+      callId: 'list-1',
+      name: 'inventory_workers',
+      input: '{}',
+      result: {
+        toolName: 'inventory_workers',
+        success: true,
+        metadata: {
+          data: {
+            presentation: {
+              summary: 'List agents',
+              body: '- **parser-reviewer** — completed',
+            },
+          },
+        },
+      },
+    };
+    const followupCall: ChatRenderToolCall = {
+      callId: 'followup-1',
+      name: 'send_instruction',
+      input: '{"agent_id":"agt_123","task":"Review the parser\\nand tests"}',
+      result: {
+        toolName: 'send_instruction',
+        success: true,
+        metadata: {
+          data: {
+            presentation: {
+              summary: 'Follow up parser-reviewer',
+              body: 'Review the parser and tests',
+            },
+          },
+        },
+      },
+    };
+    const steerCall: ChatRenderToolCall = {
+      callId: 'steer-1',
+      name: 'redirect_worker',
+      input: '{"agent_id":"agt_123","message":"Focus on error handling"}',
+      result: {
+        toolName: 'redirect_worker',
+        success: true,
+        metadata: {
+          data: {
+            presentation: {
+              summary: 'Steer parser-reviewer',
+              body: 'Focus on error handling',
+            },
+          },
+        },
+      },
+    };
+    const waitCall: ChatRenderToolCall = {
+      callId: 'wait-1',
+      name: 'observe_worker',
+      input: '{"agent_id":"agt_123"}',
+      result: {
+        toolName: 'observe_worker',
+        success: true,
+        metadata: {
+          data: { presentation: { summary: 'Wait for parser-reviewer' } },
+        },
+      },
+    };
+    const cancelCall: ChatRenderToolCall = {
+      callId: 'cancel-1',
+      name: 'stop_worker',
+      input: '{"agent_id":"agt_123"}',
+      result: {
+        toolName: 'stop_worker',
+        success: true,
+        metadata: {
+          data: {
+            presentation: {
+              summary: 'Cancel parser-reviewer',
+              body: 'The agent is permanently canceled.',
+            },
+          },
+        },
+      },
+    };
+    const runningWaitCall: ChatRenderToolCall = {
+      ...waitCall,
+      result: {
+        toolName: 'observe_worker',
+        success: true,
+        metadata: {
+          data: {
+            taskRun: {
+              version: 1,
+              revision: 1,
+              kind: 'worker',
+              status: 'running',
+              phase: 'starting',
+              title: 'Wait for parser-reviewer',
+              elapsedMs: 10,
+              counts: { succeeded: 0, failed: 0, running: 0 },
+              activities: [],
+            },
+          },
+        },
+      },
+      inProgress: true,
+    };
+
+    expect(getToolSummary(spawnCall)).toBe('Spawn parser-reviewer');
+    expect(getToolSummary(listCall)).toBe('List agents');
+    expect(getToolSummary(followupCall)).toBe('Follow up parser-reviewer');
+    expect(getToolSummary(steerCall)).toBe('Steer parser-reviewer');
+    expect(getToolSummary(waitCall)).toBe('Wait for parser-reviewer');
+    expect(getToolSummary(cancelCall)).toBe('Cancel parser-reviewer');
+    expect(getToolSummary(runningWaitCall)).toBe('Wait for parser-reviewer');
+    expect(getToolSummary({ ...followupCall, result: undefined })).toBe('Send Instruction');
+    expect(
+      getToolSummary({
+        ...steerCall,
+        result: { toolName: 'redirect_worker', success: false },
+      })
+    ).toBe('Redirect Worker');
+    expect(getToolSummary({ ...waitCall, result: undefined })).toBe('Observe Worker');
+    expect(
+      getToolSummary({
+        ...followupCall,
+        result: {
+          toolName: 'send_instruction',
+          success: true,
+          metadata: {
+            data: { presentation: { summary: 'Follow up \u202eparser-reviewer' } },
+          },
+        },
+      })
+    ).toBe('Send Instruction');
+
+    const { container } = render(
+      <ChatToolActivity
+        tools={[spawnCall, listCall, followupCall, steerCall, waitCall, cancelCall]}
+      />
+    );
+    const summaries = container.querySelectorAll('summary');
+    expect(summaries[0]).toHaveTextContent('Spawn parser-reviewer');
+    expect(summaries[0]).not.toHaveTextContent('Review the parser');
+    expect(summaries[1]).toHaveTextContent('List agents');
+    expect(summaries[1]).not.toHaveTextContent('completed');
+    expect(summaries[2]).toHaveTextContent('Follow up parser-reviewer');
+    expect(summaries[2]).not.toHaveTextContent('Review the parser');
+    expect(summaries[3]).toHaveTextContent('Steer parser-reviewer');
+    expect(summaries[3]).not.toHaveTextContent('Focus on error handling');
+    expect(summaries[4]).toHaveTextContent('Wait for parser-reviewer');
+    expect(summaries[5]).toHaveTextContent('Cancel parser-reviewer');
+    expect(summaries[5]).not.toHaveTextContent('permanently canceled');
+  });
+
   it('exposes tool status and preview helpers for focused formatting tests', () => {
     expect(
       getToolActivityStatus({
@@ -231,12 +400,12 @@ describe('ChatToolActivity', () => {
       />
     );
 
-    expect(screen.getByText('Code search: Trace tool updates')).toBeInTheDocument();
-    expect(screen.queryByText('Searching code')).not.toBeInTheDocument();
+    expect(screen.getByText('Searching code')).toBeInTheDocument();
+    expect(screen.queryByText('Trace tool updates')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-card[open]')).toBeInTheDocument();
   });
 
-  it('shows a live subagent instruction only in the outer activity header', () => {
+  it('uses a live task-run title without reconstructing extension-specific labels', () => {
     const { container } = render(
       <ChatToolActivity
         tools={[
@@ -274,9 +443,7 @@ describe('ChatToolActivity', () => {
       />
     );
 
-    expect(
-      screen.getByText('Delegated task: Review the task progress renderer')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Delegated task')).toBeInTheDocument();
     expect(container.querySelector('.activity-detail-content')).not.toHaveTextContent(
       'Review the task progress renderer'
     );
@@ -380,25 +547,22 @@ describe('ChatToolActivity', () => {
     ],
     ['view_image', '{"path":"screenshot.png"}', '.lucide-file-image', '.lucide-file-text'],
     ['openai_web_search', '{}', '.lucide-globe', '.lucide-search'],
-  ])(
-    'preserves the explicit built-in icon for %s',
-    (name, input, expectedIcon, inferredIcon) => {
-      const { container } = render(
-        <ChatToolActivity
-          tools={[
-            {
-              callId: 'builtin-1',
-              name,
-              input,
-            },
-          ]}
-        />
-      );
+  ])('preserves the explicit built-in icon for %s', (name, input, expectedIcon, inferredIcon) => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'builtin-1',
+            name,
+            input,
+          },
+        ]}
+      />
+    );
 
-      expect(container.querySelector(expectedIcon)).toBeInTheDocument();
-      expect(container.querySelector(inferredIcon)).not.toBeInTheDocument();
-    }
-  );
+    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+    expect(container.querySelector(inferredIcon)).not.toBeInTheDocument();
+  });
 
   it('uses a generic icon for a running unmatched external tool without inspecting its input', () => {
     const { container } = render(

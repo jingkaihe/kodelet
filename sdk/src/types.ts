@@ -11,15 +11,29 @@ export interface ExtensionMetadata {
   version?: string;
 }
 
+export interface ToolPresentation {
+  /** Complete compact label; the host normalizes and validates it before display. */
+  summary: string;
+  /** Expanded content; omitted values fall back to tool content and hosts may truncate it. */
+  body?: string;
+  /** Body rendering format; omitted values are treated as text. */
+  format?: "text" | "markdown";
+}
+
+export interface ExtensionToolData {
+  presentation?: ToolPresentation;
+  [key: string]: unknown;
+}
+
 export interface ToolExecutionResult {
   content: string;
-  data?: Record<string, unknown>;
+  data?: ExtensionToolData;
   error?: string;
 }
 
 export interface ToolUpdateRequest {
   content: string;
-  data?: Record<string, unknown>;
+  data?: ExtensionToolData;
 }
 
 export type CommandAction = "pass" | "respond" | "runAgent";
@@ -298,7 +312,7 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
 }
 
 export interface ToolContext extends SharedContext {
-  update(content: string, data?: Record<string, unknown>): Promise<void>;
+  update(content: string, data?: ExtensionToolData): Promise<void>;
   forkConversation(options?: ConversationForkOptions): Promise<string>;
 }
 

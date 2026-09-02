@@ -14,6 +14,7 @@ import type {
   ConversationForkOptions,
   EventContext,
   ExecResult,
+  ExtensionToolData,
   FileInfo,
   InitializeParams,
   LogContext,
@@ -90,7 +91,7 @@ export function createToolContext(
   const client = currentHostRPCClient();
   return {
     ...createSharedContext(init, context, signal, client),
-    async update(content: string, data?: Record<string, unknown>) {
+    async update(content: string, data?: ExtensionToolData) {
       if (!toolUpdatesSupported(init)) {
         return;
       }

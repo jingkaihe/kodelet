@@ -339,6 +339,15 @@ func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 	var metadata tooltypes.ExtensionToolMetadata
 	require.True(t, tooltypes.ExtractMetadata(modified.Metadata, &metadata))
 	assert.Equal(t, "event modified output", metadata.Output)
+	runtime.config.MaxOutputSize = 96
+	presented, changed := runtime.DispatchToolResult(context.Background(), callContext, "get_weather", `{"location":"Presentation"}`, "call-1", original)
+	require.True(t, changed)
+	presentation, _, ok := tooltypes.ExtractExtensionToolPresentation(&presented)
+	require.True(t, ok)
+	assert.Equal(t, "Event presentation", presentation.Summary)
+	assert.Equal(t, "markdown", presentation.Format)
+	assert.LessOrEqual(t, len(presentation.Body), runtime.config.MaxOutputSize)
+	assert.Contains(t, presentation.Body, "[TRUNCATED")
 
 	updated, changed, accepted := runtime.DispatchToolUpdate(context.Background(), callContext, "get_weather", decision.Input, "call-1", original)
 	require.True(t, accepted)
@@ -966,6 +975,13 @@ func handleHelperEvent(params eventParams) EventResult {
 			outputText = "event updated output"
 		}
 		metadata := tooltypes.ExtensionToolMetadata{ExtensionID: "events", ToolName: event.Tool.Name, Output: outputText}
+		if input.Location == "Presentation" {
+			metadata.Data = map[string]any{"presentation": map[string]any{
+				"summary": "  Event\npresentation  ",
+				"body":    string(bytes.Repeat([]byte("界"), 100)),
+				"format":  "MARKDOWN",
+			}}
+		}
 		modified := tooltypes.StructuredToolResult{
 			ToolName:  event.Tool.Name,
 			Success:   true,

@@ -8,12 +8,14 @@ import test from "node:test";
 import {
   type BackgroundTaskLease,
   ConversationForkUnavailableError,
+  type ExtensionToolData,
   HostRPCError,
   createTestHarness,
   defineExtension,
   renderTemplate,
   z,
   type JSONSchema,
+  type ToolPresentation,
 } from "./index.js";
 
 test("registers tools, commands, events and executes handlers", async () => {
@@ -114,6 +116,63 @@ test("registers tools, commands, events and executes handlers", async () => {
     payload: { messages: [{ role: "assistant", content: "done" }] },
   });
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
+});
+
+test("tool results and updates preserve presentation data", async () => {
+  const updatePresentation: ToolPresentation = {
+    summary: "Fetching weather",
+  };
+  const resultPresentation: ToolPresentation = {
+    summary: "Weather ready",
+    body: "**London:** cloudy",
+    format: "markdown",
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "present_weather",
+      description: "Present weather",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        const updateData: ExtensionToolData = {
+          phase: "fetching",
+          presentation: updatePresentation,
+        };
+        await ctx.update("Fetching the full London forecast", updateData);
+
+        const resultData: ExtensionToolData = {
+          location: "London",
+          presentation: resultPresentation,
+        };
+        return {
+          content: "Weather for London: cloudy",
+          data: resultData,
+        };
+      },
+    });
+  });
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const harness = await createTestHarness(extension, {
+    async request(method, params) {
+      requests.push({ method, params });
+      return { accepted: true };
+    },
+  });
+
+  const result = await harness.executeTool({ name: "present_weather", input: {} });
+
+  assert.deepEqual(requests, [
+    {
+      method: "kodelet.tool.update",
+      params: {
+        content: "Fetching the full London forecast",
+        data: { phase: "fetching", presentation: updatePresentation },
+      },
+    },
+  ]);
+  assert.deepEqual(result, {
+    content: "Weather for London: cloudy",
+    data: { location: "London", presentation: resultPresentation },
+  });
 });
 
 test("normalizes the supported shortcut forms", async () => {

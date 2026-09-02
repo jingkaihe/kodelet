@@ -71,6 +71,30 @@ func TestRendererRegistry_ExtensionToolMetadata(t *testing.T) {
 	assert.Contains(t, output, "Cloudy, 18C")
 }
 
+func TestRendererRegistry_ExtensionToolPresentation(t *testing.T) {
+	registry := NewRendererRegistry()
+	result := tools.StructuredToolResult{
+		ToolName: "send_instruction",
+		Success:  true,
+		Metadata: &tools.ExtensionToolMetadata{
+			ExtensionID: "worker-tools",
+			ToolName:    "send_instruction",
+			Output:      "Started run_456 for agt_123",
+			Data: map[string]any{"presentation": map[string]any{
+				"summary": "Follow up parser-reviewer",
+				"body":    "Review the parser",
+			}},
+		},
+	}
+
+	output := registry.Render(result)
+
+	assert.Equal(t, "Follow up parser-reviewer\n\nReview the parser", output)
+	assert.NotContains(t, output, "send_instruction")
+	assert.NotContains(t, output, "run_456")
+	assert.NotContains(t, output, "agt_123")
+}
+
 func TestRendererRegistry_ErrorHandling(t *testing.T) {
 	registry := NewRendererRegistry()
 

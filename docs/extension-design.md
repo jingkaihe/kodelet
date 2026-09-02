@@ -476,6 +476,27 @@ ExtensionToolMetadata{
 }
 ```
 
+### Generic extension-tool presentation
+
+An extension may add advisory user-interface metadata under `data.presentation` without changing its model-facing `content`:
+
+```json
+{
+  "content": "Started follow-up run run_456 for agent agt_123.",
+  "data": {
+    "presentation": {
+      "summary": "Follow up parser-reviewer",
+      "body": "Review the parser recovery path.",
+      "format": "markdown"
+    }
+  }
+}
+```
+
+`summary` is the complete compact tool label. It is required, normalized to one line, limited to 160 Unicode code points, and rejected when it contains control or invisible formatting characters. `body` is optional expanded content; when the field is omitted, renderers fall back to the ordinary extension output. `format` applies only to `body`, accepts `text` or `markdown`, and defaults to `text`. Markdown is rendered through the host's sanitized Markdown path.
+
+Presentation metadata is untrusted and cannot control tool identity, success or failure, status, duration, provenance, or error visibility. Malformed presentations are removed at result ingestion and normal extension rendering is used instead. Bodies are UTF-8 safely truncated before streaming or persistence to the smaller of the configured extension output limit and the protocol's 100 KiB ceiling. If `data.taskRun` is also present, `presentation.summary` supplies the compact label while the richer task-run renderer retains ownership of progress and expanded result details.
+
 ### Live extension-tool updates
 
 When initialization advertises `capabilities.toolUpdates: true`, a running tool handler may send a reverse-RPC request containing its latest accumulated result snapshot:

@@ -731,6 +731,12 @@ export interface ExtensionToolMetadata {
   data?: Record<string, unknown>;
 }
 
+export interface ToolPresentation {
+  summary: string;
+  body?: string;
+  format?: 'text' | 'markdown';
+}
+
 export interface TaskRunCounts {
   succeeded: number;
   failed: number;

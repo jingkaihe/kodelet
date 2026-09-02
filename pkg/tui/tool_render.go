@@ -63,6 +63,10 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			groups = append(groups, buildDedicatedBuiltinToolGroup(block, idx))
 			idx++
 
+		case isExtensionPresentationTool(tool):
+			groups = append(groups, buildExtensionPresentationToolGroup(block, idx))
+			idx++
+
 		default:
 			end := idx + 1
 			for end < len(block.tools) && isFallbackAggregateTool(block.tools[end]) {
@@ -79,15 +83,20 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
 	snapshot, metadata, _ := tooltypes.ExtractTaskRunSnapshot(tool.structured)
-	runningLabel := strings.TrimSpace(snapshot.Title)
+	title := strings.TrimSpace(snapshot.Title)
+	presentation, _, hasPresentation := tooltypes.ExtractExtensionToolPresentation(tool.structured)
+	if hasPresentation {
+		title = sanitizeExtensionUIText(presentation.Summary)
+	}
+	runningLabel := title
 	if runningLabel == "" {
 		runningLabel = "Running task"
 	}
-	if detail := strings.TrimSpace(snapshot.Detail); detail != "" {
+	if detail := strings.TrimSpace(snapshot.Detail); detail != "" && !hasPresentation {
 		runningLabel += " - " + detail
 	}
 
-	label := strings.TrimSpace(snapshot.Title)
+	label := title
 	if label == "" {
 		label = "Task"
 	}
@@ -97,7 +106,7 @@ func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderG
 			return formatTaskRunElapsed(taskRunElapsedMS(snapshot, tool, now))
 		})
 	}
-	if tool.done {
+	if tool.done && !hasPresentation {
 		label = taskRunCompletionLabel(snapshot, label)
 	}
 
@@ -418,6 +427,42 @@ func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGro
 	}
 }
 
+func buildExtensionPresentationToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	presentation, metadata, _ := tooltypes.ExtractExtensionToolPresentation(tool.structured)
+	label := sanitizeExtensionUIText(presentation.Summary)
+	hasPresentationBody := presentation.HasBody()
+	body := presentation.Body
+	if !hasPresentationBody {
+		body = metadata.Output
+	}
+	if tool.structured != nil {
+		errorText := strings.TrimSpace(tool.structured.Error)
+		if errorText != "" && errorText != strings.TrimSpace(body) {
+			if strings.TrimSpace(body) == "" {
+				body = "Error: " + errorText
+			} else {
+				body = "Error: " + errorText + "\n\n" + body
+			}
+		}
+	}
+	body = sanitizeExtensionTranscriptText(body)
+	markdownBody := hasPresentationBody && presentation.Format == "markdown" && body != ""
+	return toolRenderGroup{
+		toolStart:    idx,
+		toolEnd:      idx,
+		changeIndex:  -1,
+		label:        label,
+		runningLabel: label,
+		body:         body,
+		wrapBody:     !markdownBody,
+		markdownBody: markdownBody,
+		expanded:     block.expanded || tool.expanded || tool.failed,
+		active:       !tool.done,
+		failed:       tool.failed,
+	}
+}
+
 func (m model) buildFileEditToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
 	summary := fileEditSummary(tool)
@@ -684,8 +729,13 @@ func skillToolLabel(tool toolCall) string {
 	return "Loaded skill"
 }
 
+func isExtensionPresentationTool(tool toolCall) bool {
+	_, _, ok := tooltypes.ExtractExtensionToolPresentation(tool.structured)
+	return ok
+}
+
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileEditTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool)
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileEditTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {
