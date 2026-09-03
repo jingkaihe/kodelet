@@ -30,6 +30,14 @@ renderer.list = (body, ordered, start) => {
   return `<${tag} class="chat-markdown-list"${startAttribute}>\n${body}</${tag}>\n`;
 };
 
+renderer.table = (header, body) => {
+  const renderedTable = defaultRenderer
+    .table(header, body)
+    .replace('<table>', '<table class="chat-markdown-table">');
+
+  return `<div class="chat-markdown-table-shell">\n${renderedTable}</div>\n`;
+};
+
 const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
 
 const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());

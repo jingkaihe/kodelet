@@ -146,6 +146,36 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('second item')).toBeInTheDocument();
   });
 
+  it('renders markdown tables inside the bordered table surface', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content:
+                  '| Item | Status | Count |\n| --- | :--- | ---: |\n| Frontend | Complete | 2 |',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const table = screen.getByRole('table');
+
+    expect(table).toHaveClass('chat-markdown-table');
+    expect(table.parentElement).toHaveClass('chat-markdown-table-shell');
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute(
+      'align',
+      'left'
+    );
+    expect(screen.getByRole('cell', { name: '2' })).toHaveAttribute('align', 'right');
+  });
+
   it('renders long markdown links inside chat prose', () => {
     const longURL = `https://example.com/${'very-long-path-segment'.repeat(12)}`;
     const { container } = render(
