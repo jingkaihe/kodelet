@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/google/shlex"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -47,11 +49,21 @@ func isTextareaNewlineKey(key string) bool {
 	return false
 }
 
+func normalizeSingleLinePaste(text string) string {
+	text = xansi.Strip(text)
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && !unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, text)
+	return strings.Join(strings.Fields(text), " ")
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
 	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
-		m.insertTextareaNewline()
-		return m, nil
+		return m, m.insertTextareaNewline()
 	}
 
 	var cmds []tea.Cmd
@@ -430,16 +442,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeUIPrompt != nil {
 			break
 		}
-		pasteKey := tea.KeyPressMsg{Code: tea.KeyExtended, Text: msg.Content}
 		if m.conversationPicker != nil {
-			return m, m.updateConversationPickerKey(pasteKey)
+			m.appendConversationPickerQuery(normalizeSingleLinePaste(msg.Content))
+			return m, nil
 		}
 		if key, ok := m.focusedExtensionSurfaceKey(); ok {
 			surface := m.extensionSurfaces[key]
-			return m, m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, "", msg.Content, false, false, false, nil)
+			// Bubble Tea v1 wrapped pasted key strings in brackets. Preserve that
+			// public surface-input representation while carrying raw text separately.
+			return m, m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, "["+msg.Content+"]", msg.Content, false, false, false, nil)
 		}
 		if m.historySearch != nil {
-			m.updateHistorySearchKey(pasteKey)
+			m.appendHistorySearchQuery(normalizeSingleLinePaste(msg.Content))
 			m.resize()
 			return m, nil
 		}
@@ -1649,6 +1663,8 @@ func (m *model) finishActiveBlocks() {
 	}
 }
 
-func (m *model) insertTextareaNewline() {
-	m.textarea.InsertString("\n")
+func (m *model) insertTextareaNewline() tea.Cmd {
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	return cmd
 }

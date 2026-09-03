@@ -202,11 +202,17 @@ func (m *model) updateHistorySearchKey(msg tea.KeyPressMsg) {
 	}
 
 	if msg.Text != "" && !msg.Mod.Contains(tea.ModAlt) {
-		m.historySearch.query += msg.Text
-		m.applyHistorySearchQuery()
-		m.refreshViewport(false)
+		m.appendHistorySearchQuery(msg.Text)
+	}
+}
+
+func (m *model) appendHistorySearchQuery(text string) {
+	if m.historySearch == nil || text == "" {
 		return
 	}
+	m.historySearch.query += text
+	m.applyHistorySearchQuery()
+	m.refreshViewport(false)
 }
 
 func (m *model) applyHistorySearchQuery() {

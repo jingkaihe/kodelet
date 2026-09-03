@@ -724,12 +724,87 @@ func (m *model) routeExtensionSurfaceKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	surface := m.extensionSurfaces[key]
-	text := msg.Text
-	keyName := msg.Keystroke()
+	keyName, text := extensionSurfaceKeyInput(msg)
 	alt := msg.Mod.Contains(tea.ModAlt)
-	shift := msg.Mod.Contains(tea.ModShift)
-	ctrl := msg.Mod.Contains(tea.ModCtrl)
+	shift := strings.Contains(keyName, "shift+")
+	ctrl := strings.Contains(keyName, "ctrl+")
 	return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, keyName, text, alt, shift, ctrl, nil), true
+}
+
+func extensionSurfaceKeyInput(msg tea.KeyPressMsg) (string, string) {
+	alt := msg.Mod.Contains(tea.ModAlt)
+	ctrl := msg.Mod.Contains(tea.ModCtrl)
+	if msg.Code == tea.KeySpace || msg.Text == " " {
+		name := " "
+		if ctrl {
+			name = "ctrl+@"
+		}
+		if alt {
+			name = "alt+" + name
+		}
+		return name, ""
+	}
+
+	if name, ok := extensionSurfaceV1ControlAlias(msg); ok {
+		if alt {
+			name = "alt+" + name
+		}
+		return name, ""
+	}
+
+	if text := extensionSurfacePrintableText(msg); text != "" {
+		name := text
+		if alt {
+			name = "alt+" + name
+		}
+		return name, text
+	}
+
+	name := msg.Keystroke()
+	if alt {
+		name = strings.Replace(name, "alt+", "", 1)
+		name = "alt+" + name
+	}
+	return name, ""
+}
+
+func extensionSurfacePrintableText(msg tea.KeyPressMsg) string {
+	if msg.Text != "" {
+		return msg.Text
+	}
+	if msg.Mod.Contains(tea.ModCtrl) || msg.Code < ' ' || msg.Code > unicode.MaxRune || !unicode.IsPrint(msg.Code) {
+		return ""
+	}
+
+	code := msg.Code
+	if msg.Mod.Contains(tea.ModShift) {
+		if msg.ShiftedCode != 0 {
+			code = msg.ShiftedCode
+		} else if unicode.IsLetter(code) {
+			code = unicode.ToUpper(code)
+		}
+	}
+	return string(code)
+}
+
+func extensionSurfaceV1ControlAlias(msg tea.KeyPressMsg) (string, bool) {
+	if !msg.Mod.Contains(tea.ModCtrl) {
+		return "", false
+	}
+
+	code := unicode.ToLower(msg.Code)
+	shiftedCode := unicode.ToLower(msg.ShiftedCode)
+	switch {
+	case code == 'i':
+		return "tab", true
+	case code == 'm':
+		return "enter", true
+	case code == '[' || shiftedCode == '[' || shiftedCode == '{':
+		return "esc", true
+	case code == '?' || shiftedCode == '?' || code == '/' && msg.Mod.Contains(tea.ModShift):
+		return "backspace", true
+	}
+	return "", false
 }
 
 func (m *model) routeExtensionSurfaceMouse(msg tea.MouseMsg) (tea.Cmd, bool) {

@@ -470,9 +470,63 @@ func TestTextareaNewlineKeysInsertNewline(t *testing.T) {
 			updated, cmd := m.Update(tt.msg)
 			m = updated.(model)
 
-			assert.Nil(t, cmd)
+			require.NotNil(t, cmd)
 			assert.Equal(t, "first line\n", m.textarea.Value())
 			assert.Empty(t, m.entries)
+		})
+	}
+}
+
+func TestTextareaNewlineKeysReplaceSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "shift enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift)},
+		{name: "alt enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModAlt)},
+		{name: "ctrl j", msg: keyPressWithMod('j', tea.ModCtrl)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			m.textarea.SetValue("replace me")
+			m.textarea.SelectAll()
+			require.True(t, m.textarea.HasSelection())
+
+			updated, cmd := m.Update(tt.msg)
+			m = updated.(model)
+
+			require.NotNil(t, cmd)
+			assert.Equal(t, "\n", m.textarea.Value())
+			assert.False(t, m.textarea.HasSelection())
+		})
+	}
+}
+
+func TestTextareaNewlineKeysRespectMaxHeight(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "shift enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift)},
+		{name: "alt enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModAlt)},
+		{name: "ctrl j", msg: keyPressWithMod('j', tea.ModCtrl)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			m.textarea.MaxHeight = 2
+			m.textarea.SetValue("first\nsecond")
+
+			updated, cmd := m.Update(tt.msg)
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			assert.Equal(t, "first\nsecond", m.textarea.Value())
 		})
 	}
 }
@@ -487,7 +541,7 @@ func TestRunningShiftEnterInsertsSteeringNewline(t *testing.T) {
 	updated, cmd := m.Update(keyPressWithMod(tea.KeyEnter, tea.ModShift))
 	m = updated.(model)
 
-	assert.Nil(t, cmd)
+	require.NotNil(t, cmd)
 	assert.True(t, m.running)
 	assert.Equal(t, "first line\n", m.textarea.Value())
 	assert.Empty(t, m.queuedSteering)
@@ -1750,6 +1804,41 @@ func TestHistorySearchOpensSearchesCyclesAcceptsAndCancels(t *testing.T) {
 	m = updated.(model)
 	assert.Equal(t, "many cores", m.historySearch.query)
 	assert.Equal(t, "how many cores and rams on this machine?", m.textarea.Value())
+}
+
+func TestHistorySearchPasteAlwaysInsertsText(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "enter", content: "enter", want: "prefix-enter"},
+		{name: "escape", content: "esc", want: "prefix-esc"},
+		{name: "up", content: "up", want: "prefix-up"},
+		{name: "down", content: "down", want: "prefix-down"},
+		{name: "backspace", content: "backspace", want: "prefix-backspace"},
+		{name: "clear", content: "ctrl+u", want: "prefix-ctrl+u"},
+		{name: "multiline", content: " first\r\nsecond\tthird ", want: "prefix-first second third"},
+		{name: "terminal controls", content: " \x1b[31mred\x1b[0m\x07\x00 alert ", want: "prefix-red alert"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+			m.textarea.SetValue("draft")
+			m.historySearch = &historySearchState{originalDraft: "draft", query: "prefix-"}
+
+			updated, cmd := m.Update(tea.PasteMsg{Content: tt.content})
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			require.NotNil(t, m.historySearch)
+			assert.Equal(t, tt.want, m.historySearch.query)
+			assert.Equal(t, "draft", m.textarea.Value())
+		})
+	}
 }
 
 func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {

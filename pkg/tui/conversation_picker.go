@@ -344,12 +344,19 @@ func (m *model) updateConversationPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if msg.Text != "" {
-		m.conversationPicker.query += msg.Text
-		m.conversationPicker.selected = 0
-		m.conversationPicker.selectedKey = ""
-		m.clampConversationPickerSelection()
+		m.appendConversationPickerQuery(msg.Text)
 	}
 	return nil
+}
+
+func (m *model) appendConversationPickerQuery(text string) {
+	if m.conversationPicker == nil || text == "" {
+		return
+	}
+	m.conversationPicker.query += text
+	m.conversationPicker.selected = 0
+	m.conversationPicker.selectedKey = ""
+	m.clampConversationPickerSelection()
 }
 
 func trimLastRune(value string) string {

@@ -543,6 +543,47 @@ func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testin
 	assert.True(t, strings.HasPrefix(m.activeConversationKey, "new:"))
 }
 
+func TestConversationPickerPasteAlwaysInsertsText(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "enter", content: "enter", want: "prefix-enter"},
+		{name: "escape", content: "esc", want: "prefix-esc"},
+		{name: "up", content: "up", want: "prefix-up"},
+		{name: "down", content: "down", want: "prefix-down"},
+		{name: "backspace", content: "backspace", want: "prefix-backspace"},
+		{name: "clear", content: "ctrl+u", want: "prefix-ctrl+u"},
+		{name: "multiline", content: " first\r\nsecond\tthird ", want: "prefix-first second third"},
+		{name: "terminal controls", content: " \x1b[31mred\x1b[0m\x07\x00 alert ", want: "prefix-red alert"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+			m.conversationPicker = &conversationPickerState{
+				query:       "prefix-",
+				selected:    1,
+				selectedKey: "selected",
+				summaries:   []convtypes.ConversationSummary{{ID: "conversation-one", FirstMessage: "First conversation"}},
+			}
+
+			updated, cmd := m.Update(tea.PasteMsg{Content: tt.content})
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			require.NotNil(t, m.conversationPicker)
+			assert.Equal(t, tt.want, m.conversationPicker.query)
+			assert.Zero(t, m.conversationPicker.selected)
+			assert.Empty(t, m.conversationPicker.selectedKey)
+			assert.Nil(t, m.activeUIPrompt)
+		})
+	}
+}
+
 func TestConversationPickerKeepsIdenticalUntitledRowsStable(t *testing.T) {
 	workspace := t.TempDir()
 	m := newModel(context.Background(), Config{CWD: workspace})

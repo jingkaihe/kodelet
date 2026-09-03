@@ -930,7 +930,7 @@ func TestTUIExtensionSurfaceCapturesBracketedPaste(t *testing.T) {
 	input, ok := notifications[len(notifications)-1].params.(extensions.UISurfaceInputNotification)
 	require.True(t, ok)
 	assert.Equal(t, extensions.UISurfaceInputKey, input.Kind)
-	assert.Empty(t, input.Key)
+	assert.Equal(t, "[first\nsecond]", input.Key)
 	assert.Equal(t, "first\nsecond", input.Text)
 }
 
@@ -1095,32 +1095,162 @@ func TestTUIExtensionSurfaceFocusIsSuspendedByModalUI(t *testing.T) {
 	assert.Equal(t, []string{extensions.UISurfaceInputBlur, extensions.UISurfaceInputFocus}, focusKinds)
 }
 
-func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
+func TestTUIExtensionSurfaceKeyRoutingPreservesV1NamesAndModifiers(t *testing.T) {
 	tests := []struct {
-		name  string
-		key   tea.KeyPressMsg
-		alt   bool
-		shift bool
-		ctrl  bool
+		name    string
+		key     tea.KeyPressMsg
+		wantKey string
+		text    string
+		alt     bool
+		shift   bool
+		ctrl    bool
 	}{
 		{
-			name:  "ctrl shift",
-			key:   keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift),
-			shift: true,
-			ctrl:  true,
+			name:    "shifted punctuation stays textual",
+			key:     tea.KeyPressMsg{Code: '?', BaseCode: '/', Text: "?", Mod: tea.ModShift},
+			wantKey: "?",
+			text:    "?",
 		},
 		{
-			name: "alt ctrl",
-			key:  keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModAlt),
-			alt:  true,
-			ctrl: true,
+			name:    "uppercase stays textual",
+			key:     tea.KeyPressMsg{Code: 'Q', BaseCode: 'q', Text: "Q", Mod: tea.ModShift},
+			wantKey: "Q",
+			text:    "Q",
 		},
 		{
-			name:  "alt ctrl shift",
-			key:   keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift|tea.ModAlt),
-			alt:   true,
-			shift: true,
-			ctrl:  true,
+			name:    "international text stays textual",
+			key:     tea.KeyPressMsg{Code: 'é', BaseCode: '2', Text: "é"},
+			wantKey: "é",
+			text:    "é",
+		},
+		{
+			name:    "legacy alt printable restores text",
+			key:     tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt},
+			wantKey: "alt+p",
+			text:    "p",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt shifted printable restores shifted text",
+			key:     tea.KeyPressMsg{Code: 'p', ShiftedCode: 'P', Mod: tea.ModAlt | tea.ModShift},
+			wantKey: "alt+P",
+			text:    "P",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt shifted printable without shifted code",
+			key:     tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt | tea.ModShift},
+			wantKey: "alt+P",
+			text:    "P",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt international ignores base code",
+			key:     tea.KeyPressMsg{Code: 'é', BaseCode: '2', Mod: tea.ModAlt},
+			wantKey: "alt+é",
+			text:    "é",
+			alt:     true,
+		},
+		{
+			name:    "space keeps v1 key name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Text: " "},
+			wantKey: " ",
+		},
+		{
+			name:    "legacy alt space keeps v1 key name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModAlt},
+			wantKey: "alt+ ",
+			alt:     true,
+		},
+		{
+			name:    "text populated alt space avoids duplicate modifier",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Text: " ", Mod: tea.ModAlt},
+			wantKey: "alt+ ",
+			alt:     true,
+		},
+		{
+			name:    "ctrl space keeps v1 control name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl},
+			wantKey: "ctrl+@",
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl space keeps v1 control name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+ctrl+@",
+			alt:     true,
+			ctrl:    true,
+		},
+		{
+			name:    "ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', Mod: tea.ModCtrl},
+			wantKey: "tab",
+		},
+		{
+			name:    "alt ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+tab",
+			alt:     true,
+		},
+		{
+			name:    "shifted ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', ShiftedCode: 'I', Mod: tea.ModCtrl | tea.ModShift},
+			wantKey: "tab",
+		},
+		{
+			name:    "ctrl m keeps v1 enter alias",
+			key:     tea.KeyPressMsg{Code: 'm', Mod: tea.ModCtrl},
+			wantKey: "enter",
+		},
+		{
+			name:    "alt ctrl m keeps v1 enter alias",
+			key:     tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+enter",
+			alt:     true,
+		},
+		{
+			name:    "ctrl open bracket keeps v1 escape alias",
+			key:     tea.KeyPressMsg{Code: '[', Mod: tea.ModCtrl},
+			wantKey: "esc",
+		},
+		{
+			name:    "alt ctrl open bracket keeps v1 escape alias",
+			key:     tea.KeyPressMsg{Code: '[', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+esc",
+			alt:     true,
+		},
+		{
+			name:    "ctrl question mark keeps v1 backspace alias",
+			key:     tea.KeyPressMsg{Code: '/', ShiftedCode: '?', Mod: tea.ModCtrl | tea.ModShift},
+			wantKey: "backspace",
+		},
+		{
+			name:    "alt ctrl question mark keeps v1 backspace alias",
+			key:     tea.KeyPressMsg{Code: '/', ShiftedCode: '?', Mod: tea.ModAlt | tea.ModCtrl | tea.ModShift},
+			wantKey: "alt+backspace",
+			alt:     true,
+		},
+		{
+			name:    "ctrl shift navigation",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift),
+			wantKey: "ctrl+shift+up",
+			shift:   true,
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl uses v1 modifier order",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModAlt),
+			wantKey: "alt+ctrl+up",
+			alt:     true,
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl shift uses v1 modifier order",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift|tea.ModAlt),
+			wantKey: "alt+ctrl+shift+up",
+			alt:     true,
+			shift:   true,
+			ctrl:    true,
 		},
 	}
 
@@ -1144,7 +1274,8 @@ func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
 			require.Len(t, notifications, 1)
 			input, ok := notifications[0].params.(extensions.UISurfaceInputNotification)
 			require.True(t, ok)
-			assert.Equal(t, test.key.String(), input.Key)
+			assert.Equal(t, test.wantKey, input.Key)
+			assert.Equal(t, test.text, input.Text)
 			assert.Equal(t, test.alt, input.Alt)
 			assert.Equal(t, test.shift, input.Shift)
 			assert.Equal(t, test.ctrl, input.Ctrl)
