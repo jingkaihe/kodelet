@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2/compat"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,17 +15,17 @@ import (
 
 func TestResolveAutoThemeUsesLipglossTerminalDetection(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	previous := lipgloss.HasDarkBackground()
+	previous := compat.HasDarkBackground
 	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(previous)
+		compat.HasDarkBackground = previous
 	})
 
-	lipgloss.SetHasDarkBackground(false)
+	compat.HasDarkBackground = false
 	light, err := resolveTheme(AutoThemeName)
 	require.NoError(t, err)
 	assert.Equal(t, LightThemeName, light.Name)
 
-	lipgloss.SetHasDarkBackground(true)
+	compat.HasDarkBackground = true
 	dark, err := resolveTheme(AutoThemeName)
 	require.NoError(t, err)
 	assert.Equal(t, DefaultThemeName, dark.Name)
@@ -66,7 +66,6 @@ func TestThemeSlashCommandOpensPickerWithoutStartingConversation(t *testing.T) {
 }
 
 func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
-	withANSI256ColorProfile(t)
 	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	require.NotEmpty(t, m.renderMarkdown("`code`", 40, markdownAssistant))
 	require.NotNil(t, m.assistantMarkdownRenderer)

@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSanitizeTerminalTitle(t *testing.T) {
@@ -70,54 +69,21 @@ func TestTerminalTitleText(t *testing.T) {
 	assert.Equal(t, "[ ? ] Action Required | myproject", m.terminalTitleText(now.Add(time.Second)))
 }
 
-func TestRefreshTerminalTitleSkipsUnchangedWrites(t *testing.T) {
+func TestViewDeclaresTerminalTitleState(t *testing.T) {
 	m := newModel(context.Background(), Config{CWD: "/tmp/myproject"})
 	t.Cleanup(m.cancel)
+	m.terminalTitleEpoch = time.Now().Add(time.Hour)
+
+	assert.Equal(t, "myproject", m.View().WindowTitle)
+
 	m.running = true
-	now := m.terminalTitleEpoch
+	assert.Equal(t, "⠋ myproject", m.View().WindowTitle)
 
-	require.NotNil(t, m.refreshTerminalTitle(now))
-	assert.Equal(t, "⠋ myproject", m.lastTerminalTitle)
+	m.activeUIPrompt = &uiPromptState{}
+	assert.Equal(t, "[ ! ] Action Required | myproject", m.View().WindowTitle)
 
-	// Same spinner frame: no rewrite.
-	assert.Nil(t, m.refreshTerminalTitle(now.Add(50*time.Millisecond)))
-
-	// Next frame: rewrite.
-	require.NotNil(t, m.refreshTerminalTitle(now.Add(100*time.Millisecond)))
-	assert.Equal(t, "⠙ myproject", m.lastTerminalTitle)
-
-	// Run finished: title drops the spinner segment.
+	m.activeUIPrompt = nil
 	m.running = false
-	require.NotNil(t, m.refreshTerminalTitle(now.Add(200*time.Millisecond)))
-	assert.Equal(t, "myproject", m.lastTerminalTitle)
-}
-
-func TestRefreshTerminalTitleClearsWhenTitleBecomesEmpty(t *testing.T) {
-	m := newModel(context.Background(), Config{CWD: "/tmp/myproject"})
-	t.Cleanup(m.cancel)
-	now := m.terminalTitleEpoch
-
-	// Nothing written yet, empty title: nothing to clear.
 	m.cwd = ""
-	assert.Nil(t, m.refreshTerminalTitle(now))
-
-	m.cwd = "/tmp/myproject"
-	require.NotNil(t, m.refreshTerminalTitle(now))
-	require.True(t, m.terminalTitleWritten)
-
-	m.cwd = ""
-	assert.NotNil(t, m.refreshTerminalTitle(now))
-	assert.False(t, m.terminalTitleWritten)
-	assert.Empty(t, m.lastTerminalTitle)
-}
-
-func TestClearTerminalTitleOnlyClearsManagedTitle(t *testing.T) {
-	m := newModel(context.Background(), Config{CWD: "/tmp/myproject"})
-	t.Cleanup(m.cancel)
-
-	assert.Nil(t, m.clearTerminalTitle())
-
-	require.NotNil(t, m.refreshTerminalTitle(m.terminalTitleEpoch))
-	assert.NotNil(t, m.clearTerminalTitle())
-	assert.Nil(t, m.clearTerminalTitle())
+	assert.Empty(t, m.View().WindowTitle)
 }

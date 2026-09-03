@@ -8,8 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -23,7 +24,10 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	m := newModel(context.Background(), Config{Profile: " work ", CWD: ""})
 	t.Cleanup(m.cancel)
 
-	assert.Empty(t, m.View())
+	emptyView := m.View()
+	assert.Empty(t, emptyView.Content)
+	assert.True(t, emptyView.AltScreen)
+	assert.Equal(t, tea.MouseModeCellMotion, emptyView.MouseMode)
 	m.width = 48
 	m.height = 12
 	m.resize()
@@ -34,7 +38,7 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 		OutputCost:           0.125,
 	}
 	m.textarea.SetValue("draft")
-	view := m.View()
+	view := m.View().Content
 	plainLines := strings.Split(view, "\n")
 
 	assert.Contains(t, view, "draft")
@@ -43,7 +47,7 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, 3, m.textarea.Height())
 	assert.True(t, strings.HasPrefix(plainLines[0], strings.Repeat(" ", tuiLeftMargin)))
 	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
-	assert.Equal(t, m.contentWidth(), m.viewport.Width)
+	assert.Equal(t, m.contentWidth(), m.viewport.Width())
 	assert.Equal(t, "default", displayProfile(""))
 	assert.Equal(t, "default", displayProfile(" DEFAULT "))
 	assert.Equal(t, "default", profileForRequest("default"))
@@ -104,8 +108,6 @@ func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {
 }
 
 func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 	m.width = 80
@@ -113,7 +115,7 @@ func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
 	m.resize()
 	m.refreshViewport(true)
 
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	lines := strings.Split(view, "\n")
 	messageLine := ""
 	hintLine := ""
@@ -138,14 +140,12 @@ func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
 	assert.Equal(t, messageStart, hintStart)
 	assert.Equal(t, messageIndex+3, hintIndex)
 
-	rawView := m.View()
+	rawView := m.View().Content
 	assistantStart, _ := styleSequences(assistantStyle)
 	assert.Contains(t, rawView, assistantStart+"?")
 }
 
 func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
@@ -155,7 +155,7 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 			m.resize()
 			m.openShortcutsDialog()
 
-			rawView := m.View()
+			rawView := m.View().Content
 			view := xansi.Strip(rawView)
 
 			assert.Contains(t, view, "Shortcuts")
@@ -178,8 +178,6 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 }
 
 func TestNotificationSeverityUsesThemeColors(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
@@ -210,8 +208,6 @@ func TestNotificationSeverityUsesThemeColors(t *testing.T) {
 }
 
 func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	m := newModel(context.Background(), Config{Profile: "work", ProfileOptions: []string{"default", "work", "prod"}, Theme: "tokyo-night"})
 	t.Cleanup(m.cancel)
 	m.width = 80
@@ -222,24 +218,24 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	m.resize()
 	m.refreshViewport(true)
 
-	rawView := m.View()
+	rawView := m.View().Content
 	view := xansi.Strip(rawView)
 	lines := strings.Split(view, "\n")
-	pickerLine := lines[m.viewport.Height+2]
-	composerTop := lines[m.viewport.Height+m.profilePickerHeight()]
+	pickerLine := lines[m.viewport.Height()+2]
+	composerTop := lines[m.viewport.Height()+m.profilePickerHeight()]
 
 	assert.Contains(t, pickerLine, "prod")
 	assert.Contains(t, composerTop, "work")
-	assert.Contains(t, rawView, "\x1b[38;5;151mwork")
-	assert.Contains(t, rawView, "48;5;")
+	profileStart, _ := styleSequences(m.profileStyle(m.profileIndex))
+	selectedStart, _ := styleSequences(m.profileStyle(m.profilePickerIndex).Background(themeColor(m.theme.ProfileSelected)))
+	assert.Contains(t, rawView, profileStart+"work")
+	assert.Contains(t, rawView, selectedStart)
 	assert.NotContains(t, view, "→")
 	assert.NotContains(t, view, "ACTIVE")
 	assert.NotContains(t, view, "repo")
 }
 
 func TestReasoningPickerRendersBesideProfile(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	m := newModel(context.Background(), Config{
 		Profile:                "work",
 		ProfileOptions:         []string{"default", "work"},
@@ -256,10 +252,10 @@ func TestReasoningPickerRendersBesideProfile(t *testing.T) {
 	m.resize()
 	m.refreshViewport(true)
 
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	lines := strings.Split(view, "\n")
-	pickerLine := lines[m.viewport.Height+2]
-	composerTop := lines[m.viewport.Height+m.reasoningPickerHeight()]
+	pickerLine := lines[m.viewport.Height()+2]
+	composerTop := lines[m.viewport.Height()+m.reasoningPickerHeight()]
 
 	assert.Contains(t, pickerLine, "high")
 	assert.Contains(t, composerTop, "work")
@@ -267,8 +263,6 @@ func TestReasoningPickerRendersBesideProfile(t *testing.T) {
 }
 
 func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	m := newModel(context.Background(), Config{Theme: "tokyo-night"})
 	t.Cleanup(m.cancel)
 	m.width = 160
@@ -283,11 +277,11 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	m.resize()
 	m.refreshViewport(true)
 
-	rawView := m.View()
+	rawView := m.View().Content
 	view := xansi.Strip(rawView)
 	lines := strings.Split(view, "\n")
-	suggestionsTop := lines[m.viewport.Height]
-	composerTop := lines[m.viewport.Height+m.slashCommandSuggestionsHeight()]
+	suggestionsTop := lines[m.viewport.Height()]
+	composerTop := lines[m.viewport.Height()+m.slashCommandSuggestionsHeight()]
 
 	assert.Contains(t, suggestionsTop, "/goal")
 	assert.Contains(t, suggestionsTop, "Set the active goal")
@@ -296,8 +290,10 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	assert.NotContains(t, view, "target")
 	assert.Contains(t, composerTop, "default")
 	assert.Equal(t, tuiLeftMargin+m.inputOuterWidth(), lipgloss.Width(suggestionsTop))
-	assert.Contains(t, rawView, "\x1b[38;5;183m/review")
-	assert.Contains(t, rawView, "48;5;")
+	nameStart, _ := styleSequences(slashCommandNameStyle)
+	selectedStart, _ := styleSequences(slashCommandSelectedStyle)
+	assert.Contains(t, rawView, nameStart+"/review")
+	assert.Contains(t, rawView, selectedStart)
 	assert.NotContains(t, suggestionsTop, "│")
 	assert.NotContains(t, suggestionsTop, "╰")
 }
@@ -316,7 +312,7 @@ func TestSlashCommandUsageHintRendersInComposerPlaceholder(t *testing.T) {
 	m.textarea.SetValue("/review ")
 	m.resize()
 
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 
 	assert.Contains(t, view, "/review [target=HEAD] additional instructions")
 	assert.NotContains(t, view, "/review \n")
@@ -380,7 +376,7 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	m.refreshViewport(true)
 
 	transcript := xansi.Strip(m.viewport.View())
-	rawView := m.View()
+	rawView := m.View().Content
 	view := xansi.Strip(rawView)
 	lines := strings.Split(view, "\n")
 	bottomBorder := lines[len(lines)-1]
@@ -402,7 +398,7 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.Contains(t, rawBottomBorder, labelStart+" "+displayCWD(m.cwd))
 
 	m.workingFrame = 8
-	view = xansi.Strip(m.View())
+	view = xansi.Strip(m.View().Content)
 	lines = strings.Split(view, "\n")
 	bottomBorder = lines[len(lines)-1]
 
@@ -411,7 +407,7 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.Equal(t, 1, utf8.RuneCountInString(m.flowingWaterFrame()))
 
 	m.workingFrame = 16
-	view = xansi.Strip(m.View())
+	view = xansi.Strip(m.View().Content)
 	lines = strings.Split(view, "\n")
 	bottomBorder = lines[len(lines)-1]
 
@@ -420,7 +416,7 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.Equal(t, 1, utf8.RuneCountInString(m.flowingWaterFrame()))
 
 	m.workingFrame = 36
-	view = xansi.Strip(m.View())
+	view = xansi.Strip(m.View().Content)
 	lines = strings.Split(view, "\n")
 	bottomBorder = lines[len(lines)-1]
 
@@ -429,7 +425,7 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 
 	m.running = false
 	m.refreshViewport(true)
-	view = xansi.Strip(m.View())
+	view = xansi.Strip(m.View().Content)
 	lines = strings.Split(view, "\n")
 	bottomBorder = lines[len(lines)-1]
 
@@ -457,7 +453,7 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 
 	viewportContent := m.viewport.View()
 	firstGlyph := m.spinnerGlyph()
-	firstView := xansi.Strip(m.View())
+	firstView := xansi.Strip(m.View().Content)
 	require.Equal(t, 1, lipgloss.Width(transcriptSpinnerPlaceholder))
 	assert.Contains(t, viewportContent, transcriptSpinnerPlaceholder)
 	assert.Contains(t, firstView, firstGlyph+" Thinking…")
@@ -465,7 +461,7 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 	updated, _ := m.Update(spinner.TickMsg{})
 	m = updated.(model)
 	secondGlyph := m.spinnerGlyph()
-	secondView := xansi.Strip(m.View())
+	secondView := xansi.Strip(m.View().Content)
 
 	assert.NotEqual(t, firstGlyph, secondGlyph)
 	assert.Equal(t, viewportContent, m.viewport.View())
@@ -516,7 +512,7 @@ func TestElapsedPlaceholdersUpdateMultipleToolsWithoutViewportRefresh(t *testing
 
 	require.Len(t, m.transcriptElapsedClocks, 2)
 	cachedTranscript := m.viewport.View()
-	initialView := xansi.Strip(m.View())
+	initialView := xansi.Strip(m.View().Content)
 	require.Contains(t, initialView, "1 running · 1m 00s")
 	require.Contains(t, initialView, "$ mise run test  ·  7s")
 
@@ -524,7 +520,7 @@ func TestElapsedPlaceholdersUpdateMultipleToolsWithoutViewportRefresh(t *testing
 	bashResult.Timestamp = time.Now().Add(-2 * time.Second)
 	updated, _ := m.Update(spinner.TickMsg{})
 	m = updated.(model)
-	updatedView := xansi.Strip(m.View())
+	updatedView := xansi.Strip(m.View().Content)
 
 	assert.Equal(t, cachedTranscript, m.viewport.View())
 	assert.Contains(t, updatedView, "1 running · 1m 10s")
@@ -588,7 +584,7 @@ func TestElapsedPlaceholderOverflowRebuildsTranscriptAtWiderValue(t *testing.T) 
 	require.Len(t, m.transcriptElapsedClocks, 1)
 	assert.Equal(t, 8, m.transcriptElapsedClocks[0].width)
 	assert.NotEqual(t, cachedTranscript, m.viewport.View())
-	assert.Contains(t, xansi.Strip(m.View()), "1 running · 100h 01m")
+	assert.Contains(t, xansi.Strip(m.View().Content), "1 running · 100h 01m")
 }
 
 func TestElapsedPlaceholdersResetWhenSwitchingConversations(t *testing.T) {
@@ -619,12 +615,12 @@ func TestElapsedPlaceholdersResetWhenSwitchingConversations(t *testing.T) {
 	activated, _ := m.activateConversation(second.key)
 	require.True(t, activated)
 	assert.Empty(t, m.transcriptElapsedClocks)
-	assert.Contains(t, xansi.Strip(m.View()), "second transcript")
+	assert.Contains(t, xansi.Strip(m.View().Content), "second transcript")
 
 	activated, _ = m.activateConversation(first.key)
 	require.True(t, activated)
 	require.Len(t, m.transcriptElapsedClocks, 1)
-	assert.Contains(t, xansi.Strip(m.View()), "$ sleep 10  ·  ")
+	assert.Contains(t, xansi.Strip(m.View().Content), "$ sleep 10  ·  ")
 }
 
 func TestComposerLabelThemeColors(t *testing.T) {

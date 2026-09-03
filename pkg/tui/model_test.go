@@ -5,17 +5,31 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type stringMsg string
+func keyPress(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
 
-func (m stringMsg) String() string {
-	return string(m)
+func keyPressWithMod(code rune, mod tea.KeyMod) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: mod}
+}
+
+func textKeyPress(text string) tea.KeyPressMsg {
+	return textKeyPressWithMod(text, 0)
+}
+
+func textKeyPressWithMod(text string, mod tea.KeyMod) tea.KeyPressMsg {
+	code := tea.KeyExtended
+	if runes := []rune(text); len(runes) == 1 {
+		code = runes[0]
+	}
+	return tea.KeyPressMsg{Code: code, Text: text, Mod: mod}
 }
 
 func numberedLines(count int) string {
@@ -82,11 +96,11 @@ func TestRemoteModelCanSelectTUISlashCommand(t *testing.T) {
 	m.textarea.SetValue("/sess")
 
 	assert.True(t, m.slashCommandSuggestionsOpen())
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	assert.Equal(t, "/sessions ", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	assert.NotNil(t, m.conversationPicker)
 }

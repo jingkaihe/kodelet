@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -66,16 +66,16 @@ func TestTUIUIBrokerInputDialogResolvesResponse(t *testing.T) {
 	assert.Equal(t, uiPromptInput, m.activeUIPrompt.mode)
 	assert.True(t, m.activeUIPrompt.secret)
 	assert.Equal(t, "waiting for input", m.status)
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "Token?")
 	assert.Contains(t, view, "Paste a token")
 	assert.Contains(t, view, "It will not be shown")
 	assert.Contains(t, view, "[Esc] Skip")
 	assert.Contains(t, view, "[Enter] Send")
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("answer")})
+	updated, _ = m.Update(textKeyPress("answer"))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	result := receiveUIBrokerResult(t, resultCh)
@@ -112,12 +112,12 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	require.True(t, ok)
 	updated, _ := m.Update(msg)
 	m = updated.(model)
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "Allow bash?")
 	assert.Contains(t, view, "[Y] Allow")
 	assert.Contains(t, view, "[N] Deny")
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ = m.Update(textKeyPress("y"))
 	m = updated.(model)
 	confirm := receiveUIBrokerResult(t, confirmCh)
 	require.NoError(t, confirm.err)
@@ -142,10 +142,10 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	m = updated.(model)
 	assert.Equal(t, uiPromptSelect, m.activeUIPrompt.mode)
 	assert.Equal(t, 0, m.activeUIPrompt.selectIndex)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	assert.Equal(t, 1, m.activeUIPrompt.selectIndex)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	selection := receiveUIBrokerResult(t, selectCh)
@@ -166,7 +166,7 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	require.NoError(t, notify.err)
 	assert.Equal(t, extensions.UIInputStatusSubmitted, notify.response.Status)
 	require.Len(t, m.uiNotifications, 1)
-	view = xansi.Strip(m.View())
+	view = xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "Ready")
 	assert.Contains(t, view, "Done")
 
@@ -203,7 +203,7 @@ func TestExtensionDiagnosticsBecomeTUIWarningsAndErrors(t *testing.T) {
 	updated, _ := m.Update(msg)
 	m = updated.(model)
 	require.Len(t, m.uiNotifications, 1)
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "MCP warning")
 	assert.Contains(t, view, "spawn npxx ENOENT")
 
@@ -523,9 +523,9 @@ func TestUIChatEventsOpenDialogsAndNotifications(t *testing.T) {
 	m = updated.(model)
 	require.NotNil(t, m.activeUIPrompt)
 	assert.Equal(t, uiPromptInput, m.activeUIPrompt.mode)
-	assert.Contains(t, xansi.Strip(m.View()), "Question")
+	assert.Contains(t, xansi.Strip(m.View().Content), "Question")
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.Update(keyPress(tea.KeyEsc))
 	m = updated.(model)
 	assert.Nil(t, m.activeUIPrompt)
 
@@ -535,7 +535,7 @@ func TestUIChatEventsOpenDialogsAndNotifications(t *testing.T) {
 	}})
 	m = updated.(model)
 	require.Len(t, m.uiNotifications, 1)
-	assert.Contains(t, xansi.Strip(m.View()), "Heads up")
+	assert.Contains(t, xansi.Strip(m.View().Content), "Heads up")
 }
 
 func TestPromptFromChatEventVariantsAndMissingPayloads(t *testing.T) {

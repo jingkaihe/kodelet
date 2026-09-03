@@ -1,10 +1,11 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -12,6 +13,7 @@ const (
 	DefaultThemeName            = "catppuccin-mocha"
 	LightThemeName              = "catppuccin-latte"
 	ansiResetSequence           = "\x1b[0m"
+	ansiShortResetSequence      = "\x1b[m"
 	ansiForegroundResetSequence = "\x1b[39m"
 )
 
@@ -502,7 +504,7 @@ func applyTheme(theme tuiTheme) {
 	uiNotificationErrorTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationErrorTitle)).Bold(true)
 }
 
-func themeColor(color string) lipgloss.Color {
+func themeColor(color string) color.Color {
 	return lipgloss.Color(color)
 }
 
@@ -539,16 +541,16 @@ func reapplyStyleAfterResets(rendered, start, end string) string {
 
 func reapplyStyleAfterInnerResets(text, start string) string {
 	text = strings.ReplaceAll(text, ansiResetSequence, ansiResetSequence+start)
+	text = strings.ReplaceAll(text, ansiShortResetSequence, ansiShortResetSequence+start)
 	return strings.ReplaceAll(text, ansiForegroundResetSequence, ansiForegroundResetSequence+start)
 }
 
 func styleSequences(style lipgloss.Style) (start, end string) {
-	empty := style.Render("")
-	if strings.HasSuffix(empty, ansiResetSequence) {
-		return strings.TrimSuffix(empty, ansiResetSequence), ansiResetSequence
+	const probe = "\ue001"
+	rendered := style.Render(probe)
+	index := strings.Index(rendered, probe)
+	if index < 0 {
+		return "", ""
 	}
-	if strings.HasSuffix(empty, ansiForegroundResetSequence) {
-		return strings.TrimSuffix(empty, ansiForegroundResetSequence), ansiForegroundResetSequence
-	}
-	return "", ""
+	return rendered[:index], rendered[index+len(probe):]
 }

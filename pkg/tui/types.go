@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -274,9 +274,7 @@ type model struct {
 	shortcutCalls map[int]*extensionShortcutCall
 	runCh         chan tea.Msg
 
-	terminalTitleEpoch   time.Time
-	lastTerminalTitle    string
-	terminalTitleWritten bool
+	terminalTitleEpoch time.Time
 
 	detailRegions []detailRegion
 	shortcutsOpen bool

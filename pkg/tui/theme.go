@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
@@ -64,7 +64,7 @@ func resolveTheme(name string) (tuiTheme, error) {
 	registry := discoverThemes()
 	resolvedName := requestedName
 	if requestedName == AutoThemeName {
-		resolvedName = automaticThemeName(lipgloss.HasDarkBackground())
+		resolvedName = automaticThemeName(compat.HasDarkBackground)
 	}
 	if theme, ok := registry.themes[resolvedName]; ok {
 		return cloneTheme(theme), nil
@@ -222,24 +222,23 @@ func applyThemeToTextarea(input *textarea.Model) tea.Cmd {
 		return nil
 	}
 	focused := input.Focused()
-	input.FocusedStyle.Base = composerTextStyle
-	input.FocusedStyle.CursorLine = composerTextStyle
-	input.FocusedStyle.Placeholder = inputPlaceholderStyle
-	input.FocusedStyle.Text = composerTextStyle
-	input.FocusedStyle.EndOfBuffer = composerTextStyle
-	input.FocusedStyle.Prompt = composerTextStyle
-	input.BlurredStyle.Base = composerTextStyle
-	input.BlurredStyle.CursorLine = composerTextStyle
-	input.BlurredStyle.Placeholder = inputPlaceholderStyle
-	input.BlurredStyle.Text = composerTextStyle
-	input.BlurredStyle.EndOfBuffer = composerTextStyle
-	input.BlurredStyle.Prompt = composerTextStyle
-	input.Cursor.Style = composerCursorStyle
-	input.Cursor.TextStyle = composerTextStyle
+	styles := input.Styles()
+	styles.Focused.Base = composerTextStyle
+	styles.Focused.CursorLine = composerTextStyle
+	styles.Focused.Placeholder = inputPlaceholderStyle
+	styles.Focused.Text = composerTextStyle
+	styles.Focused.EndOfBuffer = composerTextStyle
+	styles.Focused.Prompt = composerTextStyle
+	styles.Blurred.Base = composerTextStyle
+	styles.Blurred.CursorLine = composerTextStyle
+	styles.Blurred.Placeholder = inputPlaceholderStyle
+	styles.Blurred.Text = composerTextStyle
+	styles.Blurred.EndOfBuffer = composerTextStyle
+	styles.Blurred.Prompt = composerTextStyle
+	styles.Cursor.Color = composerCursorStyle.GetForeground()
+	input.SetStyles(styles)
 
-	// Bubbles keeps a private pointer to the active style. Rebind it after
-	// replacing the exported styles so copied textarea models render the new
-	// theme immediately.
+	// Preserve focus and restart the virtual cursor's blink command when needed.
 	if focused {
 		return input.Focus()
 	}

@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,10 +60,11 @@ func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
 	}}
 
 	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
 
-	assert.Contains(t, content, "Had 1 Thought ▸\n\n")
-	assert.Contains(t, content, "Ran 1 command ▸\n\n")
-	assert.Contains(t, content, "\n\nfinal answer")
+	assert.Contains(t, plain, "Had 1 Thought ▸\n\n")
+	assert.Contains(t, plain, "Ran 1 command ▸\n\n")
+	assert.Contains(t, plain, "\n\nfinal answer")
 }
 
 func TestRenderTranscriptUsesHeavyUserMessageBar(t *testing.T) {
@@ -423,8 +423,6 @@ func TestBashToolBodyUsesStartTimeBeforeFirstUpdate(t *testing.T) {
 }
 
 func TestBashCommandLineUsesThemeAccentAndMutedElapsed(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
@@ -445,7 +443,6 @@ func TestBashCommandLineUsesThemeAccentAndMutedElapsed(t *testing.T) {
 }
 
 func TestBashCommandAccentContinuesAcrossWrappedLines(t *testing.T) {
-	withANSI256ColorProfile(t)
 	m := newModel(context.Background(), Config{Theme: LightThemeName})
 	t.Cleanup(m.cancel)
 
@@ -731,8 +728,6 @@ func TestApplyPatchGroupsRenderMoveLabelsCountsAndLineGutter(t *testing.T) {
 }
 
 func TestApplyPatchHeaderStylesCountsWithThemeDiffColors(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
@@ -1004,8 +999,6 @@ func TestRenderTranscriptRendersTokyoNightCodeBlock(t *testing.T) {
 }
 
 func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 	m.width = 160
@@ -1030,7 +1023,6 @@ func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 }
 
 func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
-	withANSI256ColorProfile(t)
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 	m.width = 80
@@ -1054,8 +1046,6 @@ func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
 }
 
 func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	rendered := renderPersistentStyle(assistantStyle, "before \x1b[38;5;151mcode\x1b[39m after")
 	start, _ := styleSequences(assistantStyle)
 
@@ -1063,21 +1053,10 @@ func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {
 }
 
 func TestRenderPersistentStyleRestylesEachRenderedLine(t *testing.T) {
-	withANSI256ColorProfile(t)
-
 	rendered := renderPersistentStyle(assistantStyle, "first\nsecond \x1b[38;5;151mcode\x1b[0m after")
 	start, _ := styleSequences(assistantStyle)
 
 	assert.Contains(t, rendered, "\n"+start+"second \x1b[38;5;151mcode\x1b[0m"+start+" after")
-}
-
-func withANSI256ColorProfile(t *testing.T) {
-	t.Helper()
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(previous)
-	})
 }
 
 func TestRenderTranscriptSeparatesThinkingMarkdownBlocks(t *testing.T) {

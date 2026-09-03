@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -309,7 +309,7 @@ func (m *model) closeConversationPicker() tea.Cmd {
 	return tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 }
 
-func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
+func (m *model) updateConversationPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.conversationPicker == nil {
 		return nil
 	}
@@ -343,8 +343,8 @@ func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
 		m.clampConversationPickerSelection()
 		return nil
 	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-		m.conversationPicker.query += string(msg.Runes)
+	if msg.Text != "" {
+		m.conversationPicker.query += msg.Text
 		m.conversationPicker.selected = 0
 		m.conversationPicker.selectedKey = ""
 		m.clampConversationPickerSelection()

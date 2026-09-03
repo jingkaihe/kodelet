@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -23,7 +23,7 @@ func TestRunningComposerOffersSlashCommands(t *testing.T) {
 
 	assert.True(t, m.slashCommandSuggestionsOpen())
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(keyPress(tea.KeyTab))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -40,7 +40,7 @@ func TestRunningComposerQueuesSlashCommandAsFollowUp(t *testing.T) {
 	m.activeRunID = 1
 	m.textarea.SetValue("/goal finish the review")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -120,7 +120,7 @@ func TestRunningComposerQueuesSteering(t *testing.T) {
 	}
 	m.textarea.SetValue("please focus on tests")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -154,7 +154,7 @@ func TestRunningComposerGeneratesConversationBeforeQueueingSteering(t *testing.T
 	m.activeRunID = 1
 	m.textarea.SetValue("new chat steering")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -178,7 +178,7 @@ func TestRunningComposerRejectsOverlongSteering(t *testing.T) {
 	m.activeRunID = 1
 	m.textarea.SetValue(strings.Repeat("x", steer.MaxMessageLength+1))
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)

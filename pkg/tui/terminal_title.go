@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 const maxTerminalTitleChars = 240
@@ -22,30 +20,6 @@ const (
 	terminalTitleActionRequiredPrefix    = "[ ! ] Action Required"
 	terminalTitleActionRequiredPrefixAlt = "[ ? ] Action Required"
 )
-
-// refreshTerminalTitle rewrites the title, or returns nil when it is current.
-func (m *model) refreshTerminalTitle(now time.Time) tea.Cmd {
-	title := sanitizeTerminalTitle(m.terminalTitleText(now))
-	if title == "" {
-		return m.clearTerminalTitle()
-	}
-	if m.terminalTitleWritten && title == m.lastTerminalTitle {
-		return nil
-	}
-	m.lastTerminalTitle = title
-	m.terminalTitleWritten = true
-	return tea.SetWindowTitle(title)
-}
-
-// clearTerminalTitle clears the title kodelet last wrote, if any.
-func (m *model) clearTerminalTitle() tea.Cmd {
-	if !m.terminalTitleWritten {
-		return nil
-	}
-	m.lastTerminalTitle = ""
-	m.terminalTitleWritten = false
-	return tea.SetWindowTitle("")
-}
 
 func (m *model) terminalTitleText(now time.Time) string {
 	project := terminalTitleProjectName(m.cwd)
