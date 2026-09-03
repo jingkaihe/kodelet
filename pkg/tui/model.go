@@ -221,6 +221,9 @@ func (m model) Init() tea.Cmd {
 	if !m.initialHistoryPending && !m.remote {
 		cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, m.activeConversationKey, m.slashCommandCWD()))
 	}
+	if m.themeSelection == AutoThemeName {
+		cmds = append(cmds, tea.RequestBackgroundColor)
+	}
 	return tea.Batch(cmds...)
 }
 

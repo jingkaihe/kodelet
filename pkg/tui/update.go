@@ -64,6 +64,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)
 
+	case tea.BackgroundColorMsg:
+		if m.themeSelection != AutoThemeName {
+			break
+		}
+		theme, err := resolveTheme(automaticThemeName(msg.IsDark()))
+		if err != nil {
+			break
+		}
+		return m, m.applyResolvedTheme(theme)
+
 	case extensionUIFlushMsg:
 		if m.extensionUI == nil {
 			break

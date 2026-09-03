@@ -11,7 +11,6 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2/compat"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
@@ -64,7 +63,7 @@ func resolveTheme(name string) (tuiTheme, error) {
 	registry := discoverThemes()
 	resolvedName := requestedName
 	if requestedName == AutoThemeName {
-		resolvedName = automaticThemeName(compat.HasDarkBackground)
+		resolvedName = DefaultThemeName
 	}
 	if theme, ok := registry.themes[resolvedName]; ok {
 		return cloneTheme(theme), nil
@@ -199,22 +198,33 @@ func themePickerOptions(current string) (labels []string, values []string, selec
 
 func (m *model) setThemeSelection(name string) (tea.Cmd, error) {
 	selection := normalizedThemeSelection(name)
+	if selection == AutoThemeName {
+		m.themeSelection = selection
+		m.status = "ready"
+		return tea.RequestBackgroundColor, nil
+	}
+
 	theme, err := resolveTheme(selection)
 	if err != nil {
 		return nil, err
 	}
 
+	m.themeSelection = selection
+	cmd := m.applyResolvedTheme(theme)
+	m.status = "ready"
+	return cmd, nil
+}
+
+func (m *model) applyResolvedTheme(theme tuiTheme) tea.Cmd {
 	applyTheme(theme)
 	m.theme = theme
-	m.themeSelection = selection
 	cmd := applyThemeToTextarea(&m.textarea)
 	m.assistantMarkdownRenderer = nil
 	m.assistantMarkdownRendererWidth = 0
 	m.thoughtMarkdownRenderer = nil
 	m.thoughtMarkdownRendererWidth = 0
-	m.status = "ready"
 	m.refreshViewport(false)
-	return cmd, nil
+	return cmd
 }
 
 func applyThemeToTextarea(input *textarea.Model) tea.Cmd {

@@ -306,7 +306,7 @@ func TestWaitForMsgAndInitCommands(t *testing.T) {
 	initMsg := m.Init()()
 	batch, ok := initMsg.(tea.BatchMsg)
 	require.True(t, ok)
-	assert.Len(t, batch, 6)
+	assert.Len(t, batch, 7)
 }
 
 func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
@@ -318,13 +318,28 @@ func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
 	initMsg := m.Init()()
 	batch, ok := initMsg.(tea.BatchMsg)
 	require.True(t, ok)
-	assert.Len(t, batch, 5)
+	assert.Len(t, batch, 6)
 
 	updated, cmd := m.Update(initialHistoryMsg{loaded: true, cwd: workspace})
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	assert.False(t, m.initialHistoryPending)
 	assert.True(t, m.extensionLifecyclePending)
+}
+
+func TestInitRequestsBackgroundColorOnlyForAutoTheme(t *testing.T) {
+	workspace := t.TempDir()
+	auto := newModel(context.Background(), Config{CWD: workspace, Theme: AutoThemeName})
+	explicit := newModel(context.Background(), Config{CWD: workspace, Theme: DefaultThemeName})
+	t.Cleanup(auto.cancel)
+	t.Cleanup(explicit.cancel)
+
+	autoBatch, ok := auto.Init()().(tea.BatchMsg)
+	require.True(t, ok)
+	explicitBatch, ok := explicit.Init()().(tea.BatchMsg)
+	require.True(t, ok)
+
+	assert.Len(t, autoBatch, len(explicitBatch)+1)
 }
 
 func TestSubmitWaitsForPendingStartupLifecycle(t *testing.T) {
