@@ -81,9 +81,9 @@ describe('ToolRenderer', () => {
 
     render(<ToolRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('failed')).toBeInTheDocument();
-    expect(screen.getAllByText('kodelet web ui search')).toHaveLength(2);
+    expect(screen.queryByText('kodelet web ui search')).not.toBeInTheDocument();
     expect(screen.getByText('https://example.com/source')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI web search failed')).toBeInTheDocument();
     expect(screen.queryByText('Error (openai_web_search):')).not.toBeInTheDocument();
   });
 

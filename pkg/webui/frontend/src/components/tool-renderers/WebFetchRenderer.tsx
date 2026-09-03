@@ -3,7 +3,6 @@ import { ToolResult, WebFetchMetadata } from '../../types';
 import {
   formatReferenceSize,
   ReferenceCodeBlock,
-  ReferenceToolKVGrid,
   truncateLines,
 } from './reference';
 
@@ -38,16 +37,24 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       <div className="quiet-tool-line">
         <span className="quiet-tool-emphasis">{statusText}</span>
         {sizeText ? <span className="quiet-tool-muted">{sizeText}</span> : null}
+        {meta.contentType ? <span className="quiet-tool-muted">{meta.contentType}</span> : null}
       </div>
-      <div className="quiet-tool-path">{meta.url}</div>
 
-      <ReferenceToolKVGrid
-        items={[
-          { label: 'Content type', value: meta.contentType },
-          { label: 'Saved path', value: savedPath, monospace: true },
-          { label: 'Prompt', value: meta.prompt },
-        ]}
-      />
+      {savedPath ? (
+        <div className="quiet-tool-line">
+          <span className="quiet-tool-emphasis">Saved path</span>
+          <span className="quiet-tool-muted mono" title={savedPath}>
+            {savedPath}
+          </span>
+        </div>
+      ) : null}
+
+      {meta.prompt ? (
+        <div className="quiet-tool-line">
+          <span className="quiet-tool-emphasis">Prompt</span>
+          <span>{meta.prompt}</span>
+        </div>
+      ) : null}
 
       {meta.content ? (
         <div className="web-fetch-code-preview">

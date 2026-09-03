@@ -583,6 +583,7 @@ describe('ChatTranscript', () => {
     )
 
     expect(screen.getByText('Web search: kodelet web ui')).toBeInTheDocument()
+    expect(screen.getAllByText('kodelet web ui')).toHaveLength(1)
     expect(screen.queryByText('Tools (1)')).not.toBeInTheDocument()
     expect(container.querySelectorAll('details')).toHaveLength(1)
   })
@@ -620,6 +621,7 @@ describe('ChatTranscript', () => {
     )
 
     expect(screen.getByText('Open page: https://example.com/story')).toBeInTheDocument()
+    expect(screen.getAllByText('https://example.com/story')).toHaveLength(1)
   })
 
   it('makes missing OpenAI open-page URLs explicit', () => {

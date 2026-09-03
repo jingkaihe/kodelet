@@ -34,6 +34,38 @@ describe('ChatToolActivity', () => {
     expect(screen.queryByText(longPrompt)).not.toBeInTheDocument();
   });
 
+  it('renders completed web fetch details without repeating the header URL or metadata cards', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'web-fetch-1',
+            name: 'web_fetch',
+            input: '{"url":"https://example.com/news","prompt":"Extract headlines"}',
+            result: {
+              toolName: 'web_fetch',
+              success: true,
+              metadata: {
+                url: 'https://example.com/news',
+                processedType: 'saved',
+                contentType: 'text/markdown',
+                savedPath: '/tmp/news.md',
+                prompt: 'Extract headlines',
+                content: '# Headlines',
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getAllByText('https://example.com/news')).toHaveLength(1);
+    expect(screen.getByText('saved page')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/news.md')).toBeInTheDocument();
+    expect(screen.getByText('Extract headlines')).toBeInTheDocument();
+    expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument();
+  });
+
   it('renders a successful bash result with duration status and tool details', () => {
     const { container } = render(
       <ChatToolActivity

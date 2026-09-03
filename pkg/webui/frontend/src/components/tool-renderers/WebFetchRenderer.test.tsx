@@ -14,6 +14,8 @@ describe('WebFetchRenderer', () => {
         processedType: 'ai_extracted',
         contentType: 'text/html',
         size: 3072,
+        savedPath: '/tmp/example-news.md',
+        prompt: 'Extract the top stories',
         content: '## Top stories\n\n<img src=x onerror=alert(1)>\n\n[Story one](javascript:alert(1))',
       },
     };
@@ -22,6 +24,14 @@ describe('WebFetchRenderer', () => {
 
     expect(screen.getByText('extracted summary')).toBeInTheDocument();
     expect(screen.queryByText('ai extracted')).not.toBeInTheDocument();
+    expect(screen.getByText('3.0 KB')).toBeInTheDocument();
+    expect(screen.getByText('text/html')).toBeInTheDocument();
+    expect(screen.getByText('Saved path')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/example-news.md')).toBeInTheDocument();
+    expect(screen.getByText('Prompt')).toBeInTheDocument();
+    expect(screen.getByText('Extract the top stories')).toBeInTheDocument();
+    expect(screen.queryByText('https://example.com/news')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Top stories' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Story one' })).not.toBeInTheDocument();
     expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).not.toBeInTheDocument();

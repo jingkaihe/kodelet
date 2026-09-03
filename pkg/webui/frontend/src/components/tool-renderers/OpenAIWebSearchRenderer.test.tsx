@@ -4,7 +4,7 @@ import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer'
 import { ToolResult } from '../../types'
 
 describe('OpenAIWebSearchRenderer', () => {
-  it('renders queries and discovered links', () => {
+  it('renders only additional queries and deduplicated links without cards', () => {
     const toolResult: ToolResult = {
       toolName: 'openai_web_search',
       success: true,
@@ -12,22 +12,32 @@ describe('OpenAIWebSearchRenderer', () => {
       metadata: {
         status: 'completed',
         action: 'search',
-        queries: ['kodelet web ui search tool'],
-        sources: ['https://example.com/source'],
-        results: ['https://example.com/result'],
+        queries: ['kodelet web ui search tool', 'kodelet search renderer'],
+        sources: ['https://example.com/shared', 'https://example.com/source'],
+        results: ['https://example.com/shared', 'https://example.com/result'],
       },
     }
 
-    render(<OpenAIWebSearchRenderer toolResult={toolResult} />)
+    const { container } = render(
+      <OpenAIWebSearchRenderer
+        toolInput='{"type":"search","query":"kodelet web ui search tool"}'
+        toolResult={toolResult}
+      />
+    )
 
-    expect(screen.getByText('completed')).toBeInTheDocument()
-    expect(screen.getByText('Search')).toBeInTheDocument()
-    expect(screen.getAllByText('kodelet web ui search tool')).toHaveLength(2)
+    expect(screen.queryByText('kodelet web ui search tool')).not.toBeInTheDocument()
+    expect(screen.getByText('Additional queries')).toBeInTheDocument()
+    expect(screen.getByText('kodelet search renderer')).toBeInTheDocument()
+    expect(screen.getByText('Links')).toBeInTheDocument()
+    expect(screen.getByText('https://example.com/shared')).toBeInTheDocument()
     expect(screen.getByText('https://example.com/source')).toBeInTheDocument()
     expect(screen.getByText('https://example.com/result')).toBeInTheDocument()
+    expect(screen.getAllByRole('link')).toHaveLength(3)
+    expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument()
+    expect(container.querySelector('.tool-code-list')).not.toBeInTheDocument()
   })
 
-  it('renders URL and pattern metadata for find-in-page actions', () => {
+  it('does not repeat find-in-page targets already shown in the activity title', () => {
     const toolResult: ToolResult = {
       toolName: 'openai_web_search',
       success: true,
@@ -42,13 +52,13 @@ describe('OpenAIWebSearchRenderer', () => {
 
     render(<OpenAIWebSearchRenderer toolResult={toolResult} />)
 
-    expect(screen.getByText('allowed_tools in https://example.com/docs')).toBeInTheDocument()
-    expect(screen.getByText('https://example.com/docs')).toBeInTheDocument()
-    expect(screen.getByText('allowed_tools')).toBeInTheDocument()
-    expect(screen.getByText('Find in page')).toBeInTheDocument()
+    expect(screen.queryByText('allowed_tools in https://example.com/docs')).not.toBeInTheDocument()
+    expect(screen.queryByText('https://example.com/docs')).not.toBeInTheDocument()
+    expect(screen.queryByText('allowed_tools')).not.toBeInTheDocument()
+    expect(screen.getByText('No additional details')).toBeInTheDocument()
   })
 
-  it('uses tool input as a fallback for open-page details', () => {
+  it('does not repeat open-page URLs recovered from tool input', () => {
     const toolResult: ToolResult = {
       toolName: 'openai_web_search',
       success: true,
@@ -66,8 +76,8 @@ describe('OpenAIWebSearchRenderer', () => {
       />
     )
 
-    expect(screen.getByText('Open page')).toBeInTheDocument()
-    expect(screen.getAllByText('https://example.com/story')).toHaveLength(2)
+    expect(screen.queryByText('https://example.com/story')).not.toBeInTheDocument()
+    expect(screen.getByText('No additional details')).toBeInTheDocument()
   })
 
   it('renders an explicit note when OpenAI omits an open-page URL', () => {
