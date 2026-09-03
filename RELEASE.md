@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.5.45-beta
+
+Added profile discovery from `KODELET_CONFIG_FILE` across the CLI, native TUI, and Web UI, with override scope labeling and correct global, repository, and override precedence in merge and isolated modes.
+
+Improved profile commands to report the effective configuration source, show override-defined profiles, and prevent profile switches from writing to configuration files shadowed by an authoritative override.
+
 ## 0.5.44-beta
 
 Added generic presentation metadata for extension tools, with custom compact summaries and optional text or Markdown details rendered consistently in the native TUI and Web UI through validated TypeScript SDK types.
