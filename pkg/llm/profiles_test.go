@@ -93,11 +93,14 @@ func TestOverrideProfilesFromOverrideOnly(t *testing.T) {
 	activeProfile, source := ActiveProfileSetting()
 	assert.Equal(t, "override-active", activeProfile)
 	assert.Equal(t, ProfileSourceOverride, source)
+	sources := ProfileSources()
+	assert.Equal(t, ProfileSourceOverride, sources["override-only"])
+	assert.Equal(t, ProfileSourceOverride, sources["shared"])
 }
 
 func TestProfileLayersPreserveMergePrecedence(t *testing.T) {
-	writeHomeConfig(t, homeConfigContents)
-	writeRepoConfig(t, "profile: repo-active\nprofiles:\n  repo-only:\n    provider: openai\n  shared:\n    provider: repo\n")
+	writeHomeConfig(t, homeConfigContents+"  layered:\n    provider: openai\n")
+	writeRepoConfig(t, "profile: repo-active\nprofiles:\n  repo-only:\n    provider: openai\n  layered:\n    provider: repo\n  shared:\n    provider: repo\n")
 	t.Setenv(ConfigFileEnv, writeOverrideConfig(t, overrideConfigContents))
 	t.Setenv(ConfigFileModeEnv, ConfigFileModeMerge)
 
@@ -111,6 +114,12 @@ func TestProfileLayersPreserveMergePrecedence(t *testing.T) {
 	profile, source := ActiveProfileSetting()
 	assert.Equal(t, "override-active", profile)
 	assert.Equal(t, ProfileSourceOverride, source)
+	sources := ProfileSources()
+	assert.Equal(t, ProfileSourceGlobal, sources["home-only"])
+	assert.Equal(t, ProfileSourceRepo, sources["repo-only"])
+	assert.Equal(t, ProfileSourceRepoOverridesGlobal, sources["layered"])
+	assert.Equal(t, ProfileSourceOverride, sources["override-only"])
+	assert.Equal(t, ProfileSourceOverride, sources["shared"])
 }
 
 func TestIsolatedModeIgnoresHomeAndRepoConfig(t *testing.T) {
@@ -129,6 +138,10 @@ func TestIsolatedModeIgnoresHomeAndRepoConfig(t *testing.T) {
 	profile, source := ActiveProfileSetting()
 	assert.Equal(t, "override-active", profile)
 	assert.Equal(t, ProfileSourceOverride, source)
+	assert.Equal(t, map[string]ProfileSource{
+		"override-only": ProfileSourceOverride,
+		"shared":        ProfileSourceOverride,
+	}, ProfileSources())
 }
 
 func TestProfileLayersMissingConfigsReturnEmpty(t *testing.T) {
@@ -146,6 +159,7 @@ func TestProfileLayersMissingConfigsReturnEmpty(t *testing.T) {
 	profile, source := ActiveProfileSetting()
 	assert.Empty(t, profile)
 	assert.Empty(t, source)
+	assert.Empty(t, ProfileSources())
 }
 
 func TestRepoProfilesReadRepositoryConfig(t *testing.T) {

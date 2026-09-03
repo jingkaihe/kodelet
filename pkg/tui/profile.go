@@ -8,10 +8,8 @@ import (
 )
 
 func loadProfileOptions() []string {
-	globalProfiles := llm.GlobalProfiles()
-	repoProfiles := llm.RepoProfiles()
-	overrideProfiles := llm.OverrideProfiles()
-	options := make([]string, 0, len(globalProfiles)+len(repoProfiles)+len(overrideProfiles)+1)
+	profileSources := llm.ProfileSources()
+	options := make([]string, 0, len(profileSources)+1)
 	seen := map[string]bool{}
 
 	appendOption := func(profile string) {
@@ -25,14 +23,8 @@ func loadProfileOptions() []string {
 	}
 
 	appendOption("default")
-	names := make([]string, 0, len(globalProfiles)+len(repoProfiles)+len(overrideProfiles))
-	for name := range globalProfiles {
-		names = append(names, name)
-	}
-	for name := range repoProfiles {
-		names = append(names, name)
-	}
-	for name := range overrideProfiles {
+	names := make([]string, 0, len(profileSources))
+	for name := range profileSources {
 		names = append(names, name)
 	}
 	sort.Strings(names)

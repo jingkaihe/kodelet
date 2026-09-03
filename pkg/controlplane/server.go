@@ -1248,10 +1248,6 @@ const (
 	webUIGlobalProfileScope        = "global"
 	webUIOverrideProfileScope      = "override"
 	webUIRepoOverridesProfileScope = "repo (overrides global)"
-	webUIProfileSourceRepo         = "repo"
-	webUIProfileSourceGlobal       = "global"
-	webUIProfileSourceOverride     = "override"
-	webUIProfileSourceBoth         = "both"
 )
 
 // WebMessage represents a message with structured tool calls for the web UI
@@ -1436,33 +1432,8 @@ func resolveConversationReasoningEffort(response *conversations.GetConversationR
 	return config.ReasoningEffort
 }
 
-func mergeProfiles(globalProfiles, repoProfiles, overrideProfiles map[string]llmtypes.ProfileConfig) map[string]string {
-	merged := make(map[string]string)
-
-	for name := range globalProfiles {
-		merged[name] = webUIProfileSourceGlobal
-	}
-
-	for name := range repoProfiles {
-		if _, exists := merged[name]; exists {
-			merged[name] = webUIProfileSourceBoth
-		} else {
-			merged[name] = webUIProfileSourceRepo
-		}
-	}
-
-	for name := range overrideProfiles {
-		merged[name] = webUIProfileSourceOverride
-	}
-
-	return merged
-}
-
 func getWebUIProfileOptions() []ChatProfileOption {
-	globalProfiles := llm.GlobalProfiles()
-	repoProfiles := llm.RepoProfiles()
-	overrideProfiles := llm.OverrideProfiles()
-	mergedProfiles := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
+	profileSources := llm.ProfileSources()
 	activeProfile := strings.TrimSpace(viper.GetString("profile"))
 	if strings.EqualFold(activeProfile, "default") {
 		activeProfile = ""
@@ -1474,21 +1445,21 @@ func getWebUIProfileOptions() []ChatProfileOption {
 		Active: activeProfile == "",
 	}}
 
-	names := make([]string, 0, len(mergedProfiles))
-	for name := range mergedProfiles {
+	names := make([]string, 0, len(profileSources))
+	for name := range profileSources {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	for _, name := range names {
-		source := mergedProfiles[name]
+		source := profileSources[name]
 		scope := webUIRepoProfileScope
 		switch source {
-		case webUIProfileSourceBoth:
+		case llm.ProfileSourceRepoOverridesGlobal:
 			scope = webUIRepoOverridesProfileScope
-		case webUIProfileSourceGlobal:
+		case llm.ProfileSourceGlobal:
 			scope = webUIGlobalProfileScope
-		case webUIProfileSourceOverride:
+		case llm.ProfileSourceOverride:
 			scope = webUIOverrideProfileScope
 		}
 

@@ -8,6 +8,8 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -57,36 +59,10 @@ profiles:
 	assert.Contains(t, globalProfiles, "shared")
 	assert.NotContains(t, globalProfiles, "default")
 
-	merged := mergeProfiles(globalProfiles, repoProfiles, nil)
-	assert.Equal(t, ScopeSourceGlobal, merged["global-only"])
-	assert.Equal(t, ScopeSourceRepo, merged["repo-only"])
-	assert.Equal(t, ScopeSourceBoth, merged["shared"])
-	assert.Equal(t, merged, getMergedProfiles())
-}
-
-func TestMergeProfilesExplicitOverrideWins(t *testing.T) {
-	globalProfiles := map[string]llmtypes.ProfileConfig{
-		"global-only": {"provider": "anthropic"},
-		"shared":      {"provider": "anthropic"},
-		"both":        {"provider": "anthropic"},
-	}
-	repoProfiles := map[string]llmtypes.ProfileConfig{
-		"repo-only": {"provider": "openai"},
-		"shared":    {"provider": "openai"},
-		"both":      {"provider": "openai"},
-	}
-	overrideProfiles := map[string]llmtypes.ProfileConfig{
-		"override-only": {"provider": "openai"},
-		"shared":        {"provider": "openai"},
-	}
-
-	merged := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
-
-	assert.Equal(t, ScopeSourceGlobal, merged["global-only"])
-	assert.Equal(t, ScopeSourceRepo, merged["repo-only"])
-	assert.Equal(t, ScopeSourceBoth, merged["both"])
-	assert.Equal(t, ScopeSourceOverride, merged["override-only"])
-	assert.Equal(t, ScopeSourceOverride, merged["shared"])
+	sources := llm.ProfileSources()
+	assert.Equal(t, llm.ProfileSourceGlobal, sources["global-only"])
+	assert.Equal(t, llm.ProfileSourceRepo, sources["repo-only"])
+	assert.Equal(t, llm.ProfileSourceRepoOverridesGlobal, sources["shared"])
 }
 
 func TestProfileMissingConfigReturnsEmptyValues(t *testing.T) {
@@ -112,6 +88,52 @@ func TestProfileHelpers(t *testing.T) {
 
 	assert.Equal(t, "Switched to default configuration in repo config", getProfileSwitchMessage("default", false))
 	assert.Equal(t, "Switched to profile 'fast' in global config", getProfileSwitchMessage("fast", true))
+}
+
+func TestEffectiveProfileSetting(t *testing.T) {
+	originalProfile := viper.GetString("profile")
+	t.Cleanup(func() { viper.Set("profile", originalProfile) })
+
+	t.Run("command-line flag takes precedence", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "current"}
+		cmd.Flags().String("profile", "", "")
+		require.NoError(t, cmd.Flags().Set("profile", "flag-profile"))
+		t.Setenv(profileEnv, "environment-profile")
+		viper.Set("profile", "flag-profile")
+
+		profile, source := effectiveProfileSetting(cmd)
+
+		assert.Equal(t, "flag-profile", profile)
+		assert.Equal(t, "command-line flag", source)
+	})
+
+	t.Run("environment takes precedence over files", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		withTempHomeAndCWD(t, home, repo)
+		require.NoError(t, os.WriteFile(filepath.Join(repo, llm.RepoConfigFile), []byte("profile: repo-profile\n"), 0o644))
+		t.Setenv(profileEnv, "environment-profile")
+		viper.Set("profile", "environment-profile")
+
+		profile, source := effectiveProfileSetting(&cobra.Command{})
+
+		assert.Equal(t, "environment-profile", profile)
+		assert.Equal(t, "environment", source)
+	})
+
+	t.Run("file source is retained without runtime override", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		withTempHomeAndCWD(t, home, repo)
+		require.NoError(t, os.WriteFile(filepath.Join(repo, llm.RepoConfigFile), []byte("profile: repo-profile\n"), 0o644))
+		t.Setenv(profileEnv, "")
+		viper.Set("profile", "repo-profile")
+
+		profile, source := effectiveProfileSetting(&cobra.Command{})
+
+		assert.Equal(t, "repo-profile", profile)
+		assert.Equal(t, "repo config", source)
+	})
 }
 
 func TestEnsureProfileSelectionWritable(t *testing.T) {

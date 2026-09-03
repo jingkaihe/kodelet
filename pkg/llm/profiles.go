@@ -26,9 +26,10 @@ const (
 	// RepoConfigFile is the repository-local configuration file name.
 	RepoConfigFile = "kodelet-config.yaml"
 
-	ProfileSourceGlobal   ProfileSource = "global"
-	ProfileSourceRepo     ProfileSource = "repo"
-	ProfileSourceOverride ProfileSource = "override"
+	ProfileSourceGlobal              ProfileSource = "global"
+	ProfileSourceRepo                ProfileSource = "repo"
+	ProfileSourceRepoOverridesGlobal ProfileSource = "repo-overrides-global"
+	ProfileSourceOverride            ProfileSource = "override"
 )
 
 // UsesIsolatedConfigFile reports whether an explicit override replaces both
@@ -52,12 +53,32 @@ func RepoProfiles() map[string]llmtypes.ProfileConfig {
 	if UsesIsolatedConfigFile() {
 		return nil
 	}
-	return profilesFromConfigFiles(RepoConfigFile)
+	return profilesFromViper(readConfigFile(RepoConfigFile))
 }
 
 // OverrideProfiles returns the profiles declared by KODELET_CONFIG_FILE.
 func OverrideProfiles() map[string]llmtypes.ProfileConfig {
 	return profilesFromViper(readOverrideConfig())
+}
+
+// ProfileSources returns every available profile and the highest-precedence
+// configuration layer that defines it.
+func ProfileSources() map[string]ProfileSource {
+	sources := make(map[string]ProfileSource)
+	for name := range GlobalProfiles() {
+		sources[name] = ProfileSourceGlobal
+	}
+	for name := range RepoProfiles() {
+		if _, exists := sources[name]; exists {
+			sources[name] = ProfileSourceRepoOverridesGlobal
+		} else {
+			sources[name] = ProfileSourceRepo
+		}
+	}
+	for name := range OverrideProfiles() {
+		sources[name] = ProfileSourceOverride
+	}
+	return sources
 }
 
 // ActiveProfileSetting returns the profile selected by the highest-precedence
@@ -104,7 +125,7 @@ func repoProfileSetting() (string, bool) {
 	if UsesIsolatedConfigFile() {
 		return "", false
 	}
-	return profileSettingFromViper(readConfigFiles(RepoConfigFile))
+	return profileSettingFromViper(readConfigFile(RepoConfigFile))
 }
 
 func overrideConfigFile() string {
@@ -146,10 +167,6 @@ func readOverrideConfig() *viper.Viper {
 	return v
 }
 
-func profilesFromConfigFiles(paths ...string) map[string]llmtypes.ProfileConfig {
-	return profilesFromViper(readConfigFiles(paths...))
-}
-
 func profilesFromViper(v *viper.Viper) map[string]llmtypes.ProfileConfig {
 	if v == nil || !v.IsSet("profiles") {
 		return nil
@@ -185,31 +202,15 @@ func profileSettingFromViper(v *viper.Viper) (string, bool) {
 	return "", false
 }
 
-// readConfigFiles layers the supplied config files in order, ignoring the ones
-// that are missing or unreadable. It returns nil when none could be read.
-func readConfigFiles(paths ...string) *viper.Viper {
-	v := viper.New()
-	loaded := false
-	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		v.SetConfigFile(path)
-
-		var err error
-		if loaded {
-			err = v.MergeInConfig()
-		} else {
-			err = v.ReadInConfig()
-		}
-		if err != nil {
-			continue
-		}
-		loaded = true
+func readConfigFile(path string) *viper.Viper {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
 	}
 
-	if !loaded {
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
 		return nil
 	}
 	return v

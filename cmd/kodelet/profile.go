@@ -22,15 +22,12 @@ import (
 )
 
 const (
-	ScopeBuiltIn        = "built-in"
-	ScopeRepo           = "repo"
-	ScopeGlobal         = "global"
-	ScopeOverride       = "override"
-	ScopeRepoOverrides  = "repo (overrides global)"
-	ScopeSourceRepo     = "repo"
-	ScopeSourceGlobal   = "global"
-	ScopeSourceOverride = "override"
-	ScopeSourceBoth     = "both"
+	ScopeBuiltIn       = "built-in"
+	ScopeRepo          = "repo"
+	ScopeGlobal        = "global"
+	ScopeOverride      = "override"
+	ScopeRepoOverrides = "repo (overrides global)"
+	profileEnv         = "KODELET_PROFILE"
 )
 
 var profileCmd = &cobra.Command{
@@ -42,23 +39,13 @@ var profileCmd = &cobra.Command{
 var profileCurrentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Show the current active profile",
-	RunE: func(_ *cobra.Command, _ []string) error {
-		profile, source := llm.ActiveProfileSetting()
-		profile = strings.TrimSpace(profile)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		profile, location := effectiveProfileSetting(cmd)
 		if profile == "" || strings.EqualFold(profile, "default") {
 			presenter.Info("Using default configuration (no profile active)")
 			return nil
 		}
 
-		location := ""
-		switch source {
-		case llm.ProfileSourceGlobal:
-			location = "global config"
-		case llm.ProfileSourceRepo:
-			location = "repo config"
-		case llm.ProfileSourceOverride:
-			location = "override config"
-		}
 		if location == "" {
 			presenter.Success(fmt.Sprintf("Current profile: %s", profile))
 			return nil
@@ -68,14 +55,35 @@ var profileCurrentCmd = &cobra.Command{
 	},
 }
 
+func effectiveProfileSetting(cmd *cobra.Command) (string, string) {
+	profile := strings.TrimSpace(viper.GetString("profile"))
+	if cmd != nil {
+		if flag := cmd.Flags().Lookup("profile"); flag != nil && flag.Changed {
+			return profile, "command-line flag"
+		}
+	}
+	if strings.TrimSpace(os.Getenv(profileEnv)) != "" {
+		return profile, "environment"
+	}
+
+	_, source := llm.ActiveProfileSetting()
+	switch source {
+	case llm.ProfileSourceGlobal:
+		return profile, "global config"
+	case llm.ProfileSourceRepo:
+		return profile, "repo config"
+	case llm.ProfileSourceOverride:
+		return profile, "override config"
+	default:
+		return profile, ""
+	}
+}
+
 var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available configuration profiles",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		globalProfiles := llm.GlobalProfiles()
-		repoProfiles := llm.RepoProfiles()
-		overrideProfiles := llm.OverrideProfiles()
-		mergedProfiles := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
+		profileSources := llm.ProfileSources()
 
 		activeProfile := strings.TrimSpace(viper.GetString("profile"))
 		activeProfileName := activeProfile
@@ -96,8 +104,8 @@ var profileListCmd = &cobra.Command{
 		}
 		fmt.Fprintf(tw, "default\t%s\t%s\n", ScopeBuiltIn, status)
 
-		if len(mergedProfiles) > 0 {
-			for name, source := range mergedProfiles {
+		if len(profileSources) > 0 {
+			for name, source := range profileSources {
 				status := ""
 				if name == activeProfileName {
 					status = "ACTIVE"
@@ -105,11 +113,11 @@ var profileListCmd = &cobra.Command{
 
 				scope := ""
 				switch source {
-				case ScopeSourceBoth:
+				case llm.ProfileSourceRepoOverridesGlobal:
 					scope = ScopeRepoOverrides
-				case ScopeSourceGlobal:
+				case llm.ProfileSourceGlobal:
 					scope = ScopeGlobal
-				case ScopeSourceOverride:
+				case llm.ProfileSourceOverride:
 					scope = ScopeOverride
 				default:
 					scope = ScopeRepo
@@ -189,8 +197,7 @@ Use "default" to use base configuration without any profile.`,
 		}
 
 		if profileName != "default" {
-			mergedProfiles := getMergedProfiles()
-			if _, exists := mergedProfiles[profileName]; !exists {
+			if _, exists := llm.ProfileSources()[profileName]; !exists {
 				return fmt.Errorf("profile '%s' not found", profileName)
 			}
 		}
@@ -212,32 +219,6 @@ func init() {
 
 	profileShowCmd.Flags().StringP("format", "f", "json", "Output format (json, yaml)")
 	profileUseCmd.Flags().BoolP("global", "g", false, "Update global config instead of repo config")
-}
-
-func mergeProfiles(globalProfiles, repoProfiles, overrideProfiles map[string]llmtypes.ProfileConfig) map[string]string {
-	merged := make(map[string]string)
-
-	for name := range globalProfiles {
-		merged[name] = ScopeSourceGlobal
-	}
-
-	for name := range repoProfiles {
-		if _, exists := merged[name]; exists {
-			merged[name] = ScopeSourceBoth
-		} else {
-			merged[name] = ScopeSourceRepo
-		}
-	}
-
-	for name := range overrideProfiles {
-		merged[name] = ScopeSourceOverride
-	}
-
-	return merged
-}
-
-func getMergedProfiles() map[string]string {
-	return mergeProfiles(llm.GlobalProfiles(), llm.RepoProfiles(), llm.OverrideProfiles())
 }
 
 func ensureProfileSelectionWritable(global bool) error {
