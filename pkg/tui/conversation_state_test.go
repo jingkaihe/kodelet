@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -75,7 +75,7 @@ func TestSessionsSlashCommandOpensPickerWhileRunIsActive(t *testing.T) {
 	m.slashCommands = withTUIBuiltInSlashCommands(nil)
 	m.textarea.SetValue("/sessions")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 
 	require.NotNil(t, cmd)
@@ -92,7 +92,7 @@ func TestSessionsShortcutTogglesPickerWhileRunIsActive(t *testing.T) {
 	m.activeRunID = 1
 	m.textarea.SetValue("draft while running")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd := m.Update(keyPressWithMod('l', tea.ModCtrl))
 	m = updated.(model)
 
 	require.NotNil(t, cmd)
@@ -100,7 +100,7 @@ func TestSessionsShortcutTogglesPickerWhileRunIsActive(t *testing.T) {
 	assert.True(t, m.running)
 	assert.Equal(t, "draft while running", m.textarea.Value())
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd = m.Update(keyPressWithMod('l', tea.ModCtrl))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -116,7 +116,7 @@ func TestSessionsShortcutReplacesShortcutsAndHistorySearch(t *testing.T) {
 	m.openHistorySearch()
 	m.shortcutsOpen = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd := m.Update(keyPressWithMod('l', tea.ModCtrl))
 	m = updated.(model)
 
 	require.NotNil(t, cmd)
@@ -391,7 +391,7 @@ func TestConversationPickerConsumesShiftEnter(t *testing.T) {
 	m.textarea.SetValue("draft")
 	m.conversationPicker = &conversationPickerState{}
 
-	updated, cmd := m.Update(stringMsg("?CSI[49 51 59 50 117]?"))
+	updated, cmd := m.Update(keyPressWithMod(tea.KeyEnter, tea.ModShift))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -506,24 +506,24 @@ func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testin
 
 	itemCount := len(m.filteredConversationPickerItems())
 	require.Greater(t, itemCount, 1)
-	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyUp})
+	m.updateConversationPickerKey(keyPress(tea.KeyUp))
 	assert.Equal(t, itemCount-1, m.conversationPicker.selected)
-	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyDown})
+	m.updateConversationPickerKey(keyPress(tea.KeyDown))
 	assert.Zero(t, m.conversationPicker.selected)
 
-	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("café")})
+	m.updateConversationPickerKey(textKeyPress("café"))
 	assert.Equal(t, "café", m.conversationPicker.query)
 	m.conversationPicker.selected = 1
-	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.updateConversationPickerKey(keyPress(tea.KeyBackspace))
 	assert.Equal(t, "caf", m.conversationPicker.query)
 	assert.Zero(t, m.conversationPicker.selected)
-	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m.updateConversationPickerKey(keyPressWithMod('u', tea.ModCtrl))
 	assert.Empty(t, m.conversationPicker.query)
 
 	previousKey := m.activeConversationKey
 	previousCount := len(m.conversations)
 	m.conversationPicker.selected = itemCount + 10
-	cmd := m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := m.updateConversationPickerKey(keyPress(tea.KeyEnter))
 
 	require.NotNil(t, cmd)
 	require.NotNil(t, m.conversationPicker)
@@ -534,13 +534,54 @@ func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testin
 	assert.Equal(t, previousKey, m.activeConversationKey)
 	assert.Len(t, m.conversations, previousCount)
 
-	cmd = m.updateUIPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd = m.updateUIPromptKey(keyPress(tea.KeyEnter))
 
 	require.NotNil(t, cmd)
 	assert.Nil(t, m.conversationPicker)
 	assert.Nil(t, m.activeUIPrompt)
 	assert.NotEqual(t, previousKey, m.activeConversationKey)
 	assert.True(t, strings.HasPrefix(m.activeConversationKey, "new:"))
+}
+
+func TestConversationPickerPasteAlwaysInsertsText(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "enter", content: "enter", want: "prefix-enter"},
+		{name: "escape", content: "esc", want: "prefix-esc"},
+		{name: "up", content: "up", want: "prefix-up"},
+		{name: "down", content: "down", want: "prefix-down"},
+		{name: "backspace", content: "backspace", want: "prefix-backspace"},
+		{name: "clear", content: "ctrl+u", want: "prefix-ctrl+u"},
+		{name: "multiline", content: " first\r\nsecond\tthird ", want: "prefix-first second third"},
+		{name: "terminal controls", content: " \x1b[31mred\x1b[0m\x07\x00 alert ", want: "prefix-red alert"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+			m.conversationPicker = &conversationPickerState{
+				query:       "prefix-",
+				selected:    1,
+				selectedKey: "selected",
+				summaries:   []convtypes.ConversationSummary{{ID: "conversation-one", FirstMessage: "First conversation"}},
+			}
+
+			updated, cmd := m.Update(tea.PasteMsg{Content: tt.content})
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			require.NotNil(t, m.conversationPicker)
+			assert.Equal(t, tt.want, m.conversationPicker.query)
+			assert.Zero(t, m.conversationPicker.selected)
+			assert.Empty(t, m.conversationPicker.selectedKey)
+			assert.Nil(t, m.activeUIPrompt)
+		})
+	}
 }
 
 func TestConversationPickerKeepsIdenticalUntitledRowsStable(t *testing.T) {
@@ -698,7 +739,7 @@ func TestNewConversationCWDNotificationRendersAbovePickerAndDialog(t *testing.T)
 	m.openNewConversationPrompt(missingCWD)
 
 	require.NotNil(t, m.submitUIPrompt())
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 
 	assert.Contains(t, view, "Working directory unavailable")
 	assert.Contains(t, view, "Directory does not exist")
@@ -1303,16 +1344,16 @@ func TestExtensionNotificationStaysWithOriginatingConversation(t *testing.T) {
 	m = updated.(model)
 	require.Len(t, m.uiNotifications, 1)
 	assert.Equal(t, background.key, m.uiNotifications[0].conversationKey)
-	assert.NotContains(t, xansi.Strip(m.View()), "Background update")
+	assert.NotContains(t, xansi.Strip(m.View().Content), "Background update")
 
 	m.addUINotification(uiNotification{title: "Global status", message: "visible everywhere"})
-	assert.Contains(t, xansi.Strip(m.View()), "Global status")
+	assert.Contains(t, xansi.Strip(m.View().Content), "Global status")
 	requireConversationActivation(t, &m, background.key)
-	view := xansi.Strip(m.View())
+	view := xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "Background update")
 	assert.Contains(t, view, "Global status")
 	requireConversationActivation(t, &m, active.key)
-	assert.NotContains(t, xansi.Strip(m.View()), "Background update")
+	assert.NotContains(t, xansi.Strip(m.View().Content), "Background update")
 }
 
 func TestCancelActiveConversationDoesNotCancelBackgroundRun(t *testing.T) {

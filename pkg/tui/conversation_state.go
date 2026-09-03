@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -96,7 +96,7 @@ func (m *model) saveActiveConversationPresentation() {
 		return
 	}
 	m.draft = m.textarea.Value()
-	m.viewportOffset = m.viewport.YOffset
+	m.viewportOffset = m.viewport.YOffset()
 }
 
 func (m *model) activateConversation(key string) (bool, tea.Cmd) {

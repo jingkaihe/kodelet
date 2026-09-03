@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -50,14 +49,10 @@ func Run(ctx context.Context, config Config) error {
 		}()
 	}
 
-	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program := tea.NewProgram(initialModel)
 	finalModel, err := program.Run()
 	initialModel.cancel()
 	final, isModel := finalModel.(model)
-	// Cleared here so signal-driven exits also reset the title.
-	if isModel && final.terminalTitleWritten {
-		fmt.Fprint(os.Stdout, xansi.SetWindowTitle(""))
-	}
 	if err != nil {
 		return err
 	}
@@ -93,7 +88,7 @@ func newModel(ctx context.Context, config Config) model {
 	ta.SetHeight(inputHeight)
 	ta.Focus()
 
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
 
 	sp := spinner.New()
@@ -225,6 +220,9 @@ func (m model) Init() tea.Cmd {
 	}
 	if !m.initialHistoryPending && !m.remote {
 		cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, m.activeConversationKey, m.slashCommandCWD()))
+	}
+	if m.themeSelection == AutoThemeName {
+		cmds = append(cmds, tea.RequestBackgroundColor)
 	}
 	return tea.Batch(cmds...)
 }

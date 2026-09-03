@@ -9,9 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
@@ -64,7 +63,7 @@ func resolveTheme(name string) (tuiTheme, error) {
 	registry := discoverThemes()
 	resolvedName := requestedName
 	if requestedName == AutoThemeName {
-		resolvedName = automaticThemeName(lipgloss.HasDarkBackground())
+		resolvedName = DefaultThemeName
 	}
 	if theme, ok := registry.themes[resolvedName]; ok {
 		return cloneTheme(theme), nil
@@ -199,22 +198,33 @@ func themePickerOptions(current string) (labels []string, values []string, selec
 
 func (m *model) setThemeSelection(name string) (tea.Cmd, error) {
 	selection := normalizedThemeSelection(name)
+	if selection == AutoThemeName {
+		m.themeSelection = selection
+		m.status = "ready"
+		return tea.RequestBackgroundColor, nil
+	}
+
 	theme, err := resolveTheme(selection)
 	if err != nil {
 		return nil, err
 	}
 
+	m.themeSelection = selection
+	cmd := m.applyResolvedTheme(theme)
+	m.status = "ready"
+	return cmd, nil
+}
+
+func (m *model) applyResolvedTheme(theme tuiTheme) tea.Cmd {
 	applyTheme(theme)
 	m.theme = theme
-	m.themeSelection = selection
 	cmd := applyThemeToTextarea(&m.textarea)
 	m.assistantMarkdownRenderer = nil
 	m.assistantMarkdownRendererWidth = 0
 	m.thoughtMarkdownRenderer = nil
 	m.thoughtMarkdownRendererWidth = 0
-	m.status = "ready"
 	m.refreshViewport(false)
-	return cmd, nil
+	return cmd
 }
 
 func applyThemeToTextarea(input *textarea.Model) tea.Cmd {
@@ -222,24 +232,23 @@ func applyThemeToTextarea(input *textarea.Model) tea.Cmd {
 		return nil
 	}
 	focused := input.Focused()
-	input.FocusedStyle.Base = composerTextStyle
-	input.FocusedStyle.CursorLine = composerTextStyle
-	input.FocusedStyle.Placeholder = inputPlaceholderStyle
-	input.FocusedStyle.Text = composerTextStyle
-	input.FocusedStyle.EndOfBuffer = composerTextStyle
-	input.FocusedStyle.Prompt = composerTextStyle
-	input.BlurredStyle.Base = composerTextStyle
-	input.BlurredStyle.CursorLine = composerTextStyle
-	input.BlurredStyle.Placeholder = inputPlaceholderStyle
-	input.BlurredStyle.Text = composerTextStyle
-	input.BlurredStyle.EndOfBuffer = composerTextStyle
-	input.BlurredStyle.Prompt = composerTextStyle
-	input.Cursor.Style = composerCursorStyle
-	input.Cursor.TextStyle = composerTextStyle
+	styles := input.Styles()
+	styles.Focused.Base = composerTextStyle
+	styles.Focused.CursorLine = composerTextStyle
+	styles.Focused.Placeholder = inputPlaceholderStyle
+	styles.Focused.Text = composerTextStyle
+	styles.Focused.EndOfBuffer = composerTextStyle
+	styles.Focused.Prompt = composerTextStyle
+	styles.Blurred.Base = composerTextStyle
+	styles.Blurred.CursorLine = composerTextStyle
+	styles.Blurred.Placeholder = inputPlaceholderStyle
+	styles.Blurred.Text = composerTextStyle
+	styles.Blurred.EndOfBuffer = composerTextStyle
+	styles.Blurred.Prompt = composerTextStyle
+	styles.Cursor.Color = composerCursorStyle.GetForeground()
+	input.SetStyles(styles)
 
-	// Bubbles keeps a private pointer to the active style. Rebind it after
-	// replacing the exported styles so copied textarea models render the new
-	// theme immediately.
+	// Preserve focus and restart the virtual cursor's blink command when needed.
 	if focused {
 		return input.Focus()
 	}

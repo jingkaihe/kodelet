@@ -2,33 +2,54 @@ package tui
 
 import (
 	"context"
+	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveAutoThemeUsesLipglossTerminalDetection(t *testing.T) {
+func TestResolveAutoThemeUsesDarkFallbackUntilTerminalResponse(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	previous := lipgloss.HasDarkBackground()
-	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(previous)
-	})
 
-	lipgloss.SetHasDarkBackground(false)
-	light, err := resolveTheme(AutoThemeName)
+	theme, err := resolveTheme(AutoThemeName)
 	require.NoError(t, err)
-	assert.Equal(t, LightThemeName, light.Name)
+	assert.Equal(t, DefaultThemeName, theme.Name)
+}
 
-	lipgloss.SetHasDarkBackground(true)
-	dark, err := resolveTheme(AutoThemeName)
-	require.NoError(t, err)
-	assert.Equal(t, DefaultThemeName, dark.Name)
+func TestAutoThemeAppliesBubbleTeaBackgroundColorMessages(t *testing.T) {
+	m := newThemeTestModel(t, Config{Theme: AutoThemeName})
+	m.status = "loading"
+
+	updated, _ := m.Update(tea.BackgroundColorMsg{Color: color.White})
+	updatedModel := updated.(model)
+	m = &updatedModel
+	assert.Equal(t, AutoThemeName, m.themeSelection)
+	assert.Equal(t, LightThemeName, m.theme.Name)
+	assert.Equal(t, "loading", m.status)
+
+	updated, _ = m.Update(tea.BackgroundColorMsg{Color: color.Black})
+	updatedModel = updated.(model)
+	m = &updatedModel
+	assert.Equal(t, AutoThemeName, m.themeSelection)
+	assert.Equal(t, DefaultThemeName, m.theme.Name)
+	assert.Equal(t, "loading", m.status)
+}
+
+func TestExplicitThemeIgnoresBackgroundColorMessages(t *testing.T) {
+	m := newThemeTestModel(t, Config{Theme: LightThemeName})
+
+	updated, _ := m.Update(tea.BackgroundColorMsg{Color: color.Black})
+	updatedModel := updated.(model)
+	m = &updatedModel
+
+	assert.Equal(t, LightThemeName, m.themeSelection)
+	assert.Equal(t, LightThemeName, m.theme.Name)
 }
 
 func TestThemePickerOptionsIncludeThemesAndMarkCurrent(t *testing.T) {
@@ -66,7 +87,6 @@ func TestThemeSlashCommandOpensPickerWithoutStartingConversation(t *testing.T) {
 }
 
 func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
-	withANSI256ColorProfile(t)
 	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	require.NotEmpty(t, m.renderMarkdown("`code`", 40, markdownAssistant))
 	require.NotNil(t, m.assistantMarkdownRenderer)
@@ -90,6 +110,22 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 	currentComposerStyle, _ := styleSequences(composerTextStyle)
 	assert.Contains(t, composer, currentComposerStyle+"draft")
 	assert.NotContains(t, composer, previousComposerStyle+"draft")
+}
+
+func TestSelectingAutoThemeRequestsBackgroundColor(t *testing.T) {
+	m := newThemeTestModel(t, Config{Theme: LightThemeName})
+
+	cmd, err := m.setThemeSelection(AutoThemeName)
+
+	require.NoError(t, err)
+	require.NotNil(t, cmd)
+	assert.Equal(t, AutoThemeName, m.themeSelection)
+	assert.Equal(t, LightThemeName, m.theme.Name)
+
+	updated, _ := m.Update(tea.BackgroundColorMsg{Color: color.Black})
+	updatedModel := updated.(model)
+	m = &updatedModel
+	assert.Equal(t, DefaultThemeName, m.theme.Name)
 }
 
 func TestThemeSlashCommandAcceptsDirectThemeName(t *testing.T) {

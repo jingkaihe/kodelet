@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -270,7 +270,7 @@ func TestCtrlCAfterCancelQuitsAfterRunCleanup(t *testing.T) {
 	m.running = true
 	m.runCancelling = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := m.Update(keyPressWithMod('c', tea.ModCtrl))
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -306,7 +306,7 @@ func TestWaitForMsgAndInitCommands(t *testing.T) {
 	initMsg := m.Init()()
 	batch, ok := initMsg.(tea.BatchMsg)
 	require.True(t, ok)
-	assert.Len(t, batch, 6)
+	assert.Len(t, batch, 7)
 }
 
 func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
@@ -318,13 +318,28 @@ func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
 	initMsg := m.Init()()
 	batch, ok := initMsg.(tea.BatchMsg)
 	require.True(t, ok)
-	assert.Len(t, batch, 5)
+	assert.Len(t, batch, 6)
 
 	updated, cmd := m.Update(initialHistoryMsg{loaded: true, cwd: workspace})
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	assert.False(t, m.initialHistoryPending)
 	assert.True(t, m.extensionLifecyclePending)
+}
+
+func TestInitRequestsBackgroundColorOnlyForAutoTheme(t *testing.T) {
+	workspace := t.TempDir()
+	auto := newModel(context.Background(), Config{CWD: workspace, Theme: AutoThemeName})
+	explicit := newModel(context.Background(), Config{CWD: workspace, Theme: DefaultThemeName})
+	t.Cleanup(auto.cancel)
+	t.Cleanup(explicit.cancel)
+
+	autoBatch, ok := auto.Init()().(tea.BatchMsg)
+	require.True(t, ok)
+	explicitBatch, ok := explicit.Init()().(tea.BatchMsg)
+	require.True(t, ok)
+
+	assert.Len(t, autoBatch, len(explicitBatch)+1)
 }
 
 func TestSubmitWaitsForPendingStartupLifecycle(t *testing.T) {
@@ -441,11 +456,9 @@ func TestTextareaNewlineKeysInsertNewline(t *testing.T) {
 		name string
 		msg  tea.Msg
 	}{
-		{name: "named shift enter", msg: stringMsg("shift+enter")},
-		{name: "alt enter", msg: tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
-		{name: "ctrl j", msg: tea.KeyMsg{Type: tea.KeyCtrlJ}},
-		{name: "kitty csi u shift enter", msg: stringMsg("?CSI[49 51 59 50 117]?")},
-		{name: "xterm modify other keys shift enter", msg: stringMsg("?CSI[50 55 59 50 59 49 51 126]?")},
+		{name: "shift enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift)},
+		{name: "alt enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModAlt)},
+		{name: "ctrl j", msg: keyPressWithMod('j', tea.ModCtrl)},
 	}
 
 	for _, tt := range tests {
@@ -457,9 +470,63 @@ func TestTextareaNewlineKeysInsertNewline(t *testing.T) {
 			updated, cmd := m.Update(tt.msg)
 			m = updated.(model)
 
-			assert.Nil(t, cmd)
+			require.NotNil(t, cmd)
 			assert.Equal(t, "first line\n", m.textarea.Value())
 			assert.Empty(t, m.entries)
+		})
+	}
+}
+
+func TestTextareaNewlineKeysReplaceSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "shift enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift)},
+		{name: "alt enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModAlt)},
+		{name: "ctrl j", msg: keyPressWithMod('j', tea.ModCtrl)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			m.textarea.SetValue("replace me")
+			m.textarea.SelectAll()
+			require.True(t, m.textarea.HasSelection())
+
+			updated, cmd := m.Update(tt.msg)
+			m = updated.(model)
+
+			require.NotNil(t, cmd)
+			assert.Equal(t, "\n", m.textarea.Value())
+			assert.False(t, m.textarea.HasSelection())
+		})
+	}
+}
+
+func TestTextareaNewlineKeysRespectMaxHeight(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "shift enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift)},
+		{name: "alt enter", msg: keyPressWithMod(tea.KeyEnter, tea.ModAlt)},
+		{name: "ctrl j", msg: keyPressWithMod('j', tea.ModCtrl)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			m.textarea.MaxHeight = 2
+			m.textarea.SetValue("first\nsecond")
+
+			updated, cmd := m.Update(tt.msg)
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			assert.Equal(t, "first\nsecond", m.textarea.Value())
 		})
 	}
 }
@@ -471,13 +538,25 @@ func TestRunningShiftEnterInsertsSteeringNewline(t *testing.T) {
 	m.activeRunID = 1
 	m.textarea.SetValue("first line")
 
-	updated, cmd := m.Update(stringMsg("?CSI[49 51 59 50 117]?"))
+	updated, cmd := m.Update(keyPressWithMod(tea.KeyEnter, tea.ModShift))
 	m = updated.(model)
 
-	assert.Nil(t, cmd)
+	require.NotNil(t, cmd)
 	assert.True(t, m.running)
 	assert.Equal(t, "first line\n", m.textarea.Value())
 	assert.Empty(t, m.queuedSteering)
+}
+
+func TestBracketedPasteInsertsMultilineComposerText(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.textarea.SetValue("before ")
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "first\nsecond"})
+	m = updated.(model)
+
+	assert.Equal(t, "before first\nsecond", m.textarea.Value())
+	assert.Empty(t, m.entries)
 }
 
 func TestCtrlOTogglesDetails(t *testing.T) {
@@ -505,7 +584,7 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	m.rebuildExtensionWidgetOrder()
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, cmd := m.Update(keyPressWithMod('o', tea.ModCtrl))
 	m = updated.(model)
 	content, _ := m.renderTranscript()
 
@@ -515,7 +594,7 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	assert.Contains(t, content, "toggle me")
 	assert.Contains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, cmd = m.Update(keyPressWithMod('o', tea.ModCtrl))
 	m = updated.(model)
 	content, _ = m.renderTranscript()
 
@@ -533,19 +612,19 @@ func TestQuestionMarkOpensShortcutsDialogWhenComposerEmpty(t *testing.T) {
 	m.height = 24
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	updated, cmd := m.Update(textKeyPress("?"))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.True(t, m.shortcutsOpen)
-	assert.Contains(t, xansi.Strip(m.View()), "Shortcuts")
+	assert.Contains(t, xansi.Strip(m.View().Content), "Shortcuts")
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = m.Update(keyPress(tea.KeyEsc))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.shortcutsOpen)
 
 	m.textarea.SetValue("what")
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	updated, _ = m.Update(textKeyPress("?"))
 	m = updated.(model)
 	assert.False(t, m.shortcutsOpen)
 	assert.Equal(t, "what?", m.textarea.Value())
@@ -662,17 +741,17 @@ func TestEditorShortcutUsesCtrlGAndCtrlEPreservesLineEnd(t *testing.T) {
 	t.Setenv("EDITOR", "")
 	t.Setenv("VISUAL", "")
 	m.textarea.SetValue("hello")
-	m.textarea.SetCursor(0)
+	m.textarea.SetCursorColumn(0)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, _ := m.Update(keyPressWithMod('e', tea.ModCtrl))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	updated, _ = m.Update(textKeyPress("!"))
 	m = updated.(model)
 
 	assert.Equal(t, "hello!", m.textarea.Value())
 	assert.Empty(t, m.steerError)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated, cmd := m.Update(keyPressWithMod('g', tea.ModCtrl))
 	m = updated.(model)
 
 	assert.NotNil(t, cmd)
@@ -749,18 +828,18 @@ func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	m.height = 24
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.True(t, m.profilePickerOpen)
 	assert.Equal(t, 0, m.profilePickerIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, cmd = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.Equal(t, 1, m.profilePickerIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.profilePickerOpen)
@@ -873,17 +952,17 @@ func TestSlashCommandKeyboardCompletion(t *testing.T) {
 	m.textarea.SetValue("/")
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, cmd := m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.Equal(t, 0, m.slashCommandIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, cmd = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.Equal(t, 1, m.slashCommandIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.Equal(t, "/review ", m.textarea.Value())
@@ -904,7 +983,7 @@ func TestSlashCommandTabSelectsFirstMatchAndPreservesIndent(t *testing.T) {
 	m.textarea.SetValue("  /rev")
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(keyPress(tea.KeyTab))
 	m = updated.(model)
 
 	require.Nil(t, cmd)
@@ -922,12 +1001,12 @@ func TestSlashCommandEscapeDismissesUntilDraftChanges(t *testing.T) {
 	m.resize()
 	require.True(t, m.slashCommandSuggestionsOpen())
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(keyPress(tea.KeyEsc))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.slashCommandSuggestionsOpen())
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	updated, cmd = m.Update(textKeyPress("g"))
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	assert.Equal(t, "/g", m.textarea.Value())
@@ -1020,7 +1099,7 @@ func TestExtensionShortcutOverridesBuiltInComposerBinding(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "workspace"}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 
 	require.NotNil(t, cmd)
@@ -1035,13 +1114,13 @@ func TestExtensionShortcutDispatchesSupportedTeaKeyMessages(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		key  string
-		msg  tea.KeyMsg
+		msg  tea.KeyPressMsg
 	}{
-		{name: "control letter", key: "ctrl+r", msg: tea.KeyMsg{Type: tea.KeyCtrlR}},
-		{name: "alt letter", key: "alt+p", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}},
-		{name: "alt digit", key: "alt+5", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}, Alt: true}},
-		{name: "control alt letter", key: "ctrl+alt+r", msg: tea.KeyMsg{Type: tea.KeyCtrlR, Alt: true}},
-		{name: "function key", key: "f5", msg: tea.KeyMsg{Type: tea.KeyF5}},
+		{name: "control letter", key: "ctrl+r", msg: keyPressWithMod('r', tea.ModCtrl)},
+		{name: "alt letter", key: "alt+p", msg: textKeyPressWithMod("p", tea.ModAlt)},
+		{name: "alt digit", key: "alt+5", msg: textKeyPressWithMod("5", tea.ModAlt)},
+		{name: "control alt letter", key: "ctrl+alt+r", msg: keyPressWithMod('r', tea.ModCtrl|tea.ModAlt)},
+		{name: "function key", key: "f5", msg: keyPress(tea.KeyF5)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			m := newModel(context.Background(), Config{})
@@ -1084,7 +1163,7 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "shortcut-test"}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	done, ok := cmd().(extensionShortcutDoneMsg)
@@ -1221,7 +1300,7 @@ func TestExtensionShortcutDoesNotOverrideActiveSlashSuggestions(t *testing.T) {
 	m.textarea.SetValue("/")
 	require.True(t, m.slashCommandSuggestionsOpen())
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 
 	assert.NotNil(t, m.historySearch)
@@ -1384,11 +1463,10 @@ func TestClickProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 
 	profileStart, _, ok := m.profileLabelBoundsInBlock()
 	require.True(t, ok)
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := m.Update(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin + profileStart,
-		Y:      m.viewport.Height,
+		Y:      m.viewport.Height(),
 	})
 	m = updated.(model)
 	require.Nil(t, cmd)
@@ -1396,11 +1474,10 @@ func TestClickProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 
 	pickerStart, _, ok := m.profilePickerBoundsInBlock()
 	require.True(t, ok)
-	updated, cmd = m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd = m.Update(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin + pickerStart,
-		Y:      m.viewport.Height + 2,
+		Y:      m.viewport.Height() + 2,
 	})
 	m = updated.(model)
 	require.Nil(t, cmd)
@@ -1420,11 +1497,10 @@ func TestClickReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
 
 	effortStart, _, ok := m.reasoningEffortLabelBoundsInBlock()
 	require.True(t, ok)
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := m.Update(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin + effortStart,
-		Y:      m.viewport.Height,
+		Y:      m.viewport.Height(),
 	})
 	m = updated.(model)
 	require.Nil(t, cmd)
@@ -1432,11 +1508,10 @@ func TestClickReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
 
 	pickerStart, _, ok := m.reasoningPickerBoundsInBlock()
 	require.True(t, ok)
-	updated, cmd = m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd = m.Update(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin + pickerStart,
-		Y:      m.viewport.Height + 2,
+		Y:      m.viewport.Height() + 2,
 	})
 	m = updated.(model)
 	require.Nil(t, cmd)
@@ -1451,7 +1526,7 @@ func TestProfilePickerLockedForExistingConversation(t *testing.T) {
 	m.height = 24
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.profilePickerOpen)
@@ -1459,11 +1534,10 @@ func TestProfilePickerLockedForExistingConversation(t *testing.T) {
 
 	profileStart, _, ok := m.profileLabelBoundsInBlock()
 	require.True(t, ok)
-	updated, cmd = m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd = m.Update(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin + profileStart,
-		Y:      m.viewport.Height,
+		Y:      m.viewport.Height(),
 	})
 	m = updated.(model)
 	require.Nil(t, cmd)
@@ -1503,40 +1577,40 @@ func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {
 		blocks: []assistantBlock{{kind: blockText, text: numberedLines(30)}},
 	}}
 	m.refreshViewport(true)
-	bottomOffset := m.viewport.YOffset
+	bottomOffset := m.viewport.YOffset()
 	require.Greater(t, bottomOffset, 0)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ := m.Update(keyPress(tea.KeyPgUp))
 	m = updated.(model)
-	scrolledOffset := m.viewport.YOffset
+	scrolledOffset := m.viewport.YOffset()
 	require.Less(t, scrolledOffset, bottomOffset)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated, _ = m.Update(textKeyPress("x"))
 	m = updated.(model)
-	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset())
 	assert.Equal(t, "x", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
-	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updated, _ = m.Update(keyPressWithMod('u', tea.ModCtrl))
 	m = updated.(model)
-	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset())
 	assert.Empty(t, m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	updated, _ = m.Update(keyPress(tea.KeyPgDown))
 	m = updated.(model)
-	assert.Greater(t, m.viewport.YOffset, scrolledOffset)
+	assert.Greater(t, m.viewport.YOffset(), scrolledOffset)
 }
 
 func TestHorizontalViewportMouseNavigation(t *testing.T) {
-	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelLeft}))
-	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelRight}))
-	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, Shift: true}))
-	assert.True(t, shouldUpdateViewport(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, Shift: true}))
-	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonWheelLeft}))
-	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseWheelMsg{Button: tea.MouseWheelLeft}))
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseWheelMsg{Button: tea.MouseWheelRight}))
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseWheelMsg{Button: tea.MouseWheelUp, Mod: tea.ModShift}))
+	assert.True(t, shouldUpdateViewport(tea.MouseWheelMsg{Button: tea.MouseWheelDown, Mod: tea.ModShift}))
+	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseReleaseMsg{Button: tea.MouseWheelLeft}))
+	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseClickMsg{Button: tea.MouseLeft}))
 }
 
 func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
@@ -1594,18 +1668,18 @@ func TestCtrlYReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
 	m.height = 30
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, cmd := m.Update(keyPressWithMod('y', tea.ModCtrl))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.True(t, m.reasoningPickerOpen)
 	assert.Equal(t, 1, m.reasoningPickerIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, cmd = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.Equal(t, 2, m.reasoningPickerIndex)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.reasoningPickerOpen)
@@ -1629,7 +1703,7 @@ func TestReasoningPickerLockedForExistingConversation(t *testing.T) {
 	t.Cleanup(m.cancel)
 
 	assert.False(t, m.canChangeReasoningEffort())
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, cmd := m.Update(keyPressWithMod('y', tea.ModCtrl))
 	m = updated.(model)
 	require.Nil(t, cmd)
 	assert.False(t, m.reasoningPickerOpen)
@@ -1679,57 +1753,92 @@ func TestHistorySearchOpensSearchesCyclesAcceptsAndCancels(t *testing.T) {
 	m.textarea.SetValue("draft")
 	m.resize()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 	assert.Nil(t, cmd)
 	require.NotNil(t, m.historySearch)
 	assert.Equal(t, "draft", m.textarea.Value())
 	assert.Equal(t, 1, m.historySearchHeight())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("run")})
+	updated, _ = m.Update(textKeyPress("run"))
 	m = updated.(model)
 	assert.Equal(t, "run unit tests", m.textarea.Value())
 	require.NotNil(t, m.historySearch)
 	assert.Equal(t, []string{"run unit tests", "run frontend tests"}, m.historySearch.matches)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 	assert.Equal(t, "run frontend tests", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(keyPress(tea.KeyDown))
 	m = updated.(model)
 	assert.Equal(t, "run unit tests", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
 	assert.Equal(t, "run frontend tests", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(keyPress(tea.KeyEnter))
 	m = updated.(model)
 	assert.Nil(t, m.historySearch)
 	assert.Equal(t, "run frontend tests", m.textarea.Value())
 
 	m.textarea.SetValue("another draft")
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
+	updated, _ = m.Update(textKeyPress("missing"))
 	m = updated.(model)
 	assert.Equal(t, "another draft", m.textarea.Value())
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.Update(keyPress(tea.KeyEsc))
 	m = updated.(model)
 	assert.Nil(t, m.historySearch)
 	assert.Equal(t, "another draft", m.textarea.Value())
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("many")})
+	updated, _ = m.Update(textKeyPress("many"))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	updated, _ = m.Update(textKeyPress(" "))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("cores")})
+	updated, _ = m.Update(textKeyPress("cores"))
 	m = updated.(model)
 	assert.Equal(t, "many cores", m.historySearch.query)
 	assert.Equal(t, "how many cores and rams on this machine?", m.textarea.Value())
+}
+
+func TestHistorySearchPasteAlwaysInsertsText(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "enter", content: "enter", want: "prefix-enter"},
+		{name: "escape", content: "esc", want: "prefix-esc"},
+		{name: "up", content: "up", want: "prefix-up"},
+		{name: "down", content: "down", want: "prefix-down"},
+		{name: "backspace", content: "backspace", want: "prefix-backspace"},
+		{name: "clear", content: "ctrl+u", want: "prefix-ctrl+u"},
+		{name: "multiline", content: " first\r\nsecond\tthird ", want: "prefix-first second third"},
+		{name: "terminal controls", content: " \x1b[31mred\x1b[0m\x07\x00 alert ", want: "prefix-red alert"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+			m.textarea.SetValue("draft")
+			m.historySearch = &historySearchState{originalDraft: "draft", query: "prefix-"}
+
+			updated, cmd := m.Update(tea.PasteMsg{Content: tt.content})
+			m = updated.(model)
+
+			assert.Nil(t, cmd)
+			require.NotNil(t, m.historySearch)
+			assert.Equal(t, tt.want, m.historySearch.query)
+			assert.Equal(t, "draft", m.textarea.Value())
+		})
+	}
 }
 
 func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
@@ -1740,9 +1849,9 @@ func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
 	m.messageHistory = []string{"run themed tests"}
 	m.resize()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
+	updated, _ = m.Update(textKeyPress("theme"))
 	m = updated.(model)
 
 	rendered := m.renderHistorySearch()
@@ -1756,7 +1865,7 @@ func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
 	queryStart, _ := styleSequences(historySearchQueryStyle)
 	assert.Contains(t, rendered, queryStart)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" missing")})
+	updated, _ = m.Update(textKeyPress(" missing"))
 	m = updated.(model)
 	rendered = m.renderHistorySearch()
 	assert.Contains(t, rendered, "no matches")
@@ -1871,17 +1980,6 @@ func TestSlashCommandIndexMovementAndMergeHelpers(t *testing.T) {
 	assert.Equal(t, []string{"goal", "review", "custom"}, slashCommandNames(merged))
 }
 
-func TestUnknownCSIAndModifierBranches(t *testing.T) {
-	assert.False(t, isShiftEnterCSISequence("not-csi"))
-	assert.False(t, isShiftEnterCSISequence("?CSI[49 51 117]?"))
-	assert.False(t, isShiftEnterCSISequence("?CSI[49 52 59 50 117]?"))
-	assert.False(t, isShiftEnterCSISequence("?CSI[49 51 59 49 117]?"))
-	assert.False(t, isShiftEnterCSISequence("?CSI[50 55 59 50 59 49 52 126]?"))
-	assert.False(t, hasShiftModifier("not-number"))
-	assert.False(t, hasShiftModifier("1"))
-	assert.True(t, hasShiftModifier("2:3"))
-}
-
 func TestUserDisplayMessageFallsBackForInvalidGoalCommand(t *testing.T) {
 	invalidGoal := "  /goal   "
 	assert.Equal(t, strings.TrimSpace(invalidGoal), userDisplayMessage(invalidGoal))
@@ -1925,13 +2023,13 @@ func TestStreamingPreservesViewportAfterUserScrollsUp(t *testing.T) {
 		blocks: []assistantBlock{{kind: blockText, text: numberedLines(30)}},
 	}}
 	m.refreshViewport(true)
-	bottomOffset := m.viewport.YOffset
+	bottomOffset := m.viewport.YOffset()
 	require.Greater(t, bottomOffset, 0)
 	require.True(t, m.autoFollow)
 
-	updated, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	updated, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = updated.(model)
-	scrolledOffset := m.viewport.YOffset
+	scrolledOffset := m.viewport.YOffset()
 	require.Less(t, scrolledOffset, bottomOffset)
 	assert.False(t, m.autoFollow)
 
@@ -1940,7 +2038,7 @@ func TestStreamingPreservesViewportAfterUserScrollsUp(t *testing.T) {
 	updated, _ = m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text-delta", Delta: "\nstill streaming"}})
 	m = updated.(model)
 
-	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset())
 	assert.False(t, m.autoFollow)
 }
 
@@ -1956,13 +2054,13 @@ func TestScrollingBackToBottomResumesStreamingAutoFollow(t *testing.T) {
 	}}
 	m.refreshViewport(true)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ := m.Update(keyPress(tea.KeyPgUp))
 	m = updated.(model)
 	require.False(t, m.autoFollow)
 	require.False(t, m.viewport.AtBottom())
 
 	for range 10 {
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		updated, _ = m.Update(keyPress(tea.KeyPgDown))
 		m = updated.(model)
 		if m.viewport.AtBottom() {
 			break

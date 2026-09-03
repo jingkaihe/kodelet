@@ -64,10 +64,10 @@ func isDetailBlock(block assistantBlock) bool {
 
 func (m *model) toggleDetailAt(screenY int) bool {
 	viewportY := screenY
-	if viewportY < 0 || viewportY >= m.viewport.Height {
+	if viewportY < 0 || viewportY >= m.viewport.Height() {
 		return false
 	}
-	contentLine := m.viewport.YOffset + viewportY
+	contentLine := m.viewport.YOffset() + viewportY
 	for _, region := range m.detailRegions {
 		if region.line != contentLine || region.entryIndex < 0 || region.entryIndex >= len(m.entries) || region.blockIndex < 0 || region.blockIndex >= len(m.entries[region.entryIndex].blocks) {
 			continue

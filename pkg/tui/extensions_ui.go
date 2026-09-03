@@ -7,8 +7,8 @@ import (
 	"sync"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/pkg/errors"
@@ -718,25 +718,102 @@ func (m model) extensionUIKeyVisible(key extensionUIKey) bool {
 	return key.conversationKey == "" || key.conversationKey == m.activeConversationKey
 }
 
-func (m *model) routeExtensionSurfaceKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+func (m *model) routeExtensionSurfaceKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key, ok := m.focusedExtensionSurfaceKey()
 	if !ok {
 		return nil, false
 	}
 	surface := m.extensionSurfaces[key]
-	text := ""
-	if msg.Type == tea.KeyRunes {
-		text = string(msg.Runes)
-	}
-	keyName := msg.String()
+	keyName, text := extensionSurfaceKeyInput(msg)
+	alt := msg.Mod.Contains(tea.ModAlt)
 	shift := strings.Contains(keyName, "shift+")
 	ctrl := strings.Contains(keyName, "ctrl+")
-	return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, keyName, text, msg.Alt, shift, ctrl, nil), true
+	return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, keyName, text, alt, shift, ctrl, nil), true
+}
+
+func extensionSurfaceKeyInput(msg tea.KeyPressMsg) (string, string) {
+	alt := msg.Mod.Contains(tea.ModAlt)
+	ctrl := msg.Mod.Contains(tea.ModCtrl)
+	if msg.Code == tea.KeySpace || msg.Text == " " {
+		name := " "
+		if ctrl {
+			name = "ctrl+@"
+		}
+		if alt {
+			name = "alt+" + name
+		}
+		return name, ""
+	}
+
+	if name, ok := extensionSurfaceV1ControlAlias(msg); ok {
+		if alt {
+			name = "alt+" + name
+		}
+		return name, ""
+	}
+
+	if text := extensionSurfacePrintableText(msg); text != "" {
+		name := text
+		if alt {
+			name = "alt+" + name
+		}
+		return name, text
+	}
+
+	name := msg.Keystroke()
+	if alt {
+		name = strings.Replace(name, "alt+", "", 1)
+		name = "alt+" + name
+	}
+	return name, ""
+}
+
+func extensionSurfacePrintableText(msg tea.KeyPressMsg) string {
+	if msg.Text != "" {
+		return msg.Text
+	}
+	if msg.Mod.Contains(tea.ModCtrl) || msg.Code < ' ' || msg.Code > unicode.MaxRune || !unicode.IsPrint(msg.Code) {
+		return ""
+	}
+
+	code := msg.Code
+	if msg.Mod.Contains(tea.ModShift) {
+		if msg.ShiftedCode != 0 {
+			code = msg.ShiftedCode
+		} else if unicode.IsLetter(code) {
+			code = unicode.ToUpper(code)
+		}
+	}
+	return string(code)
+}
+
+func extensionSurfaceV1ControlAlias(msg tea.KeyPressMsg) (string, bool) {
+	if !msg.Mod.Contains(tea.ModCtrl) {
+		return "", false
+	}
+
+	code := unicode.ToLower(msg.Code)
+	shiftedCode := unicode.ToLower(msg.ShiftedCode)
+	switch {
+	case code == 'i':
+		return "tab", true
+	case code == 'm':
+		return "enter", true
+	case code == '[' || shiftedCode == '[' || shiftedCode == '{':
+		return "esc", true
+	case code == '?' || shiftedCode == '?' || code == '/' && msg.Mod.Contains(tea.ModShift):
+		return "backspace", true
+	}
+	return "", false
 }
 
 func (m *model) routeExtensionSurfaceMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
-	x := msg.X - tuiLeftMargin
-	y := msg.Y
+	event := msg.Mouse()
+	x := event.X - tuiLeftMargin
+	y := event.Y
+	alt := event.Mod.Contains(tea.ModAlt)
+	shift := event.Mod.Contains(tea.ModShift)
+	ctrl := event.Mod.Contains(tea.ModCtrl)
 	for index := len(m.extensionSurfaceOrder) - 1; index >= 0; index-- {
 		key := m.extensionSurfaceOrder[index]
 		surface, ok := m.extensionSurfaces[key]
@@ -746,13 +823,13 @@ func (m *model) routeExtensionSurfaceMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
 		mouse := &extensions.UISurfaceMouseEvent{
 			X:      x - surface.layout.x,
 			Y:      y - surface.layout.y,
-			Button: extensionMouseButton(msg.Button),
-			Action: extensionMouseAction(msg.Action),
-			Shift:  msg.Shift,
-			Alt:    msg.Alt,
-			Ctrl:   msg.Ctrl,
+			Button: extensionMouseButton(event.Button),
+			Action: extensionMouseAction(msg),
+			Shift:  shift,
+			Alt:    alt,
+			Ctrl:   ctrl,
 		}
-		return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputMouse, "", "", msg.Alt, msg.Shift, msg.Ctrl, mouse), true
+		return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputMouse, "", "", alt, shift, ctrl, mouse), true
 	}
 	return nil, false
 }
@@ -985,39 +1062,40 @@ func (m *model) clampExtensionWidgetScrollOffsets() {
 }
 
 func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
-	if msg.Action != tea.MouseActionPress {
+	if mouseActionFor(msg) != tuiMouseActionPress {
 		return false
 	}
-	if msg.Button != tea.MouseButtonLeft && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+	event := msg.Mouse()
+	if event.Button != tea.MouseLeft && event.Button != tea.MouseWheelUp && event.Button != tea.MouseWheelDown {
 		return false
 	}
-	if msg.Shift && msg.Button != tea.MouseButtonLeft {
+	if event.Mod.Contains(tea.ModShift) && event.Button != tea.MouseLeft {
 		return false
 	}
-	if msg.X < tuiLeftMargin || msg.X >= tuiLeftMargin+m.contentWidth() {
+	if event.X < tuiLeftMargin || event.X >= tuiLeftMargin+m.contentWidth() {
 		return false
 	}
 
-	aboveTop := m.viewport.Height + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.profilePickerHeight() + m.reasoningPickerHeight()
+	aboveTop := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.profilePickerHeight() + m.reasoningPickerHeight()
 	aboveHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	belowTop := aboveTop + aboveHeight + inputHeight + 2
 	belowHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	placement := ""
 	row := 0
 	switch {
-	case msg.Y >= aboveTop && msg.Y < aboveTop+aboveHeight:
+	case event.Y >= aboveTop && event.Y < aboveTop+aboveHeight:
 		placement = extensions.UIWidgetPlacementAboveComposer
-		row = msg.Y - aboveTop
-	case msg.Y >= belowTop && msg.Y < belowTop+belowHeight:
+		row = event.Y - aboveTop
+	case event.Y >= belowTop && event.Y < belowTop+belowHeight:
 		placement = extensions.UIWidgetPlacementBelowComposer
-		row = msg.Y - belowTop
+		row = event.Y - belowTop
 	default:
 		return false
 	}
 
 	maximum := max(0, m.extensionWidgetLineCount(placement)-maxExtensionWidgetLines)
 	offset := min(m.extensionWidgetScrollOffset(placement), maximum)
-	if msg.Button == tea.MouseButtonLeft {
+	if event.Button == tea.MouseLeft {
 		line, ok := m.extensionWidgetLineAt(placement, offset+row)
 		if !ok || !line.header {
 			return false
@@ -1042,7 +1120,7 @@ func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
 	if m.widgetOffsets == nil {
 		m.widgetOffsets = map[extensionWidgetOffsetKey]int{}
 	}
-	if msg.Button == tea.MouseButtonWheelUp {
+	if event.Button == tea.MouseWheelUp {
 		offset -= extensionWidgetScrollStep
 	} else {
 		offset += extensionWidgetScrollStep
@@ -1165,32 +1243,32 @@ func normalizeExtensionUIColor(color string) string {
 
 func extensionMouseButton(button tea.MouseButton) string {
 	switch button {
-	case tea.MouseButtonLeft:
+	case tea.MouseLeft:
 		return "left"
-	case tea.MouseButtonMiddle:
+	case tea.MouseMiddle:
 		return "middle"
-	case tea.MouseButtonRight:
+	case tea.MouseRight:
 		return "right"
-	case tea.MouseButtonWheelUp:
+	case tea.MouseWheelUp:
 		return "wheelUp"
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		return "wheelDown"
-	case tea.MouseButtonWheelLeft:
+	case tea.MouseWheelLeft:
 		return "wheelLeft"
-	case tea.MouseButtonWheelRight:
+	case tea.MouseWheelRight:
 		return "wheelRight"
 	default:
 		return "none"
 	}
 }
 
-func extensionMouseAction(action tea.MouseAction) string {
-	switch action {
-	case tea.MouseActionPress:
+func extensionMouseAction(msg tea.MouseMsg) string {
+	switch mouseActionFor(msg) {
+	case tuiMouseActionPress:
 		return "press"
-	case tea.MouseActionRelease:
+	case tuiMouseActionRelease:
 		return "release"
-	case tea.MouseActionMotion:
+	case tuiMouseActionMotion:
 		return "motion"
 	default:
 		return "unknown"

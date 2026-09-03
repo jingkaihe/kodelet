@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 )
@@ -429,11 +429,14 @@ func newInputPromptModel(prompt uiPromptState, width int) uiPromptState {
 	input := textinput.New()
 	input.Prompt = ""
 	input.Placeholder = prompt.placeholder
-	input.PlaceholderStyle = inputPlaceholderStyle
-	input.TextStyle = composerTextStyle
-	input.Cursor.Style = composerCursorStyle
-	input.Cursor.TextStyle = composerTextStyle
-	input.Width = uiPromptTextInputWidth(width)
+	styles := input.Styles()
+	styles.Focused.Placeholder = inputPlaceholderStyle
+	styles.Focused.Text = composerTextStyle
+	styles.Blurred.Placeholder = inputPlaceholderStyle
+	styles.Blurred.Text = composerTextStyle
+	styles.Cursor.Color = composerCursorStyle.GetForeground()
+	input.SetStyles(styles)
+	input.SetWidth(uiPromptTextInputWidth(width))
 	if prompt.secret {
 		input.EchoMode = textinput.EchoPassword
 	}

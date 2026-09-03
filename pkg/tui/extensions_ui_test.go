@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/pkg/errors"
@@ -522,7 +522,7 @@ func TestTUIExtensionWidgetsRenderAboveAndBelowComposer(t *testing.T) {
 	m.width = 80
 	m.height = 30
 	m.resize()
-	baseHeight := m.viewport.Height
+	baseHeight := m.viewport.Height()
 	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}}
 
 	_, err := m.extensionUI.SetWidget(context.Background(), source, extensions.UIWidgetSetRequest{
@@ -542,8 +542,8 @@ func TestTUIExtensionWidgetsRenderAboveAndBelowComposer(t *testing.T) {
 	require.NoError(t, err)
 
 	applyPendingExtensionUI(t, &m)
-	assert.Equal(t, baseHeight-2, m.viewport.Height)
-	view := xansi.Strip(m.View())
+	assert.Equal(t, baseHeight-2, m.viewport.Height())
+	view := xansi.Strip(m.View().Content)
 	assert.Contains(t, view, "state: ready")
 	assert.Contains(t, view, "below composer")
 	aboveIndex := indexLineContaining(view, "state: ready")
@@ -584,14 +584,14 @@ func TestTUIExtensionWidgetsRenderOnlyForActiveConversation(t *testing.T) {
 	}
 	applyPendingExtensionUI(t, &m)
 
-	firstView := xansi.Strip(m.View())
+	firstView := xansi.Strip(m.View().Content)
 	assert.Contains(t, firstView, "first conversation widget")
 	assert.Contains(t, firstView, "global widget")
 	assert.NotContains(t, firstView, "second conversation widget")
 	m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)] = 3
 
 	requireConversationActivation(t, &m, second.key)
-	secondView := xansi.Strip(m.View())
+	secondView := xansi.Strip(m.View().Content)
 	assert.Contains(t, secondView, "second conversation widget")
 	assert.Contains(t, secondView, "global widget")
 	assert.NotContains(t, secondView, "first conversation widget")
@@ -621,15 +621,15 @@ func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) 
 	m.rebuildExtensionWidgetOrder()
 	m.resize()
 
-	composerTop := m.viewport.Height + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	composerTop := m.viewport.Height() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	profileStart, _, ok := m.profileLabelBoundsInBlock()
 	require.True(t, ok)
 	reasoningStart, _, ok := m.reasoningEffortLabelBoundsInBlock()
 	require.True(t, ok)
 
-	assert.False(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, m.viewport.Height))
+	assert.False(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, m.viewport.Height()))
 	assert.True(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, composerTop))
-	assert.False(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, m.viewport.Height))
+	assert.False(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, m.viewport.Height()))
 	assert.True(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, composerTop))
 }
 
@@ -652,37 +652,35 @@ func TestTUIExtensionWidgetsFoldFromFirstLine(t *testing.T) {
 	m.rebuildExtensionWidgetOrder()
 	m.resize()
 
-	expandedViewportHeight := m.viewport.Height
+	expandedViewportHeight := m.viewport.Height()
 	rendered := xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
 	assert.Contains(t, rendered, "Build status ▾")
 	assert.Contains(t, rendered, "tests passing")
 	assert.Contains(t, rendered, "lint clean")
 
-	headerY := m.viewport.Height
-	handled := m.routeExtensionWidgetMouse(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	headerY := m.viewport.Height()
+	handled := m.routeExtensionWidgetMouse(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin,
 		Y:      headerY,
 	})
 	require.True(t, handled)
 	assert.True(t, m.collapsedWidgets[key])
-	assert.Equal(t, expandedViewportHeight+2, m.viewport.Height)
+	assert.Equal(t, expandedViewportHeight+2, m.viewport.Height())
 	rendered = xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
 	assert.Contains(t, rendered, "Build status ▸")
 	assert.NotContains(t, rendered, "tests passing")
 	assert.NotContains(t, rendered, "lint clean")
 
-	headerY = m.viewport.Height
-	handled = m.routeExtensionWidgetMouse(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	headerY = m.viewport.Height()
+	handled = m.routeExtensionWidgetMouse(tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      tuiLeftMargin,
 		Y:      headerY,
 	})
 	require.True(t, handled)
 	assert.NotContains(t, m.collapsedWidgets, key)
-	assert.Equal(t, expandedViewportHeight, m.viewport.Height)
+	assert.Equal(t, expandedViewportHeight, m.viewport.Height())
 	rendered = xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
 	assert.Contains(t, rendered, "Build status ▾")
 	assert.Contains(t, rendered, "tests passing")
@@ -783,40 +781,40 @@ func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
 	assert.Contains(t, rendered[9], "0-1-1")
 
 	require.Positive(t, m.profilePickerHeight())
-	aboveY := m.viewport.Height + m.profilePickerHeight()
+	aboveY := m.viewport.Height() + m.profilePickerHeight()
 	m.viewport.SetYOffset(6)
-	updated, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: tuiLeftMargin, Y: aboveY})
+	updated, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
 	assert.Zero(t, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
-	assert.Equal(t, 6, m.viewport.YOffset)
+	assert.Equal(t, 6, m.viewport.YOffset())
 	m.viewport.GotoTop()
 
-	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	updated, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
 	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
-	assert.Zero(t, m.viewport.YOffset)
+	assert.Zero(t, m.viewport.YOffset())
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
 	require.Len(t, rendered, maxExtensionWidgetLines)
 	assert.Contains(t, rendered[0], "0-0-3")
 	assert.Contains(t, rendered[9], "0-1-4")
 
 	belowY := aboveY + maxExtensionWidgetLines + inputHeight + 2
-	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: belowY})
+	updated, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: tuiLeftMargin, Y: belowY})
 	m = updated.(model)
 	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementBelowComposer)])
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer), "\n")
 	assert.Contains(t, rendered[0], "1-0-3")
 	assert.Contains(t, rendered[9], "1-1-4")
 
-	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	updated, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
 	assert.Equal(t, 6, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
-	assert.Zero(t, m.viewport.YOffset)
+	assert.Zero(t, m.viewport.YOffset())
 
-	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	updated, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
 	assert.Equal(t, 6, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
-	assert.Zero(t, m.viewport.YOffset)
+	assert.Zero(t, m.viewport.YOffset())
 
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
 	assert.Contains(t, rendered[0], "0-0-6")
@@ -877,18 +875,17 @@ func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {
 	assert.Equal(t, 12, surface.layout.height)
 	assert.Equal(t, (m.contentWidth()-surface.layout.width)/2, surface.layout.x)
 	assert.Equal(t, (m.height-surface.layout.height)/2, surface.layout.y)
-	assert.Contains(t, xansi.Strip(m.View()), "DOOM FRAME")
+	assert.Contains(t, xansi.Strip(m.View().Content), "DOOM FRAME")
 
-	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	cmd, handled := m.routeExtensionSurfaceKey(textKeyPress("q"))
 	require.True(t, handled)
 	require.NotNil(t, cmd)
 	assert.Nil(t, cmd())
 
-	cmd, handled = m.routeExtensionSurfaceMouse(tea.MouseMsg{
+	cmd, handled = m.routeExtensionSurfaceMouse(tea.MouseClickMsg{
 		X:      tuiLeftMargin + surface.layout.x + 3,
 		Y:      surface.layout.y + 2,
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+		Button: tea.MouseLeft,
 	})
 	require.True(t, handled)
 	assert.Nil(t, cmd())
@@ -907,6 +904,34 @@ func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {
 	assert.Equal(t, 3, inputNotifications[1].Mouse.X)
 	assert.Equal(t, 2, inputNotifications[1].Mouse.Y)
 	assert.Greater(t, inputNotifications[1].Sequence, inputNotifications[0].Sequence)
+}
+
+func TestTUIExtensionSurfaceCapturesBracketedPaste(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 30
+	m.resize()
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "editor", Generation: 1}}
+
+	_, err := m.extensionUI.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{ID: "surface", Frame: extensionTestFrame(1, "EDITOR")})
+	require.NoError(t, err)
+	applyPendingExtensionUI(t, &m)
+
+	updated, cmd := m.Update(tea.PasteMsg{Content: "first\nsecond"})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.Nil(t, cmd())
+	assert.Empty(t, m.textarea.Value())
+
+	notifications := source.recordedNotifications()
+	require.NotEmpty(t, notifications)
+	input, ok := notifications[len(notifications)-1].params.(extensions.UISurfaceInputNotification)
+	require.True(t, ok)
+	assert.Equal(t, extensions.UISurfaceInputKey, input.Kind)
+	assert.Equal(t, "[first\nsecond]", input.Key)
+	assert.Equal(t, "first\nsecond", input.Text)
 }
 
 func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *testing.T) {
@@ -947,11 +972,11 @@ func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *t
 	assert.Equal(t, firstKey, focused)
 	assert.Positive(t, m.extensionSurfaces[firstKey].layout.width)
 	assert.Zero(t, m.extensionSurfaces[secondKey].layout.width)
-	firstView := xansi.Strip(m.View())
+	firstView := xansi.Strip(m.View().Content)
 	assert.Contains(t, firstView, "FIRST SURFACE")
 	assert.Contains(t, firstView, "GLOBAL SURFACE")
 	assert.NotContains(t, firstView, "SECOND SURFACE")
-	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	cmd, handled := m.routeExtensionSurfaceKey(textKeyPress("a"))
 	require.True(t, handled)
 	assert.Nil(t, cmd())
 
@@ -960,11 +985,11 @@ func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *t
 	require.True(t, ok)
 	assert.Equal(t, secondKey, focused)
 	assert.Positive(t, m.extensionSurfaces[secondKey].layout.width)
-	secondView := xansi.Strip(m.View())
+	secondView := xansi.Strip(m.View().Content)
 	assert.Contains(t, secondView, "SECOND SURFACE")
 	assert.Contains(t, secondView, "GLOBAL SURFACE")
 	assert.NotContains(t, secondView, "FIRST SURFACE")
-	cmd, handled = m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	cmd, handled = m.routeExtensionSurfaceKey(textKeyPress("b"))
 	require.True(t, handled)
 	assert.Nil(t, cmd())
 
@@ -1002,11 +1027,11 @@ func TestTUIExtensionSurfaceEventsIncludeConversationScopeForSameID(t *testing.T
 	}
 	applyPendingExtensionUI(t, &m)
 
-	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	cmd, handled := m.routeExtensionSurfaceKey(textKeyPress("a"))
 	require.True(t, handled)
 	assert.Nil(t, cmd())
 	requireConversationActivation(t, &m, second.key)
-	cmd, handled = m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	cmd, handled = m.routeExtensionSurfaceKey(textKeyPress("b"))
 	require.True(t, handled)
 	assert.Nil(t, cmd())
 
@@ -1070,32 +1095,162 @@ func TestTUIExtensionSurfaceFocusIsSuspendedByModalUI(t *testing.T) {
 	assert.Equal(t, []string{extensions.UISurfaceInputBlur, extensions.UISurfaceInputFocus}, focusKinds)
 }
 
-func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
+func TestTUIExtensionSurfaceKeyRoutingPreservesV1NamesAndModifiers(t *testing.T) {
 	tests := []struct {
-		name  string
-		key   tea.KeyMsg
-		alt   bool
-		shift bool
-		ctrl  bool
+		name    string
+		key     tea.KeyPressMsg
+		wantKey string
+		text    string
+		alt     bool
+		shift   bool
+		ctrl    bool
 	}{
 		{
-			name:  "ctrl shift",
-			key:   tea.KeyMsg{Type: tea.KeyCtrlShiftUp},
-			shift: true,
-			ctrl:  true,
+			name:    "shifted punctuation stays textual",
+			key:     tea.KeyPressMsg{Code: '?', BaseCode: '/', Text: "?", Mod: tea.ModShift},
+			wantKey: "?",
+			text:    "?",
 		},
 		{
-			name: "alt ctrl",
-			key:  tea.KeyMsg{Type: tea.KeyCtrlUp, Alt: true},
-			alt:  true,
-			ctrl: true,
+			name:    "uppercase stays textual",
+			key:     tea.KeyPressMsg{Code: 'Q', BaseCode: 'q', Text: "Q", Mod: tea.ModShift},
+			wantKey: "Q",
+			text:    "Q",
 		},
 		{
-			name:  "alt ctrl shift",
-			key:   tea.KeyMsg{Type: tea.KeyCtrlShiftUp, Alt: true},
-			alt:   true,
-			shift: true,
-			ctrl:  true,
+			name:    "international text stays textual",
+			key:     tea.KeyPressMsg{Code: 'é', BaseCode: '2', Text: "é"},
+			wantKey: "é",
+			text:    "é",
+		},
+		{
+			name:    "legacy alt printable restores text",
+			key:     tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt},
+			wantKey: "alt+p",
+			text:    "p",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt shifted printable restores shifted text",
+			key:     tea.KeyPressMsg{Code: 'p', ShiftedCode: 'P', Mod: tea.ModAlt | tea.ModShift},
+			wantKey: "alt+P",
+			text:    "P",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt shifted printable without shifted code",
+			key:     tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt | tea.ModShift},
+			wantKey: "alt+P",
+			text:    "P",
+			alt:     true,
+		},
+		{
+			name:    "legacy alt international ignores base code",
+			key:     tea.KeyPressMsg{Code: 'é', BaseCode: '2', Mod: tea.ModAlt},
+			wantKey: "alt+é",
+			text:    "é",
+			alt:     true,
+		},
+		{
+			name:    "space keeps v1 key name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Text: " "},
+			wantKey: " ",
+		},
+		{
+			name:    "legacy alt space keeps v1 key name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModAlt},
+			wantKey: "alt+ ",
+			alt:     true,
+		},
+		{
+			name:    "text populated alt space avoids duplicate modifier",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Text: " ", Mod: tea.ModAlt},
+			wantKey: "alt+ ",
+			alt:     true,
+		},
+		{
+			name:    "ctrl space keeps v1 control name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl},
+			wantKey: "ctrl+@",
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl space keeps v1 control name",
+			key:     tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+ctrl+@",
+			alt:     true,
+			ctrl:    true,
+		},
+		{
+			name:    "ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', Mod: tea.ModCtrl},
+			wantKey: "tab",
+		},
+		{
+			name:    "alt ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+tab",
+			alt:     true,
+		},
+		{
+			name:    "shifted ctrl i keeps v1 tab alias",
+			key:     tea.KeyPressMsg{Code: 'i', ShiftedCode: 'I', Mod: tea.ModCtrl | tea.ModShift},
+			wantKey: "tab",
+		},
+		{
+			name:    "ctrl m keeps v1 enter alias",
+			key:     tea.KeyPressMsg{Code: 'm', Mod: tea.ModCtrl},
+			wantKey: "enter",
+		},
+		{
+			name:    "alt ctrl m keeps v1 enter alias",
+			key:     tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+enter",
+			alt:     true,
+		},
+		{
+			name:    "ctrl open bracket keeps v1 escape alias",
+			key:     tea.KeyPressMsg{Code: '[', Mod: tea.ModCtrl},
+			wantKey: "esc",
+		},
+		{
+			name:    "alt ctrl open bracket keeps v1 escape alias",
+			key:     tea.KeyPressMsg{Code: '[', Mod: tea.ModAlt | tea.ModCtrl},
+			wantKey: "alt+esc",
+			alt:     true,
+		},
+		{
+			name:    "ctrl question mark keeps v1 backspace alias",
+			key:     tea.KeyPressMsg{Code: '/', ShiftedCode: '?', Mod: tea.ModCtrl | tea.ModShift},
+			wantKey: "backspace",
+		},
+		{
+			name:    "alt ctrl question mark keeps v1 backspace alias",
+			key:     tea.KeyPressMsg{Code: '/', ShiftedCode: '?', Mod: tea.ModAlt | tea.ModCtrl | tea.ModShift},
+			wantKey: "alt+backspace",
+			alt:     true,
+		},
+		{
+			name:    "ctrl shift navigation",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift),
+			wantKey: "ctrl+shift+up",
+			shift:   true,
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl uses v1 modifier order",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModAlt),
+			wantKey: "alt+ctrl+up",
+			alt:     true,
+			ctrl:    true,
+		},
+		{
+			name:    "alt ctrl shift uses v1 modifier order",
+			key:     keyPressWithMod(tea.KeyUp, tea.ModCtrl|tea.ModShift|tea.ModAlt),
+			wantKey: "alt+ctrl+shift+up",
+			alt:     true,
+			shift:   true,
+			ctrl:    true,
 		},
 	}
 
@@ -1119,7 +1274,8 @@ func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
 			require.Len(t, notifications, 1)
 			input, ok := notifications[0].params.(extensions.UISurfaceInputNotification)
 			require.True(t, ok)
-			assert.Equal(t, test.key.String(), input.Key)
+			assert.Equal(t, test.wantKey, input.Key)
+			assert.Equal(t, test.text, input.Text)
 			assert.Equal(t, test.alt, input.Alt)
 			assert.Equal(t, test.shift, input.Shift)
 			assert.Equal(t, test.ctrl, input.Ctrl)
@@ -1156,7 +1312,7 @@ func TestTUIExtensionSurfaceFocusStackAndFailureCleanup(t *testing.T) {
 	assert.NotContains(t, m.extensionSurfaces, extensionUIKey{owner: second.owner, id: "two"})
 
 	first.err = errors.New("process disconnected")
-	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	cmd, handled := m.routeExtensionSurfaceKey(textKeyPress("x"))
 	require.True(t, handled)
 	transportError, ok := cmd().(extensionUITransportErrorMsg)
 	require.True(t, ok)
@@ -1286,7 +1442,7 @@ func TestTUIExtensionSurfacePreservesGlobalControlC(t *testing.T) {
 	require.NoError(t, err)
 	applyPendingExtensionUI(t, &m)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := m.Update(keyPressWithMod('c', tea.ModCtrl))
 
 	_, ok := updated.(model)
 	require.True(t, ok)

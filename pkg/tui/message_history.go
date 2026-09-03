@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 )
@@ -165,57 +165,54 @@ func (m *model) openHistorySearch() {
 	m.applyHistorySearchQuery()
 }
 
-func (m *model) updateHistorySearchKey(msg tea.KeyMsg) bool {
+func (m *model) updateHistorySearchKey(msg tea.KeyPressMsg) {
 	if m.historySearch == nil {
-		return false
+		return
 	}
 
 	switch msg.String() {
 	case "ctrl+r", "up":
 		m.moveHistorySearchSelection(1)
 		m.refreshViewport(false)
-		return true
+		return
 	case "down":
 		m.moveHistorySearchSelection(-1)
 		m.refreshViewport(false)
-		return true
+		return
 	case "enter":
 		if m.acceptHistorySearch() {
 			m.resize()
 			m.refreshViewport(false)
 		}
-		return true
+		return
 	case "esc", "ctrl+c":
 		m.cancelHistorySearch()
 		m.resize()
 		m.refreshViewport(false)
-		return true
+		return
 	case "backspace", "ctrl+h":
 		m.deleteHistorySearchRune()
 		m.refreshViewport(false)
-		return true
+		return
 	case "ctrl+u":
 		m.historySearch.query = ""
 		m.applyHistorySearchQuery()
 		m.refreshViewport(false)
-		return true
+		return
 	}
 
-	if msg.Type == tea.KeySpace && !msg.Alt {
-		m.historySearch.query += " "
-		m.applyHistorySearchQuery()
-		m.refreshViewport(false)
-		return true
+	if msg.Text != "" && !msg.Mod.Contains(tea.ModAlt) {
+		m.appendHistorySearchQuery(msg.Text)
 	}
+}
 
-	if msg.Type == tea.KeyRunes && !msg.Alt {
-		m.historySearch.query += string(msg.Runes)
-		m.applyHistorySearchQuery()
-		m.refreshViewport(false)
-		return true
+func (m *model) appendHistorySearchQuery(text string) {
+	if m.historySearch == nil || text == "" {
+		return
 	}
-
-	return true
+	m.historySearch.query += text
+	m.applyHistorySearchQuery()
+	m.refreshViewport(false)
 }
 
 func (m *model) applyHistorySearchQuery() {

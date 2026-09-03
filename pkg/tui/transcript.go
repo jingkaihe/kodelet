@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/jingkaihe/kodelet/pkg/diffview"
 )
 
@@ -136,11 +136,11 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 
 func (m model) renderInitialMessage() []string {
 	width := m.contentWidth()
-	if m.viewport.Width > 0 {
-		width = m.viewport.Width
+	if m.viewport.Width() > 0 {
+		width = m.viewport.Width()
 	}
 	width = max(1, width)
-	height := max(2, m.viewport.Height)
+	height := max(2, m.viewport.Height())
 
 	messageText := "Hello! What would you like me to work on?"
 	messageStart := max(0, (width-lipgloss.Width(messageText))/2)

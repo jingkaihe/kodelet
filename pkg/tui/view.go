@@ -5,7 +5,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -154,42 +155,47 @@ func (m model) transcriptElapsedPlaceholderOverflow(now time.Time) bool {
 	return false
 }
 
-func (m model) View() string {
-	if m.width == 0 || m.height == 0 {
-		return ""
+func (m model) View() tea.View {
+	content := ""
+	if m.width > 0 && m.height > 0 {
+		transcript := m.renderTranscriptPlaceholders(m.viewport.View(), time.Now())
+		historySearch := m.renderHistorySearch()
+		slashSuggestions := m.renderSlashCommandSuggestions()
+		profilePicker := m.renderProfilePicker()
+		reasoningPicker := m.renderReasoningPicker()
+		widgetsAbove := m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)
+		input := m.renderInputBox()
+		widgetsBelow := m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer)
+		parts := []string{transcript}
+		if strings.TrimSpace(historySearch) != "" {
+			parts = append(parts, historySearch)
+		}
+		if strings.TrimSpace(slashSuggestions) != "" {
+			parts = append(parts, slashSuggestions)
+		}
+		if strings.TrimSpace(profilePicker) != "" {
+			parts = append(parts, profilePicker)
+		}
+		if strings.TrimSpace(reasoningPicker) != "" {
+			parts = append(parts, reasoningPicker)
+		}
+		if widgetsAbove != "" {
+			parts = append(parts, widgetsAbove)
+		}
+		parts = append(parts, input)
+		if widgetsBelow != "" {
+			parts = append(parts, widgetsBelow)
+		}
+		content = lipgloss.JoinVertical(lipgloss.Left, parts...)
+		content = m.renderUIOverlays(content)
+		content = leftMarginBlock(content, tuiLeftMargin)
 	}
 
-	transcript := m.renderTranscriptPlaceholders(m.viewport.View(), time.Now())
-	historySearch := m.renderHistorySearch()
-	slashSuggestions := m.renderSlashCommandSuggestions()
-	profilePicker := m.renderProfilePicker()
-	reasoningPicker := m.renderReasoningPicker()
-	widgetsAbove := m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)
-	input := m.renderInputBox()
-	widgetsBelow := m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer)
-	parts := []string{transcript}
-	if strings.TrimSpace(historySearch) != "" {
-		parts = append(parts, historySearch)
-	}
-	if strings.TrimSpace(slashSuggestions) != "" {
-		parts = append(parts, slashSuggestions)
-	}
-	if strings.TrimSpace(profilePicker) != "" {
-		parts = append(parts, profilePicker)
-	}
-	if strings.TrimSpace(reasoningPicker) != "" {
-		parts = append(parts, reasoningPicker)
-	}
-	if widgetsAbove != "" {
-		parts = append(parts, widgetsAbove)
-	}
-	parts = append(parts, input)
-	if widgetsBelow != "" {
-		parts = append(parts, widgetsBelow)
-	}
-	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	content = m.renderUIOverlays(content)
-	return leftMarginBlock(content, tuiLeftMargin)
+	view := tea.NewView(content)
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
+	view.WindowTitle = sanitizeTerminalTitle(m.terminalTitleText(time.Now()))
+	return view
 }
 
 func (m model) renderUIOverlays(content string) string {
@@ -977,7 +983,7 @@ func (m model) reasoningPickerOptionAt(screenX, screenY int) (int, bool) {
 	if !ok || blockX < startX || blockX >= endX {
 		return 0, false
 	}
-	optionIndex := screenY - m.viewport.Height
+	optionIndex := screenY - m.viewport.Height()
 	if optionIndex < 0 || optionIndex >= len(m.reasoningEffortOptions) {
 		return 0, false
 	}
@@ -989,7 +995,7 @@ func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -1025,7 +1031,7 @@ func (m model) profilePickerOptionAt(screenX, screenY int) (int, bool) {
 	if !ok || blockX < startX || blockX >= endX {
 		return 0, false
 	}
-	optionIndex := screenY - m.viewport.Height
+	optionIndex := screenY - m.viewport.Height()
 	if optionIndex < 0 || optionIndex >= len(m.profileOptions) {
 		return 0, false
 	}
@@ -1037,7 +1043,7 @@ func (m model) profileComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -1316,8 +1322,8 @@ func (m model) contentWidth() int {
 }
 
 func (m model) transcriptTextWidth() int {
-	if m.viewport.Width > 0 {
-		return max(20, m.viewport.Width-2)
+	if m.viewport.Width() > 0 {
+		return max(20, m.viewport.Width()-2)
 	}
 	return max(20, m.width-2)
 }

@@ -6,13 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/google/shlex"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -45,78 +46,24 @@ func isTextareaNewlineKey(key string) bool {
 	case "shift+enter", "alt+enter", "ctrl+j":
 		return true
 	}
-	return isShiftEnterCSISequence(key)
-}
-
-func isShiftEnterCSISequence(key string) bool {
-	sequence, ok := decodeUnknownCSISequence(key)
-	if !ok || sequence == "" {
-		return false
-	}
-
-	final := sequence[len(sequence)-1]
-	params := strings.Split(sequence[:len(sequence)-1], ";")
-	switch final {
-	case 'u':
-		if len(params) < 2 {
-			return false
-		}
-		code, err := strconv.Atoi(params[0])
-		if err != nil || code != 13 {
-			return false
-		}
-		return hasShiftModifier(params[1])
-	case '~':
-		if len(params) == 2 {
-			code, err := strconv.Atoi(params[0])
-			if err != nil || code != 13 {
-				return false
-			}
-			return hasShiftModifier(params[1])
-		}
-		if len(params) == 3 && params[0] == "27" && params[2] == "13" {
-			return hasShiftModifier(params[1])
-		}
-	}
 	return false
 }
 
-func decodeUnknownCSISequence(key string) (string, bool) {
-	encoded, ok := strings.CutPrefix(key, "?CSI[")
-	if !ok {
-		return "", false
-	}
-	encoded, ok = strings.CutSuffix(encoded, "]?")
-	if !ok {
-		return "", false
-	}
-
-	var sequence strings.Builder
-	for _, field := range strings.Fields(encoded) {
-		value, err := strconv.Atoi(field)
-		if err != nil || value < 0 || value > 255 {
-			return "", false
+func normalizeSingleLinePaste(text string) string {
+	text = xansi.Strip(text)
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && !unicode.IsSpace(r) {
+			return -1
 		}
-		sequence.WriteByte(byte(value))
-	}
-	return sequence.String(), true
-}
-
-func hasShiftModifier(value string) bool {
-	modifierText, _, _ := strings.Cut(value, ":")
-	modifier, err := strconv.Atoi(modifierText)
-	if err != nil {
-		return false
-	}
-	const shiftModifierBit = 1
-	return modifier > 1 && (modifier-1)&shiftModifierBit != 0
+		return r
+	}, text)
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
-	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(stringer.String()) {
-		m.insertTextareaNewline()
-		return m, nil
+	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
+		return m, m.insertTextareaNewline()
 	}
 
 	var cmds []tea.Cmd
@@ -128,6 +75,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)
+
+	case tea.BackgroundColorMsg:
+		if m.themeSelection != AutoThemeName {
+			break
+		}
+		theme, err := resolveTheme(automaticThemeName(msg.IsDark()))
+		if err != nil {
+			break
+		}
+		return m, m.applyResolvedTheme(theme)
 
 	case extensionUIFlushMsg:
 		if m.extensionUI == nil {
@@ -478,7 +435,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyConversationList(msg)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		if m.shortcutsOpen {
+			return m, nil
+		}
+		if m.activeUIPrompt != nil {
+			break
+		}
+		if m.conversationPicker != nil {
+			m.appendConversationPickerQuery(normalizeSingleLinePaste(msg.Content))
+			return m, nil
+		}
+		if key, ok := m.focusedExtensionSurfaceKey(); ok {
+			surface := m.extensionSurfaces[key]
+			// Bubble Tea v1 wrapped pasted key strings in brackets. Preserve that
+			// public surface-input representation while carrying raw text separately.
+			return m, m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, "["+msg.Content+"]", msg.Content, false, false, false, nil)
+		}
+		if m.historySearch != nil {
+			m.appendHistorySearchQuery(normalizeSingleLinePaste(msg.Content))
+			m.resize()
+			return m, nil
+		}
+
+	case tea.KeyPressMsg:
 		key := msg.String()
 		if m.shortcutsOpen {
 			switch key {
@@ -518,7 +498,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 			return m, nil
 		}
-		if shortcut, ok := m.extensionShortcutForKey(key); ok {
+		if shortcut, ok := m.extensionShortcutForKey(msg.Keystroke()); ok {
 			return m, m.startExtensionShortcut(shortcut)
 		}
 		switch key {
@@ -673,8 +653,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		mouse := msg.Mouse()
+		action := mouseActionFor(msg)
 		if m.shortcutsOpen {
-			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
 				oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
 				var oldFocus tuiExtensionSurface
 				if oldFocused {
@@ -698,26 +680,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.routeExtensionWidgetMouse(msg) {
 			return m, nil
 		}
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if optionIndex, ok := m.profilePickerOptionAt(msg.X, msg.Y); ok {
+		if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
+			if optionIndex, ok := m.profilePickerOptionAt(mouse.X, mouse.Y); ok {
 				m.selectProfilePickerOption(optionIndex)
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.profileComposerRegionContains(msg.X, msg.Y) {
+			if m.profileComposerRegionContains(mouse.X, mouse.Y) {
 				m.toggleProfilePickerFromClick()
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if optionIndex, ok := m.reasoningPickerOptionAt(msg.X, msg.Y); ok {
+			if optionIndex, ok := m.reasoningPickerOptionAt(mouse.X, mouse.Y); ok {
 				m.selectReasoningPickerOption(optionIndex)
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.reasoningComposerRegionContains(msg.X, msg.Y) {
+			if m.reasoningComposerRegionContains(mouse.X, mouse.Y) {
 				m.toggleReasoningPickerFromClick()
 				m.resize()
 				m.refreshViewport(false)
@@ -735,7 +717,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.toggleDetailAt(msg.Y) {
+			if m.toggleDetailAt(mouse.Y) {
 				m.refreshViewport(false)
 				return m, nil
 			}
@@ -874,8 +856,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.running && m.transcriptElapsedPlaceholderOverflow(now) {
 			m.refreshViewport(m.autoFollow)
 		}
-		// The 100ms spinner tick doubles as the terminal-title refresh heartbeat.
-		cmds = append(cmds, cmd, m.refreshTerminalTitle(now))
+		cmds = append(cmds, cmd)
 	}
 
 	if m.activeUIPrompt != nil {
@@ -913,7 +894,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
+func (m *model) updateUIPromptKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "ctrl+c", "ctrl+d":
 		return m.dismissUIPrompt()
@@ -961,44 +942,68 @@ func shouldUpdateViewport(msg tea.Msg) bool {
 }
 
 func (m *model) updateViewport(msg tea.Msg, cmd *tea.Cmd) {
-	before := m.viewport.YOffset
+	before := m.viewport.YOffset()
 	var vpCmd tea.Cmd
 	m.viewport, vpCmd = m.viewport.Update(msg)
 	if cmd != nil {
 		*cmd = vpCmd
 	}
-	if before != m.viewport.YOffset && isVerticalViewportNavigation(msg) {
+	if before != m.viewport.YOffset() && isVerticalViewportNavigation(msg) {
 		m.autoFollow = m.viewport.AtBottom()
 	}
 }
 
 func isVerticalViewportNavigation(msg tea.Msg) bool {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "pgup", "pgdown":
 			return true
 		}
 	case tea.MouseMsg:
-		if msg.Action != tea.MouseActionPress || msg.Shift {
+		mouse := msg.Mouse()
+		if mouseActionFor(msg) != tuiMouseActionPress || mouse.Mod.Contains(tea.ModShift) {
 			return false
 		}
-		return msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown
+		return mouse.Button == tea.MouseWheelUp || mouse.Button == tea.MouseWheelDown
 	}
 	return false
 }
 
 func isHorizontalViewportMouseNavigation(msg tea.MouseMsg) bool {
-	if msg.Action != tea.MouseActionPress {
+	if mouseActionFor(msg) != tuiMouseActionPress {
 		return false
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight:
+	mouse := msg.Mouse()
+	switch mouse.Button {
+	case tea.MouseWheelLeft, tea.MouseWheelRight:
 		return true
-	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
-		return msg.Shift
+	case tea.MouseWheelUp, tea.MouseWheelDown:
+		return mouse.Mod.Contains(tea.ModShift)
 	default:
 		return false
+	}
+}
+
+type tuiMouseAction uint8
+
+const (
+	tuiMouseActionUnknown tuiMouseAction = iota
+	tuiMouseActionPress
+	tuiMouseActionRelease
+	tuiMouseActionMotion
+)
+
+func mouseActionFor(msg tea.MouseMsg) tuiMouseAction {
+	switch msg.(type) {
+	case tea.MouseClickMsg, tea.MouseWheelMsg:
+		return tuiMouseActionPress
+	case tea.MouseReleaseMsg:
+		return tuiMouseActionRelease
+	case tea.MouseMotionMsg:
+		return tuiMouseActionMotion
+	default:
+		return tuiMouseActionUnknown
 	}
 }
 
@@ -1161,12 +1166,12 @@ func (m *model) resize() {
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
-	m.viewport.Width = m.contentWidth()
-	m.viewport.Height = viewportHeight
+	m.viewport.SetWidth(m.contentWidth())
+	m.viewport.SetHeight(viewportHeight)
 	m.textarea.SetWidth(max(1, m.inputContentWidth()))
 	m.textarea.SetHeight(inputHeight)
 	if m.activeUIPrompt != nil && m.activeUIPrompt.mode == uiPromptInput {
-		m.activeUIPrompt.input.Width = uiPromptTextInputWidth(m.uiDialogInputWidth())
+		m.activeUIPrompt.input.SetWidth(uiPromptTextInputWidth(m.uiDialogInputWidth()))
 	}
 }
 
@@ -1658,6 +1663,8 @@ func (m *model) finishActiveBlocks() {
 	}
 }
 
-func (m *model) insertTextareaNewline() {
-	m.textarea.InsertString("\n")
+func (m *model) insertTextareaNewline() tea.Cmd {
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	return cmd
 }
