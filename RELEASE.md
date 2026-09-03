@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.44-beta
+
+Added generic presentation metadata for extension tools, with custom compact summaries and optional text or Markdown details rendered consistently in the native TUI and Web UI through validated TypeScript SDK types.
+
+Refined Web UI tool and transcript presentation with simpler web search and fetch details, clearer Markdown table borders, and stable compact working-directory grouping while conversations stream.
+
+Updated vulnerable TypeScript SDK dependencies.
+
 ## 0.5.43-beta
 
 Added per-conversation working directories for workspace runners in the Web UI and remote TUI, with runner-host path resolution, validation, persistence, and startup-workspace defaults while terminal and Git diff remain rooted at the runner workspace.
