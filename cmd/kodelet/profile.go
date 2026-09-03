@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/pkg/errors"
@@ -21,13 +22,15 @@ import (
 )
 
 const (
-	ScopeBuiltIn       = "built-in"
-	ScopeRepo          = "repo"
-	ScopeGlobal        = "global"
-	ScopeRepoOverrides = "repo (overrides global)"
-	ScopeSourceRepo    = "repo"
-	ScopeSourceGlobal  = "global"
-	ScopeSourceBoth    = "both"
+	ScopeBuiltIn        = "built-in"
+	ScopeRepo           = "repo"
+	ScopeGlobal         = "global"
+	ScopeOverride       = "override"
+	ScopeRepoOverrides  = "repo (overrides global)"
+	ScopeSourceRepo     = "repo"
+	ScopeSourceGlobal   = "global"
+	ScopeSourceOverride = "override"
+	ScopeSourceBoth     = "both"
 )
 
 var profileCmd = &cobra.Command{
@@ -40,33 +43,43 @@ var profileCurrentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Show the current active profile",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		repoProfile := getRepoProfileSetting()
-		globalProfile := getGlobalProfileSetting()
-
-		if repoProfile == "default" || repoProfile == "" {
-			if globalProfile == "default" || globalProfile == "" {
-				presenter.Info("Using default configuration (no profile active)")
-			} else {
-				presenter.Success(fmt.Sprintf("Current profile: %s (from global config)", globalProfile))
-			}
-		} else {
-			presenter.Success(fmt.Sprintf("Current profile: %s (from repo config)", repoProfile))
+		profile, source := llm.ActiveProfileSetting()
+		profile = strings.TrimSpace(profile)
+		if profile == "" || strings.EqualFold(profile, "default") {
+			presenter.Info("Using default configuration (no profile active)")
+			return nil
 		}
+
+		location := ""
+		switch source {
+		case llm.ProfileSourceGlobal:
+			location = "global config"
+		case llm.ProfileSourceRepo:
+			location = "repo config"
+		case llm.ProfileSourceOverride:
+			location = "override config"
+		}
+		if location == "" {
+			presenter.Success(fmt.Sprintf("Current profile: %s", profile))
+			return nil
+		}
+		presenter.Success(fmt.Sprintf("Current profile: %s (from %s)", profile, location))
 		return nil
 	},
 }
 
 var profileListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all available profiles from both global and repo configs",
+	Short: "List all available configuration profiles",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		globalProfiles := getGlobalProfiles()
-		repoProfiles := getRepoProfiles()
-		mergedProfiles := mergeProfiles(globalProfiles, repoProfiles)
+		globalProfiles := llm.GlobalProfiles()
+		repoProfiles := llm.RepoProfiles()
+		overrideProfiles := llm.OverrideProfiles()
+		mergedProfiles := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
 
-		activeProfile := viper.GetString("profile")
+		activeProfile := strings.TrimSpace(viper.GetString("profile"))
 		activeProfileName := activeProfile
-		if activeProfile == "default" {
+		if strings.EqualFold(activeProfile, "default") {
 			activeProfileName = ""
 		}
 
@@ -96,6 +109,8 @@ var profileListCmd = &cobra.Command{
 					scope = ScopeRepoOverrides
 				case ScopeSourceGlobal:
 					scope = ScopeGlobal
+				case ScopeSourceOverride:
+					scope = ScopeOverride
 				default:
 					scope = ScopeRepo
 				}
@@ -116,37 +131,18 @@ var profileShowCmd = &cobra.Command{
 		profileName := args[0]
 		format, _ := cmd.Flags().GetString("format")
 
-		currentProfile := viper.GetString("profile")
-		defer viper.Set("profile", currentProfile)
-
-		if profileName != "default" {
-			globalProfiles := getGlobalProfiles()
-			repoProfiles := getRepoProfiles()
-
-			profileExists := false
-			if globalProfiles != nil {
-				if _, exists := globalProfiles[profileName]; exists {
-					profileExists = true
-				}
-			}
-			if repoProfiles != nil {
-				if _, exists := repoProfiles[profileName]; exists {
-					profileExists = true
-				}
-			}
-
-			if !profileExists {
+		var (
+			config llmtypes.Config
+			err    error
+		)
+		if profileName == "default" {
+			config, err = llm.GetConfigFromViperWithoutProfile()
+		} else {
+			if !llm.HasConfiguredProfile(profileName) {
 				return fmt.Errorf("profile '%s' not found", profileName)
 			}
+			config, err = llm.GetConfigFromViperWithProfile(profileName)
 		}
-
-		if profileName == "default" {
-			viper.Set("profile", "")
-		} else {
-			viper.Set("profile", profileName)
-		}
-
-		config, err := llm.GetConfigFromViper()
 		if err != nil {
 			return errors.Wrap(err, "failed to load configuration")
 		}
@@ -188,6 +184,10 @@ Use "default" to use base configuration without any profile.`,
 		profileName := args[0]
 		global, _ := cmd.Flags().GetBool("global")
 
+		if err := ensureProfileSelectionWritable(global); err != nil {
+			return err
+		}
+
 		if profileName != "default" {
 			mergedProfiles := getMergedProfiles()
 			if _, exists := mergedProfiles[profileName]; !exists {
@@ -214,103 +214,7 @@ func init() {
 	profileUseCmd.Flags().BoolP("global", "g", false, "Update global config instead of repo config")
 }
 
-func getRepoProfileSetting() string {
-	v := viper.New()
-	v.SetConfigName("kodelet-config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-
-	if err := v.ReadInConfig(); err != nil {
-		return ""
-	}
-
-	return v.GetString("profile")
-}
-
-func getGlobalProfileSetting() string {
-	v := viper.New()
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	v.AddConfigPath(filepath.Join(homeDir, ".kodelet"))
-
-	if err := v.ReadInConfig(); err != nil {
-		return ""
-	}
-
-	return v.GetString("profile")
-}
-
-func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
-	v := viper.New()
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	v.AddConfigPath(filepath.Join(homeDir, ".kodelet"))
-
-	if err := v.ReadInConfig(); err != nil {
-		return nil
-	}
-
-	if !v.IsSet("profiles") {
-		return nil
-	}
-
-	profilesMap := v.GetStringMap("profiles")
-	profiles := make(map[string]llmtypes.ProfileConfig)
-
-	for name, profileData := range profilesMap {
-		if name == "default" {
-			continue
-		}
-
-		if profileMap, ok := profileData.(map[string]any); ok {
-			profiles[name] = llmtypes.ProfileConfig(profileMap)
-		}
-	}
-
-	return profiles
-}
-
-func getRepoProfiles() map[string]llmtypes.ProfileConfig {
-	v := viper.New()
-	v.SetConfigName("kodelet-config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-
-	if err := v.ReadInConfig(); err != nil {
-		return nil
-	}
-
-	if !v.IsSet("profiles") {
-		return nil
-	}
-
-	profilesMap := v.GetStringMap("profiles")
-	profiles := make(map[string]llmtypes.ProfileConfig)
-
-	for name, profileData := range profilesMap {
-		if name == "default" {
-			continue
-		}
-
-		if profileMap, ok := profileData.(map[string]any); ok {
-			profiles[name] = llmtypes.ProfileConfig(profileMap)
-		}
-	}
-
-	return profiles
-}
-
-func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfig) map[string]string {
+func mergeProfiles(globalProfiles, repoProfiles, overrideProfiles map[string]llmtypes.ProfileConfig) map[string]string {
 	merged := make(map[string]string)
 
 	for name := range globalProfiles {
@@ -325,13 +229,50 @@ func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfi
 		}
 	}
 
+	for name := range overrideProfiles {
+		merged[name] = ScopeSourceOverride
+	}
+
 	return merged
 }
 
 func getMergedProfiles() map[string]string {
-	globalProfiles := getGlobalProfiles()
-	repoProfiles := getRepoProfiles()
-	return mergeProfiles(globalProfiles, repoProfiles)
+	return mergeProfiles(llm.GlobalProfiles(), llm.RepoProfiles(), llm.OverrideProfiles())
+}
+
+func ensureProfileSelectionWritable(global bool) error {
+	overridePath := strings.TrimSpace(os.Getenv(llm.ConfigFileEnv))
+	if overridePath == "" {
+		return nil
+	}
+	targetPath, err := getConfigFilePath(global)
+	if err != nil {
+		return err
+	}
+	if sameConfigFile(overridePath, targetPath) {
+		return nil
+	}
+	if llm.UsesIsolatedConfigFile() {
+		return errors.Errorf("cannot switch profiles while %s is %q; update %q directly", llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated, overridePath)
+	}
+	if _, configured := llm.OverrideProfileSetting(); configured {
+		return errors.Errorf("cannot switch profiles because %q sets the active profile and overrides repo and global configuration; update it directly", overridePath)
+	}
+	return nil
+}
+
+func sameConfigFile(first, second string) bool {
+	firstPath, firstErr := filepath.Abs(first)
+	secondPath, secondErr := filepath.Abs(second)
+	if firstErr != nil || secondErr != nil {
+		return false
+	}
+	firstInfo, firstErr := os.Stat(firstPath)
+	secondInfo, secondErr := os.Stat(secondPath)
+	if firstErr == nil && secondErr == nil {
+		return os.SameFile(firstInfo, secondInfo)
+	}
+	return filepath.Clean(firstPath) == filepath.Clean(secondPath)
 }
 
 func getConfigFilePath(global bool) (string, error) {

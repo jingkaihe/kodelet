@@ -25,6 +25,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1350,6 +1351,81 @@ func TestServer_handleGetPendingSteer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response, 1)
 	assert.Equal(t, "Queued guidance", response[0].Content)
+}
+
+// Regression test: when the config is supplied only through KODELET_CONFIG_FILE
+// (as in the containerised control plane, where $HOME/.kodelet is an empty
+// volume), the web UI profile picker used to list nothing but "default".
+func TestGetWebUIProfileOptionsHonoursConfigFileEnv(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	t.Setenv("HOME", t.TempDir())
+	oldCWD, err := os.Getwd()
+	require.NoError(t, err)
+	repoDir := t.TempDir()
+	require.NoError(t, os.Chdir(repoDir))
+	t.Cleanup(func() { require.NoError(t, os.Chdir(oldCWD)) })
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, llm.RepoConfigFile), []byte("profiles:\n  repo-only:\n    provider: anthropic\n"), 0o644))
+
+	overridePath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(overridePath, []byte("profile: deep\nprofiles:\n  flair:\n    provider: anthropic\n  deep:\n    provider: openai\n"), 0o644))
+	t.Setenv(llm.ConfigFileEnv, overridePath)
+	t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
+
+	viper.Reset()
+	viper.Set("profile", "deep")
+
+	options := getWebUIProfileOptions()
+
+	require.Len(t, options, 3)
+	assert.Equal(t, ChatProfileOption{Name: "default", Scope: webUIBuiltInProfileScope}, options[0])
+	assert.Equal(t, ChatProfileOption{Name: "deep", Scope: webUIOverrideProfileScope, Active: true}, options[1])
+	assert.Equal(t, ChatProfileOption{Name: "flair", Scope: webUIOverrideProfileScope}, options[2])
+}
+
+func TestGetWebUIProfileOptionsPreservesOverridePrecedence(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(homeDir, ".kodelet"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(homeDir, ".kodelet", "config.yaml"), []byte("profiles:\n  global-only:\n    provider: anthropic\n  shared:\n    provider: anthropic\n"), 0o644))
+
+	repoDir := t.TempDir()
+	oldCWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(repoDir))
+	t.Cleanup(func() { require.NoError(t, os.Chdir(oldCWD)) })
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, llm.RepoConfigFile), []byte("profiles:\n  repo-only:\n    provider: openai\n  shared:\n    provider: openai\n"), 0o644))
+
+	overridePath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(overridePath, []byte("profiles:\n  override-only:\n    provider: openai\n  shared:\n    provider: openai\n"), 0o644))
+	t.Setenv(llm.ConfigFileEnv, overridePath)
+	t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
+
+	viper.Reset()
+	viper.Set("profile", "shared")
+
+	options := getWebUIProfileOptions()
+
+	require.Len(t, options, 5)
+	assert.Equal(t, ChatProfileOption{Name: "default", Scope: webUIBuiltInProfileScope}, options[0])
+	assert.Equal(t, ChatProfileOption{Name: "global-only", Scope: webUIGlobalProfileScope}, options[1])
+	assert.Equal(t, ChatProfileOption{Name: "override-only", Scope: webUIOverrideProfileScope}, options[2])
+	assert.Equal(t, ChatProfileOption{Name: "repo-only", Scope: webUIRepoProfileScope}, options[3])
+	assert.Equal(t, ChatProfileOption{Name: "shared", Scope: webUIOverrideProfileScope, Active: true}, options[4])
 }
 
 func TestServer_handleGetChatSettings(t *testing.T) {

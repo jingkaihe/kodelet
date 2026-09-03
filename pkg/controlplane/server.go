@@ -1246,9 +1246,11 @@ const (
 	webUIBuiltInProfileScope       = "built-in"
 	webUIRepoProfileScope          = "repo"
 	webUIGlobalProfileScope        = "global"
+	webUIOverrideProfileScope      = "override"
 	webUIRepoOverridesProfileScope = "repo (overrides global)"
 	webUIProfileSourceRepo         = "repo"
 	webUIProfileSourceGlobal       = "global"
+	webUIProfileSourceOverride     = "override"
 	webUIProfileSourceBoth         = "both"
 )
 
@@ -1434,62 +1436,7 @@ func resolveConversationReasoningEffort(response *conversations.GetConversationR
 	return config.ReasoningEffort
 }
 
-func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
-	v := viper.New()
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	v.AddConfigPath(filepath.Join(homeDir, ".kodelet"))
-
-	if err := v.ReadInConfig(); err != nil {
-		return nil
-	}
-
-	return extractProfiles(v)
-}
-
-func getRepoProfiles() map[string]llmtypes.ProfileConfig {
-	v := viper.New()
-	v.SetConfigName("kodelet-config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-
-	if err := v.ReadInConfig(); err != nil {
-		return nil
-	}
-
-	return extractProfiles(v)
-}
-
-func extractProfiles(v *viper.Viper) map[string]llmtypes.ProfileConfig {
-	if !v.IsSet("profiles") {
-		return nil
-	}
-
-	profilesMap := v.GetStringMap("profiles")
-	profiles := make(map[string]llmtypes.ProfileConfig)
-	for name, profileData := range profilesMap {
-		if strings.EqualFold(name, "default") {
-			continue
-		}
-		profileMap, ok := profileData.(map[string]any)
-		if !ok {
-			continue
-		}
-		profiles[name] = llmtypes.ProfileConfig(profileMap)
-	}
-
-	if len(profiles) == 0 {
-		return nil
-	}
-	return profiles
-}
-
-func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfig) map[string]string {
+func mergeProfiles(globalProfiles, repoProfiles, overrideProfiles map[string]llmtypes.ProfileConfig) map[string]string {
 	merged := make(map[string]string)
 
 	for name := range globalProfiles {
@@ -1504,13 +1451,18 @@ func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfi
 		}
 	}
 
+	for name := range overrideProfiles {
+		merged[name] = webUIProfileSourceOverride
+	}
+
 	return merged
 }
 
 func getWebUIProfileOptions() []ChatProfileOption {
-	globalProfiles := getGlobalProfiles()
-	repoProfiles := getRepoProfiles()
-	mergedProfiles := mergeProfiles(globalProfiles, repoProfiles)
+	globalProfiles := llm.GlobalProfiles()
+	repoProfiles := llm.RepoProfiles()
+	overrideProfiles := llm.OverrideProfiles()
+	mergedProfiles := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
 	activeProfile := strings.TrimSpace(viper.GetString("profile"))
 	if strings.EqualFold(activeProfile, "default") {
 		activeProfile = ""
@@ -1536,6 +1488,8 @@ func getWebUIProfileOptions() []ChatProfileOption {
 			scope = webUIRepoOverridesProfileScope
 		case webUIProfileSourceGlobal:
 			scope = webUIGlobalProfileScope
+		case webUIProfileSourceOverride:
+			scope = webUIOverrideProfileScope
 		}
 
 		profiles = append(profiles, ChatProfileOption{

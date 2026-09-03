@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,33 +44,58 @@ profiles:
 `
 	require.NoError(t, os.WriteFile(globalConfigPath, []byte(globalConfig), 0o644))
 
-	assert.Equal(t, "repo-active", getRepoProfileSetting())
-	assert.Equal(t, "global-active", getGlobalProfileSetting())
+	assert.Equal(t, "repo-active", llm.RepoProfileSetting())
+	assert.Equal(t, "global-active", llm.GlobalProfileSetting())
 
-	repoProfiles := getRepoProfiles()
+	repoProfiles := llm.RepoProfiles()
 	assert.Contains(t, repoProfiles, "repo-only")
 	assert.Contains(t, repoProfiles, "shared")
 	assert.NotContains(t, repoProfiles, "default")
 
-	globalProfiles := getGlobalProfiles()
+	globalProfiles := llm.GlobalProfiles()
 	assert.Contains(t, globalProfiles, "global-only")
 	assert.Contains(t, globalProfiles, "shared")
 	assert.NotContains(t, globalProfiles, "default")
 
-	merged := mergeProfiles(globalProfiles, repoProfiles)
+	merged := mergeProfiles(globalProfiles, repoProfiles, nil)
 	assert.Equal(t, ScopeSourceGlobal, merged["global-only"])
 	assert.Equal(t, ScopeSourceRepo, merged["repo-only"])
 	assert.Equal(t, ScopeSourceBoth, merged["shared"])
 	assert.Equal(t, merged, getMergedProfiles())
 }
 
+func TestMergeProfilesExplicitOverrideWins(t *testing.T) {
+	globalProfiles := map[string]llmtypes.ProfileConfig{
+		"global-only": {"provider": "anthropic"},
+		"shared":      {"provider": "anthropic"},
+		"both":        {"provider": "anthropic"},
+	}
+	repoProfiles := map[string]llmtypes.ProfileConfig{
+		"repo-only": {"provider": "openai"},
+		"shared":    {"provider": "openai"},
+		"both":      {"provider": "openai"},
+	}
+	overrideProfiles := map[string]llmtypes.ProfileConfig{
+		"override-only": {"provider": "openai"},
+		"shared":        {"provider": "openai"},
+	}
+
+	merged := mergeProfiles(globalProfiles, repoProfiles, overrideProfiles)
+
+	assert.Equal(t, ScopeSourceGlobal, merged["global-only"])
+	assert.Equal(t, ScopeSourceRepo, merged["repo-only"])
+	assert.Equal(t, ScopeSourceBoth, merged["both"])
+	assert.Equal(t, ScopeSourceOverride, merged["override-only"])
+	assert.Equal(t, ScopeSourceOverride, merged["shared"])
+}
+
 func TestProfileMissingConfigReturnsEmptyValues(t *testing.T) {
 	withTempHomeAndCWD(t, t.TempDir(), t.TempDir())
 
-	assert.Empty(t, getRepoProfileSetting())
-	assert.Empty(t, getGlobalProfileSetting())
-	assert.Nil(t, getRepoProfiles())
-	assert.Nil(t, getGlobalProfiles())
+	assert.Empty(t, llm.RepoProfileSetting())
+	assert.Empty(t, llm.GlobalProfileSetting())
+	assert.Nil(t, llm.RepoProfiles())
+	assert.Nil(t, llm.GlobalProfiles())
 }
 
 func TestProfileHelpers(t *testing.T) {
@@ -86,6 +112,81 @@ func TestProfileHelpers(t *testing.T) {
 
 	assert.Equal(t, "Switched to default configuration in repo config", getProfileSwitchMessage("default", false))
 	assert.Equal(t, "Switched to profile 'fast' in global config", getProfileSwitchMessage("fast", true))
+}
+
+func TestEnsureProfileSelectionWritable(t *testing.T) {
+	writeOverride := func(t *testing.T, contents string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+		return path
+	}
+
+	t.Run("allows normal config", func(t *testing.T) {
+		t.Setenv(llm.ConfigFileEnv, "")
+		t.Setenv(llm.ConfigFileModeEnv, "")
+		require.NoError(t, ensureProfileSelectionWritable(false))
+	})
+
+	t.Run("rejects isolated config", func(t *testing.T) {
+		path := writeOverride(t, "profiles:\n  work:\n    provider: openai\n")
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
+
+		err := ensureProfileSelectionWritable(false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), llm.ConfigFileModeIsolated)
+		assert.Contains(t, err.Error(), path)
+	})
+
+	t.Run("rejects override profile setting", func(t *testing.T) {
+		path := writeOverride(t, "profile: locked\n")
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
+
+		err := ensureProfileSelectionWritable(false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), path)
+	})
+
+	t.Run("rejects explicit null override profile", func(t *testing.T) {
+		path := writeOverride(t, "profile: null\n")
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
+
+		require.Error(t, ensureProfileSelectionWritable(false))
+	})
+
+	t.Run("allows override without profile setting", func(t *testing.T) {
+		path := writeOverride(t, "profiles:\n  work:\n    provider: openai\n")
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
+
+		require.NoError(t, ensureProfileSelectionWritable(false))
+	})
+
+	t.Run("allows isolated override when updating the same repo file", func(t *testing.T) {
+		repo := t.TempDir()
+		t.Chdir(repo)
+		path := filepath.Join(repo, llm.RepoConfigFile)
+		require.NoError(t, os.WriteFile(path, []byte("profile: locked\n"), 0o644))
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
+
+		require.NoError(t, ensureProfileSelectionWritable(false))
+	})
+
+	t.Run("allows override when updating the same global file", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		path := filepath.Join(home, ".kodelet", "config.yaml")
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("profile: locked\n"), 0o644))
+		t.Setenv(llm.ConfigFileEnv, path)
+		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
+
+		require.NoError(t, ensureProfileSelectionWritable(true))
+	})
 }
 
 func TestUpdateProfileInConfig(t *testing.T) {
@@ -154,6 +255,8 @@ func withTempHomeAndCWD(t *testing.T, home, cwd string) {
 	t.Helper()
 
 	t.Setenv("HOME", home)
+	t.Setenv(llm.ConfigFileEnv, "")
+	t.Setenv(llm.ConfigFileModeEnv, "")
 	oldCWD, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(cwd))

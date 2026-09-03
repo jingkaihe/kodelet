@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -19,13 +20,13 @@ import (
 )
 
 const (
-	configFileEnv            = "KODELET_CONFIG_FILE"
-	configFileModeEnv        = "KODELET_CONFIG_FILE_MODE"
+	configFileEnv            = llm.ConfigFileEnv
+	configFileModeEnv        = llm.ConfigFileModeEnv
 	controlPlaneServerEnv    = "KODELET_SERVER"
 	controlPlaneAuthTokenEnv = "KODELET_AUTH_TOKEN"
 	runnerAuthTokenEnv       = "KODELET_RUNNER_AUTH_TOKEN"
-	configFileModeMerge      = "merge"
-	configFileModeIsolate    = "isolated"
+	configFileModeMerge      = llm.ConfigFileModeMerge
+	configFileModeIsolate    = llm.ConfigFileModeIsolated
 )
 
 var configFileLoadError error

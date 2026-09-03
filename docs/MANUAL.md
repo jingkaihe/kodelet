@@ -931,6 +931,8 @@ kodelet profile use openai -g     # Switch in global config (~/.kodelet/config.y
 kodelet profile use default       # Use base configuration without any profile
 ```
 
+Profiles supplied by `KODELET_CONFIG_FILE` are listed with `override` scope and take precedence over repository and global definitions. `kodelet profile use` writes only the standard repository or global config path; if a different override file is authoritative because isolated mode is active or it sets `profile`, update that override file directly.
+
 **Practical workflow examples:**
 ```bash
 # Check what's currently active, then switch to a different profile
