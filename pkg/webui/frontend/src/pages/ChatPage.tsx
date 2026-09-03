@@ -264,6 +264,30 @@ const buildConversationPreview = (
   return 'Untitled conversation';
 };
 
+const reconcileStreamCWDForDisplay = (
+  canonicalCWD: string | undefined,
+  currentCWD: string,
+  isRemote: boolean
+): string => {
+  const canonical = canonicalCWD?.trim();
+  const current = currentCWD.trim();
+  if (!canonical) {
+    return current;
+  }
+
+  // Conversation APIs compact paths under the control-plane home directory. Preserve that
+  // display form when the live local stream confirms the equivalent absolute path.
+  if (
+    !isRemote &&
+    (current === '~' || current.startsWith('~/')) &&
+    (current === '~' || canonical.endsWith(current.slice(1)))
+  ) {
+    return current;
+  }
+
+  return canonical;
+};
+
 const getConversationTimestamp = (conversation: Conversation): number => {
   const timestamp =
     conversation.updatedAt ??
@@ -2288,7 +2312,11 @@ const ChatPage: React.FC = () => {
             if (event.kind === 'conversation' && event.conversation_id) {
               const streamedId = event.conversation_id;
               const canonicalCWD = event.cwd?.trim();
-              const effectiveCWD = canonicalCWD || currentCWDLabel;
+              const effectiveCWD = reconcileStreamCWDForDisplay(
+                canonicalCWD,
+                currentCWDLabel,
+                isRemoteConversation
+              );
               const previousStreamedId = streamedConversationId;
               const shouldAdoptStreamedConversation =
                 viewedConversationIdRef.current === viewConversationIdAtStart ||

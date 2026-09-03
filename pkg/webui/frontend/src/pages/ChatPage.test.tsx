@@ -3503,6 +3503,69 @@ describe('ChatPage', () => {
     expect(screen.getAllByRole('button', { name: /Brand new task/i })[0]).toBeInTheDocument();
   });
 
+  it('keeps a new local conversation in its compact home directory group while streaming', async () => {
+    mockGetChatSettings.mockResolvedValue({
+      currentProfile: 'work',
+      defaultCWD: '~/workspace/kodelet',
+      profiles: [
+        { name: 'default', scope: 'built-in' },
+        { name: 'work', scope: 'repo' },
+      ],
+      reasoningEffort: 'medium',
+      reasoningEffortOptions: ['low', 'medium', 'high'],
+    });
+    mockGetConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conv-existing',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Existing conversation',
+          cwd: '~/workspace/kodelet',
+        },
+      ],
+      hasMore: false,
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null = null;
+    mockStreamChat.mockImplementation(
+      async (_request, options) =>
+        new Promise<void>(() => {
+          streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+        })
+    );
+
+    const { container } = render(<ChatPage />);
+
+    await screen.findByTestId('conversation-row-conv-existing');
+    await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'Brand new task' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    const conversationId = mockStreamChat.mock.calls[0]?.[0]?.conversationId as string;
+
+    await act(async () => {
+      streamOptions?.onEvent({
+        kind: 'conversation',
+        conversation_id: conversationId,
+        cwd: '/home/jingkaihe/workspace/kodelet',
+      });
+    });
+
+    expect(container.querySelectorAll('.conversation-group')).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: /~\/workspace\/kodelet 2/i })
+    ).toBeInTheDocument();
+    expect(screen.queryByText('/home/jingkaihe/workspace/kodelet')).not.toBeInTheDocument();
+  });
+
   it('forks a conversation from the sidebar menu', async () => {
     mockGetConversations.mockResolvedValue({
       conversations: [
