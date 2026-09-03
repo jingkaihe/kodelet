@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.5.46-beta
+
+Upgraded the native TUI to Charm v2, adding bracketed paste support that preserves multiline composer input and safely normalizes pasted text in search and conversation pickers.
+
+Improved automatic light and dark theme selection using the terminal's reported background color, and normalized keyboard, mouse, and extension surface input handling across terminals.
+
 ## 0.5.45-beta
 
 Added profile discovery from `KODELET_CONFIG_FILE` across the CLI, native TUI, and Web UI, with override scope labeling and correct global, repository, and override precedence in merge and isolated modes.
