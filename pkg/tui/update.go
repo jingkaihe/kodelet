@@ -778,6 +778,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForMsg(m.runCh)
 		}
 		observed := run != nil && run.observed
+		if run != nil && msg.event.Cancelled {
+			run.cancelled = true
+		}
 		if observed && state.streamRunID != msg.runID {
 			return m, waitForMsg(m.runCh)
 		}
@@ -906,7 +909,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForMsg(m.runCh)
 		}
 		active := state == m.conversationState
-		wasCancelling := state.runCancelling
+		run := m.runs[msg.runID]
+		wasCancelled := state.runCancelling || errors.Is(msg.err, context.Canceled) || (run != nil && run.cancelled)
 		if msg.conversationID != "" {
 			m.setConversationID(state, msg.conversationID)
 		}
@@ -921,12 +925,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runCancelling = false
 		m.cancelRun = nil
 		m.activeRunID = 0
-		if msg.err != nil && !wasCancelling {
+		if msg.err != nil && !wasCancelled {
 			m.err = msg.err
 			m.status = "error"
 			idx := m.ensureAssistantEntry()
 			appendTextBlock(&m.entries[idx], fmt.Sprintf("Error: %v", msg.err))
-		} else if wasCancelling {
+		} else if wasCancelled {
 			m.status = "cancelled"
 		} else {
 			m.status = "ready"
@@ -936,7 +940,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !active {
 			m.unread = true
 		}
-		runSucceeded := msg.err == nil && !wasCancelling
+		runSucceeded := msg.err == nil && !wasCancelled
 		queuedFollowUp := ""
 		if runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
 			queuedFollowUp = m.queuedFollowUps[0]
@@ -945,7 +949,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.queuedFollowUps = nil
 		}
 		m.conversationState = currentState
-		if run := m.runs[msg.runID]; run != nil {
+		if run != nil {
 			delete(m.runByState, run.conversationKey)
 		}
 		delete(m.runs, msg.runID)
@@ -1322,7 +1326,7 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 	}
 	active := state == m.conversationState
 	wasRunning := state.running && state.activeRunID == runID
-	wasCancelling := state.runCancelling
+	wasCancelled := state.runCancelling || event.Cancelled
 	var promptFocusCmd tea.Cmd
 	if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && state.activeUIPrompt.runID == runID {
 		promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
@@ -1336,14 +1340,14 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 		m.runCancelling = false
 		m.cancelRun = nil
 		m.activeRunID = 0
-		if event.Kind == "error" && !wasCancelling {
+		if event.Kind == "error" && !wasCancelled {
 			message := strings.TrimSpace(event.Error)
 			if message == "" {
 				message = "remote conversation failed"
 			}
 			m.err = errors.New(message)
 			m.status = "error"
-		} else if wasCancelling {
+		} else if wasCancelled {
 			m.status = "cancelled"
 		} else {
 			m.status = "ready"
@@ -1359,7 +1363,7 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 		m.status = "error"
 	}
 	turn := m.streamTurn
-	runSucceeded := event.Kind == "done" && !wasCancelling
+	runSucceeded := event.Kind == "done" && !wasCancelled
 	queuedFollowUp := ""
 	if wasRunning && runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
 		queuedFollowUp = m.queuedFollowUps[0]

@@ -1944,6 +1944,58 @@ func TestServer_handleChatContinuesAfterInitiatingStreamDisconnect(t *testing.T)
 	assert.Equal(t, "second", events[3].Delta)
 }
 
+func TestServer_handleChatMarksCancelledCompletion(t *testing.T) {
+	const conversationID = "conv-123"
+	runnerStarted := make(chan struct{})
+	subscriber := newSubscriberEventSink()
+	t.Cleanup(subscriber.Close)
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers: map[string]map[*subscriberEventSink]struct{}{
+			conversationID: {subscriber: {}},
+		},
+		chatRunner: &mockChatRunner{
+			runFunc: func(ctx context.Context, _ ChatRequest, _ ChatEventSink) (string, error) {
+				close(runnerStarted)
+				<-ctx.Done()
+				return conversationID, ctx.Err()
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"hello","conversationId":"conv-123"}`))
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleChat(w, req)
+		close(done)
+	}()
+
+	<-runnerStarted
+	require.True(t, server.cancelActiveChat(conversationID))
+	<-done
+
+	var initiatingCompletion ChatEvent
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(w.Body.String())), &initiatingCompletion))
+	assert.Equal(t, "done", initiatingCompletion.Kind)
+	assert.True(t, initiatingCompletion.Cancelled)
+
+	events := make([]ChatEvent, 0, 3)
+	for range 3 {
+		select {
+		case event := <-subscriber.ch:
+			events = append(events, event)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for cancelled completion event")
+		}
+	}
+	assert.Equal(t, []string{"conversation", "user-message", "done"}, []string{events[0].Kind, events[1].Kind, events[2].Kind})
+	assert.True(t, events[2].Cancelled)
+}
+
 func TestServer_handleChatWithImageContent(t *testing.T) {
 	var capturedRequest ChatRequest
 

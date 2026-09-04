@@ -208,6 +208,7 @@ type conversationRun struct {
 	turnID          string
 	cancel          context.CancelFunc
 	observed        bool
+	cancelled       bool
 }
 
 type extensionShortcutCall struct {

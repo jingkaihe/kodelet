@@ -421,6 +421,35 @@ func TestControlPlaneChatRunnerRoutesUIResponsesBackToServer(t *testing.T) {
 	assert.Equal(t, "done", sink.events[1].Kind)
 }
 
+func TestControlPlaneChatRunnerDoesNotRespondToUIAfterContextCancellation(t *testing.T) {
+	requests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	require.NoError(t, err)
+	broker := &recordingControlPlaneUIBroker{response: extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}}
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = extensions.ContextWithUIInputBroker(ctx, broker)
+	cancel()
+
+	handled, err := runner.handleUIEvent(ctx, "conversation-1", ChatEvent{
+		Kind:    "ui-input-request",
+		UIInput: &UIInputEvent{ID: "input-1", Title: "Question"},
+	})
+
+	assert.True(t, handled)
+	require.ErrorIs(t, err, context.Canceled)
+	select {
+	case <-requests:
+		t.Fatal("cancelled UI context submitted a response")
+	default:
+	}
+}
+
 func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
 	t.Run("stream error", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

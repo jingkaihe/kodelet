@@ -314,12 +314,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if runErr != nil {
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
 			s.unregisterActiveChat(registeredConversationID, run)
-			s.broadcastChatEvent(conversationID, chat.ChatEvent{
+			completionEvent := chat.ChatEvent{
 				Kind:           "done",
 				ConversationID: conversationID,
 				Role:           "assistant",
-			})
-			logger.G(requestCtx).WithError(runErr).Debug("chat stream disconnected")
+				Cancelled:      true,
+			}
+			s.broadcastChatEvent(conversationID, completionEvent)
+			_ = sink.Send(completionEvent)
+			logger.G(requestCtx).WithError(runErr).Debug("chat run interrupted")
 			return
 		}
 

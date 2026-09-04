@@ -318,7 +318,7 @@ func TestTUIUIBrokerUnavailableClosedAndContextCancellation(t *testing.T) {
 	cancelPrompt()
 	result := receiveUIBrokerResult(t, resultCh)
 	assert.ErrorIs(t, result.err, context.Canceled)
-	assert.Equal(t, extensions.UIInputStatusDismissed, result.response.Status)
+	assert.Empty(t, result.response.Status)
 
 	manualPrompt := uiPromptState{response: make(chan extensions.UIInputResponse, 1)}
 	assert.False(t, broker.respond(uiPromptState{}, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))

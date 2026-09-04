@@ -726,7 +726,10 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 	default:
 		return false, nil
 	}
-	if err != nil && ctx.Err() == nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return true, ctxErr
+	}
+	if err != nil {
 		return true, err
 	}
 	if response.Status == "" {

@@ -241,6 +241,31 @@ func TestRemoteEscapeDoesNotStopActiveTurn(t *testing.T) {
 	assert.NoError(t, m.ctx.Err())
 }
 
+func TestRemoteCancelledCompletionDiscardsQueuedSlashFollowUps(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}, Remote: true})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.running = true
+	state.activeRunID = 1
+	state.queuedFollowUps = []string{"/goal should not run"}
+	m.runs[1] = &conversationRun{conversationKey: state.key}
+	m.runByState[state.key] = 1
+
+	updated, _ := m.Update(chatEventMsg{
+		runID:           1,
+		conversationKey: state.key,
+		event:           chat.ChatEvent{Kind: "done", ConversationID: state.conversationID, Cancelled: true},
+	})
+	m = updated.(model)
+	updated, _ = m.Update(chatDoneMsg{runID: 1, conversationKey: state.key, conversationID: state.conversationID})
+	m = updated.(model)
+
+	assert.False(t, state.running)
+	assert.Equal(t, "cancelled", state.status)
+	assert.Empty(t, state.queuedFollowUps)
+	assert.Zero(t, state.activeRunID)
+}
+
 func TestObservedRemoteStopFailureKeepsConversationStreamActive(t *testing.T) {
 	m := newModel(context.Background(), Config{Remote: true})
 	t.Cleanup(m.cancel)

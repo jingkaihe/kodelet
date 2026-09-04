@@ -321,6 +321,27 @@ func TestRemoteConversationStreamRefreshesCompletedHistoryWithoutOverwritingNewT
 	assert.Equal(t, canonicalEntries, m.entries)
 }
 
+func TestObservedCancelledTurnDiscardsQueuedSlashFollowUps(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	runID := 1
+	state.streamRunID = runID
+	state.running = true
+	state.activeRunID = runID
+	state.queuedFollowUps = []string{"/goal should not run"}
+	m.runs[runID] = &conversationRun{conversationKey: state.key, observed: true}
+	m.runByState[state.key] = runID
+
+	cmd, quit := m.finishObservedConversationRun(state, runID, chat.ChatEvent{Kind: "done", ConversationID: state.conversationID, Cancelled: true})
+
+	assert.False(t, quit)
+	assert.Nil(t, cmd)
+	assert.False(t, state.running)
+	assert.Equal(t, "cancelled", state.status)
+	assert.Empty(t, state.queuedFollowUps)
+}
+
 func TestTUIRunPausesAndRecreatesRemoteConversationStream(t *testing.T) {
 	runner := newStreamingConversationSourceRunner()
 	runner.conversationID = "conversation-remote"

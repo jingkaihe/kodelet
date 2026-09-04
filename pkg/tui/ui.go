@@ -329,8 +329,7 @@ func (b *tuiUIBroker) prompt(ctx context.Context, prompt uiPromptState) (extensi
 
 	select {
 	case <-ctx.Done():
-		b.respond(prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
-		return extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}, ctx.Err()
+		return extensions.UIInputResponse{}, ctx.Err()
 	case response := <-prompt.response:
 		if response.Status == "" {
 			response.Status = extensions.UIInputStatusDismissed
