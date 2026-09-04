@@ -155,9 +155,15 @@ kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local e
 
 Set a default control plane with `server` in user configuration or `KODELET_SERVER`; `--server` takes precedence. Repository configuration cannot set this value.
 
-The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` at startup or `/theme` in the TUI; the picker marks the active selection with ` (current)`. Use `/theme THEME_NAME` to switch directly. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue ordinary text as steering for the active conversation. TUI-local slash commands such as `/sessions`, `/new`, and `/stop` execute immediately, while other slash commands remain available in completion and are queued as follow-up turns that start when the current turn finishes. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
+The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
-Use `/sessions` or `Ctrl+L` to open a searchable conversation picker. The picker includes saved conversations and conversations already open in the current TUI. It preserves each conversation's draft and scroll position when switching. Use `/new [PATH]` or select **New conversation** to choose a working directory and start another conversation. Server-backed conversations use their assigned workspace. One run may be active per conversation, while different conversations can run in parallel; `Enter` queues steering. In server-backed mode, `Ctrl+C` exits without stopping the active turn; use `/stop` to stop it. If a background run requires extension input, the TUI marks it in the picker and shows a notification so you can switch to it and respond.
+The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
+
+Before the first message, use `Ctrl+T` to choose a profile and `Ctrl+Y` to choose a reasoning effort. These settings are fixed after the conversation starts.
+
+While a turn is running, `Enter` queues steering. `/sessions`, `/new`, and `/stop` run immediately; other slash commands are queued for the next turn. In server-backed mode, `Ctrl+C` exits without stopping the active turn.
+
+Use `/sessions` or `Ctrl+L` to switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
 
 #### Custom TUI themes
 
@@ -425,7 +431,7 @@ kodelet chat \
 
 `--server` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--cwd` uses the same runner-host path rules as the Web UI and is remembered with the conversation. `--profile` selects the control-plane model profile, while `--runner-profile` independently selects a runner environment profile. `--no-tools` and `--no-extensions` remain local-only. `kodelet run --runner` is not enabled yet.
 
-A server-backed TUI and the Web UI can follow the same conversation live in either direction, including runner-backed turns. Open the conversation with `--resume`, `--follow`, or `/sessions`. Standalone local TUIs are not shared.
+Server-backed TUI and Web UI clients can follow the same conversation live, including runner-backed turns. Open it with `--resume`, `--follow`, or `/sessions`. Local-only TUI sessions are not shared.
 
 Across hosts, runner and remote TUI connections require HTTPS/WSS; plain HTTP is accepted only for loopback servers. The runner uses its process's host permissions and is not a sandbox. A conversation may select a directory outside the startup workspace when that directory is accessible to the runner user. Concurrent runs share host files, processes, network, and ports.
 
