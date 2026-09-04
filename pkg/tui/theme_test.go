@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/alecthomas/chroma/v2"
+	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,6 +42,37 @@ func TestAutoThemeAppliesBubbleTeaBackgroundColorMessages(t *testing.T) {
 	assert.Equal(t, AutoThemeName, m.themeSelection)
 	assert.Equal(t, DefaultThemeName, m.theme.Name)
 	assert.Equal(t, "loading", m.status)
+}
+
+func TestAutoThemeUpdatesCodeBlockPaletteAfterDarkRender(t *testing.T) {
+	m := newThemeTestModel(t, Config{Theme: AutoThemeName})
+	darkRendered := m.renderMarkdown("```python\ndef example():\n    return 1\n```", 80, markdownAssistant)
+	require.NotEmpty(t, darkRendered)
+	darkKeywordSequence := ansiSequenceBefore(t, darkRendered, "def")
+
+	darkCodeTheme := assistantMarkdownStyle.CodeBlock.Theme
+	assert.Equal(t, codeBlockThemePrefix+DefaultThemeName, darkCodeTheme)
+	assert.Nil(t, assistantMarkdownStyle.CodeBlock.Chroma)
+	darkStyle := chromastyles.Registry[darkCodeTheme]
+	require.NotNil(t, darkStyle)
+	assert.Equal(t, chroma.MustParseColour(themes[DefaultThemeName].Markdown.ChromaKeyword), darkStyle.Get(chroma.Keyword).Colour)
+
+	updated, _ := m.Update(tea.BackgroundColorMsg{Color: color.White})
+	updatedModel := updated.(model)
+	m = &updatedModel
+	lightRendered := m.renderMarkdown("```python\ndef example():\n    return 1\n```", 80, markdownAssistant)
+	require.NotEmpty(t, lightRendered)
+	lightKeywordSequence := ansiSequenceBefore(t, lightRendered, "def")
+
+	lightCodeTheme := assistantMarkdownStyle.CodeBlock.Theme
+	assert.Equal(t, codeBlockThemePrefix+LightThemeName, lightCodeTheme)
+	assert.NotEqual(t, darkCodeTheme, lightCodeTheme)
+	assert.Nil(t, assistantMarkdownStyle.CodeBlock.Chroma)
+	lightStyle := chromastyles.Registry[lightCodeTheme]
+	require.NotNil(t, lightStyle)
+	assert.Equal(t, chroma.MustParseColour(themes[LightThemeName].Markdown.ChromaKeyword), lightStyle.Get(chroma.Keyword).Colour)
+	assert.NotEqual(t, darkKeywordSequence, lightKeywordSequence)
+	assert.NotContains(t, lightRendered, darkKeywordSequence+"def")
 }
 
 func TestExplicitThemeIgnoresBackgroundColorMessages(t *testing.T) {
@@ -191,6 +225,7 @@ ui:
   dialog_border: "#010203"
 markdown:
   code: "#abcdef"
+  chroma_keyword: "#123456"
 `)
 
 	theme, err := resolveTheme("forest")
@@ -204,8 +239,15 @@ markdown:
 	assert.Equal(t, "#010203", theme.UI.DialogBorder)
 	assert.Equal(t, themes[LightThemeName].UI.DialogTitle, theme.UI.DialogTitle)
 	assert.Equal(t, "#abcdef", theme.Markdown.Code)
+	assert.Equal(t, "#123456", theme.Markdown.ChromaKeyword)
 	assert.Equal(t, themes[LightThemeName].Markdown.Link, theme.Markdown.Link)
 	assert.Contains(t, AvailableThemeNames(), "forest")
+
+	markdownStyle := compactMarkdownStyle(theme.Name, theme.Markdown, theme.Dark)
+	assert.Equal(t, codeBlockThemePrefix+theme.Name, markdownStyle.CodeBlock.Theme)
+	forestStyle := chromastyles.Registry[markdownStyle.CodeBlock.Theme]
+	require.NotNil(t, forestStyle)
+	assert.Equal(t, chroma.MustParseColour(theme.Markdown.ChromaKeyword), forestStyle.Get(chroma.Keyword).Colour)
 }
 
 func TestCustomThemeDefaultsToCatppuccinMochaBase(t *testing.T) {
@@ -277,4 +319,13 @@ func newThemeTestModel(t *testing.T, config Config) *model {
 	m.height = 24
 	m.resize()
 	return &m
+}
+
+func ansiSequenceBefore(t *testing.T, rendered, token string) string {
+	t.Helper()
+	tokenIndex := strings.Index(rendered, token)
+	require.GreaterOrEqual(t, tokenIndex, 0)
+	sequenceIndex := strings.LastIndex(rendered[:tokenIndex], "\x1b[")
+	require.GreaterOrEqual(t, sequenceIndex, 0)
+	return rendered[sequenceIndex:tokenIndex]
 }

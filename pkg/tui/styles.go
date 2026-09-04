@@ -459,8 +459,8 @@ func applyTheme(theme tuiTheme) {
 	assistantStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Assistant))
 	mutedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Muted))
 
-	assistantMarkdownStyle = compactMarkdownStyle(theme.Markdown, theme.Dark)
-	thoughtMarkdownStyle = compactMarkdownStyle(theme.Markdown, theme.Dark)
+	assistantMarkdownStyle = compactMarkdownStyle(theme.Name, theme.Markdown, theme.Dark)
+	thoughtMarkdownStyle = compactMarkdownStyle(theme.Name, theme.Markdown, theme.Dark)
 
 	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtHeader))
 	thoughtBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtBody)).Italic(true)

@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
+	github.com/alecthomas/chroma/v2 v2.20.0
 	github.com/anthropics/anthropic-sdk-go v1.69.0
 	github.com/avast/retry-go/v4 v4.6.1
 	github.com/aymanbagabas/go-udiff v0.4.1
@@ -51,7 +52,6 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.2 // indirect
-	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

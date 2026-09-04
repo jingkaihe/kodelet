@@ -2,11 +2,18 @@ package tui
 
 import (
 	"strings"
+	"sync"
 
+	"github.com/alecthomas/chroma/v2"
+	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
+	glamourstyles "github.com/charmbracelet/glamour/styles"
 )
+
+const codeBlockThemePrefix = "kodelet-"
+
+var codeBlockThemeRegistryMu sync.RWMutex
 
 func (m *model) renderMarkdown(text string, width int, kind markdownKind) string {
 	text = strings.TrimSpace(text)
@@ -26,6 +33,8 @@ func (m *model) renderMarkdown(text string, width int, kind markdownKind) string
 }
 
 func renderMarkdownWithRenderer(renderer *glamour.TermRenderer, text string) (rendered string, ok bool) {
+	codeBlockThemeRegistryMu.RLock()
+	defer codeBlockThemeRegistryMu.RUnlock()
 	defer func() {
 		if recover() != nil {
 			rendered = ""
@@ -71,10 +80,10 @@ func newMarkdownRenderer(width int, style ansi.StyleConfig) (*glamour.TermRender
 	)
 }
 
-func compactMarkdownStyle(theme markdownTheme, dark bool) ansi.StyleConfig {
-	style := styles.LightStyleConfig
+func compactMarkdownStyle(themeName string, theme markdownTheme, dark bool) ansi.StyleConfig {
+	style := glamourstyles.LightStyleConfig
 	if dark {
-		style = styles.DarkStyleConfig
+		style = glamourstyles.DarkStyleConfig
 	}
 	style.Document.BlockPrefix = ""
 	style.Document.BlockSuffix = ""
@@ -110,37 +119,106 @@ func compactMarkdownStyle(theme markdownTheme, dark bool) ansi.StyleConfig {
 	style.CodeBlock.Margin = uintPtr(0)
 	style.CodeBlock.Color = stringPtr(theme.CodeBlock)
 	if style.CodeBlock.Chroma != nil {
-		chroma := *style.CodeBlock.Chroma
-		style.CodeBlock.Chroma = &chroma
-		style.CodeBlock.Chroma.Text.Color = stringPtr(theme.ChromaText)
-		style.CodeBlock.Chroma.Error.Color = stringPtr(theme.ChromaError)
-		style.CodeBlock.Chroma.Error.BackgroundColor = stringPtr(theme.ChromaErrorBackground)
-		style.CodeBlock.Chroma.Comment.Color = stringPtr(theme.ChromaComment)
-		style.CodeBlock.Chroma.CommentPreproc.Color = stringPtr(theme.ChromaCommentPreproc)
-		style.CodeBlock.Chroma.Keyword.Color = stringPtr(theme.ChromaKeyword)
-		style.CodeBlock.Chroma.KeywordReserved.Color = stringPtr(theme.ChromaKeyword)
-		style.CodeBlock.Chroma.KeywordNamespace.Color = stringPtr(theme.ChromaKeyword)
-		style.CodeBlock.Chroma.KeywordType.Color = stringPtr(theme.ChromaKeywordType)
-		style.CodeBlock.Chroma.Operator.Color = stringPtr(theme.ChromaOperator)
-		style.CodeBlock.Chroma.Punctuation.Color = stringPtr(theme.ChromaPunctuation)
-		style.CodeBlock.Chroma.Name.Color = stringPtr(theme.ChromaName)
-		style.CodeBlock.Chroma.NameBuiltin.Color = stringPtr(theme.ChromaNameBuiltin)
-		style.CodeBlock.Chroma.NameTag.Color = stringPtr(theme.ChromaNameTag)
-		style.CodeBlock.Chroma.NameAttribute.Color = stringPtr(theme.ChromaNameAttribute)
-		style.CodeBlock.Chroma.NameClass.Color = stringPtr(theme.ChromaName)
-		style.CodeBlock.Chroma.NameClass.Underline = nil
-		style.CodeBlock.Chroma.NameClass.Bold = nil
-		style.CodeBlock.Chroma.NameDecorator.Color = stringPtr(theme.ChromaNameDecorator)
-		style.CodeBlock.Chroma.NameFunction.Color = stringPtr(theme.ChromaNameFunction)
-		style.CodeBlock.Chroma.LiteralNumber.Color = stringPtr(theme.ChromaNumber)
-		style.CodeBlock.Chroma.LiteralString.Color = stringPtr(theme.ChromaString)
-		style.CodeBlock.Chroma.LiteralStringEscape.Color = stringPtr(theme.ChromaStringEscape)
-		style.CodeBlock.Chroma.GenericDeleted.Color = stringPtr(theme.ChromaGenericDeleted)
-		style.CodeBlock.Chroma.GenericInserted.Color = stringPtr(theme.ChromaGenericInserted)
-		style.CodeBlock.Chroma.GenericSubheading.Color = stringPtr(theme.ChromaGenericHeading)
-		style.CodeBlock.Chroma.Background.BackgroundColor = nil
+		chromaTheme := *style.CodeBlock.Chroma
+		chromaTheme.Text.Color = stringPtr(theme.ChromaText)
+		chromaTheme.Error.Color = stringPtr(theme.ChromaError)
+		chromaTheme.Error.BackgroundColor = stringPtr(theme.ChromaErrorBackground)
+		chromaTheme.Comment.Color = stringPtr(theme.ChromaComment)
+		chromaTheme.CommentPreproc.Color = stringPtr(theme.ChromaCommentPreproc)
+		chromaTheme.Keyword.Color = stringPtr(theme.ChromaKeyword)
+		chromaTheme.KeywordReserved.Color = stringPtr(theme.ChromaKeyword)
+		chromaTheme.KeywordNamespace.Color = stringPtr(theme.ChromaKeyword)
+		chromaTheme.KeywordType.Color = stringPtr(theme.ChromaKeywordType)
+		chromaTheme.Operator.Color = stringPtr(theme.ChromaOperator)
+		chromaTheme.Punctuation.Color = stringPtr(theme.ChromaPunctuation)
+		chromaTheme.Name.Color = stringPtr(theme.ChromaName)
+		chromaTheme.NameBuiltin.Color = stringPtr(theme.ChromaNameBuiltin)
+		chromaTheme.NameTag.Color = stringPtr(theme.ChromaNameTag)
+		chromaTheme.NameAttribute.Color = stringPtr(theme.ChromaNameAttribute)
+		chromaTheme.NameClass.Color = stringPtr(theme.ChromaName)
+		chromaTheme.NameClass.Underline = nil
+		chromaTheme.NameClass.Bold = nil
+		chromaTheme.NameDecorator.Color = stringPtr(theme.ChromaNameDecorator)
+		chromaTheme.NameFunction.Color = stringPtr(theme.ChromaNameFunction)
+		chromaTheme.LiteralNumber.Color = stringPtr(theme.ChromaNumber)
+		chromaTheme.LiteralString.Color = stringPtr(theme.ChromaString)
+		chromaTheme.LiteralStringEscape.Color = stringPtr(theme.ChromaStringEscape)
+		chromaTheme.GenericDeleted.Color = stringPtr(theme.ChromaGenericDeleted)
+		chromaTheme.GenericInserted.Color = stringPtr(theme.ChromaGenericInserted)
+		chromaTheme.GenericSubheading.Color = stringPtr(theme.ChromaGenericHeading)
+		chromaTheme.Background.BackgroundColor = nil
+
+		style.CodeBlock.Theme = registerCodeBlockTheme(themeName, chromaTheme)
+		style.CodeBlock.Chroma = nil
 	}
 	return style
+}
+
+func registerCodeBlockTheme(themeName string, theme ansi.Chroma) string {
+	name := codeBlockThemePrefix + themeName
+
+	codeBlockThemeRegistryMu.Lock()
+	defer codeBlockThemeRegistryMu.Unlock()
+	if _, ok := chromastyles.Registry[name]; !ok {
+		chromastyles.Register(chroma.MustNewStyle(name, chromaStyleEntries(theme)))
+	}
+	return name
+}
+
+func chromaStyleEntries(theme ansi.Chroma) chroma.StyleEntries {
+	return chroma.StyleEntries{
+		chroma.Text:                chromaStyleEntry(theme.Text),
+		chroma.Error:               chromaStyleEntry(theme.Error),
+		chroma.Comment:             chromaStyleEntry(theme.Comment),
+		chroma.CommentPreproc:      chromaStyleEntry(theme.CommentPreproc),
+		chroma.Keyword:             chromaStyleEntry(theme.Keyword),
+		chroma.KeywordReserved:     chromaStyleEntry(theme.KeywordReserved),
+		chroma.KeywordNamespace:    chromaStyleEntry(theme.KeywordNamespace),
+		chroma.KeywordType:         chromaStyleEntry(theme.KeywordType),
+		chroma.Operator:            chromaStyleEntry(theme.Operator),
+		chroma.Punctuation:         chromaStyleEntry(theme.Punctuation),
+		chroma.Name:                chromaStyleEntry(theme.Name),
+		chroma.NameBuiltin:         chromaStyleEntry(theme.NameBuiltin),
+		chroma.NameTag:             chromaStyleEntry(theme.NameTag),
+		chroma.NameAttribute:       chromaStyleEntry(theme.NameAttribute),
+		chroma.NameClass:           chromaStyleEntry(theme.NameClass),
+		chroma.NameConstant:        chromaStyleEntry(theme.NameConstant),
+		chroma.NameDecorator:       chromaStyleEntry(theme.NameDecorator),
+		chroma.NameException:       chromaStyleEntry(theme.NameException),
+		chroma.NameFunction:        chromaStyleEntry(theme.NameFunction),
+		chroma.NameOther:           chromaStyleEntry(theme.NameOther),
+		chroma.Literal:             chromaStyleEntry(theme.Literal),
+		chroma.LiteralNumber:       chromaStyleEntry(theme.LiteralNumber),
+		chroma.LiteralDate:         chromaStyleEntry(theme.LiteralDate),
+		chroma.LiteralString:       chromaStyleEntry(theme.LiteralString),
+		chroma.LiteralStringEscape: chromaStyleEntry(theme.LiteralStringEscape),
+		chroma.GenericDeleted:      chromaStyleEntry(theme.GenericDeleted),
+		chroma.GenericEmph:         chromaStyleEntry(theme.GenericEmph),
+		chroma.GenericInserted:     chromaStyleEntry(theme.GenericInserted),
+		chroma.GenericStrong:       chromaStyleEntry(theme.GenericStrong),
+		chroma.GenericSubheading:   chromaStyleEntry(theme.GenericSubheading),
+		chroma.Background:          chromaStyleEntry(theme.Background),
+	}
+}
+
+func chromaStyleEntry(style ansi.StylePrimitive) string {
+	parts := make([]string, 0, 5)
+	if style.Color != nil {
+		parts = append(parts, *style.Color)
+	}
+	if style.BackgroundColor != nil {
+		parts = append(parts, "bg:"+*style.BackgroundColor)
+	}
+	if style.Italic != nil && *style.Italic {
+		parts = append(parts, "italic")
+	}
+	if style.Bold != nil && *style.Bold {
+		parts = append(parts, "bold")
+	}
+	if style.Underline != nil && *style.Underline {
+		parts = append(parts, "underline")
+	}
+	return strings.Join(parts, " ")
 }
 
 func uintPtr(value uint) *uint {
