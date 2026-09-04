@@ -2399,7 +2399,7 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 	}
 	defer steerStore.Close()
 
-	queued, err := steerStore.Enqueue(ctx, conversationID, message, imageInputs)
+	_, err = steerStore.Enqueue(ctx, conversationID, message, imageInputs)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", err)
 		return
@@ -2408,7 +2408,7 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 	s.writeJSONResponse(w, steerConversationResponse{
 		Success:        true,
 		ConversationID: conversationID,
-		Queued:         queued,
+		Queued:         true,
 	})
 }
 

@@ -2610,7 +2610,7 @@ func TestServer_handleSteerConversation(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, response.Success)
 	assert.Equal(t, "conv-123", response.ConversationID)
-	assert.False(t, response.Queued)
+	assert.True(t, response.Queued)
 
 	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)

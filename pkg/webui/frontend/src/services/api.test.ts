@@ -792,7 +792,7 @@ describe("ApiService", () => {
 				json: async () => ({
 					success: true,
 					conversation_id: "conv-123",
-					queued: false,
+					queued: true,
 				}),
 			});
 
@@ -811,7 +811,7 @@ describe("ApiService", () => {
 			expect(result).toEqual({
 				success: true,
 				conversation_id: "conv-123",
-				queued: false,
+				queued: true,
 			});
 		});
 
