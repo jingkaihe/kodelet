@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -2290,6 +2291,7 @@ func TestServer_handleStreamConversation(t *testing.T) {
 	server.broadcastChatEvent("conv-123", ChatEvent{Kind: "text-delta", ConversationID: "conv-123", Delta: "hi", Role: "assistant"})
 	server.closeChatSubscribers("conv-123")
 	<-done
+	assert.Equal(t, "true", w.Header().Get(chat.ConversationStreamActiveHeader))
 
 	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
 	require.Len(t, lines, 2)
@@ -2498,6 +2500,135 @@ func TestServer_handleStreamConversationFollowsFutureChatRun(t *testing.T) {
 	})
 	assert.Equal(t, "sent from the tui", events[1].Content)
 	assert.Equal(t, "hello from the runner", events[2].Delta)
+}
+
+func TestServerMultipleConversationStreamsDetachAndObserveCancellation(t *testing.T) {
+	const conversationID = "conv-123"
+	firstEventSent := make(chan struct{})
+	continueAfterDetach := make(chan struct{})
+	afterDetachEventSent := make(chan struct{})
+	runnerErrors := make(chan error, 1)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	server := &Server{
+		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{ID: conversationID}, nil
+		}},
+		runCtx:          runCtx,
+		activeChats:     make(map[string]*activeChatRun),
+		chatSubscribers: make(map[string]map[*subscriberEventSink]struct{}),
+		chatRunner: &mockChatRunner{runFunc: func(ctx context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+			if err := sink.Send(ChatEvent{Kind: "text-delta", ConversationID: conversationID, Role: "assistant", Delta: "before detach"}); err != nil {
+				runnerErrors <- err
+				return conversationID, err
+			}
+			close(firstEventSent)
+			select {
+			case <-continueAfterDetach:
+			case <-ctx.Done():
+				return conversationID, ctx.Err()
+			}
+			if err := sink.Send(ChatEvent{Kind: "tool-use", ConversationID: conversationID, Role: "assistant", ToolCallID: "call-1", ToolName: "bash", Input: `{"cmd":"df -h"}`}); err != nil {
+				runnerErrors <- err
+				return conversationID, err
+			}
+			close(afterDetachEventSent)
+			<-ctx.Done()
+			return conversationID, ctx.Err()
+		}},
+	}
+	waitForSignal := func(ch <-chan struct{}, description string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s", description)
+		}
+	}
+
+	startStream := func() (context.CancelFunc, *httptest.ResponseRecorder, <-chan struct{}) {
+		ctx, cancel := context.WithCancel(context.Background())
+		req := httptest.NewRequest(http.MethodGet, "/api/conversations/"+conversationID+"/stream", nil).WithContext(ctx)
+		req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			server.handleStreamConversation(recorder, req)
+			close(done)
+		}()
+		return cancel, recorder, done
+	}
+
+	firstCancel, firstRecorder, firstDone := startStream()
+	defer firstCancel()
+	secondCancel, secondRecorder, secondDone := startStream()
+	defer secondCancel()
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers[conversationID]) == 2
+	}, time.Second, 10*time.Millisecond)
+
+	chatReq := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"inspect disk","conversationId":"conv-123"}`))
+	chatRecorder := httptest.NewRecorder()
+	chatDone := make(chan struct{})
+	go func() {
+		server.handleChat(chatRecorder, chatReq)
+		close(chatDone)
+	}()
+	waitForSignal(firstEventSent, "the first streamed event")
+
+	firstCancel()
+	waitForSignal(firstDone, "the first stream to detach")
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers[conversationID]) == 1
+	}, time.Second, 10*time.Millisecond)
+	close(continueAfterDetach)
+	waitForSignal(afterDetachEventSent, "the post-detach event")
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelStop()
+	stopReq := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conversationID+"/stop", nil).WithContext(stopCtx)
+	stopReq = mux.SetURLVars(stopReq, map[string]string{"id": conversationID})
+	stopRecorder := httptest.NewRecorder()
+	server.handleStopConversation(stopRecorder, stopReq)
+	require.Equal(t, http.StatusOK, stopRecorder.Code)
+	waitForSignal(chatDone, "the cancelled chat request")
+	server.closeChatSubscribers(conversationID)
+	waitForSignal(secondDone, "the second stream to close")
+	select {
+	case err := <-runnerErrors:
+		require.NoError(t, err)
+	default:
+	}
+
+	decodeEvents := func(body string) []ChatEvent {
+		lines := strings.Split(strings.TrimSpace(body), "\n")
+		events := make([]ChatEvent, 0, len(lines))
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var event ChatEvent
+			require.NoError(t, json.Unmarshal([]byte(line), &event))
+			events = append(events, event)
+		}
+		return events
+	}
+	firstEvents := decodeEvents(firstRecorder.Body.String())
+	for _, event := range firstEvents {
+		assert.NotEqual(t, "tool-use", event.Kind, "detached stream received later events")
+	}
+	secondEvents := decodeEvents(secondRecorder.Body.String())
+	kinds := make([]string, 0, len(secondEvents))
+	for _, event := range secondEvents {
+		kinds = append(kinds, event.Kind)
+	}
+	require.Equal(t, []string{"conversation", "user-message", "text-delta", "tool-use", "done"}, kinds)
+	assert.True(t, secondEvents[len(secondEvents)-1].Cancelled)
 }
 
 func TestServer_handleDeleteConversationRejectsActiveRun(t *testing.T) {

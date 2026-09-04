@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -34,6 +35,35 @@ type ControlPlaneChatRunner struct {
 	authToken string
 	runnerID  string
 	client    *http.Client
+}
+
+// ControlPlaneHTTPError reports a non-successful control-plane response.
+type ControlPlaneHTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *ControlPlaneHTTPError) Error() string {
+	if e == nil {
+		return "control plane request failed"
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return fmt.Sprintf("control plane returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Message))
+	}
+	return fmt.Sprintf("control plane returned HTTP %d", e.StatusCode)
+}
+
+// Retryable reports whether retrying the request may succeed without user action.
+func (e *ControlPlaneHTTPError) Retryable() bool {
+	if e == nil {
+		return false
+	}
+	switch e.StatusCode {
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+		return true
+	default:
+		return e.StatusCode >= http.StatusInternalServerError
+	}
 }
 
 // ControlPlaneProfileOption describes one model-policy profile advertised by the server.
@@ -139,6 +169,12 @@ func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, convers
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		return controlPlaneResponseError(response)
+	}
+	if lifecycleSink, ok := sink.(ConversationStreamLifecycleSink); ok {
+		active, _ := strconv.ParseBool(response.Header.Get(ConversationStreamActiveHeader))
+		if err := lifecycleSink.ConversationStreamConnected(active); err != nil {
+			return err
+		}
 	}
 
 	_, err = r.consumeChatStream(ctx, response.Body, conversationID, sink, false, true, conversationID)
@@ -781,10 +817,10 @@ func controlPlaneResponseError(response *http.Response) error {
 	}
 	if json.Unmarshal(payload, &value) == nil {
 		if message := firstNonEmptyString(value.Error, value.Message); message != "" {
-			return errors.Errorf("control plane returned HTTP %d: %s", response.StatusCode, message)
+			return &ControlPlaneHTTPError{StatusCode: response.StatusCode, Message: message}
 		}
 	}
-	return errors.Errorf("control plane returned HTTP %d", response.StatusCode)
+	return &ControlPlaneHTTPError{StatusCode: response.StatusCode}
 }
 
 func firstNonEmptyString(values ...string) string {

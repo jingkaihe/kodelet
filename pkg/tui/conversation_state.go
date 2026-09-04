@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -13,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/pkg/errors"
 )
 
 func contextWithTUIConversation(ctx context.Context, conversationKey string) context.Context {
@@ -309,7 +311,7 @@ func (m *model) setConversationID(state *conversationState, conversationID strin
 }
 
 func (m *model) startConversationStream(state *conversationState) tea.Cmd {
-	if m == nil || state == nil || !m.remote || m.conversationStream == nil || state.running || state.streamRunID != 0 {
+	if m == nil || state == nil || !m.remote || m.conversationStream == nil || (state.running && !state.streamTurnUncertain) || state.streamRunID != 0 {
 		return nil
 	}
 	conversationID := strings.TrimSpace(state.conversationID)
@@ -325,6 +327,7 @@ func (m *model) startConversationStream(state *conversationState) tea.Cmd {
 	streamCtx = extensions.ContextWithUIInputBroker(streamCtx, uiBroker)
 	state.streamRunID = runID
 	state.cancelStream = cancel
+	state.streamConnectedActive = false
 	m.runs[runID] = &conversationRun{
 		conversationKey: conversationKey,
 		cancel:          cancel,
@@ -337,12 +340,14 @@ func (m *model) startConversationStream(state *conversationState) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
 			defer uiBroker.close()
+			defer cancel()
 			err := streamer.StreamConversation(streamCtx, conversationID, tuiSink{
 				ch:              runCh,
 				runID:           runID,
 				conversationKey: conversationKey,
 				done:            streamCtx.Done(),
 			})
+			cancel()
 			select {
 			case runCh <- conversationStreamDoneMsg{runID: runID, conversationKey: conversationKey, err: err}:
 			case <-uiDone:
@@ -353,7 +358,13 @@ func (m *model) startConversationStream(state *conversationState) tea.Cmd {
 }
 
 func (m *model) stopConversationStream(state *conversationState) {
-	if m == nil || state == nil || state.streamRunID == 0 {
+	if m == nil || state == nil {
+		return
+	}
+	state.streamReconnectAttempt = 0
+	state.streamTurnUncertain = false
+	state.streamConnectedActive = false
+	if state.streamRunID == 0 {
 		return
 	}
 	runID := state.streamRunID
@@ -368,6 +379,54 @@ func (m *model) stopConversationStream(state *conversationState) {
 	if m.runByState[state.key] == runID {
 		delete(m.runByState, state.key)
 	}
+}
+
+func conversationStreamReconnectDelay(attempt int) time.Duration {
+	if attempt <= 1 {
+		return conversationStreamReconnectInitialDelay
+	}
+	delay := conversationStreamReconnectInitialDelay
+	for current := 1; current < attempt && delay < conversationStreamReconnectMaxDelay; current++ {
+		delay *= 2
+		if delay >= conversationStreamReconnectMaxDelay {
+			return conversationStreamReconnectMaxDelay
+		}
+	}
+	return delay
+}
+
+func reconnectConversationStreamAfter(conversationKey string, attempt int) tea.Cmd {
+	delay := conversationStreamReconnectDelay(attempt)
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return conversationStreamReconnectMsg{conversationKey: conversationKey, attempt: attempt}
+	})
+}
+
+func markConversationStreamStableAfter(conversationKey string, runID int) tea.Cmd {
+	return tea.Tick(conversationStreamStableDelay, func(time.Time) tea.Msg {
+		return conversationStreamStableMsg{conversationKey: conversationKey, runID: runID}
+	})
+}
+
+func reconcileConversationStreamAfter(conversationKey string, runID, turn, attempt int) tea.Cmd {
+	delay := conversationStreamReconcileDelay
+	if attempt > 0 {
+		delay = conversationStreamReconnectDelay(attempt)
+	}
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return conversationStreamReconcileMsg{conversationKey: conversationKey, runID: runID, turn: turn, attempt: attempt}
+	})
+}
+
+func conversationStreamShouldReconnect(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var responseErr *chat.ControlPlaneHTTPError
+	if errors.As(err, &responseErr) {
+		return responseErr.Retryable()
+	}
+	return true
 }
 
 func (m *model) cancelAllRuns() {

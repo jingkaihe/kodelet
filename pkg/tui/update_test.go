@@ -284,6 +284,23 @@ func TestObservedRemoteStopFailureKeepsConversationStreamActive(t *testing.T) {
 	assert.ErrorContains(t, m.err, "stop failed")
 }
 
+func TestDisconnectedObservedRemoteStopFailureCanBeRetried(t *testing.T) {
+	m := newModel(context.Background(), Config{Remote: true})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.runCancelling = true
+	m.activeRunID = 1
+	m.streamTurnUncertain = true
+
+	updated, _ := m.Update(remoteStopMsg{conversationKey: m.activeConversationKey, err: errors.New("stop failed")})
+	m = updated.(model)
+
+	assert.True(t, m.running)
+	assert.False(t, m.runCancelling)
+	assert.Equal(t, "cancellation failed", m.status)
+	assert.ErrorContains(t, m.err, "stop failed")
+}
+
 func TestRemoteSubmitPinsTurnIDForScopedCancellation(t *testing.T) {
 	runner := &remoteControlRecordingRunner{}
 	m := newModel(context.Background(), Config{ConversationID: "conversation-1", Runner: runner, Remote: true})

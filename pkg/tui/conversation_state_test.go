@@ -42,11 +42,14 @@ type conversationStreamCall struct {
 	conversationID string
 	sink           chat.ChatEventSink
 	done           <-chan struct{}
+	finish         chan error
 }
 
 type streamingConversationSourceRunner struct {
 	conversationSourceRunner
-	streamCalls chan conversationStreamCall
+	streamCalls     chan conversationStreamCall
+	signalConnected bool
+	streamActive    bool
 }
 
 func newStreamingConversationSourceRunner() *streamingConversationSourceRunner {
@@ -54,13 +57,45 @@ func newStreamingConversationSourceRunner() *streamingConversationSourceRunner {
 }
 
 func (r *streamingConversationSourceRunner) StreamConversation(ctx context.Context, conversationID string, sink chat.ChatEventSink) error {
+	call := conversationStreamCall{conversationID: conversationID, sink: sink, done: ctx.Done(), finish: make(chan error, 1)}
 	select {
-	case r.streamCalls <- conversationStreamCall{conversationID: conversationID, sink: sink, done: ctx.Done()}:
+	case r.streamCalls <- call:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	<-ctx.Done()
-	return ctx.Err()
+	if r.signalConnected {
+		if lifecycleSink, ok := sink.(chat.ConversationStreamLifecycleSink); ok {
+			if err := lifecycleSink.ConversationStreamConnected(r.streamActive); err != nil {
+				return err
+			}
+		}
+	}
+	select {
+	case err := <-call.finish:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func conversationHistoryRefreshFromCmd(t *testing.T, cmd tea.Cmd) conversationHistoryRefreshMsg {
+	t.Helper()
+	require.NotNil(t, cmd)
+	switch message := cmd().(type) {
+	case conversationHistoryRefreshMsg:
+		return message
+	case tea.BatchMsg:
+		for _, child := range message {
+			if child == nil {
+				continue
+			}
+			if history, ok := child().(conversationHistoryRefreshMsg); ok {
+				return history
+			}
+		}
+	}
+	t.Fatal("command did not produce a conversation history refresh")
+	return conversationHistoryRefreshMsg{}
 }
 
 func TestConversationSwitchPreservesDraftAndTranscript(t *testing.T) {
@@ -322,7 +357,16 @@ func TestRemoteConversationStreamRefreshesCompletedHistoryWithoutOverwritingNewT
 }
 
 func TestObservedCancelledTurnDiscardsQueuedSlashFollowUps(t *testing.T) {
-	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	runner := newStreamingConversationSourceRunner()
+	runner.history = chat.ConversationHistory{
+		ID: "conversation-remote",
+		Messages: []conversations.StreamableMessage{
+			{Kind: "text", Role: "user", Content: "check disk space"},
+			{Kind: "tool-use", Role: "assistant", ToolCallID: "call-1", ToolName: "bash", Input: `{"cmd":"df -h"}`},
+			{Kind: "tool-result", Role: "user", ToolCallID: "call-1", Content: "83G available"},
+		},
+	}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
 	t.Cleanup(m.cancel)
 	state := m.conversationState
 	runID := 1
@@ -336,10 +380,321 @@ func TestObservedCancelledTurnDiscardsQueuedSlashFollowUps(t *testing.T) {
 	cmd, quit := m.finishObservedConversationRun(state, runID, chat.ChatEvent{Kind: "done", ConversationID: state.conversationID, Cancelled: true})
 
 	assert.False(t, quit)
-	assert.Nil(t, cmd)
 	assert.False(t, state.running)
 	assert.Equal(t, "cancelled", state.status)
 	assert.Empty(t, state.queuedFollowUps)
+	updated, _ := m.Update(conversationHistoryRefreshFromCmd(t, cmd))
+	m = updated.(model)
+	require.Len(t, state.entries, 2)
+	require.Len(t, state.entries[1].blocks, 1)
+	require.Len(t, state.entries[1].blocks[0].tools, 1)
+	assert.Equal(t, "bash", state.entries[1].blocks[0].tools[0].name)
+	assert.Equal(t, "83G available", state.entries[1].blocks[0].tools[0].result)
+}
+
+func TestRemoteConversationStreamReconnectsAndReconcilesHistory(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	runner.signalConnected = true
+	runner.history = chat.ConversationHistory{
+		ID: "conversation-remote",
+		Messages: []conversations.StreamableMessage{
+			{Kind: "text", Role: "user", Content: "persisted prompt"},
+			{Kind: "text", Role: "assistant", Content: "persisted answer"},
+		},
+	}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+
+	startCmd := m.startConversationStream(m.conversationState)
+	require.NotNil(t, startCmd)
+	assert.Nil(t, startCmd())
+	firstCall := <-runner.streamCalls
+	firstRunID := m.streamRunID
+	connected, ok := receiveRunMsg(t, m.runCh).(conversationStreamConnectedMsg)
+	require.True(t, ok)
+	updated, _ := m.Update(connected)
+	m = updated.(model)
+
+	firstCall.finish <- errors.New("connection reset")
+	disconnected, ok := receiveRunMsg(t, m.runCh).(conversationStreamDoneMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(disconnected)
+	m = updated.(model)
+	assert.Zero(t, m.streamRunID)
+	assert.Equal(t, 1, m.streamReconnectAttempt)
+	assert.Equal(t, "reconnecting", m.status)
+
+	updated, reconnectCmd := m.Update(conversationStreamReconnectMsg{conversationKey: m.activeConversationKey, attempt: 1})
+	m = updated.(model)
+	require.NotNil(t, reconnectCmd)
+	assert.Nil(t, reconnectCmd())
+	<-runner.streamCalls
+	secondRunID := m.streamRunID
+	assert.NotEqual(t, firstRunID, secondRunID)
+	connected, ok = receiveRunMsg(t, m.runCh).(conversationStreamConnectedMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(connected)
+	m = updated.(model)
+	assert.Equal(t, 1, m.streamReconnectAttempt)
+	assert.Equal(t, "ready", m.status)
+
+	updated, historyCmd := m.Update(conversationStreamReconcileMsg{
+		conversationKey: m.activeConversationKey,
+		runID:           secondRunID,
+		turn:            m.streamTurn,
+	})
+	m = updated.(model)
+	require.NotNil(t, historyCmd)
+	history, ok := historyCmd().(conversationHistoryRefreshMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(history)
+	m = updated.(model)
+	assert.Zero(t, m.streamReconnectAttempt)
+	require.Len(t, m.entries, 2)
+	assert.Equal(t, "persisted prompt", m.entries[0].content)
+	assert.Equal(t, "persisted answer", m.entries[1].blocks[0].text)
+}
+
+func TestRemoteConversationStreamDisconnectPreservesActiveTurn(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	runner.signalConnected = true
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+
+	startCmd := m.startConversationStream(m.conversationState)
+	require.NotNil(t, startCmd)
+	assert.Nil(t, startCmd())
+	call := <-runner.streamCalls
+	connected, ok := receiveRunMsg(t, m.runCh).(conversationStreamConnectedMsg)
+	require.True(t, ok)
+	updated, _ := m.Update(connected)
+	m = updated.(model)
+
+	require.NoError(t, call.sink.Send(chat.ChatEvent{Kind: "conversation", ConversationID: m.conversationID}))
+	event, ok := receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(event)
+	m = updated.(model)
+	require.NoError(t, call.sink.Send(chat.ChatEvent{Kind: "text-delta", ConversationID: m.conversationID, Delta: "partial answer"}))
+	event, ok = receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(event)
+	m = updated.(model)
+	activeRunID := m.activeRunID
+
+	call.finish <- errors.New("connection reset")
+	disconnected, ok := receiveRunMsg(t, m.runCh).(conversationStreamDoneMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(disconnected)
+	m = updated.(model)
+
+	assert.True(t, m.running)
+	assert.True(t, m.streamTurnUncertain)
+	assert.False(t, m.streamConnectedActive)
+	assert.Equal(t, activeRunID, m.activeRunID)
+	assert.Equal(t, "reconnecting", m.status)
+	assert.Equal(t, "partial answer", m.entries[len(m.entries)-1].blocks[0].text)
+
+	m.textarea.SetValue("start another turn")
+	assert.Nil(t, m.submit())
+	assert.Equal(t, "start another turn", m.textarea.Value())
+	m.textarea.SetValue("/stop")
+	_ = m.submit()
+	assert.True(t, m.runCancelling)
+	assert.Equal(t, "cancelling", m.status)
+}
+
+func TestRemoteConversationStreamActiveReconnectFinishesRetainedTurn(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	runner.signalConnected = true
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+
+	startCmd := m.startConversationStream(m.conversationState)
+	require.NotNil(t, startCmd)
+	assert.Nil(t, startCmd())
+	firstCall := <-runner.streamCalls
+	connected, ok := receiveRunMsg(t, m.runCh).(conversationStreamConnectedMsg)
+	require.True(t, ok)
+	updated, _ := m.Update(connected)
+	m = updated.(model)
+	require.NoError(t, firstCall.sink.Send(chat.ChatEvent{Kind: "conversation", ConversationID: m.conversationID}))
+	event, ok := receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(event)
+	m = updated.(model)
+	turn := m.streamTurn
+
+	firstCall.finish <- errors.New("connection reset")
+	disconnected, ok := receiveRunMsg(t, m.runCh).(conversationStreamDoneMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(disconnected)
+	m = updated.(model)
+	require.True(t, m.streamTurnUncertain)
+
+	runner.streamActive = true
+	updated, reconnectCmd := m.Update(conversationStreamReconnectMsg{conversationKey: m.activeConversationKey, attempt: m.streamReconnectAttempt})
+	m = updated.(model)
+	require.NotNil(t, reconnectCmd)
+	assert.Nil(t, reconnectCmd())
+	secondCall := <-runner.streamCalls
+	secondRunID := m.streamRunID
+	connected, ok = receiveRunMsg(t, m.runCh).(conversationStreamConnectedMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(connected)
+	m = updated.(model)
+	assert.True(t, m.running)
+	assert.False(t, m.streamTurnUncertain)
+	assert.Equal(t, secondRunID, m.activeRunID)
+
+	require.NoError(t, secondCall.sink.Send(chat.ChatEvent{Kind: "conversation", ConversationID: m.conversationID}))
+	event, ok = receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(event)
+	m = updated.(model)
+	assert.Equal(t, turn, m.streamTurn, "the attachment marker must not start a second turn")
+	require.NoError(t, secondCall.sink.Send(chat.ChatEvent{Kind: "done", ConversationID: m.conversationID}))
+	event, ok = receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(event)
+	m = updated.(model)
+	assert.False(t, m.running)
+	assert.Zero(t, m.activeRunID)
+}
+
+func TestInactiveReconnectHistoryFinalizesRetainedTurn(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.running = true
+	state.runCancelling = true
+	state.activeRunID = 8
+	state.streamRunID = 8
+	state.streamTurn = 2
+	state.streamTurnUncertain = true
+	state.streamConnectedActive = false
+	m.runs[8] = &conversationRun{conversationKey: state.key, observed: true}
+	m.runByState[state.key] = 8
+
+	updated, _ := m.Update(conversationHistoryRefreshMsg{
+		runID: 8,
+		turn:  2,
+		history: initialHistoryMsg{
+			conversationKey: state.key,
+			conversationID:  state.conversationID,
+			loaded:          true,
+			entries:         []chatEntry{{kind: entryUser, content: "canonical prompt"}},
+		},
+	})
+	m = updated.(model)
+
+	assert.False(t, state.running)
+	assert.False(t, state.runCancelling)
+	assert.False(t, state.streamTurnUncertain)
+	assert.Zero(t, state.activeRunID)
+	assert.Equal(t, "cancelled", state.status)
+	require.Len(t, state.entries, 1)
+	assert.Equal(t, "canonical prompt", state.entries[0].content)
+}
+
+func TestConversationHistoryRefreshRetriesAndSurfacesFailure(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.streamRunID = 7
+	state.streamTurn = 2
+
+	updated, retryCmd := m.Update(conversationHistoryRefreshMsg{
+		runID: 7,
+		turn:  2,
+		history: initialHistoryMsg{
+			conversationKey: state.key,
+			err:             errors.New("temporary load failure"),
+		},
+	})
+	m = updated.(model)
+	require.NotNil(t, retryCmd)
+	retry, ok := retryCmd().(conversationStreamReconcileMsg)
+	require.True(t, ok)
+	assert.Equal(t, 1, retry.attempt)
+
+	updated, cmd := m.Update(conversationHistoryRefreshMsg{
+		runID:   7,
+		turn:    2,
+		attempt: conversationHistoryRefreshMaxRetries,
+		history: initialHistoryMsg{
+			conversationKey: state.key,
+			err:             errors.New("persistent load failure"),
+		},
+	})
+	m = updated.(model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, "history sync failed", state.status)
+	assert.ErrorContains(t, state.err, "persistent load failure")
+}
+
+func TestConversationStreamBackoffResetsOnlyAfterStableConnection(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.streamRunID = 9
+	state.streamReconnectAttempt = 3
+	m.runs[9] = &conversationRun{conversationKey: state.key, observed: true}
+
+	updated, _ := m.Update(conversationStreamConnectedMsg{conversationKey: state.key, runID: 9, active: true})
+	m = updated.(model)
+	assert.Equal(t, 3, state.streamReconnectAttempt)
+	updated, _ = m.Update(chatEventMsg{runID: 9, conversationKey: state.key, event: chat.ChatEvent{Kind: "conversation", ConversationID: state.conversationID}})
+	m = updated.(model)
+	assert.Equal(t, 3, state.streamReconnectAttempt)
+	updated, _ = m.Update(conversationStreamStableMsg{conversationKey: state.key, runID: 9})
+	m = updated.(model)
+	assert.Zero(t, state.streamReconnectAttempt)
+}
+
+func TestConversationStreamReconnectClassification(t *testing.T) {
+	assert.False(t, conversationStreamShouldReconnect(context.Canceled))
+	assert.False(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 404}))
+	assert.True(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 429}))
+	assert.True(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 503}))
+	assert.True(t, conversationStreamShouldReconnect(errors.New("connection reset")))
+	assert.True(t, conversationStreamShouldReconnect(nil))
+}
+
+func TestObservedErrorRefreshesCanonicalHistory(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	runner.history = chat.ConversationHistory{
+		ID: "conversation-remote",
+		Messages: []conversations.StreamableMessage{
+			{Kind: "text", Role: "user", Content: "failed prompt"},
+			{Kind: "tool-use", Role: "assistant", ToolCallID: "call-1", ToolName: "bash", Input: `{"cmd":"false"}`},
+		},
+	}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.streamRunID = 1
+	m.runs[1] = &conversationRun{conversationKey: state.key, observed: true}
+	m.beginObservedConversationRun(state, 1)
+
+	cmd, quit := m.finishObservedConversationRun(state, 1, chat.ChatEvent{Kind: "error", ConversationID: state.conversationID, Error: "turn failed"})
+	assert.False(t, quit)
+	updated, _ := m.Update(conversationHistoryRefreshFromCmd(t, cmd))
+	m = updated.(model)
+	require.Len(t, state.entries, 2)
+	require.Len(t, state.entries[1].blocks, 1)
+	require.Len(t, state.entries[1].blocks[0].tools, 1)
+	assert.Equal(t, "bash", state.entries[1].blocks[0].tools[0].name)
+}
+
+func TestConversationStreamReconnectDelayBacksOffAndCaps(t *testing.T) {
+	assert.Equal(t, 250*time.Millisecond, conversationStreamReconnectDelay(1))
+	assert.Equal(t, 500*time.Millisecond, conversationStreamReconnectDelay(2))
+	assert.Equal(t, time.Second, conversationStreamReconnectDelay(3))
+	assert.Equal(t, 5*time.Second, conversationStreamReconnectDelay(100))
 }
 
 func TestTUIRunPausesAndRecreatesRemoteConversationStream(t *testing.T) {

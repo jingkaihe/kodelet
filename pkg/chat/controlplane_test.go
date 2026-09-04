@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,16 @@ type collectingChatSink struct {
 
 func (s *collectingChatSink) Send(event ChatEvent) error {
 	s.events = append(s.events, event)
+	return nil
+}
+
+type lifecycleCollectingChatSink struct {
+	collectingChatSink
+	connected []bool
+}
+
+func (s *lifecycleCollectingChatSink) ConversationStreamConnected(active bool) error {
+	s.connected = append(s.connected, active)
 	return nil
 }
 
@@ -87,6 +98,7 @@ func TestControlPlaneChatRunnerFollowsConversationAcrossTurns(t *testing.T) {
 		assert.Equal(t, "/base/api/conversations/conversation-1/stream", request.URL.Path)
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set(ConversationStreamActiveHeader, "true")
 		_, _ = w.Write([]byte("\n"))
 		_, _ = w.Write([]byte("{\"kind\":\"conversation\",\"conversation_id\":\"conversation-1\"}\n"))
 		_, _ = w.Write([]byte("{\"kind\":\"text-delta\",\"conversation_id\":\"conversation-1\",\"delta\":\"first\"}\n"))
@@ -99,11 +111,12 @@ func TestControlPlaneChatRunnerFollowsConversationAcrossTurns(t *testing.T) {
 
 	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
-	sink := &collectingChatSink{}
+	sink := &lifecycleCollectingChatSink{}
 
 	err = runner.StreamConversation(t.Context(), "conversation-1", sink)
 
 	require.NoError(t, err)
+	assert.Equal(t, []bool{true}, sink.connected)
 	require.Len(t, sink.events, 6)
 	assert.Equal(t, []string{"conversation", "text-delta", "done", "conversation", "text-delta", "error"}, []string{
 		sink.events[0].Kind,
@@ -115,6 +128,24 @@ func TestControlPlaneChatRunnerFollowsConversationAcrossTurns(t *testing.T) {
 	})
 	assert.Equal(t, "first", sink.events[1].Delta)
 	assert.Equal(t, "second", sink.events[4].Delta)
+}
+
+func TestControlPlaneHTTPErrorRetryability(t *testing.T) {
+	assert.False(t, (&ControlPlaneHTTPError{StatusCode: http.StatusUnauthorized}).Retryable())
+	assert.False(t, (&ControlPlaneHTTPError{StatusCode: http.StatusNotFound}).Retryable())
+	assert.True(t, (&ControlPlaneHTTPError{StatusCode: http.StatusRequestTimeout}).Retryable())
+	assert.True(t, (&ControlPlaneHTTPError{StatusCode: http.StatusTooManyRequests}).Retryable())
+	assert.True(t, (&ControlPlaneHTTPError{StatusCode: http.StatusBadGateway}).Retryable())
+
+	err := controlPlaneResponseError(&http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"access denied"}`)),
+	})
+	var responseErr *ControlPlaneHTTPError
+	require.ErrorAs(t, err, &responseErr)
+	assert.Equal(t, http.StatusForbidden, responseErr.StatusCode)
+	assert.Equal(t, "access denied", responseErr.Message)
+	assert.Equal(t, "control plane returned HTTP 403: access denied", responseErr.Error())
 }
 
 func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(t *testing.T) {

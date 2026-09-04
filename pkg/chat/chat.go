@@ -31,6 +31,8 @@ import (
 const (
 	maxChatToolDisplayOutputBytes  = 128 * 1024
 	chatToolOutputTruncationMarker = "\n\n[output truncated for remote display]"
+	// ConversationStreamActiveHeader reports whether a conversation was active when a live stream attached.
+	ConversationStreamActiveHeader = "X-Kodelet-Conversation-Active"
 )
 
 // ChatRequest is the payload for a streamed chat turn.
@@ -160,6 +162,11 @@ type UIWidgetEvent struct {
 // ChatEventSink receives streamed chat events.
 type ChatEventSink interface {
 	Send(ChatEvent) error
+}
+
+// ConversationStreamLifecycleSink receives connection state for a persistent conversation stream.
+type ConversationStreamLifecycleSink interface {
+	ConversationStreamConnected(active bool) error
 }
 
 // ChatRunner executes a single persisted chat turn.

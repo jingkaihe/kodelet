@@ -988,16 +988,17 @@ func (s *Server) respondToUIInput(conversationID, requestID string, response ext
 	return broker != nil && broker.Respond(requestID, response)
 }
 
-func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) bool {
+func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) (bool, bool) {
 	if strings.TrimSpace(conversationID) == "" || sink == nil {
-		return false
+		return false, false
 	}
 
 	s.activeChatsMu.Lock()
 	if _, deleting := s.deletingConversations[conversationID]; deleting {
 		s.activeChatsMu.Unlock()
-		return false
+		return false, false
 	}
+	active := s.activeChats[conversationID] != nil
 
 	s.chatSubscribersMu.Lock()
 	if s.chatSubscribers == nil {
@@ -1010,7 +1011,7 @@ func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberE
 	s.chatSubscribersMu.Unlock()
 	s.activeChatsMu.Unlock()
 
-	return true
+	return active, true
 }
 
 func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEventSink) {
@@ -2267,7 +2268,8 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	subscriber := newSubscriberEventSink()
-	if !s.registerChatSubscriber(conversationID, subscriber) {
+	active, registered := s.registerChatSubscriber(conversationID, subscriber)
+	if !registered {
 		subscriber.Close()
 		s.writeErrorResponse(w, http.StatusConflict, "conversation is unavailable", nil)
 		return
@@ -2277,7 +2279,10 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		subscriber.Close()
 	}()
 
-	active := s.isActiveChat(conversationID)
+	w.Header().Set(chat.ConversationStreamActiveHeader, strconv.FormatBool(active))
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 	if active {
 		_ = sink.Send(chat.ChatEvent{
 			Kind:           "conversation",

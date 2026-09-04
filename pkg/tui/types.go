@@ -174,14 +174,17 @@ type conversationState struct {
 	hasActiveAssistantEntry bool
 	usage                   llmtypes.Usage
 
-	running       bool
-	runCancelling bool
-	activeRunID   int
-	workingFrame  int
-	cancelRun     context.CancelFunc
-	streamRunID   int
-	streamTurn    int
-	cancelStream  context.CancelFunc
+	running                bool
+	runCancelling          bool
+	activeRunID            int
+	workingFrame           int
+	cancelRun              context.CancelFunc
+	streamRunID            int
+	streamTurn             int
+	cancelStream           context.CancelFunc
+	streamReconnectAttempt int
+	streamTurnUncertain    bool
+	streamConnectedActive  bool
 
 	queuedSteering    []string
 	queuedFollowUps   []string
@@ -308,9 +311,33 @@ type conversationStreamDoneMsg struct {
 	err             error
 }
 
+type conversationStreamConnectedMsg struct {
+	runID           int
+	conversationKey string
+	active          bool
+}
+
+type conversationStreamReconcileMsg struct {
+	runID           int
+	conversationKey string
+	turn            int
+	attempt         int
+}
+
+type conversationStreamReconnectMsg struct {
+	conversationKey string
+	attempt         int
+}
+
+type conversationStreamStableMsg struct {
+	runID           int
+	conversationKey string
+}
+
 type conversationHistoryRefreshMsg struct {
 	runID   int
 	turn    int
+	attempt int
 	history initialHistoryMsg
 }
 
@@ -392,6 +419,15 @@ type tuiSink struct {
 func (s tuiSink) Send(event chat.ChatEvent) error {
 	select {
 	case s.ch <- chatEventMsg{runID: s.runID, conversationKey: s.conversationKey, event: event}:
+		return nil
+	case <-s.done:
+		return context.Canceled
+	}
+}
+
+func (s tuiSink) ConversationStreamConnected(active bool) error {
+	select {
+	case s.ch <- conversationStreamConnectedMsg{runID: s.runID, conversationKey: s.conversationKey, active: active}:
 		return nil
 	case <-s.done:
 		return context.Canceled

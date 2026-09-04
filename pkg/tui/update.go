@@ -187,7 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state != nil && msg.err != nil {
 			state.err = errors.Wrap(msg.err, "failed to stop remote conversation")
 			state.status = "cancellation failed"
-			if run := m.runs[state.activeRunID]; run != nil && run.observed {
+			if run := m.runs[state.activeRunID]; state.streamTurnUncertain || (run != nil && run.observed) {
 				state.runCancelling = false
 			}
 			if state == m.conversationState {
@@ -300,18 +300,124 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport(true)
 		}
 
+	case conversationStreamConnectedMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil || state.streamRunID != msg.runID {
+			return m, waitForMsg(m.runCh)
+		}
+		wasReconnecting := state.streamReconnectAttempt > 0 || state.status == "reconnecting"
+		state.streamConnectedActive = msg.active
+		if state.running && state.streamTurnUncertain {
+			state.activeRunID = msg.runID
+			m.runByState[state.key] = msg.runID
+			state.err = nil
+			if msg.active {
+				state.streamTurnUncertain = false
+				if state.runCancelling {
+					state.status = "cancelling"
+				} else {
+					state.status = "working"
+				}
+			} else {
+				state.status = "reconnecting"
+			}
+		} else {
+			if msg.active && !state.running {
+				m.beginObservedConversationRun(state, msg.runID)
+			}
+			if wasReconnecting {
+				state.err = nil
+				if !state.running {
+					state.status = "ready"
+				}
+			}
+		}
+		if wasReconnecting && state == m.conversationState {
+			m.refreshViewport(state.autoFollow)
+		}
+		stableCmd := markConversationStreamStableAfter(state.key, msg.runID)
+		if msg.active {
+			return m, tea.Batch(waitForMsg(m.runCh), stableCmd)
+		}
+		return m, tea.Batch(
+			waitForMsg(m.runCh),
+			stableCmd,
+			reconcileConversationStreamAfter(state.key, msg.runID, state.streamTurn, 0),
+		)
+
+	case conversationStreamReconcileMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || (state.running && (!state.streamTurnUncertain || state.streamConnectedActive)) {
+			return m, nil
+		}
+		return m, refreshConversationHistoryFromSourceAttempt(m.ctx, state.key, state.conversationID, msg.runID, msg.turn, msg.attempt, m.conversationSource)
+
+	case conversationStreamReconnectMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil || state.streamRunID != 0 || (state.running && !state.streamTurnUncertain) || state.streamReconnectAttempt != msg.attempt {
+			return m, nil
+		}
+		return m, m.startConversationStream(state)
+
+	case conversationStreamStableMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state != nil && state.streamRunID == msg.runID {
+			state.streamReconnectAttempt = 0
+		}
+		return m, nil
+
 	case conversationHistoryRefreshMsg:
 		history := msg.history
 		state := m.stateForKey(history.conversationKey)
-		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || state.running || history.err != nil || !history.loaded {
+		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || (state.running && (!state.streamTurnUncertain || state.streamConnectedActive)) {
+			break
+		}
+		if history.err != nil || !history.loaded {
+			if msg.attempt < conversationHistoryRefreshMaxRetries && (history.err == nil || conversationStreamShouldReconnect(history.err)) {
+				return m, reconcileConversationStreamAfter(state.key, msg.runID, msg.turn, msg.attempt+1)
+			}
+			historyErr := history.err
+			if historyErr == nil {
+				historyErr = errors.New("control-plane conversation history is unavailable")
+			}
+			state.err = errors.Wrap(historyErr, "failed to synchronize conversation history")
+			state.status = "history sync failed"
+			if state == m.conversationState {
+				m.refreshViewport(state.autoFollow)
+			} else {
+				state.unread = true
+			}
 			break
 		}
 		if strings.TrimSpace(history.conversationID) != "" && strings.TrimSpace(history.conversationID) != strings.TrimSpace(state.conversationID) {
 			break
 		}
+		state.streamReconnectAttempt = 0
 		active := state == m.conversationState
 		currentState := m.conversationState
 		m.conversationState = state
+		if m.running && m.streamTurnUncertain && !m.streamConnectedActive {
+			wasCancelling := m.runCancelling
+			m.finishActiveBlocks()
+			m.running = false
+			m.runCancelling = false
+			m.cancelRun = nil
+			m.activeRunID = 0
+			m.streamTurnUncertain = false
+			m.queuedFollowUps = nil
+			m.err = nil
+			if wasCancelling {
+				m.status = "cancelled"
+			} else {
+				m.status = "ready"
+			}
+			if m.runByState[state.key] == msg.runID {
+				delete(m.runByState, state.key)
+			}
+		} else if m.status == "history sync failed" {
+			m.err = nil
+			m.status = "ready"
+		}
 		m.clearActiveAssistantEntry()
 		m.entries = history.entries
 		m.usage = history.usage
@@ -785,7 +891,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForMsg(m.runCh)
 		}
 		terminal := msg.event.Kind == "done" || msg.event.Kind == "error"
-		if observed && observedChatEventStartsRun(msg.event) {
+		startsObservedRun := observed && observedChatEventStartsRun(msg.event)
+		if startsObservedRun && state.streamTurnUncertain && !state.streamConnectedActive {
+			m.prepareForObservedConversationStart(state, msg.runID)
+		}
+		if startsObservedRun {
+			state.streamConnectedActive = true
 			m.beginObservedConversationRun(state, msg.runID)
 		}
 		if state.runCancelling && (!observed || !terminal) {
@@ -845,49 +956,53 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		active := state == m.conversationState
 		wasRunning := state.running && state.activeRunID == msg.runID
-		wasCancelling := state.runCancelling
 		var promptFocusCmd tea.Cmd
 		if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && state.activeUIPrompt.runID == msg.runID {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 		state.streamRunID = 0
 		state.cancelStream = nil
+		state.streamConnectedActive = false
 		delete(m.runs, msg.runID)
 		if m.runByState[state.key] == msg.runID {
 			delete(m.runByState, state.key)
 		}
+		streamCancelled := errors.Is(msg.err, context.Canceled)
+		shouldReconnect := conversationStreamShouldReconnect(msg.err)
+		var reconnectCmd tea.Cmd
+		if shouldReconnect {
+			state.streamReconnectAttempt++
+			reconnectCmd = reconnectConversationStreamAfter(state.key, state.streamReconnectAttempt)
+		} else {
+			state.streamReconnectAttempt = 0
+		}
 		if wasRunning {
-			currentState := m.conversationState
-			m.conversationState = state
-			m.finishActiveBlocks()
-			m.running = false
-			m.runCancelling = false
-			m.cancelRun = nil
-			m.activeRunID = 0
-			m.clearActiveAssistantEntry()
-			m.updatedAt = time.Now()
-			if wasCancelling || errors.Is(msg.err, context.Canceled) {
-				m.status = "cancelled"
-			} else {
+			state.streamTurnUncertain = true
+			if !streamCancelled {
 				streamErr := msg.err
 				if streamErr == nil {
 					streamErr = errors.New("control-plane conversation stream ended")
 				}
-				m.err = streamErr
-				m.status = "stream disconnected"
+				state.err = streamErr
+				if shouldReconnect {
+					state.status = "reconnecting"
+				} else {
+					state.status = "stream unavailable"
+				}
 			}
 			if !active {
-				m.unread = true
+				state.unread = true
 			}
-			m.conversationState = currentState
-		} else if !errors.Is(msg.err, context.Canceled) {
+		} else if !streamCancelled {
 			streamErr := msg.err
 			if streamErr == nil {
 				streamErr = errors.New("control-plane conversation stream ended")
 			}
-			if state.status != "error" {
-				state.err = streamErr
-				state.status = "stream disconnected"
+			state.err = streamErr
+			if shouldReconnect {
+				state.status = "reconnecting"
+			} else {
+				state.status = "stream unavailable"
 			}
 			if !active {
 				state.unread = true
@@ -896,12 +1011,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if active {
 			m.refreshViewport(state.autoFollow)
 		}
-		if m.quitAfterRun && wasRunning {
-			m.quitAfterRun = false
-			m.cancel()
-			return m, tea.Quit
-		}
-		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd)
+		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd, reconnectCmd)
 
 	case chatDoneMsg:
 		state := m.stateForRun(msg.runID)
@@ -1297,6 +1407,25 @@ func observedChatEventStartsRun(event chat.ChatEvent) bool {
 	}
 }
 
+func (m *model) prepareForObservedConversationStart(state *conversationState, runID int) {
+	if m == nil || state == nil || runID == 0 || state.streamRunID != runID || !state.running || !state.streamTurnUncertain || state.streamConnectedActive {
+		return
+	}
+	currentState := m.conversationState
+	m.conversationState = state
+	m.finishActiveBlocks()
+	m.running = false
+	m.runCancelling = false
+	m.cancelRun = nil
+	m.activeRunID = 0
+	m.streamTurnUncertain = false
+	m.clearActiveAssistantEntry()
+	if m.runByState[state.key] == runID {
+		delete(m.runByState, state.key)
+	}
+	m.conversationState = currentState
+}
+
 func (m *model) beginObservedConversationRun(state *conversationState, runID int) {
 	if m == nil || state == nil || runID == 0 || state.streamRunID != runID {
 		return
@@ -1305,6 +1434,8 @@ func (m *model) beginObservedConversationRun(state *conversationState, runID int
 	if run == nil || !run.observed || (state.running && state.activeRunID != runID) {
 		return
 	}
+	state.streamConnectedActive = true
+	state.streamTurnUncertain = false
 	if state.running {
 		return
 	}
@@ -1327,6 +1458,8 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 	active := state == m.conversationState
 	wasRunning := state.running && state.activeRunID == runID
 	wasCancelled := state.runCancelling || event.Cancelled
+	state.streamConnectedActive = false
+	state.streamTurnUncertain = false
 	var promptFocusCmd tea.Cmd
 	if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && state.activeUIPrompt.runID == runID {
 		promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
@@ -1386,7 +1519,7 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 	if queuedFollowUp != "" {
 		return tea.Batch(promptFocusCmd, m.startConversationRunPreservingComposer(state, queuedFollowUp)), false
 	}
-	if runSucceeded {
+	if event.Kind == "done" || event.Kind == "error" {
 		return tea.Batch(promptFocusCmd, refreshConversationHistoryFromSource(m.ctx, state.key, state.conversationID, runID, turn, m.conversationSource)), false
 	}
 	return promptFocusCmd, false
