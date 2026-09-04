@@ -283,6 +283,9 @@ func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationS
 	if source == nil {
 		return conversations.GetMostRecentConversationID(ctx)
 	}
+	if runner, ok := source.(*chatpkg.ControlPlaneChatRunner); ok && runner == nil {
+		return conversations.GetMostRecentConversationID(ctx)
+	}
 	summaries, err := source.ListConversations(ctx, 1)
 	if err != nil {
 		return "", err

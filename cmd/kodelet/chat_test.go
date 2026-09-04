@@ -98,6 +98,22 @@ func TestChatResumeShortFlag(t *testing.T) {
 	assert.Equal(t, "conv-short", config.ResumeConvID)
 }
 
+func TestChatFollowShortFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "chat"}
+	defaults := NewChatConfig()
+	cmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "")
+	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("theme", tui.AutoThemeName, "")
+	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
+	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
+	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
+
+	require.NoError(t, cmd.ParseFlags([]string{"-f"}))
+
+	config := getChatConfigFromFlags(cmd)
+	assert.True(t, config.Follow)
+}
+
 func TestChatNoToolsFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "chat"}
 	defaults := NewChatConfig()
@@ -259,6 +275,26 @@ func TestResolveFollowConversationUsesSelectedSource(t *testing.T) {
 
 	_, err = resolveFollowConversation(t.Context(), staticChatConversationSource{})
 	require.ErrorContains(t, err, "no conversations")
+}
+
+func TestResolveFollowConversationUsesLocalStoreForNilControlPlaneRunner(t *testing.T) {
+	basePath := setupChatConversationStore(t)
+	ctx := context.Background()
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  basePath,
+	})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	record := convtypes.NewConversationRecord("conversation-local-latest")
+	record.UpdatedAt = time.Now()
+	require.NoError(t, store.Save(ctx, record))
+
+	var runner *chatpkg.ControlPlaneChatRunner
+	id, err := resolveFollowConversation(ctx, runner)
+	require.NoError(t, err)
+	assert.Equal(t, record.ID, id)
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {
