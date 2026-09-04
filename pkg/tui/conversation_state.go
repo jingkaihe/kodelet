@@ -308,6 +308,68 @@ func (m *model) setConversationID(state *conversationState, conversationID strin
 	return conversationID
 }
 
+func (m *model) startConversationStream(state *conversationState) tea.Cmd {
+	if m == nil || state == nil || !m.remote || m.conversationStream == nil || state.running || state.streamRunID != 0 {
+		return nil
+	}
+	conversationID := strings.TrimSpace(state.conversationID)
+	if conversationID == "" || !state.loaded {
+		return nil
+	}
+
+	m.nextRunID++
+	runID := m.nextRunID
+	conversationKey := state.key
+	streamCtx, cancel := context.WithCancel(contextWithTUIConversation(m.ctx, conversationKey))
+	uiBroker := newTUIUIBrokerForConversation(m.runCh, runID, conversationKey)
+	streamCtx = extensions.ContextWithUIInputBroker(streamCtx, uiBroker)
+	state.streamRunID = runID
+	state.cancelStream = cancel
+	m.runs[runID] = &conversationRun{
+		conversationKey: conversationKey,
+		cancel:          cancel,
+		observed:        true,
+	}
+
+	streamer := m.conversationStream
+	runCh := m.runCh
+	uiDone := m.ctx.Done()
+	return func() tea.Msg {
+		go func() {
+			defer uiBroker.close()
+			err := streamer.StreamConversation(streamCtx, conversationID, tuiSink{
+				ch:              runCh,
+				runID:           runID,
+				conversationKey: conversationKey,
+				done:            streamCtx.Done(),
+			})
+			select {
+			case runCh <- conversationStreamDoneMsg{runID: runID, conversationKey: conversationKey, err: err}:
+			case <-uiDone:
+			}
+		}()
+		return nil
+	}
+}
+
+func (m *model) stopConversationStream(state *conversationState) {
+	if m == nil || state == nil || state.streamRunID == 0 {
+		return
+	}
+	runID := state.streamRunID
+	if state.cancelStream != nil {
+		state.cancelStream()
+	}
+	state.streamRunID = 0
+	state.cancelStream = nil
+	if run := m.runs[runID]; run != nil && run.observed {
+		delete(m.runs, runID)
+	}
+	if m.runByState[state.key] == runID {
+		delete(m.runByState, state.key)
+	}
+}
+
 func (m *model) cancelAllRuns() {
 	for _, run := range m.runs {
 		if run != nil && run.cancel != nil {

@@ -187,6 +187,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state != nil && msg.err != nil {
 			state.err = errors.Wrap(msg.err, "failed to stop remote conversation")
 			state.status = "cancellation failed"
+			if run := m.runs[state.activeRunID]; run != nil && run.observed {
+				state.runCancelling = false
+			}
 			if state == m.conversationState {
 				m.refreshViewport(true)
 			} else {
@@ -290,7 +293,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				cmds = append(cmds, m.startConversationRun(state, remoteQueuedSubmit))
 			}
+		} else if msg.loaded && m.remote {
+			cmds = append(cmds, m.startConversationStream(state))
 		}
+		if active {
+			m.refreshViewport(true)
+		}
+
+	case conversationHistoryRefreshMsg:
+		history := msg.history
+		state := m.stateForKey(history.conversationKey)
+		if state == nil || state.streamRunID != msg.runID || state.streamTurn != msg.turn || state.running || history.err != nil || !history.loaded {
+			break
+		}
+		if strings.TrimSpace(history.conversationID) != "" && strings.TrimSpace(history.conversationID) != strings.TrimSpace(state.conversationID) {
+			break
+		}
+		active := state == m.conversationState
+		currentState := m.conversationState
+		m.conversationState = state
+		m.clearActiveAssistantEntry()
+		m.entries = history.entries
+		m.usage = history.usage
+		if strings.TrimSpace(history.title) != "" {
+			m.title = strings.TrimSpace(history.title)
+		}
+		if !history.updatedAt.IsZero() {
+			m.updatedAt = history.updatedAt
+		}
+		if strings.TrimSpace(history.cwd) != "" {
+			m.cwd = strings.TrimSpace(history.cwd)
+		}
+		if strings.TrimSpace(history.profile) != "" {
+			m.setProfile(history.profile)
+		}
+		if strings.TrimSpace(history.reasoningEffort) != "" {
+			m.reasoningEffortOptions = []string{history.reasoningEffort}
+			m.setReasoningEffort(history.reasoningEffort, false)
+		}
+		m.conversationState = currentState
 		if active {
 			m.refreshViewport(true)
 		}
@@ -727,11 +768,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case chatEventMsg:
+		run := m.runs[msg.runID]
 		state := m.stateForRun(msg.runID)
 		if state == nil {
 			return m, waitForMsg(m.runCh)
 		}
-		if state.runCancelling {
+		observed := run != nil && run.observed
+		if observed && state.streamRunID != msg.runID {
+			return m, waitForMsg(m.runCh)
+		}
+		terminal := msg.event.Kind == "done" || msg.event.Kind == "error"
+		if observed && observedChatEventStartsRun(msg.event) {
+			m.beginObservedConversationRun(state, msg.runID)
+		}
+		if state.runCancelling && (!observed || !terminal) {
 			return m, waitForMsg(m.runCh)
 		}
 		active := state == m.conversationState
@@ -761,6 +811,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unread = true
 		}
 		m.conversationState = currentState
+		if observed && terminal {
+			nextCmd, quit := m.finishObservedConversationRun(state, msg.runID, msg.event)
+			if quit {
+				return m, tea.Quit
+			}
+			return m, tea.Batch(waitForMsg(m.runCh), nextCmd)
+		}
 		if !active {
 			return m, waitForMsg(m.runCh)
 		}
@@ -769,6 +826,75 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshViewport(m.autoFollow)
 		return m, waitForMsg(m.runCh)
+
+	case conversationStreamDoneMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil || state.streamRunID != msg.runID {
+			return m, waitForMsg(m.runCh)
+		}
+		run := m.runs[msg.runID]
+		if run == nil || !run.observed {
+			return m, waitForMsg(m.runCh)
+		}
+		active := state == m.conversationState
+		wasRunning := state.running && state.activeRunID == msg.runID
+		wasCancelling := state.runCancelling
+		var promptFocusCmd tea.Cmd
+		if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && state.activeUIPrompt.runID == msg.runID {
+			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		}
+		state.streamRunID = 0
+		state.cancelStream = nil
+		delete(m.runs, msg.runID)
+		if m.runByState[state.key] == msg.runID {
+			delete(m.runByState, state.key)
+		}
+		if wasRunning {
+			currentState := m.conversationState
+			m.conversationState = state
+			m.finishActiveBlocks()
+			m.running = false
+			m.runCancelling = false
+			m.cancelRun = nil
+			m.activeRunID = 0
+			m.clearActiveAssistantEntry()
+			m.updatedAt = time.Now()
+			if wasCancelling || errors.Is(msg.err, context.Canceled) {
+				m.status = "cancelled"
+			} else {
+				streamErr := msg.err
+				if streamErr == nil {
+					streamErr = errors.New("control-plane conversation stream ended")
+				}
+				m.err = streamErr
+				m.status = "stream disconnected"
+			}
+			if !active {
+				m.unread = true
+			}
+			m.conversationState = currentState
+		} else if !errors.Is(msg.err, context.Canceled) {
+			streamErr := msg.err
+			if streamErr == nil {
+				streamErr = errors.New("control-plane conversation stream ended")
+			}
+			if state.status != "error" {
+				state.err = streamErr
+				state.status = "stream disconnected"
+			}
+			if !active {
+				state.unread = true
+			}
+		}
+		if active {
+			m.refreshViewport(state.autoFollow)
+		}
+		if m.quitAfterRun && wasRunning {
+			m.quitAfterRun = false
+			m.cancel()
+			return m, tea.Quit
+		}
+		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd)
 
 	case chatDoneMsg:
 		state := m.stateForRun(msg.runID)
@@ -832,7 +958,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			followUpCmd := m.startConversationRunPreservingComposer(state, queuedFollowUp)
 			return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd, followUpCmd)
 		}
-		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd)
+		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd, m.startConversationStream(state))
 
 	case transcriptRefreshMsg:
 		if m.pendingRefresh {
@@ -1152,6 +1278,112 @@ func chatEventMarksConversationUnread(event chat.ChatEvent) bool {
 	}
 }
 
+func observedChatEventStartsRun(event chat.ChatEvent) bool {
+	switch event.Kind {
+	case "user-message":
+		return true
+	case "conversation":
+		return strings.TrimSpace(event.ConversationName) == ""
+	default:
+		return false
+	}
+}
+
+func (m *model) beginObservedConversationRun(state *conversationState, runID int) {
+	if m == nil || state == nil || runID == 0 || state.streamRunID != runID {
+		return
+	}
+	run := m.runs[runID]
+	if run == nil || !run.observed || (state.running && state.activeRunID != runID) {
+		return
+	}
+	if state.running {
+		return
+	}
+	state.running = true
+	state.runCancelling = false
+	state.activeRunID = runID
+	state.workingFrame = 0
+	state.cancelRun = nil
+	state.streamTurn++
+	state.status = "working"
+	state.err = nil
+	state.updatedAt = time.Now()
+	m.runByState[state.key] = runID
+}
+
+func (m *model) finishObservedConversationRun(state *conversationState, runID int, event chat.ChatEvent) (tea.Cmd, bool) {
+	if m == nil || state == nil || runID == 0 || state.streamRunID != runID {
+		return nil, false
+	}
+	active := state == m.conversationState
+	wasRunning := state.running && state.activeRunID == runID
+	wasCancelling := state.runCancelling
+	var promptFocusCmd tea.Cmd
+	if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && state.activeUIPrompt.runID == runID {
+		promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+	}
+
+	currentState := m.conversationState
+	m.conversationState = state
+	if wasRunning {
+		m.finishActiveBlocks()
+		m.running = false
+		m.runCancelling = false
+		m.cancelRun = nil
+		m.activeRunID = 0
+		if event.Kind == "error" && !wasCancelling {
+			message := strings.TrimSpace(event.Error)
+			if message == "" {
+				message = "remote conversation failed"
+			}
+			m.err = errors.New(message)
+			m.status = "error"
+		} else if wasCancelling {
+			m.status = "cancelled"
+		} else {
+			m.status = "ready"
+		}
+		m.clearActiveAssistantEntry()
+		m.updatedAt = time.Now()
+	} else if event.Kind == "error" {
+		message := strings.TrimSpace(event.Error)
+		if message == "" {
+			message = "remote conversation failed"
+		}
+		m.err = errors.New(message)
+		m.status = "error"
+	}
+	turn := m.streamTurn
+	runSucceeded := event.Kind == "done" && !wasCancelling
+	queuedFollowUp := ""
+	if wasRunning && runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
+		queuedFollowUp = m.queuedFollowUps[0]
+		m.queuedFollowUps = m.queuedFollowUps[1:]
+	} else if wasRunning && !runSucceeded {
+		m.queuedFollowUps = nil
+	}
+	m.conversationState = currentState
+	if m.runByState[state.key] == runID {
+		delete(m.runByState, state.key)
+	}
+	if active && queuedFollowUp == "" {
+		m.refreshViewport(state.autoFollow)
+	}
+	if m.quitAfterRun && wasRunning {
+		m.quitAfterRun = false
+		m.cancel()
+		return promptFocusCmd, true
+	}
+	if queuedFollowUp != "" {
+		return tea.Batch(promptFocusCmd, m.startConversationRunPreservingComposer(state, queuedFollowUp)), false
+	}
+	if runSucceeded {
+		return tea.Batch(promptFocusCmd, refreshConversationHistoryFromSource(m.ctx, state.key, state.conversationID, runID, turn, m.conversationSource)), false
+	}
+	return promptFocusCmd, false
+}
+
 func (m *model) resize() {
 	if m.width <= 0 || m.height <= 0 {
 		return
@@ -1263,6 +1495,7 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	if conversationID == "" {
 		return nil
 	}
+	m.stopConversationStream(state)
 	conversationKey := state.key
 	if strings.TrimSpace(state.title) == "" {
 		state.title = conversations.NormalizeConversationName(userDisplayMessage(message))

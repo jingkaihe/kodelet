@@ -389,7 +389,11 @@ func (m *model) uiBrokerState(runID int, conversationKey string) *conversationSt
 		}
 		return m.stateForKey(call.conversationKey)
 	}
-	return m.stateForRun(runID)
+	state := m.stateForRun(runID)
+	if run := m.runs[runID]; run != nil && run.observed && (state == nil || !state.running || state.activeRunID != runID) {
+		return nil
+	}
+	return state
 }
 
 func (m model) uiBrokerRunCancelling(runID int, state *conversationState) bool {

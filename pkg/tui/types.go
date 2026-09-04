@@ -179,6 +179,9 @@ type conversationState struct {
 	activeRunID   int
 	workingFrame  int
 	cancelRun     context.CancelFunc
+	streamRunID   int
+	streamTurn    int
+	cancelStream  context.CancelFunc
 
 	queuedSteering    []string
 	queuedFollowUps   []string
@@ -204,6 +207,7 @@ type conversationRun struct {
 	conversationKey string
 	turnID          string
 	cancel          context.CancelFunc
+	observed        bool
 }
 
 type extensionShortcutCall struct {
@@ -224,6 +228,7 @@ type model struct {
 	cancel             context.CancelFunc
 	runner             chat.ChatRunner
 	conversationSource chat.ConversationSource
+	conversationStream chat.ConversationStreamer
 	remote             bool
 	remoteDefaultCWD   string
 	environmentProfile string
@@ -294,6 +299,18 @@ type chatDoneMsg struct {
 	conversationKey string
 	conversationID  string
 	err             error
+}
+
+type conversationStreamDoneMsg struct {
+	runID           int
+	conversationKey string
+	err             error
+}
+
+type conversationHistoryRefreshMsg struct {
+	runID   int
+	turn    int
+	history initialHistoryMsg
 }
 
 type initialHistoryMsg struct {

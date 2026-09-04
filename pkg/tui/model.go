@@ -101,6 +101,7 @@ func newModel(ctx context.Context, config Config) model {
 		runner = newDefaultChatRunner("", extensionRuntimes)
 	}
 	conversationSource, _ := runner.(chat.ConversationSource)
+	conversationStream, _ := runner.(chat.ConversationStreamer)
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD
 	if cwd == "" && config.Remote {
@@ -179,6 +180,7 @@ func newModel(ctx context.Context, config Config) model {
 		cancel:                cancel,
 		runner:                runner,
 		conversationSource:    conversationSource,
+		conversationStream:    conversationStream,
 		remote:                config.Remote,
 		remoteDefaultCWD:      strings.TrimSpace(config.DefaultCWD),
 		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),

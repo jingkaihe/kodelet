@@ -166,6 +166,11 @@ type ChatRunner interface {
 	Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
 }
 
+// ConversationStreamer follows live events for a persisted conversation across turns.
+type ConversationStreamer interface {
+	StreamConversation(ctx context.Context, conversationID string, sink ChatEventSink) error
+}
+
 // ConversationSource supplies persisted conversation summaries and normalized history to a chat client.
 type ConversationSource interface {
 	ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error)

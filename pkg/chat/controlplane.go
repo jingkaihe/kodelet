@@ -108,10 +108,47 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		return "", controlPlaneResponseError(response)
 	}
 
-	conversationID := strings.TrimSpace(request.ConversationID)
+	return r.consumeChatStream(ctx, response.Body, strings.TrimSpace(request.ConversationID), sink, true, false, "")
+}
+
+// StreamConversation follows live events for one control-plane conversation across turns.
+func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, conversationID string, sink ChatEventSink) error {
+	if r == nil || r.client == nil {
+		return errors.New("control-plane chat runner is not initialized")
+	}
+	if sink == nil {
+		return errors.New("chat event sink is required")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "stream")
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create control-plane conversation stream request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return errors.Wrap(err, "failed to stream control-plane conversation")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return controlPlaneResponseError(response)
+	}
+
+	_, err = r.consumeChatStream(ctx, response.Body, conversationID, sink, false, true, conversationID)
+	return err
+}
+
+func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader io.Reader, conversationID string, sink ChatEventSink, requireCompletion, asynchronousUI bool, expectedConversationID string) (string, error) {
 	var streamErr error
 	completed := false
-	scanner := bufio.NewScanner(response.Body)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), maxControlPlaneChatEventSize)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -122,28 +159,44 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		if err := json.Unmarshal(line, &event); err != nil {
 			return conversationID, errors.Wrap(err, "failed to decode control-plane chat event")
 		}
-		if strings.TrimSpace(event.ConversationID) != "" {
-			conversationID = strings.TrimSpace(event.ConversationID)
+		eventConversationID := strings.TrimSpace(event.ConversationID)
+		if eventConversationID != "" && expectedConversationID != "" && eventConversationID != expectedConversationID {
+			return conversationID, errors.Errorf("control plane streamed conversation %s while watching %s", eventConversationID, expectedConversationID)
 		}
-		handled, err := r.handleUIEvent(ctx, conversationID, event)
-		if err != nil {
-			return conversationID, err
+		if eventConversationID != "" {
+			conversationID = eventConversationID
 		}
-		if handled {
-			continue
+		if asynchronousUI {
+			if controlPlaneSupportsInteractiveUI(ctx) && isControlPlaneUIEvent(event.Kind) {
+				go func(event ChatEvent, eventConversationID string) {
+					_, _ = r.handleUIEvent(ctx, eventConversationID, event)
+				}(event, conversationID)
+				continue
+			}
+		} else {
+			handled, err := r.handleUIEvent(ctx, conversationID, event)
+			if err != nil {
+				return conversationID, err
+			}
+			if handled {
+				continue
+			}
 		}
 		if err := sink.Send(event); err != nil {
 			return conversationID, err
 		}
-		if event.Kind == "done" {
+		if requireCompletion && event.Kind == "done" {
 			completed = true
 		}
-		if event.Kind == "error" && strings.TrimSpace(event.Error) != "" {
+		if requireCompletion && event.Kind == "error" && strings.TrimSpace(event.Error) != "" {
 			streamErr = errors.New(event.Error)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return conversationID, errors.Wrap(err, "failed to read control-plane chat stream")
+	}
+	if !requireCompletion {
+		return conversationID, nil
 	}
 	if streamErr != nil {
 		return conversationID, streamErr
@@ -155,6 +208,15 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		return conversationID, errors.New("control-plane chat stream ended before completion")
 	}
 	return conversationID, nil
+}
+
+func isControlPlaneUIEvent(kind string) bool {
+	switch kind {
+	case "ui-input", "ui-input-request", "ui-confirm", "ui-confirm-request", "ui-select", "ui-select-request", "ui-notify", "ui-notification":
+		return true
+	default:
+		return false
+	}
 }
 
 // ListConversations returns control-plane conversations visible to this client.

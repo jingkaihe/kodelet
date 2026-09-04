@@ -38,6 +38,31 @@ func (r *conversationSourceRunner) LoadConversation(context.Context, string) (ch
 	return r.history, r.loadErr
 }
 
+type conversationStreamCall struct {
+	conversationID string
+	sink           chat.ChatEventSink
+	done           <-chan struct{}
+}
+
+type streamingConversationSourceRunner struct {
+	conversationSourceRunner
+	streamCalls chan conversationStreamCall
+}
+
+func newStreamingConversationSourceRunner() *streamingConversationSourceRunner {
+	return &streamingConversationSourceRunner{streamCalls: make(chan conversationStreamCall, 4)}
+}
+
+func (r *streamingConversationSourceRunner) StreamConversation(ctx context.Context, conversationID string, sink chat.ChatEventSink) error {
+	select {
+	case r.streamCalls <- conversationStreamCall{conversationID: conversationID, sink: sink, done: ctx.Done()}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestConversationSwitchPreservesDraftAndTranscript(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -149,6 +174,7 @@ func TestRemoteConversationPickerLoadsControlPlaneSessions(t *testing.T) {
 		FirstMessage: "Remote conversation",
 		CWD:          "/Users/jingkaihe/Workspace/kodelet",
 		UpdatedAt:    time.Now(),
+		IsRunning:    true,
 	}}}
 	m := newModel(context.Background(), Config{Remote: true, Runner: runner})
 	t.Cleanup(m.cancel)
@@ -164,6 +190,180 @@ func TestRemoteConversationPickerLoadsControlPlaneSessions(t *testing.T) {
 	items := m.filteredConversationPickerItems()
 	assert.True(t, items[0].isNew)
 	assert.Contains(t, itemConversationIDs(items), "conversation-remote")
+	for _, item := range items {
+		if item.id == "conversation-remote" {
+			assert.True(t, item.running)
+		}
+	}
+}
+
+func TestRemoteConversationStartsPersistentStreamAfterHistoryLoad(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+
+	updated, cmd := m.Update(initialHistoryMsg{
+		conversationKey: m.activeConversationKey,
+		conversationID:  m.conversationID,
+		loaded:          true,
+		entries:         []chatEntry{{kind: entryUser, content: "earlier prompt"}},
+	})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	require.NotZero(t, m.streamRunID)
+	streamRunID := m.streamRunID
+	require.NotNil(t, m.runs[streamRunID])
+	assert.True(t, m.runs[streamRunID].observed)
+	assert.Nil(t, m.uiBrokerState(streamRunID, m.activeConversationKey))
+	m.beginObservedConversationRun(m.conversationState, streamRunID)
+	assert.Same(t, m.conversationState, m.uiBrokerState(streamRunID, m.activeConversationKey))
+	m.running = false
+	m.activeRunID = 0
+	delete(m.runByState, m.activeConversationKey)
+
+	assert.Nil(t, cmd())
+
+	select {
+	case call := <-runner.streamCalls:
+		assert.Equal(t, "conversation-remote", call.conversationID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for conversation stream")
+	}
+}
+
+func TestRemoteConversationStreamAppliesWebUITurnsAcrossCompletions(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+	m.entries = []chatEntry{{kind: entryUser, content: "earlier prompt"}}
+	startCmd := m.startConversationStream(m.conversationState)
+	require.NotNil(t, startCmd)
+	assert.Nil(t, startCmd())
+	call := <-runner.streamCalls
+	streamRunID := m.streamRunID
+
+	applyStreamEvent := func(event chat.ChatEvent) tea.Cmd {
+		require.NoError(t, call.sink.Send(event))
+		msg, ok := receiveRunMsg(t, m.runCh).(chatEventMsg)
+		require.True(t, ok)
+		updated, cmd := m.Update(msg)
+		m = updated.(model)
+		return cmd
+	}
+
+	applyStreamEvent(chat.ChatEvent{Kind: "conversation", ConversationID: "conversation-remote"})
+	assert.True(t, m.running)
+	assert.Equal(t, streamRunID, m.activeRunID)
+	assert.Equal(t, 1, m.streamTurn)
+	applyStreamEvent(chat.ChatEvent{Kind: "user-message", ConversationID: "conversation-remote", Content: "started in web ui"})
+	applyStreamEvent(chat.ChatEvent{Kind: "text-delta", ConversationID: "conversation-remote", Delta: "first answer"})
+	applyStreamEvent(chat.ChatEvent{Kind: "done", ConversationID: "conversation-remote"})
+
+	assert.False(t, m.running)
+	assert.Zero(t, m.activeRunID)
+	assert.Equal(t, streamRunID, m.streamRunID)
+	assert.Contains(t, m.runs, streamRunID)
+	require.Len(t, m.entries, 3)
+	assert.Equal(t, "started in web ui", m.entries[1].content)
+	assert.Equal(t, "first answer", m.entries[2].blocks[0].text)
+
+	applyStreamEvent(chat.ChatEvent{Kind: "conversation", ConversationID: "conversation-remote"})
+	assert.True(t, m.running)
+	assert.Equal(t, 2, m.streamTurn)
+	applyStreamEvent(chat.ChatEvent{Kind: "user-message", ConversationID: "conversation-remote", Content: "second web turn"})
+	applyStreamEvent(chat.ChatEvent{Kind: "text-delta", ConversationID: "conversation-remote", Delta: "second answer"})
+
+	assert.Equal(t, "second web turn", m.entries[3].content)
+	assert.Equal(t, "second answer", m.entries[4].blocks[0].text)
+}
+
+func TestRemoteConversationStreamRefreshesCompletedHistoryWithoutOverwritingNewTurn(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+	require.NotNil(t, m.startConversationStream(m.conversationState))
+	runID := m.streamRunID
+	m.beginObservedConversationRun(m.conversationState, runID)
+	turn := m.streamTurn
+	_, _ = m.finishObservedConversationRun(m.conversationState, runID, chat.ChatEvent{Kind: "done", ConversationID: m.conversationID})
+
+	canonicalEntries := []chatEntry{
+		{kind: entryUser, content: "complete web prompt"},
+		{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "complete web answer"}}},
+	}
+	updated, _ := m.Update(conversationHistoryRefreshMsg{
+		runID: runID,
+		turn:  turn,
+		history: initialHistoryMsg{
+			conversationKey: m.activeConversationKey,
+			conversationID:  m.conversationID,
+			loaded:          true,
+			entries:         canonicalEntries,
+		},
+	})
+	m = updated.(model)
+	assert.Equal(t, canonicalEntries, m.entries)
+
+	m.beginObservedConversationRun(m.conversationState, runID)
+	updated, _ = m.Update(conversationHistoryRefreshMsg{
+		runID: runID,
+		turn:  turn,
+		history: initialHistoryMsg{
+			conversationKey: m.activeConversationKey,
+			conversationID:  m.conversationID,
+			loaded:          true,
+			entries:         []chatEntry{{kind: entryUser, content: "stale"}},
+		},
+	})
+	m = updated.(model)
+	assert.Equal(t, canonicalEntries, m.entries)
+}
+
+func TestTUIRunPausesAndRecreatesRemoteConversationStream(t *testing.T) {
+	runner := newStreamingConversationSourceRunner()
+	runner.conversationID = "conversation-remote"
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.loaded = true
+	streamCmd := m.startConversationStream(m.conversationState)
+	require.NotNil(t, streamCmd)
+	assert.Nil(t, streamCmd())
+	firstCall := <-runner.streamCalls
+	firstStreamRunID := m.streamRunID
+
+	localRunCmd := m.startConversationRun(m.conversationState, "started in tui")
+	require.NotNil(t, localRunCmd)
+	localRunID := m.activeRunID
+	assert.NotEqual(t, firstStreamRunID, localRunID)
+	assert.Zero(t, m.streamRunID)
+	assert.NotContains(t, m.runs, firstStreamRunID)
+	entryCount := len(m.entries)
+	updated, _ := m.Update(chatEventMsg{runID: firstStreamRunID, conversationKey: m.activeConversationKey, event: chat.ChatEvent{Kind: "text-delta", Delta: "stale stream text"}})
+	m = updated.(model)
+	assert.Len(t, m.entries, entryCount)
+	select {
+	case <-firstCall.done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for old conversation stream cancellation")
+	}
+
+	updated, _ = m.Update(chatDoneMsg{
+		runID:           localRunID,
+		conversationKey: m.activeConversationKey,
+		conversationID:  m.conversationID,
+	})
+	m = updated.(model)
+	assert.False(t, m.running)
+	require.NotZero(t, m.streamRunID)
+	assert.NotEqual(t, firstStreamRunID, m.streamRunID)
+	require.NotNil(t, m.runs[m.streamRunID])
+	assert.True(t, m.runs[m.streamRunID].observed)
+	entryCount = len(m.entries)
+	updated, _ = m.Update(chatEventMsg{runID: firstStreamRunID, conversationKey: m.activeConversationKey, event: chat.ChatEvent{Kind: "text-delta", Delta: "late stale stream text"}})
+	m = updated.(model)
+	assert.Len(t, m.entries, entryCount)
 }
 
 func TestRemoteConversationHistoryLoadsFromControlPlaneSource(t *testing.T) {

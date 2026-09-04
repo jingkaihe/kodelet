@@ -140,6 +140,7 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 			title:     conversations.ResolveConversationName(summary.Metadata, fallback),
 			cwd:       strings.TrimSpace(summary.CWD),
 			updatedAt: summary.UpdatedAt,
+			running:   summary.IsRunning,
 		}
 	}
 

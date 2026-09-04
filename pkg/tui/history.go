@@ -134,6 +134,17 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 	}
 }
 
+func refreshConversationHistoryFromSource(ctx context.Context, conversationKey, conversationID string, runID, turn int, source chat.ConversationSource) tea.Cmd {
+	if source == nil {
+		return nil
+	}
+	load := loadConversationHistoryFromSource(ctx, conversationKey, conversationID, "", source)
+	return func() tea.Msg {
+		history, _ := load().(initialHistoryMsg)
+		return conversationHistoryRefreshMsg{runID: runID, turn: turn, history: history}
+	}
+}
+
 func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry {
 	entries := make([]chatEntry, 0)
 	toolIndex := map[string][2]int{}
