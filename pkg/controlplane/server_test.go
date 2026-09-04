@@ -58,6 +58,28 @@ func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return clientConn, bufio.NewReadWriter(reader, writer), nil
 }
 
+type disconnectedResponseWriter struct {
+	header http.Header
+	writes int
+}
+
+func newDisconnectedResponseWriter() *disconnectedResponseWriter {
+	return &disconnectedResponseWriter{header: make(http.Header)}
+}
+
+func (w *disconnectedResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *disconnectedResponseWriter) Write([]byte) (int, error) {
+	w.writes++
+	return 0, errors.New("client disconnected")
+}
+
+func (w *disconnectedResponseWriter) WriteHeader(int) {}
+
+func (w *disconnectedResponseWriter) Flush() {}
+
 func (m *mockConversationService) ListConversations(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 	if m.listFunc != nil {
 		return m.listFunc(ctx, req)
@@ -1871,6 +1893,55 @@ func TestServer_handleChat(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "done", doneEvent.Kind)
 	assert.Equal(t, "conv-123", doneEvent.ConversationID)
+}
+
+func TestServer_handleChatContinuesAfterInitiatingStreamDisconnect(t *testing.T) {
+	const conversationID = "conv-123"
+	subscriber := newSubscriberEventSink()
+	t.Cleanup(subscriber.Close)
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers: map[string]map[*subscriberEventSink]struct{}{
+			conversationID: {subscriber: {}},
+		},
+		chatRunner: &mockChatRunner{
+			runFunc: func(ctx context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+				require.NoError(t, sink.Send(ChatEvent{Kind: "text-delta", ConversationID: conversationID, Role: "assistant", Delta: "first"}))
+				require.NoError(t, sink.Send(ChatEvent{Kind: "text-delta", ConversationID: conversationID, Role: "assistant", Delta: "second"}))
+				require.NoError(t, ctx.Err())
+				return conversationID, nil
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"hello","conversationId":"conv-123"}`))
+	w := newDisconnectedResponseWriter()
+
+	server.handleChat(w, req)
+
+	assert.False(t, server.isActiveChat(conversationID))
+	assert.Equal(t, 2, w.writes)
+	events := make([]ChatEvent, 0, 5)
+	for range 5 {
+		select {
+		case event := <-subscriber.ch:
+			events = append(events, event)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for broadcast chat event")
+		}
+	}
+	assert.Equal(t, []string{"conversation", "user-message", "text-delta", "text-delta", "done"}, []string{
+		events[0].Kind,
+		events[1].Kind,
+		events[2].Kind,
+		events[3].Kind,
+		events[4].Kind,
+	})
+	assert.Equal(t, "first", events[2].Delta)
+	assert.Equal(t, "second", events[3].Delta)
 }
 
 func TestServer_handleChatWithImageContent(t *testing.T) {

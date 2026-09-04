@@ -278,6 +278,12 @@ func (m model) renderShortcutsDialog() string {
 	}
 	shortcutWidth = min(shortcutWidth, max(1, contentWidth/2))
 	descriptionWidth := max(1, contentWidth-shortcutWidth-2)
+	escapeDescription := "Cancel or dismiss"
+	ctrlCDescription := "Cancel run or quit"
+	if m.remote {
+		escapeDescription = "Dismiss"
+		ctrlCDescription = "Detach and quit"
+	}
 
 	baseRows := []shortcutHelpRow{
 		{shortcut: "Enter", description: "Send message"},
@@ -289,8 +295,9 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Ctrl+Y", description: "Change reasoning effort before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
-		{shortcut: "Esc", description: "Cancel or dismiss"},
-		{shortcut: "Ctrl+C", description: "Cancel run or quit"},
+		{shortcut: "/stop", description: "Stop active turn"},
+		{shortcut: "Esc", description: escapeDescription},
+		{shortcut: "Ctrl+C", description: ctrlCDescription},
 	}
 	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
 	for _, shortcut := range m.extensionShortcuts {

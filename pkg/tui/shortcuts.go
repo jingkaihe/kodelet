@@ -12,7 +12,7 @@ import (
 )
 
 var hardReservedExtensionShortcutKeys = map[string]string{
-	"ctrl+c": "cancel the active run or quit",
+	"ctrl+c": "quit or detach from the TUI",
 	"ctrl+d": "cancel the active run or quit",
 	"ctrl+j": "insert a newline",
 	"ctrl+l": "browse and switch conversations",

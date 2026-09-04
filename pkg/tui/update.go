@@ -501,6 +501,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		key := msg.String()
+		if key == "ctrl+c" && m.remote {
+			m.cancel()
+			return m, tea.Quit
+		}
 		if m.shortcutsOpen {
 			switch key {
 			case "ctrl+l":
@@ -584,7 +588,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.running && !m.runCancelling {
+			if m.running && !m.runCancelling && !m.remote {
 				return m, m.cancelActiveRun()
 			}
 			return m, nil

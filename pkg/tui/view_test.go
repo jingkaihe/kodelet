@@ -88,6 +88,21 @@ func TestShortcutsDialogIncludesExtensionShortcuts(t *testing.T) {
 	assert.NotContains(t, dialog, "workspace")
 }
 
+func TestRemoteShortcutsDialogDescribesDetachAndExplicitStop(t *testing.T) {
+	m := newModel(context.Background(), Config{Remote: true})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 100
+	m.height = 40
+
+	dialog := m.renderShortcutsDialog()
+
+	assert.Contains(t, dialog, "/stop")
+	assert.Contains(t, dialog, "Stop active turn")
+	assert.Contains(t, dialog, "Detach and quit")
+	assert.NotContains(t, dialog, "Cancel run or quit")
+}
+
 func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

@@ -354,17 +354,22 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastingEventSink struct {
+	mu             sync.Mutex
 	primary        chat.ChatEventSink
 	broadcast      func(string, chat.ChatEvent)
 	conversationID string
 }
 
 func (s *broadcastingEventSink) Send(event chat.ChatEvent) error {
-	if err := s.primary.Send(event); err != nil {
-		if s.broadcast != nil {
-			s.broadcast(s.conversationID, event)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// The initiating HTTP stream is only one observer of a server-owned run.
+	// Detach it after a write failure without interrupting execution or fanout.
+	if s.primary != nil {
+		if err := s.primary.Send(event); err != nil {
+			s.primary = nil
 		}
-		return err
 	}
 
 	if s.broadcast != nil {

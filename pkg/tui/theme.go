@@ -105,6 +105,11 @@ func normalizedThemeSelection(name string) string {
 func tuiBuiltInSlashCommands() []slashcommands.Command {
 	return []slashcommands.Command{
 		{
+			Name:        "stop",
+			Description: "Stop the active conversation turn",
+			Placeholder: "/stop",
+		},
+		{
 			Name:        "theme",
 			Description: "Select the TUI theme",
 			Hint:        "name (optional)",
@@ -137,6 +142,24 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	}
 
 	switch command {
+	case "stop":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		if strings.TrimSpace(args) != "" {
+			return m.addUINotification(uiNotification{
+				level:   uiNotificationError,
+				title:   "Invalid command",
+				message: "usage: /stop",
+			}), true
+		}
+		if !m.running {
+			return m.addUINotification(uiNotification{
+				level:   uiNotificationInfo,
+				title:   "No active turn",
+				message: "There is no active conversation turn to stop.",
+			}), true
+		}
+		return m.cancelActiveRun(), true
 	case "theme":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()

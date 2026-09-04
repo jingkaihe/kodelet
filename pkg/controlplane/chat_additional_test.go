@@ -35,10 +35,12 @@ func (w *plainResponseWriter) WriteHeader(statusCode int) {
 }
 
 type failingChatSink struct {
-	err error
+	err   error
+	calls int
 }
 
-func (s failingChatSink) Send(ChatEvent) error {
+func (s *failingChatSink) Send(ChatEvent) error {
+	s.calls++
 	return s.err
 }
 
@@ -105,14 +107,18 @@ func TestBroadcastingEventSinkBroadcastsOnSuccessAndFailure(t *testing.T) {
 	assert.Equal(t, []ChatEvent{event}, broadcasted)
 
 	wantErr := errors.New("write failed")
+	failingPrimary := &failingChatSink{err: wantErr}
 	failing := &broadcastingEventSink{
-		primary:        failingChatSink{err: wantErr},
+		primary:        failingPrimary,
 		conversationID: "conv-123",
 		broadcast: func(_ string, event ChatEvent) {
 			broadcasted = append(broadcasted, event)
 		},
 	}
 
-	require.ErrorIs(t, failing.Send(event), wantErr)
-	assert.Equal(t, []ChatEvent{event, event}, broadcasted)
+	secondEvent := ChatEvent{Kind: "text", ConversationID: "conv-123", Role: "assistant", Content: "again"}
+	require.NoError(t, failing.Send(event))
+	require.NoError(t, failing.Send(secondEvent))
+	assert.Equal(t, 1, failingPrimary.calls)
+	assert.Equal(t, []ChatEvent{event, event, secondEvent}, broadcasted)
 }

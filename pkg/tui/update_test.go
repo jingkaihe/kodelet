@@ -95,6 +95,26 @@ func receiveRunMsg(t *testing.T, ch <-chan tea.Msg) tea.Msg {
 	}
 }
 
+func executeRemoteStopCmd(t *testing.T, cmd tea.Cmd) remoteStopMsg {
+	t.Helper()
+	require.NotNil(t, cmd)
+	switch message := cmd().(type) {
+	case remoteStopMsg:
+		return message
+	case tea.BatchMsg:
+		for _, child := range message {
+			if child == nil {
+				continue
+			}
+			if childMessage, ok := child().(remoteStopMsg); ok {
+				return childMessage
+			}
+		}
+	}
+	t.Fatal("remote stop command did not produce a remoteStopMsg")
+	return remoteStopMsg{}
+}
+
 func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -155,27 +175,70 @@ func TestRemoteCancelStopsControlPlaneBeforeClosingStream(t *testing.T) {
 	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
 
 	cmd := m.cancelActiveRun()
-	require.NotNil(t, cmd)
-	var stopMessage remoteStopMsg
-	switch message := cmd().(type) {
-	case remoteStopMsg:
-		stopMessage = message
-	case tea.BatchMsg:
-		for _, child := range message {
-			if child == nil {
-				continue
-			}
-			if childMessage, ok := child().(remoteStopMsg); ok {
-				stopMessage = childMessage
-			}
-		}
-	default:
-		t.Fatalf("unexpected cancellation message %T", message)
-	}
+	stopMessage := executeRemoteStopCmd(t, cmd)
 	assert.NoError(t, stopMessage.err)
 	assert.Equal(t, []string{"stop-turn", "cancel-stream"}, runner.actions)
 	assert.Equal(t, "conversation-1", runner.stoppedConversation)
 	assert.Equal(t, "turn-1", runner.stoppedTurnID)
+}
+
+func TestStopSlashCommandStopsActiveRemoteTurn(t *testing.T) {
+	runner := &remoteControlRecordingRunner{}
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.conversationID = "conversation-1"
+	m.activeRunID = 1
+	m.runs[1] = &conversationRun{conversationKey: m.activeConversationKey, turnID: "turn-1"}
+	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
+	m.textarea.SetValue("/stop")
+
+	stopMessage := executeRemoteStopCmd(t, m.submit())
+
+	assert.NoError(t, stopMessage.err)
+	assert.Equal(t, []string{"stop-turn", "cancel-stream"}, runner.actions)
+	assert.True(t, m.runCancelling)
+	assert.Empty(t, m.textarea.Value())
+}
+
+func TestRemoteCtrlCDetachesWithoutStoppingActiveTurn(t *testing.T) {
+	runner := &remoteControlRecordingRunner{}
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true})
+	m.running = true
+	m.conversationID = "conversation-1"
+	m.activeRunID = 1
+	m.runs[1] = &conversationRun{conversationKey: m.activeConversationKey, turnID: "turn-1"}
+	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
+	m.shortcutsOpen = true
+
+	updated, cmd := m.Update(keyPressWithMod('c', tea.ModCtrl))
+	m = updated.(model)
+
+	assert.Empty(t, runner.actions)
+	assert.False(t, m.runCancelling)
+	assert.ErrorIs(t, m.ctx.Err(), context.Canceled)
+	require.NotNil(t, cmd)
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok)
+}
+
+func TestRemoteEscapeDoesNotStopActiveTurn(t *testing.T) {
+	runner := &remoteControlRecordingRunner{}
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.conversationID = "conversation-1"
+	m.activeRunID = 1
+	m.runs[1] = &conversationRun{conversationKey: m.activeConversationKey, turnID: "turn-1"}
+	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
+
+	updated, cmd := m.Update(keyPress(tea.KeyEsc))
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Empty(t, runner.actions)
+	assert.False(t, m.runCancelling)
+	assert.NoError(t, m.ctx.Err())
 }
 
 func TestObservedRemoteStopFailureKeepsConversationStreamActive(t *testing.T) {
@@ -1043,6 +1106,7 @@ Body
 
 	require.NoError(t, err)
 	assert.Contains(t, slashCommandNames(commands), "goal")
+	assert.Contains(t, slashCommandNames(commands), "stop")
 	assert.Contains(t, slashCommandNames(commands), "theme")
 	assert.Contains(t, slashCommandNames(commands), "workspace-only")
 }
@@ -1356,6 +1420,7 @@ func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {
 	baseCommands, err := listBaseSlashCommands(context.Background(), missing)
 	assert.ErrorContains(t, err, "cwd directory does not exist")
 	assert.Contains(t, slashCommandNames(baseCommands), "goal")
+	assert.Contains(t, slashCommandNames(baseCommands), "stop")
 	assert.Contains(t, slashCommandNames(baseCommands), "theme")
 }
 
