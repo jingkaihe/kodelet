@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.47-beta
+
+Added live control-plane conversation following to the native TUI, so turns started from the Web UI or another remote client stream into open sessions with reconnect and history reconciliation.
+
+Made remote turn control explicit: `Ctrl+C` now detaches and exits without stopping server work, while `/stop` cancels the active turn; cancellation and queued steering state now stay consistent across clients.
+
+Improved theme-aware syntax highlighting and hardened remote stream recovery with classified protocol errors and bounded history refresh retries.
+
 ## 0.5.46-beta
 
 Upgraded the native TUI to Charm v2, adding bracketed paste support that preserves multiline composer input and safely normalizes pasted text in search and conversation pickers.
