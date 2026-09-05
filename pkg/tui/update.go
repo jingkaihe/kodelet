@@ -380,6 +380,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if historyErr == nil {
 				historyErr = errors.New("control-plane conversation history is unavailable")
 			}
+			m.finishUncertainObservedConversationRun(state, msg.runID)
 			state.err = errors.Wrap(historyErr, "failed to synchronize conversation history")
 			state.status = "history sync failed"
 			if state == m.conversationState {
@@ -392,27 +393,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(history.conversationID) != "" && strings.TrimSpace(history.conversationID) != strings.TrimSpace(state.conversationID) {
 			break
 		}
-		state.streamReconnectAttempt = 0
+		finishedUncertain, wasCancelling := m.finishUncertainObservedConversationRun(state, msg.runID)
 		active := state == m.conversationState
 		currentState := m.conversationState
 		m.conversationState = state
-		if m.running && m.streamTurnUncertain && !m.streamConnectedActive {
-			wasCancelling := m.runCancelling
-			m.finishActiveBlocks()
-			m.running = false
-			m.runCancelling = false
-			m.cancelRun = nil
-			m.activeRunID = 0
-			m.streamTurnUncertain = false
-			m.queuedFollowUps = nil
+		if finishedUncertain {
 			m.err = nil
 			if wasCancelling {
 				m.status = "cancelled"
 			} else {
 				m.status = "ready"
-			}
-			if m.runByState[state.key] == msg.runID {
-				delete(m.runByState, state.key)
 			}
 		} else if m.status == "history sync failed" {
 			m.err = nil
@@ -1408,22 +1398,30 @@ func observedChatEventStartsRun(event chat.ChatEvent) bool {
 }
 
 func (m *model) prepareForObservedConversationStart(state *conversationState, runID int) {
+	m.finishUncertainObservedConversationRun(state, runID)
+}
+
+func (m *model) finishUncertainObservedConversationRun(state *conversationState, runID int) (finished, wasCancelling bool) {
 	if m == nil || state == nil || runID == 0 || state.streamRunID != runID || !state.running || !state.streamTurnUncertain || state.streamConnectedActive {
-		return
+		return false, false
 	}
 	currentState := m.conversationState
 	m.conversationState = state
+	wasCancelling = m.runCancelling
 	m.finishActiveBlocks()
 	m.running = false
 	m.runCancelling = false
 	m.cancelRun = nil
 	m.activeRunID = 0
 	m.streamTurnUncertain = false
+	m.queuedFollowUps = nil
 	m.clearActiveAssistantEntry()
+	m.updatedAt = time.Now()
 	if m.runByState[state.key] == runID {
 		delete(m.runByState, state.key)
 	}
 	m.conversationState = currentState
+	return true, wasCancelling
 }
 
 func (m *model) beginObservedConversationRun(state *conversationState, runID int) {

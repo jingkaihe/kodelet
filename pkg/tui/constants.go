@@ -9,5 +9,6 @@ const (
 	conversationStreamStableDelay           = 5 * time.Second
 	conversationStreamReconnectInitialDelay = 250 * time.Millisecond
 	conversationStreamReconnectMaxDelay     = 5 * time.Second
+	conversationHistoryRefreshTimeout       = 10 * time.Second
 	conversationHistoryRefreshMaxRetries    = 3
 )

@@ -142,8 +142,10 @@ func refreshConversationHistoryFromSourceAttempt(ctx context.Context, conversati
 	if source == nil {
 		return nil
 	}
-	load := loadConversationHistoryFromSource(ctx, conversationKey, conversationID, "", source)
 	return func() tea.Msg {
+		attemptCtx, cancel := context.WithTimeout(ctx, conversationHistoryRefreshTimeout)
+		defer cancel()
+		load := loadConversationHistoryFromSource(attemptCtx, conversationKey, conversationID, "", source)
 		history, _ := load().(initialHistoryMsg)
 		return conversationHistoryRefreshMsg{runID: runID, turn: turn, attempt: attempt, history: history}
 	}

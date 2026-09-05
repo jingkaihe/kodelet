@@ -66,6 +66,30 @@ func (e *ControlPlaneHTTPError) Retryable() bool {
 	}
 }
 
+// ControlPlaneStreamProtocolError reports invalid data from a control-plane event stream.
+type ControlPlaneStreamProtocolError struct {
+	err error
+}
+
+func (e *ControlPlaneStreamProtocolError) Error() string {
+	if e == nil || e.err == nil {
+		return "invalid control-plane stream data"
+	}
+	return e.err.Error()
+}
+
+func (e *ControlPlaneStreamProtocolError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// Retryable reports that reconnecting cannot repair deterministic stream data errors.
+func (e *ControlPlaneStreamProtocolError) Retryable() bool {
+	return false
+}
+
 // ControlPlaneProfileOption describes one model-policy profile advertised by the server.
 type ControlPlaneProfileOption struct {
 	Name   string `json:"name"`
@@ -193,11 +217,11 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		}
 		var event ChatEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			return conversationID, errors.Wrap(err, "failed to decode control-plane chat event")
+			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Wrap(err, "failed to decode control-plane chat event")}
 		}
 		eventConversationID := strings.TrimSpace(event.ConversationID)
 		if eventConversationID != "" && expectedConversationID != "" && eventConversationID != expectedConversationID {
-			return conversationID, errors.Errorf("control plane streamed conversation %s while watching %s", eventConversationID, expectedConversationID)
+			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Errorf("control plane streamed conversation %s while watching %s", eventConversationID, expectedConversationID)}
 		}
 		if eventConversationID != "" {
 			conversationID = eventConversationID
@@ -229,7 +253,11 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return conversationID, errors.Wrap(err, "failed to read control-plane chat stream")
+		streamErr := errors.Wrap(err, "failed to read control-plane chat stream")
+		if errors.Is(err, bufio.ErrTooLong) {
+			return conversationID, &ControlPlaneStreamProtocolError{err: streamErr}
+		}
+		return conversationID, streamErr
 	}
 	if !requireCompletion {
 		return conversationID, nil

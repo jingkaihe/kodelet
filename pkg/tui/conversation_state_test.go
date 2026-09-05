@@ -28,13 +28,17 @@ type conversationSourceRunner struct {
 	history   chat.ConversationHistory
 	listErr   error
 	loadErr   error
+	loadFunc  func(context.Context, string) (chat.ConversationHistory, error)
 }
 
 func (r *conversationSourceRunner) ListConversations(context.Context, int) ([]convtypes.ConversationSummary, error) {
 	return r.summaries, r.listErr
 }
 
-func (r *conversationSourceRunner) LoadConversation(context.Context, string) (chat.ConversationHistory, error) {
+func (r *conversationSourceRunner) LoadConversation(ctx context.Context, conversationID string) (chat.ConversationHistory, error) {
+	if r.loadFunc != nil {
+		return r.loadFunc(ctx, conversationID)
+	}
 	return r.history, r.loadErr
 }
 
@@ -450,10 +454,13 @@ func TestRemoteConversationStreamReconnectsAndReconcilesHistory(t *testing.T) {
 	require.True(t, ok)
 	updated, _ = m.Update(history)
 	m = updated.(model)
-	assert.Zero(t, m.streamReconnectAttempt)
+	assert.Equal(t, 1, m.streamReconnectAttempt)
 	require.Len(t, m.entries, 2)
 	assert.Equal(t, "persisted prompt", m.entries[0].content)
 	assert.Equal(t, "persisted answer", m.entries[1].blocks[0].text)
+	updated, _ = m.Update(conversationStreamStableMsg{conversationKey: m.activeConversationKey, runID: secondRunID})
+	m = updated.(model)
+	assert.Zero(t, m.streamReconnectAttempt)
 }
 
 func TestRemoteConversationStreamDisconnectPreservesActiveTurn(t *testing.T) {
@@ -636,6 +643,66 @@ func TestConversationHistoryRefreshRetriesAndSurfacesFailure(t *testing.T) {
 	assert.ErrorContains(t, state.err, "persistent load failure")
 }
 
+func TestInactiveReconnectHistoryFailureReleasesRetainedTurn(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	state.running = true
+	state.runCancelling = true
+	state.activeRunID = 7
+	state.streamRunID = 7
+	state.streamTurn = 2
+	state.streamTurnUncertain = true
+	state.streamConnectedActive = false
+	state.queuedFollowUps = []string{"follow up"}
+	m.runs[7] = &conversationRun{conversationKey: state.key, observed: true}
+	m.runByState[state.key] = 7
+
+	updated, cmd := m.Update(conversationHistoryRefreshMsg{
+		runID:   7,
+		turn:    2,
+		attempt: conversationHistoryRefreshMaxRetries,
+		history: initialHistoryMsg{
+			conversationKey: state.key,
+			err:             errors.New("persistent load failure"),
+		},
+	})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.False(t, state.running)
+	assert.False(t, state.runCancelling)
+	assert.False(t, state.streamTurnUncertain)
+	assert.Zero(t, state.activeRunID)
+	assert.Empty(t, state.queuedFollowUps)
+	assert.Equal(t, "history sync failed", state.status)
+	assert.ErrorContains(t, state.err, "persistent load failure")
+}
+
+func TestConversationHistoryRefreshAttemptHasDeadline(t *testing.T) {
+	var deadline time.Time
+	runner := &conversationSourceRunner{loadFunc: func(ctx context.Context, _ string) (chat.ConversationHistory, error) {
+		var ok bool
+		deadline, ok = ctx.Deadline()
+		require.True(t, ok)
+		return chat.ConversationHistory{ID: "conversation-remote"}, nil
+	}}
+	startedAt := time.Now()
+	msg, ok := refreshConversationHistoryFromSourceAttempt(
+		t.Context(),
+		"conversation-remote",
+		"conversation-remote",
+		1,
+		1,
+		0,
+		runner,
+	)().(conversationHistoryRefreshMsg)
+
+	require.True(t, ok)
+	assert.True(t, msg.history.loaded)
+	assert.WithinDuration(t, startedAt.Add(conversationHistoryRefreshTimeout), deadline, time.Second)
+}
+
 func TestConversationStreamBackoffResetsOnlyAfterStableConnection(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: newStreamingConversationSourceRunner()})
 	t.Cleanup(m.cancel)
@@ -658,6 +725,7 @@ func TestConversationStreamBackoffResetsOnlyAfterStableConnection(t *testing.T) 
 func TestConversationStreamReconnectClassification(t *testing.T) {
 	assert.False(t, conversationStreamShouldReconnect(context.Canceled))
 	assert.False(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 404}))
+	assert.False(t, conversationStreamShouldReconnect(&chat.ControlPlaneStreamProtocolError{}))
 	assert.True(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 429}))
 	assert.True(t, conversationStreamShouldReconnect(&chat.ControlPlaneHTTPError{StatusCode: 503}))
 	assert.True(t, conversationStreamShouldReconnect(errors.New("connection reset")))

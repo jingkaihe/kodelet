@@ -422,9 +422,12 @@ func conversationStreamShouldReconnect(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	var responseErr *chat.ControlPlaneHTTPError
-	if errors.As(err, &responseErr) {
-		return responseErr.Retryable()
+	var classified interface {
+		error
+		Retryable() bool
+	}
+	if errors.As(err, &classified) {
+		return classified.Retryable()
 	}
 	return true
 }

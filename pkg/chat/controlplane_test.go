@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -201,6 +202,27 @@ func TestControlPlaneChatRunnerRejectsMismatchedConversationStreamEvents(t *test
 	err = runner.StreamConversation(t.Context(), "conversation-1", &collectingChatSink{})
 
 	require.ErrorContains(t, err, "streamed conversation conversation-other while watching conversation-1")
+	var protocolErr *ControlPlaneStreamProtocolError
+	require.ErrorAs(t, err, &protocolErr)
+	assert.False(t, protocolErr.Retryable())
+}
+
+func TestControlPlaneChatRunnerClassifiesOversizedStreamEvents(t *testing.T) {
+	runner := &ControlPlaneChatRunner{}
+	_, err := runner.consumeChatStream(
+		t.Context(),
+		strings.NewReader(strings.Repeat("x", maxControlPlaneChatEventSize+1)),
+		"conversation-1",
+		&collectingChatSink{},
+		false,
+		true,
+		"conversation-1",
+	)
+
+	var protocolErr *ControlPlaneStreamProtocolError
+	require.ErrorAs(t, err, &protocolErr)
+	require.ErrorIs(t, err, bufio.ErrTooLong)
+	assert.False(t, protocolErr.Retryable())
 }
 
 func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
@@ -643,6 +665,8 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 	require.ErrorContains(t, runner.StreamConversation(t.Context(), "conversation", nil), "chat event sink is required")
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
 	require.ErrorContains(t, err, "failed to decode control-plane chat event")
+	var protocolErr *ControlPlaneStreamProtocolError
+	require.ErrorAs(t, err, &protocolErr)
 	_, err = runner.ChatSettings(t.Context(), "")
 	require.ErrorContains(t, err, "failed to decode control-plane chat settings")
 	_, err = runner.SteerConversation(t.Context(), "conversation", "message", nil)
