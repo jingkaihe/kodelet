@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 
+	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -16,6 +17,13 @@ import (
 // It dispatches between the Chat Completions API and the Responses API
 // based on api_mode.
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
+	if config.Model == "" {
+		config.Model = openaipreset.DefaultModel
+	}
+	if err := validateModelServiceTier(config); err != nil {
+		return nil, err
+	}
+
 	log := logger.G(context.Background())
 	apiMode := resolveAPIMode(config)
 

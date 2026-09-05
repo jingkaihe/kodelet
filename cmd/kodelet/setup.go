@@ -14,6 +14,7 @@ import (
 func recommendedSetupConfigYAML() string {
 	return `aliases:
     fable-5: claude-fable-5
+    gpt-6: gpt-6-astra
     gpt-5.6: gpt-5.6-sol
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
@@ -21,7 +22,7 @@ func recommendedSetupConfigYAML() string {
     sonnet-46: claude-sonnet-4-6
 enable_fs_search_tools: false
 max_tokens: 128000
-model: gpt-5.6-sol
+model: gpt-6-astra
 openai:
     api_mode: responses
 profile: default
@@ -32,6 +33,7 @@ allowed_reasoning_efforts:
     - medium
     - high
     - xhigh
+    - max
 tool_mode: patch
 weak_model: gpt-5.6-luna
 weak_model_max_tokens: 8192
@@ -40,7 +42,7 @@ profiles:
         enable_fs_search_tools: false
         tool_mode: patch
         max_tokens: 128000
-        model: gpt-5.6-sol
+        model: gpt-6-astra
         openai:
             api_mode: responses
         provider: openai
@@ -50,6 +52,7 @@ profiles:
             - medium
             - high
             - xhigh
+            - max
         weak_model: gpt-5.6-luna
     anthropic:
         enable_fs_search_tools: true

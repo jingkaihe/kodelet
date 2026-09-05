@@ -1,11 +1,15 @@
 // Package codex provides preset configurations for Codex CLI models.
 package codex
 
-import "github.com/jingkaihe/kodelet/pkg/types/llm"
+import (
+	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
+	"github.com/jingkaihe/kodelet/pkg/types/llm"
+)
 
 // Models defines the Codex model categorization for reasoning and non-reasoning models.
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-6-astra",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -23,10 +27,15 @@ var Models = llm.CustomModels{
 }
 
 // Pricing defines the standard-tier pricing information for Codex models.
-// Token rates mirror OpenAI API pricing in USD per token. The ChatGPT-backed
-// Codex endpoint uses the flat short-context band, so no long-context fields are
-// set here even for underlying models that have OpenAI API long-context rates.
+// The ChatGPT-backed Codex endpoint uses a flat context band and does not bill
+// cache writes, so no long-context fields are set here.
 var Pricing = llm.CustomPricing{
+	"gpt-6-astra": llm.ModelPricing{
+		Input:         0.00001,  // $10.00 per million tokens
+		CachedInput:   0.000001, // $1.00 per million tokens
+		Output:        0.00005,  // $50.00 per million tokens
+		ContextWindow: 272_000,
+	},
 	"gpt-5.6-sol": llm.ModelPricing{
 		Input:           0.000005,   // $5.00 per million tokens
 		CachedInput:     0.0000005,  // $0.50 per million tokens
@@ -107,6 +116,12 @@ var Pricing = llm.CustomPricing{
 // PriorityPricing defines the fast/priority-tier pricing information for Codex
 // models. The `fast` service tier is sent upstream as OpenAI `priority`.
 var PriorityPricing = llm.CustomPricing{
+	"gpt-6-astra": llm.ModelPricing{
+		Input:         0.000025,  // $25.00 per million tokens
+		CachedInput:   0.0000025, // $2.50 per million tokens
+		Output:        0.000125,  // $125.00 per million tokens
+		ContextWindow: 272_000,
+	},
 	"gpt-5.6-sol": llm.ModelPricing{
 		Input:           0.00001,   // $10.00 per million tokens
 		CachedInput:     0.000001,  // $1.00 per million tokens
@@ -206,4 +221,4 @@ func PricingForServiceTier(serviceTier llm.OpenAIServiceTier) llm.CustomPricing 
 const BaseURL = "https://chatgpt.com/backend-api/codex"
 
 // DefaultModel is the default model for Codex.
-const DefaultModel = "gpt-5.6-sol"
+const DefaultModel = openaipreset.DefaultModel

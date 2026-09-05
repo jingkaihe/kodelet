@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,13 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 			want:    true,
 		},
 		{
+			name: "GPT-6 Astra forces responses",
+			config: llmtypes.Config{
+				Model: "gpt-6-astra",
+			},
+			want: true,
+		},
+		{
 			name: "platform codex forces responses",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
@@ -66,6 +74,45 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 
 			got := shouldUseResponsesAPI(tt.config)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNewThreadRejectsGPT6AstraFlexTier(t *testing.T) {
+	for _, platform := range []string{"openai", "codex"} {
+		for _, model := range []string{"gpt-6-astra", ""} {
+			t.Run(platform+"/model="+model, func(t *testing.T) {
+				thread, err := NewThread(llmtypes.Config{
+					Provider: "openai",
+					Model:    model,
+					OpenAI: &llmtypes.OpenAIConfig{
+						Platform:    platform,
+						ServiceTier: llmtypes.OpenAIServiceTierFlex,
+					},
+				})
+				require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
+				assert.Nil(t, thread)
+			})
+		}
+	}
+}
+
+func TestNewThreadModelDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("KODELET_OPENAI_API_MODE", "chat_completions")
+	for _, platform := range []string{"", "openai", "codex"} {
+		t.Run("platform="+platform, func(t *testing.T) {
+			config := llmtypes.Config{}
+			if platform != "" {
+				config.OpenAI = &llmtypes.OpenAIConfig{Platform: platform}
+			}
+			thread, err := NewThread(config)
+			require.NoError(t, err)
+			require.IsType(t, &responses.Thread{}, thread)
+			t.Cleanup(func() { require.NoError(t, thread.(*responses.Thread).Close()) })
+			assert.Equal(t, "gpt-6-astra", thread.GetConfig().Model)
+			assert.Empty(t, config.Model, "defaulting must not mutate the caller's config")
 		})
 	}
 }

@@ -79,6 +79,7 @@ openai:
 
 ```yaml
 aliases:
+  gpt-6: gpt-6-astra
   haiku-45: claude-haiku-4-5-20251001
   opus-48: claude-opus-4-8
   opus-5: claude-opus-5
@@ -98,12 +99,24 @@ anthropic:
 profiles:
   openai:
     provider: openai
-    model: gpt-5
+    model: gpt-6-astra
     weak_model: gpt-5
     reasoning_effort: medium
     allowed_reasoning_efforts: [low, medium, high]
     tool_mode: patch
     enable_fs_search_tools: false
+
+  codex:
+    provider: openai
+    model: gpt-6-astra
+    weak_model: gpt-5.6-luna
+    reasoning_effort: xhigh
+    allowed_reasoning_efforts: [low, medium, high, xhigh, max]
+    tool_mode: patch
+    enable_fs_search_tools: false
+    openai:
+      platform: codex
+      api_mode: responses
 
 ```
 

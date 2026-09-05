@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
+	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -227,6 +228,9 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	// Use viper's automatic unmarshaling with mapstructure tags
 	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
+	}
+	if config.Model == "" && strings.EqualFold(config.Provider, "openai") {
+		config.Model = openaipreset.DefaultModel
 	}
 	if config.OpenAI != nil {
 		if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {

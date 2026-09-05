@@ -14,6 +14,7 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-6-astra",
 		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
@@ -155,6 +156,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-6-astra",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -170,6 +172,14 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
 	assert.Empty(t, models.NonReasoning)
+
+	gpt6AstraPricing, exists := pricing["gpt-6-astra"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00001, gpt6AstraPricing.Input)
+	assert.Equal(t, 0.000001, gpt6AstraPricing.CachedInput)
+	assert.Zero(t, gpt6AstraPricing.CacheWriteInput)
+	assert.Equal(t, 0.00005, gpt6AstraPricing.Output)
+	assert.Equal(t, 272_000, gpt6AstraPricing.ContextWindow)
 
 	gpt56SolPricing, exists := pricing["gpt-5.6-sol"]
 	require.True(t, exists)
@@ -296,6 +306,15 @@ func TestLoadOpenAIPlatformDefaults(t *testing.T) {
 	assert.ElementsMatch(t, expectedOpenAINonReasoningModels, models.NonReasoning)
 
 	// Check pricing for key models
+	gpt6AstraPricing, exists := pricing["gpt-6-astra"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00001, gpt6AstraPricing.Input)
+	assert.Equal(t, 0.000001, gpt6AstraPricing.CachedInput)
+	assert.Equal(t, 0.0000125, gpt6AstraPricing.CacheWriteInput)
+	assert.Equal(t, 0.00005, gpt6AstraPricing.Output)
+	assert.Equal(t, 0.000025, gpt6AstraPricing.LongContextCacheWriteInput)
+	assert.Equal(t, 1_050_000, gpt6AstraPricing.ContextWindow)
+
 	gpt56SolPricing, exists := pricing["gpt-5.6-sol"]
 	require.True(t, exists)
 	assert.Equal(t, 0.000005, gpt56SolPricing.Input)
@@ -337,6 +356,19 @@ func TestLoadOpenAIPlatformDefaults(t *testing.T) {
 func TestLoadOpenAIPlatformDefaultsUsesConfiguredServiceTierPricing(t *testing.T) {
 	_, standardPricing := loadOpenAIPlatformDefaults()
 	_, priorityPricing := loadOpenAIPlatformDefaultsForServiceTier(llmtypes.OpenAIServiceTierPriority)
+
+	standardGPT6Astra, exists := standardPricing["gpt-6-astra"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00001, standardGPT6Astra.Input)
+	assert.Equal(t, 0.0000125, standardGPT6Astra.CacheWriteInput)
+	assert.Equal(t, 0.000025, standardGPT6Astra.LongContextCacheWriteInput)
+
+	priorityGPT6Astra, exists := priorityPricing["gpt-6-astra"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00002, priorityGPT6Astra.Input)
+	assert.Equal(t, 0.000025, priorityGPT6Astra.CacheWriteInput)
+	assert.Equal(t, 0.00005, priorityGPT6Astra.LongContextCacheWriteInput)
+	assert.Equal(t, 272_000, priorityGPT6Astra.LongContextThreshold)
 
 	standardGPT56Sol, exists := standardPricing["gpt-5.6-sol"]
 	require.True(t, exists)
@@ -525,6 +557,11 @@ func TestResolveAPIMode(t *testing.T) {
 			expected: llmtypes.OpenAIAPIModeChatCompletions,
 		},
 		{
+			name:     "gpt-6 Astra defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-6-astra"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
 			name:     "gpt-5.6 model family defaults to responses",
 			config:   llmtypes.Config{Model: "gpt-5.6"},
 			expected: llmtypes.OpenAIAPIModeResponses,
@@ -608,6 +645,29 @@ func TestNormalizeServiceTier(t *testing.T) {
 			assert.Equal(t, tt.expected, normalizeServiceTier(tt.config))
 		})
 	}
+}
+
+func TestValidateModelServiceTier(t *testing.T) {
+	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
+		Model:  "gpt-6-astra",
+		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierDefault},
+	}))
+	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
+		Model:  "gpt-5.6-sol",
+		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
+	}))
+
+	err := validateModelServiceTier(llmtypes.Config{
+		Model:  " GPT-6-ASTRA ",
+		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
+	})
+	require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
+
+	err = validateModelServiceTier(llmtypes.Config{
+		WeakModel: "gpt-6-astra",
+		OpenAI:    &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
+	})
+	require.ErrorContains(t, err, "flex is not supported for gpt-6-astra")
 }
 
 func TestOpenAIReasoningEffortForChatRequest(t *testing.T) {

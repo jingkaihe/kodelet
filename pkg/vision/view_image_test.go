@@ -39,6 +39,7 @@ func TestMakeViewImageResultUsesDecodedImageFormat(t *testing.T) {
 
 func TestSupportsViewImageOriginalDetail(t *testing.T) {
 	for _, model := range []string{
+		"gpt-6-astra",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",

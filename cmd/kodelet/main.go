@@ -67,7 +67,8 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", "gpt-5.5")
+	// Resolve the model after platform, profile, and explicit overrides are loaded.
+	viper.SetDefault("model", "")
 	viper.SetDefault("weak_model", "gpt-5.4-mini")
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("openai.api_mode", "responses")
@@ -365,7 +366,7 @@ func main() {
 	})
 
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", "gpt-5.5", "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides config; defaults to gpt-6-astra for OpenAI and Codex)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Thinking budget for non-adaptive Claude models; adaptive Claude models ignore this and use reasoning-effort instead (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", "gpt-5.4-mini", "Weak model to use (overrides config)")

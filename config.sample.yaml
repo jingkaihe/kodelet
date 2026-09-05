@@ -98,6 +98,7 @@ sysprompt_args: {}
 # Allows using short names instead of full model identifiers
 aliases:
   fable-5: "claude-fable-5"
+  gpt-6: "gpt-6-astra"
   gpt-5.6: "gpt-5.6-sol"
   sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
@@ -157,7 +158,7 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-5.6-sol"
+    model: "gpt-6-astra"
     weak_model: "gpt-5.6-luna"
     max_tokens: 16000
     reasoning_effort: "xhigh"
@@ -165,6 +166,19 @@ profiles:
     tool_mode: "patch"
     enable_fs_search_tools: false
     openai:
+      api_mode: "responses"
+
+  codex:
+    provider: "openai"
+    model: "gpt-6-astra"
+    weak_model: "gpt-5.6-luna"
+    max_tokens: 16000
+    reasoning_effort: "xhigh"
+    allowed_reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+    tool_mode: "patch"
+    enable_fs_search_tools: false
+    openai:
+      platform: "codex"
       api_mode: "responses"
 
 # Runner-local profiles are a separate namespace from model/provider profiles.
@@ -296,7 +310,7 @@ allowed_tools: []
 
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
-# model: "gpt-5.6-sol"
+# model: "gpt-6-astra"
 # max_tokens: 8192
 # weak_model: "gpt-5.6-luna"
 # weak_model_max_tokens: 4096
@@ -325,7 +339,7 @@ openai:
 
   # Optional request latency tier. Native OpenAI values are auto, default,
   # flex, priority, and scale. Kodelet also accepts fast as a Codex-friendly
-  # alias that is sent upstream as priority.
+  # alias that is sent upstream as priority. Flex is rejected for gpt-6-astra.
   # service_tier: "fast"
 
   # Enable OpenAI's native Responses web_search tool when talking to the real

@@ -43,6 +43,69 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
 }
 
+func TestGetConfigFromViperPlatformModelDefaults(t *testing.T) {
+	tests := []struct {
+		name      string
+		settings  map[string]any
+		envModel  string
+		flagModel string
+		want      string
+	}{
+		{name: "OpenAI default", want: "gpt-6-astra"},
+		{name: "explicit OpenAI model", settings: map[string]any{"model": "gpt-5.5"}, want: "gpt-5.5"},
+		{name: "Codex default", settings: map[string]any{"openai.platform": "codex"}, want: "gpt-6-astra"},
+		{name: "normalized Codex platform", settings: map[string]any{"openai.platform": " CODEX "}, want: "gpt-6-astra"},
+		{name: "explicit previous default", settings: map[string]any{"openai.platform": "codex", "model": "gpt-5.5"}, want: "gpt-5.5"},
+		{name: "environment model", settings: map[string]any{"openai.platform": "codex"}, envModel: "gpt-5.6-sol", want: "gpt-5.6-sol"},
+		{name: "flag model", settings: map[string]any{"openai.platform": "codex"}, flagModel: "gpt-5.5", want: "gpt-5.5"},
+		{
+			name: "profile selects Codex",
+			settings: map[string]any{"profile": "codex", "profiles": map[string]any{
+				"codex": map[string]any{"openai": map[string]any{"platform": "codex"}},
+			}},
+			want: "gpt-6-astra",
+		},
+		{
+			name: "profile preserves explicit model",
+			settings: map[string]any{"profile": "codex", "profiles": map[string]any{
+				"codex": map[string]any{"model": "gpt-5.5", "openai": map[string]any{"platform": "codex"}},
+			}},
+			want: "gpt-5.5",
+		},
+		{
+			name: "profile switches away from Codex",
+			settings: map[string]any{"openai.platform": "codex", "profile": "api", "profiles": map[string]any{
+				"api": map[string]any{"openai": map[string]any{"platform": "openai"}},
+			}},
+			want: "gpt-6-astra",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			t.Setenv("KODELET_MODEL", tt.envModel)
+			viper.SetEnvPrefix("KODELET")
+			viper.AutomaticEnv()
+			viper.SetDefault("provider", "openai")
+			viper.SetDefault("model", "")
+			for key, value := range tt.settings {
+				viper.Set(key, value)
+			}
+			cmd := &cobra.Command{Use: "test"}
+			cmd.Flags().String("model", "", "Model override")
+			require.NoError(t, viper.BindPFlag("model", cmd.Flags().Lookup("model")))
+			if tt.flagModel != "" {
+				require.NoError(t, cmd.Flags().Set("model", tt.flagModel))
+			}
+
+			config, err := GetConfigFromViperWithCmd(cmd)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, config.Model)
+		})
+	}
+}
+
 func TestGetConfigFromViper_CompactRatio(t *testing.T) {
 	viper.Reset()
 	viper.Set("compact_ratio", 0.65)
@@ -522,6 +585,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				},
 			},
 			expectedAliases: map[string]string{
+				"gpt-6":     "gpt-6-astra",
 				"gpt-5.6":   "gpt-5.6-sol",
 				"sonnet-46": "claude-sonnet-4-6",
 				"haiku-45":  "claude-haiku-4-5-20251001",
@@ -536,7 +600,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				"model":      "claude-sonnet-4-6",
 				"max_tokens": 8192,
 			},
-			expectedAliases: map[string]string{"gpt-5.6": "gpt-5.6-sol"},
+			expectedAliases: map[string]string{"gpt-6": "gpt-6-astra", "gpt-5.6": "gpt-5.6-sol"},
 			description:     "should include default aliases when aliases are omitted",
 		},
 	}
@@ -603,7 +667,7 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	assert.Equal(t, originalModel, config.Model, "original config should not be modified")
 }
 
-func TestGetConfigFromViperIncludesDefaultGPT56Alias(t *testing.T) {
+func TestGetConfigFromViperIncludesDefaultOpenAIAliases(t *testing.T) {
 	// Save original viper state
 	originalConfig := viper.AllSettings()
 	defer func() {
@@ -622,6 +686,7 @@ func TestGetConfigFromViperIncludesDefaultGPT56Alias(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
+	assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
 	assert.Equal(t, "gpt-5.6-sol", config.Model)
 	assert.Equal(t, "gpt-5.6-sol", config.WeakModel)
 }

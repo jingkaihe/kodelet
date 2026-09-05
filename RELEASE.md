@@ -2,6 +2,8 @@
 
 ## 0.5.47-beta
 
+Added GPT-6 Astra support and made it the default for OpenAI and Codex, with platform-specific pricing, reasoning, prompt caching, and original-detail image support.
+
 Added live control-plane conversation following to the native TUI, so turns started from the Web UI or another remote client stream into open sessions with reconnect and history reconciliation.
 
 Made remote turn control explicit: `Ctrl+C` now detaches and exits without stopping server work, while `/stop` cancels the active turn; cancellation and queued steering state now stay consistent across clients.

@@ -137,6 +137,32 @@ func TestNewThread(t *testing.T) {
 	assert.Equal(t, "openai", thread.Provider())
 }
 
+func TestNewThreadPlatformModelDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	for _, tt := range []struct {
+		name     string
+		platform string
+		model    string
+		want     string
+	}{
+		{name: "OpenAI", platform: "openai", want: "gpt-6-astra"},
+		{name: "Codex", platform: "codex", want: "gpt-6-astra"},
+		{name: "normalized Codex", platform: " CODEX ", want: "gpt-6-astra"},
+		{name: "explicit model", platform: "codex", model: "gpt-5.5", want: "gpt-5.5"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			thread, err := NewThread(llmtypes.Config{
+				Model:  tt.model,
+				OpenAI: &llmtypes.OpenAIConfig{Platform: tt.platform},
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, thread.Close()) })
+			assert.Equal(t, tt.want, thread.GetConfig().Model)
+		})
+	}
+}
+
 func TestNewThreadWithCustomAPIKey(t *testing.T) {
 	os.Setenv("MY_CUSTOM_API_KEY", "test-key")
 	defer os.Unsetenv("MY_CUSTOM_API_KEY")
@@ -2959,7 +2985,16 @@ func TestLoadCustomConfigurationOpenAIPlatformUsesConfiguredServiceTierPricing(t
 	})
 
 	assert.Equal(t, "reasoning", standardModels["gpt-5.6-sol"])
+	assert.Equal(t, "reasoning", standardModels["gpt-6-astra"])
 	assert.Equal(t, standardModels, priorityModels)
+
+	standardGPT6Astra := standardPricing["gpt-6-astra"]
+	assert.Equal(t, 0.00001, standardGPT6Astra.Input)
+	assert.Equal(t, 0.00005, standardGPT6Astra.Output)
+
+	priorityGPT6Astra := priorityPricing["gpt-6-astra"]
+	assert.Equal(t, 0.00002, priorityGPT6Astra.Input)
+	assert.Equal(t, 0.0001, priorityGPT6Astra.Output)
 
 	standardGPT56Sol := standardPricing["gpt-5.6-sol"]
 	assert.Equal(t, 0.000005, standardGPT56Sol.Input)
@@ -3754,13 +3789,19 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
 }
 
-func TestApplyGPT56PromptCacheOptions(t *testing.T) {
+func TestApplyPromptCacheOptions(t *testing.T) {
 	tests := []struct {
 		name         string
 		config       llmtypes.Config
 		model        string
 		expectOption bool
 	}{
+		{
+			name:         "OpenAI GPT-6 Astra",
+			config:       llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}},
+			model:        "gpt-6-astra",
+			expectOption: true,
+		},
 		{
 			name:         "OpenAI GPT-5.6 alias",
 			config:       llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}},
@@ -3793,7 +3834,7 @@ func TestApplyGPT56PromptCacheOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			params := openairesponses.ResponseNewParams{}
-			applyGPT56PromptCacheOptions(&params, tt.config, tt.model)
+			applyPromptCacheOptions(&params, tt.config, tt.model)
 
 			if tt.expectOption {
 				assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
@@ -3808,8 +3849,11 @@ func TestApplyGPT56PromptCacheOptions(t *testing.T) {
 }
 
 func TestOpenAIReasoningEffortForRequest(t *testing.T) {
-	assert.Equal(t, shared.ReasoningEffortMax, openAIReasoningEffortForRequest(shared.ReasoningEffortMax))
-	assert.Equal(t, shared.ReasoningEffortXhigh, openAIReasoningEffortForRequest(shared.ReasoningEffort("XHIGH")))
+	assert.Equal(t, shared.ReasoningEffortMax, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortMax))
+	assert.Equal(t, shared.ReasoningEffortXhigh, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffort("XHIGH")))
+	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortNone))
+	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(" GPT-6-ASTRA ", shared.ReasoningEffortMinimal))
+	assert.Equal(t, shared.ReasoningEffortNone, openAIReasoningEffortForRequest("gpt-5.6-sol", shared.ReasoningEffortNone))
 }
 
 func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {

@@ -140,7 +140,9 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 		config.Provider = "openai"
 	}
 	if config.Model == "" {
-		config.Model = "gpt-5.5" // Default to GPT-5.5
+		// Legacy Chat Completions fallback. NewThread selects Astra and routes it
+		// to Responses, which is required for Astra tool calling.
+		config.Model = "gpt-5.5"
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192

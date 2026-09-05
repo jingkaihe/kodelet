@@ -6,6 +6,7 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the OpenAI model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-6-astra",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -58,6 +59,18 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-6-astra": llm.ModelPricing{
+		Input:                      0.00001,   // $10.00 per million tokens
+		CachedInput:                0.000001,  // $1.00 per million tokens
+		CacheWriteInput:            0.0000125, // $12.50 per million tokens
+		Output:                     0.00005,   // $50.00 per million tokens
+		LongContextInput:           0.00002,   // $20.00 per million tokens
+		LongContextCachedInput:     0.000002,  // $2.00 per million tokens
+		LongContextCacheWriteInput: 0.000025,  // $25.00 per million tokens
+		LongContextOutput:          0.000075,  // $75.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-5.6-sol": llm.ModelPricing{
 		Input:                      0.000005,   // $5.00 per million tokens
 		CachedInput:                0.0000005,  // $0.50 per million tokens
@@ -354,6 +367,18 @@ var Pricing = llm.CustomPricing{
 // OpenAI's pricing table publishes a separate priority rate. Models absent from
 // this map use their standard pricing.
 var PriorityPricing = llm.CustomPricing{
+	"gpt-6-astra": llm.ModelPricing{
+		Input:                      0.00002,  // $20.00 per million tokens
+		CachedInput:                0.000002, // $2.00 per million tokens
+		CacheWriteInput:            0.000025, // $25.00 per million tokens
+		Output:                     0.0001,   // $100.00 per million tokens
+		LongContextInput:           0.00004,  // $40.00 per million tokens
+		LongContextCachedInput:     0.000004, // $4.00 per million tokens
+		LongContextCacheWriteInput: 0.00005,  // $50.00 per million tokens
+		LongContextOutput:          0.00015,  // $150.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-5.6-sol": llm.ModelPricing{
 		Input:           0.00001,   // $10.00 per million tokens
 		CachedInput:     0.000001,  // $1.00 per million tokens
@@ -400,6 +425,9 @@ func PricingForServiceTier(serviceTier llm.OpenAIServiceTier) llm.CustomPricing 
 
 // BaseURL is the API endpoint for OpenAI models
 const BaseURL = "https://api.openai.com/v1"
+
+// DefaultModel is the default model for OpenAI and Codex.
+const DefaultModel = "gpt-6-astra"
 
 // APIKeyEnvVar is the environment variable name for the OpenAI API key
 const APIKeyEnvVar = "OPENAI_API_KEY"

@@ -158,7 +158,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		config.Provider = "openai"
 	}
 	if config.Model == "" {
-		config.Model = "gpt-5.5"
+		config.Model = openaipreset.DefaultModel
 	}
 
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
@@ -801,7 +801,7 @@ func (t *Thread) processMessageExchange(
 			Verbosity: responses.ResponseTextConfigVerbosity(textVerbosity),
 		}
 	}
-	applyGPT56PromptCacheOptions(&params, t.Config, model)
+	applyPromptCacheOptions(&params, t.Config, model)
 
 	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
 		params.ServiceTier = responses.ResponseNewParamsServiceTier(serviceTier)
@@ -818,7 +818,7 @@ func (t *Thread) processMessageExchange(
 		if opt.UseWeakModel {
 			reasoningEffort = shared.ReasoningEffortMedium
 		}
-		reasoningEffort = openAIReasoningEffortForRequest(reasoningEffort)
+		reasoningEffort = openAIReasoningEffortForRequest(model, reasoningEffort)
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  reasoningEffort,
 			Summary: shared.ReasoningSummaryAuto,
@@ -908,8 +908,8 @@ func (t *Thread) processMessageExchange(
 	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, tools, newResponsesStream, closeResponsesStream, processStream, opt, saveConversation, transportName)
 }
 
-func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, config llmtypes.Config, model string) {
-	if resolvePlatformName(config) != defaultOpenAIPlatform || !isGPT56Model(model) {
+func applyPromptCacheOptions(params *responses.ResponseNewParams, config llmtypes.Config, model string) {
+	if resolvePlatformName(config) != defaultOpenAIPlatform || !supportsPromptCacheOptions(model) {
 		return
 	}
 
@@ -919,13 +919,17 @@ func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, config ll
 	}
 }
 
-func isGPT56Model(model string) bool {
+func supportsPromptCacheOptions(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
+	return model == "gpt-6-astra" || model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
-func openAIReasoningEffortForRequest(effort shared.ReasoningEffort) shared.ReasoningEffort {
-	return shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
+func openAIReasoningEffortForRequest(model string, effort shared.ReasoningEffort) shared.ReasoningEffort {
+	normalized := shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
+	if strings.EqualFold(strings.TrimSpace(model), "gpt-6-astra") && (normalized == shared.ReasoningEffortNone || normalized == shared.ReasoningEffortMinimal) {
+		return shared.ReasoningEffortLow
+	}
+	return normalized
 }
 
 type responsesStreamAttempt struct {
@@ -1782,14 +1786,14 @@ func (t *Thread) buildRemoteCompactionV2Params(
 			Verbosity: responses.ResponseTextConfigVerbosity(textVerbosity),
 		}
 	}
-	applyGPT56PromptCacheOptions(&params, t.Config, t.Config.Model)
+	applyPromptCacheOptions(&params, t.Config, t.Config.Model)
 
 	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
 		params.ServiceTier = responses.ResponseNewParamsServiceTier(serviceTier)
 	}
 	if t.isReasoningModelDynamic(t.Config.Model) && t.reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
-			Effort:  openAIReasoningEffortForRequest(t.reasoningEffort),
+			Effort:  openAIReasoningEffortForRequest(t.Config.Model, t.reasoningEffort),
 			Summary: shared.ReasoningSummaryAuto,
 		}
 	}

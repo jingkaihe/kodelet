@@ -103,6 +103,7 @@ func runCodexLogin(ctx context.Context) error {
 	fmt.Println()
 	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
 	fmt.Println("  provider: openai")
+	fmt.Println("  model: gpt-6-astra")
 	fmt.Println("  openai:")
 	fmt.Println("    platform: codex")
 
@@ -144,6 +145,7 @@ func runCodexDeviceLogin(ctx context.Context) error {
 	fmt.Println()
 	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
 	fmt.Println("  provider: openai")
+	fmt.Println("  model: gpt-6-astra")
 	fmt.Println("  openai:")
 	fmt.Println("    platform: codex")
 

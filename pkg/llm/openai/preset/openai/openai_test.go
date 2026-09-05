@@ -9,10 +9,12 @@ import (
 )
 
 func TestModels(t *testing.T) {
+	assert.Equal(t, "gpt-6-astra", DefaultModel)
 	// Test that Models is properly defined
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-6-astra")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-terra")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-luna")
@@ -56,6 +58,19 @@ func TestPricing(t *testing.T) {
 	require.NotNil(t, Pricing)
 
 	// Test some key models have pricing
+	gpt6Astra, exists := Pricing["gpt-6-astra"]
+	require.True(t, exists, "gpt-6-astra pricing should exist")
+	assert.Equal(t, 0.00001, gpt6Astra.Input)
+	assert.Equal(t, 0.000001, gpt6Astra.CachedInput)
+	assert.Equal(t, 0.0000125, gpt6Astra.CacheWriteInput)
+	assert.Equal(t, 0.00005, gpt6Astra.Output)
+	assert.Equal(t, 0.00002, gpt6Astra.LongContextInput)
+	assert.Equal(t, 0.000002, gpt6Astra.LongContextCachedInput)
+	assert.Equal(t, 0.000025, gpt6Astra.LongContextCacheWriteInput)
+	assert.Equal(t, 0.000075, gpt6Astra.LongContextOutput)
+	assert.Equal(t, 272_000, gpt6Astra.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt6Astra.ContextWindow)
+
 	gpt56Sol, exists := Pricing["gpt-5.6-sol"]
 	require.True(t, exists, "gpt-5.6-sol pricing should exist")
 	assert.Equal(t, 0.000005, gpt56Sol.Input)
@@ -189,8 +204,26 @@ func TestPricingForServiceTier(t *testing.T) {
 	standard := PricingForServiceTier(llmtypes.OpenAIServiceTierDefault)
 	priority := PricingForServiceTier(llmtypes.OpenAIServiceTierPriority)
 	fast := PricingForServiceTier(llmtypes.OpenAIServiceTierFast)
+	flex := PricingForServiceTier(llmtypes.OpenAIServiceTierFlex)
 
+	require.Equal(t, priority["gpt-6-astra"], fast["gpt-6-astra"])
+	require.Equal(t, standard["gpt-6-astra"], flex["gpt-6-astra"])
 	require.Equal(t, priority["gpt-5.6-sol"], fast["gpt-5.6-sol"])
+
+	assert.Equal(t, 0.00001, standard["gpt-6-astra"].Input)
+	assert.Equal(t, 0.000001, standard["gpt-6-astra"].CachedInput)
+	assert.Equal(t, 0.0000125, standard["gpt-6-astra"].CacheWriteInput)
+	assert.Equal(t, 0.00005, standard["gpt-6-astra"].Output)
+	assert.Equal(t, 0.00002, standard["gpt-6-astra"].LongContextInput)
+	assert.Equal(t, 0.000075, standard["gpt-6-astra"].LongContextOutput)
+
+	assert.Equal(t, 0.00002, priority["gpt-6-astra"].Input)
+	assert.Equal(t, 0.000002, priority["gpt-6-astra"].CachedInput)
+	assert.Equal(t, 0.000025, priority["gpt-6-astra"].CacheWriteInput)
+	assert.Equal(t, 0.0001, priority["gpt-6-astra"].Output)
+	assert.Equal(t, 0.00004, priority["gpt-6-astra"].LongContextInput)
+	assert.Equal(t, 0.00015, priority["gpt-6-astra"].LongContextOutput)
+	assert.Equal(t, 272_000, priority["gpt-6-astra"].LongContextThreshold)
 
 	assert.Equal(t, 0.000005, standard["gpt-5.6-sol"].Input)
 	assert.Equal(t, 0.0000005, standard["gpt-5.6-sol"].CachedInput)

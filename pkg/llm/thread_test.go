@@ -391,6 +391,12 @@ func TestResolveModelAlias(t *testing.T) {
 			expected: "claude-sonnet-4-6",
 		},
 		{
+			name:     "resolves built-in GPT-6 alias",
+			model:    "gpt-6",
+			aliases:  nil,
+			expected: "gpt-6-astra",
+		},
+		{
 			name:     "resolves built-in default alias",
 			model:    "gpt-5.6",
 			aliases:  nil,

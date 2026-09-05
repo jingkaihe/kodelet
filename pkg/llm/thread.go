@@ -20,6 +20,7 @@ import (
 )
 
 var defaultModelAliases = map[string]string{
+	"gpt-6":   "gpt-6-astra",
 	"gpt-5.6": "gpt-5.6-sol",
 }
 

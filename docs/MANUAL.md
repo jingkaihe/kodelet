@@ -1102,6 +1102,7 @@ Features:
 ### OpenAI
 
 Kodelet supports OpenAI models including:
+- `gpt-6-astra` (GPT-6 Astra, most capable model for complex agentic work)
 - `gpt-5.6-sol` (GPT-5.6 Sol)
 - `gpt-5.6-terra` (GPT-5.6 Terra)
 - `gpt-5.6-luna` (GPT-5.6 Luna)
@@ -1150,6 +1151,7 @@ including rolling windows and workspace credits.
 
 ```yaml
 provider: openai
+model: gpt-6-astra
 openai:
   platform: codex
   api_mode: responses
@@ -1324,7 +1326,7 @@ const workspace = defineExtension((ext) => {
 
 const profile = new Profile({
   provider: "openai",
-  model: "gpt-5.6-sol",
+  model: "gpt-6-astra",
   reasoning_effort: "max",
   tool_mode: "patch",
   openai: { api_mode: "responses", platform: "codex", service_tier: "fast" },

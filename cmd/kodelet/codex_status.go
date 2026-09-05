@@ -49,6 +49,7 @@ func runCodexStatus() {
 		fmt.Println()
 		presenter.Info("Once authenticated, add to your config:")
 		fmt.Println("  provider: openai")
+		fmt.Println("  model: gpt-6-astra")
 		fmt.Println("  openai:")
 		fmt.Println("    platform: codex")
 		fmt.Println("    api_mode: responses")
