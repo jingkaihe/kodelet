@@ -35,6 +35,24 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 				assert.Len(t, meta.Lines, 2)
 			},
 		},
+		"file_write": {
+			json: `{
+				"toolName": "file_write",
+				"success": true,
+				"metadataType": "file_write",
+				"metadata": {
+					"filePath": "/test.go",
+					"content": "package main\n",
+					"unifiedDiff": "@@ -0,0 +1 @@\n+package main\n"
+				}
+			}`,
+			validate: func(t *testing.T, result StructuredToolResult) {
+				require.IsType(t, FileWriteMetadata{}, result.Metadata)
+				meta := result.Metadata.(FileWriteMetadata)
+				assert.Equal(t, "/test.go", meta.FilePath)
+				assert.Equal(t, "@@ -0,0 +1 @@\n+package main\n", meta.UnifiedDiff)
+			},
+		},
 		"bash": {
 			json: `{
 				"toolName": "bash",

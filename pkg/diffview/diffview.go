@@ -52,6 +52,16 @@ type RenderedLine struct {
 
 var hunkHeaderRE = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
+func FromFileWriteMetadata(meta tooltypes.FileWriteMetadata) Summary {
+	return FromApplyPatchMetadata(tooltypes.ApplyPatchMetadata{
+		Changes: []tooltypes.ApplyPatchChange{{
+			Path:        meta.FilePath,
+			Operation:   "write",
+			UnifiedDiff: meta.UnifiedDiff,
+		}},
+	})
+}
+
 func FromFileEditMetadata(meta tooltypes.FileEditMetadata) Summary {
 	file := FromApplyPatchChange(tooltypes.ApplyPatchChange{
 		Path:        meta.FilePath,

@@ -131,10 +131,11 @@ func (m FileReadMetadata) ToolType() string { return "file_read" }
 
 // FileWriteMetadata contains metadata about a file write operation
 type FileWriteMetadata struct {
-	FilePath string `json:"filePath"`
-	Content  string `json:"content"`
-	Size     int64  `json:"size"`
-	Language string `json:"language,omitempty"`
+	FilePath    string `json:"filePath"`
+	Content     string `json:"content"`
+	Size        int64  `json:"size"`
+	Language    string `json:"language,omitempty"`
+	UnifiedDiff string `json:"unifiedDiff,omitempty"`
 }
 
 // ToolType returns the tool type identifier for file write operations

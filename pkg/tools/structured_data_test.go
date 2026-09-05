@@ -80,6 +80,7 @@ func TestFileWriteToolResult_StructuredData(t *testing.T) {
 	assert.Equal(t, "json", meta.Language)
 	assert.Equal(t, int64(len(`{"setting": "value"}`)), meta.Size)
 	assert.Equal(t, `{"setting": "value"}`, meta.Content)
+	assert.Contains(t, meta.UnifiedDiff, `+{"setting": "value"}`)
 }
 
 func TestGlobToolResult_StructuredData(t *testing.T) {

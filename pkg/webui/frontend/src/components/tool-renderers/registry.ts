@@ -23,7 +23,7 @@ export interface ToolRendererRegistration {
 
 const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   file_read: { component: FileReadRenderer },
-  file_write: { component: FileWriteRenderer },
+  file_write: { component: FileWriteRenderer, supportsFailureRendering: true },
   file_edit: { component: FileEditRenderer, supportsFailureRendering: true },
   apply_patch: { component: ApplyPatchRenderer, supportsFailureRendering: true },
   bash: { component: BashRenderer, supportsFailureRendering: true },

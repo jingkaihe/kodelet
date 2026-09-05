@@ -10,6 +10,8 @@ Made remote turn control explicit: `Ctrl+C` now detaches and exits without stopp
 
 Improved theme-aware syntax highlighting and hardened remote stream recovery with classified protocol errors and bounded history refresh retries.
 
+Unified `file_write` output with the file-edit and apply-patch diff style in the Web UI and native TUI, including line numbers, addition/removal counts, and accurate overwrite diffs.
+
 ## 0.5.46-beta
 
 Upgraded the native TUI to Charm v2, adding bracketed paste support that preserves multiline composer input and safely normalizes pasted text in search and conversation pickers.

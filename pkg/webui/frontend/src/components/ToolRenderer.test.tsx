@@ -65,6 +65,27 @@ describe('ToolRenderer', () => {
     expect(screen.queryByText('Error (file_edit):')).not.toBeInTheDocument();
   });
 
+  it('uses the patch-style renderer for failed file writes', () => {
+    const toolResult: ToolResult = {
+      toolName: 'file_write',
+      success: false,
+      error: 'failed to write file',
+      metadata: {
+        filePath: '/tmp/write.go',
+        unifiedDiff: '@@ -7 +7 @@\n-old\n+new\n',
+      },
+    };
+
+    const { container } = render(<ToolRenderer toolResult={toolResult} />);
+
+    expect(container.firstChild).toHaveClass('apply-patch-result-failed');
+    expect(screen.getByText('Write')).toBeInTheDocument();
+    expect(screen.getByText('failed to write file')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/write.go')).toBeInTheDocument();
+    expect(container.querySelector('.diff-block')).toBeInTheDocument();
+    expect(screen.queryByText('Error (file_write):')).not.toBeInTheDocument();
+  });
+
   it('uses the native search renderer for failed OpenAI web search results', () => {
     const toolResult: ToolResult = {
       toolName: 'openai_web_search',

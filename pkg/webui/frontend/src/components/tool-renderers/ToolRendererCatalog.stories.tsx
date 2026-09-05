@@ -37,6 +37,7 @@ const examples: ToolExample[] = [
         language: 'tsx',
         size: 1840,
         content: 'export const ReadyToSend = {};\n',
+        unifiedDiff: '@@ -0,0 +1 @@\n+export const ReadyToSend = {};\n',
       },
     },
   },

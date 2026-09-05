@@ -51,8 +51,8 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			groups = append(groups, applyGroups...)
 			idx++
 
-		case isFileEditTool(tool):
-			groups = append(groups, m.buildFileEditToolGroup(block, idx))
+		case isFileChangeTool(tool):
+			groups = append(groups, m.buildFileChangeToolGroup(block, idx))
 			idx++
 
 		case isTaskRunTool(tool):
@@ -463,20 +463,25 @@ func buildExtensionPresentationToolGroup(block assistantBlock, idx int) toolRend
 	}
 }
 
-func (m model) buildFileEditToolGroup(block assistantBlock, idx int) toolRenderGroup {
+func (m model) buildFileChangeToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
-	summary := fileEditSummary(tool)
-	if len(summary.Files) == 0 {
-		label := "Edited file"
+	summary := fileChangeSummary(tool)
+	label, runningLabel := "Edited file", "Editing file"
+	if normalizedToolName(tool) == "file_write" {
+		label, runningLabel = "Wrote file", "Writing file"
 		if tool.failed {
-			label = "File edit failed"
+			label = "File write failed"
 		}
+	} else if tool.failed {
+		label = "File edit failed"
+	}
+	if len(summary.Files) == 0 {
 		return toolRenderGroup{
 			toolStart:    idx,
 			toolEnd:      idx,
 			changeIndex:  -1,
 			label:        label,
-			runningLabel: "Editing file",
+			runningLabel: runningLabel,
 			body:         joinTools([]toolCall{tool}),
 			wrapBody:     true,
 			expanded:     block.expanded || tool.expanded,
@@ -488,7 +493,7 @@ func (m model) buildFileEditToolGroup(block assistantBlock, idx int) toolRenderG
 	file := summary.Files[0]
 	bodyLines := diffview.RenderFileBodyWidth(file, m.transcriptTextWidth()-2)
 	if tool.failed {
-		if errorText := fileEditErrorText(tool); errorText != "" {
+		if errorText := fileChangeErrorText(tool); errorText != "" {
 			if len(bodyLines) > 0 {
 				bodyLines = append(bodyLines, diffview.RenderedLine{Kind: diffview.LinePlain, Text: ""})
 			}
@@ -502,7 +507,7 @@ func (m model) buildFileEditToolGroup(block assistantBlock, idx int) toolRenderG
 		changeIndex:  -1,
 		label:        file.Header(),
 		labelParts:   diffLabelParts(file),
-		runningLabel: "Editing file",
+		runningLabel: runningLabel,
 		body:         diffview.RenderedText(bodyLines),
 		bodyLines:    bodyLines,
 		expanded:     block.expanded || tool.expanded,
@@ -576,9 +581,17 @@ func diffLabelParts(file diffview.FileDiff) []toolRenderLabelPart {
 	}
 }
 
-func fileEditSummary(tool toolCall) diffview.Summary {
+func fileChangeSummary(tool toolCall) diffview.Summary {
 	if tool.structured == nil {
 		return diffview.Summary{}
+	}
+
+	if normalizedToolName(tool) == "file_write" {
+		var meta tooltypes.FileWriteMetadata
+		if !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+			return diffview.Summary{}
+		}
+		return diffview.FromFileWriteMetadata(meta)
 	}
 
 	var meta tooltypes.FileEditMetadata
@@ -589,7 +602,7 @@ func fileEditSummary(tool toolCall) diffview.Summary {
 	return diffview.FromFileEditMetadata(meta)
 }
 
-func fileEditErrorText(tool toolCall) string {
+func fileChangeErrorText(tool toolCall) string {
 	if tool.structured != nil && strings.TrimSpace(tool.structured.Error) != "" {
 		return strings.TrimSpace(tool.structured.Error)
 	}
@@ -735,7 +748,7 @@ func isExtensionPresentationTool(tool toolCall) bool {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileEditTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool)
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileChangeTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {
@@ -746,8 +759,9 @@ func isApplyPatchTool(tool toolCall) bool {
 	return normalizedToolName(tool) == "apply_patch"
 }
 
-func isFileEditTool(tool toolCall) bool {
-	return normalizedToolName(tool) == "file_edit"
+func isFileChangeTool(tool toolCall) bool {
+	name := normalizedToolName(tool)
+	return name == "file_edit" || name == "file_write"
 }
 
 func isTaskRunTool(tool toolCall) bool {

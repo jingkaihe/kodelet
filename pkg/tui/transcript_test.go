@@ -132,6 +132,18 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 					done:  true,
 				},
 				{name: "grep_tool", done: true},
+				{
+					name: "file_write",
+					done: true,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "file_write",
+						Success:  true,
+						Metadata: &tooltypes.FileWriteMetadata{
+							FilePath:    "written.go",
+							UnifiedDiff: "@@ -0,0 +1 @@\n+package main\n",
+						},
+					},
+				},
 				{name: "glob_tool", done: true},
 			},
 		}},
@@ -144,8 +156,10 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	assert.Contains(t, content, "Write new.go")
 	assert.Contains(t, content, "Delete old.go")
 	assert.Contains(t, content, "Fetched https://example.com")
-	assert.Contains(t, content, "Ran 2 tools")
-	require.Len(t, regions, 6)
+	assert.Contains(t, content, "Write written.go")
+	assert.Equal(t, 2, strings.Count(content, "Ran 1 tool"))
+	assert.NotContains(t, content, "Ran 2 tools")
+	require.Len(t, regions, 8)
 }
 
 func TestRenderTranscriptUsesGenericExtensionPresentation(t *testing.T) {
@@ -901,6 +915,108 @@ func TestRenderTranscriptFileEditUsesDiffHeaderAndAbsoluteLineGutter(t *testing.
 	assert.Contains(t, plain, "43    │ -old")
 	assert.Contains(t, plain, "   43 │ +new")
 	assert.Contains(t, plain, "44 44 │  after")
+}
+
+func TestRenderTranscriptFileWriteUsesDiffStyle(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		diff   string
+		error  string
+		header string
+		lines  []string
+	}{
+		{
+			name:   "new file",
+			diff:   "@@ -0,0 +1,2 @@\n+package main\n+func main() {}\n",
+			header: "Write file.go (+2 -0)",
+			lines:  []string{"  1 │ +package main", "  2 │ +func main() {}"},
+		},
+		{
+			name:   "overwrite",
+			diff:   "@@ -42,3 +42,3 @@\n before\n-old\n+new\n after\n",
+			header: "Write file.go (+1 -1)",
+			lines:  []string{"42 42 │  before", "43    │ -old", "   43 │ +new", "44 44 │  after"},
+		},
+		{name: "unchanged", header: "Write file.go (+0 -0)"},
+		{
+			name: "failed write", error: "failed to write the file",
+			header: "Write file.go (+0 -0)", lines: []string{"failed to write the file"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width = 100
+			m.height = 30
+			m.resize()
+			m.entries = []chatEntry{{
+				kind: entryAssistant,
+				blocks: []assistantBlock{{
+					kind: blockTools,
+					tools: []toolCall{{
+						name:   "file_write",
+						input:  `{"file_path":"file.go","text":"new content"}`,
+						done:   true,
+						failed: tt.error != "",
+						structured: &tooltypes.StructuredToolResult{
+							ToolName: "file_write",
+							Success:  tt.error == "",
+							Error:    tt.error,
+							Metadata: &tooltypes.FileWriteMetadata{FilePath: "file.go", UnifiedDiff: tt.diff},
+						},
+					}},
+				}},
+			}}
+
+			m.refreshViewport(true)
+			content, regions := m.renderTranscript()
+			require.Len(t, regions, 1)
+			plain := xansi.Strip(content)
+			assert.Contains(t, plain, tt.header)
+			assert.NotContains(t, plain, "Ran 1 tool")
+			for _, line := range tt.lines {
+				assert.NotContains(t, plain, line)
+			}
+
+			assert.True(t, m.toggleDetailAt(regions[0].line))
+			content, _ = m.renderTranscript()
+			plain = xansi.Strip(content)
+			assert.NotContains(t, plain, `"file_path"`)
+			for _, line := range tt.lines {
+				assert.Contains(t, plain, line)
+			}
+			if tt.diff == "" {
+				assert.NotContains(t, plain, "@@")
+			}
+
+			m.refreshViewport(true)
+			_, regions = m.renderTranscript()
+			assert.True(t, m.toggleDetailAt(regions[0].line))
+			content, _ = m.renderTranscript()
+			for _, line := range tt.lines {
+				assert.NotContains(t, xansi.Strip(content), line)
+			}
+		})
+	}
+}
+
+func TestRenderTranscriptRunningFileWriteHasDedicatedLabel(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:  blockTools,
+			tools: []toolCall{{name: "file_write", input: `{"file_path":"file.go","text":"new content"}`}},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	assert.Contains(t, xansi.Strip(content), "Writing file")
+	assert.NotContains(t, xansi.Strip(content), "Running 1 tool")
 }
 
 func TestRenderTranscriptFailedFileEditCanBeCollapsed(t *testing.T) {

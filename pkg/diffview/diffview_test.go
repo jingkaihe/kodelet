@@ -40,6 +40,21 @@ func TestFromApplyPatchChangeParsesHunksCountsAndMoveHeader(t *testing.T) {
 	assert.Equal(t, Line{Kind: LineAdded, NewLine: 31, Content: "new2"}, file.Lines[8])
 }
 
+func TestFromFileWriteMetadataUsesDiffCountsAndLineNumbers(t *testing.T) {
+	summary := FromFileWriteMetadata(tooltypes.FileWriteMetadata{
+		FilePath:    "new.go",
+		UnifiedDiff: "--- new.go\n+++ new.go\n@@ -0,0 +1,2 @@\n+package main\n+\n",
+	})
+
+	require.Len(t, summary.Files, 1)
+	file := summary.Files[0]
+	assert.Equal(t, "Write new.go (+2 -0)", file.Header())
+	assert.Equal(t, 2, summary.Added)
+	assert.Zero(t, summary.Removed)
+	assert.Contains(t, file.Lines, Line{Kind: LineAdded, NewLine: 1, Content: "package main"})
+	assert.Contains(t, file.Lines, Line{Kind: LineAdded, NewLine: 2, Content: ""})
+}
+
 func TestFromFileEditMetadataUsesAbsoluteLineNumbersAcrossEdits(t *testing.T) {
 	oldContent := "one\ntwo\nthree\nfour\nold\nsix\nseven\neight\nnine\nold2\n"
 	newContent := "one\ntwo\nthree\nfour\nnew\nextra\nsix\nseven\neight\nnine\nnew2\n"

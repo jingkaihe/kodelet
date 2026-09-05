@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -19,6 +20,7 @@ import (
 // FileWriteToolResult represents the result of a file write operation
 type FileWriteToolResult struct {
 	filename string
+	oldText  string
 	text     string
 	err      string
 }
@@ -64,10 +66,11 @@ func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileWriteMetadata{
-		FilePath: r.filename,
-		Content:  r.text,
-		Size:     int64(len(r.text)),
-		Language: language,
+		FilePath:    r.filename,
+		Content:     r.text,
+		Size:        int64(len(r.text)),
+		Language:    language,
+		UnifiedDiff: diffview.UnifiedDiff(r.filename, r.filename, r.oldText, r.text),
 	}
 
 	if r.IsError() {
@@ -146,7 +149,15 @@ func (t *FileWriteTool) Execute(_ context.Context, state tooltypes.State, parame
 		}
 	}
 
-	err := os.WriteFile(input.FilePath, []byte(input.Text), 0o644)
+	oldContent, err := os.ReadFile(input.FilePath)
+	if err != nil && !os.IsNotExist(err) {
+		return &FileWriteToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to read the file before writing: %s", err.Error()),
+		}
+	}
+
+	err = os.WriteFile(input.FilePath, []byte(input.Text), 0o644)
 	if err != nil {
 		return &FileWriteToolResult{
 			filename: input.FilePath,
@@ -156,6 +167,7 @@ func (t *FileWriteTool) Execute(_ context.Context, state tooltypes.State, parame
 
 	return &FileWriteToolResult{
 		filename: input.FilePath,
+		oldText:  string(oldContent),
 		text:     input.Text,
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/diffview"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -144,5 +146,79 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, state, string(inputJSON))
 		assert.True(t, result.IsError())
 		assert.Contains(t, result.GetError(), "failed to write the file")
+		meta := result.StructuredData().Metadata.(*tooltypes.FileWriteMetadata)
+		assert.Equal(t, nonExistentPath, meta.FilePath)
+		assert.Empty(t, meta.UnifiedDiff)
 	})
+
+	t.Run("cannot read existing path", func(t *testing.T) {
+		inputJSON, err := json.Marshal(FileWriteInput{FilePath: tempDir, Text: "new content"})
+		require.NoError(t, err)
+
+		result := tool.Execute(ctx, state, string(inputJSON))
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "failed to read the file before writing")
+		assert.Empty(t, result.StructuredData().Metadata.(*tooltypes.FileWriteMetadata).UnifiedDiff)
+		info, err := os.Stat(tempDir)
+		require.NoError(t, err)
+		assert.True(t, info.IsDir())
+	})
+}
+
+func TestFileWriteTool_ExecuteUnifiedDiff(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		exists   bool
+		oldText  string
+		text     string
+		added    int
+		removed  int
+		contains []string
+	}{
+		{
+			name: "new file", text: "one\ntwo\n", added: 2,
+			contains: []string{"+one\n+two\n"},
+		},
+		{
+			name: "overwrite", exists: true,
+			oldText: "before\nold\nafter\n", text: "before\nnew\nafter\n", added: 1, removed: 1,
+			contains: []string{" before\n-old\n+new\n after\n"},
+		},
+		{
+			name: "unchanged", exists: true, oldText: "same\n", text: "same\n",
+		},
+		{
+			name: "final newline change", exists: true,
+			oldText: "value", text: "value\n", added: 1, removed: 1,
+			contains: []string{`\ No newline at end of file`},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "file.txt")
+			if tt.exists {
+				require.NoError(t, os.WriteFile(path, []byte(tt.oldText), 0o644))
+			}
+			inputJSON, err := json.Marshal(FileWriteInput{FilePath: path, Text: tt.text})
+			require.NoError(t, err)
+
+			result := (&FileWriteTool{}).Execute(t.Context(), nil, string(inputJSON))
+			require.False(t, result.IsError(), result.GetError())
+			meta := result.StructuredData().Metadata.(*tooltypes.FileWriteMetadata)
+			assert.Equal(t, path, meta.FilePath)
+			assert.Equal(t, tt.text, meta.Content)
+			for _, content := range tt.contains {
+				assert.Contains(t, meta.UnifiedDiff, content)
+			}
+			if tt.oldText == tt.text {
+				assert.Empty(t, meta.UnifiedDiff)
+			}
+			summary := diffview.FromFileWriteMetadata(*meta)
+			assert.Equal(t, tt.added, summary.Added)
+			assert.Equal(t, tt.removed, summary.Removed)
+
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.text, string(content))
+		})
+	}
 }
