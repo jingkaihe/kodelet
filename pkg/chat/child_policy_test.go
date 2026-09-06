@@ -52,7 +52,7 @@ func TestChildPolicyUsesExplicitCeilingsNotPresentation(t *testing.T) {
 		{name: "outside workspace", outside: true, wantErr: "working directory must be inside the parent workspace"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			config := llmtypes.Config{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "medium", ToolMode: llmtypes.ToolModePatch, AllowedTools: tt.legacy, ExecutionOptions: tt.policy}
+			config := llmtypes.Config{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "medium", AllowedReasoningEfforts: []string{"medium", "high"}, ToolMode: llmtypes.ToolModePatch, AllowedTools: tt.legacy, ExecutionOptions: tt.policy}
 			parent := &childPolicyThread{fakeMetadataThread: &fakeMetadataThread{metadata: map[string]any{}}, config: config}
 			environment := agentenv.NewLocalEnvironment(workspace, nil)
 			manifest, err := environment.Open(t.Context(), agentenv.RunSpec{Config: config})
@@ -70,7 +70,7 @@ func TestChildPolicyUsesExplicitCeilingsNotPresentation(t *testing.T) {
 			if tt.outside {
 				request.CWD = filepath.Dir(workspace)
 			}
-			preset := delegation.Preset{Profile: delegation.Profile{Name: "search", Options: &llmtypes.ExecutionOptions{AllowedTools: &readTools, EnableFSSearchTools: new(true), NoSkills: new(true), NoExtensions: new(true)}}}
+			preset := delegation.Preset{Profile: delegation.Profile{Name: "search", Options: &llmtypes.ExecutionOptions{ReasoningEffort: new("none"), AllowedTools: &readTools, EnableFSSearchTools: new(true), NoSkills: new(true), NoExtensions: new(true)}}}
 			run, err := delegation.PrepareFromContext(ctx)(ctx, request, preset, delegation.Identity{})
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)

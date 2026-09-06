@@ -131,6 +131,45 @@ func TestChildConfigurationCeiling(t *testing.T) {
 	assert.True(t, config.ExecutionOptions.ToolsDisabled())
 }
 
+func TestChildConfigurationReasoningPolicy(t *testing.T) {
+	parent := llmtypes.Config{
+		Profile: "deep", Provider: "openai", Model: "gpt-4o", WeakModel: "gpt-4o-mini",
+		ReasoningEffort: "high", AllowedReasoningEfforts: []string{"medium", "high"},
+		ExecutionOptions: &llmtypes.ExecutionOptions{ReasoningEffort: new("high")},
+	}
+	original := parent.Clone()
+	for _, tt := range []struct {
+		name      string
+		preset    *llmtypes.ExecutionOptions
+		overrides *llmtypes.ExecutionOptions
+		want      string
+		wantErr   string
+	}{
+		{name: "inherit", want: "high"},
+		{name: "preset", preset: &llmtypes.ExecutionOptions{Model: new("gpt-4o-mini"), ReasoningEffort: new("none")}, overrides: &llmtypes.ExecutionOptions{MaxTurns: new(3)}, want: "none"},
+		{name: "request override", preset: &llmtypes.ExecutionOptions{ReasoningEffort: new("medium")}, overrides: &llmtypes.ExecutionOptions{ReasoningEffort: new(" NONE ")}, want: "none"},
+		{name: "invalid effort", preset: &llmtypes.ExecutionOptions{ReasoningEffort: new("invalid")}, wantErr: "invalid reasoning_effort"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := childConfiguration(parent, tt.preset, tt.overrides)
+			assert.Equal(t, original, parent, "child configuration must not mutate the parent")
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, config.ReasoningEffort)
+			assert.Empty(t, config.AllowedReasoningEfforts)
+			assert.Equal(t, parent.Profile, config.Profile, "retain the daemon profile for provider and environment resolution")
+		})
+	}
+	_, err := applyExecutionOptions(parent, &llmtypes.ExecutionOptions{ReasoningEffort: new("none")}, nil)
+	require.ErrorContains(t, err, "not included in allowed_reasoning_efforts", "ordinary new conversations must still enforce selection policy")
+	parent.Provider = "anthropic"
+	_, err = childConfiguration(parent, &llmtypes.ExecutionOptions{ReasoningEffort: new("minimal")}, nil)
+	require.ErrorContains(t, err, "not supported by provider anthropic")
+}
+
 func TestChildPresetResumeKeepsCeiling(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4o-mini", MaxTokens: 256, ReasoningEffort: "medium"}
 	preset := childPresetSnapshot{Name: "code_search", SystemPrompt: "pinned prompt", Options: &llmtypes.ExecutionOptions{AllowedTools: new([]string{"file_read", "grep_tool", "glob_tool"}), NoExtensions: new(true), NoSkills: new(true), MaxTurns: new(3)}}
@@ -181,6 +220,8 @@ func childChatFixture(t *testing.T) (llmtypes.Config, delegation.Identity, deleg
 
 func TestChildForkSnapshotsLiveProviderHistoryWithoutPublishingParentOrTemporaryChild(t *testing.T) {
 	config, id, preset, store := childChatFixture(t)
+	config.AllowedReasoningEfforts = []string{"medium", "high"}
+	preset.Options.ReasoningEffort = new("none")
 	parent, err := openaillm.NewOpenAIThread(config)
 	require.NoError(t, err)
 	parent.SetConversationID("parent")
@@ -207,6 +248,12 @@ func TestChildForkSnapshotsLiveProviderHistoryWithoutPublishingParentOrTemporary
 	require.NoError(t, err)
 	assert.Contains(t, string(child.RawMessages), "live assistant context not yet saved")
 	assert.Equal(t, "/work/subdir", child.CWD)
+	snapshot, present, err := conversationservice.ConfigSnapshotFromMetadata(child.Metadata)
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "none", snapshot.ReasoningEffort)
+	assert.Equal(t, "medium", parent.GetConfig().ReasoningEffort)
+	assert.Equal(t, []string{"medium", "high"}, parent.GetConfig().AllowedReasoningEfforts)
 	var saved childPresetSnapshot
 	require.NoError(t, decodeChildMetadata(child.Metadata["execution_preset"], &saved))
 	assert.Equal(t, "frozen child prompt", saved.SystemPrompt)
@@ -222,6 +269,8 @@ func TestChildForkSnapshotsLiveProviderHistoryWithoutPublishingParentOrTemporary
 
 func TestChildResumeValidatesProvenanceAndFreezesPolicyWithoutOverwritingHistory(t *testing.T) {
 	config, id, preset, store := childChatFixture(t)
+	config.ReasoningEffort = "none"
+	preset.Options.ReasoningEffort = new("none")
 	record := convtypes.NewConversationRecord(id.ConversationID)
 	record.Provider, record.CWD = "openai", "/work/subdir"
 	record.RawMessages = json.RawMessage(`[{"role":"user","content":"original task"},{"role":"assistant","content":"original answer"}]`)
@@ -233,15 +282,19 @@ func TestChildResumeValidatesProvenanceAndFreezesPolicyWithoutOverwritingHistory
 	record.Metadata, err = conversationservice.AddConfigSnapshot(record.Metadata, config)
 	require.NoError(t, err)
 	require.NoError(t, store.Save(t.Context(), record))
+	config.ReasoningEffort = "high"
+	config.AllowedReasoningEfforts = []string{"medium", "high"}
 	request := delegation.Request{RequestID: "followup", Profile: "research", Message: "continue", Resume: "child"}
 	next := id
 	next.RunID = "second"
 	next.ParentRunID = "new-parent-run"
 	changed := preset
 	changed.SystemPrompt = "must not replace frozen prompt"
-	changed.Options = &llmtypes.ExecutionOptions{AllowedTools: new([]string{"bash"})}
+	changed.Options = &llmtypes.ExecutionOptions{ReasoningEffort: new("high"), AllowedTools: new([]string{"bash"})}
 	state, err := prepareChild(t.Context(), nil, config, request, changed, next, "")
 	require.NoError(t, err)
+	assert.Equal(t, "none", state.config.ReasoningEffort)
+	assert.Empty(t, state.config.AllowedReasoningEfforts)
 	assert.Equal(t, "frozen child prompt", state.prompt)
 	assert.Equal(t, "/work/subdir", state.config.WorkingDirectory)
 	assert.Equal(t, []string{"file_read"}, *state.config.ExecutionOptions.AllowedTools)
@@ -255,6 +308,9 @@ func TestChildResumeValidatesProvenanceAndFreezesPolicyWithoutOverwritingHistory
 		func(r *delegation.Request, _ *delegation.Identity) { r.SystemPrompt = "new" },
 		func(r *delegation.Request, _ *delegation.Identity) {
 			r.Options = &llmtypes.ExecutionOptions{Model: new("gpt-4o-mini")}
+		},
+		func(r *delegation.Request, _ *delegation.Identity) {
+			r.Options = &llmtypes.ExecutionOptions{ReasoningEffort: new("high")}
 		},
 		func(r *delegation.Request, _ *delegation.Identity) {
 			r.Options = &llmtypes.ExecutionOptions{AllowedTools: new([]string{"grep_tool"})}

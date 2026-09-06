@@ -308,6 +308,9 @@ func intersectChildOptions(saved, current *llmtypes.ExecutionOptions) *llmtypes.
 // ceiling can narrow (never widen) the parent's effective environment policy.
 func childConfiguration(parent llmtypes.Config, preset, overrides *llmtypes.ExecutionOptions) (llmtypes.Config, error) {
 	config := parent.Clone()
+	// This is the parent's conversation-selection policy, not a child ceiling.
+	// Delegated presets may choose a different model and provider-supported effort.
+	config.AllowedReasoningEfforts = nil
 	for _, requested := range []*llmtypes.ExecutionOptions{preset, overrides} {
 		if requested == nil {
 			continue
