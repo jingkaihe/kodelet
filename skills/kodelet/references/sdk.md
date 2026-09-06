@@ -20,6 +20,8 @@ console.log(response.content);
 await client.close();
 ```
 
+ACP accepts individual stdout messages up to 64 MiB, including large saved-conversation replays and live tool results, and preserves UTF-8 across subprocess chunks. This is not a limit on total conversation history. A message above that bound, a pipe error, or unexpected stdout closure rejects pending requests and stops the child. Always await `session.close()` or `client.close()`: closing rejects pending work immediately, waits for process closure, and escalates from SIGTERM to SIGKILL after one second. If closure is still unconfirmed after another second, cleanup rejects instead of claiming success; keep any background lease until cleanup succeeds. Concurrent closes share the same cleanup attempt, and a failed close can be retried.
+
 Streaming sessions emit typed SDK events derived from ACP `session/update` JSON-RPC notifications:
 
 ```typescript

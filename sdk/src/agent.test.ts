@@ -22,6 +22,7 @@ interface JsonRPCRequest {
 
 interface FakeACPProcessOptions {
   sessionId?: string;
+  onRequest?(request: JsonRPCRequest, process: FakeACPProcess): boolean;
   onPrompt?(request: JsonRPCRequest, process: FakeACPProcess): Promise<void> | void;
   steerResult?: unknown;
   steeringSupported?: boolean;
@@ -91,6 +92,9 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
   }
 
   private handleRequest(request: JsonRPCRequest): void {
+    if (this.options.onRequest?.(request, this)) {
+      return;
+    }
     switch (request.method) {
       case "initialize":
         this.respond(request.id, {
@@ -144,7 +148,10 @@ class FailingSpawnProcess extends EventEmitter implements SpawnedProcess {
 
   constructor(error: Error) {
     super();
-    setImmediate(() => this.emit("error", error));
+    setImmediate(() => {
+      this.emit("error", error);
+      this.emit("close", -1, null);
+    });
   }
 
   kill(): boolean {
@@ -399,6 +406,169 @@ test("Client rejects child spawn failures without crashing the process", async (
   const client = new Client({ spawn });
 
   await assert.rejects(() => client.createSession(), /spawn failed/);
+});
+
+test("ACP handles large replay and live messages from a real subprocess", { timeout: 5000 }, async (t) => {
+  const text = "Large output 🙂 ".repeat(20000);
+  let child: ReturnType<typeof spawnProcess> | undefined;
+  const client = new Client({
+    spawn: (_command, _args, options) => {
+      child = spawnProcess(process.execPath, ["-e", `
+        const readline = require("node:readline");
+        const text = "Large output 🙂 ".repeat(20000);
+        const emit = message => process.stdout.write(JSON.stringify(message) + "\\n");
+        const update = () => emit({ jsonrpc: "2.0", method: "session/update", params: {
+          sessionId: "large-child", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } }
+        }});
+        readline.createInterface({ input: process.stdin }).on("line", line => {
+          const request = JSON.parse(line);
+          if (request.method === "session/load" || request.method === "session/prompt") update();
+          emit({ jsonrpc: "2.0", id: request.id, result: request.method === "initialize"
+            ? { protocolVersion: 1, padding: text } : { stopReason: "end_turn" } });
+        });
+      `], options);
+      return child;
+    },
+  });
+  t.after(() => client.close());
+  const session = await client.createSession({ resume: "large-child" });
+  const result = await session.runAndWait({ message: "continue" });
+  assert.equal(result.content, text);
+  await client.close();
+  assert.notEqual(child?.signalCode ?? child?.exitCode, null);
+});
+
+test("ACP preserves UTF-8 characters split across stdout chunks", async () => {
+  const child = new FakeACPProcess({
+    async onPrompt(_request, child) {
+      const message = Buffer.from(`${JSON.stringify({ method: "session/update", params: {
+        sessionId: "conv-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "🙂漢字" } },
+      } })}\n`);
+      for (const byte of message) {
+        child.stdout.push(Buffer.from([byte]));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    },
+  });
+  const client = new Client({ spawn: () => child });
+  try {
+    const session = await client.createSession();
+    assert.equal((await session.runAndWait({ message: "continue" })).content, "🙂漢字");
+  } finally {
+    await client.close();
+  }
+});
+
+test("ACP accepts individual live messages above 16 MiB", { timeout: 5000 }, async () => {
+  const text = "x".repeat(17 * 1024 * 1024);
+  const client = new Client({ spawn: () => new FakeACPProcess({
+    onPrompt(_request, child) {
+      child.notify("session/update", { sessionId: "conv-1", update: {
+        sessionUpdate: "agent_message_chunk", content: { type: "text", text },
+      } });
+    },
+  }) });
+  try {
+    const session = await client.createSession();
+    assert.equal((await session.runAndWait({ message: "continue" })).content, text);
+  } finally {
+    await client.close();
+  }
+});
+
+for (const ending of ["", "\n"]) {
+  test(`ACP rejects oversized ${ending ? "complete" : "unterminated"} messages`, { timeout: 5000 }, async () => {
+    const child = new FakeACPProcess({
+      onRequest(request, child) {
+        if (request.method !== "session/load") return false;
+        child.stdout.push("x".repeat(64 * 1024 * 1024 + 1) + ending);
+        return true;
+      },
+    });
+    const client = new Client({ spawn: () => child });
+    await assert.rejects(() => client.createSession({ resume: "saved-child" }), /ACP stdout message exceeds/);
+    await client.close();
+  });
+}
+
+for (const name of ["stdin", "stdout", "stderr"] as const) {
+  test(`ACP ${name} errors reject startup without unhandled stream errors`, { timeout: 3000 }, async () => {
+    const child = new FakeACPProcess({
+      onRequest(_request, child) {
+        setImmediate(() => child[name].destroy(new Error("broken pipe")));
+        return true;
+      },
+    });
+    const client = new Client({ spawn: () => child });
+    await assert.rejects(() => client.createSession(), new RegExp(`ACP ${name} failed: broken pipe`));
+  });
+}
+
+test("ACP stdout failure rejects both an active prompt and steering request", { timeout: 3000 }, async () => {
+  const child = new FakeACPProcess({
+    onRequest(request) {
+      return request.method === "session/prompt" || request.method === "_session/steering";
+    },
+  });
+  const client = new Client({ spawn: () => child });
+  const session = await client.createSession();
+  const prompt = assert.rejects(session.runAndWait({ message: "keep running" }), /broken stdout/);
+  const steering = assert.rejects(session.steer("focus"), /broken stdout/);
+  child.stdout.destroy(new Error("broken stdout"));
+  await Promise.all([prompt, steering]);
+  await client.close();
+});
+
+test("ACP rejects unexpected stdout EOF while the child is still alive", { timeout: 3000 }, async () => {
+  const client = new Client({ spawn: () => new FakeACPProcess({
+    onRequest(_request, child) {
+      child.stdout.push(null);
+      return true;
+    },
+  }) });
+  await assert.rejects(() => client.createSession(), /ACP stdout ended/);
+});
+
+test("ACP synchronous stdin write failures reject the pending request", { timeout: 3000 }, async () => {
+  const child = new FakeACPProcess();
+  child.stdin.write = () => { throw new Error("write failed"); };
+  const client = new Client({ spawn: () => child });
+  await assert.rejects(() => client.createSession(), /write failed/);
+});
+
+test("ACP close rejects pending work and kills a child that ignores SIGTERM", { timeout: 5000 }, async (t) => {
+  let child: ReturnType<typeof spawnProcess> | undefined;
+  const client = new Client({ spawn: (_command, _args, options) => {
+    child = spawnProcess(process.execPath, ["-e", `
+      process.on("SIGTERM", () => {});
+      require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
+        const request = JSON.parse(line);
+        if (request.method === "session/prompt") return;
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { sessionId: "stubborn-child" } }) + "\\n");
+      });
+    `], options);
+    return child;
+  } });
+  t.after(() => child?.kill("SIGKILL"));
+  const session = await client.createSession();
+  const pending = assert.rejects(session.runAndWait({ message: "wait forever" }), /process closed/);
+  await Promise.all([session.close(), session.close(), pending]);
+  assert.equal(child?.signalCode, "SIGKILL");
+  await client.close();
+});
+
+test("ACP close reports incomplete cleanup and allows retry after exit", { timeout: 5000 }, async () => {
+  const child = new FakeACPProcess();
+  const signals: Array<NodeJS.Signals | number | undefined> = [];
+  child.kill = (signal?: NodeJS.Signals | number) => { signals.push(signal); return false; };
+  const client = new Client({ spawn: () => child });
+  const session = await client.createSession();
+  await assert.rejects(() => session.close(), /cleanup is incomplete/);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  child.emit("close", 0, null);
+  child.stdout.push(null);
+  child.stderr.push(null);
+  await client.close();
 });
 
 test("Session steers an active run", async () => {

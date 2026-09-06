@@ -5,6 +5,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type AddressInfo, type Server, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
 import { HostRPCError, runWithHostRPCClient, type HostRPCClient } from "./context.js";
@@ -17,6 +18,7 @@ import type {
 } from "./types.js";
 
 const ACP_PROTOCOL_VERSION = 1;
+const ACP_MESSAGE_LIMIT = 64 * 1024 * 1024;
 
 export type BridgeTransport = "unix" | "tcp";
 
@@ -384,6 +386,7 @@ export class Session extends EventEmitter {
   private readonly tempConfig?: TempConfig;
   private conversationId: string;
   private closed = false;
+  private closePromise?: Promise<void>;
   private running = false;
 
   constructor(client: Client, options: SessionInternalOptions) {
@@ -490,14 +493,17 @@ export class Session extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
     this.closed = true;
-    await this.rpc.close();
-    await this.extensionBridge?.close();
-    await this.tempConfig?.close();
-    this.client._deleteSession(this);
+    this.closePromise ??= (async () => {
+      await this.rpc.close();
+      await this.extensionBridge?.close();
+      await this.tempConfig?.close();
+      this.client._deleteSession(this);
+    })().catch((error) => {
+      this.closePromise = undefined;
+      throw error;
+    });
+    await this.closePromise;
   }
 
   private handleSessionUpdate(
@@ -628,24 +634,45 @@ class ACPRPCClient {
   private readonly notificationHandlers = new Set<(method: string, params: unknown) => void>();
   private closed = false;
   private steeringSupported = false;
+  private exited = false;
+  private readonly processClosed: Promise<void>;
+  private closePromise?: Promise<void>;
 
   constructor(private readonly child: SpawnedProcess) {
     if (!child.stdin) {
       throw new Error("kodelet acp process did not expose stdin");
     }
+    this.processClosed = new Promise((resolve) => {
+      child.once("close", () => {
+        this.exited = true;
+        resolve();
+      });
+    });
     child.stdout?.on("data", (chunk: Buffer | string) => {
-      this.stdoutBuffer.push(String(chunk));
-      for (const line of this.stdoutBuffer.drainLines()) {
-        this.handleLine(line);
+      if (this.closed) {
+        return;
+      }
+      try {
+        this.stdoutBuffer.push(chunk);
+        for (const line of this.stdoutBuffer.drainLines()) {
+          this.handleLine(line);
+          if (this.closed) {
+            break;
+          }
+        }
+      } catch (error) {
+        this.failTransport(error instanceof Error ? error : new Error(String(error)));
       }
     });
     child.stderr?.on("data", (chunk: Buffer | string) => {
       this.stderrChunks.push(String(chunk));
     });
-    child.once("error", (error: Error) => {
-      this.closed = true;
-      this.rejectPending(error);
-    });
+    for (const [name, stream] of [["stdin", child.stdin], ["stdout", child.stdout], ["stderr", child.stderr]] as const) {
+      stream?.on("error", (error: Error) => this.failTransport(new Error(`ACP ${name} failed: ${error.message}`, { cause: error })));
+    }
+    child.stdout?.once("end", () => this.failTransport(new Error("ACP stdout ended before the client closed the session")));
+    child.stdout?.once("close", () => this.failTransport(new Error("ACP stdout closed before the client closed the session")));
+    child.once("error", (error: Error) => this.failTransport(error));
     child.once("close", (code: number | null, signal: NodeJS.Signals | null) => {
       this.closed = true;
       const message = this.stderrChunks.join("").trim() || `kodelet acp exited with status ${code ?? "unknown"}${signal ? ` (${signal})` : ""}`;
@@ -721,15 +748,48 @@ class ACPRPCClient {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
+    this.rejectPending(new Error("kodelet acp process closed"));
+    this.closePromise ??= (async () => {
+      if (this.exited) {
+        return;
+      }
+      this.child.kill("SIGTERM");
+      if (await this.waitForExit()) {
+        return;
+      }
+      this.child.kill("SIGKILL");
+      if (!await this.waitForExit()) {
+        throw new Error("kodelet acp process did not close after SIGKILL; cleanup is incomplete");
+      }
+    })().catch((error) => {
+      this.closePromise = undefined;
+      throw error;
+    });
+    await this.closePromise;
+  }
+
+  private async waitForExit(): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.processClosed.then(() => true),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), 1000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private failTransport(error: Error): void {
     if (this.closed) {
       return;
     }
     this.closed = true;
-    this.child.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      this.child.once("close", () => resolve());
-      setTimeout(resolve, 1000).unref?.();
-    });
+    this.rejectPending(error);
+    // Stop a child blocked on a broken/full pipe even if its caller does not
+    // immediately close the session. close() still awaits actual process exit.
+    this.child.kill("SIGKILL");
   }
 
   private request(method: string, params?: unknown): Promise<unknown> {
@@ -750,7 +810,11 @@ class ACPRPCClient {
   }
 
   private write(message: JsonRPCMessage): void {
-    this.child.stdin?.write(`${JSON.stringify(message)}\n`);
+    try {
+      this.child.stdin?.write(`${JSON.stringify(message)}\n`);
+    } catch (error) {
+      this.failTransport(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   private rejectPending(error: Error): void {
@@ -1327,9 +1391,13 @@ class FrameReader {
 
 class LineBuffer {
   private buffer = "";
+  private bytes = 0;
+  private readonly decoder = new StringDecoder("utf8");
 
-  push(chunk: string): void {
-    this.buffer += chunk;
+  push(chunk: Buffer | string): void {
+    const text = this.decoder.write(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    this.buffer += text;
+    this.bytes += Buffer.byteLength(text);
   }
 
   drainLines(): string[] {
@@ -1337,10 +1405,23 @@ class LineBuffer {
     while (true) {
       const index = this.buffer.indexOf("\n");
       if (index === -1) {
+        this.checkLimit(this.bytes);
         return lines;
       }
-      lines.push(this.buffer.slice(0, index).replace(/\r$/, ""));
+      const line = this.buffer.slice(0, index);
+      const bytes = Buffer.byteLength(line);
+      this.checkLimit(bytes);
+      lines.push(line.replace(/\r$/, ""));
       this.buffer = this.buffer.slice(index + 1);
+      this.bytes -= bytes + 1;
+    }
+  }
+
+  private checkLimit(bytes: number): void {
+    if (bytes > ACP_MESSAGE_LIMIT) {
+      this.buffer = "";
+      this.bytes = 0;
+      throw new Error(`ACP stdout message exceeds ${ACP_MESSAGE_LIMIT} byte limit`);
     }
   }
 }
