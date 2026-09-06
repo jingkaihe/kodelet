@@ -143,10 +143,10 @@ type (
 func runRemoteUsage(cmd *cobra.Command, _ []string) error {
 	config := getUsageConfigFromFlags(cmd)
 	if config.Format != "table" && config.Format != "json" {
-		return errors.New("usage format must be table or json")
+		return errors.New("--format must be table or json")
 	}
 	if config.Provider != "" && config.Provider != "anthropic" && config.Provider != "openai" && config.Provider != "openai-responses" {
-		return errors.New("usage provider must be anthropic, openai or openai-responses")
+		return errors.New("--provider must be anthropic, openai or openai-responses")
 	}
 	var startTime, endTime time.Time
 	var err error
@@ -156,7 +156,7 @@ func runRemoteUsage(cmd *cobra.Command, _ []string) error {
 	if config.Since != "" {
 		startTime, err = parseTimeSpecWithClock(config.Since, clock)
 		if err != nil {
-			return errors.Wrap(err, "invalid since time specification")
+			return errors.Wrap(err, "invalid --since value")
 		}
 		startTime = startTime.Truncate(24 * time.Hour)
 	}
@@ -164,13 +164,13 @@ func runRemoteUsage(cmd *cobra.Command, _ []string) error {
 	if config.Until != "" {
 		endTime, err = parseTimeSpecWithClock(config.Until, clock)
 		if err != nil {
-			return errors.Wrap(err, "invalid until time specification")
+			return errors.Wrap(err, "invalid --until value")
 		}
 		endTime = endTime.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second)
 	}
 
 	if !startTime.IsZero() && !endTime.IsZero() && startTime.After(endTime) {
-		return errors.New("usage since must not be later than until")
+		return errors.New("--since must not be later than --until")
 	}
 	client, err := remoteAdministrationClient(cmd)
 	if err != nil {
@@ -197,14 +197,14 @@ func runRemoteUsage(cmd *cobra.Command, _ []string) error {
 	for {
 		result, err := client.QueryConversations(ctx, options)
 		if err != nil {
-			return errors.Wrap(err, "daemon usage query failed; no local database fallback or partial totals")
+			return errors.Wrap(err, "could not load complete usage data; totals were not displayed")
 		}
 		summaries = append(summaries, result.Conversations...)
 		if !result.HasMore {
 			break
 		}
 		if len(result.Conversations) == 0 {
-			return errors.New("daemon usage pagination made no progress; refusing partial totals")
+			return errors.New("the server returned incomplete usage data; totals were not displayed")
 		}
 		options.Offset += len(result.Conversations)
 	}

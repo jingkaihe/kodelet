@@ -178,7 +178,7 @@ func TestWorkspaceCommitRejectsStaleApprovalAndPreservesLocks(t *testing.T) {
 				git("switch", "-c", "other")
 			case "generation":
 				service.generation++
-				expected = "generation changed"
+				expected = "runner reconnected"
 			case "message":
 				params.Message = "\x00"
 				expected = "commit message"
@@ -225,7 +225,7 @@ func TestWorkspaceCommitCancellationReleasesIndexAndStopsHook(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		require.ErrorContains(t, err, "did not acknowledge success")
+		require.ErrorContains(t, err, "could not confirm whether the commit was created")
 	case <-time.After(5 * time.Second):
 		t.Fatal("canceled commit hook did not terminate")
 	}

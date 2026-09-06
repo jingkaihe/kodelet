@@ -211,7 +211,7 @@ func (c *ServerConfig) Validate() error {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
 	if c.CWD != "" {
-		return errors.New("control-plane cwd is no longer supported; use --runner-workspace or select a registered runner")
+		return errors.New("serve --cwd is no longer supported; use --runner-workspace to set the default working directory")
 	}
 
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
@@ -264,7 +264,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		if err != nil {
 			runCancel()
 			_ = conversationService.Close()
-			return nil, errors.Wrap(err, "failed to open control-plane authentication store")
+			return nil, errors.Wrap(err, "failed to open server authentication store")
 		}
 	}
 	var oidcFlow OIDCFlow
@@ -1168,7 +1168,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		if s.runnerRegistry != nil {
 			affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, summary.ID)
 			if affinityErr != nil {
-				logger.G(ctx).WithError(affinityErr).WithField("conversation_id", summary.ID).Warn("failed to refresh runner affinity")
+				logger.G(ctx).WithError(affinityErr).WithField("conversation_id", summary.ID).Warn("failed to refresh the conversation's runner assignment")
 			} else if ok {
 				summary.Metadata["runner_id"] = affinity.RunnerID
 				if runner, found := s.runnerRegistry.Runner(affinity.RunnerID); found {
@@ -1545,7 +1545,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	if s.runnerRegistry != nil {
 		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, response.ID)
 		if affinityErr != nil {
-			logger.G(ctx).WithError(affinityErr).WithField("conversation_id", response.ID).Warn("failed to refresh runner affinity")
+			logger.G(ctx).WithError(affinityErr).WithField("conversation_id", response.ID).Warn("failed to refresh the conversation's runner assignment")
 		} else if ok {
 			webResponse.RunnerID = affinity.RunnerID
 			// Runner paths must not be shortened using the daemon host's home directory.
@@ -2331,9 +2331,9 @@ func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, messa
 func (s *Server) Start(ctx context.Context) error {
 	listener, err := net.Listen("tcp", net.JoinHostPort(s.config.Host, strconv.Itoa(s.config.Port)))
 	if err != nil {
-		return errors.Wrap(err, "failed to bind control-plane listener")
+		return errors.Wrap(err, "could not listen on the configured server address; check --host and --port")
 	}
-	presenter.Info(fmt.Sprintf("Starting web server on http://%s", listener.Addr()))
+	presenter.Info(fmt.Sprintf("Starting Kodelet server on http://%s", listener.Addr()))
 	return s.Serve(ctx, listener)
 }
 

@@ -6,8 +6,8 @@ import (
 
 var anthropicCmd = &cobra.Command{
 	Use:               "anthropic",
-	Short:             "Manage the daemon's Anthropic authentication and accounts",
-	Long:              `Manage Anthropic subscription accounts on the selected daemon. Requires daemon administrator access; provider credentials never reside on this client.`,
+	Short:             "Manage Anthropic sign-in and accounts",
+	Long:              `Manage Anthropic subscription accounts stored on the selected server. Requires administrator access.`,
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()

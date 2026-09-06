@@ -24,7 +24,7 @@ import (
 
 func Run(ctx context.Context, config Config) error {
 	if config.Runner == nil {
-		return errors.New("TUI requires an explicit daemon runner; connect to kodelet serve before starting chat")
+		return errors.New("chat requires a server connection; start 'kodelet serve' before opening chat")
 	}
 	// A TUI owns presentation and input, never a local execution environment.
 	config.Remote = true

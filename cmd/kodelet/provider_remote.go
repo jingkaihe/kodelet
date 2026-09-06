@@ -16,7 +16,7 @@ import (
 func runRemoteProviderDeviceLogin(cmd *cobra.Command, provider string) error {
 	if cmd.Flags().Changed("device-auth") {
 		if enabled, _ := cmd.Flags().GetBool("device-auth"); !enabled {
-			return errors.New("daemon login requires device authentication; omit --device-auth=false")
+			return errors.New("sign-in uses a browser verification code; omit --device-auth=false")
 		}
 	}
 	client, err := remoteAdministrationClient(cmd)
@@ -32,7 +32,7 @@ func runRemoteProviderDeviceLogin(cmd *cobra.Command, provider string) error {
 		return err
 	}
 	if login.ID == "" {
-		return errors.New("daemon did not acknowledge a login id; inspect daemon state before retrying")
+		return errors.New("could not start sign-in because the server returned no login ID; check the server logs")
 	}
 	completed := false
 	defer func() {
@@ -40,14 +40,14 @@ func runRemoteProviderDeviceLogin(cmd *cobra.Command, provider string) error {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if err := client.CancelProviderDeviceLogin(cleanup, provider, login.ID); err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Could not cancel daemon login; inspect daemon state:", err)
+				fmt.Fprintln(cmd.ErrOrStderr(), "Could not cancel sign-in; check the server logs:", err)
 			}
 		}
 	}()
 	if login.Status != "pending" || login.VerificationURL == "" || login.UserCode == "" {
-		return errors.New("daemon returned an invalid pending device login")
+		return errors.New("could not start sign-in because the server returned incomplete verification details")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Open %s and enter code: %s\nNever share this device code. Waiting for daemon sign-in...\n", login.VerificationURL, login.UserCode)
+	fmt.Fprintf(cmd.OutOrStdout(), "Open %s and enter code: %s\nNever share this device code. Waiting for sign-in...\n", login.VerificationURL, login.UserCode)
 	noBrowser, _ := cmd.Flags().GetBool("no-browser")
 	if !noBrowser {
 		if err := osutil.OpenBrowser(login.VerificationURL); err != nil {
@@ -64,14 +64,14 @@ func runRemoteProviderDeviceLogin(cmd *cobra.Command, provider string) error {
 		switch status.Status {
 		case "connected":
 			completed = true
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s subscription connected on the daemon.\n", provider)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s subscription connected.\n", provider)
 			return err
 		case "failed", "canceled":
 			completed = true
-			return errors.Errorf("daemon login %s: %s", status.Status, status.Message)
+			return errors.Errorf("sign-in %s: %s", status.Status, status.Message)
 		case "pending", "starting":
 		default:
-			return errors.New("daemon returned an unknown device login status")
+			return errors.New("the server returned an unrecognized sign-in status; check the server logs")
 		}
 		select {
 		case <-ctx.Done():

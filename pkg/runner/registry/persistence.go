@@ -132,7 +132,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 		JOIN runner_registrations r ON r.id = a.runner_id
 		WHERE r.owner_id = ?
 	`, s.ownerID); err != nil {
-		return PersistedState{}, errors.Wrap(err, "failed to load runner conversation affinity")
+		return PersistedState{}, errors.Wrap(err, "failed to load saved conversation runner assignments")
 	}
 	for _, affinity := range affinities {
 		state.Affinities[affinity.ConversationID] = ConversationAffinity{
@@ -302,7 +302,7 @@ func (s *SQLitePersistence) ConversationAffinity(ctx context.Context, conversati
 		return ConversationAffinity{}, false, nil
 	}
 	if err != nil {
-		return ConversationAffinity{}, false, errors.Wrap(err, "failed to load conversation runner affinity")
+		return ConversationAffinity{}, false, errors.Wrap(err, "failed to load the conversation's saved runner assignment")
 	}
 	return ConversationAffinity{RunnerID: row.RunnerID, EnvironmentProfile: row.EnvironmentProfile}, true, nil
 }

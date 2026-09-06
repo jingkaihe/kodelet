@@ -68,7 +68,7 @@ type UncertainSubmissionError struct {
 }
 
 func (e *UncertainSubmissionError) Error() string {
-	return fmt.Sprintf("submission outcome is uncertain (conversation %s, turn %s); query the turn receipt before resubmitting: %v", e.ConversationID, e.TurnID, e.Err)
+	return fmt.Sprintf("could not confirm the result; check 'kodelet conversation turn %s %s' before sending the request again: %v", e.ConversationID, e.TurnID, e.Err)
 }
 func (e *UncertainSubmissionError) Unwrap() error { return e.Err }
 
@@ -79,7 +79,7 @@ func (e *UncertainSubmissionError) Retryable() bool { return false }
 type TurnPendingError struct{ Receipt TurnReceipt }
 
 func (e *TurnPendingError) Error() string {
-	return fmt.Sprintf("turn %s in conversation %s is already %s; query its receipt instead of resubmitting", e.Receipt.TurnID, e.Receipt.ConversationID, e.Receipt.Status)
+	return fmt.Sprintf("turn %s in conversation %s is already %s; check its saved status before sending the request again", e.Receipt.TurnID, e.Receipt.ConversationID, e.Receipt.Status)
 }
 
 // Retryable is false because the daemon already owns this submission.

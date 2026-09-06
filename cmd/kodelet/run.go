@@ -15,7 +15,7 @@ import (
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
-	Long:  `Execute a one-shot query through the Kodelet daemon and save the conversation.`,
+	Long:  `Run a query and save the conversation. Start 'kodelet serve' first, or use --server to connect to an existing server.`,
 	Args:  cobra.MinimumNArgs(0),
 	RunE:  runControlPlaneCommand,
 }
@@ -26,20 +26,20 @@ func init() {
 
 func addRunFlags(cmd *cobra.Command) {
 	addRemoteRunFlags(cmd)
-	cmd.Flags().String("resume", "", "Resume a specific daemon conversation")
-	cmd.Flags().String("cwd", "", "Working directory on the runner (current directory for the same-host default)")
+	cmd.Flags().String("resume", "", "Resume a specific conversation")
+	cmd.Flags().String("cwd", "", "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
 	cmd.Flags().BoolP("follow", "f", false, "Follow the most recent conversation in the selected workspace")
-	cmd.Flags().StringSliceP("image", "I", nil, "Add a client image attachment (can be repeated)")
-	cmd.Flags().Int("max-turns", 0, "Maximum number of agentic turns (0 for no limit)")
-	cmd.Flags().StringP("recipe", "r", "", "Use a runner-owned recipe")
+	cmd.Flags().StringSliceP("image", "I", nil, "Attach an image from this machine or an HTTPS URL (can be repeated)")
+	cmd.Flags().Int("max-turns", 0, "Maximum AI turns (0 for no limit)")
+	cmd.Flags().StringP("recipe", "r", "", "Use a recipe installed on the runner")
 	cmd.Flags().StringToString("arg", nil, "Recipe arguments (e.g. --arg name=John)")
-	cmd.Flags().StringSlice("fragment-dirs", nil, "Unsupported client recipe directories; configure the runner instead")
+	cmd.Flags().StringSlice("fragment-dirs", nil, "No longer supported here; configure recipe directories on the runner")
 	cmd.Flags().Bool("no-extensions", false, "Disable extensions for this environment")
 	cmd.Flags().Bool("no-tools", false, "Disable all tools")
 	cmd.Flags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools")
 	cmd.Flags().Bool("result-only", false, "Print only the final agent message")
-	cmd.Flags().Bool("use-weak-model", false, "Use the daemon's weak model")
-	cmd.Flags().String("account", "", "Unsupported client account override; select a daemon profile instead")
+	cmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
+	cmd.Flags().String("account", "", "No longer supported here; select an account through --profile")
 }
 
 func formatFragmentDisplayArgs(args map[string]string) string {

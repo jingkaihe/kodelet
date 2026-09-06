@@ -53,7 +53,7 @@ func TestListAccountsCmd(t *testing.T) {
 func TestShowDefaultAccountCmdWithoutDefault(t *testing.T) {
 	command, output := remoteAccountsCommandForTest(t, "default", nil)
 	require.NoError(t, runRemoteAnthropicAccounts(command, nil))
-	assert.Contains(t, output.String(), "No default account set")
+	assert.Contains(t, output.String(), "No default account is set")
 }
 
 func TestAccountsUsageFormatting(t *testing.T) {

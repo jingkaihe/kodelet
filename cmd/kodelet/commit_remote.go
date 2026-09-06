@@ -20,11 +20,11 @@ func remoteCommitRequest(cmd *cobra.Command) (chat.ChatRequest, error) {
 	var request chat.ChatRequest
 	for _, name := range []string{"fragment-dirs", "sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "account", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
 		if cmd.Flags().Changed(name) {
-			return request, errors.Errorf("--%s is not supported by daemon-backed commit; configure the owning daemon or runner", name)
+			return request, errors.Errorf("--%s cannot be set with 'kodelet commit'; set it in the server or runner configuration", name)
 		}
 	}
 	if cmd.Flags().Changed("save") {
-		return request, errors.New("--save is not supported by daemon-backed commit; conversations are always saved")
+		return request, errors.New("--save is no longer needed; all conversations are saved automatically")
 	}
 	options, err := remoteRunExecutionOptions(cmd)
 	if err != nil {
@@ -33,7 +33,7 @@ func remoteCommitRequest(cmd *cobra.Command) (chat.ChatRequest, error) {
 	// Message generation cannot approve or perform the final Git mutation.
 	for name, value := range map[string]*bool{"no-tools": options.NoTools, "no-extensions": options.NoExtensions, "no-skills": options.NoSkills} {
 		if value != nil && !*value {
-			return request, errors.Errorf("daemon-backed commit requires --%s=true for message generation", name)
+			return request, errors.Errorf("commit message generation requires --%s=true; omit this flag to use the default", name)
 		}
 	}
 	options.NoTools, options.NoExtensions, options.NoSkills = new(true), new(true), new(true)
@@ -57,7 +57,7 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	config := getCommitConfigFromFlags(cmd)
 	broker := extensions.NewTerminalUIInputBroker(os.Stdin, cmd.ErrOrStderr())
 	if !config.NoConfirm && !broker.Interactive {
-		return errors.New("commit confirmation requires a terminal; use --no-confirm to explicitly approve unattended creation")
+		return errors.New("commit confirmation requires an interactive terminal; use --no-confirm to create the commit without prompting")
 	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -68,14 +68,14 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	}
 	runner, err := prepareOneShotRunner(ctx, cmd, server, token, &request)
 	if err != nil {
-		return errors.Wrap(err, "cannot prepare daemon commit; start kodelet serve or check --server (no local fallback)")
+		return errors.Wrap(err, "could not generate a commit message")
 	}
 	snapshot, err := runner.PrepareCommit(ctx, chat.WorkspaceTarget{RunnerID: request.RunnerID, CWD: request.CWD})
 	if err != nil {
 		return err
 	}
 	if snapshot.Truncated {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: staged diff exceeds the preview limit; generating the message from a limited diffstat and truncated patch. The commit will still include the entire prepared staged tree.")
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: staged changes are too large to preview in full. The commit message will use a summary and part of the diff; the commit will include all staged changes.")
 	}
 	request.RunnerID, request.CWD = snapshot.RunnerID, snapshot.CWD
 	request.Message = remoteCommitPrompt(snapshot, config)
@@ -85,7 +85,7 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	}
 	message := strings.TrimSpace(sanitizeCommitMessage(*sink.result))
 	if message == "" {
-		return errors.New("daemon returned an empty commit message; no commit was created")
+		return errors.New("the generated commit message was empty; no commit was created")
 	}
 	message = prefixCommitMessage(message, config.Prefix)
 	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Generated commit message:\n%s\n", message); err != nil {
@@ -94,7 +94,7 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if sink.usage != nil {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Usage: %d input tokens, %d output tokens\n", sink.usage.InputTokens, sink.usage.OutputTokens)
 	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Conversation: %s\nRunner repository: %s\n", request.ConversationID, snapshot.GitRoot)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Conversation: %s\nRepository: %s\n", request.ConversationID, snapshot.GitRoot)
 	if !config.NoConfirm {
 		var confirmed bool
 		confirmed, message, err = confirmRemoteCommit(ctx, broker, message)
@@ -107,7 +107,7 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Commit created on runner: %s\n", result.Commit)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Commit created: %s\n", result.Commit)
 	return err
 }
 

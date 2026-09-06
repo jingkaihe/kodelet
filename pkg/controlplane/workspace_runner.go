@@ -52,7 +52,7 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 	if runnerID == "" && conversationID == "" {
 		status := s.EmbeddedRunnerStatus()
 		if !status.Ready || status.RunnerID == "" {
-			return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "no ready default runner; start kodelet serve with an embedded runner or select runnerId (no control-plane-local workspace)"}
+			return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "the default runner is unavailable; check /api/status and the server logs, or select another runner with runnerId"}
 		}
 		runnerID = status.RunnerID
 	}
@@ -73,11 +73,11 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 		}
 		if found {
 			if runnerID != "" && runnerID != affinity.RunnerID {
-				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("runner does not match conversation affinity")}
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("the runner differs from the conversation's saved runner")}
 			}
 			runnerID = affinity.RunnerID
 			if r.URL.Query().Has("environmentProfile") && environmentProfile != affinity.EnvironmentProfile {
-				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "runner profile does not match conversation affinity"}
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the runner profile differs from the conversation's saved profile"}
 			}
 			environmentProfile = affinity.EnvironmentProfile
 			if s.conversationService == nil {
@@ -89,7 +89,7 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 			}
 			snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
 			if err != nil {
-				return nil, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to load conversation config snapshot", err: err}
+				return nil, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to load the conversation's saved settings", err: err}
 			}
 			storedProfile, hasStoredProfile := record.Metadata["profile"].(string)
 			if hasSnapshot {
@@ -103,17 +103,17 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 				storedProfile = "default"
 			}
 			if profile != "" && profile != storedProfile {
-				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "model profile does not match conversation affinity"}
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the model profile differs from the conversation's saved profile"}
 			}
 			profile = storedProfile
 			if hasSnapshot && s.missingEmbeddedModelProfile(runnerID, storedProfile) {
 				profile = "default"
 			}
 			if strings.TrimSpace(record.CWD) == "" {
-				return nil, &workspaceRunnerTargetError{status: http.StatusConflict, message: "conversation has no validated runner directory"}
+				return nil, &workspaceRunnerTargetError{status: http.StatusConflict, message: "the conversation has no saved working directory on its runner"}
 			}
 			if cwd != "" && cwd != record.CWD {
-				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "cwd does not match conversation affinity"}
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "cwd differs from the conversation's saved working directory"}
 			}
 			cwd = record.CWD
 		} else {
@@ -171,14 +171,14 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 	if method == protocol.MethodWorkspaceDiscover && r.URL.Query().Get("conversationId") != "" {
 		run, manifest, active, err := s.pinnedWorkspaceRun(target, r.URL.Query().Get("conversationId"))
 		if err != nil {
-			s.writeErrorResponse(w, http.StatusConflict, "conversation discovery is unavailable", err)
+			s.writeErrorResponse(w, http.StatusConflict, "could not load the conversation's available commands and tools", err)
 			return
 		}
 		if active {
 			// Never start a second runtime or ignore stricter restrictions
 			// when discovering the immutable active environment.
 			if err := validatePinnedDiscoveryOptions(options, manifest); err != nil {
-				s.writeErrorResponse(w, http.StatusConflict, "active environment restrictions are pinned", err)
+				s.writeErrorResponse(w, http.StatusConflict, "permissions cannot be changed while this conversation is running", err)
 				return
 			}
 			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: manifest.Digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts})
@@ -201,7 +201,7 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
 			status = http.StatusNotImplemented
 		}
-		s.writeErrorResponse(w, status, "runner discovery is unavailable", err)
+		s.writeErrorResponse(w, status, "could not load the runner's available commands and tools", err)
 		return
 	}
 	s.writeJSONResponse(w, result)

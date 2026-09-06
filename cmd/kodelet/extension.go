@@ -46,7 +46,7 @@ var extensionCmd = &cobra.Command{
 var hostExtensionCmd = &cobra.Command{
 	Use:   "extension",
 	Short: "Inspect extension files on this host",
-	Long:  "Inspect installed extension files in the intended workspace on the runner host. This starts no processes and does not inspect live registrations or a remote daemon.",
+	Long:  "View extension files installed in the current workspace on this machine, without starting them. To inspect a remote workspace, run this command on its runner host.",
 }
 
 var extensionListCmd = &cobra.Command{

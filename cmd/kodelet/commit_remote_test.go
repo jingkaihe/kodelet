@@ -146,10 +146,10 @@ func testRemoteCommitProcess(t *testing.T, truncated bool) {
 	require.NoError(t, err, "%s", output)
 	assert.Contains(t, string(output), "TICKET feat: runner change")
 	assert.Contains(t, string(output), "Usage: 10 input tokens, 5 output tokens")
-	assert.Contains(t, string(output), "Commit created on runner:")
+	assert.Contains(t, string(output), "Commit created:")
 	if truncated {
-		assert.Contains(t, string(output), "Warning: staged diff exceeds the preview limit")
-		assert.Contains(t, string(output), "commit will still include the entire prepared staged tree")
+		assert.Contains(t, string(output), "Warning: staged changes are too large to preview in full")
+		assert.Contains(t, string(output), "commit will include all staged changes")
 	} else {
 		assert.NotContains(t, string(output), "Warning: staged diff")
 	}

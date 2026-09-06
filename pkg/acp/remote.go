@@ -93,20 +93,20 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 	if runnerID == "" {
 		settings, err := client.ChatSettings(ctx, m.config.Profile)
 		if err != nil {
-			return "", errors.Wrap(err, "cannot reach daemon; start kodelet serve or check --server and client authentication")
+			return "", errors.Wrap(err, "could not connect to the server; start 'kodelet serve' or check --server and your authentication settings")
 		}
 		if !settings.DefaultRunnerReady || strings.TrimSpace(settings.DefaultRunnerID) == "" {
-			return "", errors.New("daemon has no ready default runner; configure one on serve or select --runner")
+			return "", errors.New("the default runner is unavailable; check 'kodelet runner list' and the server logs, or select another runner with --runner")
 		}
 		runnerID = settings.DefaultRunnerID
 	}
 	target := chat.WorkspaceTarget{RunnerID: runnerID, CWD: request.CWD, Profile: m.config.Profile, EnvironmentProfile: m.config.EnvironmentProfile, Options: m.config.Options.Restrictions()}
 	discovery, err := client.DiscoverWorkspace(ctx, target)
 	if err != nil {
-		return "", errors.Wrap(err, "runner workspace discovery is required for ACP session directories; check the path/profile and upgrade the runner if unsupported")
+		return "", errors.Wrap(err, "could not check the session directory; verify the path and runner profile, and update the runner if it does not support directory selection")
 	}
 	if strings.TrimSpace(discovery.CWD) == "" {
-		return "", errors.New("runner discovery returned no validated directory")
+		return "", errors.New("the runner did not return a working directory; check the directory and runner logs")
 	}
 	id := acptypes.SessionID(convtypes.GenerateID())
 	m.mu.Lock()
@@ -128,7 +128,7 @@ func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes
 		return chat.ConversationHistory{}, err
 	}
 	if strings.TrimSpace(history.ID) != string(request.SessionID) {
-		return chat.ConversationHistory{}, errors.Errorf("control plane returned conversation %s while loading %s", history.ID, request.SessionID)
+		return chat.ConversationHistory{}, errors.Errorf("server returned conversation %s while loading %s", history.ID, request.SessionID)
 	}
 	if strings.TrimSpace(history.RunnerID) == "" {
 		return chat.ConversationHistory{}, errors.New("conversation is not bound to a workspace runner")
@@ -144,20 +144,20 @@ func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes
 		}
 	}
 	if m.config.Profile != "" && chat.NormalizeRequestedProfile(m.config.Profile) != chat.NormalizeRequestedProfile(history.Profile) {
-		return chat.ConversationHistory{}, errors.New("conversation model profile is locked; cannot replace it on ACP resume")
+		return chat.ConversationHistory{}, errors.New("the model profile cannot be changed when resuming; start a new session to use another profile")
 	}
 	if strings.TrimSpace(history.CWD) == "" {
-		return chat.ConversationHistory{}, errors.New("conversation has no validated runner directory; adopt it before resuming")
+		return chat.ConversationHistory{}, errors.New("the conversation has no saved working directory on its runner; adopt it before resuming")
 	}
 	if strings.TrimSpace(request.CWD) != "" && strings.TrimSpace(request.CWD) != history.CWD {
-		return chat.ConversationHistory{}, errors.Errorf("conversation directory is locked to %s; cannot resume with %s", history.CWD, request.CWD)
+		return chat.ConversationHistory{}, errors.Errorf("this conversation uses %s and cannot resume in %s; start a new session to use another directory", history.CWD, request.CWD)
 	}
 	discovery, err := client.DiscoverWorkspace(ctx, chat.WorkspaceTarget{ConversationID: history.ID, Options: m.config.Options.Restrictions()})
 	if err != nil {
-		return chat.ConversationHistory{}, errors.Wrap(err, "failed to validate stored runner affinity")
+		return chat.ConversationHistory{}, errors.Wrap(err, "failed to verify the conversation's saved runner and directory")
 	}
 	if discovery.CWD != history.CWD || chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile) != chat.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
-		return chat.ConversationHistory{}, errors.New("runner discovery does not match stored conversation affinity")
+		return chat.ConversationHistory{}, errors.New("the runner returned a different directory or environment profile than this conversation saved")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -224,7 +224,7 @@ func (m *remoteSessionManager) beginPrompt(sessionID acptypes.SessionID) (bool, 
 		return false, errors.Errorf("session %s already has an active prompt", sessionID)
 	}
 	if session.uncertain {
-		return false, errors.New("previous submission outcome is uncertain; inspect daemon history and reload the session before submitting again")
+		return false, errors.New("the previous message may still be running; check the conversation history and reload the session before sending another message")
 	}
 	session.active = true
 	return !session.started, nil
@@ -278,7 +278,7 @@ func (m *remoteSessionManager) client(ctx context.Context) (RemoteChatClient, st
 		return nil, "", err
 	}
 	if client == nil {
-		return nil, "", errors.New("daemon client is unavailable")
+		return nil, "", errors.New("the server connection is unavailable")
 	}
 	return client, strings.TrimSpace(runnerID), nil
 }

@@ -40,14 +40,14 @@ func NewChatConfig() *ChatConfig {
 
 var chatCmd = &cobra.Command{
 	Use:               "chat",
-	Short:             "Start an interactive Kodelet chat TUI",
-	Long:              `Start an interactive terminal UI connected to kodelet serve. The daemon owns model execution and history; a registered runner supplies the workspace. No local execution fallback is used.`,
+	Short:             "Start an interactive chat in your terminal",
+	Long:              `Chat with Kodelet in your terminal. Start 'kodelet serve' first, or use --server to connect to an existing server. Conversations are saved automatically.`,
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		config, err := prepareDaemonChat(cmd.Context(), cmd)
 		if err != nil {
-			return errors.Wrap(err, "cannot prepare daemon chat; start kodelet serve or check client authentication and runner selection (no local fallback)")
+			return errors.Wrap(err, "could not start chat")
 		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
@@ -56,9 +56,12 @@ var chatCmd = &cobra.Command{
 }
 
 func validateRemoteChatFlags(cmd *cobra.Command) error {
-	for _, flag := range []string{"sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "account", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search", "no-save"} {
+	if cmd.Flags().Changed("no-save") {
+		return errors.New("--no-save is no longer supported; all conversations are saved automatically")
+	}
+	for _, flag := range []string{"sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "account", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
 		if cmd.Flags().Changed(flag) {
-			return errors.Errorf("--%s is not supported by daemon-backed %s; configure it on the owning daemon or runner", flag, cmd.Name())
+			return errors.Errorf("--%s cannot be set with 'kodelet %s'; set it in the server or runner configuration", flag, cmd.Name())
 		}
 	}
 	return nil
@@ -86,7 +89,7 @@ func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatp
 					return target, err
 				}
 				if !settings.DefaultRunnerReady || settings.DefaultRunnerID == "" {
-					return target, errors.New("daemon has no ready default runner; configure one or select --runner")
+					return target, errors.New("the default runner is unavailable; check 'kodelet runner list' and the server logs, or select another runner with --runner")
 				}
 				target.RunnerID = settings.DefaultRunnerID
 				if target.CWD == "" && r.defaultCWD == "" {
@@ -161,26 +164,26 @@ func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequ
 	}
 	id, err := r.ControlPlaneChatRunner.Run(ctx, request, sink)
 	if err != nil {
-		return id, errors.Wrapf(err, "daemon chat failed or detached (conversation %s, turn %s); inspect history before resubmitting, not retried", request.ConversationID, request.TurnID)
+		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
 	}
 	return id, nil
 }
 
 func validateDaemonChatAffinity(history chatpkg.ConversationHistory, request chatpkg.ChatRequest, explicitRunnerID string) error {
 	if history.ID != request.ConversationID || history.RunnerID == "" || history.CWD == "" {
-		return errors.New("conversation has no valid stored runner affinity; adopt it before resuming")
+		return errors.New("this conversation has no saved runner or working directory; use 'kodelet conversation adopt' before resuming")
 	}
 	if explicitRunnerID != "" && explicitRunnerID != history.RunnerID {
-		return errors.New("requested runner does not match stored conversation affinity")
+		return errors.New("this conversation uses a different runner; omit --runner to use its saved runner")
 	}
 	if request.CWD != "" && request.CWD != history.CWD {
-		return errors.New("conversation directory is locked; cannot replace it on resume")
+		return errors.New("the working directory cannot be changed when resuming; start a new conversation to use another directory")
 	}
 	if request.Profile != "" && chatpkg.NormalizeRequestedProfile(request.Profile) != chatpkg.NormalizeRequestedProfile(history.Profile) {
-		return errors.New("conversation model profile is locked; cannot replace it on resume")
+		return errors.New("the model profile cannot be changed when resuming; start a new conversation to use another profile")
 	}
 	if request.EnvironmentProfile != "" && chatpkg.NormalizeEnvironmentProfile(request.EnvironmentProfile) != chatpkg.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
-		return errors.New("conversation runner profile is locked; cannot replace it on resume")
+		return errors.New("the runner profile cannot be changed when resuming; start a new conversation to use another profile")
 	}
 	return nil
 }
@@ -215,7 +218,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 	}
 	if config.Follow {
 		if config.Runner == "" && config.CWD == "" {
-			return result, errors.New("--follow requires --runner or --cwd to scope daemon history")
+			return result, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
 		}
 		var profile string
 		if cmd.Flags().Changed("profile") {
@@ -234,7 +237,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 			return result, err
 		}
 		if len(history) == 0 {
-			return result, errors.New("no conversation found in the selected runner/workspace; omit --follow to start one")
+			return result, errors.New("no conversation found for the selected runner or directory; omit --follow to start one")
 		}
 		config.ResumeConvID = history[0].ID
 	}
@@ -252,7 +255,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 			return result, err
 		}
 		if cmd.Flags().Changed("runner-profile") && chatpkg.NormalizeEnvironmentProfile(config.RunnerProfile) != chatpkg.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
-			return result, errors.New("conversation runner profile is locked; cannot replace it on resume")
+			return result, errors.New("the runner profile cannot be changed when resuming; start a new conversation to use another profile")
 		}
 		result.Profile, result.EnvironmentProfile, result.ReasoningEffort = history.Profile, history.EnvironmentProfile, history.ReasoningEffort
 		result.CWD = history.CWD
@@ -284,10 +287,10 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		return result, err
 	}
 	if discovery.CWD == "" {
-		return result, errors.New("runner discovery returned no validated directory")
+		return result, errors.New("the runner did not return a working directory; check the directory and runner logs")
 	}
 	if config.ResumeConvID != "" && (discovery.CWD != result.CWD || chatpkg.NormalizeEnvironmentProfile(discovery.EnvironmentProfile) != chatpkg.NormalizeEnvironmentProfile(result.EnvironmentProfile)) {
-		return result, errors.New("runner discovery does not match stored conversation affinity")
+		return result, errors.New("the runner returned a different directory or environment profile than this conversation saved")
 	}
 	result.CWD, result.DefaultCWD = discovery.CWD, discovery.CWD
 	result.EnvironmentProfile = discovery.EnvironmentProfile
@@ -301,17 +304,17 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 func init() {
 	defaults := NewChatConfig()
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
-	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory on the selected runner (defaults to its workspace)")
+	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
 	chatCmd.Flags().String("theme", tui.AutoThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
-	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
+	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
-	chatCmd.Flags().Bool("use-weak-model", false, "Use the daemon's configured weak model")
-	chatCmd.Flags().Int("max-turns", 0, "Maximum agentic turns per prompt (0 for no limit)")
-	chatCmd.Flags().String("runner", defaults.Runner, "Use a remote runner by ID, ID prefix, or display name")
-	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner-owned environment profile for new conversations")
-	chatCmd.Flags().String("server", defaultRunnerServer, "Run the TUI against a control plane; use with --runner to select a runner for new conversations")
-	chatCmd.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
+	chatCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
+	chatCmd.Flags().Int("max-turns", 0, "Maximum AI turns per prompt (0 for no limit)")
+	chatCmd.Flags().String("runner", defaults.Runner, "Workspace runner ID, ID prefix, or display name")
+	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner environment profile for new conversations")
+	chatCmd.Flags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
+	chatCmd.Flags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 }
 
 func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
@@ -372,7 +375,7 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 		if selected.CompatibilityError != "" {
 			return nil, "", errors.New(selected.CompatibilityError)
 		}
-		return nil, "", errors.New("runner is incompatible with this control plane")
+		return nil, "", errors.New("runner is incompatible with this server")
 	}
 	if !selected.Connected {
 		return nil, "", errors.New("runner is offline")
@@ -403,10 +406,10 @@ func usesControlPlaneChat(config *ChatConfig) bool {
 
 func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationSource) (string, error) {
 	if source == nil {
-		return "", errors.New("daemon conversation source is required")
+		return "", errors.New("conversation history is unavailable")
 	}
 	if runner, ok := source.(*chatpkg.ControlPlaneChatRunner); ok && runner == nil {
-		return "", errors.New("daemon conversation source is required")
+		return "", errors.New("conversation history is unavailable")
 	}
 	summaries, err := source.ListConversations(ctx, 1)
 	if err != nil {
@@ -420,7 +423,7 @@ func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationS
 
 func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlaneChatRunner, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
-		return "", nil, nil, "", errors.New("control-plane chat runner is required")
+		return "", nil, nil, "", errors.New("chat runner is required")
 	}
 	selected, err := runner.ChatSettings(ctx, requestedProfile)
 	if err != nil {
@@ -476,5 +479,5 @@ func validateRemoteReasoningEffort(requested string, options []string) error {
 			return nil
 		}
 	}
-	return errors.Errorf("reasoning effort %q is not allowed by the selected control-plane profile", requested)
+	return errors.Errorf("reasoning effort %q is not allowed by the selected model profile", requested)
 }

@@ -29,7 +29,7 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF || strings.TrimSpace(params.RunnerID) == "" {
-		s.writeErrorResponse(w, http.StatusBadRequest, "adoption requires one request and an explicit runner ID; no default runner selection", nil)
+		s.writeErrorResponse(w, http.StatusBadRequest, "provide one adoption request with the runnerId of the runner you want to use", nil)
 		return
 	}
 	params.RunnerID = strings.TrimSpace(params.RunnerID)
@@ -45,17 +45,17 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 	if s.turns != nil {
 		var active bool
 		if err := s.turns.db.GetContext(ctx, &active, `SELECT EXISTS(SELECT 1 FROM chat_turns WHERE conversation_id = ? AND status IN ('accepted','running'))`, id); err != nil {
-			s.writeErrorResponse(w, http.StatusServiceUnavailable, "conversation admission state is unavailable", err)
+			s.writeErrorResponse(w, http.StatusServiceUnavailable, "could not check whether the conversation is running", err)
 			return
 		}
 		if active {
-			s.writeErrorResponse(w, http.StatusConflict, "conversation already has an admitted turn", nil)
+			s.writeErrorResponse(w, http.StatusConflict, "this conversation already has a turn in progress; wait for it to finish or stop it first", nil)
 			return
 		}
 	}
 	_, bound, err := s.runnerRegistry.ResolveConversationAffinity(ctx, id)
 	if err != nil || bound {
-		s.writeErrorResponse(w, http.StatusConflict, "conversation is already bound or affinity is unavailable; adoption cannot rebind it", err)
+		s.writeErrorResponse(w, http.StatusConflict, "the conversation already has a saved runner, or its runner settings could not be read; cannot assign another runner", err)
 		return
 	}
 	response, err := s.conversationService.GetConversation(ctx, id)
@@ -68,7 +68,7 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if runnerID, exists := response.Metadata[convtypes.RunnerIDMetadataKey]; exists && runnerID != "" {
-		s.writeErrorResponse(w, http.StatusConflict, "conversation already has runner provenance; adoption cannot replace it", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "this conversation already has a saved runner; adoption cannot change it", nil)
 		return
 	}
 	if strings.TrimSpace(response.CWD) == "" {
@@ -106,7 +106,7 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if discovered.CWD != response.CWD || chat.NormalizeEnvironmentProfile(discovered.EnvironmentProfile) != profile {
-		s.writeErrorResponse(w, http.StatusConflict, "runner canonical directory/profile does not match saved history; start a new conversation rather than silently relocating it", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "the runner's directory or environment profile differs from the saved conversation; start a new conversation to use these settings", nil)
 		return
 	}
 	result := chat.ConversationAdoptionResult{
@@ -131,12 +131,12 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 	result.Confirmation = hex.EncodeToString(digest[:])
 	if params.Confirmation != "" {
 		if params.Confirmation != result.Confirmation {
-			s.writeErrorResponse(w, http.StatusConflict, "adoption preview changed; inspect the resolved host, directory and configuration and confirm a fresh preview", nil)
+			s.writeErrorResponse(w, http.StatusConflict, "the adoption details have changed; review the host, directory and settings again before confirming", nil)
 			return
 		}
 		record := convtypes.ConversationRecord{ID: id, CWD: response.CWD, UpdatedAt: response.UpdatedAt, Metadata: response.Metadata}
 		if err := s.runnerRegistry.AdoptConversation(ctx, record, runner.ID, runner.Generation, profile); err != nil {
-			s.writeErrorResponse(w, http.StatusConflict, "adoption not committed: "+err.Error(), nil)
+			s.writeErrorResponse(w, http.StatusConflict, "could not save the conversation's runner assignment: "+err.Error(), nil)
 			return
 		}
 		result.Adopted = true

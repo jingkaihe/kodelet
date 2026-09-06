@@ -4,8 +4,8 @@ import "github.com/spf13/cobra"
 
 var copilotLoginCmd = &cobra.Command{
 	Use:               "copilot-login",
-	Short:             "Connect a GitHub Copilot subscription to the daemon",
-	Long:              "Start daemon-owned device-code sign-in. Provider credentials are exchanged and stored only by the daemon.",
+	Short:             "Connect a GitHub Copilot subscription",
+	Long:              "Sign in using a code in your browser. Your credentials are stored on the selected server.",
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE:              func(cmd *cobra.Command, _ []string) error { return runRemoteProviderDeviceLogin(cmd, "copilot") },

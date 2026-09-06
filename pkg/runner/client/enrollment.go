@@ -302,7 +302,7 @@ func (c *enrollmentClient) start(ctx context.Context) (localstate.PendingEnrollm
 		return localstate.PendingEnrollment{}, errors.Wrap(err, "failed to decode runner enrollment start response")
 	}
 	if err := validateEnrollmentStartResponse(started, c.now()); err != nil {
-		return localstate.PendingEnrollment{}, errors.Wrap(err, "control plane returned an invalid runner enrollment")
+		return localstate.PendingEnrollment{}, errors.Wrap(err, "server returned an invalid runner enrollment")
 	}
 
 	now := c.now()
@@ -374,7 +374,7 @@ func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingE
 			}
 			retryInterval, err := durationFromMilliseconds(polled.RetryAfterMS)
 			if err != nil {
-				return protocol.EnrollmentPollResponse{}, errors.Wrap(err, "control plane returned an invalid runner enrollment retry interval")
+				return protocol.EnrollmentPollResponse{}, errors.Wrap(err, "server returned an invalid runner enrollment retry interval")
 			}
 			nextInterval = max(baseInterval, retryInterval)
 		case protocol.EnrollmentStatusApproved:
@@ -387,7 +387,7 @@ func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingE
 		case protocol.EnrollmentStatusExpired:
 			return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(pending.EnrollmentID, ErrEnrollmentExpired)
 		default:
-			return protocol.EnrollmentPollResponse{}, errors.Errorf("control plane returned unknown runner enrollment status %q", polled.Status)
+			return protocol.EnrollmentPollResponse{}, errors.Errorf("server returned unknown runner enrollment status %q", polled.Status)
 		}
 	}
 }
@@ -395,27 +395,27 @@ func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingE
 func (c *enrollmentClient) finishApprovedEnrollment(pending localstate.PendingEnrollment, response protocol.EnrollmentPollResponse) error {
 	credentialID, err := validateOpaqueID("credential id", response.CredentialID)
 	if err != nil {
-		return errors.Wrap(err, "control plane returned an invalid approved runner enrollment")
+		return errors.Wrap(err, "server returned an invalid approved runner enrollment")
 	}
 	runnerID, err := validateOpaqueID("runner id", response.RunnerID)
 	if err != nil {
-		return errors.Wrap(err, "control plane returned an invalid approved runner enrollment")
+		return errors.Wrap(err, "server returned an invalid approved runner enrollment")
 	}
 	expectedFingerprint, err := protocol.CredentialFingerprint(pending.PublicKey)
 	if err != nil {
 		return errors.Wrap(err, "failed to verify approved runner enrollment key")
 	}
 	if response.Fingerprint != strings.TrimSpace(response.Fingerprint) || response.Fingerprint != expectedFingerprint {
-		return errors.New("control plane returned an approved runner fingerprint that does not match the generated key")
+		return errors.New("server returned an approved runner fingerprint that does not match the generated key")
 	}
 	if response.TokenType != protocol.DPoPAuthorizationScheme {
-		return errors.New("control plane returned an approved runner credential with an unsupported token type")
+		return errors.New("server returned an approved runner credential with an unsupported token type")
 	}
 	if err := protocol.ValidateRunnerAccessToken(response.AccessToken); err != nil {
-		return errors.Wrap(err, "control plane returned an invalid approved runner access token")
+		return errors.Wrap(err, "server returned an invalid approved runner access token")
 	}
 	if response.AccessToken != pending.DeviceCode {
-		return errors.New("control plane returned an approved runner access token that does not match the enrollment secret")
+		return errors.New("server returned an approved runner access token that does not match the enrollment secret")
 	}
 	now := c.now()
 	committed, err := c.store.CommitApprovedEnrollment(pending.EnrollmentID, localstate.Credential{

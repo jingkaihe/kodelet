@@ -16,12 +16,12 @@ import (
 )
 
 func addRemoteConversationCommands(parent *cobra.Command) {
-	parent.PersistentFlags().String("server", defaultRunnerServer, "Conversation authority (or KODELET_SERVER)")
-	parent.PersistentFlags().String("auth-token", "", "Control-plane client authentication token (or KODELET_AUTH_TOKEN)")
+	parent.PersistentFlags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
+	parent.PersistentFlags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 	for _, cmd := range parent.Commands() {
 		if cmd.Name() == "list" || cmd.Name() == "fork" {
-			cmd.Flags().String("runner", "", "Filter daemon history by exact runner ID; no online runner required")
-			cmd.Flags().String("cwd", "", "Filter daemon history by canonical persisted runner-host directory")
+			cmd.Flags().String("runner", "", "Filter conversations by exact runner ID (the runner can be offline)")
+			cmd.Flags().String("cwd", "", "Filter conversations by their saved absolute directory on the runner")
 		}
 		cmd.Run = nil
 		cmd.RunE = runRemoteConversationCommand
@@ -31,7 +31,7 @@ func addRemoteConversationCommands(parent *cobra.Command) {
 
 func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	if cmd.Name() == "import" || cmd.Name() == "edit" {
-		return errors.Errorf("conversation %s is not supported by the daemon API; arbitrary record replacement is disabled. Export a copy to inspect it; legacy history requires validated adoption", cmd.Name())
+		return errors.Errorf("'kodelet conversation %s' is no longer supported; use 'kodelet conversation export' to save a copy, or 'kodelet conversation adopt' to continue an older conversation", cmd.Name())
 	}
 	var query conversations.ListConversationsRequest
 	if cmd.Name() == "list" {
@@ -56,10 +56,10 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	query.CWD, _ = cmd.Flags().GetString("cwd")
 	query.RunnerID, _ = cmd.Flags().GetString("runner")
 	if cmd.Name() == "fork" && len(args) == 0 && query.CWD == "" && query.RunnerID == "" {
-		return errors.New("provide a conversation ID or --cwd/--runner to select the most recent daemon conversation in that scope")
+		return errors.New("provide a conversation ID, or use --cwd or --runner to find the most recent conversation in that directory or runner")
 	}
 	if cmd.Name() == "fork" && len(args) > 0 && (cmd.Flags().Changed("cwd") || cmd.Flags().Changed("runner")) {
-		return errors.New("--cwd/--runner filter implicit fork selection; do not combine them with an explicit conversation ID")
+		return errors.New("--cwd and --runner are only used to find the most recent conversation; omit them when providing a conversation ID")
 	}
 	if cmd.Name() == "export" {
 		config := getConversationExportConfigFromFlags(cmd)
@@ -79,7 +79,7 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 	if err := executeRemoteConversation(ctx, cmd, args, client, query); err != nil {
-		return errors.Wrap(err, "daemon conversation operation failed; check kodelet serve, --server and client authentication (no local database fallback)")
+		return errors.Wrap(err, "could not complete the conversation command")
 	}
 	return nil
 }
@@ -121,13 +121,13 @@ func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []s
 			path = args[1]
 		}
 		if err := os.WriteFile(path, data, 0o600); err != nil {
-			return errors.Wrap(err, "failed to write client export file")
+			return errors.Wrap(err, "failed to write the export file")
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Conversation %s exported to %s\n", record.ID, path)
 		return nil
 	case "delete":
 		if !getConversationDeleteConfigFromFlags(cmd).NoConfirm {
-			answer := presenter.Prompt(fmt.Sprintf("Delete daemon conversation %s?", args[0]), "y", "N")
+			answer := presenter.Prompt(fmt.Sprintf("Delete conversation %s?", args[0]), "y", "N")
 			if !strings.EqualFold(answer, "y") {
 				fmt.Fprintln(cmd.OutOrStdout(), "Deletion cancelled.")
 				return nil
@@ -149,7 +149,7 @@ func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []s
 				return err
 			}
 			if len(result.Conversations) == 0 {
-				return errors.New("no daemon conversation matches the selected scope")
+				return errors.New("no conversation found for the selected runner or directory")
 			}
 			id = result.Conversations[0].ID
 		}
@@ -160,14 +160,14 @@ func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []s
 		fmt.Fprintf(cmd.OutOrStdout(), "Conversation forked successfully. New ID: %s\n", forked)
 		return nil
 	default:
-		return errors.Errorf("unsupported daemon conversation operation %q", cmd.Name())
+		return errors.Errorf("unsupported conversation command %q", cmd.Name())
 	}
 }
 
 func newConversationAdoptCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt <conversation-id>",
-		Short: "Bind legacy daemon history to an explicitly selected runner",
+		Short: "Choose a runner for continuing an older conversation",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runnerID, _ := cmd.Flags().GetString("runner")
@@ -191,12 +191,12 @@ func newConversationAdoptCommand() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Conversation: %s\nRunner: %s (%s)\nHost: %s [%s]\nDirectory: %s\nRunner profile: %s\nModel: %s/%s (profile %s)\n", preview.ConversationID, preview.RunnerID, preview.RunnerName, preview.Hostname, preview.HostInstanceID, preview.CWD, adoptionProfileLabel(preview.EnvironmentProfile), preview.Provider, preview.Model, adoptionProfileLabel(preview.ModelProfile))
-			fmt.Fprintln(cmd.OutOrStdout(), "Matching paths on different hosts do not prove workspace identity. Confirm only if this is the intended workspace.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Check the host and directory above before continuing; the same path on another machine may contain a different workspace.")
 			if previewOnly {
-				fmt.Fprintln(cmd.OutOrStdout(), "Preview only; history remains unbound.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Preview only; the conversation has not been changed.")
 				return nil
 			}
-			if !yes && !strings.EqualFold(presenter.Prompt("Adopt this conversation into the displayed environment?", "y", "N"), "y") {
+			if !yes && !strings.EqualFold(presenter.Prompt("Use this runner and directory to continue the conversation?", "y", "N"), "y") {
 				fmt.Fprintln(cmd.OutOrStdout(), "Adoption cancelled; history is unchanged.")
 				return nil
 			}
@@ -208,15 +208,15 @@ func newConversationAdoptCommand() *cobra.Command {
 				return err
 			}
 			if !result.Adopted {
-				return errors.New("daemon did not confirm adoption; inspect conversation affinity")
+				return errors.New("could not confirm the runner assignment; check 'kodelet conversation show' before trying again")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Conversation %s adopted; history and model configuration preserved.\n", result.ConversationID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Conversation %s is ready to continue; its history and model settings are unchanged.\n", result.ConversationID)
 			return nil
 		},
 	}
-	cmd.Flags().String("runner", "", "Exact runner ID to adopt into (required; never uses a default)")
+	cmd.Flags().String("runner", "", "ID of the runner to use for this conversation (required)")
 	cmd.Flags().String("runner-profile", "", "Runner environment profile (inherits stored profile, otherwise default)")
-	cmd.Flags().Bool("preview", false, "Validate and display the target without binding history")
+	cmd.Flags().Bool("preview", false, "Preview the runner and directory without changing the conversation")
 	cmd.Flags().Bool("yes", false, "Confirm the displayed target without prompting")
 	_ = cmd.MarkFlagRequired("runner")
 	cmd.MarkFlagsMutuallyExclusive("preview", "yes")

@@ -35,7 +35,7 @@ func (c admittedTurnController) OpenRun(ctx context.Context, runnerID string, pa
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = c.CloseRun(closeCtx, params.RunID, protocol.RunStatusFailed, err)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to commit admitted conversation affinity")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to save the conversation's runner and working directory")
 	}
 	return manifest, nil
 }
@@ -51,16 +51,16 @@ func (s *Server) handleGetTurnReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.turns == nil {
-		s.writeErrorResponse(w, http.StatusServiceUnavailable, "durable turn store is unavailable", nil)
+		s.writeErrorResponse(w, http.StatusServiceUnavailable, "saved turn status is unavailable", nil)
 		return
 	}
 	receipt, err := s.turns.get(r.Context(), vars["id"], vars["turnId"])
 	if errors.Is(err, sql.ErrNoRows) {
-		s.writeErrorResponse(w, http.StatusNotFound, "turn has not been admitted or cancelled", nil)
+		s.writeErrorResponse(w, http.StatusNotFound, "turn not found; check the conversation and turn IDs", nil)
 		return
 	}
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read turn receipt", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read the turn status", err)
 		return
 	}
 	s.writeJSONResponse(w, receipt)
@@ -89,7 +89,7 @@ func (s *Server) handleDurableTurnStop(w http.ResponseWriter, r *http.Request) b
 		run, _ := s.requestActiveChatStop(conversationID, turnID)
 		if run == nil && s.runnerRegistry != nil && receipt.RunID != "" {
 			if _, err := s.runnerRegistry.CancelChildTurn(waitCtx, conversationID, receipt.RunID); err != nil {
-				s.writeErrorResponse(w, http.StatusRequestTimeout, "child cancellation recorded but completion is unconfirmed", err)
+				s.writeErrorResponse(w, http.StatusRequestTimeout, "cancellation was requested, but the child task has not yet confirmed that it stopped", err)
 				return true
 			}
 		}
@@ -97,18 +97,18 @@ func (s *Server) handleDurableTurnStop(w http.ResponseWriter, r *http.Request) b
 			select {
 			case <-run.done:
 			case <-waitCtx.Done():
-				s.writeErrorResponse(w, http.StatusRequestTimeout, "cancellation recorded but completion is unconfirmed", waitCtx.Err())
+				s.writeErrorResponse(w, http.StatusRequestTimeout, "cancellation was requested, but the turn may still be running", waitCtx.Err())
 				return true
 			}
 		}
 		receipt, err = s.turns.get(r.Context(), conversationID, turnID)
 		if err != nil {
-			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to reconcile turn cancellation", err)
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to update the turn status cancellation", err)
 			return true
 		}
 	}
 	if !receipt.Terminal() {
-		s.writeErrorResponse(w, http.StatusRequestTimeout, "cancellation recorded but completion is unconfirmed; query the turn receipt", nil)
+		s.writeErrorResponse(w, http.StatusRequestTimeout, "cancellation was requested, but the turn may still be running; check its saved status", nil)
 		return true
 	}
 	s.writeJSONResponse(w, struct {
@@ -174,7 +174,7 @@ func (s *Server) finishTurn(ctx context.Context, conversationID, turnID string, 
 	}
 	receipt, err := s.turns.get(persistCtx, conversationID, turnID)
 	if err != nil {
-		return errors.Wrap(err, "failed to reconcile terminal turn")
+		return errors.Wrap(err, "failed to save the turn's final status")
 	}
 	if receipt.Status == "cancelled" {
 		return context.Canceled

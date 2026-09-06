@@ -15,16 +15,16 @@ import (
 
 var codexLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Explain the daemon-host logout procedure",
+	Short: "Show how to disconnect a ChatGPT subscription",
 	Args:  cobra.NoArgs,
 	RunE: func(*cobra.Command, []string) error {
-		return errors.New("daemon Codex logout is not available remotely: stop the daemon, run 'kodelet host codex logout' on its host, then restart it; no client credentials were changed")
+		return errors.New("to disconnect the ChatGPT subscription, stop the server, run 'kodelet host codex logout' on that machine, then restart 'kodelet serve'")
 	},
 }
 
 var hostCodexLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Remove this host's Codex credentials (daemon must be stopped)",
+	Short: "Remove this host's Codex credentials (server must be stopped)",
 	Long: `Logout from OpenAI Codex and remove stored credentials.
 
 This command will:

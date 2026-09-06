@@ -385,7 +385,7 @@ func (r *Registry) restore(state PersistedState) error {
 		}
 		if run.Status == RunStatusOpening || run.Status == RunStatusRunning {
 			run.Status = RunStatusLost
-			run.Error = "control plane restarted while run was active"
+			run.Error = "server restarted while run was active"
 			run.UpdatedAt = now
 			if err := r.persistence.SaveRun(r.ctx, run); err != nil {
 				return errors.Wrap(err, "failed to mark restored runner run lost")
@@ -396,7 +396,7 @@ func (r *Registry) restore(state PersistedState) error {
 
 	for conversationID, affinity := range state.Affinities {
 		if strings.TrimSpace(conversationID) == "" || r.runners[affinity.RunnerID] == nil {
-			return errors.New("persisted conversation runner affinity is invalid")
+			return errors.New("the conversation's saved runner assignment is invalid")
 		}
 		affinity.EnvironmentProfile = normalizeEnvironmentProfile(affinity.EnvironmentProfile)
 		r.affinities.put(conversationID, affinity, true)
@@ -717,7 +717,7 @@ func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, i
 			return nil, false, errors.New("host workspace is registered under another runner id")
 		}
 		if existingID == "" && r.runners[requestedID] == nil {
-			return nil, false, errors.Wrap(ErrRunnerNotFound, "runner id is not known to this control plane")
+			return nil, false, errors.Wrap(ErrRunnerNotFound, "runner id is not known to this server")
 		}
 	}
 
@@ -936,7 +936,7 @@ func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, pa
 			WithField("generation", generation).
 			WithField("expected_run_ids", mismatchExpectedRunIDs).
 			WithField("reported_run_ids", activeRunIDs).
-			Warn("runner heartbeat active runs differ from control-plane leases")
+			Warn("runner reported a different set of active runs than the server; see expected_run_ids and reported_run_ids")
 	}
 	if runSetErr != nil {
 		return runSetErr
@@ -1036,7 +1036,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	checkpoint, _ := ctx.Value(runCheckpointKey{}).(*runCheckpoint)
 	if params.RequireCheckpoint && (checkpoint == nil || !entry.RunCheckpoint) {
 		r.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.New("runner must support admitted conversation checkpoints; upgrade the runner")
+		return runnerpayload.Manifest{}, errors.New("this runner cannot save conversations before starting work; update the runner")
 	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	reservedAffinity := false
@@ -1137,7 +1137,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		complete := checkpoint.complete && checkpoint.cwd == manifest.WorkingDirectory
 		r.mu.RUnlock()
 		if !complete {
-			return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, errors.New("runner did not acknowledge the admitted conversation checkpoint"), false)
+			return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, errors.New("the runner did not confirm that the conversation was saved before starting work"), false)
 		}
 	}
 	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
@@ -1661,7 +1661,7 @@ func (r *Registry) Close() error {
 		}
 		entry.credentialID = ""
 		for _, runID := range runnerActiveRunIDs(entry) {
-			r.finishRunLocked(runID, RunStatusLost, "control plane stopped while run was active", now)
+			r.finishRunLocked(runID, RunStatusLost, "server stopped while run was active", now)
 		}
 		entry.Connected = false
 		if entry.Status != RunnerStatusIncompatible {
@@ -1757,7 +1757,7 @@ func (r *Registry) watchRunLease(owner context.Context, leaseDone <-chan struct{
 }
 
 func (r *Registry) expireRunLease(fence runFence, cause error) {
-	message := "control-plane run context ended without run.close"
+	message := "the run ended before the runner received a close request; canceling work and cleaning up"
 	if cause != nil {
 		message += ": " + cause.Error()
 	}
@@ -1782,7 +1782,7 @@ func (r *Registry) expireRunLease(fence runFence, cause error) {
 
 	r.notifyRunFailure(conversationID)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), openingCleanupTimeout)
-	_ = fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: fence.runID, Reason: "control-plane run lease expired"}, nil)
+	_ = fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: fence.runID, Reason: "server run lease expired"}, nil)
 	cleanupErr := fence.link.Call(cleanupCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: fence.runID}, nil)
 	cancel()
 	if cleanupErr == nil || remoteRunAlreadyClosed(cleanupErr) {
@@ -2019,7 +2019,7 @@ func validateManifest(manifest runnerpayload.Manifest, runnerID string, params p
 			return errors.New("runner manifest contains a tool without a name")
 		}
 		if _, exists := reserved[name]; exists {
-			return errors.Errorf("runner tool %s collides with a reserved control-plane tool", name)
+			return errors.Errorf("runner tool %s collides with a reserved server tool", name)
 		}
 		if definition.Placement != "environment" {
 			return errors.Errorf("runner tool %s has invalid placement %q", name, definition.Placement)

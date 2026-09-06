@@ -857,11 +857,11 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 		stopErr := active.stopErr
 		s.activePromptsMu.Unlock()
 		if stopErr != nil {
-			err = pkgerrors.Wrap(stopErr, "cancellation was not acknowledged; daemon work may still be running")
+			err = pkgerrors.Wrap(stopErr, "could not confirm cancellation; the conversation may still be running")
 		} else if err == nil {
 			err = promptCtx.Err()
 		}
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, fmt.Sprintf("daemon execution failed or detached (conversation %s, turn %s): %v; inspect daemon history before resubmitting (not retried)", params.SessionID, turnID, err), nil)
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, fmt.Sprintf("the request failed or the connection was interrupted; before sending it again, check 'kodelet conversation turn %s %s': %v", params.SessionID, turnID, err), nil)
 	}
 	succeeded = true
 	return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
@@ -899,7 +899,7 @@ func (s *Server) finishRemotePromptCancellation(sessionID acptypes.SessionID, pr
 
 func (s *Server) stopRemoteConversation(sessionID acptypes.SessionID, prompt *activePrompt) error {
 	if prompt == nil || prompt.remoteClient == nil {
-		return errors.New("remote ACP prompt has no control-plane client")
+		return errors.New("remote ACP prompt has no server client")
 	}
 	stopCtx, cancelStop := context.WithTimeout(context.WithoutCancel(s.ctx), 15*time.Second)
 	defer cancelStop()

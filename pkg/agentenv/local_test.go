@@ -279,7 +279,7 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	controlPlane, err := environment.ExecuteTool(t.Context(), ToolRequest{Name: "get_goal", Input: `{}`, ToolCallID: "call-control"}, nil)
 	require.NoError(t, err)
 	assert.True(t, controlPlane.Result.IsError())
-	assert.Contains(t, controlPlane.Result.GetError(), "control-plane tool")
+	assert.Contains(t, controlPlane.Result.GetError(), "server tool")
 
 	environment.ApplyCommandResult(CommandResult{
 		Matched:         true,

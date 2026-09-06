@@ -249,7 +249,7 @@ func TestHostInspectionMigrationRejectsOldPathsBeforeEffects(t *testing.T) {
 			defer cancel()
 			output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, test.args...).CombinedOutput()
 			require.Error(t, err, "%s", output)
-			assert.Contains(t, string(output), fmt.Sprintf("'%s' is host-only; use 'kodelet host %s' with the same arguments on the runner host in the intended workspace", test.path, test.path))
+			assert.Contains(t, string(output), fmt.Sprintf("'%s' has moved to 'kodelet host %s'; run it in the workspace on the machine where the files are installed", test.path, test.path))
 			assert.NotContains(t, string(output), "unknown flag")
 			assert.NoFileExists(t, fixture.extensionMarker)
 			assert.NoFileExists(t, fixture.templateMarker)

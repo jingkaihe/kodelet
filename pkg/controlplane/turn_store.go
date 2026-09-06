@@ -38,11 +38,11 @@ func newTurnStore(ctx context.Context, path string) (*turnStore, error) {
 	// exact cancellation is durable, including before the conversation exists.
 	_, err = database.ExecContext(ctx, `UPDATE chat_turns SET
 		status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'interrupted' END,
-		error = 'daemon stopped before a terminal outcome was recorded', updated_at = ?
+		error = 'server stopped before a terminal outcome was recorded', updated_at = ?
 		WHERE status IN ('accepted', 'running')`, time.Now().UTC())
 	if err != nil {
 		_ = database.Close()
-		return nil, errors.Wrap(err, "failed to recover chat turn receipts")
+		return nil, errors.Wrap(err, "failed to restore saved turn statuses")
 	}
 	return &turnStore{db: database}, nil
 }
@@ -131,7 +131,7 @@ func (s *turnStore) finish(ctx context.Context, conversationID, turnID, status s
 		status = CASE WHEN cancel_requested THEN 'cancelled' ELSE ? END,
 		result=?, error=?, updated_at=? WHERE conversation_id=? AND turn_id=? AND status IN ('accepted','running')`,
 		status, output, message, time.Now().UTC(), conversationID, turnID)
-	return errors.Wrap(err, "failed to persist terminal turn outcome")
+	return errors.Wrap(err, "failed to save the turn's final result")
 }
 
 func (s *turnStore) stop(ctx context.Context, conversationID, turnID string) (chat.TurnReceipt, error) {

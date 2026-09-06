@@ -126,7 +126,7 @@ kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
 
 #### Daemon-backed execution
 
-All execution uses the daemon. Connection failures never fall back to local execution.
+Start `kodelet serve` before running a query, or use `--server` to connect to an existing Kodelet server. Conversations are saved automatically.
 
 ```bash
 # Select a connected runner by ID or name.
@@ -174,7 +174,7 @@ kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local e
 
 Set a default control plane with `server` in user configuration or `KODELET_SERVER`; `--server` takes precedence. Repository configuration cannot set this value.
 
-The daemon owns model execution and history; the selected runner validates directories and supplies workspace resources. Chat never starts a local provider or falls back to a client-side conversation database. Resume preserves the saved runner, directory, and profiles; `--follow` requires a runner or directory scope.
+The server runs the AI model and saves your conversations. Its built-in runner provides file access and tools on the same machine; use `--runner` to work with another runner. Resuming keeps the saved runner, directory, and profiles. Use `--follow` with `--runner` or `--cwd` to choose which conversation history to search.
 
 The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
@@ -226,7 +226,7 @@ toad acp 'kodelet acp'
 kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-The daemon saves conversations and runs the model; its default runner, or `--runner`, supplies workspace tools and commands. ACP never starts a runner or falls back to local execution. Set `server` or `KODELET_SERVER` to choose the daemon, and use `kodelet auth login --server ...` or `--auth-token` for client authentication.
+Start `kodelet serve` before connecting an ACP client. The server saves conversations and runs the AI model; its built-in runner provides workspace tools and commands. Use `--runner` to select another runner. Set `server` or `KODELET_SERVER` to choose the server, and sign in with `kodelet auth login --server ...` or supply an API token with `--auth-token`.
 
 Session directories belong to the selected runner, not the ACP client. Resuming preserves the stored runner, directory, and profiles. `--runner-profile` selects the environment for new sessions; `--profile` selects daemon model settings.
 
@@ -348,7 +348,7 @@ Workspace execution belongs on separately deployed `kodelet runner start` proces
 
 A workspace-bound runner supplies tools, context, skills, commands, and extensions to `kodelet serve`. Its startup directory is the default workspace, but conversations may select another directory accessible on the runner host.
 
-The daemon hosts an embedded runner by default. For separately managed runners only:
+The server includes a built-in runner (also called the embedded runner) that provides file access and tools on the same machine. To use only separately managed runners:
 
 ```bash
 kodelet serve --embedded-runner=false
@@ -382,7 +382,7 @@ The model profile identifier selects only the environment subset of a locally pi
 
 Trusted defaults and profile definitions are pinned at daemon startup; restart `kodelet serve` after changing them, including `serve.runner_settings`. Each run resolves its own settings without mutating the pinned defaults or another run's configuration, so different model profiles, CWDs, environment profiles, and request restrictions remain isolated across sequential and concurrent runs. Repository changes affect later runs, not active ones.
 
-Check `/api/status` for runner readiness. If another runner already owns the workspace, stop it or disable embedding and select that runner instead. Use a fixed port to preserve enrollment across restarts. Stop the daemon with Ctrl+C or SIGTERM; incomplete cleanup is reported as an error.
+Use `kodelet runner list` to check connected runners and `/api/status` to check the built-in runner. If the default runner is unavailable, check the server logs for the cause or select another runner with `--runner`. If a runner already uses the workspace, stop it or start the server with `--embedded-runner=false` and select that runner. Use a fixed port to keep runner enrollment valid across restarts. Stop the server with Ctrl+C or SIGTERM; an error is reported if active work does not finish stopping before the shutdown timeout.
 
 The runner modes are:
 

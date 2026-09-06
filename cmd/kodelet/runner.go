@@ -77,13 +77,13 @@ type runnerLocalOutput struct {
 
 var runnerCmd = &cobra.Command{
 	Use:   "runner",
-	Short: "Manage workspace-bound runners",
-	Long:  "Start, inspect, and remove workspace-bound runner processes connected to a Kodelet control plane.",
+	Short: "Manage workspace runners",
+	Long:  "Manage the runners that provide file access and tools. A runner connects a workspace on its machine to the Kodelet server.",
 }
 
 var runnerStartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start a runner bound to the current workspace",
+	Short: "Start a runner for the current workspace",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runRunnerStart(cmd.Context(), runnerStartConfigFromFlags(cmd))
 	},
@@ -91,7 +91,7 @@ var runnerStartCmd = &cobra.Command{
 
 var runnerEnrollCmd = &cobra.Command{
 	Use:   "enroll",
-	Short: "Enroll the current workspace runner with a control plane",
+	Short: "Enroll the current workspace runner with a server",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runRunnerEnroll(cmd.Context(), runnerEnrollConfigFromFlags(cmd), os.Stdout)
 	},
@@ -99,7 +99,7 @@ var runnerEnrollCmd = &cobra.Command{
 
 var runnerListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List runners registered with a control plane",
+	Short: "List runners registered with a server",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runRunnerList(cmd.Context(), runnerQueryConfigFromFlags(cmd), os.Stdout)
 	},
@@ -117,7 +117,7 @@ var runnerInspectCmd = &cobra.Command{
 var runnerRemoveCmd = &cobra.Command{
 	Use:   "remove <runner>",
 	Short: "Remove an offline runner registration",
-	Long:  "Remove an offline runner registration and its durable runner-run history.",
+	Long:  "Remove an offline runner and its saved execution records. Conversations are kept, but must be assigned to a runner before they can continue.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config := runnerRemoveConfig{runnerQueryConfig: runnerQueryConfigFromFlags(cmd)}
@@ -128,19 +128,19 @@ var runnerRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
+	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Server URL")
 	runnerStartCmd.Flags().String("auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
-	runnerStartCmd.Flags().String("name", "", "Optional mutable display name")
-	runnerEnrollCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
-	runnerEnrollCmd.Flags().String("name", "", "Optional mutable display name")
+	runnerStartCmd.Flags().String("name", "", "Display name for this runner")
+	runnerEnrollCmd.Flags().String("server", defaultRunnerServer, "Server URL")
+	runnerEnrollCmd.Flags().String("name", "", "Display name for this runner")
 	runnerEnrollCmd.Flags().Bool("replace", false, "Replace an existing local runner credential after browser approval")
 	runnerEnrollCmd.Flags().Bool("no-browser", false, "Do not open the browser automatically")
 	for _, command := range []*cobra.Command{runnerListCmd, runnerInspectCmd, runnerRemoveCmd} {
-		command.Flags().String("server", defaultRunnerServer, "Control-plane URL")
-		command.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
+		command.Flags().String("server", defaultRunnerServer, "Server URL")
+		command.Flags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 		command.Flags().Bool("json", false, "Output in JSON format")
 	}
-	runnerRemoveCmd.Flags().Bool("force", false, "Accepted for compatibility; runner affinity is cleared on every removal")
+	runnerRemoveCmd.Flags().Bool("force", false, "Accepted for compatibility; removing a runner always clears its conversation assignments")
 	runnerRemoveCmd.Flags().Bool("no-confirm", false, "Skip the removal confirmation prompt")
 	runnerCmd.AddCommand(runnerStartCmd, runnerEnrollCmd, runnerListCmd, runnerInspectCmd, runnerRemoveCmd)
 	rootCmd.AddCommand(runnerCmd)
@@ -187,7 +187,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 		return errors.Wrap(err, "failed to determine current workspace")
 	}
 	if err := os.Setenv(controlPlaneServerEnv, strings.TrimSpace(config.Server)); err != nil {
-		return errors.Wrap(err, "failed to expose the control-plane server to runner subprocesses")
+		return errors.Wrap(err, "failed to pass the server address to runner subprocesses")
 	}
 	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings())
 	if err != nil {
@@ -220,7 +220,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	runCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	presenter.Info(fmt.Sprintf("Binding runner to workspace: %s", workspace))
-	presenter.Info(fmt.Sprintf("Connecting to control plane: %s", config.Server))
+	presenter.Info(fmt.Sprintf("Connecting to server: %s", config.Server))
 	presenter.Info("Press Ctrl+C to stop the runner")
 	if err := runner.Run(runCtx); err != nil {
 		return err
@@ -418,7 +418,7 @@ func deleteRunner(ctx context.Context, server, authToken, runnerID string, force
 	}
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
 	if err != nil {
-		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to remove control-plane runner")
+		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to remove the runner")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -427,9 +427,9 @@ func deleteRunner(ctx context.Context, server, authToken, runnerID string, force
 		}
 		_ = json.NewDecoder(response.Body).Decode(&payload)
 		if strings.TrimSpace(payload.Error) != "" {
-			return runnerregistry.RemovalResult{}, errors.Errorf("control plane rejected runner removal: %s", payload.Error)
+			return runnerregistry.RemovalResult{}, errors.Errorf("server rejected runner removal: %s", payload.Error)
 		}
-		return runnerregistry.RemovalResult{}, errors.Errorf("control plane returned HTTP %d while removing runner", response.StatusCode)
+		return runnerregistry.RemovalResult{}, errors.Errorf("server returned HTTP %d while removing runner", response.StatusCode)
 	}
 	var result runnerregistry.RemovalResult
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
@@ -477,11 +477,11 @@ func fetchRunners(ctx context.Context, rawServer, authToken string) ([]runnerreg
 	client := &http.Client{Timeout: 15 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, "", errors.Wrap(err, "failed to query control-plane runners")
+		return nil, "", errors.Wrap(err, "could not list runners; check that 'kodelet serve' is running and --server points to it")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, "", errors.Errorf("control plane returned HTTP %d while listing runners", response.StatusCode)
+		return nil, "", errors.Errorf("server returned HTTP %d while listing runners", response.StatusCode)
 	}
 	var payload runnerListAPIResponse
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {

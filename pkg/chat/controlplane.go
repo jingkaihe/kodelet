@@ -51,12 +51,12 @@ type ControlPlaneHTTPError struct {
 
 func (e *ControlPlaneHTTPError) Error() string {
 	if e == nil {
-		return "control plane request failed"
+		return "server request failed"
 	}
 	if strings.TrimSpace(e.Message) != "" {
-		return fmt.Sprintf("control plane returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Message))
+		return fmt.Sprintf("server returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Message))
 	}
-	return fmt.Sprintf("control plane returned HTTP %d", e.StatusCode)
+	return fmt.Sprintf("server returned HTTP %d", e.StatusCode)
 }
 
 // Retryable reports whether retrying the request may succeed without user action.
@@ -79,7 +79,7 @@ type ControlPlaneStreamProtocolError struct {
 
 func (e *ControlPlaneStreamProtocolError) Error() string {
 	if e == nil || e.err == nil {
-		return "invalid control-plane stream data"
+		return "received an invalid chat response"
 	}
 	return e.err.Error()
 }
@@ -139,7 +139,7 @@ func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlan
 // Run posts one chat request and forwards NDJSON events to the TUI sink.
 func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
 	if r == nil || r.client == nil {
-		return "", errors.New("control-plane chat runner is not initialized")
+		return "", errors.New("the chat connection is not initialized")
 	}
 	if sink == nil {
 		return "", errors.New("chat event sink is required")
@@ -158,11 +158,11 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	request.ClientCapabilities = &capabilities
 	payload, err := json.Marshal(request)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to encode control-plane chat request")
+		return "", errors.Wrap(err, "failed to encode chat request")
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, r.chatURL, bytes.NewReader(payload))
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create control-plane chat request")
+		return "", errors.Wrap(err, "failed to create chat request")
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set(ClientIDHeader, r.clientID)
@@ -208,14 +208,14 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 // StreamConversation follows live events for one control-plane conversation across turns.
 func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, conversationID string, sink ChatEventSink) error {
 	if r == nil || r.client == nil {
-		return errors.New("control-plane chat runner is not initialized")
+		return errors.New("the chat connection is not initialized")
 	}
 	if sink == nil {
 		return errors.New("chat event sink is required")
 	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "stream")
 	if err != nil {
@@ -223,14 +223,14 @@ func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, convers
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to create control-plane conversation stream request")
+		return errors.Wrap(err, "failed to create conversation stream request")
 	}
 	r.authorize(request)
 	request.Header.Set(ClientIDHeader, r.clientID)
 	request.Header.Set(UICapabilitiesHeader, controlPlaneUICapabilitiesHeader(ctx))
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "failed to stream control-plane conversation")
+		return errors.Wrap(err, "failed to stream conversation")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -276,11 +276,11 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		}
 		var event ChatEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Wrap(err, "failed to decode control-plane chat event")}
+			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Wrap(err, "failed to decode chat event")}
 		}
 		eventConversationID := strings.TrimSpace(event.ConversationID)
 		if eventConversationID != "" && expectedConversationID != "" && eventConversationID != expectedConversationID {
-			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Errorf("control plane streamed conversation %s while watching %s", eventConversationID, expectedConversationID)}
+			return conversationID, &ControlPlaneStreamProtocolError{err: errors.Errorf("server streamed conversation %s while watching %s", eventConversationID, expectedConversationID)}
 		}
 		if eventConversationID != "" {
 			conversationID = eventConversationID
@@ -349,7 +349,7 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		streamErr := errors.Wrap(err, "failed to read control-plane chat stream")
+		streamErr := errors.Wrap(err, "failed to read chat stream")
 		if errors.Is(err, bufio.ErrTooLong) {
 			return conversationID, &ControlPlaneStreamProtocolError{err: streamErr}
 		}
@@ -365,7 +365,7 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		if err := ctx.Err(); err != nil {
 			return conversationID, err
 		}
-		return conversationID, errors.New("control-plane chat stream ended before completion")
+		return conversationID, errors.New("the connection ended before the response was complete")
 	}
 	return conversationID, nil
 }
@@ -431,7 +431,7 @@ func (r *ControlPlaneChatRunner) QueryConversations(ctx context.Context, options
 func (r *ControlPlaneChatRunner) LoadConversationRecord(ctx context.Context, conversationID string) (convtypes.ConversationRecord, error) {
 	var record convtypes.ConversationRecord
 	if strings.TrimSpace(conversationID) == "" {
-		return record, errors.New("conversation id is required")
+		return record, errors.New("conversation ID is required")
 	}
 	err := r.conversationAPIRequest(ctx, http.MethodGet, []string{"api", "conversations", conversationID}, url.Values{"format": {"raw"}}, &record)
 	return record, err
@@ -441,7 +441,7 @@ func (r *ControlPlaneChatRunner) LoadConversationRecord(ctx context.Context, con
 // are rejected by the server; transport failures are never retried implicitly.
 func (r *ControlPlaneChatRunner) DeleteConversation(ctx context.Context, conversationID string) error {
 	if strings.TrimSpace(conversationID) == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	return r.conversationAPIRequest(ctx, http.MethodDelete, []string{"api", "conversations", conversationID}, nil, nil)
 }
@@ -449,7 +449,7 @@ func (r *ControlPlaneChatRunner) DeleteConversation(ctx context.Context, convers
 // ForkConversation creates a centrally persisted copy with normal lineage and affinity.
 func (r *ControlPlaneChatRunner) ForkConversation(ctx context.Context, conversationID string) (string, error) {
 	if strings.TrimSpace(conversationID) == "" {
-		return "", errors.New("conversation id is required")
+		return "", errors.New("conversation ID is required")
 	}
 	var result struct {
 		Success        bool   `json:"success"`
@@ -459,14 +459,14 @@ func (r *ControlPlaneChatRunner) ForkConversation(ctx context.Context, conversat
 		return "", err
 	}
 	if !result.Success || strings.TrimSpace(result.ConversationID) == "" {
-		return "", errors.New("control-plane returned an invalid conversation fork response")
+		return "", errors.New("server returned an invalid conversation fork response")
 	}
 	return result.ConversationID, nil
 }
 
 func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, method string, path []string, query url.Values, result any) error {
 	if r == nil || r.client == nil {
-		return errors.New("control-plane chat runner is not initialized")
+		return errors.New("the chat connection is not initialized")
 	}
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, path...)
 	if err != nil {
@@ -477,12 +477,12 @@ func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, met
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to create control-plane conversation request")
+		return errors.Wrap(err, "failed to create conversation request")
 	}
 	r.authorize(request)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "control-plane conversation request failed (not retried)")
+		return errors.Wrap(err, "the conversation request failed; check the conversation before repeating any changes")
 	}
 	defer response.Body.Close()
 	wantStatus := http.StatusOK
@@ -494,7 +494,7 @@ func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, met
 	}
 	if result != nil {
 		if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(result); err != nil {
-			return errors.Wrap(err, "failed to decode control-plane conversation response")
+			return errors.Wrap(err, "failed to decode conversation response")
 		}
 	}
 	return nil
@@ -503,11 +503,11 @@ func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, met
 // LoadConversation returns normalized history from the control plane.
 func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error) {
 	if r == nil || r.client == nil {
-		return ConversationHistory{}, errors.New("control-plane chat runner is not initialized")
+		return ConversationHistory{}, errors.New("the chat connection is not initialized")
 	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return ConversationHistory{}, errors.New("conversation id is required")
+		return ConversationHistory{}, errors.New("conversation ID is required")
 	}
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID)
 	if err != nil {
@@ -515,19 +515,19 @@ func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversat
 	}
 	parsedEndpoint, err := url.Parse(endpoint)
 	if err != nil {
-		return ConversationHistory{}, errors.Wrap(err, "failed to parse control-plane conversation URL")
+		return ConversationHistory{}, errors.Wrap(err, "failed to parse conversation URL")
 	}
 	query := parsedEndpoint.Query()
 	query.Set("format", "stream")
 	parsedEndpoint.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedEndpoint.String(), nil)
 	if err != nil {
-		return ConversationHistory{}, errors.Wrap(err, "failed to create control-plane conversation request")
+		return ConversationHistory{}, errors.Wrap(err, "failed to create conversation request")
 	}
 	r.authorize(request)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return ConversationHistory{}, errors.Wrap(err, "failed to load control-plane conversation")
+		return ConversationHistory{}, errors.Wrap(err, "failed to load conversation")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -535,7 +535,7 @@ func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversat
 	}
 	var result controlPlaneConversationResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(&result); err != nil {
-		return ConversationHistory{}, errors.Wrap(err, "failed to decode control-plane conversation")
+		return ConversationHistory{}, errors.Wrap(err, "failed to decode conversation")
 	}
 	messages := normalizeControlPlaneConversationEntries(result.Entries, result.ToolResults)
 	if len(messages) == 0 && len(result.Messages) > 0 {
@@ -664,7 +664,7 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 			if toolResult, ok := toolResults[toolCallID]; ok {
 				payload, err := json.Marshal(toolResult)
 				if err != nil {
-					return nil, errors.Wrap(err, "failed to encode control-plane tool result")
+					return nil, errors.Wrap(err, "failed to encode tool result")
 				}
 				result = append(result, conversations.StreamableMessage{
 					Kind:       "tool-result",
@@ -693,7 +693,7 @@ func controlPlaneMessageText(content json.RawMessage) (string, error) {
 	}
 	var blocks []ChatContentBlock
 	if err := json.Unmarshal(content, &blocks); err != nil {
-		return "", errors.Wrap(err, "failed to decode control-plane conversation message content")
+		return "", errors.Wrap(err, "failed to decode conversation message content")
 	}
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
@@ -712,7 +712,7 @@ func controlPlaneMessageText(content json.RawMessage) (string, error) {
 // ChatSettings fetches control-plane model profiles and reasoning policy.
 func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile string) (ControlPlaneChatSettings, error) {
 	if r == nil || r.client == nil {
-		return ControlPlaneChatSettings{}, errors.New("control-plane chat runner is not initialized")
+		return ControlPlaneChatSettings{}, errors.New("the chat connection is not initialized")
 	}
 	settingsURL, err := controlPlaneEndpointURL(r.baseURL, "api", "chat", "settings")
 	if err != nil {
@@ -720,7 +720,7 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 	}
 	parsed, err := url.Parse(settingsURL)
 	if err != nil {
-		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to parse control-plane chat settings URL")
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to parse chat settings URL")
 	}
 	if profile = strings.TrimSpace(profile); profile != "" {
 		query := parsed.Query()
@@ -729,12 +729,12 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to create control-plane chat settings request")
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to create chat settings request")
 	}
 	r.authorize(request)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to load control-plane chat settings")
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "could not load chat settings; check that 'kodelet serve' is running and --server points to it")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -743,7 +743,7 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 	var settings ControlPlaneChatSettings
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
 	if err := decoder.Decode(&settings); err != nil {
-		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to decode control-plane chat settings")
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to decode chat settings")
 	}
 	return settings, nil
 }
@@ -818,7 +818,7 @@ func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversat
 func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conversationID, turnID string) error {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "stop")
 	if err != nil {
@@ -827,7 +827,7 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 	if turnID = strings.TrimSpace(turnID); turnID != "" {
 		parsed, err := url.Parse(endpoint)
 		if err != nil {
-			return errors.Wrap(err, "failed to parse control-plane stop URL")
+			return errors.Wrap(err, "failed to parse server stop URL")
 		}
 		query := parsed.Query()
 		query.Set("turnId", turnID)
@@ -836,12 +836,12 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to create control-plane stop request")
+		return errors.Wrap(err, "failed to create server stop request")
 	}
 	r.authorize(request)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "failed to stop control-plane conversation")
+		return errors.Wrap(err, "failed to stop conversation")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -851,7 +851,7 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 		Stopped bool `json:"stopped"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return errors.Wrap(err, "failed to decode control-plane stop response")
+		return errors.Wrap(err, "failed to decode server stop response")
 	}
 	if !result.Stopped {
 		if turnID != "" {
@@ -859,7 +859,7 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 			// requested turn has already ended or a newer turn now owns the stream.
 			return nil
 		}
-		return errors.New("control-plane conversation is not active")
+		return errors.New("conversation is not active")
 	}
 	return nil
 }
@@ -869,7 +869,7 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 	conversationID = strings.TrimSpace(conversationID)
 	message = strings.TrimSpace(message)
 	if conversationID == "" {
-		return false, errors.New("conversation id is required")
+		return false, errors.New("conversation ID is required")
 	}
 	if message == "" {
 		return false, errors.New("steering message is required")
@@ -886,17 +886,17 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 		Content: ContentBlocksForUserInput(message, images),
 	})
 	if err != nil {
-		return false, errors.Wrap(err, "failed to encode control-plane steering request")
+		return false, errors.Wrap(err, "failed to encode steering request")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return false, errors.Wrap(err, "failed to create control-plane steering request")
+		return false, errors.Wrap(err, "failed to create steering request")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	r.authorize(request)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to queue control-plane steering message")
+		return false, errors.Wrap(err, "failed to queue steering message")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -908,10 +908,10 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 		Queued         bool   `json:"queued"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return false, errors.Wrap(err, "failed to decode control-plane steering response")
+		return false, errors.Wrap(err, "failed to decode steering response")
 	}
 	if !result.Success || strings.TrimSpace(result.ConversationID) != conversationID {
-		return false, errors.New("control-plane returned an invalid steering response")
+		return false, errors.New("server returned an invalid steering response")
 	}
 	return result.Queued, nil
 }
@@ -947,7 +947,7 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 	switch event.Kind {
 	case "ui-input", "ui-input-request":
 		if event.UIInput == nil {
-			return true, errors.New("control plane sent ui input event without a request")
+			return true, errors.New("server sent ui input event without a request")
 		}
 		requestID = event.UIInput.ID
 		broker, ok := extensions.UIInputBrokerFromContext(ctx)
@@ -969,7 +969,7 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 		})
 	case "ui-confirm", "ui-confirm-request":
 		if event.UIConfirm == nil {
-			return true, errors.New("control plane sent ui confirmation event without a request")
+			return true, errors.New("server sent ui confirmation event without a request")
 		}
 		requestID = event.UIConfirm.ID
 		broker, ok := extensions.UIConfirmBrokerFromContext(ctx)
@@ -986,7 +986,7 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 		})
 	case "ui-select", "ui-select-request":
 		if event.UISelect == nil {
-			return true, errors.New("control plane sent ui selection event without a request")
+			return true, errors.New("server sent ui selection event without a request")
 		}
 		requestID = event.UISelect.ID
 		broker, ok := extensions.UISelectBrokerFromContext(ctx)
@@ -1004,7 +1004,7 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 		})
 	case "ui-notify", "ui-notification":
 		if event.UINotify == nil {
-			return true, errors.New("control plane sent ui notification event without a request")
+			return true, errors.New("server sent ui notification event without a request")
 		}
 		broker, ok := extensions.UINotifyBrokerFromContext(ctx)
 		if !ok {
@@ -1033,7 +1033,7 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 	conversationID = strings.TrimSpace(conversationID)
 	requestID = strings.TrimSpace(requestID)
 	if conversationID == "" || requestID == "" {
-		return errors.New("control-plane ui response is missing conversation or request id")
+		return errors.New("interactive prompt response is missing conversation or request id")
 	}
 	responseURL, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "ui-input", requestID)
 	if err != nil {
@@ -1041,11 +1041,11 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 	}
 	payload, err := json.Marshal(response)
 	if err != nil {
-		return errors.Wrap(err, "failed to encode control-plane ui response")
+		return errors.Wrap(err, "failed to encode interactive prompt response")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, responseURL, bytes.NewReader(payload))
 	if err != nil {
-		return errors.Wrap(err, "failed to create control-plane ui response")
+		return errors.Wrap(err, "failed to create interactive prompt response")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(ClientIDHeader, r.clientID)
@@ -1054,7 +1054,7 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 	}
 	httpResponse, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "failed to send control-plane ui response")
+		return errors.Wrap(err, "failed to send interactive prompt response")
 	}
 	defer httpResponse.Body.Close()
 	if httpResponse.StatusCode != http.StatusOK {
@@ -1067,11 +1067,11 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 // Existing prompts are dismissed, not replayed. StreamConversation must remain attached.
 func (r *ControlPlaneChatRunner) TakeUIOwnership(ctx context.Context, conversationID string) error {
 	if r == nil || r.client == nil {
-		return errors.New("control-plane chat runner is not initialized")
+		return errors.New("the chat connection is not initialized")
 	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -1081,13 +1081,13 @@ func (r *ControlPlaneChatRunner) TakeUIOwnership(ctx context.Context, conversati
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to create UI ownership request")
+		return errors.Wrap(err, "failed to create the request to take control of interactive prompts")
 	}
 	r.authorize(request)
 	request.Header.Set(ClientIDHeader, r.clientID)
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "failed to take UI ownership")
+		return errors.Wrap(err, "failed to take control of interactive prompts")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {

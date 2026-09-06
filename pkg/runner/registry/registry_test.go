@@ -1398,7 +1398,7 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	restoredRun, ok := secondRegistry.Run("run-one")
 	require.True(t, ok)
 	assert.Equal(t, RunStatusLost, restoredRun.Status)
-	assert.Contains(t, restoredRun.Error, "control plane restarted")
+	assert.Contains(t, restoredRun.Error, "server restarted")
 	var restoredManifest runnerpayload.Manifest
 	require.NoError(t, json.Unmarshal([]byte(restoredRun.ManifestJSON), &restoredManifest))
 	assert.Equal(t, "run-one", restoredManifest.RunID)
@@ -1723,7 +1723,7 @@ func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	second, err := registry.Register(testRegisterParams("host-two", "/work/two"), newFakeLink())
 	require.NoError(t, err)
 
-	require.ErrorContains(t, registry.BindConversation(t.Context(), "", first.RunnerID), "conversation id")
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "", first.RunnerID), "conversation ID")
 	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", ""), "runner id")
 	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", "missing"), "runner not found")
 	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", first.RunnerID))

@@ -1001,7 +1001,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 			Placement: agentenv.ToolPlacementEnvironment,
 		}},
 	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"get_goal"})
-	require.ErrorContains(t, err, "collides with a reserved control-plane tool")
+	require.ErrorContains(t, err, "collides with a reserved server tool")
 }
 
 func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {

@@ -45,7 +45,7 @@ func buildWireManifest(
 				continue
 			}
 			if _, collision := reserved[tool.Name()]; collision {
-				return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a reserved control-plane tool", tool.Name())
+				return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a reserved server tool", tool.Name())
 			}
 		}
 	}
@@ -74,7 +74,7 @@ func buildWireManifest(
 			continue
 		}
 		if _, collision := reserved[definition.Name]; collision {
-			return runnerpayload.Manifest{}, errors.Errorf("runner tool %s collides with a reserved control-plane tool", definition.Name)
+			return runnerpayload.Manifest{}, errors.Errorf("runner tool %s collides with a reserved server tool", definition.Name)
 		}
 		if runtimeTool := runtimeToolByName(runtime, definition.Name); runtimeTool != nil && runtimeTool != definition.Tool {
 			return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a runner tool", definition.Name)

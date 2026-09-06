@@ -127,7 +127,7 @@ func TestAdoptionPreservesLegacyHistoryAcrossRunnerPlacements(t *testing.T) {
 			assert.False(t, bound)
 			params.Confirmation = "not-the-confirmed-preview"
 			_, err = client.AdoptConversation(t.Context(), record.ID, params)
-			require.ErrorContains(t, err, "preview changed")
+			require.ErrorContains(t, err, "adoption details have changed")
 			unchanged, err = store.Load(t.Context(), record.ID)
 			require.NoError(t, err)
 			assert.Equal(t, record, unchanged)
@@ -152,7 +152,7 @@ func TestAdoptionPreservesLegacyHistoryAcrossRunnerPlacements(t *testing.T) {
 			require.Len(t, listed.ConversationSummaries, 1)
 			assert.Equal(t, runnerID, listed.ConversationSummaries[0].Metadata[convtypes.RunnerIDMetadataKey])
 			_, err = client.AdoptConversation(t.Context(), record.ID, params)
-			require.ErrorContains(t, err, "already bound")
+			require.ErrorContains(t, err, "already has a saved runner")
 			// Validate a real resumed environment, without constructing a model or
 			// dispatching a tool, proving adoption agrees with run.open targeting.
 			_, err = server.runnerRegistry.OpenRun(t.Context(), runnerID, protocol.RunOpenParams{
@@ -300,7 +300,7 @@ func TestAdoptionFencesHostGenerationAndActiveReservation(t *testing.T) {
 	require.NoError(t, err)
 	params.RunnerID, params.Confirmation = secondID, preview.Confirmation
 	_, err = client.AdoptConversation(t.Context(), record.ID, params)
-	require.ErrorContains(t, err, "preview changed", "a matching path cannot reuse consent to a different host")
+	require.ErrorContains(t, err, "adoption details have changed", "a matching path cannot reuse consent to a different host")
 	err = server.runnerRegistry.AdoptConversation(t.Context(), record, firstID, first.Generation+1, "")
 	require.ErrorContains(t, err, "connection changed")
 	unchanged, err := store.Load(t.Context(), record.ID)

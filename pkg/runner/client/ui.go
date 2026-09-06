@@ -275,7 +275,7 @@ func (s *Service) updateUICapabilities(ctx context.Context, params protocol.UICa
 	}
 	if run.closing || run.stopping {
 		s.mu.Unlock()
-		return errors.New("runner UI run is stopping")
+		return errors.New("the run that opened this interactive UI is stopping")
 	}
 	s.clearRunSurfacesLocked(run.id)
 	// Widgets have passive observers and do not lose support on interactive takeover.
@@ -295,7 +295,7 @@ func (s *Service) syncRunUICapabilities(ctx context.Context, runID string) error
 	run := s.runs[runID]
 	if run == nil || run.closing || run.stopping {
 		s.mu.Unlock()
-		return errors.New("runner UI run is stopping")
+		return errors.New("the run that opened this interactive UI is stopping")
 	}
 	runtime, capabilities := run.runtime, run.clientCaps
 	s.mu.Unlock()
@@ -406,7 +406,7 @@ func (s *Service) notifySurfaceEvent(ctx context.Context, runID string, owner ru
 	valid := run != nil && !run.closing && !run.stopping && run.ctx.Err() == nil && ok && surface.runID == runID && lifecycle != 0 && surface.lifecycle == lifecycle
 	s.mu.Unlock()
 	if !valid {
-		return errors.New("runner surface owner or lifecycle is no longer active")
+		return errors.New("this interactive view has closed or its client disconnected")
 	}
 	return extensions.NotifyUISurfaceEvent(ctx, surface.source, lifecycle, method, request)
 }

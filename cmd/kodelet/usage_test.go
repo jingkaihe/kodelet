@@ -959,7 +959,7 @@ func TestRemoteUsageRejectsInvalidAndIncompleteQueries(t *testing.T) {
 			assert.Zero(t, calls.Load())
 		} else {
 			assert.EqualValues(t, 2, calls.Load())
-			assert.ErrorContains(t, err, "no local database fallback")
+			assert.ErrorContains(t, err, "could not load complete usage data")
 		}
 	}
 }

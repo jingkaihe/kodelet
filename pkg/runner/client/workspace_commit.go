@@ -78,7 +78,7 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	available := !s.closed && s.generation == params.Generation
 	s.mu.Unlock()
 	if !available {
-		return result, errors.New("runner generation changed; prepare and review the commit again")
+		return result, errors.New("the runner reconnected; generate and review the commit again")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -147,14 +147,14 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	// the private index; publish it only after Git successfully commits it.
 	result.Output, err = runCommitGit(ctx, root, copyIndex.Name(), params.Message, args...)
 	if err != nil {
-		return result, errors.Wrap(err, "runner commit did not acknowledge success; inspect Git history before retrying")
+		return result, errors.Wrap(err, "could not confirm whether the commit was created; check 'git log' in the repository before trying again")
 	}
 	if err := os.Rename(copyIndex.Name(), indexPath); err != nil {
-		return result, errors.Wrap(err, "commit was created but Git index publication failed; inspect the runner repository")
+		return result, errors.Wrap(err, "the commit was created, but the staging area could not be updated; check 'git status' and 'git log' in the repository")
 	}
 	result.Commit, err = runCommitGit(ctx, root, "", "", "rev-parse", "HEAD")
 	if err != nil {
-		return result, errors.Wrap(err, "commit was created but its identity could not be read; inspect the runner repository")
+		return result, errors.Wrap(err, "the commit was created, but its ID could not be read; check 'git log' in the repository")
 	}
 	return result, nil
 }

@@ -59,7 +59,7 @@ func resolveExecutionOptions(ctx context.Context, req ChatRequest, config llmtyp
 			return llmtypes.Config{}, err
 		}
 		if record != nil && req.Profile != "" && NormalizeRequestedProfile(req.Profile) != NormalizeRequestedProfile(config.Profile) {
-			return llmtypes.Config{}, errors.New("conversation model profile is locked; start a new conversation to change it")
+			return llmtypes.Config{}, errors.New("the model profile cannot be changed for this conversation; start a new conversation to change it")
 		}
 	}
 	return applyExecutionOptions(config, req.Options, record)
@@ -75,7 +75,7 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 		return config, nil
 	}
 	if options.Provider != nil && *options.Provider != config.Provider {
-		return llmtypes.Config{}, errors.New("options.provider must match the daemon model profile; select a daemon profile to change providers")
+		return llmtypes.Config{}, errors.New("options.provider must match the selected model profile; select another profile to change providers")
 	}
 	var original *llmtypes.ConversationConfigSnapshot
 	if options.HasModelOptions() && record != nil {
@@ -86,7 +86,7 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 			return llmtypes.Config{}, err
 		}
 		if !present {
-			return llmtypes.Config{}, errors.New("cannot override model options when resuming a legacy conversation without config_snapshot metadata")
+			return llmtypes.Config{}, errors.New("this older conversation has no saved model settings; start a new conversation to choose different settings")
 		}
 		// Compare effective snapshot values, including defaults for older
 		// optional fields, without trusting the incoming live model config.
@@ -113,7 +113,7 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 			model = alias
 		}
 		if record == nil && !executionModelAllowed(modelPolicy, model) {
-			return llmtypes.Config{}, errors.Errorf("options.%s %q is not in the daemon's configured models or provider catalog; configure a daemon model profile or alias", option.name, model)
+			return llmtypes.Config{}, errors.Errorf("options.%s %q is not an available model; choose a supported model or add it to the server's model profiles or aliases", option.name, model)
 		}
 		*option.target = model
 	}
@@ -151,7 +151,7 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 		return llmtypes.Config{}, err
 	}
 	if original != nil && !reflect.DeepEqual(original, updated) {
-		return llmtypes.Config{}, errors.New("conversation model options are locked; start a new conversation to change them")
+		return llmtypes.Config{}, errors.New("model settings cannot be changed for this conversation; start a new conversation to change them")
 	}
 	return config, nil
 }

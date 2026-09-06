@@ -267,7 +267,7 @@ func TestResolveFollowConversationUsesSelectedSource(t *testing.T) {
 func TestResolveFollowConversationRejectsNilSourceWithoutLocalStore(t *testing.T) {
 	var runner *chatpkg.ControlPlaneChatRunner
 	_, err := resolveFollowConversation(t.Context(), runner)
-	require.ErrorContains(t, err, "daemon conversation source is required")
+	require.ErrorContains(t, err, "conversation history is unavailable")
 }
 
 func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
@@ -387,6 +387,6 @@ func TestDaemonChatProcessFailsWithoutLocalFallback(t *testing.T) {
 	process := daemonCLIProcess(ctx, t, root, env, "chat", "--auth-token=client")
 	output, err := process.CombinedOutput()
 	require.Error(t, err)
-	assert.Contains(t, string(output), "no local fallback")
+	assert.Contains(t, string(output), "could not start chat")
 	assert.NotContains(t, strings.ToLower(string(output)), "database")
 }

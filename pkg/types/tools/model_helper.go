@@ -59,7 +59,7 @@ func RunModelHelper(ctx context.Context, request ModelHelperRequest) (string, er
 	}
 	helper := ModelHelperFromContext(ctx)
 	if helper == nil {
-		return "", errors.New("central model helper is unavailable; prompt extraction requires a daemon-backed runner")
+		return "", errors.New("AI-assisted web extraction is unavailable; use a runner connected to the server")
 	}
 	return helper(ctx, request)
 }

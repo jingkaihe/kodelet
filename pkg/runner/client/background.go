@@ -181,16 +181,16 @@ func (s *Service) ReleaseBackgroundTask(ctx context.Context, source extensions.U
 	if lease.childAuthority {
 		peer := s.currentPeer()
 		if peer == nil {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.New("child lease release is unconfirmed: central connection unavailable")
+			return extensions.BackgroundTaskReleaseResponse{}, errors.New("could not confirm child task cleanup because the server connection is unavailable")
 		}
 		releaseCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		defer cancel()
 		var result delegation.Result
 		if err := peer.Call(releaseCtx, delegation.ReleaseMethod, delegation.Params{LeaseID: leaseID, ExtensionID: owner.ExtensionID, Generation: owner.Generation}, &result); err != nil {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.Wrap(err, "child lease release is unconfirmed; retry close")
+			return extensions.BackgroundTaskReleaseResponse{}, errors.Wrap(err, "could not confirm child task cleanup; try closing it again")
 		}
 		if !result.Done {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.New("child lease release did not confirm cleanup")
+			return extensions.BackgroundTaskReleaseResponse{}, errors.New("the child task has not confirmed that cleanup finished")
 		}
 	}
 	s.mu.Lock()

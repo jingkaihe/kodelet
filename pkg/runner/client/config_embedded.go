@@ -60,7 +60,7 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigL
 		if profile != "" && !strings.EqualFold(profile, "default") {
 			values, ok := settings.Profiles[profile]
 			if !ok {
-				return llmtypes.Config{}, errors.Errorf("embedded runner model profile %q not found; restart the daemon after changing profiles", profile)
+				return llmtypes.Config{}, errors.Errorf("embedded runner model profile %q not found; restart the server after changing profiles", profile)
 			}
 			if err := v.MergeConfigMap(values); err != nil {
 				return llmtypes.Config{}, errors.Wrap(err, "failed to apply embedded runner model profile")

@@ -61,7 +61,7 @@ func restoreChildPreset(ctx context.Context, req ChatRequest, config llmtypes.Co
 		return config, nil, nil
 	}
 	if req.RunnerID == "" {
-		return config, nil, errors.New("delegated children require a remote runner")
+		return config, nil, errors.New("delegated tasks require a runner connected to the server")
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
@@ -130,7 +130,7 @@ func contextWithCentralChildren(ctx context.Context, parent llmtypes.Thread, env
 		}
 		rel, err := filepath.Rel(manifest.WorkingDirectory, cwd)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, errors.New("child working directory exceeds parent workspace")
+			return nil, errors.New("the child task's working directory must be inside the parent workspace")
 		}
 		childConfig.WorkingDirectory = cwd
 		state.config, state.depth = childConfig, depth+1
@@ -151,7 +151,7 @@ func contextWithCentralChildren(ctx context.Context, parent llmtypes.Thread, env
 					}); ok {
 						err = finisher.FinishChildTurn(finishCtx, identity.ConversationID, identity.RunID, ctx.Err() != nil, runErr)
 					} else {
-						err = errors.New("conversation store does not support durable child turns")
+						err = errors.New("conversation storage does not support saving child task results")
 					}
 				}
 				if runErr == nil {
@@ -192,7 +192,7 @@ func prepareChild(ctx context.Context, parent llmtypes.Thread, config llmtypes.C
 			return nil, err
 		}
 		if origin.ParentConversationID != identity.ParentConversationID || origin.ExtensionID != identity.ExtensionID || origin.RunnerID != identity.RunnerID || origin.HostInstanceID == "" || origin.HostInstanceID != identity.HostInstanceID || origin.ConversationID != identity.ConversationID || saved.Name != request.Profile || origin.Profile != saved.Name {
-			return nil, errors.New("child resume provenance, host or preset mismatch")
+			return nil, errors.New("the child task cannot resume with a different parent, host or execution preset")
 		}
 		if record.Metadata[RunnerIDMetadataKey] != identity.RunnerID || record.Metadata[EnvironmentProfileMetadataKey] != environmentProfile || (request.CWD != "" && request.CWD != record.CWD) || (request.SystemPrompt != "" && request.SystemPrompt != saved.SystemPrompt) {
 			return nil, errors.New("child resume cannot change its runner, environment, working directory or prompt")
@@ -202,7 +202,7 @@ func prepareChild(ctx context.Context, parent llmtypes.Thread, config llmtypes.C
 			return nil, err
 		}
 		if !ok || saved.Options == nil {
-			return nil, errors.New("child resume requires frozen configuration and policy")
+			return nil, errors.New("the child task cannot resume without its saved settings and permissions")
 		}
 		livePolicy := config.EnvironmentOptions()
 		if config.ExecutionOptions != nil {
@@ -442,7 +442,7 @@ func persistChildIdentity(ctx context.Context, state *childContext, runnerID, en
 	thread.SetConversationID(state.identity.ConversationID)
 	thread.EnablePersistence(ctx, true)
 	if !thread.IsPersisted() {
-		return errors.New("child execution requires durable conversation persistence")
+		return errors.New("child tasks require conversation storage")
 	}
 	thread.SetMetadataValue("delegation", state.identity)
 	thread.SetMetadataValue("execution_preset", childPresetSnapshot{Name: state.identity.Profile, Options: state.config.ExecutionOptions, SystemPrompt: state.prompt})

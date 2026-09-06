@@ -22,7 +22,7 @@ func (s *Server) handleAnthropicAccounts(w http.ResponseWriter, r *http.Request)
 	if r.Method == http.MethodGet {
 		accounts, err := auth.ListAnthropicAccounts()
 		if err != nil {
-			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read daemon accounts", err)
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to load accounts", err)
 			return
 		}
 		result := chat.AnthropicAccounts{Accounts: make([]chat.AnthropicAccountSummary, 0, len(accounts))}
@@ -37,7 +37,7 @@ func (s *Server) handleAnthropicAccounts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := request.Validate(); err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "invalid account mutation", err)
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid account update", err)
 		return
 	}
 	// Changing accounts while a code is being exchanged must not resurrect a
@@ -70,7 +70,7 @@ func (s *Server) handleAnthropicAccounts(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "daemon account mutation failed; inspect current accounts", err)
+		s.writeErrorResponse(w, http.StatusBadRequest, "could not update accounts; use 'kodelet anthropic accounts list' to check them", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -123,7 +123,7 @@ func (s *Server) handleAnthropicAccountUsage(w http.ResponseWriter, r *http.Requ
 	}
 	accounts, err := auth.ListAnthropicAccounts()
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read daemon accounts", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to load accounts", err)
 		return
 	}
 	var selected *auth.AnthropicAccountInfo
@@ -134,14 +134,14 @@ func (s *Server) handleAnthropicAccountUsage(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if selected == nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "daemon account not found", nil)
+		s.writeErrorResponse(w, http.StatusNotFound, "account not found", nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 	stats, err := anthropic.GetRateLimitStats(ctx, selected.Alias)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadGateway, "failed to inspect daemon account usage", err)
+		s.writeErrorResponse(w, http.StatusBadGateway, "failed to load account usage", err)
 		return
 	}
 	window := func(status string, utilization float64, reset time.Time) chat.AnthropicUsageWindow {

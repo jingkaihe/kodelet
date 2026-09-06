@@ -30,7 +30,7 @@ type serverChatRunner struct {
 func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
 	if r == nil || r.server == nil || r.runner == nil {
-		return conversationID, errors.New("daemon execution is unavailable; a configured runner is required")
+		return conversationID, errors.New("cannot start work because no runner is configured")
 	}
 	if r != nil && r.server != nil && r.server.extensionUI != nil && conversationID != "" {
 		ctx = extensions.ContextWithExtensionUIHost(ctx, r.server.extensionUI)
@@ -55,12 +55,12 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	if r != nil && r.server != nil && strings.TrimSpace(req.RunnerID) == "" && r.server.config != nil && r.server.config.EmbeddedRunner != nil {
 		status := r.server.EmbeddedRunnerStatus()
 		if !status.Ready {
-			return conversationID, errors.New("default embedded runner is unavailable; inspect /api/status or explicitly select an available runner")
+			return conversationID, errors.New("the default runner is unavailable; check /api/status and the server logs, or select another runner")
 		}
 		req.RunnerID = status.RunnerID
 	}
 	if strings.TrimSpace(req.RunnerID) == "" {
-		return conversationID, errors.New("workspace execution requires a runner; select --runner or enable the default embedded runner")
+		return conversationID, errors.New("no runner is selected; use --runner or start the server with 'kodelet serve --embedded-runner'")
 	}
 	if conversationID != "" && !hasRunnerAffinity {
 		if r.server.conversationService == nil {
@@ -69,7 +69,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 		_, err := r.server.conversationService.GetConversation(ctx, conversationID)
 		switch {
 		case err == nil:
-			return conversationID, errors.New("existing local conversations are read-only; use conversation adopt before continuing")
+			return conversationID, errors.New("this older conversation needs a runner before it can continue; use 'kodelet conversation adopt'")
 		case stdErrors.Is(err, convtypes.ErrConversationNotFound):
 			// A client may allocate the conversation ID before the first turn.
 		default:
@@ -109,7 +109,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		if runner.CompatibilityError != "" {
 			return nil, errors.New(runner.CompatibilityError)
 		}
-		return nil, errors.New("runner is incompatible with this control plane")
+		return nil, errors.New("runner is incompatible with this server")
 	}
 	if !runner.Connected {
 		return nil, errors.New("runner is offline")
@@ -121,12 +121,12 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		}
 		record, err := r.server.conversationService.GetConversation(ctx, conversationID)
 		if err != nil && !errors.Is(err, convtypes.ErrConversationNotFound) {
-			return nil, errors.Wrap(err, "failed to load conversation for embedded profile fallback")
+			return nil, errors.Wrap(err, "failed to load the conversation after its model profile was removed")
 		}
 		if err == nil {
 			snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to load conversation config snapshot")
+				return nil, errors.Wrap(err, "failed to load the conversation's saved settings")
 			}
 			if hasSnapshot && strings.TrimSpace(snapshot.Profile) == strings.TrimSpace(config.Profile) {
 				profileOption = agentenv.WithRemoteModelProfile("default")
@@ -383,7 +383,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if s.turns != nil {
 			if err := s.turns.finish(context.WithoutCancel(requestCtx), conversationID, req.TurnID, "failed", nil, errConversationBusy); err != nil {
 				cancel()
-				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to finalize rejected turn", err)
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save the rejected turn's status", err)
 				return
 			}
 			if receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID); err == nil && receipt.Status == "cancelled" {
@@ -404,13 +404,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			if err := s.turns.finish(context.WithoutCancel(ctx), conversationID, req.TurnID, "failed", nil, startErr); err != nil {
 				startErr = err
 			}
-			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to start durable turn", startErr)
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save and start the turn", startErr)
 			return
 		}
 		if !started {
 			receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID)
 			if err != nil {
-				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to reconcile turn", err)
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to update the turn status", err)
 				return
 			}
 			s.replyTurnReceipt(w, sink, receipt)

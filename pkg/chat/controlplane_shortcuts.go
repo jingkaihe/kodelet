@@ -101,7 +101,7 @@ func (r *ControlPlaneChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, r
 	httpRequest.Header.Set(UICapabilitiesHeader, controlPlaneUICapabilitiesHeader(ctx))
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
-		return result, errors.Wrap(err, "shortcut submission failed; not retried")
+		return result, errors.Wrap(err, "could not confirm whether the shortcut ran; check the conversation before trying again")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -123,7 +123,7 @@ func (r *ControlPlaneChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, r
 		return json.Unmarshal(data, &result)
 	}), true, true, "")
 	if err == nil && !received {
-		err = errors.New("shortcut stream ended without a result; not retried")
+		err = errors.New("the connection ended before the shortcut returned a result; check the conversation before trying again")
 	}
 	return result, err
 }

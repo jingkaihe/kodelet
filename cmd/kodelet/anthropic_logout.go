@@ -13,14 +13,14 @@ import (
 
 var anthropicLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Remove all Anthropic accounts stored on the daemon",
-	Long:  "Remove the daemon's saved Anthropic subscription accounts. This does not revoke provider-issued tokens or interrupt already-running conversations.",
+	Short: "Remove all Anthropic accounts stored on the server",
+	Long:  "Remove the server's saved Anthropic subscription accounts. This does not revoke provider-issued tokens or interrupt already-running conversations.",
 	Args:  cobra.NoArgs,
 	RunE:  runRemoteAnthropicLogout,
 }
 
 func init() {
-	anthropicLogoutCmd.Flags().Bool("no-confirm", false, "Explicitly approve removing all daemon Anthropic accounts")
+	anthropicLogoutCmd.Flags().Bool("no-confirm", false, "Remove all Anthropic accounts without prompting")
 }
 
 func runRemoteAnthropicLogout(cmd *cobra.Command, _ []string) error {
@@ -32,7 +32,7 @@ func runRemoteAnthropicLogout(cmd *cobra.Command, _ []string) error {
 	}
 	noConfirm, _ := cmd.Flags().GetBool("no-confirm")
 	if !noConfirm {
-		fmt.Fprint(cmd.OutOrStdout(), "Remove all Anthropic accounts on the selected daemon? (y/N): ")
+		fmt.Fprint(cmd.OutOrStdout(), "Remove all Anthropic accounts on the selected server? (y/N): ")
 		answer, err := readProviderInput(ctx, cmd.InOrStdin())
 		if err != nil {
 			return err
@@ -45,6 +45,6 @@ func runRemoteAnthropicLogout(cmd *cobra.Command, _ []string) error {
 	if err := client.MutateAnthropicAccount(ctx, chat.AnthropicAccountMutation{Action: "logout"}); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Anthropic accounts removed from the daemon.")
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Anthropic accounts removed.")
 	return err
 }

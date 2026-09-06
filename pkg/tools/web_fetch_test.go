@@ -282,7 +282,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			URL: "https://example.com", Prompt: "Extract title",
 		}, "# Title", "text/markdown")
 		require.True(t, result.IsError())
-		assert.Contains(t, result.GetError(), "central model helper is unavailable")
+		assert.Contains(t, result.GetError(), "AI-assisted web extraction is unavailable")
 		assert.Empty(t, result.GetResult())
 	})
 

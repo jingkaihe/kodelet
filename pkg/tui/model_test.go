@@ -48,7 +48,7 @@ func TestRunRequiresExplicitDaemonRunnerBeforeLocalInitialization(t *testing.T) 
 	t.Setenv("KODELET_BASE_PATH", base)
 	for _, remote := range []bool{false, true} {
 		err := Run(t.Context(), Config{Remote: remote, CWD: "/only/on/runner", Profile: "missing-profile"})
-		require.ErrorContains(t, err, "TUI requires an explicit daemon runner")
+		require.ErrorContains(t, err, "chat requires a server connection")
 	}
 	data, err := os.ReadFile(base)
 	require.NoError(t, err)

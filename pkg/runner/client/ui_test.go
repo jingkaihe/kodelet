@@ -59,7 +59,7 @@ func TestServiceNativeSurfaceInputLifecycleAndTakeoverCapabilities(t *testing.T)
 	response, err = service.OpenSurface(t.Context(), source, request)
 	require.NoError(t, err)
 	require.True(t, response.Accepted)
-	require.ErrorContains(t, service.notifySurfaceInput(t.Context(), input), "no longer active")
+	require.ErrorContains(t, service.notifySurfaceInput(t.Context(), input), "closed or its client disconnected")
 	service.mu.Lock()
 	input.Lifecycle = service.uiSurfaces[key].lifecycle
 	service.mu.Unlock()

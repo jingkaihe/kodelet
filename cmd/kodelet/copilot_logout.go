@@ -15,17 +15,17 @@ import (
 
 var copilotLogoutCmd = &cobra.Command{
 	Use:               "copilot-logout",
-	Short:             "Explain the daemon-host Copilot logout procedure",
+	Short:             "Show how to disconnect GitHub Copilot",
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE: func(*cobra.Command, []string) error {
-		return errors.New("daemon Copilot logout is not available remotely: stop the daemon, run 'kodelet host copilot-logout' on its host, then restart it; no client credentials were changed")
+		return errors.New("to disconnect GitHub Copilot, stop the server, run 'kodelet host copilot-logout' on that machine, then restart 'kodelet serve'")
 	},
 }
 
 var hostCopilotLogoutCmd = &cobra.Command{
 	Use:   "copilot-logout",
-	Short: "Remove this host's Copilot credentials (daemon must be stopped)",
+	Short: "Remove this host's Copilot credentials (server must be stopped)",
 	Long: `Logout from GitHub Copilot and remove stored credentials.
 
 This command will:

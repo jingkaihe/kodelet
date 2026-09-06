@@ -591,7 +591,7 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer":
 		host, ok := ctx.Value(childHostKey{}).(ChildHost)
 		if !ok {
-			return nil, &rpcError{Code: -32004, Message: "delegated children require a daemon-backed runner"}
+			return nil, &rpcError{Code: -32004, Message: "delegated tasks require a runner connected to the server"}
 		}
 		result, err := host.ChildRequest(ctx, source, strings.TrimPrefix(method, "kodelet."), params)
 		if err != nil {

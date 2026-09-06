@@ -58,10 +58,10 @@ func TestConversationSourcesNeverFallBackToLocalStore(t *testing.T) {
 	require.NoError(t, os.WriteFile(localState, []byte("unchanged"), 0o600))
 	t.Setenv("KODELET_BASE_PATH", localState)
 	history := loadConversationHistoryFromSource(t.Context(), "key", "conversation", nil)().(initialHistoryMsg)
-	require.ErrorContains(t, history.err, "daemon runner does not support conversation history")
+	require.ErrorContains(t, history.err, "conversation history is unavailable")
 	assert.False(t, history.loaded)
 	list := loadConversationListFromSource(t.Context(), 5, nil)().(conversationListMsg)
-	require.ErrorContains(t, list.err, "daemon runner does not support conversation history")
+	require.ErrorContains(t, list.err, "conversation history is unavailable")
 	assert.Equal(t, 5, list.requestID)
 	source := &conversationSourceRunner{loadErr: assert.AnError, listErr: assert.AnError}
 	history = loadConversationHistoryFromSource(t.Context(), "key", "conversation", source)().(initialHistoryMsg)

@@ -70,8 +70,8 @@ profiles:
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Set up daemon configuration",
-	Long:  `Write daemon configuration on this host. Restart the daemon to apply changes.`,
+	Short: "Set up Kodelet configuration",
+	Long:  `Create a Kodelet configuration file with sensible defaults on this machine. Restart 'kodelet serve' to apply changes to a running server.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		override, _ := cmd.Flags().GetBool("override")
@@ -169,7 +169,7 @@ var setupCmd = &cobra.Command{
 			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
 		}
 		presenter.Info("You can modify these settings at any time by editing the config file")
-		presenter.Info("Restart the daemon after changing its configuration")
+		presenter.Info("Restart 'kodelet serve' after changing its configuration")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
 
 		presenter.Separator()
@@ -186,9 +186,9 @@ var setupCmd = &cobra.Command{
 
 		presenter.Separator()
 		presenter.Section("Getting Started")
-		presenter.Info("  kodelet serve                      # Start the daemon")
+		presenter.Info("  kodelet serve                      # Start the server")
 		presenter.Info("  kodelet serve --profile anthropic  # Use the Anthropic profile")
-		presenter.Info("Use the printed API token to connect clients")
+		presenter.Info("In another terminal, set KODELET_AUTH_TOKEN to the API token printed by 'kodelet serve', then run 'kodelet chat' or 'kodelet run'")
 
 		logger.G(ctx).Info("Kodelet setup completed successfully")
 	},

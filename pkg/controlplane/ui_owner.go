@@ -40,7 +40,7 @@ func (s *Server) handleTakeUIOwnership(w http.ResponseWriter, r *http.Request) {
 		if subscriber.clientID == clientID && subscriber.interactive && subscriber.ctx.Err() == nil {
 			if owner != nil {
 				s.chatSubscribersMu.Unlock()
-				s.writeErrorResponse(w, http.StatusConflict, "client has multiple attached streams", nil)
+				s.writeErrorResponse(w, http.StatusConflict, "this client has multiple connections to the conversation; close the extra connections before taking control", nil)
 				return
 			}
 			owner = subscriber
@@ -48,7 +48,7 @@ func (s *Server) handleTakeUIOwnership(w http.ResponseWriter, r *http.Request) {
 	}
 	s.chatSubscribersMu.Unlock()
 	if owner == nil {
-		s.writeErrorResponse(w, http.StatusConflict, "attach a capable conversation stream before taking control", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "connect to the conversation with a client that supports interactive prompts before taking control", nil)
 		return
 	}
 	capabilities := owner.capabilities

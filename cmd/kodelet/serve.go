@@ -100,10 +100,10 @@ func NewServeConfig() *ServeConfig {
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the Kodelet daemon",
-	Long: `Start the daemon and Web UI at http://localhost:8080.
-An embedded runner uses the startup directory, or --runner-workspace.
-Use --embedded-runner=false for separately managed runners only.
+	Short: "Start the Kodelet server",
+	Long: `Start the Kodelet server and Web UI at http://localhost:8080. CLI commands and editor integrations connect to this server.
+
+A built-in runner provides file access and tools on this machine. Its default workspace is the startup directory; use --runner-workspace to choose another directory. Use --embedded-runner=false if you manage runners separately.
 
 Separate client and runner tokens are generated unless authentication is configured.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -124,9 +124,9 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().String("auth-token", defaults.AuthToken, "Web UI token; generated in token mode, or used as an admin compatibility credential in OIDC mode")
 	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "Runner registration token; generated in token mode")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "Compatibility shorthand for --web-auth-mode=none --runner-auth-mode=none")
-	cmd.Flags().Bool("disable-control-plane-workspace", defaults.DisableControlPlaneWorkspace, "Deprecated compatibility flag; direct control-plane execution is always disabled")
-	cmd.Flags().Bool("embedded-runner", defaults.EmbeddedRunner, "Host the default workspace runner over authenticated loopback transport")
-	cmd.Flags().String("runner-workspace", defaults.RunnerWorkspace, "Embedded runner identity and default workspace (default: startup directory)")
+	cmd.Flags().Bool("disable-control-plane-workspace", defaults.DisableControlPlaneWorkspace, "Deprecated; use --embedded-runner=false to run without a built-in runner")
+	cmd.Flags().Bool("embedded-runner", defaults.EmbeddedRunner, "Run tools and access files on this machine using a built-in runner")
+	cmd.Flags().String("runner-workspace", defaults.RunnerWorkspace, "Default working directory for the built-in runner (default: startup directory)")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
 	cmd.Flags().String("oidc-client-secret-file", defaults.OIDCClientSecretFile, "Path to a file containing the OIDC client secret")
@@ -358,7 +358,7 @@ func validateServeConfig(config *ServeConfig) error {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
 	if strings.TrimSpace(config.CWD) != "" {
-		return errors.New("cwd cannot be set when the control-plane workspace is disabled; use --runner-workspace instead of --cwd")
+		return errors.New("serve --cwd is no longer supported; use --runner-workspace to set the default working directory")
 	}
 
 	webAuthMode, runnerAuthMode, err := resolveServeAuthModes(config)
@@ -543,12 +543,12 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 		if workspace == "" {
 			workspace, err = os.Getwd()
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to determine embedded runner workspace")
+				return nil, errors.Wrap(err, "failed to determine the built-in runner's working directory")
 			}
 		}
 		loader, err := runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), config.RunnerSettings)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to configure embedded runner inheritance")
+			return nil, errors.Wrap(err, "failed to load the built-in runner's settings")
 		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
 			Workspace:      workspace,
@@ -574,19 +574,19 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 		"web_auth_mode":                    serverConfig.WebAuthMode,
 		"runner_auth_mode":                 serverConfig.RunnerAuthMode,
 		"control_plane_workspace_disabled": serverConfig.DisableControlPlaneWorkspace,
-	}).Info("Starting control-plane server")
+	}).Info("Starting Kodelet server")
 
 	frontend, err := webui.NewHandler()
 	if err != nil {
-		return errors.Wrap(err, "failed to create Web UI handler")
+		return errors.Wrap(err, "failed to load the Web UI")
 	}
 	server, err := controlplane.NewServer(ctx, serverConfig, frontend)
 	if err != nil {
-		return errors.Wrap(err, "failed to create web server")
+		return errors.Wrap(err, "failed to initialize the server")
 	}
 	defer func() {
 		if closeErr := server.Close(); closeErr != nil {
-			logger.G(ctx).WithError(closeErr).Error("failed to close web server")
+			logger.G(ctx).WithError(closeErr).Error("failed to shut down the server")
 		}
 	}()
 
@@ -595,13 +595,13 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 
 	listener, err := net.Listen("tcp", net.JoinHostPort(serverConfig.Host, fmt.Sprint(serverConfig.Port)))
 	if err != nil {
-		return errors.Wrap(err, "failed to bind control-plane listener")
+		return errors.Wrap(err, "could not listen on the configured server address; check --host and --port")
 	}
 	defer listener.Close()
 	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
 	webTokenConfigured := strings.TrimSpace(config.AuthToken) != ""
 	runnerTokenConfigured := strings.TrimSpace(config.RunnerAuthToken) != ""
-	presenter.Success(fmt.Sprintf("Web UI server starting on %s", baseURL))
+	presenter.Success(fmt.Sprintf("Kodelet server starting on %s", baseURL))
 	switch serverConfig.WebAuthMode {
 	case controlplane.WebAuthModeToken:
 		presenter.Info("Web UI authentication mode: token")
@@ -645,10 +645,10 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 	presenter.Info("Press Ctrl+C to stop the server")
 
 	if err := server.Serve(ctx, listener); err != nil {
-		return errors.Wrap(err, "web server failed")
+		return errors.Wrap(err, "Kodelet server failed")
 	}
 
-	presenter.Info("Web server stopped")
+	presenter.Info("Kodelet server stopped")
 	return nil
 }
 

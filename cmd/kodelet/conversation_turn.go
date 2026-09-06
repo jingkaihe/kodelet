@@ -12,7 +12,7 @@ import (
 
 var conversationTurnCmd = &cobra.Command{
 	Use:   "turn <conversation-id> <turn-id>",
-	Short: "Query a submitted turn's durable status and result as JSON",
+	Short: "Show a submitted turn's saved status and result as JSON",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runConversationTurnCommand,
 }
@@ -31,9 +31,9 @@ func runConversationTurnCommand(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	receipt, err := client.GetTurnReceipt(ctx, args[0], args[1])
 	if err != nil {
-		return errors.Wrap(err, "failed to query daemon turn receipt (no execution retry or local fallback)")
+		return errors.Wrap(err, "could not load the turn status")
 	}
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
-	return errors.Wrap(encoder.Encode(receipt), "failed to write turn receipt")
+	return errors.Wrap(encoder.Encode(receipt), "failed to write turn status")
 }

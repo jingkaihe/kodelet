@@ -72,7 +72,7 @@ func (s *Server) embeddedRunnerError(err error) {
 	}
 	s.embeddedMu.Unlock()
 	if err != nil {
-		logger.G(s.runCtx).WithError(err).Error("embedded runner unavailable; control-plane API remains available")
+		logger.G(s.runCtx).WithError(err).Error("built-in runner is unavailable; the server is still accepting API requests, but work assigned to this runner cannot start; check the error details")
 	}
 }
 
@@ -119,11 +119,11 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	select {
 	case <-runnerDone:
 	case <-time.After(s.httpShutdownTimeout()):
-		runnerErr = errors.New("embedded runner shutdown timed out")
+		runnerErr = errors.New("the built-in runner did not stop before the shutdown timeout")
 	}
 	shutdownErr := s.shutdownHTTPServer()
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-		return errors.Wrap(serveErr, "control-plane listener failed")
+		return errors.Wrap(serveErr, "the server stopped accepting connections")
 	}
 	if drainErr != nil {
 		return drainErr
@@ -147,7 +147,7 @@ func (s *Server) drainExecutions(ctx context.Context) error {
 		select {
 		case <-run.done:
 		case <-ctx.Done():
-			return errors.Wrap(ctx.Err(), "active executions did not stop before daemon shutdown")
+			return errors.Wrap(ctx.Err(), "active work did not finish stopping before the server shutdown timeout")
 		}
 	}
 	return nil
@@ -156,7 +156,7 @@ func (s *Server) drainExecutions(ctx context.Context) error {
 func embeddedLoopbackEndpoint(address net.Addr) (string, error) {
 	tcp, ok := address.(*net.TCPAddr)
 	if !ok || tcp.Port <= 0 {
-		return "", errors.New("embedded runner requires a bound TCP listener")
+		return "", errors.New("the built-in runner requires the server to listen on a TCP port")
 	}
 	ip := tcp.IP
 	if ip.IsUnspecified() {
@@ -167,7 +167,7 @@ func embeddedLoopbackEndpoint(address net.Addr) (string, error) {
 		}
 	}
 	if !ip.IsLoopback() {
-		return "", errors.New("embedded runner requires a loopback or wildcard listener; use --host=0.0.0.0 or disable embedding")
+		return "", errors.New("the built-in runner must be able to connect locally; use --host=localhost, --host=0.0.0.0, or --embedded-runner=false")
 	}
 	return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(tcp.Port)), nil
 }
@@ -211,7 +211,7 @@ func (s *Server) newEmbeddedRunner(ctx context.Context, endpoint string) (*runne
 		_ = runner.Close()
 		var held *localstate.LockHeldError
 		if errors.As(err, &held) {
-			return nil, errors.Wrapf(err, "embedded runner workspace is already owned by runner %q at %q; stop its owner or disable --embedded-runner and explicitly select that runner", held.Metadata.RunnerID, held.Metadata.Server)
+			return nil, errors.Wrapf(err, "this workspace is already in use by runner %q connected to %q; stop that runner, or start with --embedded-runner=false and select it with --runner", held.Metadata.RunnerID, held.Metadata.Server)
 		}
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (s *Server) provisionEmbeddedCredential(ctx context.Context, store *localst
 		}
 		identity, err := s.authStore.VerifyRunnerDPoP(ctx, credential.AccessToken, proof, http.MethodGet, endpoint+protocol.Endpoint)
 		if err != nil {
-			return errors.Wrap(err, "embedded runner credential is invalid; re-enroll the runner explicitly rather than replacing a revoked identity automatically")
+			return errors.Wrap(err, "the built-in runner's saved credentials are invalid or revoked; re-enroll the runner before using it again")
 		}
 		return store.SaveRegistration(localstate.Registration{Server: endpoint, Workspace: workspace, RunnerID: identity.RunnerID})
 	}
@@ -276,7 +276,7 @@ func (s *Server) provisionEmbeddedCredential(ctx context.Context, store *localst
 		return err
 	})
 	if err != nil {
-		return errors.Wrap(err, "failed to approve embedded runner identity; stop or explicitly re-enroll an existing owner")
+		return errors.Wrap(err, "could not register the built-in runner; stop any runner already using this workspace, or re-enroll it if its credentials were revoked")
 	}
 	approved, err := s.authStore.PollRunnerEnrollment(ctx, protocol.EnrollmentPollRequest{EnrollmentID: enrollment.EnrollmentID, DeviceCode: enrollment.DeviceCode})
 	if err != nil {

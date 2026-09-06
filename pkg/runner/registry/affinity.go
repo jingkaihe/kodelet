@@ -113,7 +113,7 @@ func (r *Registry) BindConversationWithEnvironmentProfile(ctx context.Context, c
 	runnerID = strings.TrimSpace(runnerID)
 	environmentProfile = normalizeEnvironmentProfile(environmentProfile)
 	if conversationID == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	if runnerID == "" {
 		return errors.New("runner id is required")
@@ -134,7 +134,7 @@ func (r *Registry) CommitConversationAffinity(ctx context.Context, conversationI
 	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return errors.New("conversation id is required")
+		return errors.New("conversation ID is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -143,7 +143,7 @@ func (r *Registry) CommitConversationAffinity(ctx context.Context, conversationI
 	defer r.mu.Unlock()
 	record, ok := r.affinities.get(conversationID)
 	if !ok {
-		return errors.New("conversation runner affinity is not reserved")
+		return errors.New("the conversation has no reserved runner assignment")
 	}
 	if record.persisted || r.persistence == nil {
 		return nil
@@ -213,7 +213,7 @@ func (r *Registry) ResolveConversationAffinity(ctx context.Context, conversation
 		return ConversationAffinity{}, false, nil
 	}
 	if r.runners[affinity.RunnerID] == nil {
-		return ConversationAffinity{}, false, errors.New("persisted conversation runner affinity is invalid")
+		return ConversationAffinity{}, false, errors.New("the conversation's saved runner assignment is invalid")
 	}
 	affinity.EnvironmentProfile = normalizeEnvironmentProfile(affinity.EnvironmentProfile)
 	r.affinities.put(conversationID, affinity, true)

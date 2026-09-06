@@ -393,7 +393,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			historyErr := history.err
 			if historyErr == nil {
-				historyErr = errors.New("control-plane conversation history is unavailable")
+				historyErr = errors.New("conversation history is unavailable")
 			}
 			m.finishUncertainObservedConversationRun(state, msg.runID)
 			state.err = errors.Wrap(historyErr, "failed to synchronize conversation history")
@@ -1000,7 +1000,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !streamCancelled {
 				streamErr := msg.err
 				if streamErr == nil {
-					streamErr = errors.New("control-plane conversation stream ended")
+					streamErr = errors.New("the connection to the conversation ended")
 				}
 				state.err = streamErr
 				if shouldReconnect {
@@ -1015,7 +1015,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !streamCancelled {
 			streamErr := msg.err
 			if streamErr == nil {
-				streamErr = errors.New("control-plane conversation stream ended")
+				streamErr = errors.New("the connection to the conversation ended")
 			}
 			state.err = streamErr
 			if shouldReconnect {

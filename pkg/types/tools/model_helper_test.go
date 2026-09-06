@@ -60,8 +60,8 @@ func TestRunModelHelper(t *testing.T) {
 	}{
 		{name: "delegates", wantCalls: 1},
 		{name: "propagates error", helperErr: helperErr, wantCalls: 1, wantErr: helperErr.Error()},
-		{name: "absent capability", absent: true, wantErr: "central model helper is unavailable"},
-		{name: "nil masks inherited capability", masked: true, wantErr: "central model helper is unavailable"},
+		{name: "absent capability", absent: true, wantErr: "AI-assisted web extraction is unavailable"},
+		{name: "nil masks inherited capability", masked: true, wantErr: "AI-assisted web extraction is unavailable"},
 		{name: "canceled before invocation", canceled: true, wantErr: context.Canceled.Error()},
 		{name: "invalid before invocation", invalid: true, wantErr: "unsupported"},
 	}

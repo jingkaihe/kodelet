@@ -122,13 +122,13 @@ func TestPinnedShortcutRejectsIdentityAndRestartWithoutExecutingReplacement(t *t
 	wrong := descriptor
 	wrong.ExtensionID = "different-extension"
 	matched, _, err = runtime.ExecutePinnedShortcut(t.Context(), wrong, ExtensionCallContext{})
-	assert.ErrorContains(t, err, "registration changed")
+	assert.ErrorContains(t, err, "shortcut changed")
 	assert.False(t, matched)
 	process := runtime.shortcuts[descriptor.Key].process
 	client, _ := process.rpcSession()
 	process.failClientGeneration(client)
 	matched, _, err = runtime.ExecutePinnedShortcut(t.Context(), descriptor, ExtensionCallContext{})
-	assert.ErrorContains(t, err, "generation changed")
+	assert.ErrorContains(t, err, "extension restarted")
 	assert.False(t, matched)
 	current, _ := process.rpcSession()
 	assert.Nil(t, current, "a pinned call must not restart a dead extension")
@@ -137,9 +137,9 @@ func TestPinnedShortcutRejectsIdentityAndRestartWithoutExecutingReplacement(t *t
 	require.NotNil(t, source)
 	assert.NotEqual(t, descriptor.Generation, source.owner.Generation)
 	_, _, err = runtime.ExecutePinnedShortcut(t.Context(), descriptor, ExtensionCallContext{})
-	assert.ErrorContains(t, err, "generation changed")
+	assert.ErrorContains(t, err, "extension restarted")
 	wrong = descriptor
 	wrong.Generation = source.owner.Generation
 	_, _, err = runtime.ExecutePinnedShortcut(t.Context(), wrong, ExtensionCallContext{})
-	assert.ErrorContains(t, err, "registration changed", "new process must not inherit old shortcut registrations")
+	assert.ErrorContains(t, err, "shortcut changed", "new process must not inherit old shortcut registrations")
 }

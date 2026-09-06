@@ -180,7 +180,7 @@ var recipeCmd = &cobra.Command{
 var hostRecipeCmd = &cobra.Command{
 	Use:   "recipe",
 	Short: "Inspect recipes on this host",
-	Long:  "Inspect local recipes in a trusted workspace on the runner host. Listing starts extensions; showing executes templates. This does not contact the selected daemon.",
+	Long:  "View recipes installed in the current workspace on this machine. Listing recipes starts local extensions; showing a recipe renders its template. To inspect a remote workspace, run this command on its runner host.",
 }
 
 var recipeListCmd = &cobra.Command{
@@ -236,7 +236,7 @@ func init() {
 
 func hostInspectionMigration(cmd *cobra.Command, _ []string) error {
 	path := strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()))
-	return errors.Errorf("'%s' is host-only; use 'kodelet host %s' with the same arguments on the runner host in the intended workspace", path, path)
+	return errors.Errorf("'%s' has moved to 'kodelet host %s'; run it in the workspace on the machine where the files are installed", path, path)
 }
 
 func runRecipeList(ctx context.Context, config *RecipeListConfig) error {

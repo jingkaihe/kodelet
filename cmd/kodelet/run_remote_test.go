@@ -282,7 +282,7 @@ func TestRemoteRunImageRejectsLocalReadFailureAndInsecureURL(t *testing.T) {
 	_, err := remoteRunImage("http://example.com/image.png")
 	require.ErrorContains(t, err, "HTTPS")
 	_, err = remoteRunImage(filepath.Join(t.TempDir(), "missing.png"))
-	require.ErrorContains(t, err, "client image attachment")
+	require.ErrorContains(t, err, "image attachment")
 }
 
 func TestRemoteRunStreamsThroughDaemonWithoutLocalDatabase(t *testing.T) {
@@ -394,7 +394,7 @@ func TestRemoteRunCancellationWhileWaitingForTerminalPrompt(t *testing.T) {
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, context.Canceled)
-		require.ErrorContains(t, err, "acknowledged cancellation")
+		require.ErrorContains(t, err, "query was stopped")
 	case <-time.After(time.Second):
 		t.Fatal("terminal read prevented the scoped stop request")
 	}
@@ -437,7 +437,7 @@ func TestRemoteRunCancellationUsesScopedAcknowledgement(t *testing.T) {
 			require.ErrorIs(t, err, context.Canceled)
 			assert.True(t, stopped)
 			if acknowledged {
-				assert.Contains(t, err.Error(), "acknowledged cancellation")
+				assert.Contains(t, err.Error(), "query was stopped")
 			} else {
 				assert.Contains(t, err.Error(), "may still be running")
 			}
@@ -459,7 +459,7 @@ func TestRemoteRunDisconnectDoesNotRetryOrCancel(t *testing.T) {
 	}
 	err := executeRemoteRun(t.Context(), client, chat.ChatRequest{ConversationID: "conversation", TurnID: "turn"}, true, io.Discard, io.Discard)
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	assert.Contains(t, err.Error(), "never automatically retried")
+	assert.Contains(t, err.Error(), "before sending it again")
 	assert.Equal(t, 1, calls)
 }
 

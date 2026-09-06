@@ -47,7 +47,7 @@ func init() {
 	steerCmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
 	steerCmd.Flags().StringSliceP("image", "I", steerDefaults.Images, "Add image input (can be used multiple times)")
 	addRemoteRunFlags(steerCmd)
-	steerCmd.Flags().String("cwd", "", "Scope daemon --follow to a conversation directory")
+	steerCmd.Flags().String("cwd", "", "Find the most recent conversation in this directory with --follow")
 }
 
 func sendRemoteSteer(cmd *cobra.Command, message string) error {
@@ -59,7 +59,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 		return errors.New("--follow and --conversation-id cannot be used together")
 	}
 	if !follow && id == "" {
-		return errors.New("--conversation-id is required unless using scoped --follow")
+		return errors.New("provide --conversation-id, or use --follow with --runner or --cwd")
 	}
 	if strings.TrimSpace(message) == "" || len(message) > steer.MaxMessageLength {
 		return errors.New("steering message must be nonempty and at most 10,000 characters")
@@ -70,7 +70,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 	selector, _ := cmd.Flags().GetString("runner")
 	cwd, _ := cmd.Flags().GetString("cwd")
 	if follow && strings.TrimSpace(selector) == "" && strings.TrimSpace(cwd) == "" {
-		return errors.New("daemon-backed --follow requires --runner or --cwd to scope history")
+		return errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
 	}
 	server, _ := serverFlagOrConfig(cmd)
 	token, _, err := resolveControlPlaneAuthToken(cmd, server)
@@ -102,7 +102,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 			return err
 		}
 		if len(history) == 0 {
-			return errors.New("no daemon conversation found in the selected scope")
+			return errors.New("no conversation found for the selected runner or directory")
 		}
 		id = history[0].ID
 	}
@@ -112,7 +112,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 			return err
 		}
 		if history.RunnerID != runnerID {
-			return errors.New("selected runner does not match conversation affinity")
+			return errors.New("this conversation uses a different runner; omit --runner to use its saved runner")
 		}
 	}
 	paths, _ := cmd.Flags().GetStringSlice("image")
@@ -126,11 +126,11 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 	}
 	queued, err := client.SteerConversation(ctx, id, message, images)
 	if err != nil {
-		return errors.Wrap(err, "daemon steering failed; not retried")
+		return errors.Wrap(err, "could not confirm that the steering message was received; check the conversation before sending it again")
 	}
 	if queued {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Steering queued behind an earlier message.")
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Your steering message is queued behind an earlier message.")
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Steering sent to daemon conversation %s\n", id)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Steering sent to conversation %s\n", id)
 	return err
 }

@@ -23,10 +23,10 @@ import (
 )
 
 func addRemoteRunFlags(cmd *cobra.Command) {
-	cmd.Flags().String("server", defaultRunnerServer, "Execute through a control-plane daemon (or KODELET_SERVER)")
-	cmd.Flags().String("auth-token", "", "Control-plane client authentication token (or KODELET_AUTH_TOKEN)")
+	cmd.Flags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
+	cmd.Flags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 	cmd.Flags().String("runner", "", "Workspace runner ID, ID prefix, or display name")
-	cmd.Flags().String("runner-profile", "", "Runner-owned environment profile")
+	cmd.Flags().String("runner-profile", "", "Runner environment profile")
 }
 
 func runControlPlaneCommand(cmd *cobra.Command, args []string) error {
@@ -43,7 +43,7 @@ func runControlPlaneCommand(cmd *cobra.Command, args []string) error {
 	}
 	runner, err := prepareOneShotRunner(ctx, cmd, server, token, &request)
 	if err != nil {
-		return errors.Wrap(err, "cannot prepare daemon execution; start kodelet serve or check --server and client authentication (no local fallback)")
+		return errors.Wrap(err, "could not start the query")
 	}
 	if !resultOnly {
 		ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, cmd.ErrOrStderr()))
@@ -57,11 +57,11 @@ func remoteRunRequest(cmd *cobra.Command, args []string) (chat.ChatRequest, bool
 	// These runner/provider installation settings must not be silently forwarded.
 	for _, name := range []string{"fragment-dirs", "sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "account", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
 		if cmd.Flags().Changed(name) {
-			return request, false, errors.Errorf("--%s is not yet supported by daemon-backed run; configure it on the owning daemon or runner", name)
+			return request, false, errors.Errorf("--%s cannot be set for an individual query; set it in the server or runner configuration", name)
 		}
 	}
 	if cmd.Flags().Changed("no-save") {
-		return request, false, errors.New("--no-save is not supported by daemon-backed run; all conversations are saved")
+		return request, false, errors.New("--no-save is no longer supported; all conversations are saved automatically")
 	}
 	request.ConversationID, _ = cmd.Flags().GetString("resume")
 	request.ConversationID = strings.TrimSpace(request.ConversationID)
@@ -120,7 +120,7 @@ func remoteRunImage(input string) (chat.ChatContentBlock, error) {
 	}
 	data, err := llmbase.ReadImageFileAsDataURL(strings.TrimPrefix(input, "file://"))
 	if err != nil {
-		return chat.ChatContentBlock{}, errors.Wrap(err, "failed to read client image attachment")
+		return chat.ChatContentBlock{}, errors.Wrap(err, "failed to read the image attachment")
 	}
 	return chat.ChatContentBlock{Type: "image", ImageURL: &chat.ChatImageURLSource{URL: data}}, nil
 }
@@ -199,7 +199,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 	follow, _ := cmd.Flags().GetBool("follow")
 	if follow {
 		if strings.TrimSpace(selector) == "" && request.CWD == "" {
-			return nil, errors.New("daemon-backed --follow requires --runner or --cwd to scope history")
+			return nil, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
 		}
 		cwd := request.CWD
 		if cwd == "" {
@@ -211,7 +211,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 				return nil, err
 			}
 			if settings.DefaultRunnerID == "" || !settings.DefaultRunnerReady {
-				return nil, errors.New("daemon has no ready default runner; start serve --embedded-runner or select --runner explicitly")
+				return nil, errors.New("the default runner is unavailable; check 'kodelet runner list' and the server logs, or select another runner with --runner")
 			}
 			request.RunnerID = settings.DefaultRunnerID
 		}
@@ -223,7 +223,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 			return nil, err
 		}
 		if target.CWD == "" {
-			return nil, errors.New("runner discovery returned no validated directory")
+			return nil, errors.New("the runner did not return a working directory; check the directory and runner logs")
 		}
 		request.CWD = target.CWD
 		history, err := runner.ListConversationsInCWD(ctx, 1, target.CWD)
@@ -231,7 +231,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 			return nil, err
 		}
 		if len(history) == 0 {
-			return nil, errors.New("no conversation found in the selected runner/workspace; omit --follow to start one")
+			return nil, errors.New("no conversation found for the selected runner or directory; omit --follow to start one")
 		}
 		request.ConversationID = history[0].ID
 	}
@@ -241,7 +241,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 			return nil, err
 		}
 		if history.RunnerID == "" {
-			return nil, errors.New("legacy conversation has no runner affinity; adopt it before continuing, or start a new conversation")
+			return nil, errors.New("this older conversation has no saved runner; use 'kodelet conversation adopt' before continuing, or start a new conversation")
 		}
 		// Omitted CWD stays omitted: the server validates the stored affinity.
 		request.RunnerID = history.RunnerID
@@ -252,7 +252,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 				return nil, err
 			}
 			if settings.DefaultRunnerID == "" || !settings.DefaultRunnerReady {
-				return nil, errors.New("daemon has no ready default runner; start serve --embedded-runner or select --runner explicitly")
+				return nil, errors.New("the default runner is unavailable; check 'kodelet runner list' and the server logs, or select another runner with --runner")
 			}
 			request.RunnerID = settings.DefaultRunnerID
 			if request.CWD == "" {
@@ -279,7 +279,7 @@ func sameHostDefaultCWD(settings chat.ControlPlaneChatSettings) (string, error) 
 		return "", nil
 	}
 	cwd, err := os.Getwd()
-	return cwd, errors.Wrap(err, "failed to resolve invoking directory for the same-host daemon")
+	return cwd, errors.Wrap(err, "failed to determine the current working directory")
 }
 
 type remoteOneShotClient interface {
@@ -300,19 +300,19 @@ func executeRemoteRunWithSink(ctx context.Context, runner remoteOneShotClient, r
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if stopErr := runner.StopConversationTurn(stopCtx, request.ConversationID, request.TurnID); stopErr != nil {
-			return errors.Wrapf(ctx.Err(), "cancellation could not be acknowledged; conversation %s may still be running: %v", request.ConversationID, stopErr)
+			return errors.Wrapf(ctx.Err(), "could not confirm cancellation; conversation %s may still be running: %v", request.ConversationID, stopErr)
 		}
-		return errors.Wrap(ctx.Err(), "daemon acknowledged cancellation")
+		return errors.Wrap(ctx.Err(), "the query was stopped")
 	}
 	if err != nil {
-		return errors.Wrapf(err, "daemon execution failed or detached (conversation %s, turn %s); inspect history before resubmitting, since submission is never automatically retried", request.ConversationID, request.TurnID)
+		return errors.Wrapf(err, "the query failed or the connection was interrupted; before sending it again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
 	}
 	if sink.cancelled {
-		return errors.Wrap(context.Canceled, "daemon execution was canceled")
+		return errors.Wrap(context.Canceled, "the query was canceled")
 	}
 	if sink.resultOnly {
 		if sink.result == nil {
-			return errors.New("daemon did not provide a final result; upgrade the daemon before using --result-only")
+			return errors.New("no final result was returned; update the server before using --result-only")
 		}
 		_, err = fmt.Fprintln(sink.output, *sink.result)
 		return err

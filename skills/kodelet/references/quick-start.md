@@ -36,7 +36,7 @@ kodelet run --server https://kodelet.example --runner project-runner --no-tools 
 kodelet run --server https://kodelet.example --resume CONVERSATION_ID "continue"
 ```
 
-Runs always save; `--no-save` is removed. The daemon owns provider credentials and history; runners own workspaces and tools. The recognized same-host default uses the invoking CWD for new CLI conversations; other targets use runner-host path rules. Resumes retain stored affinity. Ctrl+C requests an exact turn stop; disconnects only detach. Inspect `kodelet conversation turn <conversation-id> <turn-id>` before resubmitting uncertain work. Client authentication uses `kodelet auth login` or a web/API token, never a runner token. There is no local execution fallback.
+Conversations are saved automatically; omit the removed `--no-save` flag. The server stores provider credentials and conversation history, while runners provide file access and tools. New conversations using this machine's built-in runner start in your current directory. For other runners, directories refer to paths on the runner's machine. Resuming keeps the saved runner and directory. Ctrl+C requests cancellation; losing the connection does not stop the work. If a request is interrupted, check `kodelet conversation turn <conversation-id> <turn-id>` before sending it again. Sign in with `kodelet auth login` or supply a web/API token; runner tokens are for connecting runners, not CLI clients.
 
 ### Interactive/IDE mode (ACP)
 
@@ -47,7 +47,7 @@ kodelet acp
 kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-Use `server` or `KODELET_SERVER` for the default endpoint. For OIDC, run `kodelet auth login --server https://kodelet.example`; `--auth-token` overrides `KODELET_AUTH_TOKEN` and stored login state. ACP uses client credentials only, never enrolls or starts a runner, and has no local execution fallback. Without `--runner`, new sessions use the daemon's default runner.
+Use `server` or `KODELET_SERVER` to set the server address. For OIDC, run `kodelet auth login --server https://kodelet.example`; `--auth-token` overrides `KODELET_AUTH_TOKEN` and saved sign-in credentials. Start the server and any separately managed runners before connecting ACP. Without `--runner`, new sessions use the server's default runner.
 
 Example Zed-style configuration:
 
@@ -72,7 +72,7 @@ kodelet chat --theme catppuccin-latte
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 
-Chat always uses the daemon, including the default local endpoint. Directories are runner-side; resume keeps stored affinity and `--follow` needs `--runner` or `--cwd`. Exit detaches, `/stop` cancels, and `/take-control` requests ownership of future prompts without replaying dismissed prompts.
+Start the server before opening chat. Directories refer to paths on the runner's machine. Resuming keeps the saved runner, directory, and profiles; use `--follow` with `--runner` or `--cwd` to choose which history to search. Exiting chat leaves work running; `/stop` cancels it. Use `/take-control` to receive future interactive prompts in this client. Previously dismissed prompts are not shown again.
 
 ### Web UI
 

@@ -16,8 +16,8 @@ import (
 
 var codexStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the daemon's ChatGPT subscription connection status",
-	Long:  "Show sanitized connection status from the daemon. Detailed local usage inspection is available to operators as 'kodelet host codex status' on the daemon host.",
+	Short: "Show ChatGPT subscription connection status",
+	Long:  "Show whether a ChatGPT subscription is connected to the selected server. For detailed usage, run 'kodelet host codex status' on the server host.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := remoteAdministrationClient(cmd)
@@ -28,7 +28,7 @@ var codexStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Daemon Codex connected: %t\n", status.Connected)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ChatGPT subscription connected: %t\n", status.Connected)
 		return err
 	},
 }

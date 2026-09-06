@@ -197,7 +197,7 @@ func TestWorkspaceShortcutRejectsInvalidOrStaleBeforeExecution(t *testing.T) {
 	stale := f.request
 	stale.Shortcut.ExtensionID = "same-key-other-extension"
 	response = f.invoke(t.Context(), t, stale, "owner")
-	assert.Contains(t, response.Body.String(), "registration changed")
+	assert.Contains(t, response.Body.String(), "shortcut changed")
 	assert.Equal(t, []string{protocol.MethodRunOpen, protocol.MethodRunCancel, protocol.MethodRunClose}, f.methods)
 }
 

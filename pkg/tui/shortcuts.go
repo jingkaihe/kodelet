@@ -132,7 +132,7 @@ func executeRemoteShortcut(ctx context.Context, runner chat.ChatRunner, target c
 		ExecuteWorkspaceShortcut(context.Context, chat.WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error)
 	})
 	if !ok {
-		return runnerpayload.ShortcutExecuteResult{}, errors.New("daemon runner does not support extension shortcuts")
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("extension shortcuts are unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -143,7 +143,7 @@ func executeRemoteShortcut(ctx context.Context, runner chat.ChatRunner, target c
 		return runnerpayload.ShortcutExecuteResult{}, err
 	}
 	if digest == "" || discovery.Digest != digest {
-		return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut environment changed; refresh discovery")
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("the workspace settings changed; reload the available shortcuts")
 	}
 	for _, current := range discovery.Shortcuts {
 		if current.Key == shortcut.Key && current.ExtensionID == shortcut.ExtensionID {
@@ -153,7 +153,7 @@ func executeRemoteShortcut(ctx context.Context, runner chat.ChatRunner, target c
 			return remote.ExecuteWorkspaceShortcut(ctx, chat.WorkspaceShortcutRequest{Target: target, RunID: discovery.RunID, Digest: discovery.Digest, Shortcut: current})
 		}
 	}
-	return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut registration changed; refresh discovery")
+	return runnerpayload.ShortcutExecuteResult{}, errors.New("the shortcut changed; reload the available shortcuts")
 }
 
 func formatShortcutKey(key string) string {

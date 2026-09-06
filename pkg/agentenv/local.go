@@ -363,7 +363,7 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	spec := e.runSpec()
 	effectiveInput := request.Input
 	if tools.IsControlPlaneTool(request.Name) {
-		result := tooltypes.BaseToolResult{Error: "control-plane tool cannot execute in the workspace environment: " + request.Name}
+		result := tooltypes.BaseToolResult{Error: "server tool cannot execute in the workspace environment: " + request.Name}
 		structured := result.StructuredData()
 		structured.ToolName = request.Name
 		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured}, nil

@@ -110,7 +110,7 @@ func (r *ControlPlaneChatRunner) StartAnthropicLogin(ctx context.Context) (Anthr
 func (r *ControlPlaneChatRunner) CompleteAnthropicLogin(ctx context.Context, id, code, alias string) (AnthropicLogin, error) {
 	var result AnthropicLogin
 	if id == "" || code == "" || len(code) > 8192 {
-		return result, errors.New("login id and bounded authorization code are required")
+		return result, errors.New("provide a login ID and an authorization code of at most 8192 bytes")
 	}
 	if alias != "" {
 		if err := auth.ValidateAlias(alias); err != nil {
@@ -179,7 +179,7 @@ func (r *ControlPlaneChatRunner) CancelProviderDeviceLogin(ctx context.Context, 
 
 func (r *ControlPlaneChatRunner) providerRequest(ctx context.Context, provider, method string, path []string, input, result any) error {
 	if provider != "anthropic" && provider != "codex" && provider != "copilot" {
-		return errors.New("unsupported daemon provider")
+		return errors.New("unsupported provider")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -203,7 +203,7 @@ func (r *ControlPlaneChatRunner) providerRequest(ctx context.Context, provider, 
 	request.Header.Set("Content-Type", "application/json")
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.Wrap(err, "daemon provider operation was not acknowledged; inspect daemon state before retrying (not retried)")
+		return errors.Wrap(err, "could not confirm the account request; check the account status and server logs before trying again")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent {

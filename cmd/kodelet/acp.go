@@ -18,13 +18,10 @@ type acpServerLifecycle interface {
 
 var acpCmd = &cobra.Command{
 	Use:   "acp",
-	Short: "Connect an ACP client to a Kodelet daemon",
-	Long: `Run the Agent Client Protocol (ACP) stdio adapter for kodelet serve.
+	Short: "Connect an ACP client to a Kodelet server",
+	Long: `Connect an editor or another Agent Client Protocol (ACP) client to Kodelet over stdin and stdout.
 
-The daemon owns model execution and conversations. A registered runner owns
-workspace tools, context, skills, recipes, and extensions. ACP never starts a
-runner or falls back to a client-local provider or conversation database.
-Session directories are interpreted and validated on the selected runner.
+Start 'kodelet serve' first, or use --server to connect to an existing server. Conversations are saved automatically. The server's built-in runner provides file access and tools; use --runner to work on another machine. Session directories refer to paths on the selected runner's machine.
 
 Examples:
   kodelet acp
@@ -42,8 +39,8 @@ func init() {
 	addRemoteRunFlags(acpCmd)
 	acpCmd.Flags().Bool("no-extensions", false, "Disable runner extensions for this execution")
 	acpCmd.Flags().Bool("no-tools", false, "Disable all model-callable tools")
-	acpCmd.Flags().Bool("use-weak-model", false, "Use the daemon's configured weak model")
-	acpCmd.Flags().Int("max-turns", 0, "Maximum agentic turns per prompt (0 for no limit)")
+	acpCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
+	acpCmd.Flags().Int("max-turns", 0, "Maximum AI turns per prompt (0 for no limit)")
 	// Retain the old spelling only to give an actionable migration error.
 	acpCmd.Flags().String("runner-auth-token", "", "Removed: configure credentials on the runner, not ACP")
 	_ = acpCmd.Flags().MarkHidden("runner-auth-token")

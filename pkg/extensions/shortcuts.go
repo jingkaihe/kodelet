@@ -170,17 +170,17 @@ func (r *Runtime) ExecutePinnedShortcut(ctx context.Context, expected Shortcut, 
 	shortcut, ok := r.shortcuts[expected.Key]
 	r.mu.RUnlock()
 	if !ok || shortcut.ExtensionID != expected.ExtensionID || shortcut.process == nil || expected.Generation == 0 || shortcut.Generation != expected.Generation {
-		return false, nil, errors.New("shortcut registration changed; refresh discovery")
+		return false, nil, errors.New("the shortcut changed; reload the available shortcuts")
 	}
 	client, source := shortcut.process.rpcSession()
 	if client == nil || source == nil || source.owner.Generation != expected.Generation || !source.current() {
-		return false, nil, errors.New("shortcut extension generation changed; refresh discovery")
+		return false, nil, errors.New("the extension restarted; reload the available shortcuts")
 	}
 	params := executeShortcutParams{Key: expected.Key, Context: extensionCallContextWithUIScope(ctx, callContext)}
 	var result *ShortcutResult
 	err := client.callWithHostHandler(ctx, "extension.shortcut.execute", params, &result, source)
 	if err == nil && !source.current() {
-		err = errors.New("shortcut extension generation changed during execution")
+		err = errors.New("the extension restarted while the shortcut was running")
 	}
 	return true, result, err
 }

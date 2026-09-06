@@ -293,7 +293,7 @@ func (r *Runner) Close() error {
 
 func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
 	ctx = r.loggingContext(ctx)
-	logger.G(ctx).Debug("connecting runner to control plane")
+	logger.G(ctx).Debug("connecting runner to server")
 	if _, err := r.refreshStoredCredential(); err != nil {
 		return false, &permanentConnectionError{err: pkgerrors.Wrap(err, "failed to reload enrolled runner credential")}
 	}
@@ -331,7 +331,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	if conn.Subprotocol() != protocol.Subprotocol {
 		_ = conn.Close()
-		return false, &permanentConnectionError{err: pkgerrors.New("control plane did not negotiate the runner websocket subprotocol")}
+		return false, &permanentConnectionError{err: pkgerrors.New("server did not negotiate the runner websocket subprotocol")}
 	}
 
 	peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
@@ -412,7 +412,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	logger.G(ctx).WithFields(map[string]any{
 		"heartbeat_interval": heartbeatInterval,
 		"manifest_digest":    initialDigest,
-	}).Info("runner registered with control plane")
+	}).Info("runner registered with server")
 	if r.config.OnRegistered != nil {
 		r.config.OnRegistered(registration)
 	}
@@ -436,7 +436,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	for {
 		select {
 		case <-ctx.Done():
-			logger.G(ctx).Debug("stopping runner control-plane connection")
+			logger.G(ctx).Debug("disconnecting runner from server")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), connectionShutdownPeriod)
 			_ = peer.Notify(shutdownCtx, protocol.MethodRunnerGoodbye, protocol.GoodbyeParams{
 				RunnerID:   registration.RunnerID,

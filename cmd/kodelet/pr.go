@@ -69,11 +69,11 @@ func init() {
 func remotePRRequest(cmd *cobra.Command) (chat.ChatRequest, error) {
 	var request chat.ChatRequest
 	if err := validateRemoteChatFlags(cmd); err != nil {
-		return request, errors.Wrap(err, "invalid daemon PR options")
+		return request, errors.Wrap(err, "invalid pull request options")
 	}
 	provider, _ := cmd.Flags().GetString("provider")
 	if provider != "github" {
-		return request, errors.New("PR provider must be github; select the model provider using a daemon --profile")
+		return request, errors.New("--provider must be github for pull requests; use --profile to select the AI provider")
 	}
 	target, _ := cmd.Flags().GetString("target")
 	if strings.TrimSpace(target) == "" {

@@ -202,11 +202,11 @@ func TestRemoteSteerProcessUsesDaemonWithoutClientStore(t *testing.T) {
 			output, err := process.CombinedOutput()
 			if status == http.StatusOK {
 				require.NoError(t, err, "%s", output)
-				assert.Contains(t, string(output), "Steering sent to daemon conversation conversation-12345")
+				assert.Contains(t, string(output), "Steering sent to conversation conversation-12345")
 			} else {
 				require.Error(t, err)
-				assert.Contains(t, string(output), "daemon steering failed")
-				assert.Contains(t, string(output), "not retried")
+				assert.Contains(t, string(output), "could not confirm that the steering message was received")
+				assert.Contains(t, string(output), "before sending it again")
 			}
 			assert.EqualValues(t, 1, calls.Load())
 		})

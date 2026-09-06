@@ -49,7 +49,7 @@ func TestChildPolicyUsesExplicitCeilingsNotPresentation(t *testing.T) {
 		{name: "late agent init malformed", patch: map[string]any{"file_read": true}, wantErr: "invalid parent agent.init tool policy"},
 		{name: "late agent init malformed member", patch: []any{42}, wantErr: "invalid parent agent.init tool policy"},
 		{name: "patch cannot widen typed policy", policy: &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}, patch: readTools, wantErr: "child tools exceed parent policy"},
-		{name: "outside workspace", outside: true, wantErr: "working directory exceeds parent workspace"},
+		{name: "outside workspace", outside: true, wantErr: "working directory must be inside the parent workspace"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			config := llmtypes.Config{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "medium", ToolMode: llmtypes.ToolModePatch, AllowedTools: tt.legacy, ExecutionOptions: tt.policy}

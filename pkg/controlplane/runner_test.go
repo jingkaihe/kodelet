@@ -167,7 +167,7 @@ func TestEmbeddedRunnerLockConflictKeepsAPIAvailable(t *testing.T) {
 	status := server.EmbeddedRunnerStatus()
 	assert.False(t, status.Ready)
 	assert.Contains(t, status.Error, "existing-owner")
-	assert.Contains(t, status.Error, "disable --embedded-runner")
+	assert.Contains(t, status.Error, "--embedded-runner=false")
 	assert.Empty(t, server.runnerRegistry.Runners(), "lock conflict must not create a second enrolled owner")
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/status", nil))
@@ -190,7 +190,7 @@ func TestEmbeddedLoopbackEndpoint(t *testing.T) {
 		assert.Equal(t, test.expected, endpoint)
 	}
 	_, err := embeddedLoopbackEndpoint(&net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: 4321})
-	assert.ErrorContains(t, err, "loopback or wildcard")
+	assert.ErrorContains(t, err, "must be able to connect locally")
 }
 
 // The returned stop function closes persistence too, allowing restart tests to
@@ -616,7 +616,7 @@ func TestEmbeddedRunnerShutdownBoundsExecutionDrain(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		require.ErrorContains(t, err, "active executions did not stop")
+		require.ErrorContains(t, err, "active work did not finish stopping")
 	case <-time.After(3 * time.Second):
 		require.FailNow(t, "daemon shutdown exceeded its bound")
 	}
@@ -678,7 +678,7 @@ func TestEmbeddedRunnerDefaultSelectionPrecedence(t *testing.T) {
 			t.Cleanup(func() { assert.NoError(t, defaultRunner.Close()) })
 			_, err := (&serverChatRunner{server: server, runner: defaultRunner}).Run(t.Context(), request, &recordingChatSink{})
 			if scenario == "unavailable" {
-				require.ErrorContains(t, err, "default embedded runner is unavailable")
+				require.ErrorContains(t, err, "default runner is unavailable")
 				assert.Empty(t, resolver.requests, "never silently select the available external runner")
 				return
 			}
@@ -748,7 +748,7 @@ func TestEmbeddedRunnerForcedCrashRestoresLostRunWithoutReplay(t *testing.T) {
 	run, found := server.runnerRegistry.Run("crash-run")
 	require.True(t, found)
 	assert.Equal(t, runnerregistry.RunStatusLost, run.Status)
-	assert.Contains(t, run.Error, "control plane restarted")
+	assert.Contains(t, run.Error, "server restarted")
 	affinity, found, err := server.runnerRegistry.ResolveConversationAffinity(t.Context(), "crash-conversation")
 	require.NoError(t, err)
 	require.True(t, found)
@@ -1883,12 +1883,12 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 		ConversationID: "local-conversation",
 		Message:        "hello",
 	}, &recordingChatSink{})
-	require.ErrorContains(t, err, "workspace execution requires a runner")
+	require.ErrorContains(t, err, "no runner is selected")
 	assert.Equal(t, "local-conversation", conversationID)
 
 	var nilRunner *serverChatRunner
 	conversationID, err = nilRunner.Run(t.Context(), ChatRequest{ConversationID: "local-conversation", Message: " "}, &recordingChatSink{})
-	require.ErrorContains(t, err, "daemon execution is unavailable")
+	require.ErrorContains(t, err, "cannot start work because no runner is configured")
 	assert.Equal(t, "local-conversation", conversationID)
 
 	assert.True(t, chatSupportsInteractiveUI(ChatRequest{ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true}}))
@@ -1928,7 +1928,7 @@ func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *test
 		RunnerID:       registration.RunnerID,
 		Message:        " ",
 	}, &recordingChatSink{})
-	require.ErrorContains(t, err, "existing local conversations are read-only")
+	require.ErrorContains(t, err, "older conversation needs a runner")
 	assert.Equal(t, "local-conversation", conversationID)
 	_, found := server.runnerRegistry.RunnerForConversation(conversationID)
 	assert.False(t, found)
@@ -2082,7 +2082,7 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 				query := url.Values{"runnerId": {registration.RunnerID}, "profile": {"removed"}}
 				server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil))
 				assert.Equal(t, http.StatusBadGateway, recorder.Code)
-				assert.Contains(t, recorder.Body.String(), "runner discovery is unavailable", "unknown new discovery must not receive snapshot fallback")
+				assert.Contains(t, recorder.Body.String(), "could not load the runner's available commands and tools", "unknown new discovery must not receive snapshot fallback")
 				unknown := config.Clone()
 				unknown.Profile = "removed"
 				environment, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, "new", unknown, root)

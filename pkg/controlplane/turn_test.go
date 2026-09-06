@@ -103,7 +103,7 @@ func TestTurnStoreDurableAdmissionAndRestart(t *testing.T) {
 	assert.False(t, admitted)
 	assert.Equal(t, receipt.RunID, recovered.RunID)
 	assert.Equal(t, "interrupted", recovered.Status)
-	assert.Contains(t, recovered.Error, "daemon stopped")
+	assert.Contains(t, recovered.Error, "server stopped")
 	_, admitted, err = store.admit(ctx, changed)
 	require.NoError(t, err)
 	assert.True(t, admitted)
@@ -330,7 +330,7 @@ func TestTurnHTTPStopDoesNotClaimUnconfirmedCancellation(t *testing.T) {
 	assert.Equal(t, http.StatusRequestTimeout, response.StatusCode)
 	data, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "completion is unconfirmed")
+	assert.Contains(t, string(data), "turn may still be running")
 }
 
 func TestTurnHTTPRejectsEmptyScopedStop(t *testing.T) {

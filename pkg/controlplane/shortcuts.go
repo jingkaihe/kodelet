@@ -31,7 +31,7 @@ func (s *Server) pinnedWorkspaceRun(target *workspaceRunnerTarget, conversationI
 			continue
 		}
 		if run.Status != runnerregistry.RunStatusRunning || run.ManifestJSON == "" {
-			return run, runnerpayload.Manifest{}, true, errors.New("conversation environment is not ready; refresh discovery")
+			return run, runnerpayload.Manifest{}, true, errors.New("the workspace is not ready; wait for it to finish loading, then reload the available commands")
 		}
 		var manifest runnerpayload.Manifest
 		err := json.Unmarshal([]byte(run.ManifestJSON), &manifest)
@@ -77,23 +77,23 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 	}
 	activeRun, manifest, active, err := s.pinnedWorkspaceRun(target, request.Target.ConversationID)
 	if err != nil || (active && request.RunID != activeRun.ID) || (!active && request.RunID != "") {
-		s.writeErrorResponse(w, http.StatusConflict, "shortcut run changed; refresh discovery", err)
+		s.writeErrorResponse(w, http.StatusConflict, "the active run changed; reload the available shortcuts", err)
 		return
 	}
 	if !active && s.isActiveChat(request.Target.ConversationID) {
-		s.writeErrorResponse(w, http.StatusConflict, "conversation environment is opening or closing; refresh discovery", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "the workspace is starting or stopping; wait for it to finish, then reload the available commands", nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	if active {
 		if err := validatePinnedDiscoveryOptions(request.Target.Options, manifest); err != nil {
-			s.writeErrorResponse(w, http.StatusConflict, "active environment restrictions are pinned", err)
+			s.writeErrorResponse(w, http.StatusConflict, "permissions cannot be changed while this conversation is running", err)
 			return
 		}
 		broker := s.uiInputBrokerForRun(request.Target.ConversationID)
 		if broker == nil {
-			s.writeErrorResponse(w, http.StatusConflict, "shortcut requires an active UI owner", nil)
+			s.writeErrorResponse(w, http.StatusConflict, "connect to the conversation and use /take-control before running this shortcut", nil)
 			return
 		}
 		finish, err := broker.beginOwnedShortcut(ctx, clientID, cancel)
@@ -103,7 +103,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 		}
 		defer finish()
 		if err := validateShortcutManifest(request, manifest, true); err != nil {
-			s.writeErrorResponse(w, http.StatusConflict, "shortcut discovery changed", err)
+			s.writeErrorResponse(w, http.StatusConflict, "the available shortcuts changed; reload them before trying again", err)
 			return
 		}
 	}
@@ -200,28 +200,28 @@ func validatePinnedDiscoveryOptions(options *llmtypes.ExecutionOptions, manifest
 		value.EnableFSSearchTools = nil
 	}
 	if !reflect.DeepEqual(base, narrowed) || host.EnableFSSearchTools != effective.EnableFSSearchTools {
-		return errors.New("new restrictions require a new execution; active discovery uses the pinned environment")
+		return errors.New("permissions cannot be changed while work is running; apply the new settings to the next run")
 	}
 	return nil
 }
 
 func validateShortcutManifest(request chat.WorkspaceShortcutRequest, manifest runnerpayload.Manifest, active bool) error {
 	if request.Digest != manifest.Digest {
-		return errors.New("shortcut environment changed; refresh discovery")
+		return errors.New("the workspace settings changed; reload the available shortcuts")
 	}
 	for _, shortcut := range manifest.Shortcuts {
 		if shortcut.Key == request.Shortcut.Key && shortcut.ExtensionID == request.Shortcut.ExtensionID && shortcut.Generation != 0 && (!active || shortcut.Generation == request.Shortcut.Generation) {
 			return nil
 		}
 	}
-	return errors.New("shortcut registration changed; refresh discovery")
+	return errors.New("the shortcut changed; reload the available shortcuts")
 }
 
 func (b *webUIInputBroker) beginOwnedShortcut(ctx context.Context, clientID string, cancel context.CancelFunc) (func(), error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed || b.owner == nil || b.owner.ctx.Err() != nil || b.owner.clientID != clientID || ctx.Err() != nil {
-		return nil, errors.New("shortcut requires the current UI owner; take control first")
+		return nil, errors.New("use /take-control before running this shortcut from another client")
 	}
 	if len(b.shortcutCancels) >= 8 {
 		return nil, errors.New("too many active shortcut requests")

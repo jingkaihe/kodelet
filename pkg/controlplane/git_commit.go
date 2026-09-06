@@ -46,7 +46,7 @@ func (s *Server) handleWorkspaceCommit(w http.ResponseWriter, r *http.Request) {
 	var result any = &snapshot
 	if r.Method == http.MethodPost {
 		if approval.Generation != target.Runner.Generation || (target.CWD != "" && target.CWD != approval.CWD) {
-			s.writeErrorResponse(w, http.StatusConflict, "runner generation or directory changed; prepare and review the commit again", nil)
+			s.writeErrorResponse(w, http.StatusConflict, "the runner reconnected or the working directory changed; generate and review the commit again", nil)
 			return
 		}
 		method, timeout, params = protocol.MethodWorkspaceGitCommit, 2*time.Minute, approval

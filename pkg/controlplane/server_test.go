@@ -251,7 +251,7 @@ func TestServerConfig_Validate(t *testing.T) {
 				CWD:                          "/srv/kodelet",
 				DisableControlPlaneWorkspace: true,
 			},
-			expectedError: "control-plane cwd is no longer supported; use --runner-workspace",
+			expectedError: "serve --cwd is no longer supported; use --runner-workspace",
 		},
 	}
 
@@ -822,7 +822,7 @@ func TestServerConfig_Validate_RejectsLocalCWD(t *testing.T) {
 	for _, cwd := range []string{t.TempDir(), "/missing/daemon/workspace", "relative", "   "} {
 		for _, disabled := range []bool{false, true} {
 			config := &ServerConfig{Host: "localhost", Port: 8080, CWD: cwd, CompactRatio: 0.8, DisableControlPlaneWorkspace: disabled}
-			require.ErrorContains(t, config.Validate(), "control-plane cwd is no longer supported; use --runner-workspace")
+			require.ErrorContains(t, config.Validate(), "serve --cwd is no longer supported; use --runner-workspace")
 		}
 	}
 }
@@ -1177,7 +1177,7 @@ func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
 					tt.handler(w, req)
 
 					assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-					assert.Contains(t, w.Body.String(), "no ready default runner")
+					assert.Contains(t, w.Body.String(), "default runner is unavailable")
 					assert.NotContains(t, w.Body.String(), "local-secret")
 					assert.NoFileExists(t, marker, "no daemon-local git, PTY or extension process")
 				})

@@ -156,7 +156,7 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 			TakeUIOwnership(context.Context, string) error
 		})
 		if !ok || !m.running || m.conversationID == "" || strings.TrimSpace(args) != "" {
-			return m.addUINotification(uiNotification{level: uiNotificationError, title: "Control unavailable", message: "Use /take-control while attached to an active daemon conversation."}), true
+			return m.addUINotification(uiNotification{level: uiNotificationError, title: "Control unavailable", message: "Use /take-control while connected to an active conversation."}), true
 		}
 		conversationID := m.conversationID
 		ctx := m.ctx

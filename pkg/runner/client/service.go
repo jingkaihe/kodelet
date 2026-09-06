@@ -607,11 +607,11 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		peer := s.currentPeer()
 		if peer == nil {
 			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.New("admitted run checkpoint requires the authenticated control plane")
+			return runnerpayload.Manifest{}, errors.New("saving the conversation before starting work requires an authenticated server connection")
 		}
 		if err := peer.Call(operationCtx, protocol.MethodRunCheckpoint, protocol.RunCheckpointParams{RunID: run.id, CWD: workingDirectory}, new(struct{})); err != nil {
 			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to persist admitted conversation before extension startup")
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to save the conversation before starting extensions")
 		}
 		if err := operationCtx.Err(); err != nil {
 			s.failOpen(run)
@@ -1259,7 +1259,7 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 	}
 	result.ConversationID = strings.TrimSpace(result.ConversationID)
 	if result.ConversationID == "" {
-		return "", errors.New("control plane returned an empty conversation fork ID")
+		return "", errors.New("server returned an empty conversation fork ID")
 	}
 	return result.ConversationID, nil
 }
@@ -1419,7 +1419,7 @@ func (s *Service) reportEnvironmentError(ctx context.Context, runID string, err 
 		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(logCtx), 10*time.Second)
 		defer cancel()
 		if notifyErr := peer.Notify(notifyCtx, protocol.MethodRunEnvironmentError, protocol.EnvironmentErrorParams{RunID: run.id, Message: err.Error()}); notifyErr != nil {
-			logger.G(logCtx).WithError(notifyErr).Warn("failed to report runner environment error to control plane")
+			logger.G(logCtx).WithError(notifyErr).Warn("failed to report runner environment error to server")
 		}
 	}
 }

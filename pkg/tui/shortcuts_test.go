@@ -87,12 +87,12 @@ func TestRemoteShortcutRejectsChangedScopeOrExtensionWithoutLocalFallback(t *tes
 	runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{Digest: "sha256:changed", Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "replacement", Generation: 2}}}}
 	shortcut := extensions.Shortcut{Key: "ctrl+r", ExtensionID: "original", Generation: 1}
 	_, err := executeRemoteShortcut(t.Context(), runner, chat.WorkspaceTarget{RunnerID: "runner"}, shortcut, "sha256:original")
-	assert.ErrorContains(t, err, "environment changed")
+	assert.ErrorContains(t, err, "workspace settings changed")
 	assert.Nil(t, runner.request)
 	runner.discovery.Digest = "sha256:original"
 	_, err = executeRemoteShortcut(t.Context(), runner, chat.WorkspaceTarget{RunnerID: "runner"}, shortcut, "sha256:original")
-	assert.ErrorContains(t, err, "registration changed")
+	assert.ErrorContains(t, err, "shortcut changed")
 	assert.Nil(t, runner.request)
 	_, err = executeRemoteShortcut(t.Context(), &recordingRunner{}, chat.WorkspaceTarget{}, shortcut, "sha256:original")
-	assert.ErrorContains(t, err, "does not support")
+	assert.ErrorContains(t, err, "extension shortcuts are unavailable")
 }

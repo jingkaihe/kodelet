@@ -30,10 +30,18 @@ func remoteACPCommandForTest() *cobra.Command {
 }
 
 func TestRemoteACPRejectsRunnerCredentialsAndOwnerConfig(t *testing.T) {
-	for _, flag := range []string{"--runner-auth-token=runner-only", "--sysprompt=/client/prompt", "--allowed-domains-file=/client/domains", "--compact-ratio=0.5", "--enable-openai-search=false"} {
+	for _, test := range []struct {
+		flag, hint string
+	}{
+		{"--runner-auth-token=runner-only", "use --auth-token or 'kodelet auth login' to authenticate"},
+		{"--sysprompt=/client/prompt", "server or runner configuration"},
+		{"--allowed-domains-file=/client/domains", "server or runner configuration"},
+		{"--compact-ratio=0.5", "server or runner configuration"},
+		{"--enable-openai-search=false", "server or runner configuration"},
+	} {
 		cmd := remoteACPCommandForTest()
-		require.NoError(t, cmd.ParseFlags([]string{flag}))
-		require.ErrorContains(t, validateRemoteACPFlags(cmd), "owning daemon or runner")
+		require.NoError(t, cmd.ParseFlags([]string{test.flag}))
+		require.ErrorContains(t, validateRemoteACPFlags(cmd), test.hint)
 	}
 }
 
@@ -103,7 +111,7 @@ func TestRemoteACPDoesNotFallbackWhenDaemonIsUnavailable(t *testing.T) {
 	cmd := remoteACPCommandForTest()
 	require.NoError(t, cmd.ParseFlags([]string{"--runner=missing", "--auth-token=client-token"}))
 	err := runRemoteACP(context.Background(), cmd, server.URL)
-	require.ErrorContains(t, err, "no local fallback")
+	require.ErrorContains(t, err, "could not start the ACP connection")
 }
 
 func TestRemoteACPInitializesWithoutLocalRunnerOrDatabase(t *testing.T) {

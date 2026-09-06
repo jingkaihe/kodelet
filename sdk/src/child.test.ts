@@ -40,8 +40,8 @@ test("child RPC uses tool context and explicit retained lease, without subproces
   assert.equal(calls[1].persistent, true);
   await child.cancel();
   assert.deepEqual(calls.at(-1), { method: "kodelet.child.cancel", params: { childId: "child", childRunId: "run-child", leaseId: "lease" }, persistent: true });
-  await assert.rejects(createChildClient(undefined).start({ profile: "search", message: "query" }), /no local fallback/);
-  await assert.rejects(ctx.children.start({ profile: "search", message: "query", lease: { close: async () => {} } }), /real runner background lease/);
+  await assert.rejects(createChildClient(undefined).start({ profile: "search", message: "query" }), /Delegated tasks require an authenticated runner connection/);
+  await assert.rejects(ctx.children.start({ profile: "search", message: "query", lease: { close: async () => {} } }), /valid runner background task lease/);
 });
 
 test("foreground child abort cancels the exact ID and unauthorized admission fails closed", async () => {
@@ -175,7 +175,7 @@ test("malformed or wrong resume identities never create a handle", async () => {
   const host = new Host();
   for (const invalid of [{ conversationId: null }, { runId: 123 }, { runId: " " }, { done: null }]) {
     host.result = { ...identity, ...invalid } as unknown as ChildResult;
-    await assert.rejects(createChildClient(host).start({ profile: "search", message: "query" }), /Invalid central child execution/);
+    await assert.rejects(createChildClient(host).start({ profile: "search", message: "query" }), /Invalid response from the delegated task/);
   }
   host.result = { ...identity, conversationId: "other-child" };
   await assert.rejects(createChildClient(host).start({ profile: "search", message: "next", resume: "child" }), /resumed conversation/);

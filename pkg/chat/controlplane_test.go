@@ -192,7 +192,7 @@ func TestControlPlaneHTTPErrorRetryability(t *testing.T) {
 	require.ErrorAs(t, err, &responseErr)
 	assert.Equal(t, http.StatusForbidden, responseErr.StatusCode)
 	assert.Equal(t, "access denied", responseErr.Message)
-	assert.Equal(t, "control plane returned HTTP 403: access denied", responseErr.Error())
+	assert.Equal(t, "server returned HTTP 403: access denied", responseErr.Error())
 }
 
 func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(t *testing.T) {
@@ -653,7 +653,7 @@ func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
 		conversationID, err := runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
 
 		assert.Equal(t, "conversation-1", conversationID)
-		require.ErrorContains(t, err, "ended before completion")
+		require.ErrorContains(t, err, "ended before the response was complete")
 	})
 }
 
@@ -771,19 +771,19 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, nil)
 	require.ErrorContains(t, err, "chat event sink is required")
-	require.ErrorContains(t, runner.StreamConversation(t.Context(), " ", &collectingChatSink{}), "conversation id is required")
+	require.ErrorContains(t, runner.StreamConversation(t.Context(), " ", &collectingChatSink{}), "conversation ID is required")
 	require.ErrorContains(t, runner.StreamConversation(t.Context(), "conversation", nil), "chat event sink is required")
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
-	require.ErrorContains(t, err, "failed to decode control-plane chat event")
+	require.ErrorContains(t, err, "failed to decode chat event")
 	var protocolErr *ControlPlaneStreamProtocolError
 	require.ErrorAs(t, err, &protocolErr)
 	_, err = runner.ChatSettings(t.Context(), "")
-	require.ErrorContains(t, err, "failed to decode control-plane chat settings")
+	require.ErrorContains(t, err, "failed to decode chat settings")
 	_, err = runner.SteerConversation(t.Context(), "conversation", "message", nil)
-	require.ErrorContains(t, err, "failed to decode control-plane steering response")
-	require.ErrorContains(t, runner.StopConversation(t.Context(), " "), "conversation id is required")
+	require.ErrorContains(t, err, "failed to decode steering response")
+	require.ErrorContains(t, runner.StopConversation(t.Context(), " "), "conversation ID is required")
 	_, err = runner.SteerConversation(t.Context(), " ", "message", nil)
-	require.ErrorContains(t, err, "conversation id is required")
+	require.ErrorContains(t, err, "conversation ID is required")
 	_, err = runner.SteerConversation(t.Context(), "conversation", " ", nil)
 	require.ErrorContains(t, err, "steering message is required")
 

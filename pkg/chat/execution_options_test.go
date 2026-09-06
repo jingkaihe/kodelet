@@ -92,12 +92,12 @@ func TestApplyExecutionOptionsModelPolicy(t *testing.T) {
 	}{
 		{"inherit", nil, "private-main", ""},
 		{"same provider", &llmtypes.ExecutionOptions{Provider: new("openai")}, "private-main", ""},
-		{"different provider", &llmtypes.ExecutionOptions{Provider: new("anthropic")}, "", "must match the daemon model profile"},
+		{"different provider", &llmtypes.ExecutionOptions{Provider: new("anthropic")}, "", "must match the selected model profile"},
 		{"unknown provider", &llmtypes.ExecutionOptions{Provider: new("unknown")}, "", "unsupported execution provider"},
 		{"alias", &llmtypes.ExecutionOptions{Model: new(" short ")}, "private-main", ""},
 		{"swap configured models", &llmtypes.ExecutionOptions{Model: new("private-weak"), WeakModel: new("private-main")}, "private-weak", ""},
-		{"unknown model", &llmtypes.ExecutionOptions{Model: new("unconfigured")}, "", "daemon's configured models"},
-		{"unknown weak model", &llmtypes.ExecutionOptions{WeakModel: new("unconfigured")}, "", "daemon's configured models"},
+		{"unknown model", &llmtypes.ExecutionOptions{Model: new("unconfigured")}, "", "not an available model"},
+		{"unknown weak model", &llmtypes.ExecutionOptions{WeakModel: new("unconfigured")}, "", "not an available model"},
 		{"zero output tokens", &llmtypes.ExecutionOptions{MaxTokens: new(0)}, "", "must be positive"},
 		{"negative turns", &llmtypes.ExecutionOptions{MaxTurns: new(-1)}, "", "must not be negative"},
 		{"OpenAI thinking budget", &llmtypes.ExecutionOptions{ThinkingBudgetTokens: new(0)}, "", "requires the anthropic provider"},
@@ -182,7 +182,7 @@ func TestApplyExecutionOptionsSnapshotLock(t *testing.T) {
 		{ReasoningEffort: new("high")},
 	} {
 		_, err := applyExecutionOptions(base, options, record)
-		require.ErrorContains(t, err, "conversation model options are locked")
+		require.ErrorContains(t, err, "model settings cannot be changed")
 	}
 	unchanged := &llmtypes.ExecutionOptions{
 		Provider: new("anthropic"), Model: new("private-main"), WeakModel: new("private-weak"),
@@ -201,13 +201,13 @@ func TestApplyExecutionOptionsSnapshotLock(t *testing.T) {
 
 	legacy := &conversationservice.GetConversationResponse{}
 	_, err = applyExecutionOptions(base, &llmtypes.ExecutionOptions{Model: new("private-main")}, legacy)
-	require.ErrorContains(t, err, "legacy conversation without config_snapshot")
+	require.ErrorContains(t, err, "older conversation has no saved model settings")
 	_, err = applyExecutionOptions(base, &llmtypes.ExecutionOptions{NoTools: new(true), MaxTurns: new(0)}, legacy)
 	require.NoError(t, err)
 	changed := base.Clone()
 	changed.MaxTokens = 8192
 	_, err = applyExecutionOptions(changed, &llmtypes.ExecutionOptions{MaxTokens: new(8192)}, record)
-	require.ErrorContains(t, err, "conversation model options are locked", "compare against persisted metadata, not just the incoming config")
+	require.ErrorContains(t, err, "model settings cannot be changed", "compare against persisted metadata, not just the incoming config")
 }
 
 func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
@@ -246,13 +246,13 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 		err     string
 	}{
 		{"invalid tokens", ChatRequest{Options: &llmtypes.ExecutionOptions{MaxTokens: new(0)}}, "must be positive"},
-		{"provider policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Provider: new("openai")}}, "must match the daemon model profile"},
-		{"model policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Model: new("unconfigured")}}, "daemon's configured models"},
+		{"provider policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Provider: new("openai")}}, "must match the selected model profile"},
+		{"model policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Model: new("unconfigured")}}, "not an available model"},
 		{"thinking budget", ChatRequest{Options: &llmtypes.ExecutionOptions{ThinkingBudgetTokens: new(4096)}}, "must be less than maxTokens"},
 		{"provider reasoning", ChatRequest{Options: &llmtypes.ExecutionOptions{ReasoningEffort: new("minimal")}}, "not supported by provider"},
 		{"conflicting reasoning", ChatRequest{ReasoningEffort: "low", Options: &llmtypes.ExecutionOptions{ReasoningEffort: new("high")}}, "conflicts"},
-		{"frozen model", ChatRequest{ConversationID: record.ID, Options: &llmtypes.ExecutionOptions{Model: new("private-weak")}}, "model options are locked"},
-		{"frozen profile", ChatRequest{ConversationID: record.ID, Profile: "other"}, "model profile is locked"},
+		{"frozen model", ChatRequest{ConversationID: record.ID, Options: &llmtypes.ExecutionOptions{Model: new("private-weak")}}, "model settings cannot be changed"},
+		{"frozen profile", ChatRequest{ConversationID: record.ID, Profile: "other"}, "model profile cannot be changed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &recordingEnvironmentResolver{}

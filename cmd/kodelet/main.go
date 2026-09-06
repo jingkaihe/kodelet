@@ -197,13 +197,13 @@ func validateTrustedConfigPermissions(configFile string) error {
 		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.Errorf("trusted control-plane config file %q must be a regular file", configFile)
+		return errors.Errorf("trusted server config file %q must be a regular file", configFile)
 	}
 	if containsStaticTokens && info.Mode().Perm()&0o077 != 0 {
 		return errors.Errorf("trusted config file %q containing static authentication tokens must not be accessible by group or other users", configFile)
 	}
 	if info.Mode().Perm()&0o022 != 0 {
-		return errors.Errorf("trusted control-plane config file %q must not be writable by group or other users", configFile)
+		return errors.Errorf("trusted server config file %q must not be writable by group or other users", configFile)
 	}
 	return nil
 }
@@ -353,7 +353,7 @@ func main() {
 	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
 	rootCmd.PersistentFlags().String("tool-mode", "full", "Tool interaction mode (full, patch)")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
-	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
+	rootCmd.PersistentFlags().String("profile", "", "Model profile to use")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
 	rootCmd.PersistentFlags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools (glob_tool and grep_tool)")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")

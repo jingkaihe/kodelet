@@ -20,12 +20,12 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 			return result
 		}
 		if source == nil {
-			result.err = errors.New("daemon runner does not support conversation history")
+			result.err = errors.New("conversation history is unavailable")
 			return result
 		}
 		history, err := source.LoadConversation(ctx, conversationID)
 		if err != nil {
-			result.err = errors.Wrap(err, "failed to load control-plane conversation")
+			result.err = errors.Wrap(err, "failed to load conversation")
 			return result
 		}
 		result.loaded = true

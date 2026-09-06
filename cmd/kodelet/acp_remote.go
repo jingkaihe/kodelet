@@ -25,7 +25,7 @@ func (p *daemonACPProvider) WaitForRemoteChat(context.Context) (acp.RemoteChatCl
 func runRemoteACP(ctx context.Context, cmd *cobra.Command, serverURL string) error {
 	config, err := remoteACPSessionConfig(ctx, cmd, serverURL)
 	if err != nil {
-		return errors.Wrap(err, "cannot connect ACP to daemon; start kodelet serve or check --server and client authentication (no local fallback)")
+		return errors.Wrap(err, "could not start the ACP connection")
 	}
 	server := acp.NewServer(acp.WithContext(ctx), acp.WithInput(cmd.InOrStdin()), acp.WithOutput(cmd.OutOrStdout()), acp.WithRemoteSessions(config))
 	return runACPServer(ctx, server)
@@ -74,9 +74,12 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 }
 
 func validateRemoteACPFlags(cmd *cobra.Command) error {
-	for _, name := range []string{"runner-auth-token", "sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
+	if cmd.Flags().Changed("runner-auth-token") {
+		return errors.New("--runner-auth-token is not used by ACP; use --auth-token or 'kodelet auth login' to authenticate")
+	}
+	for _, name := range []string{"sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
 		if cmd.Flags().Changed(name) {
-			return errors.Errorf("--%s is not supported by daemon-backed ACP; configure it on the owning daemon or runner", name)
+			return errors.Errorf("--%s cannot be set with 'kodelet acp'; set it in the server or runner configuration", name)
 		}
 	}
 	return nil

@@ -450,14 +450,14 @@ func runDefaultChat(
 		if isChild {
 			remote, ok := environment.(*agentenv.RemoteEnvironment)
 			if !ok {
-				return sessionID, errors.New("delegated children require a remote runner environment")
+				return sessionID, errors.New("delegated tasks require a runner connected to the server")
 			}
 			remote.SetChildRunID(child.identity.RunID)
 			remote.SetChildPrompt(child.prompt)
 		} else if resumedChildPrompt != nil {
 			remote, ok := environment.(*agentenv.RemoteEnvironment)
 			if !ok {
-				return sessionID, errors.New("delegated children require a remote runner environment")
+				return sessionID, errors.New("delegated tasks require a runner connected to the server")
 			}
 			remote.SetChildPrompt(*resumedChildPrompt)
 		}
@@ -550,10 +550,10 @@ func runDefaultChat(
 			}
 			saver, ok := thread.(llmtypes.PendingUserMessageSaver)
 			if !ok || !thread.IsPersisted() {
-				return errors.New("conversation admission persistence is unavailable")
+				return errors.New("cannot save the conversation before starting work")
 			}
 			if err := saver.SavePendingUserMessage(saveCtx, message, imageInputs...); err != nil {
-				return errors.Wrap(err, "failed to persist admitted user input")
+				return errors.Wrap(err, "failed to save the user message before starting work")
 			}
 			checkpointSaved = true
 			return nil
@@ -1191,7 +1191,7 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 	if record != nil {
 		snapshot, hasSnapshot, err := conversationservice.ConfigSnapshotFromMetadata(record.Metadata)
 		if err != nil {
-			return llmtypes.Config{}, errors.Wrap(err, "failed to load conversation config snapshot")
+			return llmtypes.Config{}, errors.Wrap(err, "failed to load the conversation's saved settings")
 		}
 		if hasSnapshot {
 			if strings.TrimSpace(requestedReasoningEffort) != "" {

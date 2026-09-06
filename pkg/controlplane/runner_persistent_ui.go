@@ -116,7 +116,7 @@ func (s *Server) handleNativeRunnerUI(ctx context.Context, identity runnerregist
 	}
 	run, found := s.runnerRegistry.Run(value.RunID)
 	if !found || run.RunnerID != identity.RunnerID {
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "native UI belongs to another runner run"}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "this interactive UI belongs to a different run"}
 	}
 	if run.Status != runnerregistry.RunStatusRunning && run.Status != runnerregistry.RunStatusOpening {
 		return unavailable("native surfaces require an active execution; reopen on the next run"), nil
@@ -131,7 +131,7 @@ func (s *Server) handleNativeRunnerUI(ctx context.Context, identity runnerregist
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
 	}
 	if request.ScopeID != "" && request.ScopeID != run.ConversationID {
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "native UI scope does not match conversation"}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "this interactive UI belongs to a different conversation"}
 	}
 	if len(value.Request) > 512*1024 {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "native UI request exceeds limit"}
@@ -207,7 +207,7 @@ func (s *Server) handleNativeRunnerUI(ctx context.Context, identity runnerregist
 	if method == protocol.MethodUISurfaceOpen {
 		if value.Lifecycle == 0 {
 			broker.mu.Unlock()
-			return unavailable("runner does not support native surface lifecycles"), nil
+			return unavailable("the runner does not support persistent interactive views; update the runner"), nil
 		}
 		if route != nil {
 			route.cancel()
@@ -263,7 +263,7 @@ func (s *Server) handleNativeRunnerUI(ctx context.Context, identity runnerregist
 		response = extensions.UIFrameResponse{Reason: "native UI owner changed or execution ended"}
 	}
 	if route != nil && state.routes[routeID] != route {
-		response = extensions.UIFrameResponse{Reason: "native surface lifecycle ended"}
+		response = extensions.UIFrameResponse{Reason: "this interactive view has closed"}
 	}
 	if route != nil && ((method == protocol.MethodUISurfaceOpen && !response.Accepted) || (method == protocol.MethodUISurfaceClose && response.Accepted)) {
 		if state.routes[routeID] == route {
@@ -302,19 +302,19 @@ func (s *Server) handlePersistentUIAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if broker == nil {
-		s.writeErrorResponse(w, http.StatusConflict, "native UI execution ended", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "the run that opened this interactive UI has ended", nil)
 		return
 	}
 	broker.mu.Lock()
 	if broker.native == nil {
 		broker.mu.Unlock()
-		s.writeErrorResponse(w, http.StatusConflict, "native UI request is not pending", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "this interactive prompt is no longer waiting for a response", nil)
 		return
 	}
 	pending := broker.native.pending[ack.RequestID]
 	if pending == nil || pending.owner != broker.owner || broker.closed || broker.owner.ctx.Err() != nil || broker.owner.clientID != r.Header.Get(chat.ClientIDHeader) {
 		broker.mu.Unlock()
-		s.writeErrorResponse(w, http.StatusConflict, "native UI acknowledgement belongs to a stale owner", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "another client now controls this interactive UI", nil)
 		return
 	}
 	delete(broker.native.pending, ack.RequestID)
@@ -332,7 +332,7 @@ func (s *Server) handlePersistentUIInput(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if broker == nil {
-		s.writeErrorResponse(w, http.StatusConflict, "native UI execution ended", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "the run that opened this interactive UI has ended", nil)
 		return
 	}
 	broker.mu.Lock()
@@ -343,7 +343,7 @@ func (s *Server) handlePersistentUIInput(w http.ResponseWriter, r *http.Request)
 	valid := !broker.closed && route != nil && route.owner == broker.owner && route.ctx.Err() == nil && broker.owner.clientID == r.Header.Get(chat.ClientIDHeader)
 	broker.mu.Unlock()
 	if !valid {
-		s.writeErrorResponse(w, http.StatusConflict, "native surface owner or lifecycle is stale", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "this interactive view has closed or is controlled by another client", nil)
 		return
 	}
 	if rpcErr := validateRunnerUIIdentity(s, route.identity); rpcErr != nil {

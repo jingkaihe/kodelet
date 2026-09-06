@@ -60,7 +60,7 @@ func TestChildHostFencesLeasesAndNeverFallsBack(t *testing.T) {
 				assert.ErrorContains(t, err, "provisional")
 			}
 			if scenario == "no peer" {
-				assert.ErrorContains(t, err, "central child execution is unavailable")
+				assert.ErrorContains(t, err, "delegated task execution is unavailable")
 			}
 		})
 	}
@@ -101,7 +101,7 @@ func TestChildExplicitReleaseWaitsAndRetriesWithoutNewAdmission(t *testing.T) {
 	<-entered
 	_, err = s.ChildRequest(ctx, source, delegation.StartMethod, json.RawMessage(`{"requestId":"late","profile":"search","message":"hello","leaseId":"lease"}`))
 	require.ErrorContains(t, err, "being released")
-	require.ErrorContains(t, <-finished, "unconfirmed")
+	require.ErrorContains(t, <-finished, "could not confirm child task cleanup")
 	require.Contains(t, s.backgroundLeases, "lease", "uncertain cleanup remains reconcilable")
 	s.peer = &modelHelperPeer{call: func(_ context.Context, method string, _ any, result any) error {
 		assert.Equal(t, delegation.ReleaseMethod, method)

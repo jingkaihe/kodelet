@@ -192,7 +192,7 @@ func TestValidateServeConfig(t *testing.T) {
 				CWD:                          "/srv/kodelet",
 				DisableControlPlaneWorkspace: true,
 			},
-			expectedError: "cwd cannot be set when the control-plane workspace is disabled",
+			expectedError: "serve --cwd is no longer supported",
 		},
 	}
 

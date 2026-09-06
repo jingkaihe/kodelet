@@ -747,7 +747,7 @@ func TestRemoteACPCancelFailureStillCancelsLocalPrompt(t *testing.T) {
 	messages := readJSONRPCMessages(t, output)
 	require.Len(t, messages, 1)
 	assert.Nil(t, messages[0]["result"], "cannot claim daemon cancellation without acknowledgement")
-	assert.Contains(t, messages[0]["error"].(map[string]any)["message"], "cancellation was not acknowledged")
+	assert.Contains(t, messages[0]["error"].(map[string]any)["message"], "could not confirm cancellation")
 }
 
 func TestRemoteACPCancelTreatsControlPlaneEOFAsCancelled(t *testing.T) {
@@ -949,10 +949,10 @@ func TestRemoteACPUncertainSubmissionIsNotRepeated(t *testing.T) {
 	request := &acptypes.Request{ID: json.RawMessage(`2`), Params: mustJSONRawMessage(t, acptypes.PromptRequest{SessionID: id, Prompt: []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "side effect"}}})}
 	require.NoError(t, server.handleSessionPrompt(request))
 	response := readJSONRPCMessage(t, output)
-	assert.Contains(t, response["error"].(map[string]any)["message"], "not retried")
+	assert.Contains(t, response["error"].(map[string]any)["message"], "before sending it again")
 	assert.Contains(t, response["error"].(map[string]any)["message"], string(id))
 	require.NoError(t, server.handleSessionPrompt(request))
 	response = readJSONRPCMessage(t, output)
-	assert.Contains(t, response["error"].(map[string]any)["message"], "outcome is uncertain")
+	assert.Contains(t, response["error"].(map[string]any)["message"], "previous message may still be running")
 	assert.Len(t, client.recordedRequests(), 1)
 }

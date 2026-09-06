@@ -42,14 +42,14 @@ func (p *Process) setProfiles(source *processExtensionUISource, profiles []deleg
 			}
 			info, err := os.Stat(path)
 			if err != nil {
-				return errors.Wrap(err, "failed to stat runner-owned preset prompt")
+				return errors.Wrap(err, "failed to stat runner preset prompt")
 			}
 			if !info.Mode().IsRegular() {
 				return errors.New("preset prompt must be a regular file")
 			}
 			file, err := os.Open(path)
 			if err != nil {
-				return errors.Wrap(err, "failed to open runner-owned preset prompt")
+				return errors.Wrap(err, "failed to open runner preset prompt")
 			}
 			content, err := io.ReadAll(io.LimitReader(file, 256*1024+1))
 			_ = file.Close()

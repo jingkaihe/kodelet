@@ -30,7 +30,7 @@ type runCheckpoint struct {
 // It is only for admitted ordinary turns, not discovery or delegated utilities.
 func (r *Registry) OpenRunWithCheckpoint(ctx context.Context, runnerID string, params protocol.RunOpenParams, save func(context.Context, string) error) (runnerpayload.Manifest, error) {
 	if save == nil {
-		return runnerpayload.Manifest{}, errors.New("admitted conversation checkpoint is unavailable")
+		return runnerpayload.Manifest{}, errors.New("cannot save the conversation before starting work")
 	}
 	checkpointCtx, cancel := context.WithCancel(ctx)
 	checkpoint := &runCheckpoint{ctx: checkpointCtx, cancel: cancel, save: save, expectedCWD: params.ExpectedCWD}
@@ -52,14 +52,14 @@ func (r *Registry) OpenRunWithCheckpoint(ctx context.Context, runnerID string, p
 
 func (r *Registry) checkpointRun(ctx context.Context, runnerID, connectionID string, generation int64, params protocol.RunCheckpointParams) (any, *protocol.RPCError) {
 	if params.RunID == "" || !path.IsAbs(params.CWD) || path.Clean(params.CWD) != params.CWD {
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "checkpoint requires a run ID and canonical runner directory"}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "saving the conversation checkpoint requires a run ID and the runner's resolved working directory"}
 	}
 	r.mu.Lock()
 	run := r.runs[params.RunID]
 	runner, connectionErr := r.currentRunnerLocked(runnerID, connectionID, generation)
 	if connectionErr != nil || run == nil || run.Status != RunStatusOpening || run.RunnerID != runnerID || run.connectionID != connectionID || run.generation != generation || !runnerHasActiveRun(runner, params.RunID) || run.checkpoint == nil {
 		r.mu.Unlock()
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "checkpoint requires the admitted opening run owner"}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "only the runner starting this accepted run can save its conversation checkpoint"}
 	}
 	checkpoint := run.checkpoint
 	if checkpoint.closed || checkpoint.ctx.Err() != nil || ctx.Err() != nil {
@@ -72,7 +72,7 @@ func (r *Registry) checkpointRun(ctx context.Context, runnerID, connectionID str
 	}
 	if checkpoint.expectedCWD != "" && checkpoint.expectedCWD != params.CWD {
 		r.mu.Unlock()
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeConflict, Message: "checkpoint directory does not match conversation affinity"}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeConflict, Message: "the working directory differs from the conversation's saved directory"}
 	}
 	checkpoint.used = true
 	checkpoint.ops.Add(1)

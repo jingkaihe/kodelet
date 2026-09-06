@@ -84,7 +84,7 @@ func (s *Service) ChildRequest(ctx context.Context, source extensions.UIExtensio
 			}
 			rel, err := filepath.Rel(cwd, path)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return nil, errors.New("child working directory exceeds parent workspace")
+				return nil, errors.New("the child task's working directory must be inside the parent workspace")
 			}
 			params.Request.CWD = path
 		} else if input.Resume == "" {
@@ -93,7 +93,7 @@ func (s *Service) ChildRequest(ctx context.Context, source extensions.UIExtensio
 	}
 	peer := s.currentPeer()
 	if peer == nil {
-		return nil, errors.New("central child execution is unavailable")
+		return nil, errors.New("delegated task execution is unavailable")
 	}
 	if params.LeaseID != "" {
 		s.mu.Lock()

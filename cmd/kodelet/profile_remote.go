@@ -16,34 +16,38 @@ import (
 
 var remoteProfileCmd = &cobra.Command{
 	Use:               "profile",
-	Short:             "Inspect daemon-owned model profiles",
-	Long:              "Inspect profiles advertised by the selected daemon. Use --profile when starting a conversation. Edit daemon-host configuration with 'kodelet host profile' and restart serve to change defaults.",
+	Short:             "View available model profiles",
+	Long:              "View model profiles available on the selected server. Use --profile when starting a conversation. To change the defaults, run 'kodelet host profile' on the server host and restart 'kodelet serve'.",
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE:              func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 }
 
 func init() {
 	addRemoteAdministrationFlags(remoteProfileCmd)
+	descriptions := map[string]string{
+		"current": "Show the default model profile",
+		"list":    "List available model profiles",
+		"show":    "Show a model profile's reasoning settings",
+	}
 	for _, name := range []string{"current", "list", "show"} {
-		command := &cobra.Command{Use: name, Short: "Inspect daemon profile " + name, Args: cobra.NoArgs, RunE: runRemoteProfileCommand}
+		command := &cobra.Command{Use: name, Short: descriptions[name], Args: cobra.NoArgs, RunE: runRemoteProfileCommand}
 		if name == "show" {
 			command.Use = "show <profile>"
 			command.Args = cobra.ExactArgs(1)
-			command.Short = "Show a daemon profile's advertised reasoning settings"
 			command.Flags().StringP("format", "f", "json", "Output format (json, yaml)")
 		}
 		remoteProfileCmd.AddCommand(command)
 	}
-	use := &cobra.Command{Use: "use <profile>", Short: "Explain how to select a daemon profile", Args: cobra.ExactArgs(1), RunE: func(*cobra.Command, []string) error {
-		return errors.New("profile use does not edit a daemon: pass --profile when starting a conversation, or run 'kodelet host profile use <profile> -g' on the daemon host and restart serve")
+	use := &cobra.Command{Use: "use <profile>", Short: "Show how to select a model profile", Args: cobra.ExactArgs(1), RunE: func(*cobra.Command, []string) error {
+		return errors.New("select a profile with --profile when starting a conversation; to change the default, run 'kodelet host profile use <profile> -g' on the server host and restart 'kodelet serve'")
 	}}
-	use.Flags().BoolP("global", "g", false, "Legacy flag; daemon defaults require host configuration")
+	use.Flags().BoolP("global", "g", false, "No longer supported here; use 'kodelet host profile use -g' on the server host")
 	remoteProfileCmd.AddCommand(use)
 }
 
 func addRemoteAdministrationFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().String("server", defaultRunnerServer, "Daemon endpoint (or KODELET_SERVER)")
-	cmd.PersistentFlags().String("auth-token", "", "Daemon client authentication token (or KODELET_AUTH_TOKEN)")
+	cmd.PersistentFlags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
+	cmd.PersistentFlags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 }
 
 func remoteAdministrationClient(cmd *cobra.Command) (*chat.ControlPlaneChatRunner, error) {
@@ -76,7 +80,7 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	settings, err := client.ChatSettings(ctx, profile)
 	if err != nil {
-		return errors.Wrap(err, "daemon profile inspection failed; no local configuration fallback")
+		return errors.Wrap(err, "could not load model profiles")
 	}
 	current := settings.CurrentProfile
 	if current == "" {
@@ -94,7 +98,7 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 		err = writer.Flush()
 	case "show":
 		if current != profile {
-			return errors.New("daemon returned a different profile; refusing a local or default fallback")
+			return errors.New("the server returned a different profile than requested; use 'kodelet profile list' to check available profiles")
 		}
 		view := struct {
 			Profile                string   `json:"profile" yaml:"profile"`

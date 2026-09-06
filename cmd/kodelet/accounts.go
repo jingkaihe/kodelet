@@ -12,7 +12,7 @@ import (
 
 var anthropicAccountsCmd = &cobra.Command{
 	Use:   "accounts",
-	Short: "Manage the daemon's Anthropic subscription accounts",
+	Short: "Manage Anthropic subscription accounts",
 	RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 }
 
@@ -21,10 +21,10 @@ func init() {
 		use, short string
 		args       cobra.PositionalArgs
 	}{
-		{"list", "List daemon accounts and token status", cobra.NoArgs},
-		{"default [alias]", "Show or set the daemon's default account", cobra.MaximumNArgs(1)},
-		{"remove <alias>", "Remove an account from the daemon", cobra.ExactArgs(1)},
-		{"rename <old-alias> <new-alias>", "Rename a daemon account", cobra.ExactArgs(2)},
+		{"list", "List accounts and token status", cobra.NoArgs},
+		{"default [alias]", "Show or set the default account", cobra.MaximumNArgs(1)},
+		{"remove <alias>", "Remove an account from the server", cobra.ExactArgs(1)},
+		{"rename <old-alias> <new-alias>", "Rename an account", cobra.ExactArgs(2)},
 	} {
 		anthropicAccountsCmd.AddCommand(&cobra.Command{Use: spec.use, Short: spec.short, Args: spec.args, RunE: runRemoteAnthropicAccounts})
 	}
@@ -62,7 +62,7 @@ func runRemoteAnthropicAccounts(cmd *cobra.Command, args []string) error {
 		if err := client.MutateAnthropicAccount(cmd.Context(), mutation); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Daemon account updated.")
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Account updated.")
 		return err
 	}
 	result, err := client.AnthropicAccounts(cmd.Context())
@@ -76,11 +76,11 @@ func runRemoteAnthropicAccounts(cmd *cobra.Command, args []string) error {
 				return err
 			}
 		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No default account set on the daemon.")
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No default account is set.")
 		return err
 	}
 	if len(result.Accounts) == 0 {
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No Anthropic accounts found on the daemon. Use 'kodelet anthropic login' to add one.")
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No Anthropic accounts found. Use 'kodelet anthropic login' to add one.")
 		return err
 	}
 	sort.Slice(result.Accounts, func(i, j int) bool { return result.Accounts[i].Alias < result.Accounts[j].Alias })

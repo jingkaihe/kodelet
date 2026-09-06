@@ -20,8 +20,8 @@ import (
 
 var anthropicLoginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Connect an Anthropic subscription account to the daemon",
-	Long:  "Open the daemon's authorization URL and paste the resulting code. The daemon exchanges and stores credentials. An omitted alias is derived from the account email.",
+	Short: "Connect an Anthropic subscription account",
+	Long:  "Connect your Anthropic account by opening an authorization URL and pasting the code. Credentials are saved on the selected server. If you omit the alias, your account email is used to create one.",
 	Args:  cobra.NoArgs,
 	RunE:  runRemoteAnthropicLogin,
 }
@@ -51,7 +51,7 @@ func runRemoteAnthropicLogin(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if login.ID == "" || login.Status != "pending" || login.AuthorizationURL == "" {
-		return errors.New("daemon returned an invalid pending login; inspect daemon state before retrying")
+		return errors.New("could not start sign-in because the server returned incomplete login details; check the server logs")
 	}
 	completed := false
 	defer func() {
@@ -59,11 +59,11 @@ func runRemoteAnthropicLogin(cmd *cobra.Command, _ []string) error {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if err := client.CancelAnthropicLogin(cleanup, login.ID); err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Could not cancel daemon login; inspect daemon state:", err)
+				fmt.Fprintln(cmd.ErrOrStderr(), "Could not cancel sign-in; check the server logs:", err)
 			}
 		}
 	}()
-	fmt.Fprintln(cmd.OutOrStdout(), "Authorize this daemon account at:", login.AuthorizationURL)
+	fmt.Fprintln(cmd.OutOrStdout(), "Open this URL to authorize your account:", login.AuthorizationURL)
 	noBrowser, _ := cmd.Flags().GetBool("no-browser")
 	if !noBrowser {
 		if err := osutil.OpenBrowser(login.AuthorizationURL); err != nil {
@@ -81,9 +81,9 @@ func runRemoteAnthropicLogin(cmd *cobra.Command, _ []string) error {
 	}
 	completed = true
 	if result.Status != "connected" {
-		return errors.Errorf("daemon login %s: %s", result.Status, result.Message)
+		return errors.Errorf("sign-in %s: %s", result.Status, result.Message)
 	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Anthropic account connected on the daemon. Use 'kodelet anthropic accounts list' to inspect it.")
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Anthropic account connected. Use 'kodelet anthropic accounts list' to view your accounts.")
 	return err
 }
 
@@ -112,7 +112,7 @@ func readProviderInput(ctx context.Context, input io.Reader) (string, error) {
 		return "", ctx.Err()
 	}
 	if len(line) > 8193 {
-		return "", errors.New("provider input exceeds 8192 bytes")
+		return "", errors.New("authorization input is too long (maximum 8192 bytes)")
 	}
 	if err != nil && (err != io.EOF || line == "") {
 		return "", err

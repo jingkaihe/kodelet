@@ -402,7 +402,7 @@ func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing
 	unavailable := ExecuteEnvironmentTool(t.Context(), thread, registry, "get_goal", `{}`, "call-goal")
 	require.NotNil(t, unavailable.Result)
 	assert.True(t, unavailable.Result.IsError())
-	assert.Contains(t, unavailable.Result.GetError(), "not available in the active run")
+	assert.Contains(t, unavailable.Result.GetError(), "not available in the current run")
 
 	sentinel := errors.New("runner link closed")
 	environment.manifest.Tools = []agentenv.ToolDefinition{{Name: "remote", Placement: agentenv.ToolPlacementEnvironment}}

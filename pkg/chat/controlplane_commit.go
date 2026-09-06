@@ -43,7 +43,7 @@ func (r *ControlPlaneChatRunner) PrepareCommit(ctx context.Context, target Works
 		return result, err
 	}
 	if result.RunnerID == "" || result.Diff == "" {
-		return result, errors.New("daemon returned an incomplete commit snapshot")
+		return result, errors.New("the commit preview is incomplete; generate and review it again")
 	}
 	return result, (protocol.WorkspaceGitCommitParams{CWD: result.CWD, Head: result.Head, HeadRef: result.HeadRef, Tree: result.Tree, Generation: result.Generation, Message: "validate snapshot"}).Validate()
 }
@@ -76,17 +76,17 @@ func (r *ControlPlaneChatRunner) CreateCommit(ctx context.Context, target Worksp
 	request.Header.Set("Content-Type", "application/json")
 	response, err := r.client.Do(request)
 	if err != nil {
-		return result, errors.Wrap(err, "runner commit was not acknowledged; inspect Git history before retrying (not retried)")
+		return result, errors.Wrap(err, "could not confirm whether the commit was created; check 'git log' in the repository before trying again")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return result, errors.Wrap(controlPlaneResponseError(response), "runner commit was not acknowledged; inspect Git history before retrying (not retried)")
+		return result, errors.Wrap(controlPlaneResponseError(response), "could not confirm whether the commit was created; check 'git log' in the repository before trying again")
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return result, errors.Wrap(err, "cannot read commit acknowledgement; inspect Git history before retrying (not retried)")
+		return result, errors.Wrap(err, "could not read the commit result; check 'git log' in the repository before trying again")
 	}
 	if result.Commit == "" {
-		return result, errors.New("daemon did not acknowledge a commit identity; inspect Git history before retrying")
+		return result, errors.New("no commit ID was returned; check 'git log' in the repository before trying again")
 	}
 	return result, nil
 }

@@ -105,7 +105,7 @@ func (s *remoteUISource) NotifyExtensionUISurfaceEvent(ctx context.Context, life
 	current := s.lifecycles[key]
 	s.mu.Unlock()
 	if route == "" || (lifecycle != 0 && lifecycle != current) {
-		return errors.New("remote surface lifecycle is closed")
+		return errors.New("this interactive view is closed")
 	}
 	switch method {
 	case extensions.UISurfaceInputMethod:

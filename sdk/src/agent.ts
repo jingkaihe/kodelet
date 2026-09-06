@@ -311,7 +311,7 @@ export class Client {
 
   async createSession(options: CreateSessionOptions = {}): Promise<Session> {
     if (options.extensions?.length || options.extensionTransport !== undefined) {
-      throw new Error("Inline executable extensions are not supported by daemon sessions; install the extension on the runner and use ctx.children for delegated execution");
+      throw new Error("Inline executable extensions are not supported by server sessions; install the extension on the runner and use ctx.children for delegated execution");
     }
     if (options.ui !== undefined) throw new Error("Inline extension UI handlers are not supported by this ACP adapter");
     const cwd = options.cwd ?? this.cwd;

@@ -146,7 +146,7 @@ export class ChildExecution {
 function parseResult(value: unknown): ChildResult {
   const result = value as ChildResult | undefined;
   if (!result || !identitySchema.safeParse(result.conversationId).success || !identitySchema.safeParse(result.runId).success || typeof result.done !== "boolean") {
-    throw new Error("Invalid central child execution response");
+    throw new Error("Invalid response from the delegated task");
   }
   return result;
 }
@@ -155,16 +155,16 @@ export function createChildClient(client: HostRPCClient | undefined): ChildClien
   const retained = new Set<string>();
   return {
     async start(request) {
-      if (!client) throw new Error("Central child execution requires an authenticated runner host; no local fallback is available");
+      if (!client) throw new Error("Delegated tasks require an authenticated runner connection");
       const { lease, ...input } = request;
-      if (lease !== undefined && (!lease || !identitySchema.safeParse(lease.id).success)) throw new Error("Child execution requires a real runner background lease");
+      if (lease !== undefined && (!lease || !identitySchema.safeParse(lease.id).success)) throw new Error("Delegated tasks require a valid runner background task lease");
       const leaseId = lease?.id;
       const persistent = (method: string, params: unknown) => {
         // Unlike UI requests, retained child RPC must outlive a handler even
         // when it starts before that handler has returned.
         if (client.persistent) return client.persistent.request(method, params);
         if (client.requestPersistent) return client.requestPersistent(method, params);
-        throw new Error("Retained child execution requires persistent host RPC");
+        throw new Error("Continuing a background child task requires a persistent runner connection");
       };
       const active = (method: string, params: unknown) => client.request(method, params);
       const validated = requestSchema.parse(input);

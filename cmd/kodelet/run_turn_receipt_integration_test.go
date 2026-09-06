@@ -151,7 +151,7 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 				return err == nil && recovered.Status == "interrupted" && recovered.RunID == receipt.RunID
 			}, 15*time.Second, 20*time.Millisecond)
 			_, err = client.Run(ctx, req, &receiptDiscardSink{})
-			require.ErrorContains(t, err, "daemon stopped")
+			require.ErrorContains(t, err, "server stopped")
 			late := req
 			late.TurnID = "cancel-before-admission"
 			sink := &receiptDiscardSink{}

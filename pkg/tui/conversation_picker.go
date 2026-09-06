@@ -59,11 +59,11 @@ type conversationListMsg struct {
 func loadConversationListFromSource(ctx context.Context, requestID int, source chat.ConversationSource) tea.Cmd {
 	return func() tea.Msg {
 		if source == nil {
-			return conversationListMsg{requestID: requestID, err: errors.New("daemon runner does not support conversation history")}
+			return conversationListMsg{requestID: requestID, err: errors.New("conversation history is unavailable")}
 		}
 		summaries, err := source.ListConversations(ctx, conversationPickerLimit)
 		if err != nil {
-			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list control-plane conversations")}
+			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list conversations")}
 		}
 		return conversationListMsg{requestID: requestID, summaries: summaries}
 	}

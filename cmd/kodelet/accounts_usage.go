@@ -19,7 +19,7 @@ Shows the 5-hour and 7-day usage windows including:
 - Utilization percentage
 - Reset time
 
-The daemon makes a minimal provider request to retrieve the rate limit headers.
+The server makes a minimal provider request to retrieve the rate limit headers.
 
 Examples:
   kodelet anthropic accounts usage           # Show usage for default account

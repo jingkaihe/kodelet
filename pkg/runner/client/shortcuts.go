@@ -21,7 +21,7 @@ func (s *Service) executeShortcut(ctx context.Context, params runnerpayload.Shor
 	manifest, config, runtime := run.manifest, run.config, run.runtime
 	s.mu.Unlock()
 	if params.Digest == "" || params.Digest != manifest.Digest {
-		return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut manifest changed; refresh discovery")
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("the available shortcuts changed; reload them before trying again")
 	}
 	matched := false
 	for _, descriptor := range manifest.Shortcuts {
@@ -31,7 +31,7 @@ func (s *Service) executeShortcut(ctx context.Context, params runnerpayload.Shor
 		}
 	}
 	if !matched || params.Shortcut.Generation == 0 {
-		return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut is not registered in the pinned run")
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("this shortcut is not available in the current run")
 	}
 	matched, result, err := runtime.ExecutePinnedShortcut(operationCtx, extensions.Shortcut{
 		Key: params.Shortcut.Key, ExtensionID: params.Shortcut.ExtensionID, Generation: params.Shortcut.Generation,

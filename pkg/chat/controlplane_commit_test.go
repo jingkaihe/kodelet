@@ -38,7 +38,7 @@ func TestControlPlaneCommitUncertainResultIsNeverRetried(t *testing.T) {
 			client, err := NewControlPlaneChatRunner(server.URL, "client", "runner")
 			require.NoError(t, err)
 			_, err = client.CreateCommit(t.Context(), WorkspaceTarget{}, protocol.WorkspaceGitCommitParams{CWD: "/runner/repo", Tree: strings.Repeat("a", 40), Generation: 1, Message: "feat: test"})
-			require.ErrorContains(t, err, "inspect Git history")
+			require.ErrorContains(t, err, "check 'git log'")
 			assert.EqualValues(t, 1, calls.Load())
 		})
 	}
