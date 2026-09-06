@@ -40,15 +40,14 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 	if err != nil {
 		return config, err
 	}
-	// Preserve explicit serverURL callers while sharing CLI local bootstrap.
-	if selected, configured := serverFlagOrConfig(cmd); !configured && selected == serverURL {
-		connection, err := ensureLocalServer(ctx, cmd.ErrOrStderr())
-		if err != nil {
-			return config, err
-		}
-		serverURL = connection.URL
+	// Share chat/run bootstrap and saved OIDC login handling, while preserving
+	// library callers that supply a different serverURL directly.
+	var token string
+	if selected, _ := serverFlagOrConfig(cmd); selected == serverURL {
+		serverURL, token, err = prepareClientServer(ctx, cmd)
+	} else {
+		token, _, err = resolveControlPlaneAuthToken(cmd, serverURL)
 	}
-	token, _, err := resolveControlPlaneAuthToken(cmd, serverURL)
 	if err != nil {
 		return config, err
 	}

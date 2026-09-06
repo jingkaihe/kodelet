@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,7 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -117,6 +122,135 @@ func TestPrepareClientExplicitServerNeverStartsLocalDaemon(t *testing.T) {
 			assert.Equal(t, endpoint, server)
 			assert.Equal(t, "explicit", token)
 			assert.NoDirExists(t, directory)
+		})
+	}
+}
+
+func TestPrepareClientOIDCServerRemainsConnectOnly(t *testing.T) {
+	for _, test := range []struct {
+		name, credential, override string
+		oidc                       bool
+	}{
+		{name: "saved login", credential: "valid"},
+		{name: "expired login", credential: "expired"},
+		{name: "OIDC without login", oidc: true},
+		{name: "OIDC flag override", credential: "expired", override: "flag", oidc: true},
+		{name: "OIDC environment override", credential: "expired", override: "environment", oidc: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			if test.oidc {
+				viper.Set("serve", map[string]any{"web_auth_mode": " OIDC ", "runner_auth_mode": "enrollment"})
+			}
+			bearer := controlPlaneAuthTestBearer(0x91)
+			if test.credential != "" {
+				store, err := userauth.NewStore()
+				require.NoError(t, err)
+				expiry := time.Now().Add(time.Hour)
+				if test.credential == "expired" {
+					expiry = time.Now().Add(-time.Hour)
+				}
+				require.NoError(t, store.SaveCredential(controlPlaneAuthTestCredential(defaultRunnerServer, "saved-login", bearer, controlPlaneAuthTestPrincipal("user", "user@example.com"), expiry)))
+			}
+			cmd := remoteRunCommandForTest()
+			switch test.override {
+			case "flag":
+				require.NoError(t, cmd.Flags().Set("auth-token", "override"))
+			case "environment":
+				t.Setenv(controlPlaneAuthTokenEnv, "override")
+			}
+			server, token, err := prepareClientServer(t.Context(), cmd)
+			assert.Equal(t, defaultRunnerServer, server)
+			switch {
+			case test.override != "":
+				require.NoError(t, err)
+				assert.Equal(t, "override", token)
+			case test.credential == "expired":
+				require.ErrorContains(t, err, "kodelet auth login --server")
+				assert.NotContains(t, err.Error(), bearer)
+			case test.credential == "valid":
+				require.NoError(t, err)
+				assert.Equal(t, bearer, token)
+			default:
+				require.NoError(t, err)
+				assert.Empty(t, token)
+			}
+			assert.NoDirExists(t, directory, "connect-only clients must not create local lifecycle state")
+		})
+	}
+}
+
+func TestOIDCClientsReuseSavedLoginWithoutLocalDiscovery(t *testing.T) {
+	for _, client := range []string{"chat", "run", "acp"} {
+		t.Run(client, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			viper.Set("serve", map[string]any{"web_auth_mode": "oidc", "runner_auth_mode": "enrollment"})
+			// An operator-owned OIDC server holds the lifetime lock, but does
+			// not publish a token-mode connection.json or client-token.
+			lock, err := tryLocalServerLock(directory, "server.lock")
+			require.NoError(t, err)
+			require.NotNil(t, lock)
+			defer lock.Close()
+			bearer := controlPlaneAuthTestBearer(0x92)
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				assert.Equal(t, "Bearer "+bearer, r.Header.Get("Authorization"))
+				switch r.URL.Path {
+				case "/api/chat/settings":
+					_ = json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: "default", DefaultRunnerID: "runner", DefaultRunnerReady: true})
+				case "/api/chat/slash-commands":
+					_ = json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/oidc-workspace"})
+				case "/api/chat":
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					_ = json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "result", Result: new("OIDC result")})
+					_ = json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"})
+				default:
+					assert.Fail(t, "unexpected client endpoint", "%s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			store, err := userauth.NewStore()
+			require.NoError(t, err)
+			require.NoError(t, store.SaveCredential(controlPlaneAuthTestCredential(server.URL, "saved-login", bearer, controlPlaneAuthTestPrincipal("user", "user@example.com"), time.Now().Add(time.Hour))))
+			cmd := remoteRunCommandForTest()
+			cmd.Use = client
+			cmd.Flags().String("theme", tui.AutoThemeName, "")
+			// Replace only the default URL so the OS can assign a free test
+			// port; --server, environment, and config remain unset.
+			require.NoError(t, cmd.Flags().Lookup("server").Value.Set(server.URL))
+			require.False(t, cmd.Flags().Changed("server"))
+			var output, diagnostics bytes.Buffer
+			cmd.SetOut(&output)
+			cmd.SetErr(&diagnostics)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			cmd.SetContext(ctx)
+			switch client {
+			case "chat":
+				config, err := prepareDaemonChat(ctx, cmd)
+				require.NoError(t, err)
+				assert.Equal(t, "/oidc-workspace", config.CWD)
+			case "run":
+				require.NoError(t, cmd.Flags().Set("result-only", "true"))
+				require.NoError(t, runControlPlaneCommand(cmd, []string{"hello"}))
+				assert.Equal(t, "OIDC result\n", output.String())
+			case "acp":
+				config, err := remoteACPSessionConfig(ctx, cmd, server.URL)
+				require.NoError(t, err)
+				remote, _, err := config.Provider.WaitForRemoteChat(ctx)
+				require.NoError(t, err)
+				_, err = remote.DiscoverWorkspace(ctx, chat.WorkspaceTarget{RunnerID: "runner"})
+				require.NoError(t, err)
+			}
+			assert.Positive(t, calls.Load())
+			assert.Empty(t, diagnostics.String())
+			assert.NoFileExists(t, filepath.Join(directory, "startup.lock"))
+			assert.NoFileExists(t, filepath.Join(directory, "connection.json"))
+			assert.NoFileExists(t, filepath.Join(directory, "client-token"))
 		})
 	}
 }

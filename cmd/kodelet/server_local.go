@@ -377,13 +377,31 @@ func ensureLocalServer(ctx context.Context, output io.Writer) (localServerConnec
 
 func prepareClientServer(ctx context.Context, cmd *cobra.Command) (string, string, error) {
 	server, configured := serverFlagOrConfig(cmd)
-	if !configured {
-		connection, err := ensureLocalServer(ctx, cmd.ErrOrStderr())
-		if err != nil {
-			return "", "", err
-		}
-		server = connection.URL
+	token, source, err := resolveControlPlaneAuthToken(cmd, server)
+	if configured || source == controlPlaneAuthTokenSourceStored || err != nil {
+		// A saved sign-in identifies an existing operator-managed server, even
+		// without --server. Preserve login/connection errors instead of starting
+		// another daemon or waiting for token-based local discovery state.
+		return server, token, err
 	}
-	token, _, err := resolveControlPlaneAuthToken(cmd, server)
+	config := NewServeConfig()
+	if err := applyTrustedServeConfig(config); err != nil {
+		return "", "", err
+	}
+	webMode, _, err := resolveServeAuthModes(config)
+	if err != nil {
+		return "", "", err
+	}
+	if webMode == controlplane.WebAuthModeOIDC {
+		// OIDC deployments remain connect-only before login too, and may
+		// use an explicit API credential instead of a saved sign-in.
+		return server, token, nil
+	}
+	connection, err := ensureLocalServer(ctx, cmd.ErrOrStderr())
+	if err != nil {
+		return "", "", err
+	}
+	server = connection.URL
+	token, _, err = resolveControlPlaneAuthToken(cmd, server)
 	return server, token, err
 }

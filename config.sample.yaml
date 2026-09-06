@@ -14,6 +14,8 @@ log_format: "json"
 # endpoint/token under ~/.kodelet/server/ (or $KODELET_BASE_PATH/server/).
 # KODELET_SERVER overrides this setting; --server overrides both.
 # Explicit server selections are connect-only, with no automatic local fallback.
+# Saved OIDC sign-ins and serve.web_auth_mode: oidc also keep the selected endpoint
+# connect-only, including the default http://localhost:8080 without --server.
 # This security-sensitive option is honored only from ~/.kodelet/config.yaml or
 # a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
 # server: "https://kodelet.example"
