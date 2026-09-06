@@ -9,6 +9,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Prerequisites](#prerequisites)
 - [Updating](#updating)
 - [Usage Modes](#usage-modes)
+  - [Local background server](#local-background-server)
   - [One-shot Mode](#one-shot-mode)
   - [Terminal Chat TUI](#terminal-chat-tui)
   - [Interactive Chat Mode (ACP)](#interactive-chat-mode-acp)
@@ -89,9 +90,31 @@ For running locally or building from source:
 
 ## Usage Modes
 
-Start `kodelet serve` in a separate terminal, then set `KODELET_AUTH_TOKEN` to its printed web/API token. Provider credentials belong on the daemon. CLI commands connect to `http://localhost:8080` by default; use `--server`, `KODELET_SERVER`, or the user configuration's `server` setting for another endpoint.
+Run `kodelet chat`, `kodelet run`, or `kodelet acp` directly: when no server is explicitly selected, Kodelet starts a detached local server if needed and discovers its API credential automatically. Subsequent clients reuse it. Provider credentials belong on the daemon. Use `--server`, `KODELET_SERVER`, or the user configuration's `server` setting for a connect-only endpoint; an unavailable explicitly selected server never falls back to local execution.
 
 When upgrading, stop older Kodelet processes and back up `~/.kodelet` before starting the new daemon. Existing history is reused; use `conversation adopt` before continuing a legacy conversation. Do not run older direct-write clients against the upgraded database. One-shot runs always save; the removed `--no-save` flag fails explicitly.
+
+### Local background server
+
+```bash
+kodelet chat                    # start or reuse the local server, then open chat
+kodelet run "inspect this repo" # use the same server from another terminal
+kodelet server start            # explicitly start or reuse the local server
+kodelet server status           # endpoint, PID, version, API/runner readiness
+kodelet server logs             # most recent 64 KiB of background logs
+kodelet server stop             # refuse if agent runs are active
+kodelet server restart          # apply changed trusted defaults or a new version
+kodelet server stop --force     # cancel active runs and stop
+kodelet serve                   # foreground operation for debugging/supervision
+```
+
+The managed server stays alive when chat exits or a query finishes. Its stdin is disconnected, its output goes to a private log, and it runs in a separate Unix session. It is not a login/reboot service or crash supervisor: the next chat/run/ACP command recovers a stopped server. Startup waits up to 30 seconds for the API and embedded runner; authentication failures, instance mismatches, unhealthy runners, and occupied ports are reported instead of starting a competing daemon. Stop/restart never signal an unverified PID and require `--force` when agent runs are active.
+
+User-edited settings remain in `~/.kodelet/config.yaml`. Generated connection state is stored separately under `~/.kodelet/server/` (or `$KODELET_BASE_PATH/server/`): `connection.json` contains the actual endpoint and process identity, `client-token` contains the API credential, `startup.lock` coordinates client lifecycle requests, `server.lock` is held for the daemon lifetime, and `server.log` holds diagnostics. The directory is mode `0700`; generated files are mode `0600`. Do not edit or delete the lock files. Credentials are not printed into managed-server logs. Client `--auth-token` and `KODELET_AUTH_TOKEN` overrides still take precedence.
+
+Managed startup uses trusted `serve` settings and requires loopback binding, token authentication, and an enabled embedded runner. The default port is 8080; `serve.port: 0` selects an available port, which clients discover from runtime state. For public/OIDC deployments or external-runner-only servers, start `kodelet serve` explicitly and select its endpoint with `--server`. A foreground loopback token server also publishes local connection state, but remains operator-owned: stop it with Ctrl+C or its supervisor, not `kodelet server stop`. Only one `serve` process may own a state directory, including during database migrations; independent deployments need separate `KODELET_BASE_PATH` values.
+
+The managed embedded runner defaults to the user's home directory, giving it a stable identity across restarts; `serve.runner_workspace` overrides this. Each new same-host chat/run still defaults to the invoking client's current directory, and resumed conversations preserve their saved runner and directory. The daemon inherits trusted configuration and environment from its launching process, not later client request flags. Trusted defaults remain pinned until restart. A different `KODELET_CONFIG_FILE` or configuration mode requires stopping the existing server first; repository configuration never becomes daemon-wide configuration.
 
 ### One-shot Mode
 
@@ -126,7 +149,7 @@ kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
 
 #### Daemon-backed execution
 
-Start `kodelet serve` before running a query, or use `--server` to connect to an existing Kodelet server. Conversations are saved automatically.
+The local server starts automatically when needed, or use `--server` to connect to an existing Kodelet server without automatic startup. Conversations are saved automatically.
 
 ```bash
 # Select a connected runner by ID or name.
@@ -153,7 +176,7 @@ Kodelet names persisted conversations deterministically from the first user mess
 
 ### Terminal Chat TUI
 
-Use `kodelet chat` to connect the native terminal UI to a running daemon:
+Use `kodelet chat` to open the native terminal UI, starting the local daemon automatically when needed:
 
 ```bash
 kodelet chat                         # start a new TUI conversation
@@ -226,7 +249,7 @@ toad acp 'kodelet acp'
 kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-Start `kodelet serve` before connecting an ACP client. The server saves conversations and runs the AI model; its built-in runner provides workspace tools and commands. Use `--runner` to select another runner. Set `server` or `KODELET_SERVER` to choose the server, and sign in with `kodelet auth login --server ...` or supply an API token with `--auth-token`.
+ACP starts the managed local server automatically when no server is explicitly selected; startup diagnostics go to stderr so stdout remains JSON-RPC only. The server saves conversations and runs the AI model; its built-in runner provides workspace tools and commands. Use `--runner` to select another runner. Set `server` or `KODELET_SERVER` to choose a connect-only server, and sign in with `kodelet auth login --server ...` or supply an API token with `--auth-token`.
 
 Session directories belong to the selected runner, not the ACP client. Resuming preserves the stored runner, directory, and profiles. `--runner-profile` selects the environment for new sessions; `--profile` selects daemon model settings.
 
@@ -427,7 +450,7 @@ kodelet runner start \
   --name kodelet-gpu
 ```
 
-Runner commands use the user-level `server` setting or `KODELET_SERVER` when `--server` is omitted, otherwise they default to `http://localhost:8080`.
+Runner commands use the user-level `server` setting or `KODELET_SERVER` when `--server` is omitted; otherwise they discover a published local endpoint, falling back to `http://localhost:8080`. They do not automatically start a server.
 
 `--name` is optional mutable display metadata. The control plane assigns the stable opaque runner ID. Reconnecting from the same authenticated owner, stable local host instance, and canonical workspace path reuses that ID even if the local ID cache was removed. Hostname, process ID, workspace basename, and display name are diagnostic metadata rather than identity.
 
@@ -794,7 +817,7 @@ max_tokens: 8192
 log_level: "info"
 ```
 
-The user-level `server` setting selects the daemon for ordinary commands; `KODELET_SERVER` and `--server` override it. Without an override, clients use `http://localhost:8080`. Repository configuration cannot select the server or change daemon credentials/models.
+The user-level `server` setting selects the daemon for ordinary commands; `KODELET_SERVER` and `--server` override it. Explicit selections are connect-only. Without an override, clients discover the local endpoint from `server/connection.json`; chat/run/ACP start the managed server when needed, while other commands connect without starting it. The managed server defaults to port 8080. Repository configuration cannot select the server or change daemon credentials/models.
 
 Configure `kodelet serve` with flags or the trusted user-level `serve` namespace. Repository configuration cannot set `serve`; command-line flags take precedence, and static token or OIDC secret files must be owner-only. See [Web UI Server](#web-ui-server) and [`config.sample.yaml`](../config.sample.yaml).
 

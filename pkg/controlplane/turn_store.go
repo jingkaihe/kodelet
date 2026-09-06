@@ -81,13 +81,20 @@ func (s *turnStore) admit(ctx context.Context, req chat.ChatRequest) (chat.TurnR
 	if err != nil {
 		return chat.TurnReceipt{}, false, err
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
+	connection, err := s.db.Connx(ctx)
 	if err != nil {
 		return chat.TurnReceipt{}, false, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer connection.Close()
+	// Admission reads before inserting. Reserve the write transaction before
+	// taking a WAL snapshot, so concurrent conversation persistence cannot make
+	// that snapshot unwritable (SQLITE_BUSY_SNAPSHOT). Never replay a query.
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return chat.TurnReceipt{}, false, err
+	}
+	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
 	var row turnRow
-	err = tx.GetContext(ctx, &row, `SELECT * FROM chat_turns WHERE conversation_id = ? AND turn_id = ?`, req.ConversationID, req.TurnID)
+	err = connection.GetContext(ctx, &row, `SELECT * FROM chat_turns WHERE conversation_id = ? AND turn_id = ?`, req.ConversationID, req.TurnID)
 	if err == nil {
 		if row.RequestHash != "" && row.RequestHash != hash {
 			return chat.TurnReceipt{}, false, errTurnConflict
@@ -98,7 +105,7 @@ func (s *turnStore) admit(ctx context.Context, req chat.ChatRequest) (chat.TurnR
 		return chat.TurnReceipt{}, false, err
 	}
 	var active int
-	if err := tx.GetContext(ctx, &active, `SELECT COUNT(*) FROM chat_turns WHERE conversation_id = ? AND status IN ('accepted','running')`, req.ConversationID); err != nil {
+	if err := connection.GetContext(ctx, &active, `SELECT COUNT(*) FROM chat_turns WHERE conversation_id = ? AND status IN ('accepted','running')`, req.ConversationID); err != nil {
 		return chat.TurnReceipt{}, false, err
 	}
 	if active != 0 {
@@ -106,11 +113,12 @@ func (s *turnStore) admit(ctx context.Context, req chat.ChatRequest) (chat.TurnR
 	}
 	now := time.Now().UTC()
 	receipt := chat.TurnReceipt{ConversationID: req.ConversationID, TurnID: req.TurnID, RunID: convtypes.GenerateID(), Status: "accepted", CreatedAt: now, UpdatedAt: now}
-	_, err = tx.ExecContext(ctx, `INSERT INTO chat_turns (conversation_id,turn_id,request_hash,run_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`, receipt.ConversationID, receipt.TurnID, hash, receipt.RunID, receipt.Status, now, now)
+	_, err = connection.ExecContext(ctx, `INSERT INTO chat_turns (conversation_id,turn_id,request_hash,run_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`, receipt.ConversationID, receipt.TurnID, hash, receipt.RunID, receipt.Status, now, now)
 	if err != nil {
 		return chat.TurnReceipt{}, false, err
 	}
-	return receipt, true, tx.Commit()
+	_, err = connection.ExecContext(ctx, "COMMIT")
+	return receipt, true, err
 }
 
 func (s *turnStore) start(ctx context.Context, conversationID, turnID string) (bool, error) {

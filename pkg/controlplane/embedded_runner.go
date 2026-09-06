@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
 
@@ -57,11 +59,45 @@ func (s *Server) EmbeddedRunnerStatus() EmbeddedRunnerStatus {
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	s.activeChatsMu.Lock()
 	stopping := s.stopping
+	activeRuns := len(s.activeChats)
 	s.activeChatsMu.Unlock()
+	var instanceID string
+	if s.config != nil {
+		instanceID = s.config.InstanceID
+	}
 	s.writeJSONResponse(w, map[string]any{
 		"apiReady":       !stopping,
 		"embeddedRunner": s.EmbeddedRunnerStatus(),
+		"instanceId":     instanceID,
+		"version":        version.Version,
+		"activeRuns":     activeRuns,
 	})
+}
+
+func (s *Server) handleLocalServerStop(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		InstanceID string `json:"instanceId"`
+		Force      bool   `json:"force"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid server stop request", err)
+		return
+	}
+	if request.InstanceID == "" || request.InstanceID != s.config.InstanceID {
+		s.writeErrorResponse(w, http.StatusConflict, "server instance changed; refusing to stop a different server", nil)
+		return
+	}
+	s.activeChatsMu.Lock()
+	if len(s.activeChats) != 0 && !request.Force {
+		s.activeChatsMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "server has active work; use --force to cancel it and stop", nil)
+		return
+	}
+	// Stop admission under the same lock as the active-work check.
+	s.stopping = true
+	s.activeChatsMu.Unlock()
+	s.writeJSONResponse(w, map[string]bool{"stopping": true})
+	s.config.LocalShutdown()
 }
 
 func (s *Server) embeddedRunnerError(err error) {

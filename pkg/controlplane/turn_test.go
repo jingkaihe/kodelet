@@ -173,6 +173,39 @@ func TestTurnStoreConcurrentDuplicatesAdmitExactlyOnce(t *testing.T) {
 	assert.EqualValues(t, 1, accepted.Load())
 }
 
+func TestTurnStoreAdmissionWaitsForConcurrentWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.db")
+	store := openTurnTestStore(t, path)
+	writer, err := db.Open(t.Context(), path)
+	require.NoError(t, err)
+	defer writer.Close()
+	_, err = writer.ExecContext(t.Context(), "BEGIN IMMEDIATE")
+	require.NoError(t, err)
+	defer func() { _, _ = writer.ExecContext(context.Background(), "ROLLBACK") }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, admitted, err := store.admit(t.Context(), chat.ChatRequest{ConversationID: "conversation", TurnID: "turn", Message: "once"})
+		if err == nil && !admitted {
+			err = errors.New("turn was not admitted")
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.FailNow(t, "admission must wait for the writer instead of failing or replaying", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_, err = writer.ExecContext(t.Context(), "COMMIT")
+	require.NoError(t, err)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "admission did not complete after the writer committed")
+	}
+}
+
 func serveTurnTestServer(t *testing.T, store *turnStore, runner chat.ChatRunner) (*httptest.Server, *chat.ControlPlaneChatRunner) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

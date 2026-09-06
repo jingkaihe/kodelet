@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/binaries"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -59,6 +57,11 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 	}
 	if configured := strings.TrimSpace(viper.GetString("server")); configured != "" {
 		return configured, true
+	}
+	if directory, err := localServerDirectory(); err == nil {
+		if connection, err := readLocalServerConnection(directory); err == nil {
+			return connection.URL, false
+		}
 	}
 	return strings.TrimSpace(value), false
 }
@@ -451,9 +454,6 @@ func main() {
 
 func initializeCommandResources(cmd *cobra.Command, _ []string) error {
 	switch cmd.Name() {
-	case "serve":
-		binaries.EnsureDepsInstalled(cmd.Context())
-		return errors.Wrap(db.RunMigrations(cmd.Context(), migrations.All()), "failed to run database migrations")
 	case "start":
 		if parent := cmd.Parent(); parent != nil && parent.Name() == "runner" {
 			binaries.EnsureDepsInstalled(cmd.Context())

@@ -43,6 +43,34 @@ type runnerAPITestLink struct {
 	call func(context.Context, string, any, any) error
 }
 
+func TestLocalServerStopRequiresIdentityAndIdleServer(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		active bool
+		code   int
+	}{
+		{"invalid", "{", false, http.StatusBadRequest},
+		{"wrong instance", `{"instanceId":"other"}`, false, http.StatusConflict},
+		{"active", `{"instanceId":"same"}`, true, http.StatusConflict},
+		{"idle", `{"instanceId":"same"}`, false, http.StatusOK},
+		{"force", `{"instanceId":"same","force":true}`, true, http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stopped := false
+			server := &Server{config: &ServerConfig{InstanceID: "same", LocalShutdown: func() { stopped = true }}, activeChats: map[string]*activeChatRun{}}
+			if test.active {
+				server.activeChats["active"] = &activeChatRun{}
+			}
+			response := httptest.NewRecorder()
+			server.handleLocalServerStop(response, httptest.NewRequest(http.MethodPost, "/api/server/stop", strings.NewReader(test.body)))
+			assert.Equal(t, test.code, response.Code)
+			assert.Equal(t, test.code == http.StatusOK, stopped)
+			assert.Equal(t, stopped, server.stopping)
+		})
+	}
+}
+
 func newRunnerAPITestLink() *runnerAPITestLink {
 	return &runnerAPITestLink{done: make(chan struct{})}
 }

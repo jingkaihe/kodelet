@@ -9,8 +9,11 @@ log_level: "info"
 log_format: "json"
 
 # Default Kodelet control-plane URL for run, conversation, chat, ACP, and runner commands.
-# Ordinary commands always use the daemon (default http://localhost:8080).
+# Ordinary commands always use the daemon. Without an explicit server, chat/run/ACP
+# start a detached local server when needed (default port 8080) and discover its
+# endpoint/token under ~/.kodelet/server/ (or $KODELET_BASE_PATH/server/).
 # KODELET_SERVER overrides this setting; --server overrides both.
+# Explicit server selections are connect-only, with no automatic local fallback.
 # This security-sensitive option is honored only from ~/.kodelet/config.yaml or
 # a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
 # server: "https://kodelet.example"
@@ -20,7 +23,13 @@ log_format: "json"
 # kodelet-config.yaml cannot set this namespace. Explicit CLI flags override the
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
-# modes: token, enrollment, none.
+# modes: token, enrollment, none. Automatic local startup requires loopback binding,
+# token authentication, and embedded_runner: true. Use explicit serve/--server for
+# the public OIDC deployment example below. Use `kodelet server restart` to apply
+# changes to a managed daemon; `kodelet server stop` leaves history intact.
+# Managed runner_workspace defaults to the home directory for stable identity;
+# foreground serve defaults to its startup directory. Each new same-host chat/run
+# still uses the client's current directory. port: 0 publishes an available port.
 # The embedded runner inherits trusted daemon top-level environment settings:
 # tool_mode, sysprompt, sysprompt_args, enable_fs_search_tools, bash, context,
 # skills, extensions, allowed_tools, allowed_commands, allowed_domains_file,

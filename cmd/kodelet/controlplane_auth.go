@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -268,6 +269,19 @@ func resolveControlPlaneAuthToken(cmd *cobra.Command, server string) (token stri
 	}
 	if environment := strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)); environment != "" {
 		return environment, controlPlaneAuthTokenSourceEnvironment, nil
+	}
+	if cmd != nil {
+		if _, configured := serverFlagOrConfig(cmd); !configured {
+			directory, pathErr := localServerDirectory()
+			if pathErr != nil {
+				return "", "local-server", pathErr
+			}
+			connection, readErr := readLocalServerConnection(directory)
+			if readErr == nil && connection.URL == server {
+				value, tokenErr := os.ReadFile(filepath.Join(directory, "client-token"))
+				return strings.TrimSpace(string(value)), "local-server", tokenErr
+			}
+		}
 	}
 
 	canonicalServer, store, err := prepareControlPlaneAuthState(server, nil)

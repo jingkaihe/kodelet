@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/db"
@@ -32,7 +34,174 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
+
+func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
+	directory := localServerTestState(t)
+	home := os.Getenv("HOME")
+	var toolResults, helperCalls atomic.Int32
+	provider := daemonTestProvider(t, "", "", &toolResults, &helperCalls, nil)
+	defer provider.Close()
+	// Dependency fixtures prevent network downloads. These tool-free runs never
+	// use filesystem search; only binary version discovery is exercised.
+	binDir := filepath.Join(home, ".kodelet", "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o700))
+	for name, output := range map[string]string{"rg": "ripgrep " + binaries.RipgrepVersion, "fd": "fd " + binaries.FdVersion} {
+		require.NoError(t, os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\necho '"+output+"'\n"), 0o700))
+	}
+	config := fmt.Sprintf("provider: openai\nmodel: gpt-4o\nweak_model: gpt-4o\nmax_tokens: 256\nopenai:\n  platform: openai\n  base_url: %s\n  api_mode: chat_completions\n  api_key_env_var: KODELET_TEST_PROVIDER_KEY\nextensions:\n  enabled: false\nskills:\n  enabled: false\nserve:\n  host: 127.0.0.1\n  port: 0\n", provider.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte(config), 0o600))
+	environment := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "SHELL=/bin/sh", "KODELET_BASE_PATH=" + os.Getenv("KODELET_BASE_PATH"), "KODELET_TEST_CLI_PROCESS=1", "KODELET_TEST_PROVIDER_KEY=daemon-only-key"}
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+	cli := func(cwd string, args ...string) *exec.Cmd { return daemonCLIProcess(ctx, t, cwd, environment, args...) }
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		process := daemonCLIProcess(cleanupCtx, t, home, environment, "server", "stop", "--force")
+		output, err := process.CombinedOutput()
+		assert.NoError(t, err, "%s", output)
+		if t.Failed() {
+			data, _ := os.ReadFile(filepath.Join(directory, "server.log"))
+			t.Logf("server log: %.12000s", data)
+		}
+	})
+
+	// Two independently launched CLI processes race a completely cold startup.
+	workspaces := []string{filepath.Join(home, "first"), filepath.Join(home, "second")}
+	var processes []*exec.Cmd
+	var outputs, diagnostics [2]bytes.Buffer
+	for index, cwd := range workspaces {
+		require.NoError(t, os.MkdirAll(cwd, 0o700))
+		process := cli(cwd, "run", "--no-tools", "--result-only", "cold query")
+		process.Stdout, process.Stderr = &outputs[index], &diagnostics[index]
+		require.NoError(t, process.Start())
+		processes = append(processes, process)
+	}
+	for index, process := range processes {
+		require.NoError(t, process.Wait(), "%s", diagnostics[index].String())
+		assert.Equal(t, "tool-free answer\n", outputs[index].String())
+	}
+	assert.Equal(t, 1, strings.Count(diagnostics[0].String()+diagnostics[1].String(), "Starting local Kodelet server"))
+	connection, err := readLocalServerConnection(directory)
+	require.NoError(t, err)
+	token, err := os.ReadFile(filepath.Join(directory, "client-token"))
+	require.NoError(t, err)
+	status, err := probeLocalServer(ctx, connection, string(token))
+	require.NoError(t, err)
+	assert.True(t, status.EmbeddedRunner.Ready, "daemon survives the launching clients")
+	session, err := unix.Getsid(connection.PID)
+	require.NoError(t, err)
+	assert.Equal(t, connection.PID, session, "daemon owns a detached Unix session")
+	client, err := chat.NewControlPlaneChatRunner(connection.URL, string(token), "")
+	require.NoError(t, err)
+	for _, cwd := range workspaces {
+		history, err := client.ListConversationsInCWD(ctx, 10, cwd)
+		require.NoError(t, err)
+		require.Len(t, history, 1)
+		assert.Equal(t, cwd, history[0].CWD)
+	}
+	for _, args := range [][]string{{"server", "status"}, {"conversation", "list"}, {"server", "logs"}} {
+		output, err := cli(home, args...).CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		assert.NotContains(t, string(output), string(token))
+	}
+	// A second foreground server cannot migrate/open the same daemon state,
+	// even if asked to listen on a different free port.
+	output, err := cli(home, "serve", "--port=0").CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(output), "already owns this state directory")
+
+	// Crash recovery replaces stale metadata, and stable runner affinity allows
+	// resuming conversations from either directory after the restart.
+	process, err := os.FindProcess(connection.PID)
+	require.NoError(t, err)
+	require.NoError(t, process.Kill())
+	require.Eventually(t, func() bool {
+		lock, err := tryLocalServerLock(directory, "server.lock")
+		if err != nil || lock == nil {
+			return false
+		}
+		_ = lock.Close()
+		return true
+	}, 5*time.Second, 20*time.Millisecond)
+	output, err = cli(workspaces[1], "run", "--no-tools", "--result-only", "after crash").CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	replacement, err := readLocalServerConnection(directory)
+	require.NoError(t, err)
+	assert.NotEqual(t, connection.InstanceID, replacement.InstanceID)
+	output, err = cli(workspaces[0], "run", "--no-tools", "--result-only", "--follow", "--cwd="+workspaces[0], "resume after crash").CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	output, err = cli(home, "server", "restart").CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	restarted, err := readLocalServerConnection(directory)
+	require.NoError(t, err)
+	assert.NotEqual(t, replacement.InstanceID, restarted.InstanceID)
+
+	t.Run("cold chat", func(t *testing.T) {
+		output, err := cli(home, "server", "stop").CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		process := cli(workspaces[0], "chat", "--no-tools")
+		process.Env = append(process.Env, "TERM=xterm-256color", "COLORTERM=truecolor")
+		terminal, err := pty.StartWithSize(process, &pty.Winsize{Rows: 40, Cols: 120})
+		require.NoError(t, err)
+		var screen daemonChatPTYOutput
+		readDone, processDone := make(chan struct{}), make(chan error, 1)
+		go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
+		go func() { processDone <- process.Wait() }()
+		exited := false
+		defer func() {
+			if !exited {
+				_ = process.Process.Kill()
+				<-processDone
+			}
+			_ = terminal.Close()
+			<-readDone
+			if t.Failed() {
+				t.Logf("chat screen: %s", screen.String())
+			}
+		}()
+		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "Ask kodelet") }, 10*time.Second, 20*time.Millisecond)
+		_, err = io.WriteString(terminal, "cold chat query\r")
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "tool-free answer") }, 10*time.Second, 20*time.Millisecond)
+		_, err = io.WriteString(terminal, "\x03")
+		require.NoError(t, err)
+		select {
+		case err := <-processDone:
+			exited = true
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, "chat did not exit")
+		}
+		output, err = cli(home, "server", "status").CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		assert.Contains(t, string(output), "Runner ready: true")
+	})
+
+	t.Run("cold ACP", func(t *testing.T) {
+		output, err := cli(home, "server", "stop").CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		process := cli(workspaces[1], "acp")
+		input, err := process.StdinPipe()
+		require.NoError(t, err)
+		outputPipe, err := process.StdoutPipe()
+		require.NoError(t, err)
+		var diagnostics bytes.Buffer
+		process.Stderr = &diagnostics
+		require.NoError(t, process.Start())
+		defer process.Process.Kill()
+		require.NoError(t, json.NewEncoder(input).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": 1}}))
+		var response map[string]any
+		require.NoError(t, json.NewDecoder(outputPipe).Decode(&response), "ACP stdout must contain only JSON-RPC")
+		assert.Equal(t, float64(1), response["id"])
+		assert.NotNil(t, response["result"])
+		require.NoError(t, input.Close())
+		require.NoError(t, process.Wait(), "%s", diagnostics.String())
+		assert.Contains(t, diagnostics.String(), "Starting local Kodelet server")
+	})
+}
 
 // TestDaemonFirstCLIProcess executes the real CLI entry point in an isolated
 // process, without invoking a nested go build or using a developer's credentials.
@@ -42,6 +211,15 @@ func TestDaemonFirstCLIProcess(t *testing.T) {
 	}
 	for index, arg := range os.Args {
 		if arg == "--" {
+			// Re-exec the real test CLI entry point when local bootstrap launches
+			// a detached serve process, just as the installed binary re-execs itself.
+			detachedServerCommand = func() (*exec.Cmd, error) {
+				executable, err := os.Executable()
+				if err != nil {
+					return nil, err
+				}
+				return exec.Command(executable, "-test.run=^TestDaemonFirstCLIProcess$", "--", "serve", "--managed"), nil
+			}
 			os.Args = append([]string{"kodelet"}, os.Args[index+1:]...)
 			main()
 			os.Exit(0)

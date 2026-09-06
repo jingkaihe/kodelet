@@ -28,7 +28,7 @@ kodelet run --result-only "what is 2+2"
 kodelet run --no-tools "what is the capital of France?"
 ```
 
-Start `kodelet serve` separately and supply its web/API token through `KODELET_AUTH_TOKEN`. Execution always uses the daemon; choose its endpoint with `--server`, `KODELET_SERVER`, or a trusted user-level `server` setting:
+Local chat/run/ACP commands automatically start a detached server when needed and discover its credential; no separate terminal or token copying is required. The server remains running after the client exits. Execution always uses the daemon. An explicit `--server`, `KODELET_SERVER`, or trusted user-level `server` setting is connect-only and never falls back to a local server:
 
 ```bash
 kodelet run --server https://kodelet.example --runner project-runner --cwd /workspace/project "inspect the repository"
@@ -40,14 +40,14 @@ Conversations are saved automatically; omit the removed `--no-save` flag. The se
 
 ### Interactive/IDE mode (ACP)
 
-ACP requires a running daemon and a registered runner:
+ACP starts the local daemon and embedded runner automatically when needed:
 
 ```bash
 kodelet acp
 kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-Use `server` or `KODELET_SERVER` to set the server address. For OIDC, run `kodelet auth login --server https://kodelet.example`; `--auth-token` overrides `KODELET_AUTH_TOKEN` and saved sign-in credentials. Start the server and any separately managed runners before connecting ACP. Without `--runner`, new sessions use the server's default runner.
+Use `server` or `KODELET_SERVER` to select an explicitly managed server address. For OIDC, run `kodelet auth login --server https://kodelet.example`; `--auth-token` overrides `KODELET_AUTH_TOKEN` and saved sign-in credentials. Explicitly selected servers and separately managed runners must already be running. Without `--runner`, new sessions use the server's default runner. Automatic startup writes diagnostics only to stderr.
 
 Example Zed-style configuration:
 
@@ -72,7 +72,20 @@ kodelet chat --theme catppuccin-latte
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 
-Start the server before opening chat. Directories refer to paths on the runner's machine. Resuming keeps the saved runner, directory, and profiles; use `--follow` with `--runner` or `--cwd` to choose which history to search. Exiting chat leaves work running; `/stop` cancels it. Use `/take-control` to receive future interactive prompts in this client. Previously dismissed prompts are not shown again.
+Chat starts or reuses the local server automatically unless a server is explicitly selected. Directories refer to paths on the runner's machine. Resuming keeps the saved runner, directory, and profiles; use `--follow` with `--runner` or `--cwd` to choose which history to search. Exiting chat leaves work running; `/stop` cancels it. Use `/take-control` to receive future interactive prompts in this client. Previously dismissed prompts are not shown again.
+
+### Local server lifecycle
+
+```bash
+kodelet server start
+kodelet server status
+kodelet server logs
+kodelet server stop             # refuses while agent runs are active
+kodelet server restart         # reload trusted configuration after changes
+kodelet server stop --force    # cancel active runs and stop
+```
+
+Connection state and the local API credential live under `~/.kodelet/server/` (or `$KODELET_BASE_PATH/server/`), separately from user-edited configuration. The directory is private (`0700`) and files are owner-only (`0600`). Managed startup requires loopback token authentication and an enabled embedded runner; public/OIDC or external-runner-only deployments use explicit `serve` and `--server`. The default port is 8080; `serve.port: 0` selects an available port and publishes it for discovery. The managed runner defaults to the home directory for stable identity, while new same-host conversations use the client's current directory. Trusted configuration/environment is inherited at startup and remains pinned until restart. Foreground `kodelet serve` remains available and operator-owned. Detachment is not a reboot/login service or automatic crash supervisor.
 
 ### Web UI
 

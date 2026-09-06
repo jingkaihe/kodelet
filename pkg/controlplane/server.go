@@ -180,6 +180,8 @@ type ServerConfig struct {
 	DisableControlPlaneWorkspace bool // Deprecated: control-plane-local execution is always disabled.
 	CORSOrigins                  []string
 	EmbeddedRunner               *EmbeddedRunnerConfig
+	InstanceID                   string             // Identity of this process for local discovery.
+	LocalShutdown                context.CancelFunc // Set only by managed loopback server hosts.
 }
 
 // Validate validates the server configuration
@@ -356,6 +358,9 @@ func (s *Server) setupRoutes() {
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/status", s.handleStatus).Methods("GET")
+	if s.config != nil && s.config.LocalShutdown != nil {
+		api.HandleFunc("/server/stop", s.requireRole(RoleAdmin, s.handleLocalServerStop)).Methods("POST")
+	}
 	api.HandleFunc("/auth/me", s.handleAuthMe).Methods("GET")
 	api.HandleFunc("/auth/v1/device/context", s.handleUserLoginContext).Methods("GET")
 	api.HandleFunc("/auth/v1/device/decision", s.handleUserLoginDecision).Methods("POST")

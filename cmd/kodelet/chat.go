@@ -5,6 +5,7 @@ import (
 	"io"
 	stdlog "log"
 	"net/http"
+	"os"
 	"strings"
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
@@ -41,7 +42,7 @@ func NewChatConfig() *ChatConfig {
 var chatCmd = &cobra.Command{
 	Use:               "chat",
 	Short:             "Start an interactive chat in your terminal",
-	Long:              `Chat with Kodelet in your terminal. Start 'kodelet serve' first, or use --server to connect to an existing server. Conversations are saved automatically.`,
+	Long:              `Chat with Kodelet in your terminal. A local server starts automatically in the background when needed. Use --server to connect to an explicitly managed server. Conversations are saved automatically; exiting chat leaves the server running.`,
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -200,6 +201,14 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 	if err := tui.ValidateThemeName(config.Theme); err != nil {
 		return result, err
 	}
+	if config.Follow && config.Runner == "" && config.CWD == "" {
+		return result, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
+	}
+	server, token, err := prepareClientServer(ctx, cmd)
+	if err != nil {
+		return result, err
+	}
+	config.Server, config.AuthToken = server, token
 	client, err := prepareServerChatRunner(config)
 	if err != nil {
 		return result, err
@@ -217,9 +226,6 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		runner.runnerID, runner.explicitRunnerID = selected.ID, selected.ID
 	}
 	if config.Follow {
-		if config.Runner == "" && config.CWD == "" {
-			return result, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
-		}
 		var profile string
 		if cmd.Flags().Changed("profile") {
 			profile, _ = cmd.Flags().GetString("profile")
@@ -352,7 +358,7 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	}
 	config.Server, config.ServerConfigured = serverFlagOrConfig(cmd)
 	config.Options, config.ConfigError = remoteRunExecutionOptions(cmd)
-	if config.ConfigError == nil {
+	if config.ConfigError == nil && (config.ServerConfigured || cmd.Flags().Changed("auth-token") || strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)) != "") {
 		config.AuthToken, _, config.ConfigError = resolveControlPlaneAuthToken(cmd, config.Server)
 	}
 

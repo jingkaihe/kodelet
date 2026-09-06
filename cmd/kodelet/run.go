@@ -15,7 +15,7 @@ import (
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
-	Long:  `Run a query and save the conversation. Start 'kodelet serve' first, or use --server to connect to an existing server.`,
+	Long:  `Run a query and save the conversation. A local server starts automatically in the background when needed and keeps running after the query. Use --server to connect to an explicitly managed server.`,
 	Args:  cobra.MinimumNArgs(0),
 	RunE:  runControlPlaneCommand,
 }

@@ -56,7 +56,9 @@ mise run frontend-test           # Frontend tests
 ```bash
 # Core
 kodelet run "query"              # One-shot execution
-kodelet serve                    # Required daemon plus embedded runner (localhost:8080)
+kodelet chat                     # Auto-start/reuse a detached local daemon
+kodelet serve                    # Foreground daemon plus embedded runner (localhost:8080)
+kodelet server status|stop|restart  # Manage the local background daemon
 kodelet run -r recipe-name       # Use recipe template
 kodelet run --follow --cwd "$PWD" "continue"  # Continue scoped daemon history
 

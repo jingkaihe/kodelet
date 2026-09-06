@@ -36,8 +36,7 @@ func runControlPlaneCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	server, _ := serverFlagOrConfig(cmd)
-	token, _, err := resolveControlPlaneAuthToken(cmd, server)
+	server, token, err := prepareClientServer(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -71,6 +70,9 @@ func remoteRunRequest(cmd *cobra.Command, args []string) (chat.ChatRequest, bool
 	}
 	request.CWD, _ = cmd.Flags().GetString("cwd")
 	request.CWD = strings.TrimSpace(request.CWD)
+	if selector, _ := cmd.Flags().GetString("runner"); follow && request.CWD == "" && strings.TrimSpace(selector) == "" {
+		return request, false, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
+	}
 	request.EnvironmentProfile, _ = cmd.Flags().GetString("runner-profile")
 	if cmd.Flags().Changed("profile") {
 		request.Profile, _ = cmd.Flags().GetString("profile")

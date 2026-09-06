@@ -8,16 +8,21 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/pkg/errors"
@@ -32,6 +37,7 @@ const (
 var defaultOIDCScopes = []string{"openid", "profile", "email"}
 
 type ServeConfig struct {
+	Managed                      bool
 	Host                         string
 	Port                         int
 	CWD                          string
@@ -116,6 +122,8 @@ func init() {
 }
 
 func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
+	cmd.Flags().Bool("managed", false, "Internal: run the managed local server")
+	_ = cmd.Flags().MarkHidden("managed")
 	cmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
 	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (0 selects an available port)")
 	cmd.Flags().String("cwd", defaults.CWD, "Removed; use --runner-workspace for the embedded runner")
@@ -144,6 +152,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 
 func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	config := NewServeConfig()
+	config.Managed, _ = cmd.Flags().GetBool("managed")
 	if err := applyTrustedServeConfig(config); err != nil {
 		config.ConfigError = err
 	}
@@ -563,9 +572,49 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 }
 
 func runServeCommand(ctx context.Context, config *ServeConfig) error {
+	if config != nil && config.Managed {
+		if err := prepareLocalServeConfig(config); err != nil {
+			return err
+		}
+	}
 	serverConfig, err := buildControlPlaneServerConfig(config)
 	if err != nil {
 		return errors.Wrap(err, "invalid server configuration")
+	}
+	directory, err := localServerDirectory()
+	if err != nil {
+		return err
+	}
+	lock, err := tryLocalServerLock(directory, "server.lock")
+	if err != nil {
+		return err
+	}
+	if lock == nil {
+		return errors.New("a Kodelet server already owns this state directory; use 'kodelet server status' or select a separate KODELET_BASE_PATH")
+	}
+	defer lock.Close()
+	// A crashed process may have left discovery state. Only the new lock owner
+	// may clear it; non-local deployments must not advertise a stale endpoint.
+	for _, name := range []string{"connection.json", "client-token"} {
+		if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "failed to clear stale local server state")
+		}
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(serverConfig.Host, fmt.Sprint(serverConfig.Port)))
+	if err != nil {
+		return errors.Wrap(err, "could not listen on the configured server address; check --host and --port")
+	}
+	defer listener.Close()
+	// Acquire ownership before migrations or any daemon/runner resources.
+	binaries.EnsureDepsInstalled(ctx)
+	if err := db.RunMigrations(ctx, migrations.All()); err != nil {
+		return errors.Wrap(err, "failed to run database migrations")
+	}
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	serverConfig.InstanceID = convtypes.GenerateID()
+	if config.Managed {
+		serverConfig.LocalShutdown = cancel
 	}
 
 	logger.G(ctx).WithFields(map[string]any{
@@ -590,17 +639,22 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 		}
 	}()
 
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	listener, err := net.Listen("tcp", net.JoinHostPort(serverConfig.Host, fmt.Sprint(serverConfig.Port)))
-	if err != nil {
-		return errors.Wrap(err, "could not listen on the configured server address; check --host and --port")
-	}
-	defer listener.Close()
 	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
+	// Foreground loopback token servers are discoverable too, but remain
+	// operator-owned: local lifecycle commands may not stop/restart them.
+	if localServerHost(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken {
+		if err := publishLocalServer(directory, baseURL, serverConfig.AuthToken, serverConfig.InstanceID, config.Managed); err != nil {
+			return errors.Wrap(err, "failed to publish local server connection")
+		}
+		defer os.Remove(filepath.Join(directory, "connection.json"))
+		defer os.Remove(filepath.Join(directory, "client-token"))
+	}
 	webTokenConfigured := strings.TrimSpace(config.AuthToken) != ""
 	runnerTokenConfigured := strings.TrimSpace(config.RunnerAuthToken) != ""
+	if config.Managed {
+		// Credentials are discovered through private state, never startup logs.
+		webTokenConfigured, runnerTokenConfigured = true, true
+	}
 	presenter.Success(fmt.Sprintf("Kodelet server starting on %s", baseURL))
 	switch serverConfig.WebAuthMode {
 	case controlplane.WebAuthModeToken:
@@ -642,7 +696,11 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 			presenter.Warning("Runner authentication disabled (--runner-auth-mode=none)")
 		}
 	}
-	presenter.Info("Press Ctrl+C to stop the server")
+	if config.Managed {
+		presenter.Info("Use 'kodelet server stop' to stop the background server")
+	} else {
+		presenter.Info("Press Ctrl+C to stop the server")
+	}
 
 	if err := server.Serve(ctx, listener); err != nil {
 		return errors.Wrap(err, "Kodelet server failed")

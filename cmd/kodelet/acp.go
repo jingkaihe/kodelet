@@ -21,7 +21,7 @@ var acpCmd = &cobra.Command{
 	Short: "Connect an ACP client to a Kodelet server",
 	Long: `Connect an editor or another Agent Client Protocol (ACP) client to Kodelet over stdin and stdout.
 
-Start 'kodelet serve' first, or use --server to connect to an existing server. Conversations are saved automatically. The server's built-in runner provides file access and tools; use --runner to work on another machine. Session directories refer to paths on the selected runner's machine.
+A local server starts automatically in the background when needed, or use --server to connect to an explicitly managed server. Conversations are saved automatically. The server's built-in runner provides file access and tools; use --runner to work on another machine. Session directories refer to paths on the selected runner's machine.
 
 Examples:
   kodelet acp
