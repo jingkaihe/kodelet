@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -181,7 +182,12 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 				s.writeErrorResponse(w, http.StatusConflict, "permissions cannot be changed while this conversation is running", err)
 				return
 			}
-			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: manifest.Digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts})
+			digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+			if err != nil {
+				s.writeErrorResponse(w, http.StatusInternalServerError, "could not load the conversation's available commands and tools", err)
+				return
+			}
+			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts})
 			return
 		}
 	}

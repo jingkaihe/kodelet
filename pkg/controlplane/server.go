@@ -779,6 +779,10 @@ type forkConversationResponse struct {
 	ConversationID string `json:"conversation_id"`
 }
 
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
@@ -2001,6 +2005,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
 		return
 	}
+	defer sink.Close()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

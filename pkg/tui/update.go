@@ -102,6 +102,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case extensionUITranscriptMsg:
 		state := m.stateForKey(msg.conversationKey)
 		if state == nil {
+			for _, candidate := range m.conversations {
+				if candidate.conversationID == msg.conversationKey {
+					state = candidate
+					break
+				}
+			}
+		}
+		if state == nil {
 			return m, waitForMsg(m.runCh)
 		}
 		active := state == m.conversationState

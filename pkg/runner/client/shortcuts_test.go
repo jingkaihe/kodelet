@@ -67,6 +67,33 @@ func TestRunnerShortcutUsesPinnedProcessAndBoundedCancellation(t *testing.T) {
 	assert.Empty(t, service.backgrounds, "an isolated shortcut run must not retain runtime without a lease")
 }
 
+func TestRunnerShortcutDiscoveryMatchesIdleRunWithTools(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "plain")
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf("#!/bin/sh\nKODELET_RUNNER_SHORTCUT_HELPER=1 exec %q -test.run '^TestRunnerShortcutHelper$'\n", executable)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-shortcut"), []byte(script), 0o700))
+	loader, err := NewEmbeddedConfigLoader(map[string]any{"skills": map[string]any{"enabled": false}}, nil)
+	require.NoError(t, err)
+	service.profileConfigLoader = loader
+	probe, err := service.ProbeManifestForCWD(t.Context(), workspace, "")
+	require.NoError(t, err)
+	discovery := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
+	manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "shortcut-run", ConversationID: "conversation", CWD: workspace})
+	require.NoError(t, err)
+	assert.Equal(t, probe.Config, manifest.Config)
+	assert.Equal(t, probe.Commands, manifest.Commands)
+	assert.Len(t, manifest.Tools, len(probe.Tools)+1, "background-only tools are absent during discovery")
+	assert.NotEqual(t, probe.Digest, manifest.Digest, "full run digests must still detect tool changes")
+	digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, discovery.Digest, digest)
+	result, err := service.executeShortcut(t.Context(), runnerpayload.ShortcutExecuteParams{RunID: manifest.RunID, Digest: manifest.Digest, Shortcut: manifest.Shortcuts[0]})
+	require.NoError(t, err)
+	require.NotNil(t, result.Result)
+	assert.Equal(t, "/review", result.Result.Message)
+}
+
 func TestRunnerShortcutHelper(t *testing.T) {
 	if os.Getenv("KODELET_RUNNER_SHORTCUT_HELPER") != "1" {
 		return
@@ -80,7 +107,17 @@ func TestRunnerShortcutHelper(t *testing.T) {
 		var result any
 		switch request.Method {
 		case "extension.initialize":
-			result = extensions.InitializeResult{Name: "shortcut", Version: "1", Shortcuts: []extensions.ShortcutRegistration{{Key: "ctrl+r", Description: "Review"}, {Key: "ctrl+t", Description: "Wait"}}}
+			var params struct {
+				Capabilities struct {
+					Runtime extensions.RuntimeCapabilities `json:"runtime"`
+				} `json:"capabilities"`
+			}
+			_ = json.Unmarshal(request.Params, &params)
+			initialized := extensions.InitializeResult{Name: "shortcut", Version: "1", Shortcuts: []extensions.ShortcutRegistration{{Key: "ctrl+r", Description: "Review"}, {Key: "ctrl+t", Description: "Wait"}}}
+			if params.Capabilities.Runtime.BackgroundTasks {
+				initialized.Tools = []extensions.ToolRegistration{{Name: "background_only", Description: "Requires background execution", InputSchema: map[string]any{"type": "object"}}}
+			}
+			result = initialized
 		case "extension.shortcut.execute":
 			var params struct {
 				Key     string                          `json:"key"`

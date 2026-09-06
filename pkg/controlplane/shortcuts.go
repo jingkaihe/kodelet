@@ -112,6 +112,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 		s.writeErrorResponse(w, http.StatusInternalServerError, "shortcut stream unavailable", err)
 		return
 	}
+	defer sink.Close()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	var result runnerpayload.ShortcutExecuteResult
@@ -206,7 +207,11 @@ func validatePinnedDiscoveryOptions(options *llmtypes.ExecutionOptions, manifest
 }
 
 func validateShortcutManifest(request chat.WorkspaceShortcutRequest, manifest runnerpayload.Manifest, active bool) error {
-	if request.Digest != manifest.Digest {
+	digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+	if err != nil {
+		return err
+	}
+	if request.Digest != digest {
 		return errors.New("the workspace settings changed; reload the available shortcuts")
 	}
 	for _, shortcut := range manifest.Shortcuts {

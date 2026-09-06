@@ -202,6 +202,7 @@ type ndjsonEventSink struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	mu      sync.Mutex
+	closed  bool
 }
 
 type subscriberEventSink struct {
@@ -229,6 +230,9 @@ func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
 func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return io.ErrClosedPipe
+	}
 	// A slow or vanished UI must not indefinitely hold the provider or UI broker.
 	controller := http.NewResponseController(s.w)
 	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -249,6 +253,9 @@ func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 func (s *ndjsonEventSink) KeepAlive() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return io.ErrClosedPipe
+	}
 	controller := http.NewResponseController(s.w)
 	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
@@ -257,6 +264,13 @@ func (s *ndjsonEventSink) KeepAlive() error {
 	}
 	s.flusher.Flush()
 	return nil
+}
+
+// Close drains in-flight writes and fences late UI cleanup before the HTTP handler returns.
+func (s *ndjsonEventSink) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
 }
 
 func newSubscriberEventSink() *subscriberEventSink {
@@ -323,6 +337,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
 		return
 	}
+	defer sink.Close()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

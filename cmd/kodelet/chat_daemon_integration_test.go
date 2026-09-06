@@ -97,11 +97,11 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 			viper.Set("openai", map[string]any{"platform": "openai", "base_url": provider.URL, "api_key_env_var": "KODELET_TEST_CHAT_PROVIDER_KEY", "api_mode": "chat_completions"})
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
-			viper.Set("allowed_tools", []string{"pty_prompt"})
+			viper.Set("allowed_tools", []string{"pty_prompt", "pty_background"})
 			t.Setenv("KODELET_TEST_CHAT_PROVIDER_KEY", "daemon-only-pty-key")
 			t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-store"))
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			settings := map[string]any{"allowed_tools": []string{"pty_prompt"}, "extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}}
+			settings := map[string]any{"allowed_tools": []string{"pty_prompt", "pty_background"}, "extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}}
 			settingsData, err := json.Marshal(settings)
 			require.NoError(t, err)
 			for _, cwd := range []string{startup, workspace} {
@@ -540,7 +540,10 @@ func TestDaemonChatExtensionProcess(_ *testing.T) {
 		switch method {
 		case "extension.initialize":
 			var params struct {
-				Extension struct{ CWD string } `json:"extension"`
+				Extension    struct{ CWD string } `json:"extension"`
+				Capabilities struct {
+					Runtime extensions.RuntimeCapabilities `json:"runtime"`
+				} `json:"capabilities"`
 			}
 			_ = json.Unmarshal(message["params"], &params)
 			cwd = params.Extension.CWD
@@ -553,6 +556,12 @@ func TestDaemonChatExtensionProcess(_ *testing.T) {
 				Name: "pty", Version: "1",
 				Tools:     []extensions.ToolRegistration{{Name: "pty_prompt", Description: "Exercise native terminal prompts", InputSchema: map[string]any{"type": "object"}}},
 				Shortcuts: []extensions.ShortcutRegistration{{Key: "ctrl+r", Description: "PTY shortcut submission"}},
+			}
+			// Like subagent extensions, advertise background tools only during execution.
+			if params.Capabilities.Runtime.BackgroundTasks {
+				initialized := result.(extensions.InitializeResult)
+				initialized.Tools = append(initialized.Tools, extensions.ToolRegistration{Name: "pty_background", Description: "Requires background execution", InputSchema: map[string]any{"type": "object"}})
+				result = initialized
 			}
 			if os.Getenv("KODELET_TEST_INSPECTION_RECIPES") == "1" {
 				initialized := result.(extensions.InitializeResult)

@@ -266,6 +266,8 @@ export interface UISurface {
   close(): Promise<void>;
   onInput(handler: (event: UISurfaceInputEvent) => void): () => void;
   onResize(handler: (event: UISurfaceResizeEvent) => void): () => void;
+  /** Called once on close, or immediately if already closed. Returns an unsubscribe function. */
+  onClose(handler: () => void): () => void;
 }
 
 export type UIInputStatus = "submitted" | "dismissed" | "timeout" | "unavailable";

@@ -1,12 +1,14 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,11 +61,15 @@ func TestEmbeddedDiscoveryAndRemoteRunShareInheritedPermissionCeilings(t *testin
 		require.NoError(t, err)
 		run, found := server.runnerRegistry.Run(runID)
 		require.True(t, found)
+		var wire runnerpayload.Manifest
+		require.NoError(t, json.Unmarshal([]byte(run.ManifestJSON), &wire))
+		digest, err := runnerpayload.ComputeDiscoveryDigest(wire)
+		require.NoError(t, err)
 		if restricted {
-			assert.NotEqual(t, discovery.Digest, run.ManifestDigest)
+			assert.NotEqual(t, discovery.Digest, digest)
 			assert.Empty(t, manifest.Tools, "request narrowing must still remove every tool")
 		} else {
-			assert.Equal(t, discovery.Digest, run.ManifestDigest, "discovery and actual remote runs must apply the same inherited policy")
+			assert.Equal(t, discovery.Digest, digest, "discovery and actual remote runs must apply the same inherited policy")
 			assert.Equal(t, []string{"bash"}, manifest.ToolNames())
 		}
 		require.NotNil(t, manifest.Config)

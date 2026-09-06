@@ -86,7 +86,9 @@ func TestEmbeddedProfilesReachRunAndDiscoveryManifests(t *testing.T) {
 				assert.True(t, manifest.Config.EnableFSSearchTools)
 				assert.Empty(t, manifest.Config.SystemPromptContent)
 				assert.Empty(t, manifest.Skills)
-				assert.Equal(t, probe.Digest, manifest.Digest)
+				digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+				require.NoError(t, err)
+				assert.Equal(t, probe.Digest, digest)
 			}
 			callService[struct{}](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: profile})
 		})

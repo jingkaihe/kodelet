@@ -48,7 +48,9 @@ func newShortcutFixture(t *testing.T) *shortcutFixture {
 	}
 	f.manifest.Digest, err = runnerpayload.ComputeManifestDigest(f.manifest)
 	require.NoError(t, err)
-	f.request = chat.WorkspaceShortcutRequest{Target: chat.WorkspaceTarget{RunnerID: registration.RunnerID, CWD: "/runner/selected", EnvironmentProfile: "review", Options: f.manifest.Config.Options.Clone()}, Digest: f.manifest.Digest, Shortcut: f.manifest.Shortcuts[0]}
+	digest, err := runnerpayload.ComputeDiscoveryDigest(f.manifest)
+	require.NoError(t, err)
+	f.request = chat.WorkspaceShortcutRequest{Target: chat.WorkspaceTarget{RunnerID: registration.RunnerID, CWD: "/runner/selected", EnvironmentProfile: "review", Options: f.manifest.Config.Options.Clone()}, Digest: digest, Shortcut: f.manifest.Shortcuts[0]}
 	link.call = func(ctx context.Context, method string, params, result any) error {
 		f.methods = append(f.methods, method)
 		switch method {
@@ -65,6 +67,7 @@ func newShortcutFixture(t *testing.T) *shortcutFixture {
 		case protocol.MethodShortcutExecute:
 			value := params.(runnerpayload.ShortcutExecuteParams)
 			assert.Equal(t, f.opened.RunID, value.RunID)
+			assert.Equal(t, f.manifest.Digest, value.Digest, "runner execution still uses the full pinned manifest")
 			assert.Equal(t, uint64(99), value.Shortcut.Generation, "invoke the opened generation, not the expired probe")
 			assert.Equal(t, "review", value.Shortcut.ExtensionID)
 			_, bounded := ctx.Deadline()
@@ -164,6 +167,33 @@ func TestWorkspaceShortcutRoutesModelProfileToTemporaryRun(t *testing.T) {
 	}
 }
 
+func TestWorkspaceShortcutDiscoveryAllowsExecutionToolsButRejectsPolicyChanges(t *testing.T) {
+	for _, policyChanged := range []bool{false, true} {
+		t.Run(map[bool]string{false: "execution-only tools", true: "changed permissions"}[policyChanged], func(t *testing.T) {
+			f := newShortcutFixture(t)
+			f.manifest.Config.Options.AllowedTools = nil
+			digest, err := runnerpayload.ComputeDiscoveryDigest(f.manifest)
+			require.NoError(t, err)
+			f.request.Digest = digest
+			f.request.Target.Options = f.manifest.Config.Options.Clone()
+			f.manifest.Tools = []runnerpayload.ToolDefinition{{Name: "background_only", InputSchema: map[string]any{"type": "object"}, Placement: "environment"}}
+			if policyChanged {
+				f.manifest.Config.AllowedCommands = []string{"git status"}
+			}
+			f.manifest.Digest, err = runnerpayload.ComputeManifestDigest(f.manifest)
+			require.NoError(t, err)
+			response := f.invoke(t.Context(), t, f.request, "owner")
+			if policyChanged {
+				assert.Contains(t, response.Body.String(), "workspace settings changed")
+				assert.NotContains(t, f.methods, protocol.MethodShortcutExecute)
+			} else {
+				assert.Contains(t, response.Body.String(), `"matched":true`)
+				assert.Contains(t, f.methods, protocol.MethodShortcutExecute)
+			}
+		})
+	}
+}
+
 func TestWorkspaceShortcutRejectsInvalidOrStaleBeforeExecution(t *testing.T) {
 	f := newShortcutFixture(t)
 	valid := string(mustRunnerJSON(t, f.request))
@@ -225,6 +255,7 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	var discovery protocol.WorkspaceDiscoverResult
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &discovery))
 	assert.Equal(t, manifest.RunID, discovery.RunID)
+	assert.Equal(t, f.request.Digest, discovery.Digest)
 	assert.Equal(t, manifest.Shortcuts, discovery.Shortcuts)
 	assert.Empty(t, f.methods, "active discovery must not start another runtime")
 	recorder = httptest.NewRecorder()

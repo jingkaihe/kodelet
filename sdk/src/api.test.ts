@@ -739,30 +739,97 @@ test("native UI takeover updates only its client and closes only the matching su
   await assert.rejects(contexts[1].ui.openSurface({ id: "canvas" }), /not available/);
   assert.equal(init.capabilities.ui.surfaces, false, "notification must not mutate a shared initialization snapshot");
   const surface = await contexts[0].ui.openSurface({ id: "canvas" });
+  const closed: string[] = [];
+  surface.onClose(() => closed.push("original"));
+  surface.onClose(() => closed.push("second subscriber"));
+  const unsubscribe = surface.onClose(() => closed.push("unsubscribed"));
+  unsubscribe();
+  unsubscribe();
   const open = clients[0].requests.at(-1)?.params as { frame: { sequence: number } };
   clients[0].notify("extension.ui.surface.closed", { scopeId: "another", id: "canvas", openSequence: open.frame.sequence });
   await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  assert.deepEqual(closed, []);
   clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  assert.deepEqual(closed, ["original", "second subscriber"]);
+  const unsubscribeLate = surface.onClose(() => closed.push("late subscriber"));
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber"]);
+  unsubscribeLate();
   const previousRequests = clients[0].requests.length;
   surface.update(["late frame"]);
   await surface.close();
   assert.equal(clients[0].requests.length, previousRequests, "revoked handles cannot issue frames or close a replacement");
   const replacement = await contexts[0].ui.openSurface({ id: "canvas" });
+  replacement.onClose(() => closed.push("replacement"));
   clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
   await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber"]);
   await replacement.close();
+  await replacement.close();
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber", "replacement"]);
+  replacement.onClose(() => closed.push("late explicit subscriber"));
+  assert.equal(closed.at(-1), "late explicit subscriber");
   clients[0].notify("kodelet.ui.capabilities", { widgets: true, surfaces: false, transcript: false });
   await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /not available/);
   await contexts[0].ui.setWidget("background", ["still active"]);
   assert.equal(clients[0].requests.at(-1)?.method, "kodelet.ui.widget.set");
 });
 
+test("surface onClose notifies once when host closure races an explicit close", async () => {
+  let notify: (method: string, params: unknown) => void = () => undefined;
+  let finishClose: (value: unknown) => void = () => undefined;
+  let closeRequests = 0;
+  let openingSequence = 0;
+  const host = {
+    async request(method: string, params?: unknown): Promise<unknown> {
+      if (method === "kodelet.ui.surface.open") {
+        openingSequence ||= (params as { frame: { sequence: number } }).frame.sequence;
+      }
+      if (method === "kodelet.ui.surface.close" && closeRequests++ === 0) {
+        return new Promise((resolve) => { finishClose = resolve; });
+      }
+      return { accepted: true };
+    },
+    onNotification(handler: typeof notify) { notify = handler; return () => undefined; },
+  };
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { surfaces: true } } };
+  const context = await runWithHostRPCClient(host, async () => createToolContext(init, { uiScopeId: "conversation" }));
+  const surface = await context.ui.openSurface({ id: "canvas" });
+  let closed = 0;
+  let replacement = Promise.resolve(surface);
+  surface.onClose(() => {
+    closed++;
+    replacement = context.ui.openSurface({ id: "canvas" });
+  });
+  const closing = surface.close();
+  assert.equal(closed, 0);
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 1);
+  const reopened = await replacement;
+  let replacementClosed = 0;
+  reopened.onClose(() => replacementClosed++);
+  finishClose({ accepted: true });
+  await closing;
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 1);
+  assert.equal(replacementClosed, 0);
+  await assert.rejects(context.ui.openSurface({ id: "canvas" }), /already open/);
+  await reopened.close();
+  assert.equal(replacementClosed, 1);
+  assert.equal(closeRequests, 2);
+});
+
 test("native surface revoked while opening cannot activate a stale handle", async () => {
   let notify: (method: string, params: unknown) => void = () => undefined;
   let finishOpen: (value: unknown) => void = () => undefined;
+  let openingSequence = 0;
   const host = {
-    request(_method: string, params?: unknown): Promise<unknown> {
+    async request(method: string, params?: unknown): Promise<unknown> {
+      if (openingSequence !== 0 || method !== "kodelet.ui.surface.open") {
+        return { accepted: true };
+      }
       const request = params as { frame: { sequence: number } };
+      openingSequence = request.frame.sequence;
       return new Promise((resolve) => {
         finishOpen = resolve;
         notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: request.frame.sequence });
@@ -773,8 +840,16 @@ test("native surface revoked while opening cannot activate a stale handle", asyn
   const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { surfaces: true } } };
   const context = await runWithHostRPCClient(host, async () => createToolContext(init, { uiScopeId: "conversation" }));
   const opening = context.ui.openSurface({ id: "canvas" });
+  const replacement = await context.ui.openSurface({ id: "canvas" });
+  let closed = 0;
+  replacement.onClose(() => closed++);
   finishOpen({ accepted: true });
   await assert.rejects(opening, /closed.*while.*opening/);
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 0);
+  await assert.rejects(context.ui.openSurface({ id: "canvas" }), /already open/);
+  await replacement.close();
+  assert.equal(closed, 1);
 });
 
 test("widgets use sequences and surfaces route host events", async () => {
@@ -939,6 +1014,7 @@ test("same surface ID is isolated by UI scope and routes scoped events", async (
 
 test("surface IDs reject overlapping ownership until the active handle closes", async () => {
   let openedSurface: any;
+  let closed = 0;
   let releaseFirstOpen: ((response: { accepted: boolean }) => void) | undefined;
   let releaseFirstClose: ((response: { accepted: boolean }) => void) | undefined;
   let openRequests = 0;
@@ -969,11 +1045,17 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
         releaseFirstOpen?.({ accepted: true });
         openedSurface = await firstOpen;
+        openedSurface.onClose(() => closed++);
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
         const firstClose = openedSurface.close();
+        const concurrentClose = openedSurface.close();
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
+        assert.equal(closed, 0, "callbacks wait for a successful close acknowledgement");
         releaseFirstClose?.({ accepted: true });
-        await firstClose;
+        await Promise.all([firstClose, concurrentClose]);
+        assert.equal(closed, 1);
+        await openedSurface.close();
+        assert.equal(closed, 1);
         openedSurface = await ctx.ui.openSurface({ id: "singleton" });
         return { action: "respond", response: "opened" };
       },
@@ -1007,12 +1089,19 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
 
 test("failed surface close keeps ownership and can be retried", async () => {
   let closeAttempts = 0;
+  let closed = 0;
   const requests: Array<{ method: string; params?: unknown }> = [];
   const host = {
     async request(method: string, params?: unknown) {
       requests.push({ method, params });
-      if (method === "kodelet.ui.surface.close" && closeAttempts++ === 0) {
-        throw new Error("close failed");
+      if (method === "kodelet.ui.surface.close") {
+        closeAttempts++;
+        if (closeAttempts === 1) {
+          throw new Error("close failed");
+        }
+        if (closeAttempts === 2) {
+          return { accepted: false, reason: "close rejected" };
+        }
       }
       return { accepted: true };
     },
@@ -1023,9 +1112,14 @@ test("failed surface close keeps ownership and can be retried", async () => {
       description: "Retry a failed close",
       async execute(_input, ctx) {
         const surface = await ctx.ui.openSurface({ id: "retryable" });
+        surface.onClose(() => closed++);
         await assert.rejects(surface.close(), /close failed/);
+        assert.equal(closed, 0);
+        await assert.rejects(surface.close(), /close rejected/);
+        assert.equal(closed, 0);
         await assert.rejects(ctx.ui.openSurface({ id: "retryable" }), /already open, opening, or closing/);
         await surface.close();
+        assert.equal(closed, 1);
         const replacement = await ctx.ui.openSurface({ id: "retryable" });
         await replacement.close();
         return { action: "respond", response: "closed" };
@@ -1043,13 +1137,14 @@ test("failed surface close keeps ownership and can be retried", async () => {
     "kodelet.ui.surface.open",
     "kodelet.ui.surface.close",
     "kodelet.ui.surface.close",
+    "kodelet.ui.surface.close",
     "kodelet.ui.surface.open",
     "kodelet.ui.surface.close",
   ]);
   assert.deepEqual(requests.map((request) => {
     const params = request.params as { sequence?: number; frame?: { sequence?: number } };
     return params.sequence ?? params.frame?.sequence;
-  }), [1, 2, 3, 4, 5]);
+  }), [1, 2, 3, 4, 5, 6]);
 });
 
 test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {

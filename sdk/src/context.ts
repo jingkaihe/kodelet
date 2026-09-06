@@ -505,6 +505,7 @@ class UISurfaceHandle implements UISurface {
   private pendingFocusEvent: UISurfaceInputEvent | undefined;
   private resizeHandlers = new Set<(event: UISurfaceResizeEvent) => void>();
   private pendingResizeEvent: UISurfaceResizeEvent | undefined;
+  private closeHandlers = new Set<() => void>();
   private currentSize: { width: number; height: number } | undefined;
 
   constructor(
@@ -582,6 +583,9 @@ class UISurfaceHandle implements UISurface {
   }
 
   private dispose(): void {
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
     this.pendingLines = undefined;
     this.inputHandlers.clear();
@@ -591,6 +595,11 @@ class UISurfaceHandle implements UISurface {
     const activeSurfaces = surfacesForClient(this.client);
     if (activeSurfaces.get(this.routingKey()) === this) {
       activeSurfaces.delete(this.routingKey());
+    }
+    const handlers = [...this.closeHandlers];
+    this.closeHandlers.clear();
+    for (const handler of handlers) {
+      handler();
     }
   }
 
@@ -612,6 +621,15 @@ class UISurfaceHandle implements UISurface {
       handler(pendingResizeEvent);
     }
     return () => this.resizeHandlers.delete(handler);
+  }
+
+  onClose(handler: () => void): () => void {
+    if (this.closed) {
+      handler();
+      return () => undefined;
+    }
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
   }
 
   handleNotification(method: string, params: unknown): void {

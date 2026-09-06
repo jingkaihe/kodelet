@@ -108,6 +108,14 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	return fmt.Sprintf("sha256:%x", digest[:]), nil
 }
 
+// ComputeDiscoveryDigest fences workspace policy and command registrations, not
+// tool schemas that may depend on model identity or execution-only capabilities.
+// Actual tool and shortcut calls still use the pinned run's full manifest digest.
+func ComputeDiscoveryDigest(manifest Manifest) (string, error) {
+	manifest.Tools = nil
+	return ComputeManifestDigest(manifest)
+}
+
 // ShortcutExecuteParams fences a shortcut to a pinned run and registration.
 type ShortcutExecuteParams struct {
 	RunID    string                      `json:"runId"`

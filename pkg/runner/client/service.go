@@ -360,7 +360,11 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		manifest, err := s.ProbeManifestForProfile(ctx, value.CWD, value.Profile, value.EnvironmentProfile, value.Options)
-		return rpcResult(protocol.WorkspaceDiscoverResult{CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile), Digest: manifest.Digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts}, err)
+		if err != nil {
+			return rpcResult(nil, err)
+		}
+		digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+		return rpcResult(protocol.WorkspaceDiscoverResult{CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile), Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts}, err)
 	case protocol.MethodWorkspaceCWDHints:
 		value, rpcErr := decodeParams[protocol.WorkspaceCWDHintsParams](params)
 		if rpcErr != nil {

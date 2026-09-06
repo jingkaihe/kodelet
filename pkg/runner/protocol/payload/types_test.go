@@ -111,3 +111,59 @@ func TestComputeManifestDigestReportsUnserializableManifest(t *testing.T) {
 
 	require.ErrorContains(t, err, "failed to encode runner manifest")
 }
+
+func TestDiscoveryDigestIgnoresToolAvailabilityButPinsPolicyAndRegistrations(t *testing.T) {
+	manifest := Manifest{
+		WorkingDirectory: "/workspace",
+		Config:           EnvironmentConfig{Options: &llmtypes.ExecutionOptions{NoSkills: new(true)}},
+		Shortcuts:        []protocol.ShortcutDescriptor{{Key: "ctrl+alt+r", ExtensionID: "dictate", Description: "Start dictation", Generation: 1}},
+		Tools:            []ToolDefinition{{Name: "view_image", Description: "Model-specific image tool"}},
+	}
+	digest, err := ComputeDiscoveryDigest(manifest)
+	require.NoError(t, err)
+	fullDigest, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	execution := manifest
+	execution.Tools = []ToolDefinition{{Name: "view_image", Description: "Original detail supported"}, {Name: "spawn_agent"}}
+	execution.Shortcuts = []protocol.ShortcutDescriptor{{Key: "ctrl+alt+r", ExtensionID: "dictate", Description: "Start dictation", Generation: 2}}
+	executionDigest, err := ComputeDiscoveryDigest(execution)
+	require.NoError(t, err)
+	assert.Equal(t, digest, executionDigest)
+	executionFullDigest, err := ComputeManifestDigest(execution)
+	require.NoError(t, err)
+	assert.NotEqual(t, fullDigest, executionFullDigest)
+	require.Len(t, manifest.Tools, 1, "computing the discovery digest must not mutate the snapshot")
+	assert.Equal(t, uint64(1), manifest.Shortcuts[0].Generation)
+
+	for name, change := range map[string]func(*Manifest){
+		"working directory": func(m *Manifest) { m.WorkingDirectory = "/other" },
+		"tool permissions": func(m *Manifest) {
+			m.Config.Options = &llmtypes.ExecutionOptions{NoSkills: new(true), AllowedTools: &[]string{}}
+		},
+		"command permissions": func(m *Manifest) { m.Config.AllowedCommands = []string{"git status"} },
+		"disabled extensions": func(m *Manifest) {
+			m.Config.Options = &llmtypes.ExecutionOptions{NoSkills: new(true), NoExtensions: new(true)}
+		},
+		"disabled tools": func(m *Manifest) {
+			m.Config.Options = &llmtypes.ExecutionOptions{NoSkills: new(true), NoTools: new(true)}
+		},
+		"skills": func(m *Manifest) { m.Config.Options = &llmtypes.ExecutionOptions{} },
+		"shortcut owner": func(m *Manifest) {
+			m.Shortcuts = []protocol.ShortcutDescriptor{{Key: "ctrl+alt+r", ExtensionID: "replacement", Description: "Start dictation"}}
+		},
+		"shortcut key": func(m *Manifest) {
+			m.Shortcuts = []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "dictate", Description: "Start dictation"}}
+		},
+		"shortcut description": func(m *Manifest) {
+			m.Shortcuts = []protocol.ShortcutDescriptor{{Key: "ctrl+alt+r", ExtensionID: "dictate", Description: "Changed action"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := manifest
+			change(&changed)
+			changedDigest, err := ComputeDiscoveryDigest(changed)
+			require.NoError(t, err)
+			assert.NotEqual(t, digest, changedDigest)
+		})
+	}
+}
