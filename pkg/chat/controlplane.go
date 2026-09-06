@@ -780,6 +780,9 @@ func (r *ControlPlaneChatRunner) WorkspaceCWDSuggestions(ctx context.Context, ta
 
 func (r *ControlPlaneChatRunner) workspaceDiscovery(ctx context.Context, endpoint string, target WorkspaceTarget, query string, result any) error {
 	if target.RunnerID == "" && target.ConversationID == "" {
+		target.RunnerID = r.runnerID
+	}
+	if target.RunnerID == "" && target.ConversationID == "" {
 		return errors.New("runnerId or conversationId is required for runner workspace discovery")
 	}
 	if err := (protocol.WorkspaceDiscoverParams{Options: target.Options}).Validate(); err != nil {

@@ -137,7 +137,7 @@ kodelet run --server https://kodelet.example --resume CONVERSATION_ID "continue"
 
 Authenticate with `kodelet auth login`, `KODELET_AUTH_TOKEN`, or `--auth-token`. Select `--runner` unless the daemon has a ready embedded runner.
 
-`--cwd` selects a directory on the runner host. New conversations on the recognized same-host default use your current directory; other targets use the runner's startup directory when omitted. Resuming keeps the original runner and directory. `--follow` requires `--runner` or `--cwd`.
+`--cwd` selects a directory on the runner host. New conversations on the recognized same-host default use your current directory; other targets use the runner's startup directory when omitted. Resuming keeps the original runner and directory. `--follow` requires `--runner` or `--cwd` and resolves the directory on the runner before looking up history, so relative paths, tilde paths, and symlinks match their canonical saved directory.
 
 Stdin, images, recipes, model options, and tool restrictions are supported. Recipes and `--runner-profile` resolve on the runner. Unsupported options return an error. The runner uses its own environment, not virtual environments or shell changes made after it started.
 

@@ -205,7 +205,28 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 		if cwd == "" {
 			cwd = defaultCWD
 		}
-		history, err := runner.ListConversationsInCWD(ctx, 1, cwd)
+		if strings.TrimSpace(selector) == "" {
+			settings, err := runner.ChatSettings(ctx, request.Profile)
+			if err != nil {
+				return nil, err
+			}
+			if settings.DefaultRunnerID == "" || !settings.DefaultRunnerReady {
+				return nil, errors.New("daemon has no ready default runner; start serve --embedded-runner or select --runner explicitly")
+			}
+			request.RunnerID = settings.DefaultRunnerID
+		}
+		target, err := runner.DiscoverWorkspace(ctx, chat.WorkspaceTarget{
+			RunnerID: request.RunnerID, CWD: cwd, Profile: request.Profile,
+			EnvironmentProfile: request.EnvironmentProfile, Options: request.Options.Restrictions(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if target.CWD == "" {
+			return nil, errors.New("runner discovery returned no validated directory")
+		}
+		request.CWD = target.CWD
+		history, err := runner.ListConversationsInCWD(ctx, 1, target.CWD)
 		if err != nil {
 			return nil, err
 		}

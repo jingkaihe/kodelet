@@ -18,6 +18,27 @@ const setTestCookie = (cookie: string) => {
 };
 
 describe("ApiService", () => {
+	it.each([{}, undefined])(
+		"initializes without secure-context crypto APIs: %s",
+		async (crypto) => {
+			vi.resetModules();
+			vi.stubGlobal("crypto", crypto);
+			try {
+				const { default: client } = await import("./api");
+				mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+				await client.takeUIOwnership("conversation-1");
+				await client.respondToUIInput("conversation-1", "request-1", {
+					status: "dismissed",
+				});
+				const id = mockFetch.mock.calls[0][1].headers["X-Kodelet-Client-ID"];
+				expect(id).toMatch(/^client-.+/);
+				expect(mockFetch.mock.calls[1][1].headers["X-Kodelet-Client-ID"]).toBe(id);
+			} finally {
+				vi.unstubAllGlobals();
+				vi.resetModules();
+			}
+		},
+	);
 	it("uses one client identity for prompt replies and explicit ownership", async () => {
 		mockFetch.mockResolvedValue({
 			ok: true,

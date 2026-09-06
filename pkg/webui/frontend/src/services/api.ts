@@ -36,7 +36,10 @@ class ApiService {
 	private baseUrl = "";
 	private csrfCookieName = "kodelet_csrf";
 	private csrfHeaderName = "X-CSRF-Token";
-	private clientId = crypto.randomUUID();
+	private clientId =
+		typeof globalThis.crypto?.randomUUID === "function"
+			? globalThis.crypto.randomUUID()
+			: `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 	private async request<T>(
 		endpoint: string,

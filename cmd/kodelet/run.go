@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -52,7 +53,7 @@ func formatFragmentDisplayArgs(args map[string]string) string {
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		value := args[key]
-		if strings.ContainsAny(value, " \t\n\r\"") {
+		if strings.ContainsAny(value, "\"\\") || strings.ContainsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
 			value = fmt.Sprintf("%q", value)
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", key, value))

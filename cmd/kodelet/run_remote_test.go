@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -202,6 +204,78 @@ func TestRemoteRunRequestReadsStdinAndClientAttachments(t *testing.T) {
 	_, images, err := chat.NormalizeRequest(request)
 	require.NoError(t, err)
 	assert.Len(t, images, 1)
+}
+
+func TestRemoteRecipeArgumentsRoundTrip(t *testing.T) {
+	arguments := map[string]string{
+		"quoted": `say "hello"`, "slashes": `a\b\`, "empty": "",
+		"controls": "line1\nline2\t\r\x00\a\b\f\v", "unicode": "你好 🌍",
+		"literal": `\n\t`, "equals": "a=b",
+	}
+	cmd := remoteRunCommandForTest()
+	require.NoError(t, cmd.Flags().Set("recipe", "review"))
+	// Encode the complete flag map using pflag's CSV syntax.
+	values := make([]string, 0, len(arguments))
+	for key, value := range arguments {
+		values = append(values, key+"="+value)
+	}
+	var encodedFlags strings.Builder
+	writer := csv.NewWriter(&encodedFlags)
+	require.NoError(t, writer.Write(values))
+	writer.Flush()
+	require.NoError(t, writer.Error())
+	require.NoError(t, cmd.Flags().Set("arg", encodedFlags.String()))
+	request := withDevNullStdin(t, func() chat.ChatRequest {
+		request, _, err := remoteRunRequest(cmd, []string{"extra instructions"})
+		require.NoError(t, err)
+		return request
+	})
+	command, encoded, found := slashcommands.Parse(request.Message)
+	require.True(t, found)
+	assert.Equal(t, "review", command)
+	decoded, instructions := slashcommands.ParseArgs(encoded)
+	assert.Equal(t, arguments, decoded)
+	assert.Equal(t, "extra instructions", instructions)
+}
+
+func TestOneShotFollowResolvesRunnerDirectory(t *testing.T) {
+	for _, selector := range []string{"chosen", ""} {
+		for _, cwd := range []string{".", "~/project", "/runner/link", "/runner/project/"} {
+			t.Run(selector+"/"+cwd, func(t *testing.T) {
+				discovered := false
+				daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/api/runners":
+						require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"runners": []runnerregistry.Runner{{ID: "chosen", Connected: true, Status: runnerregistry.RunnerStatusIdle, Workspace: protocol.Workspace{Path: "/runner/startup"}}}}))
+					case "/api/chat/settings":
+						require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{DefaultRunnerID: "chosen", DefaultRunnerReady: true}))
+					case "/api/chat/slash-commands":
+						assert.Equal(t, "chosen", r.URL.Query().Get("runnerId"))
+						assert.Equal(t, cwd, r.URL.Query().Get("cwd"))
+						discovered = true
+						_, _ = io.WriteString(w, `{"cwd":"/runner/project"}`)
+					case "/api/conversations":
+						assert.True(t, discovered)
+						assert.Equal(t, "/runner/project", r.URL.Query().Get("cwd"))
+						_, _ = io.WriteString(w, `{"conversations":[{"id":"saved","metadata":{"runner_id":"chosen"}}]}`)
+					case "/api/conversations/saved":
+						_, _ = io.WriteString(w, `{"id":"saved","runnerId":"chosen","cwd":"/runner/project"}`)
+					default:
+						assert.Fail(t, "unexpected request", "%s", r.URL)
+						w.WriteHeader(http.StatusNotFound)
+					}
+				}))
+				defer daemon.Close()
+				cmd := remoteRunCommandForTest()
+				require.NoError(t, cmd.ParseFlags([]string{"--follow", "--runner=" + selector}))
+				request := chat.ChatRequest{CWD: cwd}
+				_, err := prepareOneShotRunner(t.Context(), cmd, daemon.URL, "", &request)
+				require.NoError(t, err)
+				assert.Equal(t, "saved", request.ConversationID)
+				assert.Equal(t, "/runner/project", request.CWD)
+			})
+		}
+	}
 }
 
 func TestRemoteRunImageRejectsLocalReadFailureAndInsecureURL(t *testing.T) {
