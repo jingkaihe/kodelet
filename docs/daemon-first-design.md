@@ -159,7 +159,7 @@ Every existing execution flag and SDK option must receive a disposition: support
 
 ### Configuration ownership and shell environment
 
-The control plane resolves model profiles from trusted daemon configuration. The runner resolves environment policy, resources, and workspace configuration for the effective execution CWD. A repository cannot change the daemon endpoint, inject provider credentials into daemon configuration, or rewrite daemon authentication policy. Model profiles and runner environment profiles remain separate namespaces.
+The control plane resolves named daemon model profiles from trusted configuration and validates permitted inline or extension-defined execution presets without adding them to its global configuration. The runner resolves environment policy, resources, and workspace configuration for the effective execution CWD. A repository cannot change the daemon endpoint, inject provider credentials into daemon configuration, or rewrite daemon authentication policy. Named daemon model profiles and runner environment profiles remain separate namespaces.
 
 For embedding, inject runner-specific configuration rather than relying on the control plane's process-global Viper instance. Resolve each run against an immutable settings snapshot and define precedence among runner defaults, workspace settings, the selected environment profile, and permitted request restrictions. Existing conversations retain their documented persisted configuration behavior; reload must not silently replace pinned settings during a run.
 
@@ -215,7 +215,7 @@ Each workstream should land in small, independently testable changes. The table 
 |---|---|---|---|
 | 1. Execution/configuration contract | `pkg/chat`, `pkg/controlplane`, shared types | None | Ordinary, tool-free, and restricted requests have tested semantics; retained flags and SDK options have explicit dispositions. |
 | 2. Embedded runner hosting | `cmd/kodelet/serve.go`, `pkg/controlplane`, `pkg/runner/client` | Configuration decisions from 1 | Embedded and standalone runners pass the same execution tests, including startup, concurrent CWDs, cancellation, and shutdown. |
-| 3. Nested execution and SDK | `pkg/tools/web_fetch.go`, `pkg/controlplane`, `pkg/acp`, `sdk/src/agent.ts` | 1 | Supported extraction and subagent examples run without provider credentials on clients or standalone runners; authorization and cancellation are tested. |
+| 3. Nested execution and SDK | `pkg/tools/web_fetch.go`, `pkg/controlplane`, `pkg/acp`, runner/extension protocol, SDK APIs | 1; registration lifetime rules from 4 | Supported extraction and subagent examples, including extension-defined profiles, run without provider credentials on clients or standalone runners; authorization and cancellation are tested. |
 | 4. Extension lifetime/context | `pkg/extensions`, `pkg/runner/client`, SDK extension APIs | Lifecycle/context decisions from 1 | Representative extensions work across submissions, concurrent conversations, background work, and cleanup with one documented lifetime contract. |
 | 5. Client UI/discovery/workspace parity | Control-plane routes, runner protocol/service, TUI, ACP, Web UI | Relevant contracts from 1 and 4 | Supported features within each client behave the same with embedded and external runners. |
 | 6. Thin-client conversion | `cmd/kodelet`, `pkg/chat/controlplane.go`, `pkg/acp`, SDK | 1; specific features from 3–5 | Supported commands use the daemon for execution and persistence, with no client-local provider or database dependency. |
@@ -225,6 +225,8 @@ Each workstream should land in small, independently testable changes. The table 
 
 Implement the retained execution fields, validation, configuration snapshots, result/error semantics, and cancellation contract on the existing remote path. Keep the existing persisted-conversation model rather than adding transient executions. Add tests that distinguish omitted values from explicit restrictions. Reject unsupported combinations before provider or tool side effects begin. This workstream should not wait for embedding or a daemon installer.
 
+Use the same typed execution-option schema for request overrides, SDK inline profiles, and extension-defined presets. Permitted options must not require a pre-existing named daemon profile; registration and child invocation belong to workstream 3.
+
 ### Workstream 2: compose existing runner components
 
 Add optional embedded hosting, readiness reporting, authentication provisioning, workspace-lock handling, default selection, and bounded shutdown to `serve`. Extract/inject the necessary runner settings without broadly refactoring unrelated configuration. Test simultaneous requests for different CWDs and configuration profiles. Standalone runners must remain valid peers throughout.
@@ -233,9 +235,19 @@ Add optional embedded hosting, readiness reporting, authentication provisioning,
 
 First migrate tool-free extraction, replacing its local `kodelet run --no-save` subprocess with the internal control-plane helper operation before removing the CLI flag. Then migrate SDK/subagent launch and supported per-session options, including explicit authentication and parent/child relationships. Test with provider credentials available only to a separate control-plane process; an embedded-only test cannot establish that runner code is independent of shared provider credentials.
 
+Add extension-owned execution presets through a proposed `ext.registerProfile({...})` API, with equivalent support in the Python SDK. The runner advertises serializable definitions through the extension initialization/environment protocol; extension tools can select them when requesting authorized child sessions on the control plane. A preset need not exist in daemon YAML, but its provider/model options must be supported and authorized there. Reuse workstream 1's validation rather than forwarding arbitrary configuration or introducing another execution path.
+
+- Scope registration by owning extension and runner environment, without overwriting daemon profiles or another extension's names. Snapshot the resolved definition into the child configuration before execution.
+- Apply model/provider settings centrally and workspace/tool/skill/extension settings on the runner, within host and delegated policy. Resolve system-prompt files on the runner and transport their content; support per-invocation prompt inputs without depending on daemon access to runner-local temporary files.
+- Resolve the preset from the parent environment before constructing the child, so disabling extensions in the child does not disable the parent tool or make its registered preset unavailable. Preserve child progress, cancellation, and normal conversation persistence.
+
+Use the existing [`code_search` extension](https://github.com/jingkaihe/skills/blob/main/extensions/code-search/kodelet-extension-code-search) as the compatibility case: a child using its declared model, only `file_read`/`grep_tool`/`glob_tool`, no child extensions or skills, and a runner-resolved prompt must work without a daemon-defined `code_search` profile or runner-side provider credentials.
+
 ### Workstream 4: extension compatibility
 
 Create a small set of representative extensions covering lifecycle hooks, background tasks, persistent data, follow-up messages, and conversation forking. Resolve lifetime/context gaps using those examples rather than inventing hypothetical generic state APIs. Record intentional compatibility changes in extension documentation and update affected examples.
+
+Define profile-registration lifetime with the owning extension runtime and its leases. Test name isolation and reload/removal without changing an active child's pinned configuration; workstream 3 owns registration and invocation implementation.
 
 ### Workstream 5: two parallel deliverables
 
@@ -305,6 +317,7 @@ Use the same focused acceptance scenarios with an embedded runner and with a sta
 | Runner disconnect or uncertain submission | Outcome is reported/reconciled without blindly replaying side effects. |
 | Concurrent CWDs/configurations | Context, resources, environment policy, and subprocess directories do not leak between conversations or into daemon configuration. |
 | Nested helper/subagent | Supported nested execution succeeds with provider credentials only on the control plane and cannot exceed delegated authority. |
+| Extension-defined profile | `code_search` runs without a preconfigured daemon profile; runner-local prompts, child restrictions, progress/cancellation, scoped names, and pinned configuration survive the supported lifecycle. |
 | Extension lifecycle | Two submissions, background work, failure cleanup, and unavailable UI follow the same contract on both runner placements. |
 | Workspace discovery/panels | Commands and suggestions come from the selected runner; conversation-scoped terminal and diff use the correct CWD. |
 | Daemon restart | Existing history remains valid; interrupted work is identified without claiming transparent execution recovery. |
@@ -362,7 +375,7 @@ Also distinguish request-only settings from conversation configuration. A turn l
 
 **Accepted direction:** Keep existing global plus conversation-CWD extension discovery, including plugins, with isolated runtimes and explicit background leases. Do not add runner-startup or parent-directory extension inheritance.
 
-**Configuration work:** The runner currently uses startup-loaded settings plus an environment profile; per-CWD YAML loading is still new work. Resolve runner defaults → execution-CWD environment settings → selected environment profile → permitted request overrides, subject to host policy. Model credentials and model profiles remain daemon-owned. Finalize explicit override-file and isolated-config semantics during implementation.
+**Configuration work:** The runner currently uses startup-loaded settings plus an environment profile; per-CWD YAML loading is still new work. Resolve runner defaults → execution-CWD environment settings → selected environment profile → permitted request overrides, subject to host policy. Model credentials and named daemon profiles remain daemon-owned; extension presets use the validated execution options described in workstream 3. Finalize explicit override-file and isolated-config semantics during implementation.
 
 Pin effective settings at `run.open`; workspace changes affect later runs, respecting persisted conversation settings. Initially require explicit reload or restart for daemon configuration, without file watchers. Scope resource caches by CWD, environment profile, and effective settings.
 
