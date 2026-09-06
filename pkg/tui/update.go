@@ -490,6 +490,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil {
 			break
 		}
+		// Saved discovery uses server-pinned settings rather than the displayed
+		// profile. A new-conversation probe cannot populate a saved environment.
+		if msg.remote && (msg.conversationID != state.conversationID || (msg.conversationID == "" && msg.profile != state.profile)) {
+			break
+		}
 		active := state == m.conversationState
 		currentState := m.conversationState
 		m.conversationState = state
@@ -713,9 +718,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+t":
 			if m.canChangeProfile() {
-				m.toggleProfilePickerFromKeyboard()
+				cmd := m.toggleProfilePickerFromKeyboard()
 				m.resize()
 				m.refreshViewport(false)
+				return m, cmd
 			}
 			return m, nil
 		case "ctrl+y":
@@ -793,10 +799,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.profilePickerOpen {
-				m.selectProfilePickerOption(m.profilePickerIndex)
+				cmd := m.selectProfilePickerOption(m.profilePickerIndex)
 				m.resize()
 				m.refreshViewport(false)
-				return m, nil
+				return m, cmd
 			}
 			if m.reasoningPickerOpen {
 				m.selectReasoningPickerOption(m.reasoningPickerIndex)
@@ -846,10 +852,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
 			if optionIndex, ok := m.profilePickerOptionAt(mouse.X, mouse.Y); ok {
-				m.selectProfilePickerOption(optionIndex)
+				cmd := m.selectProfilePickerOption(optionIndex)
 				m.resize()
 				m.refreshViewport(false)
-				return m, nil
+				return m, cmd
 			}
 			if m.profileComposerRegionContains(mouse.X, mouse.Y) {
 				m.toggleProfilePickerFromClick()

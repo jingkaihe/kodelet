@@ -149,7 +149,7 @@ func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequ
 		}
 		request.RunnerID, request.CWD, request.EnvironmentProfile = history.RunnerID, history.CWD, history.EnvironmentProfile
 	} else {
-		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, EnvironmentProfile: request.EnvironmentProfile})
+		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, Profile: request.Profile, EnvironmentProfile: request.EnvironmentProfile})
 		if err != nil {
 			return request.ConversationID, err
 		}
@@ -217,7 +217,11 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if config.Runner == "" && config.CWD == "" {
 			return result, errors.New("--follow requires --runner or --cwd to scope daemon history")
 		}
-		target, err := runner.DiscoverWorkspace(ctx, chatpkg.WorkspaceTarget{CWD: config.CWD})
+		var profile string
+		if cmd.Flags().Changed("profile") {
+			profile, _ = cmd.Flags().GetString("profile")
+		}
+		target, err := runner.DiscoverWorkspace(ctx, chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: profile})
 		if err != nil {
 			return result, err
 		}
@@ -263,7 +267,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		}
 		settings, _ := remoteProfileSettings(result.ProfileSettings, result.Profile)
 		result.ReasoningEffort, result.ReasoningEffortOptions = settings.ReasoningEffort, settings.ReasoningEffortOptions
-		target = chatpkg.WorkspaceTarget{CWD: config.CWD, EnvironmentProfile: config.RunnerProfile}
+		target = chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile}
 	}
 	if result.ReasoningEffortExplicit {
 		result.ReasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")

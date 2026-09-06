@@ -94,9 +94,13 @@ func (s *Server) handleAdoptConversation(w http.ResponseWriter, r *http.Request)
 		s.writeErrorResponse(w, http.StatusNotFound, "selected runner not found", nil)
 		return
 	}
+	modelProfile := strings.TrimSpace(config.Profile)
+	if modelProfile == "" {
+		modelProfile = "default" // Config is resolved; do not inherit the active profile again.
+	}
 	var discovered protocol.WorkspaceDiscoverResult
 	err = s.runnerRegistry.CallRunner(ctx, runner.ID, runner.Generation, protocol.MethodWorkspaceDiscover,
-		protocol.WorkspaceDiscoverParams{CWD: response.CWD, EnvironmentProfile: profile}, &discovered)
+		protocol.WorkspaceDiscoverParams{CWD: response.CWD, Profile: modelProfile, EnvironmentProfile: profile}, &discovered)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusConflict, "runner workspace validation failed: "+err.Error(), nil)
 		return

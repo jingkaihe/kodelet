@@ -323,6 +323,7 @@ class ApiService {
 			params.append("cwd", cwd);
 		}
 		for (const [key, value] of Object.entries(target || {})) {
+			if (key === "profile" && (!value?.trim() || target?.conversationId)) continue;
 			if (value !== undefined) params.append(key, value);
 		}
 		const suffix = params.toString();
@@ -340,6 +341,7 @@ class ApiService {
 			params.append("q", query);
 		}
 		for (const [key, value] of Object.entries(target || {})) {
+			if (key === "profile" && (!value?.trim() || target?.conversationId)) continue;
 			if (value !== undefined) params.append(key, value);
 		}
 		const suffix = params.toString();

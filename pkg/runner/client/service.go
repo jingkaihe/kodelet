@@ -77,6 +77,7 @@ type ServiceOptions struct {
 	RuntimeProvider           RuntimeProvider
 	ConfigLoader              ConfigLoader
 	WorkspaceConfigLoader     WorkspaceConfigLoader
+	ProfileConfigLoader       ProfileConfigLoader
 	EnvironmentFactory        EnvironmentFactory
 	ExecutionInstanceProvider ExecutionInstanceProvider
 	CleanupTimeout            time.Duration
@@ -95,6 +96,7 @@ type Service struct {
 	ownedRuntime          *extensions.RuntimeManager
 	configLoader          ConfigLoader
 	workspaceConfigLoader WorkspaceConfigLoader
+	profileConfigLoader   ProfileConfigLoader
 	environmentFactory    EnvironmentFactory
 	instanceProvider      ExecutionInstanceProvider
 	workspaceTerminals    *workspaceTerminalManager
@@ -160,6 +162,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		runtimeProvider:       options.RuntimeProvider,
 		configLoader:          options.ConfigLoader,
 		workspaceConfigLoader: options.WorkspaceConfigLoader,
+		profileConfigLoader:   options.ProfileConfigLoader,
 		environmentFactory:    options.EnvironmentFactory,
 		instanceProvider:      options.ExecutionInstanceProvider,
 		cleanupTimeout:        options.CleanupTimeout,
@@ -201,11 +204,14 @@ func loadRunnerConfig(profile string) (llmtypes.Config, error) {
 	return llm.GetConfigFromViperWithEnvironmentProfile(profile)
 }
 
-func (s *Service) loadConfig(cwd, profile string) (llmtypes.Config, error) {
-	if s.workspaceConfigLoader != nil {
-		return s.workspaceConfigLoader(cwd, profile)
+func (s *Service) loadConfig(cwd, modelProfile, environmentProfile string) (llmtypes.Config, error) {
+	if s.profileConfigLoader != nil {
+		return s.profileConfigLoader(cwd, modelProfile, environmentProfile)
 	}
-	return s.configLoader(profile)
+	if s.workspaceConfigLoader != nil {
+		return s.workspaceConfigLoader(cwd, environmentProfile)
+	}
+	return s.configLoader(environmentProfile)
 }
 
 // Attach installs the current symmetric connection used by runner-originated calls.
@@ -343,7 +349,7 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
-		manifest, err := s.ProbeManifestForCWDWithOptions(ctx, value.CWD, value.EnvironmentProfile, value.Options)
+		manifest, err := s.ProbeManifestForProfile(ctx, value.CWD, value.Profile, value.EnvironmentProfile, value.Options)
 		return rpcResult(protocol.WorkspaceDiscoverResult{CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile), Digest: manifest.Digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts}, err)
 	case protocol.MethodWorkspaceCWDHints:
 		value, rpcErr := decodeParams[protocol.WorkspaceCWDHintsParams](params)
@@ -572,7 +578,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	workingDirectory := resources.workingDirectory
 
-	config, err := s.loadConfig(workingDirectory, params.Agent.EnvironmentProfile)
+	config, err := s.loadConfig(workingDirectory, params.Agent.Profile, params.Agent.EnvironmentProfile)
 	if err != nil {
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
@@ -702,7 +708,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	run.opening = false
 	s.activateBackgroundTasksLocked(run)
-	if workingDirectory == s.workspace {
+	if workingDirectory == s.workspace && params.Agent.Profile == "" && variant == "" && params.Options == nil {
 		s.lastManifestDigest = wireManifest.Digest
 	}
 	s.mu.Unlock()
@@ -879,6 +885,12 @@ func (s *Service) ProbeManifestForCWD(ctx context.Context, cwd, environmentProfi
 
 // ProbeManifestForCWDWithOptions scopes discovery restrictions to this request.
 func (s *Service) ProbeManifestForCWDWithOptions(ctx context.Context, cwd, environmentProfile string, options *llmtypes.ExecutionOptions) (runnerpayload.Manifest, error) {
+	return s.ProbeManifestForProfile(ctx, cwd, "", environmentProfile, options)
+}
+
+// ProbeManifestForProfile selects the same embedded environment preferences as
+// run.open. Standalone loaders ignore modelProfile and retain runner ownership.
+func (s *Service) ProbeManifestForProfile(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (runnerpayload.Manifest, error) {
 	if s == nil {
 		return runnerpayload.Manifest{}, errors.New("runner service is required")
 	}
@@ -889,14 +901,14 @@ func (s *Service) ProbeManifestForCWDWithOptions(ctx context.Context, cwd, envir
 		return runnerpayload.Manifest{}, err
 	}
 	defer s.unlockSnapshot()
-	return s.probeManifestWithOptionsLocked(ctx, cwd, environmentProfile, options)
+	return s.probeManifestWithOptionsLocked(ctx, cwd, modelProfile, environmentProfile, options)
 }
 
 func (s *Service) probeManifestLocked(ctx context.Context, cwd, environmentProfile string) (runnerpayload.Manifest, error) {
-	return s.probeManifestWithOptionsLocked(ctx, cwd, environmentProfile, nil)
+	return s.probeManifestWithOptionsLocked(ctx, cwd, "", environmentProfile, nil)
 }
 
-func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, environmentProfile string, options *llmtypes.ExecutionOptions) (result runnerpayload.Manifest, probeErr error) {
+func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (result runnerpayload.Manifest, probeErr error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -933,7 +945,7 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, envir
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Errorf("runner manifest probe instance returned working directory %q, expected %q", workingDirectory, resolvedCWD))
 	}
 
-	config, err := s.loadConfig(workingDirectory, environmentProfile)
+	config, err := s.loadConfig(workingDirectory, modelProfile, environmentProfile)
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
 	}
@@ -997,7 +1009,7 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, envir
 	if err := s.closeProbeResources(probeCtx, environment, instance, nil); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
-	if options == nil && cwd == "" && normalizeEnvironmentProfile(environmentProfile) == "" {
+	if options == nil && cwd == "" && modelProfile == "" && normalizeEnvironmentProfile(environmentProfile) == "" {
 		s.mu.Lock()
 		s.lastManifestDigest = wire.Digest
 		s.mu.Unlock()

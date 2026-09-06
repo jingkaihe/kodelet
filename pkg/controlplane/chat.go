@@ -12,6 +12,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -92,7 +93,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	return resultConversationID, runErr
 }
 
-func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.ChatRequest, conversationID string, config llmtypes.Config, _ string) (agentenv.Environment, error) {
 	runnerID := strings.TrimSpace(req.RunnerID)
 	if runnerID == "" {
 		return nil, errors.New("runner id is required")
@@ -112,6 +113,25 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	}
 	if !runner.Connected {
 		return nil, errors.New("runner is offline")
+	}
+	var profileOption agentenv.RemoteEnvironmentOption
+	if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
+		if r.server.conversationService == nil {
+			return nil, errors.New("conversation service is unavailable")
+		}
+		record, err := r.server.conversationService.GetConversation(ctx, conversationID)
+		if err != nil && !errors.Is(err, convtypes.ErrConversationNotFound) {
+			return nil, errors.Wrap(err, "failed to load conversation for embedded profile fallback")
+		}
+		if err == nil {
+			snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to load conversation config snapshot")
+			}
+			if hasSnapshot && strings.TrimSpace(snapshot.Profile) == strings.TrimSpace(config.Profile) {
+				profileOption = agentenv.WithRemoteModelProfile("default")
+			}
+		}
 	}
 	capabilities := protocol.ClientCapabilities{}
 	if req.ClientCapabilities != nil {
@@ -136,6 +156,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	return agentenv.NewRemoteEnvironment(
 		controller,
 		runnerID,
+		profileOption,
 		agentenv.WithRemoteClientCapabilities(capabilities),
 		agentenv.WithRemoteRunIDGenerator(func() (string, error) {
 			if id, ok := ctx.Value(turnRunIDKey{}).(string); ok && admitted {

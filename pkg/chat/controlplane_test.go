@@ -15,6 +15,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,50 @@ type failingControlPlaneChatSink struct {
 }
 
 func (s failingControlPlaneChatSink) Send(ChatEvent) error { return s.err }
+
+func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
+	for _, endpoint := range []string{"slash-commands", "cwd-suggestions"} {
+		for _, target := range []WorkspaceTarget{
+			{RunnerID: "runner", CWD: "~/project with spaces", EnvironmentProfile: "environment"},
+			{RunnerID: "runner", Profile: "default", EnvironmentProfile: "environment"},
+			{RunnerID: "runner", Profile: "model/+profile", EnvironmentProfile: "environment"},
+			{ConversationID: "saved"},
+		} {
+			t.Run(endpoint+"/"+target.Profile+target.ConversationID, func(t *testing.T) {
+				calls := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					assert.Equal(t, http.MethodGet, r.Method)
+					assert.Equal(t, "/base/api/chat/"+endpoint, r.URL.Path)
+					assert.Equal(t, "Bearer client-token", r.Header.Get("Authorization"))
+					query := r.URL.Query()
+					assert.Equal(t, target.Profile, query.Get("profile"))
+					assert.Equal(t, target.Profile != "", query.Has("profile"))
+					assert.Equal(t, target.RunnerID, query.Get("runnerId"))
+					assert.Equal(t, target.CWD, query.Get("cwd"))
+					assert.Equal(t, target.EnvironmentProfile, query.Get("environmentProfile"))
+					assert.Equal(t, target.ConversationID, query.Get("conversationId"))
+					if endpoint == "cwd-suggestions" {
+						assert.Equal(t, "../other", query.Get("q"))
+						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{}))
+					} else {
+						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{}))
+					}
+				}))
+				t.Cleanup(server.Close)
+				runner, err := NewControlPlaneChatRunner(server.URL+"/base", "client-token", "")
+				require.NoError(t, err)
+				if endpoint == "cwd-suggestions" {
+					_, err = runner.WorkspaceCWDSuggestions(t.Context(), target, "../other")
+				} else {
+					_, err = runner.DiscoverWorkspace(t.Context(), target)
+				}
+				require.NoError(t, err)
+				assert.Equal(t, 1, calls)
+			})
+		}
+	}
+}
 
 func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

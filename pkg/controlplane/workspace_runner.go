@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -17,6 +19,7 @@ import (
 type workspaceRunnerTarget struct {
 	Runner             runnerregistry.Runner
 	CWD                string
+	Profile            string
 	EnvironmentProfile string
 }
 
@@ -54,7 +57,11 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 		runnerID = status.RunnerID
 	}
 	cwd := strings.TrimSpace(r.URL.Query().Get("cwd"))
-	profile := chat.NormalizeEnvironmentProfile(r.URL.Query().Get("environmentProfile"))
+	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
+	if strings.EqualFold(profile, "default") {
+		profile = "default"
+	}
+	environmentProfile := chat.NormalizeEnvironmentProfile(r.URL.Query().Get("environmentProfile"))
 	if s == nil || s.runnerRegistry == nil {
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner registry is unavailable"}
 	}
@@ -69,16 +76,38 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("runner does not match conversation affinity")}
 			}
 			runnerID = affinity.RunnerID
-			if r.URL.Query().Has("environmentProfile") && profile != affinity.EnvironmentProfile {
+			if r.URL.Query().Has("environmentProfile") && environmentProfile != affinity.EnvironmentProfile {
 				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "runner profile does not match conversation affinity"}
 			}
-			profile = affinity.EnvironmentProfile
+			environmentProfile = affinity.EnvironmentProfile
 			if s.conversationService == nil {
 				return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "conversation store is unavailable"}
 			}
 			record, err := s.conversationService.GetConversation(r.Context(), conversationID)
 			if err != nil {
 				return nil, &workspaceRunnerTargetError{status: http.StatusNotFound, message: "conversation not found", err: err}
+			}
+			snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+			if err != nil {
+				return nil, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to load conversation config snapshot", err: err}
+			}
+			storedProfile, hasStoredProfile := record.Metadata["profile"].(string)
+			if hasSnapshot {
+				storedProfile, hasStoredProfile = snapshot.Profile, true
+			}
+			storedProfile = strings.TrimSpace(storedProfile)
+			// An empty persisted profile means the base configuration, not the
+			// daemon's current active profile. Only legacy records without any
+			// stored profile continue to inherit the daemon default.
+			if hasStoredProfile && (storedProfile == "" || strings.EqualFold(storedProfile, "default")) {
+				storedProfile = "default"
+			}
+			if profile != "" && profile != storedProfile {
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "model profile does not match conversation affinity"}
+			}
+			profile = storedProfile
+			if hasSnapshot && s.missingEmbeddedModelProfile(runnerID, storedProfile) {
+				profile = "default"
 			}
 			if strings.TrimSpace(record.CWD) == "" {
 				return nil, &workspaceRunnerTargetError{status: http.StatusConflict, message: "conversation has no validated runner directory"}
@@ -99,7 +128,18 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 	if !runner.Connected {
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner is offline"}
 	}
-	return &workspaceRunnerTarget{Runner: runner, CWD: cwd, EnvironmentProfile: profile}, nil
+	return &workspaceRunnerTarget{Runner: runner, CWD: cwd, Profile: profile, EnvironmentProfile: environmentProfile}, nil
+}
+
+// Missing profiles may fall back only for validated saved snapshots, matching
+// chat.ResolveConfigForExistingConversation. Standalone runners own their policy.
+func (s *Server) missingEmbeddedModelProfile(runnerID, profile string) bool {
+	profile = chat.NormalizeRequestedProfile(profile)
+	if profile == "" {
+		return false
+	}
+	status := s.EmbeddedRunnerStatus()
+	return status.Enabled && status.RunnerID == runnerID && !llm.HasConfiguredProfile(profile)
 }
 
 func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, method string) {
@@ -149,10 +189,10 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 	var params any
 	if method == protocol.MethodWorkspaceDiscover {
 		result = &protocol.WorkspaceDiscoverResult{}
-		params = protocol.WorkspaceDiscoverParams{CWD: target.CWD, EnvironmentProfile: target.EnvironmentProfile, Options: options}
+		params = protocol.WorkspaceDiscoverParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options}
 	} else {
 		result = &protocol.WorkspaceCWDHintsResult{}
-		params = protocol.WorkspaceCWDHintsParams{CWD: target.CWD, EnvironmentProfile: target.EnvironmentProfile, Query: r.URL.Query().Get("q")}
+		params = protocol.WorkspaceCWDHintsParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Query: r.URL.Query().Get("q")}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()

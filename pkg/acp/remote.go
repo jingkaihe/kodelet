@@ -100,7 +100,7 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		}
 		runnerID = settings.DefaultRunnerID
 	}
-	target := chat.WorkspaceTarget{RunnerID: runnerID, CWD: request.CWD, EnvironmentProfile: m.config.EnvironmentProfile, Options: m.config.Options.Restrictions()}
+	target := chat.WorkspaceTarget{RunnerID: runnerID, CWD: request.CWD, Profile: m.config.Profile, EnvironmentProfile: m.config.EnvironmentProfile, Options: m.config.Options.Restrictions()}
 	discovery, err := client.DiscoverWorkspace(ctx, target)
 	if err != nil {
 		return "", errors.Wrap(err, "runner workspace discovery is required for ACP session directories; check the path/profile and upgrade the runner if unsupported")
@@ -185,9 +185,11 @@ func (m *remoteSessionManager) commands(ctx context.Context, sessionID acptypes.
 		return nil, errors.Errorf("session not found: %s", sessionID)
 	}
 	client := session.client
-	target := chat.WorkspaceTarget{RunnerID: session.runnerID, CWD: session.cwd, EnvironmentProfile: session.environmentProfile, Options: session.options.Restrictions()}
-	if session.started {
-		target.ConversationID = string(sessionID)
+	target := chat.WorkspaceTarget{ConversationID: string(sessionID), Options: session.options.Restrictions()}
+	if !session.started {
+		target.ConversationID = ""
+		target.RunnerID, target.CWD = session.runnerID, session.cwd
+		target.Profile, target.EnvironmentProfile = m.config.Profile, session.environmentProfile
 	}
 	m.mu.Unlock()
 	discovery, err := client.DiscoverWorkspace(ctx, target)

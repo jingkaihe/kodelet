@@ -41,6 +41,15 @@ func WithRemoteClientCapabilities(capabilities protocol.ClientCapabilities) Remo
 	}
 }
 
+// WithRemoteModelProfile overrides only the runner's environment selector. The
+// trusted server uses this for embedded snapshot fallback without changing the
+// resolved model configuration or its immutable saved profile identity.
+func WithRemoteModelProfile(profile string) RemoteEnvironmentOption {
+	return func(environment *RemoteEnvironment) {
+		environment.modelProfile = strings.TrimSpace(profile)
+	}
+}
+
 // WithRemoteRunIDGenerator overrides opaque run ID generation, primarily for tests.
 func WithRemoteRunIDGenerator(generate func() (string, error)) RemoteEnvironmentOption {
 	return func(environment *RemoteEnvironment) {
@@ -55,6 +64,7 @@ type RemoteEnvironment struct {
 	mu                 sync.RWMutex
 	controller         RemoteController
 	runnerID           string
+	modelProfile       string
 	clientCapabilities protocol.ClientCapabilities
 	newRunID           func() (string, error)
 	runID              string
@@ -107,6 +117,16 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		e.finishOpenFailure()
 		return Manifest{}, errors.Wrap(err, "failed to generate remote run id")
 	}
+	// RunSpec contains an already resolved model configuration. An empty
+	// profile here means the base, not the embedded runner's active default
+	// (which may have changed since this conversation's snapshot was saved).
+	profile := strings.TrimSpace(spec.Config.Profile)
+	if profile == "" {
+		profile = "default"
+	}
+	if e.modelProfile != "" {
+		profile = e.modelProfile
+	}
 	params := protocol.RunOpenParams{
 		ChildPrompt:    e.childPrompt,
 		RunID:          runID,
@@ -116,7 +136,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		Agent: protocol.AgentDescriptor{
 			Provider:           spec.Config.Provider,
 			Model:              spec.Config.Model,
-			Profile:            spec.Config.Profile,
+			Profile:            profile,
 			EnvironmentProfile: spec.EnvironmentProfile,
 			RecipeName:         spec.Config.RecipeName,
 			InvokedBy:          firstNonEmpty(spec.InvokedBy, "main"),

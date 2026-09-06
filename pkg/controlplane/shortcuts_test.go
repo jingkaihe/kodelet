@@ -122,6 +122,48 @@ func TestWorkspaceShortcutIdleLeasePinsGenerationAndReleasesScope(t *testing.T) 
 	}
 }
 
+func TestWorkspaceShortcutRoutesModelProfileToTemporaryRun(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		profile  string
+		stored   *string
+		want     string
+		conflict bool
+	}{
+		{name: "daemon default"},
+		{name: "explicit default", profile: "default", want: "default"},
+		{name: "named", profile: "model-profile", want: "model-profile"},
+		{name: "stored", stored: new("stored-profile"), want: "stored-profile"},
+		{name: "stored default", stored: new("default"), want: "default"},
+		{name: "stored empty pins base", stored: new(""), want: "default"},
+		{name: "conflicting", profile: "default", stored: new("stored-profile"), conflict: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newShortcutFixture(t)
+			f.request.Target.Profile = test.profile
+			if test.stored != nil {
+				metadata, err := conversations.AddConfigSnapshot(nil, llmtypes.Config{Profile: *test.stored, Provider: "openai", Model: "stored-model", ReasoningEffort: "medium"})
+				require.NoError(t, err)
+				f.server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+					return &conversations.GetConversationResponse{ID: "saved", CWD: "/runner/selected", Metadata: metadata}, nil
+				}}
+				require.NoError(t, f.server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "saved", f.registration.RunnerID, "review"))
+				f.request.Target = chat.WorkspaceTarget{ConversationID: "saved", Profile: test.profile, Options: f.request.Target.Options}
+			}
+			response := f.invoke(t.Context(), t, f.request, "owner")
+			if test.conflict {
+				assert.Equal(t, http.StatusBadRequest, response.Code)
+				assert.Empty(t, f.methods, "conflicts must fail before opening a temporary run")
+				return
+			}
+			assert.Equal(t, http.StatusOK, response.Code)
+			assert.Contains(t, response.Body.String(), `"matched":true`)
+			assert.Equal(t, test.want, f.opened.Agent.Profile)
+			assert.Equal(t, "review", f.opened.Agent.EnvironmentProfile)
+		})
+	}
+}
+
 func TestWorkspaceShortcutRejectsInvalidOrStaleBeforeExecution(t *testing.T) {
 	f := newShortcutFixture(t)
 	valid := string(mustRunnerJSON(t, f.request))
@@ -161,10 +203,10 @@ func TestWorkspaceShortcutRejectsInvalidOrStaleBeforeExecution(t *testing.T) {
 
 func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T) {
 	f := newShortcutFixture(t)
-	manifest, err := f.server.runnerRegistry.OpenRun(t.Context(), f.registration.RunnerID, protocol.RunOpenParams{RunID: "active-run", ConversationID: "conversation", CWD: f.request.Target.CWD, Agent: protocol.AgentDescriptor{EnvironmentProfile: "review"}, Options: f.request.Target.Options})
+	manifest, err := f.server.runnerRegistry.OpenRun(t.Context(), f.registration.RunnerID, protocol.RunOpenParams{RunID: "active-run", ConversationID: "conversation", CWD: f.request.Target.CWD, Agent: protocol.AgentDescriptor{Profile: "model-profile", EnvironmentProfile: "review"}, Options: f.request.Target.Options})
 	require.NoError(t, err)
 	f.server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
-		return &conversations.GetConversationResponse{ID: "conversation", CWD: "/runner/selected"}, nil
+		return &conversations.GetConversationResponse{ID: "conversation", CWD: "/runner/selected", Metadata: map[string]any{"profile": "model-profile"}}, nil
 	}}
 	sink := &runnerUIEventSink{events: make(chan ChatEvent, 8)}
 	broker := newWebUIInputBroker("conversation", sink)
@@ -185,6 +227,13 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	assert.Equal(t, manifest.RunID, discovery.RunID)
 	assert.Equal(t, manifest.Shortcuts, discovery.Shortcuts)
 	assert.Empty(t, f.methods, "active discovery must not start another runtime")
+	recorder = httptest.NewRecorder()
+	f.server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/slash-commands?conversationId=conversation&profile=default", nil))
+	assert.Equal(t, http.StatusBadRequest, recorder.Code, "active discovery rejects conflicting profiles without rediscovery")
+	conflict := f.request
+	conflict.Target.Profile = "default"
+	assert.Equal(t, http.StatusBadRequest, f.invoke(t.Context(), t, conflict, "owner").Code)
+	assert.Empty(t, f.methods)
 	response := f.invoke(t.Context(), t, f.request, "observer")
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.Empty(t, f.methods)

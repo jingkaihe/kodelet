@@ -749,8 +749,13 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 }
 
 // WorkspaceTarget selects runner-owned discovery without interpreting paths on
-// the client. ConversationID pins discovery to persisted runner/CWD affinity.
+// the client. Profile selects the daemon model profile independently of the
+// runner's EnvironmentProfile; blank inherits the daemon default, while "default"
+// explicitly selects the base profile. ConversationID pins discovery to persisted
+// runner/CWD affinity and the stored model profile; clients should omit Profile
+// when discovering a saved conversation.
 type WorkspaceTarget struct {
+	Profile            string                     `json:"profile,omitempty"`
 	RunnerID           string                     `json:"runnerId,omitempty"`
 	CWD                string                     `json:"cwd,omitempty"`
 	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
@@ -791,7 +796,7 @@ func (r *ControlPlaneChatRunner) workspaceDiscovery(ctx context.Context, endpoin
 		}
 		values.Set("options", string(data))
 	}
-	for name, value := range map[string]string{"runnerId": target.RunnerID, "cwd": target.CWD, "environmentProfile": target.EnvironmentProfile, "conversationId": target.ConversationID, "q": query} {
+	for name, value := range map[string]string{"runnerId": target.RunnerID, "cwd": target.CWD, "profile": target.Profile, "environmentProfile": target.EnvironmentProfile, "conversationId": target.ConversationID, "q": query} {
 		if value != "" {
 			values.Set(name, value)
 		}

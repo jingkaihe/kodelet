@@ -336,9 +336,10 @@ export interface SlashCommandsResponse {
 }
 
 export interface RunnerDiscoveryTarget {
-  runnerId: string;
+  runnerId?: string;
   conversationId?: string;
   environmentProfile?: string;
+  profile?: string;
 }
 
 export interface ChatSettings {

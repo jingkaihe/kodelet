@@ -379,6 +379,8 @@ type transcriptRefreshMsg struct{}
 
 type slashCommandsMsg struct {
 	conversationKey string
+	conversationID  string
+	profile         string
 	cwd             string
 	commands        []slashcommands.Command
 	shortcuts       []extensions.Shortcut

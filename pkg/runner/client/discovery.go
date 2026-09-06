@@ -25,7 +25,7 @@ func (s *Service) workspaceCWDHints(ctx context.Context, params protocol.Workspa
 	if err != nil {
 		return protocol.WorkspaceCWDHintsResult{}, err
 	}
-	if _, err := s.loadConfig(base, params.EnvironmentProfile); err != nil {
+	if _, err := s.loadConfig(base, params.Profile, params.EnvironmentProfile); err != nil {
 		return protocol.WorkspaceCWDHintsResult{}, err
 	}
 	query := strings.TrimSpace(params.Query)

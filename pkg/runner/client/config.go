@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -105,6 +106,56 @@ func validateWorkspacePolicy(host, config llmtypes.Config) error {
 	}
 	if host.Skills != nil && !host.Skills.Enabled && (config.Skills == nil || config.Skills.Enabled) {
 		return errors.New("workspace cannot enable skills disabled by runner policy")
+	}
+	if host.Skills != nil && (config.Skills == nil || config.Skills.Enabled) {
+		var allowed []string
+		if config.Skills != nil {
+			allowed = config.Skills.Allowed
+		}
+		if err := validateWorkspaceAllowlist("skills.allowed", host.Skills.Allowed, allowed); err != nil {
+			return err
+		}
+	}
+	hostExtensions, err := extensions.LoadConfigFromSettings(host.ExtensionSettings)
+	if err != nil {
+		return errors.Wrap(err, "failed to load runner extension policy")
+	}
+	workspaceExtensions, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	if err != nil {
+		return errors.Wrap(err, "failed to load workspace extension policy")
+	}
+	if workspaceExtensions.Enabled {
+		if err := validateWorkspaceAllowlist("extensions.allow", hostExtensions.Allow, workspaceExtensions.Allow); err != nil {
+			return err
+		}
+		for _, denied := range hostExtensions.Deny {
+			if !slices.Contains(workspaceExtensions.Deny, denied) {
+				return errors.New("workspace extensions.deny cannot remove runner restrictions")
+			}
+		}
+		for name, policy := range hostExtensions.Tools {
+			if policy.Enabled != nil && !*policy.Enabled {
+				tool := workspaceExtensions.Tools[name]
+				if tool.Enabled == nil || *tool.Enabled {
+					return errors.Errorf("workspace cannot enable extension tool %q disabled by runner policy", name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateWorkspaceAllowlist(name string, host, workspace []string) error {
+	if len(host) == 0 {
+		return nil
+	}
+	if len(workspace) == 0 {
+		return errors.Errorf("workspace %s cannot remove runner restrictions", name)
+	}
+	for _, value := range workspace {
+		if !slices.Contains(host, value) {
+			return errors.Errorf("workspace %s cannot widen runner restrictions", name)
+		}
 	}
 	return nil
 }

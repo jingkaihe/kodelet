@@ -115,7 +115,7 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 	runner, digest := m.runner, state.shortcutDigest
 	target := chat.WorkspaceTarget{ConversationID: conversationID}
 	if conversationID == "" {
-		target.CWD, target.EnvironmentProfile = cwd, m.environmentProfile
+		target.CWD, target.Profile, target.EnvironmentProfile = cwd, state.profile, m.environmentProfile
 	}
 
 	return func() tea.Msg {

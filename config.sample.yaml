@@ -21,6 +21,29 @@ log_format: "json"
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
 # modes: token, enrollment, none.
+# The embedded runner inherits trusted daemon top-level environment settings:
+# tool_mode, sysprompt, sysprompt_args, enable_fs_search_tools, bash, context,
+# skills, extensions, allowed_tools, allowed_commands, allowed_domains_file,
+# and environment_profiles. Do not duplicate them under runner_settings unless
+# you want explicit overrides stronger than model-profile preferences.
+# Embedded environment preference precedence (lowest to highest):
+# daemon base/defaults -> selected model profile environment settings ->
+# explicit serve.runner_settings -> permitted per-CWD repository settings ->
+# selected trusted environment profile -> request narrowing.
+# Explicit runner settings override tool_mode, sysprompt/sysprompt_args,
+# enable_fs_search_tools, context, bash, etc., and may narrow permissions.
+# Selected daemon model/base allowed_tools, allowed_commands, skills.enabled:false,
+# and extensions.enabled:false are mandatory ceilings, as on normal remote runs:
+# intersect (deny wins), not last-write-wins. Runner settings and environment
+# profiles cannot relax them; the embedded loader enforces them before discovery.
+# Repository settings cannot widen effective trusted host restrictions, including
+# skills.allowed, extension allow/deny and per-tool settings, or allowed_domains_file;
+# they cannot define model or environment profiles.
+# Defaults and trusted profile definitions are pinned at startup: restart
+# kodelet serve after changing them. Per-run settings are isolated, including
+# concurrent runs with different profiles, CWDs, and request restrictions.
+# Standalone runners keep their own environment preferences, but still enforce
+# the daemon's mandatory restrictions sent with remote runs.
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080
@@ -28,15 +51,16 @@ log_format: "json"
 #   # Workspace operations always use runners. serve.cwd is no longer supported.
 #   embedded_runner: true
 #   # runner_workspace: "/srv/workspaces"
-#   # Environment settings only; provider configuration stays daemon-owned.
+#   # Optional environment overrides; model/provider settings and credentials
+#   # stay daemon-owned and are not passed in runner settings.
 #   # runner_settings:
 #   #   tool_mode: "full"
 #   #   allowed_tools: ["bash", "file_read", "file_write", "apply_patch"]
 #   #   environment_profiles:
 #   #     review:
 #   #       allowed_tools: ["file_read"]
-#   # Per-execution kodelet-config.yaml may narrow these tool/command lists,
-#   # but cannot define environment profiles or enable disabled skills/extensions.
+#   # Per-execution kodelet-config.yaml may narrow effective host permissions,
+#   # but cannot define profiles or enable host-disabled skills/extensions.
 #   web_auth_mode: "oidc"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.
@@ -116,8 +140,16 @@ aliases:
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "anthropic"
 
-# Daemon model profiles. Configure workspace tools separately in runner defaults
-# or environment_profiles; selecting a model profile does not select tool policy.
+# Daemon model profiles come only from trusted daemon configuration.
+# The embedded runner applies the selected profile's environment preferences below
+# explicit serve.runner_settings; inherited permission ceilings cannot be relaxed.
+# A model profile identifier selects a locally pinned environment projection,
+# not transported model/provider configuration or credentials.
+# --profile default uses the base; blank/omitted uses the daemon's active default;
+# a named --profile selects that profile. This does not select --runner-profile.
+# Saved conversations whose named model profile was removed retain snapshotted
+# model identity and fall back to base environment, not the active named default.
+# Unknown model profiles still fail for new conversations.
 profiles:
   anthropic:
     model: "claude-opus-5"
@@ -183,9 +215,15 @@ profiles:
       platform: "codex"
       api_mode: "responses"
 
-# Runner-local profiles are a separate namespace from model/provider profiles.
-# They are resolved by `kodelet runner start` on the runner host before context,
-# tools, skills, recipes, and extensions are discovered for a remote run.
+# Trusted environment profiles are separate from daemon model/provider profiles.
+# Both the embedded runner in `kodelet serve` and standalone `kodelet runner start`
+# resolve them on the runner host before context, tools, skills, recipes, and
+# extensions are discovered. The embedded runner inherits these definitions;
+# standalone runners use their own trusted configuration. Repositories cannot
+# define profiles. Select one with --runner-profile workspace; blank/default
+# adds no named environment-profile overrides to the effective run settings.
+# Environment profiles cannot relax inherited daemon tool/command allowlists
+# or skill/extension disablements.
 environment_profiles:
   workspace:
     allowed_tools:

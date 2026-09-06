@@ -25,6 +25,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -32,6 +33,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1088,6 +1090,87 @@ func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testin
 	}
 }
 
+func TestRunnerDiscoveryRoutesModelProfilesIndependentlyOfEnvironmentProfiles(t *testing.T) {
+	snapshotMetadata := func(profile string) map[string]any {
+		metadata, err := conversations.AddConfigSnapshot(map[string]any{"profile": "legacy-ignored"}, llmtypes.Config{Profile: profile, Provider: "openai", Model: "stored-model", ReasoningEffort: "medium"})
+		require.NoError(t, err)
+		return metadata
+	}
+	for _, method := range []string{protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints} {
+		t.Run(method, func(t *testing.T) {
+			server := newRunnerTestServer(t, "")
+			var metadata map[string]any
+			server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+				return &conversations.GetConversationResponse{ID: "saved", CWD: "/runner/selected", Metadata: metadata}, nil
+			}}
+			link := newRunnerAPITestLink()
+			registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{WorkspaceDiscovery: true},
+				Host: protocol.Host{InstanceID: "profile-host", Hostname: "worker", OS: "linux", Arch: "amd64"}, Workspace: protocol.Workspace{Path: "/runner/startup", Name: "startup"},
+			}, link)
+			require.NoError(t, err)
+			require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle}))
+			require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "saved", registration.RunnerID, "environment"))
+			for _, test := range []struct {
+				name     string
+				profile  string
+				metadata map[string]any
+				want     string
+				status   int
+			}{
+				{name: "daemon default"},
+				{name: "explicit default", profile: "default", want: "default"},
+				{name: "named", profile: " model-profile ", want: "model-profile"},
+				{name: "default spelling", profile: " DEFAULT ", want: "default"},
+				{name: "snapshot wins", metadata: snapshotMetadata("stored-profile"), want: "stored-profile"},
+				{name: "matching snapshot", profile: "stored-profile", metadata: snapshotMetadata("stored-profile"), want: "stored-profile"},
+				{name: "snapshot default", metadata: snapshotMetadata("default"), want: "default"},
+				{name: "snapshot empty pins base", metadata: snapshotMetadata(""), want: "default"},
+				{name: "legacy named", metadata: map[string]any{"profile": "legacy-profile"}, want: "legacy-profile"},
+				{name: "legacy default", metadata: map[string]any{"profile": "default"}, want: "default"},
+				{name: "legacy empty pins base", metadata: map[string]any{"profile": ""}, want: "default"},
+				{name: "legacy missing inherits daemon default", metadata: map[string]any{}},
+				{name: "conflicting named", profile: "other", metadata: snapshotMetadata("stored-profile"), status: http.StatusBadRequest},
+				{name: "conflicting default", profile: "default", metadata: snapshotMetadata("stored-profile"), status: http.StatusBadRequest},
+				{name: "conflicting base", profile: "other", metadata: snapshotMetadata(""), status: http.StatusBadRequest},
+				{name: "conflicting legacy", profile: "other", metadata: map[string]any{"profile": "legacy-profile"}, status: http.StatusBadRequest},
+				{name: "invalid snapshot", metadata: map[string]any{conversations.ConfigSnapshotMetadataKey: map[string]any{"version": 99}, "profile": "legacy"}, status: http.StatusInternalServerError},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					metadata = test.metadata
+					calls := 0
+					link.call = func(_ context.Context, gotMethod string, params, _ any) error {
+						calls++
+						assert.Equal(t, method, gotMethod, "discovery must not open a run or submit a model turn")
+						if method == protocol.MethodWorkspaceDiscover {
+							assert.Equal(t, protocol.WorkspaceDiscoverParams{CWD: "/runner/selected", Profile: test.want, EnvironmentProfile: "environment"}, params)
+						} else {
+							assert.Equal(t, protocol.WorkspaceCWDHintsParams{CWD: "/runner/selected", Profile: test.want, EnvironmentProfile: "environment", Query: "project"}, params)
+						}
+						return nil
+					}
+					query := url.Values{"runnerId": {registration.RunnerID}, "cwd": {"/runner/selected"}, "environmentProfile": {"environment"}, "q": {"project"}}
+					if metadata != nil {
+						query = url.Values{"conversationId": {"saved"}, "q": {"project"}}
+					}
+					if test.profile != "" {
+						query.Set("profile", test.profile)
+					}
+					recorder := httptest.NewRecorder()
+					server.handleRunnerDiscovery(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil), method)
+					if test.status != 0 {
+						assert.Equal(t, test.status, recorder.Code, recorder.Body.String())
+						assert.Zero(t, calls)
+					} else {
+						assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+						assert.Equal(t, 1, calls)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
@@ -1865,6 +1948,161 @@ func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *test
 	}, &recordingChatSink{})
 	require.ErrorContains(t, err, "message cannot be empty")
 	assert.Equal(t, "remote-conversation", conversationID)
+}
+
+func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("provider", "openai")
+	viper.Set("model", "base-model")
+	viper.Set("profile", "deep")
+	viper.Set("tool_mode", "full")
+	viper.Set("extensions.enabled", false)
+	viper.Set("profiles", map[string]any{
+		"deep": map[string]any{"model": "active-model", "tool_mode": "patch"},
+	})
+	viper.Set("environment_profiles", map[string]any{"review": map[string]any{"sysprompt_args": map[string]any{"scope": "review"}}})
+	for _, test := range []struct {
+		name       string
+		snapshot   *string
+		legacy     map[string]any
+		standalone bool
+		identity   string
+		selector   string
+		mode       llmtypes.ToolMode
+	}{
+		{name: "removed snapshot", snapshot: new("removed"), identity: "removed", selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "existing snapshot", snapshot: new("deep"), identity: "deep", selector: "deep", mode: llmtypes.ToolModePatch},
+		{name: "empty snapshot", snapshot: new(""), selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "legacy missing profile", identity: "deep", selector: "deep", mode: llmtypes.ToolModePatch},
+		{name: "legacy empty profile", legacy: map[string]any{"profile": ""}, identity: "default", selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "standalone removed snapshot", standalone: true, snapshot: new("removed"), identity: "removed", selector: "removed", mode: llmtypes.ToolModePatch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("HOME", root)
+			server := newRunnerTestServer(t, "")
+			server.config.EmbeddedRunner = &EmbeddedRunnerConfig{Workspace: root}
+			options := runnerclient.ServiceOptions{}
+			var err error
+			if test.standalone {
+				options.WorkspaceConfigLoader, err = runnerclient.NewWorkspaceConfigLoader(map[string]any{
+					"tool_mode": "patch", "extensions": map[string]any{"enabled": false},
+					"environment_profiles": viper.Get("environment_profiles"),
+				})
+			} else {
+				options.ProfileConfigLoader, err = runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), nil)
+			}
+			require.NoError(t, err)
+			service, err := runnerclient.NewService(t.Context(), root, options)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, service.Close()) })
+			link := newRunnerAPITestLink()
+			registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{WorkspaceDiscovery: true},
+				Host:      protocol.Host{InstanceID: "resume-host", Hostname: "worker", OS: "linux", Arch: "amd64"},
+				Workspace: protocol.Workspace{Path: root, Name: "resume"},
+			}, link)
+			require.NoError(t, err)
+			require.NoError(t, service.SetRegistration(registration))
+			require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+				RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle,
+			}))
+			server.embeddedStatus.RunnerID = registration.RunnerID
+			if test.standalone {
+				server.embeddedStatus.RunnerID = "other-embedded-runner"
+			}
+			var opened protocol.RunOpenParams
+			var wire runnerpayload.Manifest
+			link.call = func(ctx context.Context, method string, params, result any) error {
+				response, rpcErr := service.HandleRequest(ctx, method, mustRunnerJSON(t, params))
+				if rpcErr != nil {
+					return rpcErr
+				}
+				if method == protocol.MethodRunOpen {
+					opened = params.(protocol.RunOpenParams)
+					wire = response.(runnerpayload.Manifest)
+				}
+				if result == nil {
+					return nil
+				}
+				return json.Unmarshal(mustRunnerJSON(t, response), result)
+			}
+			record := &conversations.GetConversationResponse{ID: "saved", CWD: root, Provider: "openai", Metadata: test.legacy}
+			if test.snapshot != nil {
+				record.Metadata, err = conversations.AddConfigSnapshot(map[string]any{"profile": "ignored-legacy-profile"}, llmtypes.Config{
+					Profile: *test.snapshot, Provider: "openai", Model: "saved-model", ReasoningEffort: "medium",
+				})
+				require.NoError(t, err)
+			}
+			before := mustRunnerJSON(t, record)
+			server.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+				if id != record.ID {
+					return nil, convtypes.ErrConversationNotFound
+				}
+				return record, nil
+			}}
+			require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), record.ID, registration.RunnerID, "review"))
+			var discovery protocol.WorkspaceDiscoverResult
+			for _, method := range []string{protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints} {
+				recorder := httptest.NewRecorder()
+				query := url.Values{"conversationId": {record.ID}}
+				if test.snapshot != nil {
+					query.Set("profile", *test.snapshot)
+				}
+				server.handleRunnerDiscovery(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil), method)
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				if method == protocol.MethodWorkspaceDiscover {
+					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &discovery))
+				}
+			}
+			config, err := chat.ResolveConfigForExistingConversation(record)
+			require.NoError(t, err)
+			config.WorkingDirectory = root
+			runner := &serverChatRunner{server: server}
+			environment, err := runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, record.ID, config, root)
+			require.NoError(t, err)
+			manifest, err := environment.Open(t.Context(), agentenv.RunSpec{ConversationID: record.ID, Config: config, EnvironmentProfile: "review"})
+			require.NoError(t, err)
+			assert.Equal(t, test.selector, opened.Agent.Profile)
+			assert.Equal(t, "review", opened.Agent.EnvironmentProfile)
+			assert.Equal(t, config.Provider, opened.Agent.Provider)
+			assert.Equal(t, config.Model, opened.Agent.Model)
+			assert.Equal(t, test.mode, manifest.Config.ToolMode)
+			assert.Equal(t, discovery.Digest, wire.Digest, "saved discovery and execution must use the same environment")
+			assert.Equal(t, test.identity, config.Profile)
+			assert.Equal(t, before, mustRunnerJSON(t, record), "runner fallback must not rewrite the saved snapshot")
+			require.NoError(t, environment.Close(t.Context()))
+
+			if !test.standalone {
+				_, err = chat.ResolveConfigForNewConversation("removed")
+				require.ErrorContains(t, err, "not found")
+				recorder := httptest.NewRecorder()
+				query := url.Values{"runnerId": {registration.RunnerID}, "profile": {"removed"}}
+				server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil))
+				assert.Equal(t, http.StatusBadGateway, recorder.Code)
+				assert.Contains(t, recorder.Body.String(), "runner discovery is unavailable", "unknown new discovery must not receive snapshot fallback")
+				unknown := config.Clone()
+				unknown.Profile = "removed"
+				environment, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, "new", unknown, root)
+				require.NoError(t, err)
+				_, err = environment.Open(t.Context(), agentenv.RunSpec{ConversationID: "new", Config: unknown, EnvironmentProfile: "review"})
+				require.ErrorContains(t, err, "not found", "new executions without a snapshot must not receive fallback")
+				if test.snapshot == nil || *test.snapshot != "removed" {
+					environment, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, record.ID, unknown, root)
+					require.NoError(t, err)
+					_, err = environment.Open(t.Context(), agentenv.RunSpec{ConversationID: record.ID, Config: unknown, EnvironmentProfile: "review"})
+					require.ErrorContains(t, err, "not found", "fallback requires a matching snapshot, not just an existing conversation")
+				}
+			}
+			if test.snapshot != nil && *test.snapshot == "removed" {
+				recorder := httptest.NewRecorder()
+				server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/?conversationId=saved&profile=default", nil))
+				assert.Equal(t, http.StatusBadRequest, recorder.Code, "fallback must not allow replacing the immutable model profile")
+			}
+		})
+	}
 }
 
 func TestServerChatRunnerResolveEnvironmentValidatesRunnerState(t *testing.T) {

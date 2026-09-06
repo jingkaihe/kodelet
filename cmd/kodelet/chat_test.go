@@ -290,6 +290,7 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 		case "/api/chat/slash-commands":
 			discoveries.Add(1)
 			assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+			assert.Equal(t, "daemon", r.URL.Query().Get("profile"))
 			var options llmtypes.ExecutionOptions
 			require.NoError(t, json.Unmarshal([]byte(r.URL.Query().Get("options")), &options))
 			assert.Equal(t, new(true), options.NoExtensions)
@@ -318,7 +319,7 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.Equal(t, "daemon", config.Profile)
 	assert.Equal(t, "environment", config.EnvironmentProfile)
 	assert.Empty(t, submissions, "preparing the TUI must not start a provider turn")
-	_, err = config.Runner.Run(t.Context(), chatpkg.ChatRequest{ConversationID: "new", TurnID: "turn", Message: "work", CWD: config.CWD}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
+	_, err = config.Runner.Run(t.Context(), chatpkg.ChatRequest{ConversationID: "new", TurnID: "turn", Message: "work", CWD: config.CWD, Profile: config.Profile}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
 	require.NoError(t, err)
 	require.Len(t, submissions, 1)
 	assert.Equal(t, "runner", submissions[0].RunnerID)
@@ -341,6 +342,7 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 		case "/api/chat/slash-commands":
 			discoveries.Add(1)
 			assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
+			assert.False(t, r.URL.Query().Has("profile"), "saved discovery must use the server's pinned profile")
 			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/runner-only/saved", EnvironmentProfile: "stored-environment"}))
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)

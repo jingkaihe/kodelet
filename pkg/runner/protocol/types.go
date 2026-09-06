@@ -427,6 +427,9 @@ type OperationCancelParams struct {
 
 // WorkspaceDiscoverParams selects runner-owned resources without opening a model turn.
 type WorkspaceDiscoverParams struct {
+	// Profile selects an embedded runner's trusted daemon environment projection.
+	// Standalone runners ignore it and retain their own environment policy.
+	Profile            string                     `json:"profile,omitempty"`
 	CWD                string                     `json:"cwd,omitempty"`
 	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
 	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
@@ -481,6 +484,7 @@ type ShortcutDescriptor struct {
 
 // WorkspaceCWDHintsParams resolves path suggestions on the runner host.
 type WorkspaceCWDHintsParams struct {
+	Profile            string `json:"profile,omitempty"`
 	CWD                string `json:"cwd,omitempty"`
 	EnvironmentProfile string `json:"environmentProfile,omitempty"`
 	Query              string `json:"query,omitempty"`

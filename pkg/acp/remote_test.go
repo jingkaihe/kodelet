@@ -843,9 +843,32 @@ func TestRemoteACPLoadUsesStoredAffinityWithoutDefaultRunner(t *testing.T) {
 	assert.Equal(t, history.CWD, request.CWD)
 	assert.Equal(t, history.EnvironmentProfile, request.EnvironmentProfile)
 	assert.Equal(t, []chat.WorkspaceTarget{{ConversationID: "saved"}}, client.targets)
+	_, err = manager.commands(t.Context(), "saved")
+	require.NoError(t, err)
+	assert.Equal(t, chat.WorkspaceTarget{ConversationID: "saved"}, client.targets[1])
 	first, err := manager.beginPrompt("saved")
 	require.NoError(t, err)
 	assert.False(t, first, "resume does not apply new-session defaults")
+}
+
+func TestRemoteACPDiscoveryUsesSelectedModelProfileUntilSaved(t *testing.T) {
+	for _, profile := range []string{"", "default", "model-profile"} {
+		t.Run("profile="+profile, func(t *testing.T) {
+			client := &fakeRemoteChatClient{}
+			manager := newRemoteSessionManager(RemoteSessionConfig{Provider: staticRemoteChatProvider{client: client, runnerID: "runner"}, Profile: profile, EnvironmentProfile: "environment"})
+			id, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "/runner/project"})
+			require.NoError(t, err)
+			_, err = manager.commands(t.Context(), id)
+			require.NoError(t, err)
+			target := chat.WorkspaceTarget{RunnerID: "runner", CWD: "/runner/project", Profile: profile, EnvironmentProfile: "environment"}
+			assert.Equal(t, []chat.WorkspaceTarget{target, target}, client.targets)
+			manager.finishPrompt(id, true)
+			_, err = manager.commands(t.Context(), id)
+			require.NoError(t, err)
+			assert.Equal(t, chat.WorkspaceTarget{ConversationID: string(id)}, client.targets[2])
+			assert.Empty(t, client.recordedRequests(), "discovery must not submit a model turn")
+		})
+	}
 }
 
 func TestRemoteACPResumeRejectsReplacementBeforeDiscovery(t *testing.T) {

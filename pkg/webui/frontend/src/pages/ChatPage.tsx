@@ -1843,8 +1843,9 @@ const ChatPage: React.FC = () => {
           ? apiService.getCWDHints(query, {
               runnerId: newChatRunnerDraft,
               environmentProfile: newChatEnvironmentProfileDraft,
+              profile: newChatProfileDraft,
             })
-          : apiService.getCWDHints(query);
+          : apiService.getCWDHints(query, { profile: newChatProfileDraft });
         void request
           .then((response) => {
             if (cwdSuggestionRequestRef.current !== requestId || viewedConversationIdRef.current) {
@@ -1865,7 +1866,7 @@ const ChatPage: React.FC = () => {
             setCwdSuggestionsOpen(false);
           });
       }, 150),
-    [newChatRunnerDraft, newChatEnvironmentProfileDraft]
+    [newChatRunnerDraft, newChatEnvironmentProfileDraft, newChatProfileDraft]
   );
 
   useEffect(() => {
@@ -2763,10 +2764,12 @@ const ChatPage: React.FC = () => {
   const runnerWorkspaceAvailable = Boolean(
     currentRunner?.connected && (currentRunner.status === 'idle' || currentRunner.status === 'busy')
   );
-  const remoteWorkspaceConversationID =
-    isRemoteConversation && conversationId && !hasOptimisticRemoteConversation
+  const discoveryConversationID =
+    conversationId && !hasOptimisticRemoteConversation
       ? conversationId
       : undefined;
+  const remoteWorkspaceConversationID = isRemoteConversation ? discoveryConversationID : undefined;
+  const discoveryProfile = discoveryConversationID ? undefined : selectedProfile;
   const executionEnvironmentAvailable = controlPlaneWorkspaceEnabled || isRemoteConversation;
   const currentEnvironmentProfile = conversationId
     ? conversation?.environmentProfile || ''
@@ -2841,9 +2844,13 @@ const ChatPage: React.FC = () => {
             runnerId: currentRunnerID,
             conversationId: remoteWorkspaceConversationID,
             environmentProfile: currentEnvironmentProfile,
+            profile: discoveryProfile,
           }
         )
-      : apiService.getSlashCommands(currentCWDLabel || undefined);
+      : apiService.getSlashCommands(
+          discoveryConversationID ? undefined : currentCWDLabel || undefined,
+          { conversationId: discoveryConversationID, profile: discoveryProfile }
+        );
     void request
       .then((response) => {
         if (!cancelled) {
@@ -2859,7 +2866,7 @@ const ChatPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation, runnerWorkspaceAvailable, currentRunner?.workspaceDiscovery, currentRunner?.generation, currentRunnerID, remoteWorkspaceConversationID, currentEnvironmentProfile]);
+  }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation, runnerWorkspaceAvailable, currentRunner?.workspaceDiscovery, currentRunner?.generation, currentRunnerID, remoteWorkspaceConversationID, currentEnvironmentProfile, discoveryConversationID, discoveryProfile]);
 
   useEffect(() => {
     if (

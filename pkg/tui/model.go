@@ -231,7 +231,7 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 	key, cwd := state.key, slashCommandCWDForState(state)
 	target := chat.WorkspaceTarget{ConversationID: state.conversationID}
 	if target.ConversationID == "" {
-		target.CWD, target.EnvironmentProfile = cwd, m.environmentProfile
+		target.CWD, target.Profile, target.EnvironmentProfile = cwd, state.profile, m.environmentProfile
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
@@ -241,7 +241,7 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 		for _, shortcut := range result.Shortcuts {
 			shortcuts = append(shortcuts, extensions.Shortcut{Key: shortcut.Key, Description: shortcut.Description, ExtensionID: shortcut.ExtensionID, Generation: shortcut.Generation})
 		}
-		return slashCommandsMsg{conversationKey: key, cwd: cwd, commands: withTUIBuiltInSlashCommands(result.Commands), shortcuts: shortcuts, shortcutDigest: result.Digest, remote: true, err: err}
+		return slashCommandsMsg{conversationKey: key, conversationID: target.ConversationID, profile: target.Profile, cwd: cwd, commands: withTUIBuiltInSlashCommands(result.Commands), shortcuts: shortcuts, shortcutDigest: result.Digest, remote: true, err: err}
 	}
 }
 

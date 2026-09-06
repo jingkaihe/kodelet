@@ -67,12 +67,12 @@ func (r *remoteDiscoveryRunner) DiscoverWorkspace(_ context.Context, target chat
 
 func TestRemoteSlashDiscoveryUsesRunnerTargetAndDiscardsStaleDirectory(t *testing.T) {
 	runner := &remoteDiscoveryRunner{}
-	m := newModel(t.Context(), Config{Runner: runner, Remote: true, CWD: "../only-on-runner", EnvironmentProfile: "review"})
+	m := newModel(t.Context(), Config{Runner: runner, Remote: true, CWD: "../only-on-runner", Profile: "model-profile", EnvironmentProfile: "review"})
 	t.Cleanup(m.cancel)
 	command := m.loadRemoteSlashCommands(m.conversationState)
 	require.NotNil(t, command)
 	message := command().(slashCommandsMsg)
-	assert.Equal(t, chat.WorkspaceTarget{CWD: "../only-on-runner", EnvironmentProfile: "review"}, runner.target)
+	assert.Equal(t, chat.WorkspaceTarget{CWD: "../only-on-runner", Profile: "model-profile", EnvironmentProfile: "review"}, runner.target)
 	updated, next := m.Update(message)
 	m = updated.(model)
 	assert.Contains(t, slashCommandNames(m.slashCommands), "runner-only")
@@ -83,9 +83,70 @@ func TestRemoteSlashDiscoveryUsesRunnerTargetAndDiscardsStaleDirectory(t *testin
 	updated, _ = m.Update(message)
 	m = updated.(model)
 	assert.NotContains(t, slashCommandNames(m.slashCommands), "runner-only")
+	m.profile = "default"
+	m.loadRemoteSlashCommands(m.conversationState)()
+	assert.Equal(t, "default", runner.target.Profile, "explicit default must not inherit the daemon's active profile")
 	m.conversationID = "persisted-conversation"
 	m.loadRemoteSlashCommands(m.conversationState)()
 	assert.Equal(t, chat.WorkspaceTarget{ConversationID: "persisted-conversation"}, runner.target, "stored affinity must replace CLI directory/profile defaults on resume")
+}
+
+func TestRemoteSlashDiscoveryMatchesConversationTargetNotDisplayProfile(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		conversationID string
+		nextID         string
+		background     bool
+		accept         bool
+	}{
+		{name: "new probe after save", nextID: "saved"},
+		{name: "saved probe after identity change", conversationID: "saved", nextID: "other"},
+		{name: "saved probe after reset", conversationID: "saved"},
+		{name: "saved profile display change", conversationID: "saved", nextID: "saved", accept: true},
+		{name: "background saved profile display change", conversationID: "saved", nextID: "saved", background: true, accept: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{
+				Commands:  []slashcommands.Command{{Name: "discovered-command"}},
+				Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "discovered", Generation: 1}}, Digest: "discovered-digest",
+			}}
+			m := newModel(t.Context(), Config{Remote: true, Runner: runner, CWD: "/runner/project", Profile: "work", ConversationID: test.conversationID})
+			t.Cleanup(m.cancel)
+			state := m.conversationState
+			discover := m.loadRemoteSlashCommands(state)
+			state.conversationID = test.nextID
+			if test.conversationID != "" {
+				state.profile = "updated-display-profile"
+			}
+			if test.background {
+				other := newConversationState("other", "other", true, m.conversationDefaults)
+				m.conversations[other.key] = other
+				_, _ = m.activateConversation(other.key)
+			}
+			message := discover().(slashCommandsMsg)
+			assert.Equal(t, test.conversationID, message.conversationID)
+			if test.conversationID != "" {
+				assert.Empty(t, message.profile, "saved discovery must use the server-pinned profile")
+			}
+			updated, cmd := m.Update(message)
+			m = updated.(model)
+			assert.Nil(t, cmd)
+			if test.accept {
+				assert.Contains(t, slashCommandNames(state.slashCommands), "discovered-command")
+				assert.Len(t, state.extensionShortcuts, 1)
+				assert.Equal(t, "discovered-digest", state.shortcutDigest)
+			} else {
+				assert.NotContains(t, slashCommandNames(state.slashCommands), "discovered-command")
+				assert.Empty(t, state.extensionShortcuts)
+				assert.Empty(t, state.shortcutDigest)
+			}
+			if test.background {
+				assert.Equal(t, "other", m.activeConversationKey)
+				assert.NotContains(t, slashCommandNames(m.slashCommands), "discovered-command")
+				assert.Empty(t, m.extensionShortcuts)
+			}
+		})
+	}
 }
 
 func TestNewModelDoesNotConstructRunnerOrExtensionRuntime(t *testing.T) {

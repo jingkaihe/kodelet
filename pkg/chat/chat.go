@@ -1279,8 +1279,6 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 
 	if hasStoredProfile && profileName == "" {
 		config.Profile = "default"
-	} else {
-		config.Profile = profileName
 	}
 	if strings.TrimSpace(requestedReasoningEffort) != "" {
 		return llmtypes.Config{}, errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")

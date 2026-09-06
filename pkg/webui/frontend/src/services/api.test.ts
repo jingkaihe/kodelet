@@ -725,6 +725,67 @@ describe("ApiService", () => {
 		});
 	});
 
+	describe.each([
+		{ method: "getSlashCommands", endpoint: "slash-commands", queryKey: "cwd" },
+		{ method: "getCWDHints", endpoint: "cwd-suggestions", queryKey: "q" },
+	] as const)("$method model profile discovery", ({ method, endpoint, queryKey }) => {
+		it.each([
+			{ runnerId: undefined, profile: "work" },
+			{ runnerId: undefined, profile: "default" },
+			{ runnerId: "runner-1", profile: "work" },
+			{ runnerId: "runner-1", profile: "default" },
+		])("forwards $profile to the intended workspace ($runnerId)", async (target) => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({}),
+			});
+
+			await apiService[method]("/workspace/project", target);
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				`/api/chat/${endpoint}?${queryKey}=%2Fworkspace%2Fproject${target.runnerId ? "&runnerId=runner-1" : ""}&profile=${target.profile}`,
+				expect.any(Object),
+			);
+		});
+
+		it.each([undefined, "", "   "])("omits a blank model profile (%s)", async (profile) => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({}),
+			});
+
+			await apiService[method]("", {
+				runnerId: "runner-1",
+				environmentProfile: "",
+				profile,
+			});
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				`/api/chat/${endpoint}?runnerId=runner-1&environmentProfile=`,
+				expect.any(Object),
+			);
+		});
+
+		it.each(["work", "default"])("omits %s for a persisted conversation", async (profile) => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({}),
+			});
+
+			await apiService[method]("", {
+				runnerId: "runner-1",
+				conversationId: "conv-1",
+				environmentProfile: "review",
+				profile,
+			});
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				`/api/chat/${endpoint}?runnerId=runner-1&conversationId=conv-1&environmentProfile=review`,
+				expect.any(Object),
+			);
+		});
+	});
+
 	describe("getSlashCommands", () => {
 		it("uses durable conversation affinity for runner command discovery", async () => {
 			mockFetch.mockResolvedValueOnce({

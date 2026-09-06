@@ -363,7 +363,24 @@ kodelet run --server=http://localhost:8080 --auth-token=WEB_TOKEN --cwd=/path/to
 
 The embedded runner starts and stops with the daemon. `--runner-workspace` defaults to the daemon's startup directory. An explicit `--runner` takes precedence. `serve --cwd` is no longer supported.
 
-Configure `serve.embedded_runner`, `serve.runner_workspace`, and `serve.runner_settings` in your user configuration. Repository settings may restrict runner permissions but cannot change daemon credentials or relax host restrictions. Restart the daemon after changing runner defaults.
+Configure `serve.embedded_runner`, `serve.runner_workspace`, and optional `serve.runner_settings` in your trusted user configuration or `KODELET_CONFIG_FILE`. The embedded runner inherits trusted daemon top-level environment settings: `tool_mode`, `sysprompt`, `sysprompt_args`, `enable_fs_search_tools`, `bash`, `context`, `skills`, `extensions`, `allowed_tools`, `allowed_commands`, `allowed_domains_file`, and `environment_profiles`. You do not need to duplicate these settings under `serve.runner_settings`.
+
+For each embedded-runner execution, environment preferences use this order, from lowest to highest precedence; mandatory permission ceilings described below are not last-write-wins settings:
+
+1. Trusted daemon base settings and defaults
+2. The selected daemon model profile's environment settings
+3. Explicit `serve.runner_settings`
+4. Permitted repository settings from `kodelet-config.yaml` at the execution CWD
+5. The selected trusted environment profile (`--runner-profile`)
+6. Request restrictions, which may only narrow permissions
+
+Explicit `serve.runner_settings` override model-profile preferences such as `tool_mode`, `sysprompt`/`sysprompt_args`, `enable_fs_search_tools`, `context`, and `bash`, and may narrow permissions. However, the selected daemon model/base configuration's `allowed_tools`, `allowed_commands`, `skills.enabled: false`, and `extensions.enabled: false` remain mandatory ceilings, just as on normal remote runs. These four inherited restrictions intersect with runner policy (deny wins), rather than following last-write-wins precedence; runner settings and trusted environment profiles cannot relax them. The embedded loader applies these ceilings before discovery so advertised resources match actual execution even when runner overrides attempt widening.
+
+Repository settings may configure workspace resources and narrow permissions, but cannot widen effective trusted host restrictions, including `skills.allowed`, extension allow/deny and per-tool settings, and `allowed_domains_file`. They cannot define model or environment profiles or change daemon models, provider credentials, or endpoints.
+
+The model profile identifier selects only the environment subset of a locally pinned trusted profile for the embedded runner; model/provider settings and credentials are not passed in runner settings. `--profile default` uses the daemon base, a blank or omitted model profile uses the daemon's active default, and a named model profile selects that profile. This does not select the separate `--runner-profile` namespace. Standalone runners retain their own environment preferences, while still enforcing the daemon's mandatory restrictions sent with remote runs.
+
+Trusted defaults and profile definitions are pinned at daemon startup; restart `kodelet serve` after changing them, including `serve.runner_settings`. Each run resolves its own settings without mutating the pinned defaults or another run's configuration, so different model profiles, CWDs, environment profiles, and request restrictions remain isolated across sequential and concurrent runs. Repository changes affect later runs, not active ones.
 
 Check `/api/status` for runner readiness. If another runner already owns the workspace, stop it or disable embedding and select that runner instead. Use a fixed port to preserve enrollment across restarts. Stop the daemon with Ctrl+C or SIGTERM; incomplete cleanup is reported as an error.
 
@@ -727,7 +744,7 @@ Configure each setting on its owner: provider/model settings on the daemon, work
 
 ### Environment Variables
 
-Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set model credentials and defaults before starting the daemon, and workspace defaults before starting a standalone runner:
+Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set model credentials and defaults before starting the daemon. Set workspace defaults before starting `kodelet serve` for its embedded runner, or before starting a standalone runner on its own host:
 
 ```bash
 # Logging configuration
@@ -783,7 +800,7 @@ Configure `kodelet serve` with flags or the trusted user-level `serve` namespace
 
 **Repository-level Configuration**
 
-The runner reads `kodelet-config.yaml` from each conversation's execution directory. Workspace settings may narrow host permissions and configure resources; they cannot replace daemon model settings or define trusted environment profiles. Runner defaults, workspace settings, the selected runner profile, and permitted request restrictions are applied in that order. Changes affect later runs, not active ones.
+Both embedded and standalone runners read `kodelet-config.yaml` from each conversation's execution directory. Workspace settings may narrow the effective trusted host permissions and configure resources; they cannot widen host restrictions, replace daemon model/provider/credential settings, or define model or environment profiles. For an embedded runner, trusted daemon base settings, the selected model profile's environment subset, and explicit `serve.runner_settings` establish defaults before workspace settings; standalone runners use their own defaults. Workspace settings are followed by the selected trusted environment profile and request narrowing, as detailed in [Workspace-bound Runners](#workspace-bound-runners). Repository changes affect later runs, not active ones.
 
 ```yaml
 # Repository config (kodelet-config.yaml)
@@ -877,7 +894,7 @@ Kodelet includes a comprehensive profile system that allows you to define and sw
 
 ### Profile Definition
 
-Profiles are defined in your configuration files using the `profiles` section. Each profile can override any configuration setting:
+Daemon model profiles are defined in trusted daemon configuration using the `profiles` section, not in repository configuration. Profile fields inherit from the daemon base when omitted. For an embedded runner, a selected model profile also supplies environment preferences beneath explicit `serve.runner_settings`, but its inherited tool/command allowlists and skill/extension disablements remain mandatory ceilings. Model/provider settings and credentials stay daemon-owned; standalone runner preferences remain independent.
 
 ```yaml
 
@@ -934,7 +951,7 @@ aliases:
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 
-Runner-local environment profiles use a separate `environment_profiles` namespace. They are resolved only by `kodelet runner start` on the runner host and do not select or override the control plane's model profile:
+Trusted runner environment profiles use a separate `environment_profiles` namespace. Both the embedded runner in `kodelet serve` and standalone `kodelet runner start` resolve them on the runner host before resource discovery. The embedded runner inherits these definitions from trusted daemon environment configuration, with explicit `serve.runner_settings` taking precedence over model-profile preferences; standalone runners use their own trusted configuration. Neither runner settings nor environment profiles may relax inherited daemon tool/command allowlists or skill/extension disablements. Repository files cannot define profiles. Selecting an environment profile does not select or override the daemon's model profile:
 
 ```yaml
 environment_profiles:
@@ -945,7 +962,7 @@ environment_profiles:
       allow: [acp-subagent]
 ```
 
-Select one with `kodelet chat --runner RUNNER --runner-profile workspace` or the Web UI's **Runner profile** field. Blank or `default` uses the runner base configuration.
+Select one with `kodelet chat --runner-profile workspace` for the embedded default, add `--runner RUNNER` for a specific runner, or use the Web UI's **Runner profile** field. A blank or `default` environment profile adds no named environment-profile overrides; embedded model-profile inheritance and per-CWD repository settings still apply.
 
 ### Profile Management Commands
 
@@ -989,26 +1006,22 @@ kodelet serve
 
 ### Profile Precedence and Merging
 
-Profile definitions and defaults are resolved on the daemon host. Client-local profile files do not configure a remote daemon; select an advertised profile with `--profile`.
+Profile definitions and defaults are resolved and pinned on the daemon host at startup. Client-local profile files and repository `kodelet-config.yaml` do not configure daemon model profiles; select an advertised profile with `--profile`.
 
-**Profile Selection Priority:**
-1. Command-line `--profile` flag (highest)
-2. `KODELET_PROFILE` environment variable
-3. `profile` field in repository config (`kodelet-config.yaml`)
-4. `profile` field in global config (`~/.kodelet/config.yaml`) (lowest)
+**Model profile selection:**
+- An explicit named `--profile` selects that daemon profile; unknown names fail for new conversations.
+- `--profile default` selects the trusted daemon base without a named profile.
+- A blank or omitted profile uses the daemon's active default, selected at startup from trusted process configuration, including daemon-host `KODELET_PROFILE`; client shell changes do not reconfigure a running daemon.
+- Resuming a saved conversation whose named model profile has been removed retains its snapshotted model identity and falls back to the daemon base environment, not the active named default. This preserves the existing daemon fallback; it does not permit selecting unknown profiles for new conversations.
 
-**Profile Definition Priority:**
-- Repository profiles override global profiles with the same name
-- All profiles from both global and repository configs are available
-- Profile settings override base configuration
-- Undefined fields in profiles inherit from base configuration
+**Profile definitions and merging:**
+- Trusted daemon configuration loads defaults, then the global user file, then `KODELET_CONFIG_FILE` when supplied; isolated mode omits the global file.
+- Selected profile settings override base settings, and omitted fields inherit from the base.
+- For embedded execution, only the selected profile's environment subset is projected into runner configuration; explicit `serve.runner_settings` override preferences before per-CWD repository settings, the selected trusted environment profile, and request narrowing. Inherited tool/command allowlists and skill/extension disablements remain mandatory ceilings throughout (intersection, deny wins).
+- Repository configuration cannot define model or environment profiles or widen the effective trusted host permissions. Standalone runners keep their own environment configuration.
+- Restart `kodelet serve` to apply changed trusted defaults or profile definitions. Each run uses isolated settings, including concurrent runs with different selections.
 
-**Configuration Priority (overall):**
-1. Command-line flags (highest)
-2. Active profile settings
-3. Repository configuration base settings
-4. Global configuration base settings
-5. Default values (lowest)
+See [Workspace-bound Runners](#workspace-bound-runners) for the complete embedded environment precedence. Model-profile selection does not upload broad configuration or credentials and does not select a runner environment profile.
 
 ### Special "Default" Profile
 

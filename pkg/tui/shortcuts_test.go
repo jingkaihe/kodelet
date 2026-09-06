@@ -36,7 +36,7 @@ func TestRemoteShortcutNewAndActiveUseRunnerThenExistingSubmit(t *testing.T) {
 	for _, active := range []bool{false, true} {
 		t.Run(map[bool]string{false: "new", true: "active"}[active], func(t *testing.T) {
 			runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{CWD: "/only/on/runner", EnvironmentProfile: "review", Digest: "sha256:discovery", Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "review", Generation: 4}}}}
-			m := newModel(t.Context(), Config{Runner: runner, Remote: true, CWD: "../only-on-runner", EnvironmentProfile: "review"})
+			m := newModel(t.Context(), Config{Runner: runner, Remote: true, CWD: "../only-on-runner", Profile: "model-profile", EnvironmentProfile: "review"})
 			t.Cleanup(m.cancel)
 			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 			message := m.loadRemoteSlashCommands(m.conversationState)().(slashCommandsMsg)
@@ -58,10 +58,12 @@ func TestRemoteShortcutNewAndActiveUseRunnerThenExistingSubmit(t *testing.T) {
 			assert.Empty(t, runner.req.Message, "shortcut RPC must not itself submit a model turn")
 			if active {
 				assert.Equal(t, chat.WorkspaceTarget{ConversationID: "stored-conversation"}, runner.target)
+				assert.Empty(t, runner.request.Target.Profile)
 				assert.Equal(t, "active-lease", runner.request.RunID)
 				assert.Equal(t, uint64(8), runner.request.Shortcut.Generation)
 			} else {
-				assert.Equal(t, chat.WorkspaceTarget{CWD: "../only-on-runner", EnvironmentProfile: "review"}, runner.target)
+				assert.Equal(t, chat.WorkspaceTarget{CWD: "../only-on-runner", Profile: "model-profile", EnvironmentProfile: "review"}, runner.target)
+				assert.Equal(t, "model-profile", runner.request.Target.Profile)
 				assert.Equal(t, "/only/on/runner", runner.request.Target.CWD, "invoke canonical runner directory, not client-relative path")
 				assert.Empty(t, runner.request.RunID)
 			}

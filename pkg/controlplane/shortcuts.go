@@ -60,6 +60,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 	query.Set("runnerId", request.Target.RunnerID)
 	query.Set("conversationId", request.Target.ConversationID)
 	query.Set("cwd", request.Target.CWD)
+	query.Set("profile", request.Target.Profile)
 	if request.Target.EnvironmentProfile != "" {
 		query.Set("environmentProfile", request.Target.EnvironmentProfile)
 	}
@@ -141,7 +142,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 		defer s.runnerRegistry.ReleasePendingConversationAffinity(scopeID)
 		manifest, err = s.runnerRegistry.OpenRun(ctx, target.Runner.ID, protocol.RunOpenParams{
 			RunID: runID, ConversationID: scopeID, CWD: target.CWD, ExpectedCWD: target.CWD,
-			Agent:              protocol.AgentDescriptor{EnvironmentProfile: target.EnvironmentProfile},
+			Agent:              protocol.AgentDescriptor{Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile},
 			Options:            request.Target.Options.Clone(),
 			ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: caps.InteractiveUI, PersistentWidgets: caps.PersistentWidgets, PersistentSurfaces: caps.PersistentSurfaces},
 		})

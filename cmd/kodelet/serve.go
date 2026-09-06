@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/pkg/errors"
@@ -545,9 +546,14 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 				return nil, errors.Wrap(err, "failed to determine embedded runner workspace")
 			}
 		}
+		loader, err := runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), config.RunnerSettings)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to configure embedded runner inheritance")
+		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
-			Workspace: workspace,
-			Settings:  config.RunnerSettings,
+			Workspace:      workspace,
+			Settings:       config.RunnerSettings,
+			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader},
 		}
 	}
 	if err := serverConfig.Validate(); err != nil {

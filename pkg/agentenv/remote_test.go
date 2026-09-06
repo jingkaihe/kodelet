@@ -135,6 +135,49 @@ func assignRemoteResult(target any, value any) error {
 	return json.Unmarshal(payload, target)
 }
 
+func TestRemoteEnvironmentSendsResolvedBaseProfile(t *testing.T) {
+	for _, profile := range []string{"", "default", "deep"} {
+		t.Run("profile="+profile, func(t *testing.T) {
+			controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
+				ProtocolVersion: protocol.Version, RunnerID: "runner", RunID: "run",
+				Generation: 1, WorkingDirectory: "/runner/workspace",
+			}}
+			environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
+			_, err := environment.Open(t.Context(), RunSpec{
+				ConversationID: "saved", Config: llmtypes.Config{Profile: profile},
+			})
+			require.NoError(t, err)
+			want := profile
+			if want == "" {
+				want = "default"
+			}
+			assert.Equal(t, want, controller.openParams.Agent.Profile)
+			require.NoError(t, environment.Close(t.Context()))
+		})
+	}
+}
+
+func TestRemoteEnvironmentModelProfileOverridePreservesConfig(t *testing.T) {
+	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
+		ProtocolVersion: protocol.Version, RunnerID: "runner", RunID: "run",
+		Generation: 1, WorkingDirectory: "/runner/workspace",
+	}}
+	environment := NewRemoteEnvironment(controller, "runner", WithRemoteModelProfile(" default "))
+	spec := RunSpec{
+		ConversationID: "saved", EnvironmentProfile: "review",
+		Config: llmtypes.Config{Profile: "removed", Provider: "openai", Model: "saved-model"},
+	}
+	before := spec.Clone()
+	_, err := environment.Open(t.Context(), spec)
+	require.NoError(t, err)
+	assert.Equal(t, "default", controller.openParams.Agent.Profile)
+	assert.Equal(t, "review", controller.openParams.Agent.EnvironmentProfile)
+	assert.Equal(t, "openai", controller.openParams.Agent.Provider)
+	assert.Equal(t, "saved-model", controller.openParams.Agent.Model)
+	assert.Equal(t, before, spec, "environment selection must not rewrite immutable model identity")
+	require.NoError(t, environment.Close(t.Context()))
+}
+
 func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	contextContent := "# Runner instructions"
 	controller := &fakeRemoteController{}
