@@ -978,12 +978,12 @@ kodelet run --profile anthropic "explain this architecture"
 To change defaults, run these operator commands **on the daemon host**, then restart `kodelet serve`. Top-level `profile use` does not modify a remote daemon.
 
 ```bash
-kodelet host profile show anthropic
-kodelet host profile use anthropic -g
-kodelet host profile use default -g
+kodelet profile --local show anthropic
+kodelet profile --local use anthropic -g
+kodelet profile --local use default -g
 ```
 
-Host profile commands inspect or modify host-local configuration. Use `-g` for daemon defaults; repository files do not configure daemon model profiles. Edit an authoritative `KODELET_CONFIG_FILE` directly instead.
+`profile --local` commands inspect or modify configuration files on the current machine. Use `-g` for daemon defaults; repository files do not configure daemon model profiles. Edit an authoritative `KODELET_CONFIG_FILE` directly instead.
 
 ### Profile Usage
 
@@ -1032,7 +1032,7 @@ The `"default"` profile is a special reserved name that means "use base configur
 kodelet run --profile default "query"
 
 # Change the daemon-host default, then restart serve
-kodelet host profile use default -g
+kodelet profile --local use default -g
 ```
 
 You cannot define a profile named "default" in your configuration files - it's reserved for this special purpose.
@@ -1172,7 +1172,7 @@ Device authentication is always used; no client callback server is started. For 
 kodelet codex status
 ```
 
-This reports daemon connection status only. Operators can inspect detailed usage on the daemon host with `kodelet host codex status`. Remote Codex/Copilot logout is not available: stop the daemon, run `kodelet host codex logout` or `kodelet host copilot-logout` on its host, then restart it.
+This reports the selected server's connection, masked account ID, sign-in expiry, plan, live usage limits, and credits. Provider credentials stay on the server. If live usage cannot be loaded, connection details remain available with a recovery hint. Remote Codex/Copilot logout is not available: stop the server, run `kodelet codex logout --local` or `kodelet copilot-logout --local` on that machine, then restart it. Explicit `--server` and `--auth-token` flags cannot be combined with `--local`; environment defaults are ignored in local mode.
 
 ### Configure Codex
 
@@ -1615,16 +1615,16 @@ Within each extension root, Kodelet loads either direct or nested executables:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
 
-Inspect installed extension files on the runner host, from the intended workspace. These commands do not start extensions or inspect another machine's live runtime:
+Inspect installed extension files in the selected runner's workspace. These commands do not start extension processes or inspect live registrations:
 
 ```bash
-kodelet host extension list
-kodelet host extension list --json
-kodelet host extension inspect weather
-kodelet host extension inspect org@repo/weather --json
+kodelet extension list
+kodelet extension list --json
+kodelet extension inspect weather
+kodelet extension inspect org@repo/weather --json
 ```
 
-Top-level `kodelet extension list/inspect` now fail with migration guidance; use the same arguments under `host`.
+Use `--runner`, `--cwd`, `--profile`, and `--runner-profile` to select a workspace and its settings. Paths in the output belong to the runner. Without an explicit runner, the same-machine built-in runner uses your current directory; remote runners use their default directory unless you pass `--cwd`. Inspection respects the selected environment's extension settings and reports installed files, not live registrations.
 
 ### Extension Commands and Dynamic Recipes
 
@@ -1680,14 +1680,14 @@ ext.registerCommand({
 });
 ```
 
-Invoke runner-owned recipes with `kodelet run -r review --arg target=main` or slash commands such as `/review target=main`. For operator inspection, run these commands on the runner host in the intended workspace:
+Invoke recipes with `kodelet run -r review --arg target=main` or slash commands such as `/review target=main`. Inspect recipes through the selected runner:
 
 ```bash
-kodelet host recipe list --show-path
-kodelet host recipe show review --arg target=main
+kodelet recipe list --show-path
+kodelet recipe show review --arg target=main
 ```
 
-`host recipe list` starts local extensions to discover dynamic recipes. `host recipe show` renders file-backed templates and may execute their commands locally; it does not render dynamic extension recipes. Use only in trusted workspaces. Top-level `kodelet recipe list/show` now fail with migration guidance.
+`recipe list` starts extensions on the runner to discover dynamic recipes. `recipe show` renders file-backed templates, including command substitutions, in the selected directory; it does not render dynamic extension recipes. Both accept `--server`, `--auth-token`, `--runner`, `--cwd`, `--profile`, and `--runner-profile`. For a same-machine built-in runner, the default directory is your current directory. Explicit or remote runners use their default directory unless you pass `--cwd`. These commands require a running server and a runner that supports workspace inspection; they do not inspect files on the client.
 
 `runAgent` commands may set `display` to control the persisted user-facing text while `prompt` remains the model input.
 

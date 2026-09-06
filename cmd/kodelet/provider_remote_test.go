@@ -43,14 +43,14 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 		{"profile-list", []string{"profile", "list"}, "", "central", false, 1},
 		{"profile-show", []string{"profile", "show", "central"}, "", `"profile": "central"`, false, 1},
 		{"profile-missing", []string{"profile", "show", "local-only"}, "", "could not load model profiles", true, 1},
-		{"profile-use", []string{"profile", "use", "local-only", "--global"}, "", "host profile use", true, 0},
+		{"profile-use", []string{"profile", "use", "local-only", "--global"}, "", "profile use <profile> --local", true, 0},
 		{"profile-format", []string{"profile", "show", "central", "--format=toml"}, "", "json or yaml", true, 0},
 		{"codex-status", []string{"codex", "status"}, "", "ChatGPT subscription connected: true", false, 1},
 		{"codex-login", []string{"codex", "login", "--device-auth", "--no-browser"}, "", "codex subscription connected", false, 2},
 		{"codex-callback-rejected", []string{"codex", "login", "--device-auth=false"}, "", "sign-in uses a browser verification code", true, 0},
 		{"copilot-login", []string{"copilot-login", "--no-browser"}, "", "copilot subscription connected", false, 2},
-		{"codex-logout-guidance", []string{"codex", "logout", "--no-confirm"}, "", "host codex logout", true, 0},
-		{"copilot-logout-guidance", []string{"copilot-logout", "--no-confirm"}, "", "host copilot-logout", true, 0},
+		{"codex-logout-guidance", []string{"codex", "logout", "--no-confirm"}, "", "codex logout --local", true, 0},
+		{"copilot-logout-guidance", []string{"copilot-logout", "--no-confirm"}, "", "copilot-logout --local", true, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -97,8 +97,8 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 						return
 					}
 					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: "central", Profiles: []chat.ControlPlaneProfileOption{{Name: "central", Scope: "global", Active: true}}, ReasoningEffort: "high"}))
-				case "/api/providers/codex":
-					require.NoError(t, json.NewEncoder(w).Encode(chat.ProviderConnection{Provider: "codex", Connected: true}))
+				case "/api/providers/codex/status":
+					require.NoError(t, json.NewEncoder(w).Encode(chat.CodexStatus{Connected: true, AccountID: "server-account"}))
 				case "/api/providers/codex/device-login", "/api/providers/copilot/device-login":
 					assert.Equal(t, http.MethodPost, r.Method)
 					require.NoError(t, json.NewEncoder(w).Encode(chat.ProviderDeviceLogin{ID: "device", Status: "pending", VerificationURL: "https://provider.test/device", UserCode: "CODE"}))
@@ -219,7 +219,7 @@ func TestRemoteProviderAndProfileUnavailableNeverFallBack(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(home, ".kodelet"))
 }
 
-func TestHostProviderAndProfileOperationsAreExplicit(t *testing.T) {
+func TestLocalProviderAndProfileOperationsAreExplicit(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o700))
 	for _, name := range []string{"codex-credentials.json", "copilot-subscription.json"} {
@@ -229,7 +229,7 @@ func TestHostProviderAndProfileOperationsAreExplicit(t *testing.T) {
 	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer daemon.Close()
 	env := []string{"HOME=" + home, "PATH=" + home, "KODELET_SERVER=" + daemon.URL, "KODELET_TEST_CLI_PROCESS=1"}
-	for _, args := range [][]string{{"host", "codex", "logout", "--no-confirm"}, {"host", "copilot-logout", "--no-confirm"}, {"host", "profile", "use", "default", "--global"}} {
+	for _, args := range [][]string{{"codex", "logout", "--local", "--no-confirm"}, {"copilot-logout", "--local", "--no-confirm"}, {"profile", "use", "default", "--local", "--global"}} {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		output, err := daemonCLIProcess(ctx, t, home, env, args...).CombinedOutput()
 		cancel()
@@ -252,4 +252,23 @@ func TestProviderInputCancellationAndBounds(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	_, err = readProviderInput(t.Context(), strings.NewReader(strings.Repeat("x", 9000)))
 	require.ErrorContains(t, err, "8192")
+}
+
+func TestLocalAdministrationRejectsRemoteFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"profile", "list", "--local", "--server=http://remote.invalid"},
+		{"profile", "show", "default", "--local", "--auth-token=remote"},
+		{"profile", "use", "default", "--local", "--global", "--server=http://remote.invalid"},
+		{"codex", "logout", "--local", "--no-confirm", "--server=http://remote.invalid"},
+		{"copilot-logout", "--local", "--no-confirm", "--auth-token=remote"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			home := t.TempDir()
+			env := []string{"HOME=" + home, "PATH=" + home, "KODELET_TEST_CLI_PROCESS=1"}
+			output, err := daemonCLIProcess(t.Context(), t, home, env, args...).CombinedOutput()
+			require.Error(t, err, string(output))
+			assert.Contains(t, string(output), "--local cannot be combined with")
+			assert.NoDirExists(t, filepath.Join(home, ".kodelet"))
+		})
+	}
 }

@@ -17,13 +17,14 @@ import (
 var remoteProfileCmd = &cobra.Command{
 	Use:               "profile",
 	Short:             "View available model profiles",
-	Long:              "View model profiles available on the selected server. Use --profile when starting a conversation. To change the defaults, run 'kodelet host profile' on the server host and restart 'kodelet serve'.",
+	Long:              "View model profiles available on the selected server. Use --profile when starting a conversation. To change the defaults, run 'kodelet profile --local' on the server host and restart 'kodelet serve'.",
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE:              func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 }
 
 func init() {
 	addRemoteAdministrationFlags(remoteProfileCmd)
+	remoteProfileCmd.PersistentFlags().Bool("local", false, "Read or edit configuration files on this machine instead of contacting the server")
 	descriptions := map[string]string{
 		"current": "Show the default model profile",
 		"list":    "List available model profiles",
@@ -38,10 +39,21 @@ func init() {
 		}
 		remoteProfileCmd.AddCommand(command)
 	}
-	use := &cobra.Command{Use: "use <profile>", Short: "Show how to select a model profile", Args: cobra.ExactArgs(1), RunE: func(*cobra.Command, []string) error {
-		return errors.New("select a profile with --profile when starting a conversation; to change the default, run 'kodelet host profile use <profile> -g' on the server host and restart 'kodelet serve'")
+	use := &cobra.Command{Use: "use <profile>", Short: "Set the default model profile in a local configuration file", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		local, _ := cmd.Flags().GetBool("local")
+		if !local {
+			return errors.New("select a profile with --profile when starting a conversation; to change the default, run 'kodelet profile use <profile> --local -g' on the server machine and restart 'kodelet serve'")
+		}
+		if err := validateLocalAdministrationFlags(cmd); err != nil {
+			return err
+		}
+		global, _ := cmd.Flags().GetBool("global")
+		if !global {
+			return errors.New("use --global with --local to change the server default; repository files do not configure model profiles")
+		}
+		return profileUseCmd.RunE(cmd, args)
 	}}
-	use.Flags().BoolP("global", "g", false, "No longer supported here; use 'kodelet host profile use -g' on the server host")
+	use.Flags().BoolP("global", "g", false, "Update this machine's user configuration (requires --local)")
 	remoteProfileCmd.AddCommand(use)
 }
 
@@ -60,6 +72,17 @@ func remoteAdministrationClient(cmd *cobra.Command) (*chat.ControlPlaneChatRunne
 }
 
 func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
+	local, _ := cmd.Flags().GetBool("local")
+	if local {
+		if err := validateLocalAdministrationFlags(cmd); err != nil {
+			return err
+		}
+		for _, command := range profileCmd.Commands() {
+			if command.Name() == cmd.Name() {
+				return command.RunE(cmd, args)
+			}
+		}
+	}
 	format := "json"
 	profile := ""
 	if cmd.Name() == "show" {
@@ -116,4 +139,15 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return err
+}
+
+// Explicit remote flags conflict with an explicit local file operation. Environment
+// defaults are ignored in local mode so offline administration remains possible.
+func validateLocalAdministrationFlags(cmd *cobra.Command) error {
+	for _, name := range []string{"server", "auth-token"} {
+		if cmd.Flags().Changed(name) {
+			return errors.Errorf("--local cannot be combined with --%s", name)
+		}
+	}
+	return nil
 }

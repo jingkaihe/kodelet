@@ -105,7 +105,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
 - Native TUI shortcuts use `ext.registerShortcut(key, { description?, handler })` and may return `{ action: "submit", message }`.
 - `runAgent` results may set `display` when the visible and persisted user message should differ from the model-facing `prompt`.
-- Recipe-like commands use `kind: "recipe"`, appear in `kodelet host recipe list` on the runner host, and can be invoked through `kodelet run -r` or directly as `/name`.
+- Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list` for the selected workspace, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
 - Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`; multi-line widgets use their first line as a foldable summary in the TUI.
@@ -174,13 +174,13 @@ Within each root, both forms are supported:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`; standalone extensions are matched by directory or executable path in allow/deny config.
 
-Inspect installation paths on the runner host, from the intended workspace. These commands do not start extensions:
+Inspect installation paths in the selected workspace. These commands contact the runner without starting extensions:
 
 ```bash
-kodelet host extension list
-kodelet host extension list --json
-kodelet host extension inspect weather
-kodelet host extension inspect org@repo/weather --json
+kodelet extension list
+kodelet extension list --json
+kodelet extension inspect weather
+kodelet extension inspect org@repo/weather --json
 ```
 
 ## Configuration

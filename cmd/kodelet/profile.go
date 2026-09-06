@@ -36,14 +36,6 @@ var profileCmd = &cobra.Command{
 	Long:  "View or edit model profiles stored on this machine. Run this command on the server host and restart 'kodelet serve' to apply changes.",
 }
 
-var hostCmd = &cobra.Command{
-	Use:               "host",
-	Short:             "Administer configuration files on this host",
-	Long:              "Manage configuration files on this machine. To change a remote server's configuration, run these commands on that machine; --server and KODELET_SERVER do not apply.",
-	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
-	RunE:              func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
-}
-
 var profileCurrentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Show the current active profile",
@@ -221,7 +213,6 @@ Use "default" to use base configuration without any profile.`,
 }
 
 func init() {
-	hostCmd.AddCommand(profileCmd)
 	profileCmd.AddCommand(profileCurrentCmd)
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileShowCmd)

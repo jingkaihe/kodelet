@@ -214,3 +214,20 @@ func (r *ControlPlaneChatRunner) providerRequest(ctx context.Context, provider, 
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(result)
 }
+
+// CodexStatus is the server's account and live-usage view. It never contains tokens.
+type CodexStatus struct {
+	Connected      bool                  `json:"connected"`
+	Authentication string                `json:"authentication,omitempty"`
+	AccountID      string                `json:"accountId,omitempty"`
+	ExpiresAt      int64                 `json:"expiresAt,omitempty"`
+	CanRefresh     bool                  `json:"canRefresh,omitempty"`
+	Usage          *auth.CodexUsageStats `json:"usage,omitempty"`
+	UsageMessage   string                `json:"usageMessage,omitempty"`
+}
+
+func (r *ControlPlaneChatRunner) CodexStatus(ctx context.Context) (CodexStatus, error) {
+	var result CodexStatus
+	err := r.providerRequest(ctx, "codex", http.MethodGet, []string{"status"}, nil, &result)
+	return result, err
+}

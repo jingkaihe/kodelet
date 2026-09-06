@@ -1,41 +1,36 @@
 package main
 
 import (
+	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jingkaihe/kodelet/pkg/chat"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunCodexStatusNoCredentials(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
-	output := captureAllStdout(t, runCodexStatus)
-
-	assert.Contains(t, output, "Codex credentials not found")
-	assert.Contains(t, output, "kodelet codex login")
-	assert.Contains(t, output, "platform: codex")
-}
-
-func TestRunCodexStatusOAuthCredentialsUsageUnavailable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	_, err := auth.SaveCodexCredentials(&auth.CodexCredentials{
-		AccessToken: "access-token",
-		AccountID:   "acct_1234567890",
-		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
-	})
-	require.NoError(t, err)
-
-	output := captureAllStdout(t, runCodexStatus)
-
-	assert.Contains(t, output, "Codex credentials found")
-	assert.Contains(t, output, "Authentication type: OAuth")
-	assert.Contains(t, output, "Account ID: acct...7890")
-	assert.Contains(t, output, "Live usage stats unavailable")
-	assert.Contains(t, output, "chatgpt.com/codex/settings/usage")
+func TestRenderCodexStatus(t *testing.T) {
+	var output bytes.Buffer
+	require.NoError(t, renderCodexStatus(&output, chat.CodexStatus{}))
+	assert.Contains(t, output.String(), "connected: false")
+	assert.Contains(t, output.String(), "kodelet codex login")
+	output.Reset()
+	status := chat.CodexStatus{Connected: true, Authentication: "OAuth (ChatGPT account)", AccountID: "acct...7890", ExpiresAt: time.Now().Add(time.Hour).Unix(), UsageMessage: "Live usage is unavailable."}
+	require.NoError(t, renderCodexStatus(&output, status))
+	assert.Contains(t, output.String(), "Account ID: acct...7890")
+	assert.Contains(t, output.String(), "Live usage is unavailable")
+	output.Reset()
+	status.UsageMessage = ""
+	status.Usage = &auth.CodexUsageStats{PlanType: "pro", Snapshots: []auth.CodexUsageSnapshot{{Primary: &auth.CodexUsageWindow{UsedPercent: 25, WindowDurationMinutes: 300}, Credits: &auth.CodexCredits{HasCredits: true, Balance: "42"}}}}
+	require.NoError(t, renderCodexStatus(&output, status))
+	for _, want := range []string{"Plan: Pro", "5h limit:", "75% left", "42 credits"} {
+		assert.Contains(t, output.String(), want)
+	}
 }
 
 func TestBuildCodexUsageBuckets(t *testing.T) {
@@ -74,7 +69,7 @@ func TestBuildCodexUsageBuckets(t *testing.T) {
 
 func TestPrintCodexUsageLinesAlignsLabels(t *testing.T) {
 	output := captureStdout(t, func() {
-		printCodexUsageLines([]codexUsageLine{
+		writeCodexUsageLines(os.Stdout, []codexUsageLine{
 			{Label: "Short", Value: "one"},
 			{Label: "Longer label", Value: "two"},
 		}, "  ")
@@ -126,8 +121,6 @@ func TestCodexStringHelpers(t *testing.T) {
 	assert.Equal(t, "", capitalizeFirst(""))
 	assert.Equal(t, "Hello", capitalizeFirst("hello"))
 	assert.Equal(t, "One Two", titleWords("one two"))
-	assert.Equal(t, "****", maskString("short"))
-	assert.Equal(t, "abcd...wxyz", maskString("abcdefghijklmnopqrstuvwxyz"))
 
 	assert.Equal(t, "5h", codexLimitDuration(5*60))
 	assert.Equal(t, "1h", codexLimitDuration(-10))

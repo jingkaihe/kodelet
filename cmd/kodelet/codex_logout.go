@@ -14,41 +14,27 @@ import (
 )
 
 var codexLogoutCmd = &cobra.Command{
-	Use:   "logout",
-	Short: "Show how to disconnect a ChatGPT subscription",
-	Args:  cobra.NoArgs,
-	RunE: func(*cobra.Command, []string) error {
-		return errors.New("to disconnect the ChatGPT subscription, stop the server, run 'kodelet host codex logout' on that machine, then restart 'kodelet serve'")
-	},
-}
-
-var hostCodexLogoutCmd = &cobra.Command{
-	Use:   "logout",
-	Short: "Remove this host's Codex credentials (server must be stopped)",
-	Long: `Logout from OpenAI Codex and remove stored credentials.
-
-This command will:
-1. Remove the stored authentication credentials from ~/.kodelet/codex-credentials.json
-2. You will need to run 'kodelet codex login' again to access ChatGPT-backed models
-
-After running this command, you will no longer have access to ChatGPT-backed
-Codex models until you authenticate again.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
-
-		if err := runCodexLogout(ctx, noConfirm); err != nil {
-			presenter.Error(err, "Failed to complete Codex logout")
-			os.Exit(1)
+	Use:               "logout",
+	Short:             "Disconnect ChatGPT subscription",
+	Long:              "Remove saved sign-in details with --local on the server machine while the server is stopped. Restart the server afterward to apply the change.",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		local, _ := cmd.Flags().GetBool("local")
+		if !local {
+			return errors.New("to disconnect ChatGPT subscription, stop the server, run 'kodelet codex logout --local' on that machine, then restart 'kodelet serve'")
 		}
+		if err := validateLocalAdministrationFlags(cmd); err != nil {
+			return err
+		}
+		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
+		return runCodexLogout(cmd.Context(), noConfirm)
 	},
 }
 
 func init() {
-	codexLogoutCmd.Flags().Bool("no-confirm", false, "Legacy flag; remote logout is not supported")
-	hostCodexLogoutCmd.Flags().Bool("no-confirm", false, "Explicitly approve deleting credentials on this host")
-	hostCodexCmd.AddCommand(hostCodexLogoutCmd)
-	hostCmd.AddCommand(hostCodexCmd)
+	codexLogoutCmd.Flags().Bool("local", false, "Remove sign-in details stored on this machine (stop the server first)")
+	codexLogoutCmd.Flags().Bool("no-confirm", false, "Skip the confirmation prompt")
 }
 
 func runCodexLogout(_ context.Context, noConfirm bool) error {

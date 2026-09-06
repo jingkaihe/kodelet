@@ -344,6 +344,16 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		}
 		result, err := s.commitWorkspace(ctx, value)
 		return rpcResult(result, err)
+	case protocol.MethodWorkspaceInspect:
+		value, rpcErr := decodeParams[protocol.WorkspaceInspectParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		if err := value.Validate(); err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		result, err := s.inspectWorkspace(ctx, value)
+		return rpcResult(result, err)
 	case protocol.MethodWorkspaceDiscover:
 		value, rpcErr := decodeParams[protocol.WorkspaceDiscoverParams](params)
 		if rpcErr != nil {
@@ -962,29 +972,11 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, extensions.RuntimeCapabilities{BackgroundTasks: false})
 	probeCtx, cancelProbe := context.WithCancel(probeCtx)
 	defer cancelProbe()
-	variant := normalizeEnvironmentProfile(environmentProfile)
-	var runtime *extensions.Runtime
-	if provider, ok := s.runtimeProvider.(isolatedRuntimeDiscoveryProvider); ok {
-		var release func() error
-		runtime, release, err = provider.RuntimeForCommandDiscoveryWithIsolatedLease(probeCtx, workingDirectory, variant, extensionConfig)
-		if release != nil {
-			defer func() {
-				probeErr = combineCleanupErrors(probeErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "runner discovery runtime", func(context.Context) error { return release() }))
-			}()
-		}
-	} else if provider, ok := s.runtimeProvider.(runtimeDiscoveryProvider); ok {
-		runtime, err = provider.RuntimeForCommandDiscoveryWithConfig(probeCtx, workingDirectory, variant, extensionConfig)
-	} else {
-		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(probeCtx, workingDirectory, variant, extensionConfig, extensions.ExtensionCallContext{
-			ConversationID: "runner-manifest-probe",
-			UIScopeID:      "runner-manifest-probe",
-			CWD:            workingDirectory,
-			Provider:       config.Provider,
-			Model:          config.Model,
-			Profile:        config.Profile,
-			RecipeName:     config.RecipeName,
-			InvokedBy:      "runner.manifest",
-		})
+	runtime, release, err := s.inspectionRuntime(probeCtx, workingDirectory, environmentProfile, config, extensionConfig)
+	if release != nil {
+		defer func() {
+			probeErr = combineCleanupErrors(probeErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "runner discovery runtime", func(context.Context) error { return release() }))
+		}()
 	}
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))

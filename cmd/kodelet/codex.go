@@ -19,10 +19,3 @@ func init() {
 	codexCmd.AddCommand(codexStatusCmd)
 	rootCmd.AddCommand(codexCmd)
 }
-
-var hostCodexCmd = &cobra.Command{
-	Use:   "codex",
-	Short: "Administer Codex credential files on this host",
-	Long:  "Manage credentials stored on this machine. Stop the server before deleting its credentials. To change a remote server's credentials, run these commands on that machine.",
-	RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
-}

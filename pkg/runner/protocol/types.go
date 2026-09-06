@@ -44,6 +44,7 @@ const (
 	MethodWorkspaceGitPrepare     = "workspace.git.prepareCommit"
 	MethodWorkspaceGitCommit      = "workspace.git.commit"
 	MethodWorkspaceDiscover       = "workspace.discover"
+	MethodWorkspaceInspect        = "workspace.inspect"
 	MethodWorkspaceCWDHints       = "workspace.cwdHints"
 	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
@@ -195,13 +196,14 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	RunCheckpoint      bool `json:"runCheckpoint,omitempty"`
-	ConcurrentRuns     bool `json:"concurrentRuns,omitempty"`
-	WorkspaceGitDiff   bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceGitCommit bool `json:"workspaceGitCommit,omitempty"`
-	WorkspaceTerminal  bool `json:"workspaceTerminal,omitempty"`
-	WorkspaceDiscovery bool `json:"workspaceDiscovery,omitempty"`
-	WorkspaceCWD       bool `json:"workspaceCwd,omitempty"`
+	RunCheckpoint       bool `json:"runCheckpoint,omitempty"`
+	ConcurrentRuns      bool `json:"concurrentRuns,omitempty"`
+	WorkspaceGitDiff    bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit  bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal   bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceDiscovery  bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceInspection bool `json:"workspaceInspection,omitempty"`
+	WorkspaceCWD        bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.

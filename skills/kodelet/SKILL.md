@@ -53,9 +53,9 @@ kodelet serve
 ## Feature summary
 
 - Context files: Kodelet automatically loads `AGENTS.md`; bootstrap one with `kodelet run -r init`.
-- Recipes/fragments: Runner-owned prompt templates in `./recipes/` or `~/.kodelet/recipes/`; run with `kodelet run -r <name>`. On the runner host, `kodelet host recipe list` starts discovery extensions and `kodelet host recipe show <name>` renders executable templates.
+- Recipes/fragments: Runner-owned prompt templates in `./recipes/` or `~/.kodelet/recipes/`; run with `kodelet run -r <name>`. `kodelet recipe list` discovers recipes through the selected runner and `kodelet recipe show <name>` renders file-backed templates there; use `--cwd` to select the directory.
 - Skills: Model-invoked domain guidance in `.kodelet/skills/<name>/SKILL.md`, plugins, or global skill dirs; disable with `--no-skills`.
-- Extensions: Runner subprocesses can register model tools, prompt commands/dynamic recipes, native TUI shortcuts, and lifecycle event handlers; inspect installation paths with `kodelet host extension list` on the runner host and disable per request with `--no-extensions`.
+- Extensions: Runner subprocesses can register model tools, prompt commands/dynamic recipes, native TUI shortcuts, and lifecycle event handlers; inspect installation paths with `kodelet extension list` through the selected runner and disable per request with `--no-extensions`.
 - Plugins: Install bundled skills, recipes, and extensions with `kodelet plugin add org/repo`; inspect with `kodelet plugin list` and `kodelet plugin show org/repo`.
 - Conversations: Use `kodelet conversation list/show/delete/fork` for persisted runs.
 - Git helpers: `kodelet commit` generates commit messages; `kodelet pr` creates PRs.

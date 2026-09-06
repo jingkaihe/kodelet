@@ -21,14 +21,14 @@ kodelet run -r init
 Recipes are runner-owned prompt templates. Store custom recipes in `./recipes/` or `~/.kodelet/recipes/` on the runner host.
 
 ```bash
-kodelet host recipe list
-kodelet host recipe show init
+kodelet recipe list
+kodelet recipe show init
 kodelet run -r init
 kodelet run -r my-recipe --arg project="Kodelet" --arg focus_area="security"
 kodelet run -r my-recipe "additional context"
 ```
 
-Run `host recipe` in the intended workspace on the runner host: `list` starts discovery extensions, and `show` renders templates, including Bash substitutions. Ordinary `run -r` resolves recipes through the selected runner; the old top-level inspection commands fail with migration guidance.
+Recipe inspection uses the selected runner: `list` starts discovery extensions, and `show` renders file-backed templates, including Bash substitutions. Pass `--runner` and `--cwd` to select another workspace, or omit them to use your current directory with a same-machine built-in runner. `--server`, `--auth-token`, `--profile`, and `--runner-profile` are also supported. Inspection requires the server and runner to be available; client files are not used.
 
 Recipe capabilities:
 

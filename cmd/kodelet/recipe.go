@@ -1,17 +1,14 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -85,27 +82,6 @@ func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format Rec
 	return output
 }
 
-func appendExtensionRecipeOutputs(output *RecipeListOutput, commands []extensions.Command, showPath bool) {
-	if output == nil {
-		return
-	}
-	for _, command := range commands {
-		if command.Registration.Kind != "recipe" {
-			continue
-		}
-		name := command.Registration.Name
-		recipe := RecipeOutput{
-			ID:          name,
-			Name:        name,
-			Description: command.Registration.Description,
-		}
-		if showPath || output.Format == RecipeJSONFormat {
-			recipe.Path = "extension:" + command.ExtensionID + "/" + name
-		}
-		output.Recipes = append(output.Recipes, recipe)
-	}
-}
-
 func (o *RecipeListOutput) Render(w io.Writer) error {
 	if o.Format == RecipeJSONFormat {
 		return o.renderJSON(w)
@@ -172,34 +148,38 @@ func (o *RecipeListOutput) hasPath() bool {
 }
 
 var recipeCmd = &cobra.Command{
-	Use:   "recipe",
-	Short: "Moved to kodelet host recipe",
-	RunE:  hostInspectionMigration,
-}
-
-var hostRecipeCmd = &cobra.Command{
-	Use:   "recipe",
-	Short: "Inspect recipes on this host",
-	Long:  "View recipes installed in the current workspace on this machine. Listing recipes starts local extensions; showing a recipe renders its template. To inspect a remote workspace, run this command on its runner host.",
+	Use:               "recipe",
+	Short:             "Inspect recipes in a workspace",
+	Long:              "List and render recipes in the selected runner's workspace. With the same-machine built-in runner, the workspace defaults to your current directory.",
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE:              func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 }
 
 var recipeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available recipes",
-	Long:  "List local recipes. Starts local extensions to discover dynamic recipes.",
+	Long:  "List recipes in the selected workspace. Starts extensions on the runner to discover dynamic recipes.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		config := NewRecipeListConfig()
 		config.ShowPath, _ = cmd.Flags().GetBool("show-path")
 		config.JSONOutput, _ = cmd.Flags().GetBool("json")
 
-		return runRecipeList(cmd.Context(), config)
+		result, err := inspectCommandWorkspace(cmd, protocol.WorkspaceInspectParams{Operation: "recipe.list"})
+		if err != nil {
+			return err
+		}
+		format := RecipeTableFormat
+		if config.JSONOutput {
+			format = RecipeJSONFormat
+		}
+		return NewRecipeListOutput(result.Recipes, format, config.ShowPath).Render(cmd.OutOrStdout())
 	},
 }
 
 var recipeShowCmd = &cobra.Command{
 	Use:   "show <recipe>",
 	Short: "Show recipe content with metadata",
-	Long:  "Render a local recipe. Template functions may execute commands on this host.",
+	Long:  "Render a recipe in the selected workspace. Template functions may execute commands on the runner.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config := NewRecipeShowConfig()
@@ -213,121 +193,62 @@ var recipeShowCmd = &cobra.Command{
 			}
 		}
 
-		return runRecipeShow(cmd.Context(), args[0], config)
+		result, err := inspectCommandWorkspace(cmd, protocol.WorkspaceInspectParams{Operation: "recipe.show", Name: args[0], Arguments: config.Arguments})
+		if err != nil {
+			return err
+		}
+		if result.Recipe == nil {
+			return errors.New("the runner returned no recipe content")
+		}
+		return renderRecipeShow(cmd.OutOrStdout(), result.Recipe)
 	},
 }
 
 func init() {
-	hostRecipeCmd.AddCommand(recipeListCmd, recipeShowCmd)
-	hostCmd.AddCommand(hostRecipeCmd)
-	legacyList := &cobra.Command{Use: "list", Short: "Moved to kodelet host recipe list", RunE: hostInspectionMigration}
-	legacyShow := &cobra.Command{Use: "show <recipe>", Short: "Moved to kodelet host recipe show", RunE: hostInspectionMigration}
-	recipeCmd.AddCommand(legacyList, legacyShow)
-
-	for _, cmd := range []*cobra.Command{recipeListCmd, legacyList} {
-		cmd.Flags().Bool("show-path", false, "Show the file path for each recipe")
-		cmd.Flags().Bool("json", false, "Output in JSON format")
-	}
-
-	for _, cmd := range []*cobra.Command{recipeShowCmd, legacyShow} {
-		cmd.Flags().StringSliceP("arg", "a", []string{}, "Template arguments in format key=value (can be specified multiple times)")
-	}
+	addWorkspaceInspectionFlags(recipeCmd)
+	recipeCmd.AddCommand(recipeListCmd, recipeShowCmd)
+	recipeListCmd.Flags().Bool("show-path", false, "Show recipe file paths on the runner")
+	recipeListCmd.Flags().Bool("json", false, "Output in JSON format")
+	recipeShowCmd.Flags().StringSliceP("arg", "a", nil, "Recipe argument in key=value format (repeatable)")
 }
 
-func hostInspectionMigration(cmd *cobra.Command, _ []string) error {
-	path := strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()))
-	return errors.Errorf("'%s' has moved to 'kodelet host %s'; run it in the workspace on the machine where the files are installed", path, path)
-}
-
-func runRecipeList(ctx context.Context, config *RecipeListConfig) error {
-	processor, err := fragments.NewFragmentProcessor()
-	if err != nil {
-		return errors.Wrap(err, "failed to create fragment processor")
-	}
-
-	fragmentsWithMetadata, err := processor.ListFragmentsWithMetadata()
-	if err != nil {
-		return errors.Wrap(err, "failed to list fragments")
-	}
-
-	format := RecipeTableFormat
-	if config.JSONOutput {
-		format = RecipeJSONFormat
-	}
-
-	output := NewRecipeListOutput(fragmentsWithMetadata, format, config.ShowPath)
-	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, "")
-	if err != nil {
-		return errors.Wrap(err, "failed to initialize extensions")
-	}
-	if extensionRuntime != nil {
-		defer func() { _ = extensionRuntime.Close() }()
-		appendExtensionRecipeOutputs(output, extensionRuntime.Commands(), config.ShowPath)
-	}
-
-	if len(output.Recipes) == 0 {
-		presenter.Info("No recipes found")
-		return nil
-	}
-	if err := output.Render(os.Stdout); err != nil {
-		return errors.Wrap(err, "failed to render recipe list")
-	}
-
-	return nil
-}
-
-func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowConfig) error {
-	processor, err := fragments.NewFragmentProcessor()
-	if err != nil {
-		return errors.Wrap(err, "failed to create fragment processor")
-	}
-
-	fragmentConfig := &fragments.Config{
-		FragmentName: recipeName,
-		Arguments:    config.Arguments,
-	}
-
-	fragment, err := processor.LoadFragment(ctx, fragmentConfig)
-	if err != nil {
-		return errors.Wrapf(err, "failed to load recipe '%s'", recipeName)
-	}
-
+func renderRecipeShow(w io.Writer, fragment *fragments.Fragment) error {
 	if fragment.Metadata.Name != "" || fragment.Metadata.Description != "" {
-		presenter.Section("Recipe Metadata")
+		fmt.Fprintln(w, "Recipe Metadata")
 
 		if fragment.Metadata.Name != "" {
-			fmt.Printf("Name: %s\n", fragment.Metadata.Name)
+			fmt.Fprintf(w, "Name: %s\n", fragment.Metadata.Name)
 		}
 
 		if fragment.Metadata.Description != "" {
-			fmt.Printf("Description: %s\n", fragment.Metadata.Description)
+			fmt.Fprintf(w, "Description: %s\n", fragment.Metadata.Description)
 		}
 
-		fmt.Printf("Path: %s\n", fragment.Path)
+		fmt.Fprintf(w, "Path: %s\n", fragment.Path)
 
 		if len(fragment.Metadata.Arguments) > 0 {
-			fmt.Println()
-			presenter.Section("Arguments")
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Arguments")
 			for key, argMeta := range fragment.Metadata.Arguments {
 				if argMeta.Description != "" {
 					if argMeta.Default != "" {
-						fmt.Printf("  %s: %s (default: %s)\n", key, argMeta.Description, argMeta.Default)
+						fmt.Fprintf(w, "  %s: %s (default: %s)\n", key, argMeta.Description, argMeta.Default)
 					} else {
-						fmt.Printf("  %s: %s\n", key, argMeta.Description)
+						fmt.Fprintf(w, "  %s: %s\n", key, argMeta.Description)
 					}
 				} else if argMeta.Default != "" {
-					fmt.Printf("  %s: (default: %s)\n", key, argMeta.Default)
+					fmt.Fprintf(w, "  %s: (default: %s)\n", key, argMeta.Default)
 				} else {
-					fmt.Printf("  %s\n", key)
+					fmt.Fprintf(w, "  %s\n", key)
 				}
 			}
 		}
 
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 
-	presenter.Section("Recipe Content")
-	fmt.Print(fragment.Content)
+	fmt.Fprintln(w, "Recipe Content")
+	_, err := fmt.Fprint(w, fragment.Content)
 
-	return nil
+	return err
 }

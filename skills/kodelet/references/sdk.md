@@ -317,7 +317,7 @@ Command result actions:
 - `respond`: display a direct terminal/Web UI response; it is not fed into the LLM.
 - `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input. Set optional `display` to replace the slash command with different visible and persisted user text.
 
-Recipe-like commands use `kind: "recipe"`, appear in `kodelet host recipe list` on the runner host, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`. Host recipe listing starts discovery extensions; host recipe rendering can execute template commands.
+Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list` for the selected workspace, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`. Recipe listing starts discovery extensions on the runner; recipe rendering can execute template commands in the selected directory.
 
 ## Native TUI shortcuts
 

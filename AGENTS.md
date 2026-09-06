@@ -143,8 +143,8 @@ See [docs/extension-design.md](docs/extension-design.md).
 
 Discovery helpers:
 ```bash
-kodelet host extension list
-kodelet host extension inspect <name-or-id-or-path>
+kodelet extension list
+kodelet extension inspect <name-or-id-or-path>
 ```
 
 ## External Binary Management

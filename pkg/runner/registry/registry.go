@@ -102,31 +102,32 @@ const (
 
 // Runner is a safe snapshot of one stable runner registration.
 type Runner struct {
-	ID                 string             `json:"id"`
-	DisplayName        string             `json:"displayName,omitempty"`
-	Host               protocol.Host      `json:"host"`
-	Workspace          protocol.Workspace `json:"workspace"`
-	KodeletVersion     string             `json:"kodeletVersion"`
-	ManifestDigest     string             `json:"manifestDigest,omitempty"`
-	ManifestChanged    bool               `json:"manifestChanged"`
-	CompatibilityError string             `json:"compatibilityError,omitempty"`
-	Status             RunnerStatus       `json:"status"`
-	Connected          bool               `json:"connected"`
-	ConcurrentRuns     bool               `json:"concurrentRuns"`
-	WorkspaceGitDiff   bool               `json:"workspaceGitDiff"`
-	WorkspaceGitCommit bool               `json:"workspaceGitCommit"`
-	WorkspaceTerminal  bool               `json:"workspaceTerminal"`
-	WorkspaceDiscovery bool               `json:"workspaceDiscovery"`
-	WorkspaceCWD       bool               `json:"workspaceCwd"`
-	RunCheckpoint      bool               `json:"runCheckpoint"`
-	ActiveRunID        string             `json:"activeRunId,omitempty"`
-	ActiveRunIDs       []string           `json:"activeRunIds,omitempty"`
-	ConnectionID       string             `json:"connectionId,omitempty"`
-	Generation         int64              `json:"generation"`
-	ConnectedAt        time.Time          `json:"connectedAt,omitempty"`
-	LastHeartbeatAt    time.Time          `json:"lastHeartbeatAt,omitempty"`
-	CreatedAt          time.Time          `json:"createdAt"`
-	UpdatedAt          time.Time          `json:"updatedAt"`
+	ID                  string             `json:"id"`
+	DisplayName         string             `json:"displayName,omitempty"`
+	Host                protocol.Host      `json:"host"`
+	Workspace           protocol.Workspace `json:"workspace"`
+	KodeletVersion      string             `json:"kodeletVersion"`
+	ManifestDigest      string             `json:"manifestDigest,omitempty"`
+	ManifestChanged     bool               `json:"manifestChanged"`
+	CompatibilityError  string             `json:"compatibilityError,omitempty"`
+	Status              RunnerStatus       `json:"status"`
+	Connected           bool               `json:"connected"`
+	ConcurrentRuns      bool               `json:"concurrentRuns"`
+	WorkspaceGitDiff    bool               `json:"workspaceGitDiff"`
+	WorkspaceGitCommit  bool               `json:"workspaceGitCommit"`
+	WorkspaceTerminal   bool               `json:"workspaceTerminal"`
+	WorkspaceDiscovery  bool               `json:"workspaceDiscovery"`
+	WorkspaceInspection bool               `json:"workspaceInspection"`
+	WorkspaceCWD        bool               `json:"workspaceCwd"`
+	RunCheckpoint       bool               `json:"runCheckpoint"`
+	ActiveRunID         string             `json:"activeRunId,omitempty"`
+	ActiveRunIDs        []string           `json:"activeRunIds,omitempty"`
+	ConnectionID        string             `json:"connectionId,omitempty"`
+	Generation          int64              `json:"generation"`
+	ConnectedAt         time.Time          `json:"connectedAt,omitempty"`
+	LastHeartbeatAt     time.Time          `json:"lastHeartbeatAt,omitempty"`
+	CreatedAt           time.Time          `json:"createdAt"`
+	UpdatedAt           time.Time          `json:"updatedAt"`
 }
 
 // Run is a snapshot of one top-level runner environment lease.
@@ -623,6 +624,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
@@ -754,6 +756,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
@@ -1269,6 +1272,8 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return false
 	}
 	switch method {
+	case protocol.MethodWorkspaceInspect:
+		return entry.WorkspaceInspection
 	case protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints:
 		return entry.WorkspaceDiscovery
 	case protocol.MethodWorkspaceGitDiff:

@@ -1,167 +1,81 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/spf13/cobra"
 )
 
 var codexStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show ChatGPT subscription connection status",
-	Long:  "Show whether a ChatGPT subscription is connected to the selected server. For detailed usage, run 'kodelet host codex status' on the server host.",
+	Short: "Show ChatGPT subscription status and usage",
+	Long:  "Show the selected server's ChatGPT connection, account, plan, usage limits and credits. Sign-in details stay on the server.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := remoteAdministrationClient(cmd)
 		if err != nil {
 			return err
 		}
-		status, err := client.ProviderConnection(cmd.Context(), "codex")
+		status, err := client.CodexStatus(cmd.Context())
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ChatGPT subscription connected: %t\n", status.Connected)
+		return renderCodexStatus(cmd.OutOrStdout(), status)
+	},
+}
+
+func renderCodexStatus(w io.Writer, status chat.CodexStatus) error {
+	fmt.Fprintf(w, "ChatGPT subscription connected: %t\n", status.Connected)
+	if !status.Connected {
+		_, err := fmt.Fprintln(w, "Run 'kodelet codex login' to connect your ChatGPT account.")
 		return err
-	},
-}
-
-var hostCodexStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Inspect this host's Codex credentials and live usage",
-	Long: `Show the current OpenAI Codex authentication status.
-
-This command checks if valid Codex credentials are available at ~/.kodelet/codex-credentials.json.
-These credentials are created by running 'kodelet codex login'.
-
-If credentials are found, Kodelet also fetches the live ChatGPT-backed Codex
-usage snapshot when OAuth authentication is available, including rolling windows
-and workspace credits.`,
-	Run: func(_ *cobra.Command, _ []string) {
-		runCodexStatus()
-	},
-}
-
-func init() { hostCodexCmd.AddCommand(hostCodexStatusCmd) }
-
-func runCodexStatus() {
-	ctx := context.Background()
-
-	exists, err := auth.GetCodexCredentialsExists()
-	if err != nil {
-		presenter.Error(err, "Failed to check Codex credentials")
-		os.Exit(1)
 	}
-
-	if !exists {
-		presenter.Warning("Codex credentials not found")
-		fmt.Println()
-		presenter.Info("To enable Codex authentication:")
-		fmt.Println("1. Run 'kodelet codex login' to authenticate with your ChatGPT account")
-		fmt.Println("   - Use 'kodelet codex login --device-auth' on remote or headless machines")
-		fmt.Println("2. Run 'kodelet codex status' again to verify")
-		fmt.Println()
-		presenter.Info("Once authenticated, add to your config:")
-		fmt.Println("  provider: openai")
-		fmt.Println("  model: gpt-6-astra")
-		fmt.Println("  openai:")
-		fmt.Println("    platform: codex")
-		fmt.Println("    api_mode: responses")
-		fmt.Println("    service_tier: fast  # optional")
-		return
+	if status.Authentication != "" {
+		fmt.Fprintf(w, "Authentication: %s\n", status.Authentication)
 	}
-
-	creds, err := auth.GetCodexCredentials()
-	if err != nil {
-		presenter.Error(err, "Failed to read Codex credentials")
-		os.Exit(1)
+	if status.AccountID != "" {
+		fmt.Fprintf(w, "Account ID: %s\n", status.AccountID)
 	}
-	displayCreds := creds
-	var usageRefreshErr error
-	if auth.IsCodexOAuthEnabled(creds) {
-		if refreshed, err := auth.GetCodexCredentialsForRequest(ctx); err == nil {
-			displayCreds = refreshed
+	if status.ExpiresAt > 0 {
+		expires := time.Unix(status.ExpiresAt, 0)
+		if expires.After(time.Now()) {
+			fmt.Fprintf(w, "Token expires: %s\n", expires.Format(time.RFC3339))
+		} else if status.CanRefresh {
+			fmt.Fprintln(w, "Sign-in will refresh automatically on next use.")
 		} else {
-			usageRefreshErr = err
+			fmt.Fprintln(w, "Sign-in has expired. Run 'kodelet codex login' to reconnect.")
 		}
 	}
-
-	presenter.Success("Codex credentials found")
-	fmt.Println()
-	presenter.Section("Authentication")
-
-	if auth.IsCodexOAuthEnabled(displayCreds) {
-		presenter.Info("Authentication type: OAuth (ChatGPT account)")
-		fmt.Printf("Account ID: %s\n", maskString(displayCreds.AccountID))
-
-		if displayCreds.ExpiresAt > 0 {
-			expiresAt := time.Unix(displayCreds.ExpiresAt, 0)
-			now := time.Now()
-			if expiresAt.After(now) {
-				remaining := expiresAt.Sub(now).Round(time.Minute)
-				fmt.Printf("Token expires: %s (in %s)\n", expiresAt.Format(time.RFC3339), remaining)
-			} else {
-				presenter.Warning("Token has expired")
-				if displayCreds.RefreshToken != "" {
-					presenter.Info("Token will be automatically refreshed on next use")
-				} else {
-					presenter.Info("Please run 'kodelet codex login' to re-authenticate")
-				}
+	if status.UsageMessage != "" {
+		fmt.Fprintln(w, status.UsageMessage)
+	}
+	if stats := status.Usage; stats != nil {
+		fmt.Fprintln(w, "\nUsage")
+		if plan := formatCodexPlanType(stats.PlanType); plan != "" {
+			fmt.Fprintf(w, "Plan: %s\n", plan)
+		}
+		buckets := buildCodexUsageBuckets(stats, time.Now())
+		if len(buckets) == 0 {
+			fmt.Fprintln(w, "Limits: data not available yet")
+		}
+		for _, bucket := range buckets {
+			indent := ""
+			if bucket.Title != "" {
+				fmt.Fprintf(w, "\n%s:\n", bucket.Title)
+				indent = "  "
 			}
-		}
-
-		if displayCreds.RefreshToken != "" {
-			fmt.Println("Refresh token: available")
+			writeCodexUsageLines(w, bucket.Lines, indent)
 		}
 	}
-
-	if !auth.IsCodexOAuthEnabled(displayCreds) {
-		fmt.Println()
-		presenter.Section("Usage")
-		presenter.Info("Live ChatGPT usage stats are only available with OAuth login.")
-		return
-	}
-
-	stats, err := auth.GetCodexUsageStatsWithCredentials(ctx, displayCreds)
-	if err != nil {
-		if usageRefreshErr != nil {
-			presenter.Warning(fmt.Sprintf("Live usage stats unavailable: %v", usageRefreshErr))
-		} else {
-			presenter.Warning(fmt.Sprintf("Live usage stats unavailable: %v", err))
-		}
-		presenter.Info("Visit https://chatgpt.com/codex/settings/usage for up-to-date information.")
-		return
-	}
-
-	fmt.Println()
-	presenter.Section("Usage")
-	if plan := formatCodexPlanType(stats.PlanType); plan != "" {
-		fmt.Printf("Plan: %s\n", plan)
-	}
-	presenter.Info("Visit https://chatgpt.com/codex/settings/usage for up-to-date information.")
-
-	buckets := buildCodexUsageBuckets(stats, time.Now())
-	if len(buckets) == 0 {
-		fmt.Println("Limits: data not available yet")
-		return
-	}
-
-	for _, bucket := range buckets {
-		if bucket.Title != "" {
-			fmt.Printf("\n%s:\n", bucket.Title)
-			printCodexUsageLines(bucket.Lines, "  ")
-			continue
-		}
-
-		printCodexUsageLines(bucket.Lines, "")
-	}
+	_, err := fmt.Fprintln(w, "https://chatgpt.com/codex/settings/usage")
+	return err
 }
 
 type codexUsageBucket struct {
@@ -211,7 +125,7 @@ func buildCodexUsageBuckets(stats *auth.CodexUsageStats, now time.Time) []codexU
 	return buckets
 }
 
-func printCodexUsageLines(lines []codexUsageLine, indent string) {
+func writeCodexUsageLines(w io.Writer, lines []codexUsageLine, indent string) {
 	maxLabelLen := 0
 	for _, line := range lines {
 		if len(line.Label) > maxLabelLen {
@@ -220,7 +134,7 @@ func printCodexUsageLines(lines []codexUsageLine, indent string) {
 	}
 
 	for _, line := range lines {
-		fmt.Printf("%s%-*s  %s\n", indent, maxLabelLen+1, line.Label+":", line.Value)
+		fmt.Fprintf(w, "%s%-*s  %s\n", indent, maxLabelLen+1, line.Label+":", line.Value)
 	}
 }
 
@@ -342,12 +256,4 @@ func titleWords(s string) string {
 		parts[i] = capitalizeFirst(part)
 	}
 	return strings.Join(parts, " ")
-}
-
-// maskString masks a string, showing only the first and last 4 characters.
-func maskString(s string) string {
-	if len(s) <= 12 {
-		return "****"
-	}
-	return s[:4] + "..." + s[len(s)-4:]
 }

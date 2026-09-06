@@ -554,6 +554,11 @@ func TestDaemonChatExtensionProcess(_ *testing.T) {
 				Tools:     []extensions.ToolRegistration{{Name: "pty_prompt", Description: "Exercise native terminal prompts", InputSchema: map[string]any{"type": "object"}}},
 				Shortcuts: []extensions.ShortcutRegistration{{Key: "ctrl+r", Description: "PTY shortcut submission"}},
 			}
+			if os.Getenv("KODELET_TEST_INSPECTION_RECIPES") == "1" {
+				initialized := result.(extensions.InitializeResult)
+				initialized.Commands = []extensions.CommandRegistration{{Name: "dynamic-review", Description: "Dynamic runner recipe", Kind: "recipe", InputSchema: map[string]any{"type": "object"}}, {Name: "not-a-recipe", Description: "Regular command", Kind: "command", InputSchema: map[string]any{"type": "object"}}}
+				result = initialized
+			}
 		case "extension.shortcut.execute":
 			var params struct {
 				Key     string                          `json:"key"`

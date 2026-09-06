@@ -398,7 +398,6 @@ func main() {
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(remoteProfileCmd)
-	rootCmd.AddCommand(hostCmd)
 	rootCmd.AddCommand(dbCmd)
 
 	// Initialize telemetry with tracing
