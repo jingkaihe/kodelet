@@ -14,9 +14,91 @@ import (
 	openaillm "github.com/jingkaihe/kodelet/pkg/llm/openai"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChildEventSinkProjection(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		event ChatEvent
+		want  delegation.Event
+	}{
+		{
+			name:  "raw tool input",
+			event: ChatEvent{Kind: "tool-use", Input: "{\n  \"path\": \"文件.go\"\n}"},
+			want:  delegation.Event{Input: "{\n  \"path\": \"文件.go\"\n}"},
+		},
+		{
+			name:  "intermediate output is not terminal success",
+			event: ChatEvent{Kind: "tool-update", ToolOutput: "partial output", ToolResult: &tooltypes.StructuredToolResult{Success: true}},
+			want:  delegation.Event{ToolOutput: "partial output"},
+		},
+		{
+			name:  "intermediate failure is not terminal failure",
+			event: ChatEvent{Kind: "tool-update", ToolOutput: "retrying", ToolResult: &tooltypes.StructuredToolResult{Success: false, Error: "transient"}},
+			want:  delegation.Event{ToolOutput: "retrying"},
+		},
+		{
+			name:  "successful result",
+			event: ChatEvent{Kind: "tool-result", ToolOutput: "file contents", ToolResult: &tooltypes.StructuredToolResult{Success: true}},
+			want:  delegation.Event{ToolOutput: "file contents", Success: new(true)},
+		},
+		{
+			name:  "failed result",
+			event: ChatEvent{Kind: "tool-result", ToolOutput: "cannot open file", ToolResult: &tooltypes.StructuredToolResult{Success: false, Error: "not found"}},
+			want:  delegation.Event{ToolOutput: "cannot open file", Success: new(false), Error: "not found"},
+		},
+		{
+			name:  "failure without error text",
+			event: ChatEvent{Kind: "tool-result", ToolResult: &tooltypes.StructuredToolResult{Success: false}},
+			want:  delegation.Event{Success: new(false)},
+		},
+		{
+			name:  "status is not inferred from error text",
+			event: ChatEvent{Kind: "tool-result", ToolResult: &tooltypes.StructuredToolResult{Success: true, Error: "diagnostic"}},
+			want:  delegation.Event{Success: new(true), Error: "diagnostic"},
+		},
+		{
+			name:  "nil result status remains unknown",
+			event: ChatEvent{Kind: "tool-result", ToolOutput: "unclassified output"},
+			want:  delegation.Event{ToolOutput: "unclassified output"},
+		},
+		{
+			name:  "text content",
+			event: ChatEvent{Kind: "text", Content: "message"},
+			want:  delegation.Event{Text: "message"},
+		},
+		{
+			name:  "delta overrides content",
+			event: ChatEvent{Kind: "text", Content: "message", Delta: "chunk"},
+			want:  delegation.Event{Text: "chunk"},
+		},
+		{
+			name:  "result overrides delta",
+			event: ChatEvent{Kind: "result", Content: "message", Delta: "chunk", Result: new("final")},
+			want:  delegation.Event{Text: "final"},
+		},
+		{
+			name:  "empty result overrides delta",
+			event: ChatEvent{Kind: "result", Delta: "chunk", Result: new("")},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.event.ToolName, test.event.ToolCallID = "file_read", "call-one"
+			test.want.Kind, test.want.ToolName, test.want.ToolCallID = test.event.Kind, "file_read", "call-one"
+			var events []delegation.Event
+			sink := childEventSink{emit: func(event delegation.Event) { events = append(events, event) }}
+			require.NoError(t, sink.Send(test.event))
+			assert.Equal(t, []delegation.Event{test.want}, events)
+			if test.event.ToolResult != nil {
+				test.event.ToolResult.Success = !test.event.ToolResult.Success
+				assert.Equal(t, []delegation.Event{test.want}, events, "projected status must not alias the provider event")
+			}
+		})
+	}
+}
 
 func TestChildConfigurationCeiling(t *testing.T) {
 	parent := llmtypes.Config{

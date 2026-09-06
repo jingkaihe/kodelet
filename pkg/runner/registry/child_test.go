@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -405,6 +407,101 @@ func TestChildReplayProgressAndExactCancellation(t *testing.T) {
 	result, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReadMethod, p)
 	require.NoError(t, err)
 	assert.False(t, result.Done)
+}
+
+func TestChildEventEmissionReadAndBounds(t *testing.T) {
+	const limit = 32 * 1024
+	input := strings.Repeat("a", limit+10)
+	output := "a" + strings.Repeat("🙂", limit/4+1)
+	errorText := "aa" + strings.Repeat("🙂", limit/4+1)
+	final := strings.Repeat("界", limit/3+10)
+	progress, continueRun := make(chan struct{}), make(chan struct{})
+	_, session, _ := childTestRegistry(t, func(context.Context, delegation.Request, delegation.Preset, delegation.Identity) (delegation.Run, error) {
+		return func(ctx context.Context, emit func(delegation.Event)) error {
+			if err := delegation.Admit(ctx); err != nil {
+				return err
+			}
+			emit(delegation.Event{Kind: "tool-use", ToolName: "file_read", ToolCallID: "call-one", Input: `{"path":"file.go"}`})
+			emit(delegation.Event{Kind: "tool-update", ToolName: "file_read", ToolCallID: "call-one", ToolOutput: "partial"})
+			emit(delegation.Event{Kind: "tool-result", ToolName: "file_read", ToolCallID: "call-one", ToolOutput: "unavailable", Success: new(false), Error: "not found"})
+			close(progress)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-continueRun:
+			}
+			for range 130 {
+				emit(delegation.Event{Kind: "tool-update", ToolOutput: "progress"})
+			}
+			emit(delegation.Event{Kind: "tool-use", Input: input})
+			emit(delegation.Event{Kind: "tool-update", ToolOutput: output})
+			emit(delegation.Event{Kind: "tool-result", Text: final, ToolOutput: output, Error: errorText, Success: new(false)})
+			emit(delegation.Event{Kind: "result", Text: final})
+			return nil
+		}, nil
+	})
+	p := childTestParams()
+	value, rpcErr := session.HandleRequest(t.Context(), delegation.StartMethod, mustRegistryJSON(t, p))
+	require.Nil(t, rpcErr)
+	started := value.(delegation.Result)
+	p.ChildID, p.ChildRunID = started.ConversationID, started.RunID
+	select {
+	case <-progress:
+	case <-time.After(time.Second):
+		require.FailNow(t, "child did not emit tool progress")
+	}
+	value, rpcErr = session.HandleRequest(t.Context(), delegation.ReadMethod, mustRegistryJSON(t, p))
+	require.Nil(t, rpcErr)
+	result := value.(delegation.Result)
+	assert.False(t, result.Done)
+	require.Equal(t, []delegation.Event{
+		{Sequence: 1, Kind: "tool-use", ToolName: "file_read", ToolCallID: "call-one", Input: `{"path":"file.go"}`},
+		{Sequence: 2, Kind: "tool-update", ToolName: "file_read", ToolCallID: "call-one", ToolOutput: "partial"},
+		{Sequence: 3, Kind: "tool-result", ToolName: "file_read", ToolCallID: "call-one", ToolOutput: "unavailable", Success: new(false), Error: "not found"},
+	}, result.Events)
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+	var wire struct {
+		Events []map[string]any `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	assert.NotContains(t, wire.Events[0], "success")
+	assert.NotContains(t, wire.Events[1], "success")
+	assert.Equal(t, false, wire.Events[2]["success"])
+	p.After = 2
+	value, rpcErr = session.HandleRequest(t.Context(), delegation.ReadMethod, mustRegistryJSON(t, p))
+	require.Nil(t, rpcErr)
+	assert.Equal(t, result.Events[2:], value.(delegation.Result).Events)
+	close(continueRun)
+	p.After = 0
+	require.Eventually(t, func() bool {
+		value, rpcErr = session.HandleRequest(t.Context(), delegation.ReadMethod, mustRegistryJSON(t, p))
+		if rpcErr != nil {
+			return false
+		}
+		result = value.(delegation.Result)
+		return result.Done
+	}, time.Second, time.Millisecond)
+	require.Len(t, result.Events, 128)
+	for i, event := range result.Events {
+		assert.EqualValues(t, i+10, event.Sequence, "ring retains only the newest events")
+		for _, field := range []string{event.Text, event.Input, event.ToolOutput, event.Error} {
+			assert.LessOrEqual(t, len(field), limit)
+			assert.True(t, utf8.ValidString(field))
+		}
+	}
+	assert.Equal(t, input[:limit], result.Events[124].Input)
+	assert.Equal(t, output[:limit-3], result.Events[125].ToolOutput)
+	assert.Equal(t, errorText[:limit-2], result.Events[126].Error)
+	assert.Equal(t, final[:limit-2], result.Events[126].Text)
+	assert.Equal(t, new(false), result.Events[126].Success)
+	assert.Equal(t, final[:limit-2], result.Events[127].Text)
+	assert.Equal(t, final, result.Output, "the final result output must remain untruncated")
+	p.After = result.Events[127].Sequence
+	value, rpcErr = session.HandleRequest(t.Context(), delegation.ReadMethod, mustRegistryJSON(t, p))
+	require.Nil(t, rpcErr)
+	assert.Empty(t, value.(delegation.Result).Events)
+	assert.Equal(t, final, value.(delegation.Result).Output)
 }
 
 func TestChildLifetime(t *testing.T) {

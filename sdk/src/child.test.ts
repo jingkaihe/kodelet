@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { ExtensionHost } from "./api.js";
-import { createChildClient, type ChildRequest, type ChildResult } from "./child.js";
+import { createChildClient, type ChildEvent, type ChildRequest, type ChildResult } from "./child.js";
 import { createToolContext, runWithHostRPCClient } from "./context.js";
 import type { ExecutionProfile } from "./execution.js";
 
@@ -63,6 +63,53 @@ class Host {
     return method === "kodelet.child.steer" ? this.steerResult : this.result;
   }
 }
+
+test("child progress preserves optional tool metadata and monotonic callbacks on the exact run", async () => {
+  for (const retained of [false, true]) {
+    const events: ChildEvent[] = [
+      { sequence: 1, kind: "tool-call", toolName: "grep_tool", toolCallId: "search-1", input: '{ "pattern": "π.*", "path": "src" }\n' },
+      { sequence: 2, kind: "tool-result", toolName: "grep_tool", toolCallId: "search-1", toolOutput: "src/parser.ts:2: π\n", success: true },
+      { sequence: 3, kind: "tool-call", toolName: "file_read", toolCallId: "read-1", input: '{"file_path":"missing.ts"' },
+      { sequence: 4, kind: "tool-result", toolName: "file_read", toolCallId: "read-1", toolOutput: "", success: false, error: "missing.ts: not found" },
+      { sequence: 130, kind: "tool-result", toolName: "glob_tool", toolCallId: "legacy-1", text: "legacy result without metadata" },
+    ];
+    const final: ChildResult = { ...identity, done: true, output: "summary", events: events.slice(2) };
+    const pages: ChildResult[] = [
+      { ...identity, events: events.slice(0, 1) },
+      { ...identity, events: events.slice(0, 3) },
+      final,
+    ];
+    const host = new Host();
+    host.reply = (method, params, persistent) => {
+      host.calls.push({ method, params: params as Record<string, unknown>, persistent });
+      const page = pages.shift();
+      assert.ok(page, "unexpected extra RPC");
+      return JSON.parse(JSON.stringify(page));
+    };
+    const lease = retained ? { id: "lease", close: async () => {} } : undefined;
+    const child = await createChildClient(host).start({ profile: "search", message: "query", lease });
+    const observed: ChildEvent[] = [];
+    const result = await child.wait({ onEvent: async (event) => { await Promise.resolve(); observed.push(event); } });
+    assert.deepEqual(result, final);
+    assert.deepEqual(observed, events);
+    assert.equal(observed[3].success, false);
+    assert.equal(Object.hasOwn(observed[4], "success"), false);
+    assert.deepEqual(host.calls.slice(1), [1, 3].map((after) => ({
+      method: "kodelet.child.read", persistent: retained,
+      params: { childId: "child", childRunId: "run-child", after, ...(retained ? { leaseId: "lease" } : {}) },
+    })));
+    // Direct reads keep the wire metadata too; a later run cannot replace it.
+    pages.push(final);
+    assert.deepEqual(await child.read(), final);
+    assert.equal(host.calls.at(-1)?.params.after, 130);
+    pages.push({ ...final, runId: "later-run", events: [{ ...events[3], sequence: 131 }] });
+    await assert.rejects(child.read(), /does not match this execution/);
+    assert.equal(child.runId, "run-child");
+    assert.deepEqual(await child.wait({ onEvent: (event) => { observed.push(event); } }), final);
+    assert.deepEqual(observed, events);
+    assert.deepEqual(pages, []);
+  }
+});
 
 test("fresh and fork context selection preserve typed options and exact read identity", async () => {
   for (const mode of [{}, { contextMode: "fresh" as const }, { contextMode: "fork" as const }]) {

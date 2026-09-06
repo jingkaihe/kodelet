@@ -27,6 +27,12 @@ export interface ChildEvent {
   text?: string;
   toolName?: string;
   toolCallId?: string;
+  /** Raw tool input JSON; bounded host progress may truncate it. */
+  input?: string;
+  toolOutput?: string;
+  /** Final tool-result status; absence means unknown, not success. */
+  success?: boolean;
+  error?: string;
 }
 
 export interface ChildResult {

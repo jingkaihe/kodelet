@@ -120,6 +120,10 @@ type Event struct {
 	Text       string `json:"text,omitempty"`
 	ToolName   string `json:"toolName,omitempty"`
 	ToolCallID string `json:"toolCallId,omitempty"`
+	Input      string `json:"input,omitempty"`
+	ToolOutput string `json:"toolOutput,omitempty"`
+	Success    *bool  `json:"success,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type Result struct {

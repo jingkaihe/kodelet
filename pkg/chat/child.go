@@ -389,7 +389,18 @@ func (s childEventSink) Send(event ChatEvent) error {
 	if event.Result != nil {
 		text = *event.Result
 	}
-	s.emit(delegation.Event{Kind: event.Kind, Text: text, ToolName: event.ToolName, ToolCallID: event.ToolCallID})
+	childEvent := delegation.Event{Kind: event.Kind, Text: text, ToolName: event.ToolName, ToolCallID: event.ToolCallID}
+	switch event.Kind {
+	case "tool-use":
+		childEvent.Input = event.Input
+	case "tool-update", "tool-result":
+		childEvent.ToolOutput = event.ToolOutput
+		if event.Kind == "tool-result" && event.ToolResult != nil {
+			childEvent.Success = new(event.ToolResult.Success)
+			childEvent.Error = event.ToolResult.Error
+		}
+	}
+	s.emit(childEvent)
 	return nil
 }
 

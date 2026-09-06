@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/delegation"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -192,6 +193,37 @@ func TestChildLifecycleAcrossRunnerPlacements(t *testing.T) {
 					assert.Equal(t, "injected", result["steerOutcome"])
 					if sdk != "subagent" {
 						assert.Equal(t, "promptRequired", result["terminalSteerOutcome"])
+						// Real tool metadata must survive provider -> runner -> host ->
+						// SDK callbacks, including an unsuccessful call in a successful turn.
+						encoded, err := json.Marshal(result["observedEvents"])
+						require.NoError(t, err)
+						var events []delegation.Event
+						require.NoError(t, json.Unmarshal(encoded, &events))
+						uses, results := map[string]delegation.Event{}, map[string]delegation.Event{}
+						var sequence uint64
+						for _, event := range events {
+							assert.Greater(t, event.Sequence, sequence)
+							sequence = event.Sequence
+							switch event.Kind {
+							case "tool-use":
+								uses[event.ToolCallID] = event
+								assert.Nil(t, event.Success)
+							case "tool-result":
+								results[event.ToolCallID] = event
+							}
+						}
+						require.Len(t, uses, 2)
+						require.Len(t, results, 2)
+						for id, filename := range map[string]string{"child-steer-read": "marker.txt", "child-steer-missing": "missing.txt"} {
+							var input map[string]string
+							require.NoError(t, json.Unmarshal([]byte(uses[id].Input), &input))
+							assert.Equal(t, filepath.Join(workspace, filename), input["file_path"])
+							assert.Equal(t, "file_read", results[id].ToolName)
+							require.NotNil(t, results[id].Success)
+							assert.Equal(t, id == "child-steer-read", *results[id].Success)
+						}
+						assert.Contains(t, results["child-steer-read"].ToolOutput, "child tool evidence")
+						assert.NotEmpty(t, results["child-steer-missing"].Error)
 					}
 				}
 			}
@@ -330,6 +362,12 @@ func childLifecycleProvider(t *testing.T, workspace string, childCalls *atomic.I
 				}
 				args, _ := json.Marshal(map[string]string{"file_path": filepath.Join(workspace, "marker.txt")})
 				delta = childLifecycleToolDelta("child-steer-read", "file_read", string(args))
+				if !consumer {
+					missingArgs, _ := json.Marshal(map[string]string{"file_path": filepath.Join(workspace, "missing.txt")})
+					missing := childLifecycleToolDelta("child-steer-missing", "file_read", string(missingArgs))["tool_calls"].([]any)[0].(map[string]any)
+					missing["index"] = 1
+					delta["tool_calls"] = append(delta["tool_calls"].([]any), missing)
+				}
 				finish = "tool_calls"
 			} else {
 				if input == "child-steer" {
@@ -401,7 +439,7 @@ await runExtension(defineExtension(ext => {
         await waitMarker(input.stage+"-started");if(input.stage==="cancel")await child.cancel();
         const end=Date.now()+10000;
         do{result=await child.read();if(!result.done)await delay(10);if(Date.now()>end)throw Error("cancel drain timeout");}while(!result.done);
-      }else result=await child.wait({signal:ctx.signal});
+      }else {const events=[];result=await child.wait({signal:ctx.signal,onEvent:event=>{events.push(event);}});result.observedEvents=events;}
       if(steering){result.steerOutcome=steering.outcome;result.terminalSteerOutcome=(await child.steer("too late",{requestId:"late-guidance"})).outcome;}
     }catch(error){result={error:String(error)};}
     writeFileSync(join(ctx.cwd,"child-"+input.stage+".json"),JSON.stringify(result));
@@ -449,7 +487,10 @@ async def exercise(input,ctx):
                     result=await child.read()
                     if result["done"]: break
                     await asyncio.sleep(.01)
-        else: result=await child.wait()
+        else:
+            events=[]
+            result=await child.wait(on_event=events.append)
+            result["observedEvents"]=events
         if steering:
             result["steerOutcome"]=steering["outcome"]
             result["terminalSteerOutcome"]=(await child.steer("too late",request_id="late-guidance"))["outcome"]

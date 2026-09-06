@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -363,8 +364,14 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 				}
 				child.sequence++
 				event.Sequence = child.sequence
-				if len(event.Text) > 32*1024 {
-					event.Text = event.Text[:32*1024]
+				for _, field := range []*string{&event.Text, &event.Input, &event.ToolOutput, &event.Error} {
+					if len(*field) > 32*1024 {
+						limit := 32 * 1024
+						for limit > 0 && !utf8.RuneStart((*field)[limit]) {
+							limit--
+						}
+						*field = strings.Clone((*field)[:limit])
+					}
 				}
 				child.result.Events = append(child.result.Events, event)
 				if len(child.result.Events) > 128 {
