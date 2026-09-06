@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
@@ -32,6 +34,8 @@ type childGrant struct {
 	leaseID                                                    string
 	environmentProfile                                         string
 	stop                                                       func() bool
+	revoked                                                    bool
+	activated                                                  bool
 }
 
 type childExecution struct {
@@ -41,6 +45,13 @@ type childExecution struct {
 	sequence uint64
 	ready    chan struct{}
 	admitted bool
+	done     chan struct{}
+	steers   map[string]childSteerReceipt
+}
+
+type childSteerReceipt struct {
+	message string
+	result  delegation.SteerResult
 }
 
 type childLeaseKey struct{ runnerID, leaseID string }
@@ -106,7 +117,13 @@ func (r *Registry) registerToolChildren(ctx context.Context, params runnerpayloa
 }
 
 func (r *Registry) childRequest(ctx context.Context, runnerID, connectionID string, generation int64, method string, p delegation.Params) (any, *protocol.RPCError) {
-	result, err := r.executeChildRequest(ctx, runnerID, connectionID, generation, method, p)
+	var result any
+	var err error
+	if method == delegation.SteerMethod {
+		result, err = r.executeChildSteer(ctx, runnerID, connectionID, generation, p)
+	} else {
+		result, err = r.executeChildRequest(ctx, runnerID, connectionID, generation, method, p)
+	}
 	if err != nil {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
 	}
@@ -125,12 +142,63 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 	leaseKey := childLeaseKey{runnerID, p.LeaseID}
 	if method == delegation.ReleaseMethod {
 		grant := r.childLeases[leaseKey]
-		if grant != nil && !grant.owns(connectionID, generation, p) {
+		if p.LeaseID == "" || p.ExtensionID == "" || p.Generation == 0 {
+			r.mu.Unlock()
+			return delegation.Result{}, errors.New("child lease release requires its exact owner")
+		}
+		// Release is connection/process scoped, not tied to lastRunID: a
+		// retained process may have reattached since starting its children.
+		ownerParams := p
+		if grant != nil {
+			ownerParams.RunID = grant.runID
+		}
+		if grant != nil && !grant.owns(connectionID, generation, ownerParams) {
 			r.mu.Unlock()
 			return delegation.Result{}, errors.New("child lease owner mismatch")
 		}
-		if grant != nil {
-			r.dropChildLeaseLocked(leaseKey, grant)
+		if grant == nil {
+			if len(r.childLeases) >= 1024 {
+				r.mu.Unlock()
+				return delegation.Result{}, errors.New("child lease revocation capacity exceeded; reconnect runner")
+			}
+			leaseCtx, cancel := context.WithCancel(r.ctx)
+			grant = &childGrant{
+				ctx: leaseCtx, cancel: cancel, runnerID: runnerID, connectionID: connectionID, generation: generation, extensionID: p.ExtensionID, runID: p.RunID,
+				profiles: map[string]delegation.Preset{"": {Generation: p.Generation}},
+			}
+			if r.childLeases == nil {
+				r.childLeases = make(map[childLeaseKey]*childGrant)
+			}
+			r.childLeases[leaseKey] = grant
+		}
+		// Keep a bounded connection-lifetime tombstone. A delayed start that
+		// passed the runner's local check before release must not recreate it.
+		grant.revoked = true
+		if grant.stop != nil {
+			grant.stop()
+		}
+		grant.cancel()
+		done := make([]<-chan struct{}, 0, len(grant.children))
+		for _, child := range grant.children {
+			done = append(done, child.done)
+		}
+		r.mu.Unlock()
+		drainCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		for _, wait := range done {
+			select {
+			case <-wait:
+			case <-drainCtx.Done():
+				return delegation.Result{}, errors.Wrap(drainCtx.Err(), "child lease revoked but cleanup is not yet confirmed; retry release")
+			}
+		}
+		r.mu.Lock()
+		if r.childLeases[leaseKey] == grant {
+			// A revocation tombstone needs ownership proof, not the parent
+			// thread, prompts or completed child history. Keep payloads only
+			// while cleanup remains unconfirmed and retry must still drain.
+			grant.prepare, grant.children, grant.stop = nil, nil, nil
+			grant.profiles = map[string]delegation.Preset{"": {Generation: p.Generation}}
 		}
 		r.mu.Unlock()
 		return delegation.Result{Done: true}, nil
@@ -152,16 +220,10 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 		}
 	}
 	if method != delegation.StartMethod {
-		var child *childExecution
-		for _, candidate := range grant.children {
-			if candidate.result.ConversationID == p.ChildID {
-				child = candidate
-				break
-			}
-		}
-		if child == nil {
+		child, err := r.ownedChildLocked(grant, p)
+		if err != nil {
 			r.mu.Unlock()
-			return delegation.Result{}, errors.New("child is not owned by this capability")
+			return delegation.Result{}, err
 		}
 		if method == delegation.CancelMethod {
 			child.cancel()
@@ -185,6 +247,23 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 		r.mu.Unlock()
 		return delegation.Result{}, errors.New("child lease mismatch")
 	}
+	if child := grant.children[p.Request.RequestID]; child != nil {
+		if !reflect.DeepEqual(child.request, p.Request) {
+			r.mu.Unlock()
+			return delegation.Result{}, errors.New("requestId was already used with different child input")
+		}
+		r.mu.Unlock()
+		return r.waitChildAdmission(ctx, child, p.After)
+	}
+	toolGrant := r.childTools[toolForkKey{p.RunID, p.ToolCallID}]
+	if grant.leaseID != "" && !grant.activated && (toolGrant == nil || toolGrant.ctx.Err() != nil || !toolGrant.owns(connectionID, generation, p)) {
+		r.mu.Unlock()
+		return delegation.Result{}, errors.New("child retained authority requires successful initial admission from an active tool")
+	}
+	if p.Request.ContextMode == "fork" && (toolGrant == nil || toolGrant.ctx.Err() != nil || !toolGrant.owns(connectionID, generation, p)) {
+		r.mu.Unlock()
+		return delegation.Result{}, errors.New("child fork requires the current active parent tool")
+	}
 	if p.LeaseID != "" && grant.leaseID == "" {
 		if len(r.childLeases) >= 1024 {
 			r.mu.Unlock()
@@ -201,14 +280,6 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 		r.childLeases[leaseKey] = grant
 		grant.stop = context.AfterFunc(leaseCtx, func() { r.mu.Lock(); defer r.mu.Unlock(); r.dropChildLeaseLocked(leaseKey, grant) })
 	}
-	if child := grant.children[p.Request.RequestID]; child != nil {
-		if !reflect.DeepEqual(child.request, p.Request) {
-			r.mu.Unlock()
-			return delegation.Result{}, errors.New("requestId was already used with different child input")
-		}
-		r.mu.Unlock()
-		return r.waitChildAdmission(ctx, child, p.After)
-	}
 	if len(grant.children) >= maxChildrenPerGrant {
 		r.mu.Unlock()
 		return delegation.Result{}, errors.New("child submission limit exceeded")
@@ -216,37 +287,45 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 	identity := delegation.Identity{
 		ConversationID: convtypes.GenerateID(), RunID: convtypes.GenerateID(), ParentConversationID: grant.conversationID,
 		ParentRunID: grant.runID, ExtensionID: p.ExtensionID, Profile: p.Request.Profile,
+		RunnerID: runnerID, HostInstanceID: r.runners[runnerID].Host.InstanceID,
 	}
-	r.mu.Unlock()
-	// Preparation is side-effect free. Never hold the registry mutex, parent's
-	// conversation lock, or runner snapshot gate during nested execution.
-	run, err := grant.prepare(ctx, p.Request, preset, identity)
-	if err != nil {
-		return delegation.Result{}, err
-	}
-	r.mu.Lock()
-	if grant.ctx.Err() != nil {
-		r.mu.Unlock()
-		return delegation.Result{}, errors.New("child authority expired during preparation")
-	}
-	if child := grant.children[p.Request.RequestID]; child != nil {
-		if !reflect.DeepEqual(child.request, p.Request) {
+	if p.Request.Resume != "" {
+		identity.ConversationID = p.Request.Resume
+		if active := r.childExecutions[identity.ConversationID]; active != nil && !active.result.Done {
 			r.mu.Unlock()
-			return delegation.Result{}, errors.New("requestId was already used with different child input")
+			return delegation.Result{}, errors.New("child conversation already has an active submission")
 		}
-		r.mu.Unlock()
-		return r.waitChildAdmission(ctx, child, p.After)
-	}
-	if len(grant.children) >= maxChildrenPerGrant {
-		r.mu.Unlock()
-		return delegation.Result{}, errors.New("child submission limit exceeded")
 	}
 	childCtx, cancel := context.WithCancel(grant.ctx)
-	child := &childExecution{request: p.Request, result: delegation.Result{Identity: identity}, cancel: cancel, ready: make(chan struct{})}
+	child := &childExecution{request: p.Request, result: delegation.Result{Identity: identity}, cancel: cancel, ready: make(chan struct{}), done: make(chan struct{})}
 	grant.children[p.Request.RequestID] = child
+	if r.childExecutions == nil {
+		r.childExecutions = make(map[string]*childExecution)
+	}
+	r.childExecutions[identity.ConversationID] = child
+	var stopOrigin func() bool
+	if toolGrant != nil {
+		// Initial retained admission must still complete while its originating
+		// tool lives. Once admitted, the retained child owns an independent
+		// lifetime; a late context callback must not cancel it.
+		stopOrigin = context.AfterFunc(toolGrant.ctx, func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if !child.admitted {
+				cancel()
+			}
+		})
+	}
 	r.mu.Unlock()
 	go func() {
 		defer cancel()
+		defer close(child.done)
+		if stopOrigin != nil {
+			defer stopOrigin()
+		}
+		// Reserve before preparation so duplicate/cancel/release observe even
+		// an in-flight snapshot. No registry lock is held during provider work.
+		run, prepareErr := grant.prepare(childCtx, p.Request, preset, identity)
 		childCtx = delegation.WithAdmission(childCtx, func() error {
 			if err := childCtx.Err(); err != nil {
 				return err
@@ -256,26 +335,43 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 			}
 			r.mu.Lock()
 			defer r.mu.Unlock()
+			if err := childCtx.Err(); err != nil {
+				return err
+			}
+			if toolGrant != nil && toolGrant.ctx.Err() != nil {
+				cancel()
+				return errors.New("child originating tool ended before admission")
+			}
 			child.admitted = true
+			grant.activated = true
+			if stopOrigin != nil {
+				stopOrigin()
+			}
 			close(child.ready)
 			return nil
 		})
-		err := run(childCtx, func(event delegation.Event) {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			if event.Kind == "result" {
-				child.result.Output = event.Text
-			}
-			child.sequence++
-			event.Sequence = child.sequence
-			if len(event.Text) > 32*1024 {
-				event.Text = event.Text[:32*1024]
-			}
-			child.result.Events = append(child.result.Events, event)
-			if len(child.result.Events) > 128 {
-				child.result.Events = child.result.Events[len(child.result.Events)-128:]
-			}
-		})
+		err := prepareErr
+		if err == nil {
+			err = childCtx.Err()
+		}
+		if err == nil {
+			err = run(childCtx, func(event delegation.Event) {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				if event.Kind == "result" {
+					child.result.Output = event.Text
+				}
+				child.sequence++
+				event.Sequence = child.sequence
+				if len(event.Text) > 32*1024 {
+					event.Text = event.Text[:32*1024]
+				}
+				child.result.Events = append(child.result.Events, event)
+				if len(child.result.Events) > 128 {
+					child.result.Events = child.result.Events[len(child.result.Events)-128:]
+				}
+			})
+		}
 		if _, opened := r.Run(identity.RunID); opened {
 			commitCtx, commitCancel := context.WithTimeout(context.WithoutCancel(childCtx), 10*time.Second)
 			commitErr := r.CommitConversationAffinity(commitCtx, identity.ConversationID)
@@ -287,6 +383,9 @@ func (r *Registry) executeChildRequest(ctx context.Context, runnerID, connection
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		child.result.Done = true
+		if r.childExecutions[identity.ConversationID] == child {
+			delete(r.childExecutions, identity.ConversationID)
+		}
 		if !child.admitted {
 			close(child.ready)
 		}
@@ -339,7 +438,9 @@ func (r *Registry) dropChildLeaseLocked(key childLeaseKey, grant *childGrant) {
 	if r.childLeases[key] != grant {
 		return
 	}
-	delete(r.childLeases, key)
+	if !grant.revoked {
+		delete(r.childLeases, key)
+	}
 	if grant.stop != nil {
 		grant.stop()
 	}
@@ -378,6 +479,97 @@ func (r *Registry) clearRunnerChildrenLocked(runnerID string) {
 	for key, grant := range r.childLeases {
 		if grant.runnerID == runnerID {
 			r.dropChildLeaseLocked(key, grant)
+			delete(r.childLeases, key)
 		}
 	}
+}
+
+func (r *Registry) ownedChildLocked(grant *childGrant, p delegation.Params) (*childExecution, error) {
+	var child *childExecution
+	for _, candidate := range grant.children {
+		if candidate.result.ConversationID != p.ChildID || (p.ChildRunID != "" && candidate.result.RunID != p.ChildRunID) {
+			continue
+		}
+		if child != nil {
+			return nil, errors.New("childRunId is required for an ambiguous child handle")
+		}
+		child = candidate
+	}
+	if child == nil {
+		return nil, errors.New("child run is not owned by this capability")
+	}
+	if p.ChildRunID == "" && child.request.Resume != "" {
+		return nil, errors.New("childRunId is required after a child followup")
+	}
+	return child, nil
+}
+
+// CancelChildTurn is the daemon client's exact durable-receipt cancellation
+// seam. It cannot cancel a later followup sharing the same conversation ID.
+func (r *Registry) CancelChildTurn(ctx context.Context, conversationID, runID string) (bool, error) {
+	r.mu.Lock()
+	child := r.childExecutions[conversationID]
+	if child == nil || child.result.RunID != runID {
+		r.mu.Unlock()
+		return false, nil
+	}
+	child.cancel()
+	r.mu.Unlock()
+	select {
+	case <-child.done:
+		return true, nil
+	case <-ctx.Done():
+		return true, errors.Wrap(ctx.Err(), "child cancellation cleanup is unconfirmed")
+	}
+}
+
+func (r *Registry) executeChildSteer(ctx context.Context, runnerID, connectionID string, generation int64, p delegation.Params) (delegation.SteerResult, error) {
+	if !delegation.ValidID(p.RequestID) || strings.TrimSpace(p.Message) == "" || len(p.Message) > steer.MaxMessageLength {
+		return delegation.SteerResult{}, errors.New("child steer requires requestId and a nonempty bounded message")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, err := r.currentRunnerLocked(runnerID, connectionID, generation); err != nil {
+		return delegation.SteerResult{}, err
+	}
+	grant := r.childTools[toolForkKey{p.RunID, p.ToolCallID}]
+	if p.LeaseID != "" && r.childLeases[childLeaseKey{runnerID, p.LeaseID}] != nil {
+		grant = r.childLeases[childLeaseKey{runnerID, p.LeaseID}]
+	}
+	if grant == nil || !grant.owns(connectionID, generation, p) || grant.ctx.Err() != nil {
+		return delegation.SteerResult{}, errors.New("child steering requires current owned authority")
+	}
+	child, err := r.ownedChildLocked(grant, p)
+	if err != nil {
+		return delegation.SteerResult{}, err
+	}
+	if prior, ok := child.steers[p.RequestID]; ok {
+		if prior.message != p.Message {
+			return delegation.SteerResult{}, errors.New("steer requestId already used with different input")
+		}
+		return prior.result, nil
+	}
+	if len(child.steers) >= 128 {
+		return delegation.SteerResult{}, errors.New("child steer request limit exceeded")
+	}
+	result := delegation.SteerResult{Outcome: "promptRequired", Reason: "noRunningTurn"}
+	if child.admitted && !child.result.Done {
+		store, err := steer.NewSteerStore(ctx)
+		if err != nil {
+			return delegation.SteerResult{}, err
+		}
+		defer func() { _ = store.Close() }()
+		injected, err := store.EnqueueChild(ctx, p.ChildID, child.result.RunID, p.Message)
+		if err != nil {
+			return delegation.SteerResult{}, err
+		}
+		if injected {
+			result = delegation.SteerResult{Outcome: "injected"}
+		}
+	}
+	if child.steers == nil {
+		child.steers = make(map[string]childSteerReceipt)
+	}
+	child.steers[p.RequestID] = childSteerReceipt{message: p.Message, result: result}
+	return result, nil
 }

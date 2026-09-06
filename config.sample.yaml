@@ -327,10 +327,12 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from the main-agent
 #   toolset, and ensures apply_patch is available
+# Typed request/preset allowedTools selects tools independently within explicit policy.
 tool_mode: full
 
 # Enable built-in filesystem search tools (glob_tool and grep_tool).
 # Disabled by default; the agent is instructed to use fd/rg via the bash tool instead.
+# This is a default selection; typed enableFSSearchTools: false is an inherited restriction.
 # enable_fs_search_tools: true
 
 # Context-window utilization ratio that triggers automatic context compaction.

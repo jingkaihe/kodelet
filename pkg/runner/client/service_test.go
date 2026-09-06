@@ -316,6 +316,72 @@ func newRegisteredTestService(t *testing.T, workspace string, options ServiceOpt
 	return service
 }
 
+func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	readTools := []string{"file_read", "grep_tool", "glob_tool"}
+	for _, tt := range []struct {
+		name    string
+		legacy  []string
+		policy  *llmtypes.ExecutionOptions
+		want    []string
+		wantErr string
+	}{
+		{"unrestricted defaults", nil, nil, readTools, ""},
+		{"runner allowlist", []string{"grep_tool", "glob_tool"}, nil, []string{"grep_tool", "glob_tool"}, ""},
+		{"runner deny all", []string{"none"}, nil, nil, ""},
+		{"typed empty", nil, &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}, nil, ""},
+		{"no tools", nil, &llmtypes.ExecutionOptions{NoTools: new(true)}, nil, ""},
+		{"explicit disabled search", nil, &llmtypes.ExecutionOptions{EnableFSSearchTools: new(false)}, nil, "runner policy"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			filePath := filepath.Join(workspace, "selected.txt")
+			require.NoError(t, os.WriteFile(filePath, []byte("runner-selected-content\n"), 0o600))
+			service := newRegisteredTestService(t, workspace, ServiceOptions{
+				ConfigLoader: func(string) (llmtypes.Config, error) {
+					return llmtypes.Config{ToolMode: llmtypes.ToolModePatch, EnableFSSearchTools: false, AllowedTools: tt.legacy, ExecutionOptions: tt.policy}, nil
+				},
+			})
+			params := protocol.RunOpenParams{
+				RunID: "child-run", ConversationID: "child-conversation", ChildPrompt: new("read-only search"),
+				Agent:   protocol.AgentDescriptor{Provider: "openai", Model: "gpt-4o"},
+				Options: &llmtypes.ExecutionOptions{AllowedTools: &readTools, EnableFSSearchTools: new(true), NoExtensions: new(true), NoSkills: new(true)},
+			}
+			value, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, params))
+			if tt.wantErr != "" {
+				require.NotNil(t, rpcErr)
+				assert.Contains(t, rpcErr.Message, tt.wantErr)
+				return
+			}
+			require.Nil(t, rpcErr)
+			manifest := value.(runnerpayload.Manifest)
+			assert.ElementsMatch(t, tt.want, manifestToolNames(manifest))
+			assert.Equal(t, llmtypes.ToolModePatch, manifest.Config.ToolMode)
+			assert.True(t, manifest.Config.EnableFSSearchTools)
+			assert.True(t, *manifest.Config.Options.NoExtensions)
+			assert.True(t, *manifest.Config.Options.NoSkills)
+			result := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
+				RunID: "child-run", ToolCallID: "read", Name: "file_read", Input: mustJSON(t, map[string]any{"file_path": filePath, "offset": 1, "line_limit": 10}),
+			})
+			if slices.Contains(tt.want, "file_read") {
+				assert.True(t, result.Result.Structured.Success)
+				assert.Contains(t, result.Result.AssistantFacing, "runner-selected-content")
+			} else {
+				assert.False(t, result.Result.Structured.Success)
+				assert.Contains(t, result.Result.Error, "not allowed")
+			}
+			blocked := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
+				RunID: "child-run", ToolCallID: "write", Name: "file_write", Input: mustJSON(t, map[string]any{"file_path": filePath, "content": "must not write"}),
+			})
+			assert.False(t, blocked.Result.Structured.Success)
+			assert.Contains(t, blocked.Result.Error, "not allowed")
+			content, err := os.ReadFile(filePath)
+			require.NoError(t, err)
+			assert.Equal(t, "runner-selected-content\n", string(content))
+		})
+	}
+}
+
 func TestServiceOpensPinnedManifestAndExecutesRunnerTool(t *testing.T) {
 	workspace := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("# Workspace rules"), 0o600))

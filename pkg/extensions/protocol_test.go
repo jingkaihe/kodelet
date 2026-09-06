@@ -203,6 +203,49 @@ func TestRPCClientUsesPersistentHostContextForParentlessRequests(t *testing.T) {
 	assert.Equal(t, map[string]any{"accepted": true, "conversation": "conversation-host"}, result)
 }
 
+type childContextHostHandler struct{ ctx context.Context }
+
+func (h childContextHostHandler) hostContext() context.Context { return h.ctx }
+
+func (h childContextHostHandler) HandleRPCRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+	return map[string]any{"scope": ctx.Value(rpcCallContextKey{}), "cancelled": ctx.Err() != nil}, nil
+}
+
+func TestRPCClientRetainedChildNeverBorrowsPendingForegroundContext(t *testing.T) {
+	for _, method := range []string{"kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer", BackgroundTaskReleaseMethod} {
+		t.Run(method, func(t *testing.T) {
+			var outbound bytes.Buffer
+			client := newRPCClient(strings.NewReader(""), &outbound)
+			host := childContextHostHandler{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "retained")}
+			client.setHostRequestHandler(host)
+			pending, cancel := context.WithCancel(context.WithValue(t.Context(), rpcCallContextKey{}, "unrelated new turn"))
+			cancel()
+			client.pending[7] = &rpcPendingCall{ctx: pending, handler: host}
+			client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), Method: method, Params: json.RawMessage(`{"leaseId":"owned"}`)})
+			frames := readAllTestFrames(t, outbound.Bytes())
+			require.Len(t, frames, 1)
+			var response rpcResponse
+			require.NoError(t, json.Unmarshal(frames[0], &response))
+			require.Nil(t, response.Error)
+			assert.JSONEq(t, `{"scope":"retained","cancelled":false}`, string(response.Result))
+		})
+	}
+	// The first start still uses explicit active parentId, never an inferred
+	// oldest pending request. Parentless start receives no tool-scoped context.
+	var outbound bytes.Buffer
+	client := newRPCClient(strings.NewReader(""), &outbound)
+	host := childContextHostHandler{ctx: t.Context()}
+	client.setHostRequestHandler(host)
+	client.pending[7] = &rpcPendingCall{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "active tool"), handler: host}
+	client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), ParentID: json.RawMessage(`7`), Method: "kodelet.child.start"})
+	frames := readAllTestFrames(t, outbound.Bytes())
+	require.Len(t, frames, 1)
+	var response rpcResponse
+	require.NoError(t, json.Unmarshal(frames[0], &response))
+	require.Nil(t, response.Error)
+	assert.JSONEq(t, `{"scope":"active tool","cancelled":false}`, string(response.Result))
+}
+
 func TestRPCClientRunsPostResponseHookAfterWriteAttempt(t *testing.T) {
 	t.Run("successful write", func(t *testing.T) {
 		var outbound bytes.Buffer

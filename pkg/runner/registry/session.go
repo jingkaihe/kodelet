@@ -79,7 +79,7 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 		}
 		return s.registry.executeModelHelper(ctx, runnerID, connectionID, generation, value)
 	}
-	if method == delegation.StartMethod || method == delegation.ReadMethod || method == delegation.CancelMethod || method == delegation.ReleaseMethod {
+	if method == delegation.StartMethod || method == delegation.ReadMethod || method == delegation.CancelMethod || method == delegation.SteerMethod || method == delegation.ReleaseMethod {
 		var value delegation.Params
 		if err := delegation.Decode(params, &value); err != nil {
 			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}

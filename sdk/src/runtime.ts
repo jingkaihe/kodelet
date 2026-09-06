@@ -213,7 +213,9 @@ function handleMessage(
     return;
   }
 
-  if (!request.method && hostClient.handleResponse(request as JsonRpcResponse)) {
+  if (!request.method) {
+    // Duplex IDs are independent: even unmatched responses are not requests.
+    hostClient.handleResponse(request as JsonRpcResponse);
     return;
   }
 

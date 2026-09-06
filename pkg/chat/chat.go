@@ -651,7 +651,8 @@ func runDefaultChat(
 		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools, llmConfig.AllowedCommands)
 	}
 	if isChild && child.aggregate != nil {
-		defer func() { child.aggregate(thread.GetUsage()) }()
+		initialUsage := thread.GetUsage()
+		defer func() { child.aggregate(childTurnUsage(thread.GetUsage(), initialUsage)) }()
 	}
 	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
 		extensionSetter.SetExtensions(extensionRuntime)

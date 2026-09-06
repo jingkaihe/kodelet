@@ -13,6 +13,7 @@ import (
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -26,6 +27,8 @@ type (
 		prompt    string
 		depth     int
 		aggregate func(llmtypes.Usage)
+		record    *convtypes.ConversationRecord
+		resume    bool
 	}
 )
 
@@ -96,25 +99,32 @@ func contextWithCentralChildren(ctx context.Context, parent llmtypes.Thread, env
 	config.Extensions = nil
 	manifest := environment.Manifest()
 	policy := config.EnvironmentOptions()
-	tools := manifest.ToolNames()
-	if policy.AllowedTools != nil {
-		tools = slices.DeleteFunc(tools, func(name string) bool { return !slices.Contains(*policy.AllowedTools, name) })
-	}
-	policy.AllowedTools = &tools
+	// The manifest is a presentation snapshot, not an implicit permission ceiling.
 	config.ExecutionOptions = mergeChildOptions(config.ExecutionOptions, policy)
 	depth := 0
 	if state, ok := ctx.Value(childContextKey{}).(*childContext); ok {
 		depth = state.depth
 	}
-	return delegation.WithPrepare(ctx, func(_ context.Context, request delegation.Request, preset delegation.Preset, identity delegation.Identity) (delegation.Run, error) {
+	return delegation.WithPrepare(ctx, func(ctx context.Context, request delegation.Request, preset delegation.Preset, identity delegation.Identity) (delegation.Run, error) {
 		if depth >= 8 {
 			return nil, errors.New("child nesting limit exceeded")
 		}
-		childConfig, err := childConfiguration(config, preset.Options, request.Options)
+		childPolicy := config.Clone()
+		// agent.init runs after this context is installed. Its explicit tool-list
+		// patch (including an empty list) must constrain later child admissions.
+		if raw := parent.GetMetadata()["allowed_tools"]; raw != nil {
+			var allowed []string
+			if err := decodeChildMetadata(raw, &allowed); err != nil {
+				return nil, errors.Wrap(err, "invalid parent agent.init tool policy")
+			}
+			childPolicy.ExecutionOptions = intersectChildOptions(childPolicy.ExecutionOptions, &llmtypes.ExecutionOptions{AllowedTools: &allowed})
+		}
+		state, err := prepareChild(ctx, parent, childPolicy, request, preset, identity, req.EnvironmentProfile)
 		if err != nil {
 			return nil, err
 		}
-		cwd := request.CWD
+		childConfig := state.config
+		cwd := childConfig.WorkingDirectory
 		if cwd == "" {
 			cwd = manifest.WorkingDirectory
 		}
@@ -123,18 +133,33 @@ func contextWithCentralChildren(ctx context.Context, parent llmtypes.Thread, env
 			return nil, errors.New("child working directory exceeds parent workspace")
 		}
 		childConfig.WorkingDirectory = cwd
-		prompt := preset.SystemPrompt
-		if request.SystemPrompt != "" {
-			prompt = request.SystemPrompt
-		}
-		state := &childContext{config: childConfig, identity: identity, prompt: prompt, depth: depth + 1}
+		state.config, state.depth = childConfig, depth+1
 		if request.LeaseID == "" {
 			if aggregate, ok := parent.(interface{ AggregateSubagentUsage(llmtypes.Usage) }); ok {
 				state.aggregate = aggregate.AggregateSubagentUsage
 			}
 		}
-		return func(ctx context.Context, emit func(delegation.Event)) error {
+		return func(ctx context.Context, emit func(delegation.Event)) (runErr error) {
+			defer func() {
+				finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				store, err := conversationservice.GetConversationStore(finishCtx)
+				if err == nil {
+					defer func() { _ = store.Close() }()
+					if finisher, ok := store.(interface {
+						FinishChildTurn(context.Context, string, string, bool, error) error
+					}); ok {
+						err = finisher.FinishChildTurn(finishCtx, identity.ConversationID, identity.RunID, ctx.Err() != nil, runErr)
+					} else {
+						err = errors.New("conversation store does not support durable child turns")
+					}
+				}
+				if runErr == nil {
+					runErr = err
+				}
+			}()
 			ctx = context.WithValue(ctx, childContextKey{}, state)
+			ctx = steer.WithChildRun(ctx, identity.RunID)
 			childReq := ChatRequest{
 				Message: request.Message, ConversationID: identity.ConversationID, TurnID: identity.RunID,
 				RunnerID: req.RunnerID, EnvironmentProfile: req.EnvironmentProfile, CWD: cwd, Options: childConfig.ExecutionOptions.Clone(),
@@ -143,6 +168,140 @@ func contextWithCentralChildren(ctx context.Context, parent llmtypes.Thread, env
 			return err
 		}, nil
 	})
+}
+
+func prepareChild(ctx context.Context, parent llmtypes.Thread, config llmtypes.Config, request delegation.Request, preset delegation.Preset, identity delegation.Identity, environmentProfile string) (*childContext, error) {
+	state := &childContext{identity: identity, prompt: preset.SystemPrompt, resume: request.Resume != ""}
+	var err error
+	if state.resume {
+		store, err := conversationservice.GetConversationStore(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = store.Close() }()
+		record, err := store.Load(ctx, request.Resume)
+		if err != nil {
+			return nil, err
+		}
+		var origin delegation.Identity
+		var saved childPresetSnapshot
+		if err := decodeChildMetadata(record.Metadata["delegation"], &origin); err != nil {
+			return nil, err
+		}
+		if err := decodeChildMetadata(record.Metadata["execution_preset"], &saved); err != nil {
+			return nil, err
+		}
+		if origin.ParentConversationID != identity.ParentConversationID || origin.ExtensionID != identity.ExtensionID || origin.RunnerID != identity.RunnerID || origin.HostInstanceID == "" || origin.HostInstanceID != identity.HostInstanceID || origin.ConversationID != identity.ConversationID || saved.Name != request.Profile || origin.Profile != saved.Name {
+			return nil, errors.New("child resume provenance, host or preset mismatch")
+		}
+		if record.Metadata[RunnerIDMetadataKey] != identity.RunnerID || record.Metadata[EnvironmentProfileMetadataKey] != environmentProfile || (request.CWD != "" && request.CWD != record.CWD) || (request.SystemPrompt != "" && request.SystemPrompt != saved.SystemPrompt) {
+			return nil, errors.New("child resume cannot change its runner, environment, working directory or prompt")
+		}
+		snapshot, ok, err := conversationservice.ConfigSnapshotFromMetadata(record.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || saved.Options == nil {
+			return nil, errors.New("child resume requires frozen configuration and policy")
+		}
+		livePolicy := config.EnvironmentOptions()
+		if config.ExecutionOptions != nil {
+			livePolicy.MaxTurns = config.ExecutionOptions.MaxTurns
+		}
+		config, err = snapshot.Apply(config)
+		if err != nil {
+			return nil, err
+		}
+		config.ExecutionOptions = intersectChildOptions(saved.Options, livePolicy)
+		// Validate supplied model fields against the saved identity, then narrow
+		// the saved policy. Changed extension registrations never replace it.
+		if _, err := applyExecutionOptions(config, request.Options, &conversationservice.GetConversationResponse{ID: record.ID, Metadata: record.Metadata}); err != nil {
+			return nil, err
+		}
+		state.config, err = childConfiguration(config, nil, request.Options)
+		if err != nil {
+			return nil, err
+		}
+		state.config.WorkingDirectory = record.CWD
+		state.record, state.prompt = &record, saved.SystemPrompt
+		return state, nil
+	}
+	state.config, err = childConfiguration(config, preset.Options, request.Options)
+	if err != nil {
+		return nil, err
+	}
+	state.config.WorkingDirectory = request.CWD
+	if request.SystemPrompt != "" {
+		state.prompt = request.SystemPrompt
+	}
+	if request.ContextMode == "fork" {
+		forker, ok := parent.(interface {
+			SnapshotConversationFork(context.Context) (convtypes.ConversationRecord, error)
+		})
+		if !ok {
+			return nil, errors.New("provider does not support a safe live context fork")
+		}
+		source, err := forker.SnapshotConversationFork(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if source.ID != identity.ParentConversationID || source.Provider != state.config.Provider {
+			return nil, errors.New("child fork must preserve the authenticated parent provider")
+		}
+		record := convtypes.ForkConversationRecordWithOptions(source, convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot})
+		record.ID = identity.ConversationID
+		state.record = &record
+	}
+	return state, nil
+}
+
+func decodeChildMetadata(raw any, target any) error {
+	if raw == nil {
+		return errors.New("child delegation metadata is missing")
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
+func intersectChildOptions(saved, current *llmtypes.ExecutionOptions) *llmtypes.ExecutionOptions {
+	result := saved.Clone()
+	if result == nil {
+		result = &llmtypes.ExecutionOptions{}
+	}
+	if current == nil {
+		return result
+	}
+	for _, pair := range []struct {
+		to      **bool
+		ceiling *bool
+	}{{&result.NoTools, current.NoTools}, {&result.NoSkills, current.NoSkills}, {&result.NoExtensions, current.NoExtensions}} {
+		if pair.ceiling != nil && *pair.ceiling {
+			*pair.to = new(true)
+		}
+	}
+	for _, pair := range []struct {
+		to      **[]string
+		ceiling *[]string
+	}{{&result.AllowedTools, current.AllowedTools}, {&result.AllowedCommands, current.AllowedCommands}} {
+		if pair.ceiling == nil {
+			continue
+		}
+		allowed := slices.Clone(*pair.ceiling)
+		if *pair.to != nil {
+			allowed = slices.DeleteFunc(allowed, func(name string) bool { return !slices.Contains(**pair.to, name) })
+		}
+		*pair.to = &allowed
+	}
+	if current.EnableFSSearchTools != nil && !*current.EnableFSSearchTools {
+		result.EnableFSSearchTools = new(false)
+	}
+	if current.MaxTurns != nil && *current.MaxTurns > 0 && (result.MaxTurns == nil || *result.MaxTurns == 0 || *result.MaxTurns > *current.MaxTurns) {
+		result.MaxTurns = new(*current.MaxTurns)
+	}
+	return result
 }
 
 // Model validation stays in W1's applyExecutionOptions. The additional child
@@ -237,8 +396,33 @@ func (s childEventSink) Send(event ChatEvent) error {
 // Save the child's identity before runner/provider side effects and preserve it
 // even when opening fails or cancellation arrives immediately after admission.
 func persistChildIdentity(ctx context.Context, state *childContext, runnerID, environmentProfile string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	admission := convtypes.ChildAdmission{TurnAdmission: convtypes.TurnAdmission{ConversationID: state.identity.ConversationID, RunID: state.identity.RunID, RunnerID: runnerID, EnvironmentProfile: environmentProfile}}
+	if state.resume {
+		admission.ExpectedUpdatedAt = state.record.UpdatedAt
+	}
+	ctx = convtypes.ContextWithChildAdmission(ctx, admission)
+	if state.record != nil {
+		record := *state.record
+		record.CWD = state.config.WorkingDirectory
+		var err error
+		record.Metadata, err = conversationservice.AddConfigSnapshot(record.Metadata, state.config)
+		if err != nil {
+			return err
+		}
+		if !state.resume {
+			record.Metadata["delegation"] = state.identity
+		}
+		record.Metadata["execution_preset"] = childPresetSnapshot{Name: state.identity.Profile, Options: state.config.ExecutionOptions.Clone(), SystemPrompt: state.prompt}
+		record.Metadata[RunnerIDMetadataKey], record.Metadata[EnvironmentProfileMetadataKey] = runnerID, environmentProfile
+		store, err := conversationservice.GetConversationStore(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = store.Close() }()
+		return store.Save(ctx, record)
+	}
 	thread, err := llm.NewThread(state.config.Clone())
 	if err != nil {
 		return err
@@ -246,9 +430,23 @@ func persistChildIdentity(ctx context.Context, state *childContext, runnerID, en
 	defer func() { _ = llm.CloseThread(thread) }()
 	thread.SetConversationID(state.identity.ConversationID)
 	thread.EnablePersistence(ctx, true)
+	if !thread.IsPersisted() {
+		return errors.New("child execution requires durable conversation persistence")
+	}
 	thread.SetMetadataValue("delegation", state.identity)
 	thread.SetMetadataValue("execution_preset", childPresetSnapshot{Name: state.identity.Profile, Options: state.config.ExecutionOptions, SystemPrompt: state.prompt})
 	thread.SetMetadataValue(RunnerIDMetadataKey, runnerID)
 	thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
 	return thread.SaveConversation(ctx)
+}
+
+// A resumed child's lifetime usage remains in its own record; the foreground
+// parent is charged only for this execution, never for previous child turns.
+func childTurnUsage(total, initial llmtypes.Usage) llmtypes.Usage {
+	return llmtypes.Usage{
+		InputTokens: total.InputTokens - initial.InputTokens, OutputTokens: total.OutputTokens - initial.OutputTokens,
+		CacheCreationInputTokens: total.CacheCreationInputTokens - initial.CacheCreationInputTokens, CacheReadInputTokens: total.CacheReadInputTokens - initial.CacheReadInputTokens,
+		InputCost: total.InputCost - initial.InputCost, OutputCost: total.OutputCost - initial.OutputCost,
+		CacheCreationCost: total.CacheCreationCost - initial.CacheCreationCost, CacheReadCost: total.CacheReadCost - initial.CacheReadCost,
+	}
 }

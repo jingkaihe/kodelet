@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -1636,6 +1636,73 @@ test("runtime keeps interactive surfaces alive after the opening command returns
   assert.deepEqual(closeRequest?.params, { scopeId: "conversation-a", id: "game", sequence: 4 });
 });
 
+test("retained child read started inside a handler survives its return", { timeout: 5000 }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-child-lease-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const extensionFile = path.join(directory, "extension.ts");
+  await writeFile(extensionFile, `
+    import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+    let retained;
+    let result;
+    runExtension(defineExtension((ext) => {
+      ext.registerTool({ name: "start", description: "Start retained work", inputSchema: z.object({}),
+        async execute(_, ctx) {
+          const lease = await ctx.acquireBackgroundTask();
+          retained = await ctx.children.start({ profile: "search", message: "query", lease });
+          result = retained.read().then((value) => value.output, (error) => "ERROR: " + error.message);
+          return "handler returned";
+        }
+      });
+      ext.registerTool({ name: "result", description: "Read retained result", inputSchema: z.object({}),
+        async execute() {
+          const output = await result;
+          await retained.steer("guidance", { requestId: "stable" });
+          await retained.cancel();
+          return output;
+        }
+      });
+    }));
+  `);
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+  const client = new RpcTestClient(child.stdout, child.stdin, false);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30", extension: { id: "retained", cwd: process.cwd(), dataDir: "" },
+    capabilities: { runtime: { backgroundTasks: true } },
+  });
+  const handler = client.beginCall("extension.tool.execute", { name: "start", input: {}, context: { conversationId: "parent" } });
+  await client.waitForHostRequests(1);
+  assert.equal(client.hostRequests[0].method, "kodelet.runtime.background.acquire");
+  client.respondHostResult(client.hostRequests[0].id, { leaseId: "lease" });
+  await client.waitForHostRequests(2);
+  assert.equal(client.hostRequests[1].method, "kodelet.child.start");
+  assert.equal(client.hostRequests[1].parentId, handler.id);
+  const identity = { conversationId: "child", runId: "child-run", done: false };
+  client.respondHostResult(client.hostRequests[1].id, identity);
+  await client.waitForHostRequests(3);
+  const reading = client.hostRequests[2];
+  assert.equal(reading.method, "kodelet.child.read");
+  assert.equal(reading.parentId, undefined);
+  assert.deepEqual(await handler.response, { content: "handler returned" });
+  client.respondHostResult(reading.id, { ...identity, done: true, output: "completed after handler" });
+  const result = client.beginCall("extension.tool.execute", { name: "result", input: {} });
+  for (const [index, method, response] of [
+    [3, "kodelet.child.steer", { outcome: "injected" }],
+    [4, "kodelet.child.cancel", { ...identity, done: true, cancelled: true }],
+  ] as const) {
+    await client.waitForHostRequests(index + 1);
+    const request = client.hostRequests[index];
+    assert.equal(request.method, method);
+    assert.equal(request.parentId, undefined);
+    assert.equal((request.params as Record<string, unknown>).childRunId, "child-run");
+    assert.equal((request.params as Record<string, unknown>).leaseId, "lease");
+    client.respondHostResult(request.id, response);
+  }
+  assert.deepEqual(await result.response, { content: "completed after handler" });
+});
+
 test("runtime does not replay a persistent UI request after its handler completes", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-persistent-once-")), "extension.ts");
   await writeFile(
@@ -1680,6 +1747,48 @@ test("runtime does not replay a persistent UI request after its handler complete
   assert.equal(client.hostRequests.length, 1);
   assert.equal(client.hostRequests[0]?.parentId, command.id);
   assert.deepEqual(client.hostRequests[0]?.params, { scopeId: "conversation-once", message: "once" });
+});
+
+test("late reverse responses cannot cancel an active forward request with the same ID", { timeout: 5000 }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-duplex-ids-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const extensionFile = path.join(directory, "extension.ts");
+  await writeFile(extensionFile, `
+    import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+    let release;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    runExtension(defineExtension((ext) => {
+      ext.registerTool({ name: "driver", description: "Wait across a late response", inputSchema: z.object({}),
+        async execute() { await waiting; return "driver remained active"; }
+      });
+      ext.registerTool({ name: "orphan", description: "Leave unanswered reverse RPC", inputSchema: z.object({}),
+        execute(_, ctx) {
+          void ctx.ui.input("first").catch(() => undefined);
+          void ctx.ui.input("second").catch(() => undefined);
+          return "handler ended";
+        }
+      });
+      ext.registerTool({ name: "release", description: "Release the driver", inputSchema: z.object({}),
+        execute() { release(); return "released"; }
+      });
+    }));
+  `);
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => child.kill());
+  const client = new RpcTestClient(child.stdout, child.stdin, false);
+  await client.call("extension.initialize", { protocolVersion: "2026-05-30", extension: { id: "duplex", cwd: process.cwd(), dataDir: "" }, capabilities: { ui: { input: true } } });
+  const driver = client.beginCall("extension.tool.execute", { name: "driver", input: {} });
+  assert.equal(driver.id, 2);
+  const result = await client.call("extension.tool.execute", { name: "orphan", input: {} });
+  assert.deepEqual(result, { content: "handler ended" });
+  assert.equal(client.hostRequests.length, 2);
+  assert.equal(client.hostRequests[1].id, driver.id);
+  // Both pending reverse requests were removed when the orphan handler ended.
+  client.respondHostError(2, { code: -1, message: "late error" });
+  client.respondHostResult(2, { status: "submitted", value: "late result" });
+  const released = client.call("extension.tool.execute", { name: "release", input: {} });
+  assert.deepEqual(await driver.response, { content: "driver remained active" });
+  assert.deepEqual(await released, { content: "released" });
 });
 
 test("runtime cancellation aborts handlers and blocks late host RPC", async (t) => {
@@ -1802,6 +1911,11 @@ class RpcTestClient {
 
   respondHostError(id: number | string, error: { code: number; message: string; data?: unknown }): void {
     const payload = JSON.stringify({ jsonrpc: "2.0", id, error });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
+  respondHostResult(id: number | string, result: unknown): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 

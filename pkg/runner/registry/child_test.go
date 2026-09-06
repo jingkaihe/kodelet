@@ -3,13 +3,17 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/delegation"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +24,260 @@ func childTestParams() delegation.Params {
 		RunID: "run-one", ToolCallID: "tool-one", ExtensionID: "search", Generation: 7,
 		Request: delegation.Request{RequestID: "request-one", Profile: "code_search", Message: "find the parser"},
 	}
+}
+
+func TestChildReleaseDrainsUncertainAdmissionAndFencesDelayedStart(t *testing.T) {
+	for _, preparing := range []bool{true, false} {
+		t.Run(map[bool]string{true: "preparing", false: "admitted lost response"}[preparing], func(t *testing.T) {
+			started, cancelled, drain := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var effects atomic.Int32
+			r, s, _ := childTestRegistry(t, func(ctx context.Context, _ delegation.Request, _ delegation.Preset, _ delegation.Identity) (delegation.Run, error) {
+				if preparing {
+					close(started)
+					<-ctx.Done()
+					close(cancelled)
+					<-drain
+					return nil, ctx.Err()
+				}
+				return func(ctx context.Context, _ func(delegation.Event)) error {
+					if err := delegation.Admit(ctx); err != nil {
+						return err
+					}
+					close(started)
+					<-ctx.Done()
+					close(cancelled)
+					<-drain
+					effects.Add(1)
+					return ctx.Err()
+				}, nil
+			})
+			runner, connection, generation, _ := s.connectionIdentity()
+			p := childTestParams()
+			p.LeaseID = "retained"
+			p.Request.LeaseID = p.LeaseID
+			caller, cancel := context.WithCancel(t.Context())
+			startDone := make(chan struct{})
+			go func() {
+				defer close(startDone)
+				_, _ = r.executeChildRequest(caller, runner, connection, generation, delegation.StartMethod, p)
+			}()
+			<-started
+			cancel()
+			<-startDone // caller intentionally has no acknowledged handle
+			releaseCtx, releaseCancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			_, err := r.executeChildRequest(releaseCtx, runner, connection, generation, delegation.ReleaseMethod, p)
+			releaseCancel()
+			require.ErrorContains(t, err, "cleanup is not yet confirmed")
+			<-cancelled
+			late := p
+			late.Request.RequestID = "delayed"
+			_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, late)
+			require.Error(t, err)
+			close(drain)
+			result, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReleaseMethod, p)
+			require.NoError(t, err)
+			require.True(t, result.Done)
+			r.mu.RLock()
+			tombstone := r.childLeases[childLeaseKey{runner, p.LeaseID}]
+			assert.Nil(t, tombstone.prepare)
+			assert.Empty(t, tombstone.children)
+			assert.Equal(t, map[string]delegation.Preset{"": {Generation: p.Generation}}, tombstone.profiles)
+			r.mu.RUnlock()
+			after := effects.Load()
+			_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+			require.Error(t, err)
+			assert.Equal(t, after, effects.Load(), "release acknowledgement joined all admitted/in-flight execution")
+		})
+	}
+}
+
+func TestChildReleaseBeforeStartLeavesConnectionFencedTombstone(t *testing.T) {
+	var calls atomic.Int32
+	r, s, _ := childTestRegistry(t, func(context.Context, delegation.Request, delegation.Preset, delegation.Identity) (delegation.Run, error) {
+		calls.Add(1)
+		return nil, errors.New("must not prepare")
+	})
+	runner, connection, generation, _ := s.connectionIdentity()
+	p := childTestParams()
+	p.LeaseID = "lease"
+	p.Request.LeaseID = p.LeaseID
+	_, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReleaseMethod, p)
+	require.NoError(t, err)
+	_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.Error(t, err)
+	assert.Zero(t, calls.Load())
+}
+
+func TestChildRetainedInitialAdmissionCannotOutliveOriginatingTool(t *testing.T) {
+	for _, mode := range []string{"fresh", "fork"} {
+		t.Run(mode, func(t *testing.T) {
+			preparing, continueAdmission := make(chan struct{}), make(chan struct{})
+			var effects atomic.Int32
+			r, s, cleanup := childTestRegistry(t, func(context.Context, delegation.Request, delegation.Preset, delegation.Identity) (delegation.Run, error) {
+				close(preparing)
+				<-continueAdmission
+				return func(ctx context.Context, _ func(delegation.Event)) error {
+					if err := delegation.Admit(ctx); err != nil {
+						return err
+					}
+					effects.Add(1)
+					return nil
+				}, nil
+			})
+			runner, connection, generation, _ := s.connectionIdentity()
+			p := childTestParams()
+			p.Request.ContextMode = mode
+			p.LeaseID = "lease"
+			p.Request.LeaseID = "lease"
+			done := make(chan error, 1)
+			go func() {
+				_, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+				done <- err
+			}()
+			<-preparing
+			cleanup()
+			close(continueAdmission)
+			require.Error(t, <-done)
+			assert.Zero(t, effects.Load())
+			p.Request.ContextMode = "fresh"
+			p.Request.RequestID = "late-start"
+			_, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+			require.ErrorContains(t, err, "successful initial admission")
+		})
+	}
+}
+
+func TestChildDurableReceiptCancelDrainsOnlyExactReservedExecution(t *testing.T) {
+	r, s, _ := childTestRegistry(t, func(context.Context, delegation.Request, delegation.Preset, delegation.Identity) (delegation.Run, error) {
+		return func(ctx context.Context, _ func(delegation.Event)) error {
+			if err := delegation.Admit(ctx); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}, nil
+	})
+	runner, connection, generation, _ := s.connectionIdentity()
+	p := childTestParams()
+	child, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.NoError(t, err)
+	for _, ids := range [][2]string{{"other", child.RunID}, {child.ConversationID, "old-run"}} {
+		cancelled, err := r.CancelChildTurn(t.Context(), ids[0], ids[1])
+		require.NoError(t, err)
+		assert.False(t, cancelled)
+	}
+	cancelled, err := r.CancelChildTurn(t.Context(), child.ConversationID, child.RunID)
+	require.NoError(t, err)
+	assert.True(t, cancelled)
+	p.ChildID, p.ChildRunID = child.ConversationID, child.RunID
+	result, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReadMethod, p)
+	require.NoError(t, err)
+	assert.True(t, result.Done)
+	assert.True(t, result.Cancelled)
+}
+
+func TestChildForkRequiresActiveParentAndResumeHasExactHandles(t *testing.T) {
+	r, s, cleanup := childTestRegistry(t, func(_ context.Context, _ delegation.Request, _ delegation.Preset, _ delegation.Identity) (delegation.Run, error) {
+		return func(ctx context.Context, _ func(delegation.Event)) error { return delegation.Admit(ctx) }, nil
+	})
+	runner, connection, generation, _ := s.connectionIdentity()
+	p := childTestParams()
+	p.LeaseID = "lease"
+	p.Request.LeaseID = p.LeaseID
+	p.Request.ContextMode = "fork"
+	first, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.NoError(t, err)
+	cleanup()
+	replay, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.NoError(t, err)
+	assert.Equal(t, first.Identity, replay.Identity, "an admitted fork replay does not require another live snapshot")
+	p.Request.RequestID = "no-active-fork"
+	_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.ErrorContains(t, err, "active parent tool")
+	read := p
+	read.ChildID = first.ConversationID
+	read.ChildRunID = first.RunID
+	require.Eventually(t, func() bool {
+		result, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReadMethod, read)
+		return err == nil && result.Done
+	}, time.Second, time.Millisecond)
+	p.Request.ContextMode = ""
+	p.Request.Resume = first.ConversationID
+	p.Request.RequestID = "followup"
+	second, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.NoError(t, err)
+	assert.Equal(t, first.ConversationID, second.ConversationID)
+	assert.NotEqual(t, first.RunID, second.RunID)
+	read.ChildRunID = "wrong"
+	_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.CancelMethod, read)
+	require.Error(t, err)
+	read.ChildRunID = ""
+	_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReadMethod, read)
+	require.ErrorContains(t, err, "ambiguous")
+	read.ChildRunID = first.RunID
+	old, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.CancelMethod, read)
+	require.NoError(t, err)
+	assert.Equal(t, first.RunID, old.RunID)
+	assert.True(t, old.Done)
+}
+
+func TestChildSteerIsOwnedExactIdempotentAndTerminalSafe(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", filepath.Join(t.TempDir(), "state"))
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	path, err := db.DefaultDBPath()
+	require.NoError(t, err)
+	database, err := db.Open(t.Context(), path)
+	require.NoError(t, err)
+	defer database.Close()
+	r, s, _ := childTestRegistry(t, func(_ context.Context, _ delegation.Request, _ delegation.Preset, id delegation.Identity) (delegation.Run, error) {
+		return func(ctx context.Context, _ func(delegation.Event)) error {
+			_, err := database.Exec(`INSERT INTO chat_turns(conversation_id,turn_id,run_id,status,created_at,updated_at) VALUES (?,?,?,'running',?,?)`, id.ConversationID, id.RunID, id.RunID, time.Now().UTC(), time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			if err := delegation.Admit(ctx); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}, nil
+	})
+	runner, connection, generation, _ := s.connectionIdentity()
+	p := childTestParams()
+	child, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.StartMethod, p)
+	require.NoError(t, err)
+	p.ChildID, p.ChildRunID, p.RequestID, p.Message = child.ConversationID, child.RunID, "steer-one", "do this once"
+	for range 2 {
+		result, err := r.executeChildSteer(t.Context(), runner, connection, generation, p)
+		require.NoError(t, err)
+		assert.Equal(t, "injected", result.Outcome)
+	}
+	wrong := p
+	wrong.Message = "conflict"
+	_, err = r.executeChildSteer(t.Context(), runner, connection, generation, wrong)
+	require.Error(t, err)
+	for _, change := range []func(*delegation.Params){func(p *delegation.Params) { p.ChildRunID = "other" }, func(p *delegation.Params) { p.ExtensionID = "other" }, func(p *delegation.Params) { p.Generation++ }, func(p *delegation.Params) { p.RunID = "other" }, func(p *delegation.Params) { p.ToolCallID = "other" }} {
+		wrong = p
+		change(&wrong)
+		_, err = r.executeChildSteer(t.Context(), runner, connection, generation, wrong)
+		require.Error(t, err)
+	}
+	queue, err := steer.NewSteerStore(t.Context())
+	require.NoError(t, err)
+	defer queue.Close()
+	pending, err := queue.Consume(steer.WithChildRun(t.Context(), child.RunID), child.ConversationID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	_, err = r.executeChildRequest(t.Context(), runner, connection, generation, delegation.CancelMethod, p)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		result, err := r.executeChildRequest(t.Context(), runner, connection, generation, delegation.ReadMethod, p)
+		return err == nil && result.Done
+	}, time.Second, time.Millisecond)
+	p.RequestID = "terminal"
+	result, err := r.executeChildSteer(t.Context(), runner, connection, generation, p)
+	require.NoError(t, err)
+	assert.Equal(t, delegation.SteerResult{Outcome: "promptRequired", Reason: "noRunningTurn"}, result)
 }
 
 func childTestRegistry(t *testing.T, prepare delegation.Prepare) (*Registry, *Session, func()) {
@@ -216,7 +474,16 @@ func TestChildLifetime(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("child cancellation did not propagate")
 			}
-			require.Eventually(t, func() bool { r.mu.RLock(); defer r.mu.RUnlock(); return len(r.childLeases) == 0 }, time.Second, time.Millisecond)
+			require.Eventually(t, func() bool {
+				r.mu.RLock()
+				defer r.mu.RUnlock()
+				for _, grant := range r.childLeases {
+					if !grant.revoked || grant.ctx.Err() == nil {
+						return false
+					}
+				}
+				return true
+			}, time.Second, time.Millisecond)
 		})
 	}
 }

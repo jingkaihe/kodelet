@@ -108,7 +108,7 @@ type Config struct {
 	ExtensionSettings   map[string]any    `mapstructure:"extensions" json:"-" yaml:"-"`                                                       // ExtensionSettings is the configuration projection used before constructing a runtime
 	Extensions          any               `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
 	ExecutionOptions    *ExecutionOptions `mapstructure:"-" json:"-" yaml:"-"`                                                                // ExecutionOptions is the immutable request-scoped execution contract, never persisted as configuration.
-	EnableFSSearchTools bool              `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	EnableFSSearchTools bool              `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // Default glob/grep selection; ExecutionOptions carries explicit feature restrictions.
 	RecipeName          string            `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
 	CompactRatio        float64           `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }

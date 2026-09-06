@@ -87,6 +87,12 @@ func (s *Server) handleDurableTurnStop(w http.ResponseWriter, r *http.Request) b
 	}
 	if !receipt.Terminal() || receipt.Status == "cancelled" {
 		run, _ := s.requestActiveChatStop(conversationID, turnID)
+		if run == nil && s.runnerRegistry != nil && receipt.RunID != "" {
+			if _, err := s.runnerRegistry.CancelChildTurn(waitCtx, conversationID, receipt.RunID); err != nil {
+				s.writeErrorResponse(w, http.StatusRequestTimeout, "child cancellation recorded but completion is unconfirmed", err)
+				return true
+			}
+		}
 		if run != nil && run.done != nil {
 			select {
 			case <-run.done:

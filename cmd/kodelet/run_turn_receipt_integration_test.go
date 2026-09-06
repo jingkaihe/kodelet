@@ -208,7 +208,7 @@ func startReceiptProcess(t *testing.T, process *exec.Cmd) func() {
 		_ = log.Close()
 		if t.Failed() {
 			data, _ := os.ReadFile(log.Name())
-			t.Logf("process output: %.4000s", data)
+			t.Logf("process output (tail): %s", data[max(0, len(data)-12000):])
 		}
 	})
 	t.Cleanup(stop)

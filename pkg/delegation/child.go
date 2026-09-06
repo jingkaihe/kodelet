@@ -16,6 +16,7 @@ const (
 	StartMethod   = "child.start"
 	ReadMethod    = "child.read"
 	CancelMethod  = "child.cancel"
+	SteerMethod   = "child.steer"
 	ReleaseMethod = "child.lease.release"
 )
 
@@ -47,8 +48,11 @@ func (p Profile) Validate() error {
 	return p.Options.Validate()
 }
 
-// Request never accepts a conversation ID, provider credentials, or an endpoint.
+// Request accepts only an owned child resume target, never an arbitrary source,
+// provider credentials, or an endpoint. Fork always means the live parent.
 type Request struct {
+	ContextMode  string                     `json:"contextMode,omitempty"`
+	Resume       string                     `json:"resume,omitempty"`
 	RequestID    string                     `json:"requestId"`
 	Profile      string                     `json:"profile"`
 	Message      string                     `json:"message"`
@@ -65,7 +69,18 @@ func (r Request) Validate() error {
 	if len(r.Message) > 512*1024 || len(r.SystemPrompt) > 256*1024 || len(r.CWD) > 8192 {
 		return errors.New("child input exceeds limit")
 	}
+	if r.ContextMode != "" && r.ContextMode != "fresh" && r.ContextMode != "fork" {
+		return errors.New("child contextMode must be fresh or fork")
+	}
+	if r.Resume != "" && (!ValidID(r.Resume) || r.ContextMode == "fork") {
+		return errors.New("child resume requires a valid owned conversation ID and cannot be combined with fork")
+	}
 	return r.Options.Validate()
+}
+
+// ValidID accepts an opaque conversation/run/request identifier, not a path.
+func ValidID(id string) bool {
+	return id != "" && id != "." && id != ".." && len(id) <= 128 && !strings.ContainsAny(id, "/\\") && strings.IndexFunc(id, func(r rune) bool { return r <= ' ' || r == 127 }) == -1
 }
 
 // Params is sent only on the authenticated runner connection.
@@ -76,17 +91,27 @@ type Params struct {
 	Generation  uint64  `json:"generation"`
 	Request     Request `json:"request,omitempty"`
 	ChildID     string  `json:"childId,omitempty"`
+	ChildRunID  string  `json:"childRunId,omitempty"`
+	Message     string  `json:"message,omitempty"`
+	RequestID   string  `json:"requestId,omitempty"`
 	LeaseID     string  `json:"leaseId,omitempty"`
 	After       uint64  `json:"after,omitempty"`
 }
 
 type Identity struct {
+	RunnerID             string `json:"runnerId,omitempty"`
+	HostInstanceID       string `json:"hostInstanceId,omitempty"`
 	ConversationID       string `json:"conversationId"`
 	RunID                string `json:"runId"`
 	ParentConversationID string `json:"parentConversationId"`
 	ParentRunID          string `json:"parentRunId"`
 	ExtensionID          string `json:"extensionId"`
 	Profile              string `json:"profile"`
+}
+
+type SteerResult struct {
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type Event struct {
@@ -154,8 +179,8 @@ func Decode(data []byte, target any) error {
 		return errors.New("child input must be an object")
 	}
 	for name, raw := range fields {
-		if strings.EqualFold(name, "options") && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return errors.New("child options must not be null")
+		if (strings.EqualFold(name, "options") || strings.EqualFold(name, "contextMode") || strings.EqualFold(name, "resume") || strings.EqualFold(name, "childRunId")) && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return errors.Errorf("child %s must not be null", name)
 		}
 		if strings.EqualFold(name, "request") {
 			var nested Request

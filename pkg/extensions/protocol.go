@@ -428,6 +428,18 @@ func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
 
 func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	ctx, handler, parentMatched, ambiguousParentless := c.hostRequestTarget(msg.ParentID)
+	if !hasRPCParentID(msg.ParentID) && isPersistentChildRequest(msg.Method) {
+		// A retained child handle must never borrow an unrelated pending
+		// collect/foreground request's cancellation or run identity. Initial
+		// start remains fail-closed: this source has no active tool capability.
+		c.stateMu.Lock()
+		handler = c.host
+		c.stateMu.Unlock()
+		ctx = hostRequestContext(handler)
+		if source, ok := handler.(interface{ backgroundHostContext() context.Context }); ok {
+			ctx = source.backgroundHostContext()
+		}
+	}
 	if isPersistentExtensionUIRequest(msg.Method) && !hasRPCParentID(msg.ParentID) {
 		if hasExplicitExtensionUIScope(msg.Params) || ambiguousParentless {
 			c.stateMu.Lock()
@@ -444,6 +456,15 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
+	}
+}
+
+func isPersistentChildRequest(method string) bool {
+	switch method {
+	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer", BackgroundTaskReleaseMethod:
+		return true
+	default:
+		return false
 	}
 }
 

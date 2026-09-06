@@ -271,6 +271,7 @@ type Registry struct {
 	modelHelpers      map[modelHelperKey]*modelHelperRegistration
 	childTools        map[toolForkKey]*childGrant
 	childLeases       map[childLeaseKey]*childGrant
+	childExecutions   map[string]*childExecution
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration

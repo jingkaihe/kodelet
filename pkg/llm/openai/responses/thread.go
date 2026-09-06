@@ -2597,18 +2597,23 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	return t.Store.Save(ctx, record)
 }
 
-// ForkConversation snapshots the live thread into a new persisted conversation.
-func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+// SnapshotConversationFork captures the safe live fork source without publishing a new ID.
+func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.ConversationRecord, error) {
 	if t.ConversationForkBlocked() {
-		return "", llmtypes.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llmtypes.ErrConversationForkUnavailable
 	}
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
 	if !t.Persisted || t.Store == nil {
-		return "", llmtypes.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llmtypes.ErrConversationForkUnavailable
 	}
-	record, err := t.buildConversationRecord(ctx, t.snapshotConversationState(false), false)
+	return t.buildConversationRecord(ctx, t.snapshotConversationState(false), false)
+}
+
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	record, err := t.SnapshotConversationFork(ctx)
 	if err != nil {
 		return "", err
 	}

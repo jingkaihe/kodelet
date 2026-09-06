@@ -507,6 +507,23 @@ func TestProcessCloseCleansBackgroundTasks(t *testing.T) {
 	assert.Equal(t, []UIExtensionOwner{source.owner}, host.cleanups)
 }
 
+func TestProcessRetainedHostContextSurvivesReinitializationButNotGenerationClose(t *testing.T) {
+	source := &processExtensionUISource{}
+	first, cancel := context.WithCancel(context.WithValue(t.Context(), rpcCallContextKey{}, "first-run"))
+	source.setHostContext(first)
+	retained := source.backgroundHostContext()
+	initialUI := source.hostContext()
+	cancel()
+	require.NoError(t, retained.Err())
+	source.setHostContext(context.WithValue(t.Context(), rpcCallContextKey{}, "new-run"))
+	require.NoError(t, retained.Err(), "reattachment must not cancel in-flight retained child operations")
+	assert.ErrorIs(t, initialUI.Err(), context.Canceled)
+	assert.Equal(t, "first-run", retained.Value(rpcCallContextKey{}))
+	assert.Equal(t, "new-run", source.hostContext().Value(rpcCallContextKey{}))
+	source.cancelHostContext()
+	assert.ErrorIs(t, retained.Err(), context.Canceled)
+}
+
 func TestProcessCloseCancelsAndWaitsForParentlessHostRequests(t *testing.T) {
 	clientReader, serverWriter := io.Pipe()
 	t.Cleanup(func() {

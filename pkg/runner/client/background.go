@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -41,9 +43,12 @@ type runnerBackgroundResources struct {
 }
 
 type runnerBackgroundLease struct {
-	owner        extensions.UIExtensionOwner
-	description  string
-	openingRunID string
+	owner               extensions.UIExtensionOwner
+	description         string
+	openingRunID        string
+	childAuthority      bool
+	childAuthorityRunID string
+	releasing           bool
 }
 
 func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskAcquireRequest) (extensions.BackgroundTaskAcquireResponse, error) {
@@ -147,7 +152,7 @@ func (s *Service) removeBackgroundLeaseLocked(resources *runnerBackgroundResourc
 	}
 }
 
-func (s *Service) ReleaseBackgroundTask(_ context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskReleaseRequest) (extensions.BackgroundTaskReleaseResponse, error) {
+func (s *Service) ReleaseBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskReleaseRequest) (extensions.BackgroundTaskReleaseResponse, error) {
 	owner, err := runnerBackgroundTaskOwner(source)
 	if err != nil {
 		return extensions.BackgroundTaskReleaseResponse{}, err
@@ -168,7 +173,31 @@ func (s *Service) ReleaseBackgroundTask(_ context.Context, source extensions.UIE
 		s.mu.Unlock()
 		return extensions.BackgroundTaskReleaseResponse{}, errors.New("background task lease is owned by another extension process")
 	}
-	s.removeBackgroundLeaseLocked(resources, leaseID)
+	// Fence new local submissions before the reverse RPC. Keep the lease on
+	// errors so explicit close can reconcile instead of claiming cleanup.
+	lease.releasing = true
+	resources.leases[leaseID] = lease
+	s.mu.Unlock()
+	if lease.childAuthority {
+		peer := s.currentPeer()
+		if peer == nil {
+			return extensions.BackgroundTaskReleaseResponse{}, errors.New("child lease release is unconfirmed: central connection unavailable")
+		}
+		releaseCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
+		var result delegation.Result
+		if err := peer.Call(releaseCtx, delegation.ReleaseMethod, delegation.Params{LeaseID: leaseID, ExtensionID: owner.ExtensionID, Generation: owner.Generation}, &result); err != nil {
+			return extensions.BackgroundTaskReleaseResponse{}, errors.Wrap(err, "child lease release is unconfirmed; retry close")
+		}
+		if !result.Done {
+			return extensions.BackgroundTaskReleaseResponse{}, errors.New("child lease release did not confirm cleanup")
+		}
+	}
+	s.mu.Lock()
+	delete(resources.leases, leaseID)
+	if s.backgroundLeases[leaseID] == resources {
+		delete(s.backgroundLeases, leaseID)
+	}
 	cleanup := s.detachBackgroundResourcesIfUnusedLocked(resources)
 	s.mu.Unlock()
 	response := extensions.BackgroundTaskReleaseResponse{Released: true}

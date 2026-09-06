@@ -26,7 +26,7 @@ type ExecutionOptions struct {
 	NoTools              *bool     `json:"noTools,omitempty"`
 	NoExtensions         *bool     `json:"noExtensions,omitempty"`
 	NoSkills             *bool     `json:"noSkills,omitempty"`
-	AllowedTools         *[]string `json:"allowedTools,omitempty"`
+	AllowedTools         *[]string `json:"allowedTools,omitempty"` // Explicit catalog selection within inherited policy, independent of tool mode.
 	AllowedCommands      *[]string `json:"allowedCommands,omitempty"`
 	EnableFSSearchTools  *bool     `json:"enableFSSearchTools,omitempty"`
 }
@@ -265,7 +265,9 @@ func ApplyEnvironmentOptions(config Config, options *ExecutionOptions) (Config, 
 		config.EnableFSSearchTools = false
 	}
 	if o.EnableFSSearchTools != nil {
-		if *o.EnableFSSearchTools && !config.EnableFSSearchTools {
+		// The raw config flag chooses the default tool presentation. Only an
+		// explicit inherited restriction prevents selecting filesystem search.
+		if *o.EnableFSSearchTools && host.EnableFSSearchTools != nil && !*host.EnableFSSearchTools {
 			return Config{}, errors.New("enableFSSearchTools cannot enable a feature disabled by runner policy")
 		}
 		config.EnableFSSearchTools = *o.EnableFSSearchTools

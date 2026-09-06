@@ -195,6 +195,17 @@ return result.output;
 
 Children have separate durable `conversationId`/`runId` values and parent metadata. `child.read()` reads status/progress; `child.cancel()` targets that child only. `wait()` rejects cancellation/failure and accepts an event callback. No client/admin token is injected and there is no subprocess/provider fallback. Model choices use daemon validation; tool/command permissions and resource limits cannot exceed the parent's effective policy. Optional per-invocation `options`, `systemPrompt` content, and descendant `cwd` remain subject to that ceiling. The saved child preset and prompt survive ordinary conversation resume.
 
+With a matching daemon/runner, `contextMode: "fork"` snapshots the active parent's history; omitted context is fresh. Forking must begin inside the originating tool handler, even with a retained lease. `resume: child.conversationId` submits a follow-up to that owned conversation with new run/request IDs; it cannot be combined with fork or loosen the saved policy. Old handles remain bound to their original run and cannot cancel or steer the follow-up.
+
+```typescript
+const child = await ctx.children.start({ profile: "review", message: "Review changes", contextMode: "fork" });
+const steered = await child.steer("Also check cancellation", { requestId: "guidance-1" });
+await child.wait({ signal: ctx.signal });
+const followup = await ctx.children.start({ profile: "review", message: "Check the fix", resume: child.conversationId });
+```
+
+`steer(message, { requestId? })` returns `{ outcome: "injected" }` when guidance is queued, or `{ outcome: "promptRequired", reason: "noRunningTurn" }` when no turn is active. It never starts a turn automatically. Optional stable steering IDs deduplicate repeated guidance; omitted IDs are generated. Start/steer failures are never retried automatically. A disconnected start may already be admitted: retain its request ID and background lease until exact child cancellation or acknowledged lease cleanup. After restart, resuming requires fresh tool authority; saved IDs alone are not credentials.
+
 Foreground children are cancelled when the parent tool returns. To retain a child, acquire a real runner lease in the active tool, pass it as `lease` on the first `start`, and keep it until the child reaches a terminal state. Subsequent reads/cancels/submissions use that explicitly retained authority. Provisional `session.start` leases do not authorize children. Authority expires after one hour and ends on lease release, cancellation, runner/extension loss, or shutdown; request/result caches are bounded and not restart-replay credentials. Foreground child usage aggregates into the parent; retained children account to their own durable conversations. Live `forkConversation` only snapshots history; it does not grant permission to execute another session.
 
 ### Background extension work

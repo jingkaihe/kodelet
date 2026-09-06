@@ -1,6 +1,9 @@
 package conversations
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // TurnAdmission fences an ordinary conversation checkpoint to a durable running
 // receipt and its exact reserved runner run. Only central orchestration sets it.
@@ -21,5 +24,23 @@ func ContextWithTurnAdmission(ctx context.Context, admission TurnAdmission) cont
 // TurnAdmissionFromContext returns the checkpoint's exact admission fence.
 func TurnAdmissionFromContext(ctx context.Context) (TurnAdmission, bool) {
 	admission, ok := ctx.Value(turnAdmissionKey{}).(TurnAdmission)
+	return admission, ok
+}
+
+// ChildAdmission atomically reserves an ordinary durable turn while saving a
+// new child or a compare-and-swapped resume. It is never supplied by a client.
+type ChildAdmission struct {
+	TurnAdmission
+	ExpectedUpdatedAt time.Time // zero means insert-only
+}
+
+type childAdmissionKey struct{}
+
+func ContextWithChildAdmission(ctx context.Context, admission ChildAdmission) context.Context {
+	return context.WithValue(ctx, childAdmissionKey{}, admission)
+}
+
+func ChildAdmissionFromContext(ctx context.Context) (ChildAdmission, bool) {
+	admission, ok := ctx.Value(childAdmissionKey{}).(ChildAdmission)
 	return admission, ok
 }

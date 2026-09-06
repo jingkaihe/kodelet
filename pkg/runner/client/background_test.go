@@ -245,6 +245,9 @@ type backgroundLeasePeer struct {
 func (p *backgroundLeasePeer) Call(ctx context.Context, method string, params, result any) error {
 	if method == delegation.ReleaseMethod {
 		p.released <- params.(delegation.Params)
+		if result != nil {
+			*result.(*delegation.Result) = delegation.Result{Done: true}
+		}
 		return nil
 	}
 	return p.recordingPeer.Call(ctx, method, params, result)
@@ -265,6 +268,11 @@ func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *te
 			service.Attach(peer)
 			switch mode {
 			case "release":
+				service.mu.Lock()
+				lease := service.backgroundLeases[state.LeaseID].leases[state.LeaseID]
+				lease.childAuthority = true
+				service.backgroundLeases[state.LeaseID].leases[state.LeaseID] = lease
+				service.mu.Unlock()
 				_, err = service.ReleaseBackgroundTask(t.Context(), &recordingUIExtensionSource{owner: owner}, extensions.BackgroundTaskReleaseRequest{LeaseID: state.LeaseID})
 				require.NoError(t, err)
 			case "cancel":
@@ -275,7 +283,11 @@ func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *te
 				require.NoError(t, service.Close())
 			}
 			runs := make([]string, 0, 2)
-			for range 2 {
+			wantRuns := []string{"one", "two"}
+			if mode == "release" {
+				wantRuns = []string{""}
+			} // synchronous owner-scoped revocation covers all reattachments
+			for range len(wantRuns) {
 				select {
 				case release := <-peer.released:
 					runs = append(runs, release.RunID)
@@ -286,7 +298,7 @@ func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *te
 					require.FailNow(t, "child authority was not revoked for each attached run")
 				}
 			}
-			assert.ElementsMatch(t, []string{"one", "two"}, runs)
+			assert.ElementsMatch(t, wantRuns, runs)
 			require.NoError(t, service.Close())
 			assertBackgroundProcessStopped(t, state.PID)
 		})

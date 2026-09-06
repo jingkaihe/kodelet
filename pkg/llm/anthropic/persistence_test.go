@@ -800,6 +800,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 		ExtensionID: "subagent",
 		ToolName:    "subagent",
 	})
+	snapshot, err := thread.SnapshotConversationFork(forkContext)
+	require.NoError(t, err)
+	assert.Equal(t, thread.ConversationID, snapshot.ID)
+	assert.Empty(t, store.SavedRecords, "capturing a child seed must not publish a temporary conversation")
+	assert.NotContains(t, string(snapshot.RawMessages), "call-subagent")
+	assert.Contains(t, string(snapshot.RawMessages), "thinking-signature")
 	forkedID, err := thread.ForkConversation(forkContext)
 
 	require.NoError(t, err)

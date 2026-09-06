@@ -132,18 +132,23 @@ func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, ima
 	return t.SaveConversation(ctx)
 }
 
-// ForkConversation snapshots the live thread into a new persisted conversation.
-func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+// SnapshotConversationFork captures the safe live fork source without publishing a new ID.
+func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.ConversationRecord, error) {
 	if t.ConversationForkBlocked() {
-		return "", llm.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llm.ErrConversationForkUnavailable
 	}
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
 	if !t.Persisted || t.Store == nil {
-		return "", llm.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llm.ErrConversationForkUnavailable
 	}
-	record, err := t.buildConversationRecord(ctx, cleanedAnthropicMessagesForFork(t.messages), false)
+	return t.buildConversationRecord(ctx, cleanedAnthropicMessagesForFork(t.messages), false)
+}
+
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	record, err := t.SnapshotConversationFork(ctx)
 	if err != nil {
 		return "", err
 	}

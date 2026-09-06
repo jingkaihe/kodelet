@@ -172,13 +172,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	}
 
 	if len(state.tools) == 0 {
-		var allowedTools []string
-		if state.llmConfig.AllowedTools != nil {
-			allowedTools = state.llmConfig.AllowedTools
-		}
-		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
-		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableFSSearchTools)
-		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
+		state.tools = mainToolsForConfig(ctx, state.llmConfig)
 	}
 	state.configureTools()
 
@@ -188,19 +182,35 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 // WithMainTools returns an option that configures main tools
 func WithMainTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		var allowedTools []string
-		if s.llmConfig.AllowedTools != nil {
-			allowedTools = s.llmConfig.AllowedTools
-		}
-		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
-		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
-		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
+		s.tools = mainToolsForConfig(ctx, s.llmConfig)
 		if !skillsEnabledForConfig(s.llmConfig) {
 			s.tools = filterOutSkill(s.tools)
 		}
 		s.configureTools()
 		return nil
 	}
+}
+
+func mainToolsForConfig(ctx context.Context, config llmtypes.Config) []tooltypes.Tool {
+	if config.ExecutionOptions != nil && config.ExecutionOptions.AllowedTools != nil {
+		// Explicit selection resolves from the catalog, not from a parent's
+		// presentation defaults. Mandatory policy still wins, including deny-all.
+		policy := config.EnvironmentOptions()
+		if policy.ToolsDisabled() {
+			return nil
+		}
+		selected := GetMainToolsWithOptions(ctx, *policy.AllowedTools, config.EnableFSSearchTools)
+		filtered := selected[:0]
+		for _, tool := range selected {
+			if policy.ToolAllowed(tool.Name()) {
+				filtered = append(filtered, tool)
+			}
+		}
+		return filtered
+	}
+	allowedTools := enforceToolMode(config.AllowedTools, config.ToolMode, defaultMainTools)
+	selected := GetMainToolsWithOptions(ctx, allowedTools, config.EnableFSSearchTools)
+	return enforceToolModeOnResolvedTools(selected, allowedTools, config.ToolMode)
 }
 
 // WithExtensionTools returns an option that configures extension-provided tools.

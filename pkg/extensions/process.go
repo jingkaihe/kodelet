@@ -588,7 +588,7 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		ctx = ContextWithExtensionUIImplicitScope(ctx)
 	}
 	switch method {
-	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel":
+	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer":
 		host, ok := ctx.Value(childHostKey{}).(ChildHost)
 		if !ok {
 			return nil, &rpcError{Code: -32004, Message: "delegated children require a daemon-backed runner"}
@@ -821,6 +821,8 @@ type processExtensionUISource struct {
 	hostCtxMu        sync.RWMutex
 	hostCtx          context.Context
 	hostCancel       context.CancelFunc
+	backgroundCtx    context.Context
+	backgroundCancel context.CancelFunc
 	notifyMu         sync.Mutex
 	notify           map[string]*orderedExtensionUINotifications
 	notifyLifecycles map[string]uint64
@@ -835,6 +837,9 @@ func (s *processExtensionUISource) setHostContext(ctx context.Context) {
 	}
 	hostCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.hostCtxMu.Lock()
+	if s.backgroundCtx == nil {
+		s.backgroundCtx, s.backgroundCancel = context.WithCancel(context.WithoutCancel(ctx))
+	}
 	previousCancel := s.hostCancel
 	s.hostCtx = hostCtx
 	s.hostCancel = cancel
@@ -842,6 +847,17 @@ func (s *processExtensionUISource) setHostContext(ctx context.Context) {
 	if previousCancel != nil {
 		previousCancel()
 	}
+}
+
+// Retained child RPCs outlive individual run contexts and reinitialization,
+// but never the authenticated extension process generation.
+func (s *processExtensionUISource) backgroundHostContext() context.Context {
+	s.hostCtxMu.RLock()
+	defer s.hostCtxMu.RUnlock()
+	if s.backgroundCtx == nil {
+		return context.Background()
+	}
+	return s.backgroundCtx
 }
 
 func (s *processExtensionUISource) hostContext() context.Context {
@@ -863,11 +879,17 @@ func (s *processExtensionUISource) cancelHostContext() {
 	}
 	s.hostCtxMu.Lock()
 	cancel := s.hostCancel
+	backgroundCancel := s.backgroundCancel
+	s.backgroundCancel = nil
+	s.backgroundCtx = nil
 	s.hostCancel = nil
 	s.hostCtx = nil
 	s.hostCtxMu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if backgroundCancel != nil {
+		backgroundCancel()
 	}
 }
 

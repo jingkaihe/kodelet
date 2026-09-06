@@ -209,6 +209,33 @@ func TestApplyEnvironmentOptionsFeaturePolicy(t *testing.T) {
 	}
 }
 
+func TestApplyEnvironmentOptionsFilesystemSelectionAndCeiling(t *testing.T) {
+	host := Config{ToolMode: ToolModePatch, EnableFSSearchTools: false}
+	for _, options := range []*ExecutionOptions{nil, {}} {
+		config, err := ApplyEnvironmentOptions(host, options)
+		require.NoError(t, err)
+		assert.False(t, config.EnableFSSearchTools, "omission preserves runner presentation")
+		assert.Nil(t, config.ExecutionOptions.EnableFSSearchTools)
+	}
+	selected, err := ApplyEnvironmentOptions(host, &ExecutionOptions{EnableFSSearchTools: new(true)})
+	require.NoError(t, err)
+	assert.True(t, selected.EnableFSSearchTools)
+	assert.Equal(t, ToolModePatch, selected.ToolMode)
+	assert.False(t, host.EnableFSSearchTools, "request selection does not mutate defaults")
+	assert.Nil(t, host.ExecutionOptions)
+
+	denied, err := ApplyEnvironmentOptions(host, &ExecutionOptions{EnableFSSearchTools: new(false)})
+	require.NoError(t, err)
+	for _, inherited := range []Config{denied, {EnableFSSearchTools: true, ExecutionOptions: &ExecutionOptions{EnableFSSearchTools: new(false)}}} {
+		_, err = ApplyEnvironmentOptions(inherited, &ExecutionOptions{EnableFSSearchTools: new(true)})
+		require.ErrorContains(t, err, "runner policy")
+		preserved, err := ApplyEnvironmentOptions(inherited, nil)
+		require.NoError(t, err)
+		assert.False(t, preserved.EnableFSSearchTools)
+		assert.Equal(t, new(false), preserved.ExecutionOptions.EnableFSSearchTools)
+	}
+}
+
 func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 	for _, options := range []*ExecutionOptions{
 		nil,
