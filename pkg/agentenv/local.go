@@ -65,9 +65,15 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 	}
 
 	spec = spec.Clone()
+	if err := spec.Config.ExecutionOptions.Validate(); err != nil {
+		return Manifest{}, err
+	}
 	runtime := e.extensions
 	if runtime == nil {
 		runtime, _ = spec.Config.Extensions.(*extensions.Runtime)
+	}
+	if options := spec.Config.EnvironmentOptions(); options.NoExtensions != nil && *options.NoExtensions {
+		runtime = nil
 	}
 
 	state := e.providedState
@@ -86,6 +92,9 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 	}
 
 	manifest := snapshotManifest(ctx, state, runtime)
+	manifest.Tools = slices.DeleteFunc(manifest.Tools, func(tool ToolDefinition) bool {
+		return !spec.Config.ExecutionOptions.ToolAllowed(tool.Name)
+	})
 	spec.Config.WorkingDirectory = manifest.WorkingDirectory
 	e.extensions = runtime
 	e.state = newSnapshotState(state, manifest)
@@ -396,8 +405,9 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		}
 		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
 	}
-	if request.Name == "bash" && len(spec.Config.AllowedCommands) > 0 {
-		validator := tools.NewBashToolWithTimeout(spec.Config.AllowedCommands, spec.Config.EnableFSSearchTools, spec.Config.BashTimeout())
+	commandPolicy := spec.Config.EnvironmentOptions().AllowedCommands
+	if request.Name == "bash" && commandPolicy != nil && len(*commandPolicy) > 0 {
+		validator := tools.NewBashToolWithTimeout(*commandPolicy, spec.Config.EnableFSSearchTools, spec.Config.BashTimeout())
 		if err := validator.ValidateInput(state, effectiveInput); err != nil {
 			result := tooltypes.BaseToolResult{Error: err.Error()}
 			structured := result.StructuredData()
@@ -526,6 +536,9 @@ func (e *LocalEnvironment) pinnedCommands(name string) ([]slashcommands.Command,
 }
 
 func environmentToolAllowed(config llmtypes.Config, name string) bool {
+	if !config.ExecutionOptions.ToolAllowed(name) {
+		return false
+	}
 	if len(config.AllowedTools) == 0 {
 		return true
 	}

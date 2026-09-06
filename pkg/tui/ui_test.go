@@ -11,6 +11,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,72 @@ func receiveUIBrokerResult(t *testing.T, ch <-chan uiBrokerResult) uiBrokerResul
 		t.Fatal("timed out waiting for UI broker result")
 		return uiBrokerResult{}
 	}
+}
+
+func TestTUIUIBrokerDismissesVisibleAndQueuedCancelledPrompts(t *testing.T) {
+	for _, visible := range []bool{false, true} {
+		t.Run(fmt.Sprint("visible=", visible), func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.running, m.activeRunID = true, 7
+			broker := newTUIUIBroker(m.runCh, m.activeRunID)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			resultCh := make(chan uiBrokerResult, 1)
+			go func() {
+				response, err := broker.Input(ctx, extensions.UIInputRequest{ID: "same-id", Title: "Old prompt"})
+				resultCh <- uiBrokerResult{response: response, err: err}
+			}()
+			request := receiveRunMsg(t, m.runCh).(uiPromptRequestMsg)
+			if visible {
+				updated, _ := m.Update(request)
+				m = updated.(model)
+				require.NotNil(t, m.activeUIPrompt)
+			}
+			cancel()
+			dismiss := receiveRunMsg(t, m.runCh).(uiPromptDismissMsg)
+			if !visible {
+				updated, _ := m.Update(request)
+				m = updated.(model)
+				assert.Nil(t, m.activeUIPrompt, "a queued expired prompt must not reopen")
+			}
+			updated, _ := m.Update(dismiss)
+			m = updated.(model)
+			assert.Nil(t, m.activeUIPrompt)
+			m.openUIPrompt(uiPromptState{id: "same-id", response: make(chan extensions.UIInputResponse, 1)})
+			updated, _ = m.Update(dismiss)
+			m = updated.(model)
+			assert.NotNil(t, m.activeUIPrompt, "old dismissal must not clear a newer prompt with the same extension ID")
+			require.ErrorIs(t, receiveUIBrokerResult(t, resultCh).err, context.Canceled)
+			assert.True(t, m.running, "dismissing UI must not stop the run")
+		})
+	}
+}
+
+type ownershipCheckingRunner struct {
+	recordingRunner
+	conversationID string
+}
+
+func (r *ownershipCheckingRunner) TakeUIOwnership(ctx context.Context, conversationID string) error {
+	if _, ok := ctx.Deadline(); !ok {
+		return errors.New("ownership requests must be bounded")
+	}
+	r.conversationID = conversationID
+	return nil
+}
+
+func TestTUITakeControlUsesRunnerInterface(t *testing.T) {
+	runner := &ownershipCheckingRunner{}
+	m := newModel(t.Context(), Config{Runner: runner})
+	t.Cleanup(m.cancel)
+	m.running, m.conversationID = true, "conversation-1"
+	cmd, handled := m.handleLocalSlashCommand("/take-control")
+	require.True(t, handled)
+	require.NotNil(t, cmd)
+	message := cmd().(uiDiagnosticMsg)
+	assert.Equal(t, "Control transferred", message.notification.title)
+	assert.Equal(t, "conversation-1", runner.conversationID)
 }
 
 func TestTUIUIBrokerInputDialogResolvesResponse(t *testing.T) {

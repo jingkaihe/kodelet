@@ -37,6 +37,7 @@ const (
 )
 
 type uiPromptState struct {
+	ctx      context.Context
 	runID    int
 	mode     uiPromptMode
 	origin   uiPromptOrigin
@@ -82,6 +83,12 @@ type uiPromptRequestMsg struct {
 	runID           int
 	conversationKey string
 	prompt          uiPromptState
+}
+
+type uiPromptDismissMsg struct {
+	runID           int
+	conversationKey string
+	response        chan extensions.UIInputResponse
 }
 
 type uiNotificationMsg struct {
@@ -321,6 +328,7 @@ func (b *tuiUIBroker) Notify(ctx context.Context, request extensions.UINotifyReq
 }
 
 func (b *tuiUIBroker) prompt(ctx context.Context, prompt uiPromptState) (extensions.UIInputResponse, error) {
+	prompt.ctx = ctx
 	select {
 	case <-ctx.Done():
 		return extensions.UIInputResponse{}, ctx.Err()
@@ -329,6 +337,13 @@ func (b *tuiUIBroker) prompt(ctx context.Context, prompt uiPromptState) (extensi
 
 	select {
 	case <-ctx.Done():
+		// Fence by the response channel as extensions may reuse request IDs.
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case b.ch <- uiPromptDismissMsg{runID: b.runID, conversationKey: b.conversationKey, response: prompt.response}:
+		case <-timer.C:
+		}
 		return extensions.UIInputResponse{}, ctx.Err()
 	case response := <-prompt.response:
 		if response.Status == "" {

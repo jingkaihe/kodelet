@@ -22,28 +22,32 @@ kodelet version
 
 ```bash
 kodelet run "your query"
-kodelet run -f "continue the task" # same as --follow
+kodelet run --cwd "$PWD" -f "continue the task" # scoped --follow
 kodelet run --resume CONVERSATION_ID "more questions"
-kodelet run --no-save "temporary query"
 kodelet run --result-only "what is 2+2"
 kodelet run --no-tools "what is the capital of France?"
 ```
 
+Start `kodelet serve` separately and supply its web/API token through `KODELET_AUTH_TOKEN`. Execution always uses the daemon; choose its endpoint with `--server`, `KODELET_SERVER`, or a trusted user-level `server` setting:
+
+```bash
+kodelet run --server https://kodelet.example --runner project-runner --cwd /workspace/project "inspect the repository"
+kodelet run --server https://kodelet.example --runner project-runner --no-tools --result-only "explain the context"
+kodelet run --server https://kodelet.example --resume CONVERSATION_ID "continue"
+```
+
+Runs always save; `--no-save` is removed. The daemon owns provider credentials and history; runners own workspaces and tools. The recognized same-host default uses the invoking CWD for new CLI conversations; other targets use runner-host path rules. Resumes retain stored affinity. Ctrl+C requests an exact turn stop; disconnects only detach. Inspect `kodelet conversation turn <conversation-id> <turn-id>` before resubmitting uncertain work. Client authentication uses `kodelet auth login` or a web/API token, never a runner token. There is no local execution fallback.
+
 ### Interactive/IDE mode (ACP)
 
-Kodelet implements the Agent Client Protocol (ACP):
+ACP requires a running daemon and a registered runner:
 
 ```bash
 kodelet acp
+kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-To use a remote control-plane agentic loop while retaining local workspace tools, context, skills, recipes, and extensions:
-
-```bash
-kodelet acp --server https://kodelet.example
-```
-
-For an OIDC control plane, run `kodelet auth login --server https://kodelet.example`; ACP automatically uses the resulting Kodelet-issued per-server credential. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over stored login state. In runner enrollment mode, ACP separately uses the current workspace's stored DPoP credential when no explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` is supplied; enroll first with `kodelet runner enroll --server https://kodelet.example`. Runner tokens are used only with runner token mode. If a same-server `kodelet runner start` process already owns the current workspace, ACP reuses that runner; different ACP sessions can run concurrently through it.
+Use `server` or `KODELET_SERVER` for the default endpoint. For OIDC, run `kodelet auth login --server https://kodelet.example`; `--auth-token` overrides `KODELET_AUTH_TOKEN` and stored login state. ACP uses client credentials only, never enrolls or starts a runner, and has no local execution fallback. Without `--runner`, new sessions use the daemon's default runner.
 
 Example Zed-style configuration:
 
@@ -56,7 +60,7 @@ Example Zed-style configuration:
 }
 ```
 
-ACP supports session persistence, image input, embedded file context, streaming responses, tool-call visualization, and local slash-command discovery in compatible clients. Server-backed ACP persists conversations on the control plane and resumes only conversations bound to the selected workspace runner.
+ACP supports persisted history, images, streaming, tool visualization, and runner-backed slash-command discovery. Session directories are validated on the runner, independently of the client's startup directory. Resume preserves stored runner/CWD/profile affinity. Closing the client detaches; an explicit cancel action stops only its active prompt. Model and restriction flags use the daemon execution contract; configure extension installations and provider credentials on their owning hosts.
 
 ### Terminal chat TUI
 
@@ -68,16 +72,18 @@ kodelet chat --theme catppuccin-latte
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 
+Chat always uses the daemon, including the default local endpoint. Directories are runner-side; resume keeps stored affinity and `--follow` needs `--runner` or `--cwd`. Exit detaches, `/stop` cancels, and `/take-control` requests ownership of future prompts without replaying dismissed prompts.
+
 ### Web UI
 
 ```bash
 kodelet serve
 kodelet serve --host 0.0.0.0 --port 3000
 kodelet serve --cors-origins https://app.example.com,https://admin.example.com
-kodelet serve --disable-control-plane-workspace
+kodelet serve --embedded-runner=false
 ```
 
-`--disable-control-plane-workspace` keeps the provider and conversation control plane active while requiring workspace runners for execution. It removes the local workspace option and disables the server-host terminal, Git diff, CWD suggestions, and local command or extension discovery; do not combine it with `--cwd`.
+`serve` hosts an embedded runner by default; `--embedded-runner=false` uses external runners only. Workspace execution, discovery, Git and terminals always stay on runners. Use `--runner-workspace` instead of the removed `serve --cwd`.
 
 With no explicit authentication modes, `kodelet serve` prints separate generated web/API and runner tokens. Tokens supplied through flags or trusted configuration are not echoed. For native browser OIDC and browser-approved runners, create a Web application OAuth client with the exact callback URI, store its client secret in a regular owner-only file, and run:
 

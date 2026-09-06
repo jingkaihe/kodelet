@@ -13,6 +13,7 @@ import (
 	"time"
 
 	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
@@ -40,6 +41,7 @@ type Process struct {
 	failures     int
 	uiHost       ExtensionUIHost
 	uiSource     *processExtensionUISource
+	profiles     map[string]delegation.Preset
 }
 
 // RuntimeCapabilities describes execution-lifetime guarantees available to an extension process.
@@ -342,6 +344,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 	if err := client.callWithHostHandler(ctx, "extension.initialize", params, &result, source); err != nil {
 		return nil, err
 	}
+	if err := p.setProfiles(source, result.Profiles); err != nil {
+		return nil, err
+	}
 	return &result, nil
 }
 
@@ -539,11 +544,18 @@ func (p *Process) ExecuteShortcutWithResult(ctx context.Context, key string, cal
 
 // HandleEvent invokes an extension event handler.
 func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
-	if err := p.ensureRunning(ctx); err != nil {
-		return nil, err
+	// Cleanup must never restart a failed generation merely to notify it that
+	// its session ended. Ordinary events retain their existing restart policy.
+	if eventName != EventSessionEnd {
+		if err := p.ensureRunning(ctx); err != nil {
+			return nil, err
+		}
 	}
 	client, source := p.rpcSession()
 	if client == nil || source == nil {
+		if eventName == EventSessionEnd {
+			return &EventResult{}, nil
+		}
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
@@ -576,6 +588,16 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		ctx = ContextWithExtensionUIImplicitScope(ctx)
 	}
 	switch method {
+	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel":
+		host, ok := ctx.Value(childHostKey{}).(ChildHost)
+		if !ok {
+			return nil, &rpcError{Code: -32004, Message: "delegated children require a daemon-backed runner"}
+		}
+		result, err := host.ChildRequest(ctx, source, strings.TrimPrefix(method, "kodelet."), params)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		return result, nil
 	case BackgroundTaskAcquireMethod:
 		if !RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
 			return nil, &rpcError{Code: -32000, Message: "extension background tasks are not available"}

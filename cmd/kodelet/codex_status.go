@@ -16,7 +16,26 @@ import (
 
 var codexStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show Codex authentication status",
+	Short: "Show the daemon's ChatGPT subscription connection status",
+	Long:  "Show sanitized connection status from the daemon. Detailed local usage inspection is available to operators as 'kodelet host codex status' on the daemon host.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := remoteAdministrationClient(cmd)
+		if err != nil {
+			return err
+		}
+		status, err := client.ProviderConnection(cmd.Context(), "codex")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Daemon Codex connected: %t\n", status.Connected)
+		return err
+	},
+}
+
+var hostCodexStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Inspect this host's Codex credentials and live usage",
 	Long: `Show the current OpenAI Codex authentication status.
 
 This command checks if valid Codex credentials are available at ~/.kodelet/codex-credentials.json.
@@ -29,6 +48,8 @@ and workspace credits.`,
 		runCodexStatus()
 	},
 }
+
+func init() { hostCodexCmd.AddCommand(hostCodexStatusCmd) }
 
 func runCodexStatus() {
 	ctx := context.Background()

@@ -132,10 +132,13 @@ func TestRuntimeExecutesRegisteredShortcut(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
 
+	require.NotEmpty(t, runtime.Shortcuts())
+	assert.NotZero(t, runtime.Shortcuts()[0].Generation)
 	assert.Contains(t, runtime.Shortcuts(), Shortcut{
 		Key:         "ctrl+alt+r",
 		Description: "Refresh project context",
 		ExtensionID: "shortcut",
+		Generation:  runtime.Shortcuts()[0].Generation,
 	})
 	ctx := ContextWithExtensionUIScope(context.Background(), "conversation-scope")
 	matched, result, err := runtime.ExecuteShortcutWithResult(ctx, "alt+control+r", ExtensionCallContext{

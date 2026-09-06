@@ -89,7 +89,9 @@ For running locally or building from source:
 
 ## Usage Modes
 
-Kodelet supports several usage modes depending on your needs.
+Start `kodelet serve` in a separate terminal, then set `KODELET_AUTH_TOKEN` to its printed web/API token. Provider credentials belong on the daemon. CLI commands connect to `http://localhost:8080` by default; use `--server`, `KODELET_SERVER`, or the user configuration's `server` setting for another endpoint.
+
+When upgrading, stop older Kodelet processes and back up `~/.kodelet` before starting the new daemon. Existing history is reused; use `conversation adopt` before continuing a legacy conversation. Do not run older direct-write clients against the upgraded database. One-shot runs always save; the removed `--no-save` flag fails explicitly.
 
 ### One-shot Mode
 
@@ -102,9 +104,8 @@ kodelet run "your query"
 # One-shot query with conversation persistence
 kodelet run "your query"                     # saved automatically
 kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
-kodelet run --follow "continue most recent"  # continue the most recent conversation
-kodelet run -f "quick follow-up"             # short form
-kodelet run --no-save "temporary query"      # don't save the conversation
+kodelet run --cwd "$PWD" --follow "continue most recent"
+kodelet run --cwd "$PWD" -f "quick follow-up" # short form
 
 # Output only the final result (suppresses intermediate output and usage stats)
 kodelet run --result-only "what is 2+2"      # outputs just: 4
@@ -119,9 +120,28 @@ kodelet run --enable-fs-search-tools "find references to SessionManager"
 kodelet run "/goal finish the migration and verify tests pass"
 
 # Rename a persisted conversation without invoking the model
-kodelet run --follow "/rename Migration cleanup"
+kodelet run --cwd "$PWD" --follow "/rename Migration cleanup"
 kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
 ```
+
+#### Daemon-backed execution
+
+All execution uses the daemon. Connection failures never fall back to local execution.
+
+```bash
+# Select a connected runner by ID or name.
+kodelet run --server https://kodelet.example --runner project-runner "inspect this repository"
+printf '%s\n' 'Additional details' | kodelet run --server https://kodelet.example --runner project-runner --result-only "summarize"
+kodelet run --server https://kodelet.example --resume CONVERSATION_ID "continue"
+```
+
+Authenticate with `kodelet auth login`, `KODELET_AUTH_TOKEN`, or `--auth-token`. Select `--runner` unless the daemon has a ready embedded runner.
+
+`--cwd` selects a directory on the runner host. New conversations on the recognized same-host default use your current directory; other targets use the runner's startup directory when omitted. Resuming keeps the original runner and directory. `--follow` requires `--runner` or `--cwd`.
+
+Stdin, images, recipes, model options, and tool restrictions are supported. Recipes and `--runner-profile` resolve on the runner. Unsupported options return an error. The runner uses its own environment, not virtual environments or shell changes made after it started.
+
+All runs are saved, including `--result-only`; `--no-save` is rejected. Ctrl+C requests cancellation and reports if stopping cannot be confirmed. A network disconnect does not cancel work: inspect `kodelet conversation turn <conversation-id> <turn-id>` before submitting again.
 
 ### Thread Goals
 
@@ -133,12 +153,11 @@ Kodelet names persisted conversations deterministically from the first user mess
 
 ### Terminal Chat TUI
 
-For a minimal terminal UI, use `kodelet chat`:
+Use `kodelet chat` to connect the native terminal UI to a running daemon:
 
 ```bash
 kodelet chat                         # start a new TUI conversation
-kodelet chat --follow                # continue the most recent conversation
-kodelet chat -f                      # short form
+kodelet chat --follow --runner RUNNER # continue the latest conversation in this runner's workspace
 kodelet chat --resume CONVERSATION_ID  # resume a specific conversation
 kodelet chat -r CONVERSATION_ID        # short form
 kodelet chat --theme catppuccin-mocha   # force the bundled dark theme
@@ -155,13 +174,17 @@ kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local e
 
 Set a default control plane with `server` in user configuration or `KODELET_SERVER`; `--server` takes precedence. Repository configuration cannot set this value.
 
+The daemon owns model execution and history; the selected runner validates directories and supplies workspace resources. Chat never starts a local provider or falls back to a client-side conversation database. Resume preserves the saved runner, directory, and profiles; `--follow` requires a runner or directory scope.
+
 The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
 The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
 
 Before the first message, use `Ctrl+T` to choose a profile and `Ctrl+Y` to choose a reasoning effort. These settings are fixed after the conversation starts.
 
-While a turn is running, `Enter` queues steering. `/sessions`, `/new`, and `/stop` run immediately; other slash commands are queued for the next turn. In server-backed mode, `Ctrl+C` exits without stopping the active turn.
+While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, and `/take-control` run immediately; other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the active turn. `/take-control` receives future interactive prompts; dismissed prompts are not replayed.
+
+Extension shortcuts run on the selected runner, including before the first message. During an active turn, only its current UI owner can invoke them. Shortcuts that submit messages use the same submission or queueing behavior as typed messages.
 
 Use `/sessions` or `Ctrl+L` to switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
 
@@ -196,27 +219,18 @@ Theme colors must use `#rrggbb` notation. Supported top-level color keys are `us
 
 ### Interactive Chat Mode (ACP)
 
-For extended conversations and complex tasks, use the Agent Client Protocol (ACP) with a compatible client like `toad`:
+ACP connects compatible clients such as `toad` to a running Kodelet daemon:
 
 ```bash
-toad acp 'kodelet acp'             # Start interactive chat via ACP
+toad acp 'kodelet acp'
+kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-The ACP mode provides a rich interactive experience with features like:
-- Real-time streaming responses
-- Tool execution visualization
-- Conversation persistence
-- Multi-turn conversations
+The daemon saves conversations and runs the model; its default runner, or `--runner`, supplies workspace tools and commands. ACP never starts a runner or falls back to local execution. Set `server` or `KODELET_SERVER` to choose the daemon, and use `kodelet auth login --server ...` or `--auth-token` for client authentication.
 
-To run the model loop and conversation store on a `kodelet serve` control plane while keeping the current workspace's tools, context files, skills, recipes, and extensions local, use:
+Session directories belong to the selected runner, not the ACP client. Resuming preserves the stored runner, directory, and profiles. `--runner-profile` selects the environment for new sessions; `--profile` selects daemon model settings.
 
-```bash
-kodelet acp --server https://kodelet.example
-```
-
-The user-level `server` setting or `KODELET_SERVER` can select the control plane by default. For OIDC, run `kodelet auth login --server https://kodelet.example`; when runner enrollment is enabled, run `kodelet runner enroll --server https://kodelet.example` once per workspace. ACP uses the stored credentials automatically. `--runner-profile` selects the runner environment, while `--profile` and `--reasoning-effort` select model settings.
-
-Use ACP or the TypeScript Agent SDK for programmatic integrations that need structured assistant and tool events.
+Closing the ACP client detaches without stopping daemon work. Use the client's cancel action to stop its active prompt. Streaming responses, tool visualization, images, and multi-turn history are supported.
 
 ### Web UI Server
 
@@ -254,7 +268,7 @@ The same setup can be kept in trusted user configuration instead of repeated on 
 serve:
   host: "0.0.0.0"
   port: 8080
-  disable_control_plane_workspace: true
+  embedded_runner: false
   web_auth_mode: "oidc"
   runner_auth_mode: "enrollment"
   # Optional static administrative token for automation or migration:
@@ -307,7 +321,7 @@ kodelet serve --skip-auth
 The container runs the control plane as unprivileged UID/GID `65532` and starts with the equivalent of:
 
 ```bash
-kodelet serve --host=0.0.0.0 --disable-control-plane-workspace
+kodelet serve --host=0.0.0.0 --embedded-runner=false
 ```
 
 Binding to `0.0.0.0` is required for a container-published port to reach the server; it does not itself restart the container. Use your container runtime's restart policy for that behavior.
@@ -332,15 +346,26 @@ Workspace execution belongs on separately deployed `kodelet runner start` proces
 
 ### Workspace-bound Runners
 
-A workspace-bound runner lets one `kodelet serve` control plane use tools, context, skills, commands, and extensions hosted by another Kodelet process. The directory where `kodelet runner start` is launched is the default working directory. Conversations may select any other directory accessible to the runner process; terminal and Git diff remain rooted at the startup workspace.
+A workspace-bound runner supplies tools, context, skills, commands, and extensions to `kodelet serve`. Its startup directory is the default workspace, but conversations may select another directory accessible on the runner host.
 
-To require workspace runners for all chats, disable the control-plane workspace:
+The daemon hosts an embedded runner by default. For separately managed runners only:
 
 ```bash
-kodelet serve --disable-control-plane-workspace
+kodelet serve --embedded-runner=false
 ```
 
-The equivalent setting is `serve.disable_control_plane_workspace: true`. It disables local workspace execution and makes existing local conversations read-only.
+To choose the embedded runner's startup workspace:
+
+```bash
+kodelet serve --runner-workspace=/path/to/workspaces
+kodelet run --server=http://localhost:8080 --auth-token=WEB_TOKEN --cwd=/path/to/project "inspect this project"
+```
+
+The embedded runner starts and stops with the daemon. `--runner-workspace` defaults to the daemon's startup directory. An explicit `--runner` takes precedence. `serve --cwd` is no longer supported.
+
+Configure `serve.embedded_runner`, `serve.runner_workspace`, and `serve.runner_settings` in your user configuration. Repository settings may restrict runner permissions but cannot change daemon credentials or relax host restrictions. Restart the daemon after changing runner defaults.
+
+Check `/api/status` for runner readiness. If another runner already owns the workspace, stop it or disable embedding and select that runner instead. Use a fixed port to preserve enrollment across restarts. Stop the daemon with Ctrl+C or SIGTERM; incomplete cleanup is reported as an error.
 
 The runner modes are:
 
@@ -414,9 +439,11 @@ Removing a stopped runner deletes its registration, credentials, and run history
 
 Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. An idle compatible runner accepts a new run, and a busy runner also accepts one when it advertised concurrent-run support; legacy protocol-v1 runners that omit that capability remain capacity-one. A manifest-change flag means the connected runner detected changed context, skills, tools, commands, extensions, or relevant configuration; the changed manifest is pinned independently by the next run and never mutates an already active run.
 
-In the Web UI, choose a runner from the **Environment** field when creating a conversation. **Runner profile** and **Working directory** are optional. A blank working directory uses the startup workspace, relative paths resolve from it, and absolute paths or `~` resolve on the runner host. Kodelet validates and remembers the selected path for the conversation. The terminal and Git diff remain rooted at the startup workspace.
+In the Web UI, choose a runner from **Environment**. **Runner profile** and **Working directory** are optional. Relative paths and `~` resolve on the runner host; a blank directory uses its startup workspace. Suggestions and slash commands follow the selected runner, profile, and directory.
 
-When the control-plane workspace is disabled, only runner environments are available.
+The terminal and Git diff follow a saved conversation's directory. Panels remain hidden until a custom directory is saved, or if the runner needs upgrading. Terminals survive closing the browser panel but stop with the runner. If the terminal limit is reached, exit an existing shell before opening another directory.
+
+Workspace operations always use a runner.
 
 The terminal UI can start a new remote conversation with:
 
@@ -429,9 +456,9 @@ kodelet chat \
   --server https://kodelet.example
 ```
 
-`--server` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--cwd` uses the same runner-host path rules as the Web UI and is remembered with the conversation. `--profile` selects the control-plane model profile, while `--runner-profile` independently selects a runner environment profile. `--no-tools` and `--no-extensions` remain local-only. `kodelet run --runner` is not enabled yet.
+The TUI always uses daemon history and execution. `--runner` selects new conversations and scopes the picker; resumed conversations retain their affinity. `--profile` selects daemon model settings, while `--runner-profile` selects a runner environment. `--no-tools`, `--no-extensions`, and `--no-skills` restrict the selected environment.
 
-Server-backed TUI and Web UI clients can follow the same conversation live, including runner-backed turns. Open it with `--resume`, `--follow`, or `/sessions`. Local-only TUI sessions are not shared.
+TUI and Web UI clients can follow the same conversation live. Open it with `--resume`, scoped `--follow`, or `/sessions`.
 
 Across hosts, runner and remote TUI connections require HTTPS/WSS; plain HTTP is accepted only for loopback servers. The runner uses its process's host permissions and is not a sandbox. A conversation may select a directory outside the startup workspace when that directory is accessible to the runner user. Concurrent runs share host files, processes, network, and ports.
 
@@ -443,23 +470,28 @@ Generate meaningful commit messages using AI:
 
 ```bash
 kodelet commit
+kodelet commit --server https://kodelet.example --runner workstation --cwd '~/project'
 ```
 
 This command analyzes your staged changes (`git diff --cached`) and uses AI to generate a meaningful commit message following conventional commits format. You must stage your changes using `git add` before running this command.
 
 Options:
-- `--no-sign`: Disable commit signing (commits are signed by default)
+- `--no-sign`: Omit the Signed-off-by trailer; Git's signing configuration is unchanged
 - `--template` or `-t`: Use a template for the commit message
 - `--short`: Generate a short commit message (enabled by default)
 - `--prefix`: Prefix the generated commit message, such as `TICKET-123`
 - `--no-confirm`: Skip confirmation prompt
-- `--save`: Enable conversation persistence (disabled by default for commits)
+
+Staged changes and commit creation stay on the selected runner; confirmation and message editing stay in your terminal. The conversation is always saved. Patches larger than 512 KiB use a truncated preview plus a diffstat (up to 200 file entries and overall totals) for message generation, with an explicit warning; the commit still includes the entire prepared staged tree, not just the preview. If staging or HEAD changes during review, prepare again; if acknowledgement is lost, inspect the runner's Git history before retrying.
 
 Create pull requests:
 
 ```bash
 kodelet pr
+kodelet pr --server https://kodelet.example --runner workstation --target main
 ```
+
+The PR workflow runs in the runner repository; GitHub authentication and template files must be available there. The conversation is always saved. `--provider` means the Git host (`github`); use `--profile` for daemon model settings.
 
 ### Image Input Support
 
@@ -476,8 +508,10 @@ kodelet run --image ./diagram.png --image https://example.com/mockup.jpg "Compar
 kodelet run --image ./architecture.png "Review this system architecture and suggest improvements"
 
 # Steer a running conversation with image context
-kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 --image ./screenshot.png "Use this screenshot as context"
+kodelet steer --server https://kodelet.example --conversation-id CONVERSATION_ID --image ./screenshot.png "Use this screenshot as context"
 ```
+
+Steering uses the daemon and uploads client image attachments. `--follow` requires `--runner` or `--cwd`; failed requests are not automatically retried.
 
 **Supported Features:**
 - **Local Images**: JPEG, PNG, GIF, and WebP formats
@@ -500,21 +534,18 @@ kodelet run -f "what's the status?"
 kodelet run --resume CONVERSATION_ID "more questions"
 ```
 
-**Note**: The `--follow` and `--resume` flags cannot be used together. If no conversations exist when using `--follow`, a new conversation will be started with a warning message.
+**Note**: The `--follow` and `--resume` flags cannot be used together. `--follow` requires a runner or CWD scope and fails if no matching history exists.
 
 ### Context Compaction
 
 As conversations grow longer, they may approach the context window limit. Kodelet automatically compacts context when utilization exceeds a configured threshold (default 80%). Compaction generates a comprehensive summary of the conversation history and replaces the active context with that summary, preserving essential details while reducing token usage.
 
 ```bash
-# Use the default threshold
-kodelet run --follow "continue working on the feature"
-
-# Override the threshold for this invocation
-kodelet --compact-ratio 0.9 run --follow "continue working on the feature"
+# Set the daemon's threshold at startup
+kodelet serve --compact-ratio 0.9
 ```
 
-Auto-compaction uses the shared `compact_ratio` configuration in CLI, ACP, and web UI server modes. Configure it via `--compact-ratio`, `compact_ratio` in config, or `KODELET_COMPACT_RATIO` in the environment. The ratio must be greater than `0.0` and less than or equal to `1.0`. Manual context compaction recipes are no longer supported.
+Auto-compaction uses the daemon's `compact_ratio` setting, which must be greater than `0.0` and less than or equal to `1.0`. Configure it on the daemon or a daemon model profile, not on an individual client invocation. Manual context compaction recipes are no longer supported.
 
 ### Conversation Management
 
@@ -541,6 +572,20 @@ kodelet run --resume <conversation-id> "/rename New conversation name"
 ```
 
 `conversation list --search` matches conversation IDs, working directories, first messages, and summaries. `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage and does not inherit the source conversation's active thread goal.
+
+Conversation commands manage daemon history, even when its runner is offline. Authentication is the same as for `run`.
+
+```bash
+export KODELET_SERVER=http://localhost:8080
+kodelet conversation list --runner <runner-id> --cwd /srv/workspace
+kodelet conversation show <conversation-id> --format raw
+kodelet conversation export <conversation-id> ./conversation.json
+kodelet conversation turn <conversation-id> <turn-id>
+```
+
+History filters use the exact runner ID and its saved directory. Forking without a conversation ID requires `--runner` or `--cwd`. Exports are saved on your client. Remote `import` and `edit` are not supported.
+
+To continue legacy history, run `kodelet conversation adopt <id> --runner <runner-id> --preview`, then repeat without `--preview` to confirm the displayed host and workspace. Use `--runner-profile <name>` when needed or `--yes` for a known, explicitly selected target. Adoption preserves history and model settings; incompatible or already-bound conversations remain unchanged. Back up the database and stop old direct-write clients before upgrading; use matching daemon-first client and server releases.
 
 ### Database Management
 
@@ -673,7 +718,7 @@ After setting up completion, you will need to start a new shell session for the 
 
 ## Configuration
 
-Kodelet supports multiple configuration methods with the following precedence (highest to lowest):
+Configure each setting on its owner: provider/model settings on the daemon, workspace/tool settings on the runner, and endpoint/display settings on the client. Explicit supported execution flags are sent to the daemon; client model environment variables and configuration files are not uploaded. Owner configuration uses this precedence (highest to lowest):
 
 1. Command line flags
 2. Environment variables
@@ -682,7 +727,7 @@ Kodelet supports multiple configuration methods with the following precedence (h
 
 ### Environment Variables
 
-All environment variables should be prefixed with `KODELET_`:
+Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set model credentials and defaults before starting the daemon, and workspace defaults before starting a standalone runner:
 
 ```bash
 # Logging configuration
@@ -715,15 +760,13 @@ export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated 
 
 ### Configuration File
 
-Kodelet uses a **layered configuration approach** where settings are applied in the following order:
+Trusted process configuration is loaded in this order:
 
 1. **Defaults**: Built-in default values
 2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
-3. **Repository Config**: `kodelet-config.yaml` in the current directory (overrides global)
+3. **Explicit Config**: `KODELET_CONFIG_FILE`, when supplied
 
-**Repository-level Configuration**
-
-Use `kodelet-config.yaml` in your project root for project-specific settings. This file will **merge with and override** your global configuration, so you only need to specify the settings that differ from your global defaults.
+`KODELET_CONFIG_FILE_MODE=isolated` skips the global file; it does not disable runner workspace policy. Restart the owning daemon or runner after changing its defaults.
 
 ```yaml
 # Global config (~/.kodelet/config.yaml)
@@ -734,25 +777,20 @@ max_tokens: 8192
 log_level: "info"
 ```
 
-The user-level `server` setting provides the default for `kodelet chat`, `kodelet acp`, and runner commands; `KODELET_SERVER` and `--server` override it. Repository configuration cannot set this value, and `kodelet run` remains local.
+The user-level `server` setting selects the daemon for ordinary commands; `KODELET_SERVER` and `--server` override it. Without an override, clients use `http://localhost:8080`. Repository configuration cannot select the server or change daemon credentials/models.
 
 Configure `kodelet serve` with flags or the trusted user-level `serve` namespace. Repository configuration cannot set `serve`; command-line flags take precedence, and static token or OIDC secret files must be owner-only. See [Web UI Server](#web-ui-server) and [`config.sample.yaml`](../config.sample.yaml).
 
+**Repository-level Configuration**
+
+The runner reads `kodelet-config.yaml` from each conversation's execution directory. Workspace settings may narrow host permissions and configure resources; they cannot replace daemon model settings or define trusted environment profiles. Runner defaults, workspace settings, the selected runner profile, and permitted request restrictions are applied in that order. Changes affect later runs, not active ones.
+
 ```yaml
-# Repository config (kodelet-config.yaml) - only override what's different
-provider: "openai"
-model: gpt-4.1
+# Repository config (kodelet-config.yaml)
+allowed_commands: ["git status", "git diff *"]
+extensions:
+  enabled: false
 ```
-
-```bash
-# Result: using provider=openai, model=gpt-4.1, max_tokens=8192, log_level=info
-kodelet run "analyze this codebase"
-```
-
-**Benefits of layered configuration:**
-- **Minimal repo configs**: Only specify what's different from your global settings
-- **Team consistency**: Share project-specific settings while preserving individual global preferences
-- **Inheritance**: Automatically inherit global settings like API keys, logging preferences, etc.
 
 Example `config.yaml`:
 
@@ -826,11 +864,8 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 # Enable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --enable-fs-search-tools "query"
 
-# Use a custom system prompt template
-kodelet run --sysprompt ./sysprompt.tmpl "query"
-
-# Pass custom template args (repeatable)
-kodelet run --sysprompt ./sysprompt.tmpl --sysprompt-arg project=kodelet --sysprompt-arg env=dev "query"
+# Use runner-owned prompt/resources configured in an environment profile
+kodelet run --runner-profile project "query"
 
 # Profile override for single command
 kodelet run --profile anthropic "explain this architecture"
@@ -914,46 +949,24 @@ Select one with `kodelet chat --runner RUNNER --runner-profile workspace` or the
 
 ### Profile Management Commands
 
-**View current active profile:**
+Inspect the selected daemon's profiles with `--server` or `KODELET_SERVER`. `show` displays advertised reasoning settings, not credential-bearing configuration.
+
 ```bash
 kodelet profile current
-```
-
-**List all available profiles:**
-```bash
 kodelet profile list
-```
-
-**Show detailed configuration for a profile:**
-```bash
 kodelet profile show anthropic
-kodelet profile show default  # Shows base configuration
+kodelet run --profile anthropic "explain this architecture"
 ```
 
-**Switch to a different profile:**
+To change defaults, run these operator commands **on the daemon host**, then restart `kodelet serve`. Top-level `profile use` does not modify a remote daemon.
+
 ```bash
-kodelet profile use anthropic    # Switch in repository config (./kodelet-config.yaml)
-kodelet profile use openai -g     # Switch in global config (~/.kodelet/config.yaml)
-kodelet profile use default       # Use base configuration without any profile
+kodelet host profile show anthropic
+kodelet host profile use anthropic -g
+kodelet host profile use default -g
 ```
 
-Profiles supplied by `KODELET_CONFIG_FILE` are listed with `override` scope and take precedence over repository and global definitions. `kodelet profile use` writes only the standard repository or global config path; if a different override file is authoritative because isolated mode is active or it sets `profile`, update that override file directly.
-
-**Practical workflow examples:**
-```bash
-# Check what's currently active, then switch to a different profile
-kodelet profile current
-kodelet profile use development
-
-# Use the anthropic profile globally across all projects
-kodelet profile use anthropic -g
-
-# Show the merged configuration for a specific profile
-kodelet profile show mix-n-match
-
-# Return to base configuration (no profile)
-kodelet profile use default
-```
+Host profile commands inspect or modify host-local configuration. Use `-g` for daemon defaults; repository files do not configure daemon model profiles. Edit an authoritative `KODELET_CONFIG_FILE` directly instead.
 
 ### Profile Usage
 
@@ -968,15 +981,15 @@ kodelet run --profile openai "what does this function do?"
 kodelet run --profile default "use base configuration"
 ```
 
-**Environment variable override:**
+**Daemon-host environment default (before starting the daemon):**
 ```bash
 export KODELET_PROFILE="anthropic"
-kodelet run "this will use the anthropic profile"
+kodelet serve
 ```
 
 ### Profile Precedence and Merging
 
-Profiles follow a hierarchical approach with intelligent merging:
+Profile definitions and defaults are resolved on the daemon host. Client-local profile files do not configure a remote daemon; select an advertised profile with `--profile`.
 
 **Profile Selection Priority:**
 1. Command-line `--profile` flag (highest)
@@ -1002,9 +1015,11 @@ Profiles follow a hierarchical approach with intelligent merging:
 The `"default"` profile is a special reserved name that means "use base configuration without any profile":
 
 ```bash
-# These are equivalent - both use base configuration
-kodelet profile use default
+# Select base configuration for one conversation
 kodelet run --profile default "query"
+
+# Change the daemon-host default, then restart serve
+kodelet host profile use default -g
 ```
 
 You cannot define a profile named "default" in your configuration files - it's reserved for this special purpose.
@@ -1124,19 +1139,19 @@ openai:
 
 ## OpenAI Codex Authentication
 
-Kodelet supports ChatGPT-backed Codex authentication for `openai.platform: codex`.
+Kodelet supports ChatGPT-backed Codex authentication for `openai.platform: codex`. Login and status target the selected daemon and require administrator access (`--server`/`KODELET_SERVER`, `--auth-token`/`KODELET_AUTH_TOKEN`).
 
 ### Login
 
 ```bash
-# Browser redirect flow
+# Device sign-in; credentials stay on the daemon
 kodelet codex login
 
-# Device code flow for remote/headless machines
-kodelet codex login --device-auth
+# Print the URL without opening a browser
+kodelet codex login --device-auth --no-browser
 ```
 
-Both flows save credentials to `~/.kodelet/codex-credentials.json`.
+Device authentication is always used; no client callback server is started. For GitHub Copilot, use `kodelet copilot-login` with the same daemon flags.
 
 ### Check Status
 
@@ -1144,10 +1159,11 @@ Both flows save credentials to `~/.kodelet/codex-credentials.json`.
 kodelet codex status
 ```
 
-With ChatGPT OAuth credentials, this also shows the live Codex usage snapshot,
-including rolling windows and workspace credits.
+This reports daemon connection status only. Operators can inspect detailed usage on the daemon host with `kodelet host codex status`. Remote Codex/Copilot logout is not available: stop the daemon, run `kodelet host codex logout` or `kodelet host copilot-logout` on its host, then restart it.
 
 ### Configure Codex
+
+Set these model defaults in the daemon-host configuration and restart `serve`.
 
 ```yaml
 provider: openai
@@ -1218,7 +1234,7 @@ Kodelet only enables this built-in tool when all of the following are true:
 
 ## Anthropic Multi-Account Authentication
 
-Kodelet supports multiple Anthropic subscription accounts, allowing you to manage different accounts (e.g., work and personal) and switch between them at runtime.
+Manage multiple Anthropic subscription accounts on the selected daemon. These commands require daemon administrator access and accept `--server`/`KODELET_SERVER` and `--auth-token`/`KODELET_AUTH_TOKEN`. They do not read or write client provider credentials.
 
 ### Logging In with Multiple Accounts
 
@@ -1230,7 +1246,7 @@ kodelet anthropic login --alias work
 kodelet anthropic login
 ```
 
-The first account logged in automatically becomes the default account.
+The daemon exchanges the authorization code and stores the credentials. The first account becomes the default; omit browser launch with `--no-browser`.
 
 ### Managing Accounts
 
@@ -1260,26 +1276,29 @@ kodelet anthropic accounts default personal
 **Remove an account:**
 ```bash
 kodelet anthropic accounts remove work
+kodelet anthropic accounts rename personal home
+kodelet anthropic accounts usage home --json
+kodelet anthropic logout  # Confirm removal of all daemon Anthropic accounts
 ```
 
-If you remove the default account, another account will automatically become the new default (if available).
+Removing the default selects another account when available. Finish or cancel pending sign-in before changing accounts. Logout removes saved accounts, not provider-issued tokens or already-running conversations.
 
 ### Using Accounts at Runtime
 
-Specify which account to use with the `--account` flag:
+Select accounts through daemon model profiles; client `--account` overrides are not supported by daemon-backed execution.
 
 ```bash
 # Use a specific account for one-shot queries
-kodelet run --account work "analyze this code"
-kodelet run --account personal "help with my side project"
+kodelet run --profile work "analyze this code"
+kodelet run --profile personal "help with my side project"
 ```
 
-Without the `--account` flag, Kodelet uses the default account.
+Profiles must already exist on the daemon and configure the desired account. Otherwise the daemon's provider configuration selects its default account.
 
 ### Account Status
 
 The `kodelet anthropic accounts list` command shows token status:
-- **valid**: Token is valid and ready to use
+- **valid**: Saved token has not expired; this does not test provider authorization
 - **needs refresh**: Token will be refreshed on next use
 - **expired**: Token has expired and needs re-authentication
 
@@ -1583,14 +1602,16 @@ Within each extension root, Kodelet loads either direct or nested executables:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
 
-Inspect discovered extensions with:
+Inspect installed extension files on the runner host, from the intended workspace. These commands do not start extensions or inspect another machine's live runtime:
 
 ```bash
-kodelet extension list
-kodelet extension list --json
-kodelet extension inspect weather
-kodelet extension inspect org@repo/weather --json
+kodelet host extension list
+kodelet host extension list --json
+kodelet host extension inspect weather
+kodelet host extension inspect org@repo/weather --json
 ```
+
+Top-level `kodelet extension list/inspect` now fail with migration guidance; use the same arguments under `host`.
 
 ### Extension Commands and Dynamic Recipes
 
@@ -1646,7 +1667,14 @@ ext.registerCommand({
 });
 ```
 
-Recipe-like commands appear in `kodelet recipe list` and can be invoked through recipe UX such as `kodelet run -r review --arg target=main`. They can also be invoked directly as slash commands, for example `/review target=main`.
+Invoke runner-owned recipes with `kodelet run -r review --arg target=main` or slash commands such as `/review target=main`. For operator inspection, run these commands on the runner host in the intended workspace:
+
+```bash
+kodelet host recipe list --show-path
+kodelet host recipe show review --arg target=main
+```
+
+`host recipe list` starts local extensions to discover dynamic recipes. `host recipe show` renders file-backed templates and may execute their commands locally; it does not render dynamic extension recipes. Use only in trusted workspaces. Top-level `kodelet recipe list/show` now fail with migration guidance.
 
 `runAgent` commands may set `display` to control the persisted user-facing text while `prompt` remains the model input.
 

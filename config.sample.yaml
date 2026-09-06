@@ -8,9 +8,9 @@ log_level: "info"
 # Log format for the application (json, text, fmt)
 log_format: "json"
 
-# Default Kodelet control-plane URL for chat, ACP, and runner commands.
-# When configured, `kodelet chat` and `kodelet acp` use server-backed mode
-# without requiring an explicit --server flag. KODELET_SERVER overrides this.
+# Default Kodelet control-plane URL for run, conversation, chat, ACP, and runner commands.
+# Ordinary commands always use the daemon (default http://localhost:8080).
+# KODELET_SERVER overrides this setting; --server overrides both.
 # This security-sensitive option is honored only from ~/.kodelet/config.yaml or
 # a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
 # server: "https://kodelet.example"
@@ -24,11 +24,19 @@ log_format: "json"
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080
-#   cwd: "/srv/kodelet"
-#   # Disable control-plane-local chat execution, terminal, Git diff, CWD
-#   # discovery, and local slash-command discovery. Requires workspace runners
-#   # for executable conversations and cannot be combined with cwd.
-#   disable_control_plane_workspace: false
+#   # Embedded runner enabled by default; set false for external runners only.
+#   # Workspace operations always use runners. serve.cwd is no longer supported.
+#   embedded_runner: true
+#   # runner_workspace: "/srv/workspaces"
+#   # Environment settings only; provider configuration stays daemon-owned.
+#   # runner_settings:
+#   #   tool_mode: "full"
+#   #   allowed_tools: ["bash", "file_read", "file_write", "apply_patch"]
+#   #   environment_profiles:
+#   #     review:
+#   #       allowed_tools: ["file_read"]
+#   # Per-execution kodelet-config.yaml may narrow these tool/command lists,
+#   # but cannot define environment profiles or enable disabled skills/extensions.
 #   web_auth_mode: "oidc"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.
@@ -108,8 +116,8 @@ aliases:
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "anthropic"
 
-# Profile definitions for different use cases
-# Each profile can override any configuration setting
+# Daemon model profiles. Configure workspace tools separately in runner defaults
+# or environment_profiles; selecting a model profile does not select tool policy.
 profiles:
   anthropic:
     model: "claude-opus-5"
@@ -133,8 +141,6 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
-    tool_mode: "patch"
-    enable_fs_search_tools: false
     openai:
       platform: "copilot"
       api_mode: "responses"
@@ -163,8 +169,6 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
-    tool_mode: "patch"
-    enable_fs_search_tools: false
     openai:
       api_mode: "responses"
 
@@ -175,8 +179,6 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
-    tool_mode: "patch"
-    enable_fs_search_tools: false
     openai:
       platform: "codex"
       api_mode: "responses"

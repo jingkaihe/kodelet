@@ -14,6 +14,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -33,20 +34,25 @@ const (
 	chatToolOutputTruncationMarker = "\n\n[output truncated for remote display]"
 	// ConversationStreamActiveHeader reports whether a conversation was active when a live stream attached.
 	ConversationStreamActiveHeader = "X-Kodelet-Conversation-Active"
+	// ClientIDHeader identifies one attached UI client, independently of its user login.
+	ClientIDHeader = "X-Kodelet-Client-ID"
+	// UICapabilitiesHeader declares UI features supported by a watching client.
+	UICapabilitiesHeader = "X-Kodelet-UI-Capabilities"
 )
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message            string                  `json:"message"`
-	Content            []ChatContentBlock      `json:"content,omitempty"`
-	ConversationID     string                  `json:"conversationId,omitempty"`
-	TurnID             string                  `json:"turnId,omitempty"`
-	RunnerID           string                  `json:"runnerId,omitempty"`
-	Profile            string                  `json:"profile,omitempty"`
-	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
-	ReasoningEffort    string                  `json:"reasoningEffort,omitempty"`
-	CWD                string                  `json:"cwd,omitempty"`
-	ClientCapabilities *ChatClientCapabilities `json:"clientCapabilities,omitempty"`
+	Message            string                     `json:"message"`
+	Content            []ChatContentBlock         `json:"content,omitempty"`
+	ConversationID     string                     `json:"conversationId,omitempty"`
+	TurnID             string                     `json:"turnId,omitempty"`
+	RunnerID           string                     `json:"runnerId,omitempty"`
+	Profile            string                     `json:"profile,omitempty"`
+	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
+	ReasoningEffort    string                     `json:"reasoningEffort,omitempty"`
+	CWD                string                     `json:"cwd,omitempty"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
+	ClientCapabilities *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
 }
 
 const (
@@ -102,11 +108,14 @@ type ChatEvent struct {
 	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
 	UISelect         *UISelectEvent                  `json:"ui_select,omitempty"`
 	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
+	UIRequestID      string                          `json:"ui_request_id,omitempty"`
 	UIWidget         *UIWidgetEvent                  `json:"ui_widget,omitempty"`
 	UIWidgets        []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
 	UIWidgetRevision string                          `json:"ui_widget_revision,omitempty"`
+	UIPersistent     *UIPersistentEvent              `json:"ui_persistent,omitempty"`
 	Cancelled        bool                            `json:"cancelled,omitempty"`
 	Error            string                          `json:"error,omitempty"`
+	Result           *string                         `json:"result,omitempty"`
 }
 
 // UIInputEvent describes an extension-requested input prompt.
@@ -345,6 +354,20 @@ func runDefaultChat(
 	threadOwner *DefaultChatRunner,
 	environmentResolver EnvironmentResolver,
 ) (resultSessionID string, resultErr error) {
+	req.Options = req.Options.Clone()
+	if err := req.Options.Validate(); err != nil {
+		return "", err
+	}
+	if req.Options != nil && req.Options.ReasoningEffort != nil {
+		effort, _ := llmtypes.NormalizeReasoningEffort(*req.Options.ReasoningEffort)
+		if req.ReasoningEffort != "" {
+			legacy, err := llmtypes.NormalizeReasoningEffort(req.ReasoningEffort)
+			if err != nil || legacy != effort {
+				return "", errors.New("reasoningEffort conflicts with options.reasoningEffort")
+			}
+		}
+		req.ReasoningEffort = effort
+	}
 	message, imageInputs, err := NormalizeRequest(req)
 	if err != nil {
 		return "", err
@@ -370,7 +393,19 @@ func runDefaultChat(
 	var resolvedCWD string
 	var expectedCWD string
 	var environmentProfile string
-	if strings.TrimSpace(req.RunnerID) != "" {
+	child, isChild := ctx.Value(childContextKey{}).(*childContext)
+	var resumedChildPrompt *string
+	if isChild {
+		llmConfig = child.config.Clone()
+		resolvedCWD, environmentProfile = req.CWD, req.EnvironmentProfile
+		invokedBy = "subagent"
+		if err := persistChildIdentity(ctx, child, req.RunnerID, environmentProfile); err != nil {
+			return sessionID, err
+		}
+		if err := delegation.Admit(ctx); err != nil {
+			return sessionID, err
+		}
+	} else if strings.TrimSpace(req.RunnerID) != "" {
 		llmConfig, environmentProfile, err = ResolveRemoteConfigWithReasoningAndEnvironmentProfile(
 			ctx,
 			sessionID,
@@ -390,6 +425,16 @@ func runDefaultChat(
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
+	if !isChild {
+		llmConfig, err = resolveExecutionOptions(ctx, req, llmConfig)
+		if err != nil {
+			return sessionID, err
+		}
+		llmConfig, resumedChildPrompt, err = restoreChildPreset(ctx, req, llmConfig)
+		if err != nil {
+			return sessionID, err
+		}
+	}
 	llmConfig.WorkingDirectory = resolvedCWD
 
 	var extensionRuntime *extensions.Runtime
@@ -402,8 +447,25 @@ func runDefaultChat(
 		if err != nil {
 			return sessionID, err
 		}
+		if isChild {
+			remote, ok := environment.(*agentenv.RemoteEnvironment)
+			if !ok {
+				return sessionID, errors.New("delegated children require a remote runner environment")
+			}
+			remote.SetChildRunID(child.identity.RunID)
+			remote.SetChildPrompt(child.prompt)
+		} else if resumedChildPrompt != nil {
+			remote, ok := environment.(*agentenv.RemoteEnvironment)
+			if !ok {
+				return sessionID, errors.New("delegated children require a remote runner environment")
+			}
+			remote.SetChildPrompt(*resumedChildPrompt)
+		}
 	}
-	if environment == nil && extensionRuntimes != nil {
+	extensionsDisabled := llmConfig.EnvironmentOptions().NoExtensions
+	if environment == nil && extensionsDisabled != nil && *extensionsDisabled {
+		// Do not initialize disabled extensions, including session.start hooks.
+	} else if environment == nil && extensionRuntimes != nil {
 		if contextualProvider, ok := extensionRuntimes.(contextualExtensionRuntimeProvider); ok {
 			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensionCallContext(sessionID, resolvedCWD, llmConfig, invokedBy))
 		} else {
@@ -446,6 +508,57 @@ func runDefaultChat(
 		Config:                   llmConfig,
 		InvokedBy:                invokedBy,
 	}
+	var thread llmtypes.Thread
+	releaseThread := func() {}
+	checkpointSaved := false
+	prepareThread := func(ctx context.Context) error {
+		if thread != nil {
+			return nil
+		}
+		var newThread bool
+		thread, newThread, releaseThread, err = acquireChatThread(threadOwner, sessionID, llmConfig)
+		if err != nil {
+			return errors.Wrap(err, "failed to create LLM thread")
+		}
+		thread.SetConversationID(sessionID)
+		if newThread {
+			thread.EnablePersistence(ctx, true)
+		}
+		if strings.TrimSpace(req.RunnerID) != "" {
+			thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))
+			thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
+		}
+		return nil
+	}
+	defer func() {
+		releaseThread()
+		// A failed opening/user-message hook can leave admitted input only in the
+		// durable checkpoint. Reload it rather than reuse the pre-input live cache.
+		if checkpointSaved && (resultErr != nil || ctx.Err() != nil) && threadOwner != nil {
+			_ = threadOwner.CloseConversation(sessionID)
+		}
+	}()
+	if isChild {
+		// Delegated children have their own durable admission and must never
+		// reuse an inherited ordinary parent turn's checkpoint authority.
+		ctx = agentenv.ContextWithRunCheckpoint(ctx, nil)
+	} else if strings.TrimSpace(req.RunnerID) != "" {
+		ctx = agentenv.ContextWithRunCheckpoint(ctx, func(saveCtx context.Context, cwd string) error {
+			llmConfig.WorkingDirectory = cwd
+			if err := prepareThread(saveCtx); err != nil {
+				return err
+			}
+			saver, ok := thread.(llmtypes.PendingUserMessageSaver)
+			if !ok || !thread.IsPersisted() {
+				return errors.New("conversation admission persistence is unavailable")
+			}
+			if err := saver.SavePendingUserMessage(saveCtx, message, imageInputs...); err != nil {
+				return errors.Wrap(err, "failed to persist admitted user input")
+			}
+			checkpointSaved = true
+			return nil
+		})
+	}
 	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
 	if err != nil {
 		return sessionID, err
@@ -458,7 +571,10 @@ func runDefaultChat(
 	if commandResult.Matched {
 		switch commandResult.Action {
 		case agentenv.CommandActionRespond:
-			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, strings.TrimSpace(req.RunnerID), environmentProfile, message, commandResult.Response, imageInputs); err != nil {
+			if err := prepareThread(ctx); err != nil {
+				return sessionID, err
+			}
+			if err := saveDirectCommandResponse(ctx, thread, message, commandResult.Response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
@@ -468,6 +584,9 @@ func runDefaultChat(
 				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
 					return sessionID, err
 				}
+			}
+			if err := sink.Send(ChatEvent{Kind: "result", ConversationID: sessionID, Result: &commandResult.Response}); err != nil {
+				logger.G(ctx).WithError(err).Debug("failed to send command result event")
 			}
 			return sessionID, nil
 		case agentenv.CommandActionRunAgent:
@@ -519,23 +638,25 @@ func runDefaultChat(
 		}
 	}
 
-	thread, newThread, releaseThread, err := acquireChatThread(threadOwner, sessionID, llmConfig)
-	if err != nil {
-		return sessionID, errors.Wrap(err, "failed to create LLM thread")
+	if err := prepareThread(ctx); err != nil {
+		return sessionID, err
 	}
-	defer releaseThread()
+	if checkpointSaved && commandResult.Matched {
+		setter, ok := thread.(interface {
+			SetCommandConfig(string, []string, []string)
+		})
+		if !ok {
+			return sessionID, errors.New("conversation provider cannot apply command restrictions")
+		}
+		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools, llmConfig.AllowedCommands)
+	}
+	if isChild && child.aggregate != nil {
+		defer func() { child.aggregate(thread.GetUsage()) }()
+	}
 	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
 		extensionSetter.SetExtensions(extensionRuntime)
 	}
 
-	thread.SetConversationID(sessionID)
-	if strings.TrimSpace(req.RunnerID) != "" {
-		thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))
-		thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
-	}
-	if newThread {
-		thread.EnablePersistence(ctx, true)
-	}
 	if renameName != "" {
 		name, err := conversationservice.RenameThread(ctx, thread, renameName)
 		if err != nil {
@@ -580,12 +701,20 @@ func runDefaultChat(
 		sink:           sink,
 	}
 	environmentHandedOff = true
-	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      imageInputs,
-	})
+	messageOpt := executionMessageOpt(req.Options)
+	if strings.TrimSpace(req.RunnerID) != "" {
+		ctx = contextWithCentralModelHelper(ctx, thread)
+		parentRequest := req
+		parentRequest.EnvironmentProfile = environmentProfile
+		ctx = contextWithCentralChildren(ctx, thread, environment, parentRequest, environmentResolver)
+	}
+	messageOpt.Images = imageInputs
+	result, err := thread.SendMessage(ctx, message, handler, messageOpt)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to process chat message")
+	}
+	if err := sink.Send(ChatEvent{Kind: "result", ConversationID: sessionID, Result: &result}); err != nil {
+		logger.G(ctx).WithError(err).Debug("failed to send final result event")
 	}
 
 	return sessionID, nil
@@ -620,6 +749,10 @@ func persistDirectCommandResponse(
 	if !thread.IsPersisted() {
 		thread.EnablePersistence(ctx, true)
 	}
+	return saveDirectCommandResponse(ctx, thread, message, response, images)
+}
+
+func saveDirectCommandResponse(ctx context.Context, thread llmtypes.Thread, message, response string, images []string) error {
 	appender, ok := thread.(assistantMessageAppender)
 	if !ok {
 		return errors.New("conversation provider cannot persist direct command responses")

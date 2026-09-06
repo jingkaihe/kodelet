@@ -15,8 +15,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,16 +62,6 @@ func (p *switchableRemoteChatProvider) setBlocked(blocked bool) {
 	p.mu.Unlock()
 }
 
-type recordingRemoteCommandSource struct {
-	commands []slashcommands.Command
-	profile  string
-}
-
-func (s *recordingRemoteCommandSource) Commands(_ context.Context, profile string) ([]slashcommands.Command, error) {
-	s.profile = profile
-	return append([]slashcommands.Command(nil), s.commands...), nil
-}
-
 func (p staticRemoteChatProvider) WaitForRemoteChat(context.Context) (RemoteChatClient, string, error) {
 	return p.client, p.runnerID, p.err
 }
@@ -85,10 +77,34 @@ type fakeRemoteChatClient struct {
 	requests []chat.ChatRequest
 	stopped  []string
 	steered  []string
+	discover func(chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
+	targets  []chat.WorkspaceTarget
+	settings chat.ControlPlaneChatSettings
 
 	steerStarted   chan struct{}
 	steerRelease   chan struct{}
 	steerCancelled bool
+}
+
+func (c *fakeRemoteChatClient) ChatSettings(context.Context, string) (chat.ControlPlaneChatSettings, error) {
+	return c.settings, nil
+}
+
+func (c *fakeRemoteChatClient) DiscoverWorkspace(_ context.Context, target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+	c.mu.Lock()
+	c.targets = append(c.targets, target)
+	c.mu.Unlock()
+	if c.discover != nil {
+		return c.discover(target)
+	}
+	if target.ConversationID != "" && c.history.ID != "" {
+		return protocol.WorkspaceDiscoverResult{CWD: c.history.CWD, EnvironmentProfile: c.history.EnvironmentProfile}, nil
+	}
+	cwd := target.CWD
+	if cwd == "" {
+		cwd = "/runner/default"
+	}
+	return protocol.WorkspaceDiscoverResult{CWD: cwd, EnvironmentProfile: target.EnvironmentProfile}, nil
 }
 
 func (c *fakeRemoteChatClient) Run(ctx context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
@@ -238,7 +254,7 @@ func TestRemoteACPSessionSteeringFinishesBeforePromptCloses(t *testing.T) {
 	assert.False(t, client.steerCancelled)
 }
 
-func newRemoteACPTestServer(t *testing.T, workspace string, client RemoteChatClient, output *bytes.Buffer) *Server {
+func newRemoteACPTestServer(t *testing.T, _ string, client RemoteChatClient, output *bytes.Buffer) *Server {
 	t.Helper()
 	server := NewServer(
 		WithInput(bytes.NewBuffer(nil)),
@@ -246,7 +262,6 @@ func newRemoteACPTestServer(t *testing.T, workspace string, client RemoteChatCli
 		WithContext(t.Context()),
 		WithRemoteSessions(RemoteSessionConfig{
 			Provider:           staticRemoteChatProvider{client: client, runnerID: "runner-1"},
-			Workspace:          workspace,
 			Profile:            "server-profile",
 			ReasoningEffort:    "high",
 			EnvironmentProfile: "workspace",
@@ -320,7 +335,9 @@ func TestRemoteACPNewSessionAndPrompt(t *testing.T) {
 	assert.NotEqual(t, requests[0].TurnID, requests[1].TurnID)
 	assert.Empty(t, requests[1].Profile)
 	assert.Empty(t, requests[1].ReasoningEffort)
-	assert.Empty(t, requests[1].EnvironmentProfile)
+	assert.Equal(t, "workspace", requests[1].EnvironmentProfile)
+	assert.Equal(t, workspace, requests[0].CWD)
+	assert.Equal(t, workspace, requests[1].CWD)
 }
 
 func TestOrderedRemoteCancelCannotRacePromptRegistration(t *testing.T) {
@@ -370,6 +387,8 @@ func TestRemoteACPLoadReplaysControlPlaneHistory(t *testing.T) {
 	client := &fakeRemoteChatClient{history: chat.ConversationHistory{
 		ID:       "conversation-1",
 		RunnerID: "runner-1",
+		CWD:      workspace,
+		Profile:  "server-profile",
 		Messages: []conversations.StreamableMessage{
 			{Kind: "text", Role: "user", Content: "hello"},
 			{Kind: "text", Role: "assistant", Content: "world"},
@@ -443,7 +462,6 @@ func TestRemoteACPLoadRequiresExactConversationAffinity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := newRemoteSessionManager(RemoteSessionConfig{
 				Provider:                   staticRemoteChatProvider{client: &fakeRemoteChatClient{history: tt.history}, runnerID: "runner-1"},
-				Workspace:                  workspace,
 				EnvironmentProfile:         "workspace",
 				EnvironmentProfileExplicit: true,
 			})
@@ -457,7 +475,6 @@ func TestRemoteACPLoadRequiresExactConversationAffinity(t *testing.T) {
 func TestRemoteACPReadinessWaitHasDeadline(t *testing.T) {
 	manager := newRemoteSessionManager(RemoteSessionConfig{
 		Provider:         blockingRemoteChatProvider{},
-		Workspace:        t.TempDir(),
 		ReadinessTimeout: 10 * time.Millisecond,
 	})
 
@@ -466,18 +483,18 @@ func TestRemoteACPReadinessWaitHasDeadline(t *testing.T) {
 }
 
 func TestRemoteACPCommandsIncludeBuiltInsAndWorkspaceCommands(t *testing.T) {
-	source := &recordingRemoteCommandSource{commands: []slashcommands.Command{
-		{Name: "review", Description: "Review the workspace"},
-		{Name: "goal", Description: "duplicate"},
+	client := &fakeRemoteChatClient{discover: func(target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+		assert.Equal(t, chat.WorkspaceTarget{RunnerID: "runner-1", CWD: "/runner/another-project", EnvironmentProfile: "gpu"}, target)
+		return protocol.WorkspaceDiscoverResult{Commands: []slashcommands.Command{
+			{Name: "review", Description: "Review the workspace"},
+			{Name: "goal", Description: "duplicate"},
+		}}, nil
 	}}
-	manager := newRemoteSessionManager(RemoteSessionConfig{
-		CommandSource: source,
-	})
-	manager.sessions["session-1"] = &remoteSession{id: "session-1", environmentProfile: "gpu"}
+	manager := newRemoteSessionManager(RemoteSessionConfig{})
+	manager.sessions["session-1"] = &remoteSession{id: "session-1", client: client, runnerID: "runner-1", cwd: "/runner/another-project", environmentProfile: "gpu"}
 
 	commands, err := manager.commands(t.Context(), "session-1")
 	require.NoError(t, err)
-	assert.Equal(t, "gpu", source.profile)
 	names := make([]string, 0, len(commands))
 	for _, command := range commands {
 		names = append(names, command.Name)
@@ -490,13 +507,13 @@ func TestRemoteACPSessionsCanRunConcurrently(t *testing.T) {
 	manager.sessions["session-1"] = &remoteSession{id: "session-1"}
 	manager.sessions["session-2"] = &remoteSession{id: "session-2"}
 
-	firstPrompt, _, err := manager.beginPrompt("session-1")
+	firstPrompt, err := manager.beginPrompt("session-1")
 	require.NoError(t, err)
 	assert.True(t, firstPrompt)
-	secondPrompt, _, err := manager.beginPrompt("session-2")
+	secondPrompt, err := manager.beginPrompt("session-2")
 	require.NoError(t, err)
 	assert.True(t, secondPrompt)
-	_, _, err = manager.beginPrompt("session-1")
+	_, err = manager.beginPrompt("session-1")
 	require.ErrorContains(t, err, "already has an active prompt")
 
 	assert.True(t, manager.isActive("session-1"))
@@ -506,7 +523,7 @@ func TestRemoteACPSessionsCanRunConcurrently(t *testing.T) {
 	assert.True(t, manager.isActive("session-2"))
 }
 
-func TestRemoteACPRunEOFCancelsPromptAndStopsControlPlane(t *testing.T) {
+func TestRemoteACPRunEOFDetachesWithoutStoppingControlPlane(t *testing.T) {
 	workspace := t.TempDir()
 	stopCalled := make(chan struct{})
 	stopOnce := sync.Once{}
@@ -535,8 +552,8 @@ func TestRemoteACPRunEOFCancelsPromptAndStopsControlPlane(t *testing.T) {
 	}
 	select {
 	case <-stopCalled:
+		t.Fatal("EOF must not stop daemon work")
 	default:
-		t.Fatal("expected StopConversation to be called")
 	}
 }
 
@@ -626,7 +643,7 @@ func TestRemoteACPCancelUsesPromptClientWithoutWaitingForRunnerReadiness(t *test
 		WithInput(bytes.NewBuffer(nil)),
 		WithOutput(output),
 		WithContext(t.Context()),
-		WithRemoteSessions(RemoteSessionConfig{Provider: provider, Workspace: workspace}),
+		WithRemoteSessions(RemoteSessionConfig{Provider: provider}),
 	)
 	server.initialized.Store(true)
 	t.Cleanup(server.Shutdown)
@@ -729,7 +746,8 @@ func TestRemoteACPCancelFailureStillCancelsLocalPrompt(t *testing.T) {
 
 	messages := readJSONRPCMessages(t, output)
 	require.Len(t, messages, 1)
-	assert.Equal(t, string(acptypes.StopReasonCancelled), messages[0]["result"].(map[string]any)["stopReason"])
+	assert.Nil(t, messages[0]["result"], "cannot claim daemon cancellation without acknowledgement")
+	assert.Contains(t, messages[0]["error"].(map[string]any)["message"], "cancellation was not acknowledged")
 }
 
 func TestRemoteACPCancelTreatsControlPlaneEOFAsCancelled(t *testing.T) {
@@ -738,6 +756,8 @@ func TestRemoteACPCancelTreatsControlPlaneEOFAsCancelled(t *testing.T) {
 	chatStarted := make(chan struct{})
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch {
+		case request.URL.Path == "/api/chat/slash-commands":
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: workspace, EnvironmentProfile: "workspace"}))
 		case request.URL.Path == "/api/chat":
 			var chatRequest chat.ChatRequest
 			require.NoError(t, json.NewDecoder(request.Body).Decode(&chatRequest))
@@ -785,4 +805,131 @@ func TestRemoteACPCancelTreatsControlPlaneEOFAsCancelled(t *testing.T) {
 	messages := readJSONRPCMessages(t, output)
 	require.Len(t, messages, 1)
 	assert.Equal(t, string(acptypes.StopReasonCancelled), messages[0]["result"].(map[string]any)["stopReason"])
+}
+
+func TestRemoteACPRunnerDirectoriesAndDefaultsArePinnedPerSession(t *testing.T) {
+	client := &fakeRemoteChatClient{settings: chat.ControlPlaneChatSettings{DefaultRunnerID: "runner-a", DefaultRunnerReady: true}}
+	client.discover = func(target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+		return protocol.WorkspaceDiscoverResult{CWD: "/runner-only/" + target.CWD, EnvironmentProfile: "resolved", Commands: []slashcommands.Command{{Name: target.CWD}}}, nil
+	}
+	manager := newRemoteSessionManager(RemoteSessionConfig{Provider: staticRemoteChatProvider{client: client}, EnvironmentProfile: "requested"})
+	first, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "one"})
+	require.NoError(t, err)
+	client.settings.DefaultRunnerID = "runner-b"
+	second, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "two"})
+	require.NoError(t, err)
+	_, firstRequest := manager.promptTarget(first)
+	_, secondRequest := manager.promptTarget(second)
+	assert.Equal(t, "runner-a", firstRequest.RunnerID)
+	assert.Equal(t, "/runner-only/one", firstRequest.CWD)
+	assert.Equal(t, "runner-b", secondRequest.RunnerID)
+	assert.Equal(t, "/runner-only/two", secondRequest.CWD)
+	assert.Equal(t, "resolved", firstRequest.EnvironmentProfile)
+	_, err = manager.commands(t.Context(), first)
+	require.NoError(t, err)
+	assert.Equal(t, chat.WorkspaceTarget{RunnerID: "runner-a", CWD: "/runner-only/one", EnvironmentProfile: "resolved"}, client.targets[2])
+	assert.Empty(t, client.recordedRequests(), "directory validation and command discovery never submit a model turn")
+}
+
+func TestRemoteACPLoadUsesStoredAffinityWithoutDefaultRunner(t *testing.T) {
+	history := chat.ConversationHistory{ID: "saved", RunnerID: "old-runner", CWD: "/runner-only/saved", EnvironmentProfile: "old-environment", Profile: "old-model-profile"}
+	client := &fakeRemoteChatClient{history: history}
+	manager := newRemoteSessionManager(RemoteSessionConfig{Provider: staticRemoteChatProvider{client: client}})
+	loaded, err := manager.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: "saved"})
+	require.NoError(t, err)
+	assert.Equal(t, history, loaded)
+	_, request := manager.promptTarget("saved")
+	assert.Equal(t, history.RunnerID, request.RunnerID)
+	assert.Equal(t, history.CWD, request.CWD)
+	assert.Equal(t, history.EnvironmentProfile, request.EnvironmentProfile)
+	assert.Equal(t, []chat.WorkspaceTarget{{ConversationID: "saved"}}, client.targets)
+	first, err := manager.beginPrompt("saved")
+	require.NoError(t, err)
+	assert.False(t, first, "resume does not apply new-session defaults")
+}
+
+func TestRemoteACPResumeRejectsReplacementBeforeDiscovery(t *testing.T) {
+	for _, name := range []string{"cwd", "runner", "model-profile", "environment-profile"} {
+		t.Run(name, func(t *testing.T) {
+			client := &fakeRemoteChatClient{history: chat.ConversationHistory{ID: "saved", RunnerID: "stored-runner", CWD: "/runner-only/saved", Profile: "stored-model", EnvironmentProfile: "stored-environment"}}
+			config := RemoteSessionConfig{Provider: staticRemoteChatProvider{client: client}}
+			request := acptypes.LoadSessionRequest{SessionID: "saved", CWD: client.history.CWD}
+			switch name {
+			case "cwd":
+				request.CWD = t.TempDir()
+			case "runner":
+				config.Provider = staticRemoteChatProvider{client: client, runnerID: "replacement"}
+			case "model-profile":
+				config.Profile = "replacement"
+			case "environment-profile":
+				config.EnvironmentProfile, config.EnvironmentProfileExplicit = "", true
+			}
+			manager := newRemoteSessionManager(config)
+			_, err := manager.loadSession(t.Context(), request)
+			require.Error(t, err)
+			assert.Empty(t, client.targets)
+			assert.Empty(t, client.recordedRequests())
+			assert.False(t, manager.hasSession("saved"))
+		})
+	}
+}
+
+func TestRemoteACPDiscoveryFailureDoesNotCreateSession(t *testing.T) {
+	for _, message := range []string{"runner does not support workspace discovery", "directory does not exist", "runner is offline", "unknown environment profile"} {
+		t.Run(message, func(t *testing.T) {
+			client := &fakeRemoteChatClient{discover: func(chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+				return protocol.WorkspaceDiscoverResult{}, errors.New(message)
+			}}
+			manager := newRemoteSessionManager(RemoteSessionConfig{Provider: staticRemoteChatProvider{client: client, runnerID: "runner"}})
+			_, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: t.TempDir()})
+			require.ErrorContains(t, err, message)
+			assert.Empty(t, manager.sessions)
+			assert.Empty(t, client.recordedRequests())
+		})
+	}
+}
+
+func TestRemoteACPOptionsAreValidatedAndClonedBeforeEffects(t *testing.T) {
+	client := &fakeRemoteChatClient{}
+	provider := staticRemoteChatProvider{client: client, runnerID: "runner"}
+	invalid := newRemoteSessionManager(RemoteSessionConfig{Provider: provider, Options: &llmtypes.ExecutionOptions{MaxTurns: new(-1)}})
+	_, err := invalid.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "/runner-only"})
+	require.ErrorContains(t, err, "maxTurns")
+	assert.Empty(t, client.targets)
+
+	options := &llmtypes.ExecutionOptions{Model: new("alias"), NoTools: new(false), MaxTurns: new(0), AllowedTools: new([]string{}), AllowedCommands: new([]string{"git status"})}
+	manager := newRemoteSessionManager(RemoteSessionConfig{Provider: provider, Options: options})
+	*options.Model = "mutated"
+	(*options.AllowedCommands)[0] = "mutated"
+	sessionID, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{CWD: "/runner-only"})
+	require.NoError(t, err)
+	_, first := manager.promptTarget(sessionID)
+	assert.Equal(t, "alias", *first.Options.Model)
+	assert.Equal(t, []string{"git status"}, *first.Options.AllowedCommands)
+	assert.Equal(t, new([]string{}), first.Options.AllowedTools)
+	*first.Options.NoTools = true
+	manager.finishPrompt(sessionID, true)
+	_, second := manager.promptTarget(sessionID)
+	assert.Nil(t, second.Options.Model, "subsequent prompts use daemon-frozen model semantics")
+	assert.Equal(t, new(false), second.Options.NoTools)
+	assert.Equal(t, new(0), second.Options.MaxTurns)
+	assert.Equal(t, new([]string{}), second.Options.AllowedTools)
+}
+
+func TestRemoteACPUncertainSubmissionIsNotRepeated(t *testing.T) {
+	output := new(bytes.Buffer)
+	client := &fakeRemoteChatClient{run: func(_ context.Context, request chat.ChatRequest, _ chat.ChatEventSink) (string, error) {
+		return request.ConversationID, errors.New("stream disconnected")
+	}}
+	server := newRemoteACPTestServer(t, "", client, output)
+	id := createRemoteACPSession(t, server, output, "/runner-only")
+	request := &acptypes.Request{ID: json.RawMessage(`2`), Params: mustJSONRawMessage(t, acptypes.PromptRequest{SessionID: id, Prompt: []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "side effect"}}})}
+	require.NoError(t, server.handleSessionPrompt(request))
+	response := readJSONRPCMessage(t, output)
+	assert.Contains(t, response["error"].(map[string]any)["message"], "not retried")
+	assert.Contains(t, response["error"].(map[string]any)["message"], string(id))
+	require.NoError(t, server.handleSessionPrompt(request))
+	response = readJSONRPCMessage(t, output)
+	assert.Contains(t, response["error"].(map[string]any)["message"], "outcome is uncertain")
+	assert.Len(t, client.recordedRequests(), 1)
 }

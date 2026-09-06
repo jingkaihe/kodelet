@@ -119,6 +119,19 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	return t.Store.Save(ctx, record)
 }
 
+// SavePendingUserMessage saves an admission checkpoint without changing live history.
+// The caller must own the thread, just as when calling SendMessage.
+func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
+	if !t.Persisted || t.Store == nil {
+		return errors.New("conversation persistence is unavailable")
+	}
+	original := t.messages
+	t.messages = slices.Clone(original)
+	defer func() { t.messages = original }()
+	t.AddUserMessage(ctx, message, images...)
+	return t.SaveConversation(ctx)
+}
+
 // ForkConversation snapshots the live thread into a new persisted conversation.
 func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
 	if t.ConversationForkBlocked() {

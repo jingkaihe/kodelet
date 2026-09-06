@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -183,4 +185,128 @@ Hello {{.subject}}!
 	assert.Contains(t, output, "subject: Thing to greet (default: world)")
 	assert.Contains(t, output, "Recipe Content")
 	assert.Contains(t, output, "Hello kodelet!")
+}
+
+type hostInspectionFixture struct {
+	cwd, home, extensionPath, extensionMarker, templateMarker string
+	env                                                       []string
+}
+
+func newHostInspectionFixture(t *testing.T) hostInspectionFixture {
+	t.Helper()
+	root := t.TempDir()
+	fixture := hostInspectionFixture{
+		cwd: filepath.Join(root, "workspace"), home: filepath.Join(root, "home"),
+		extensionMarker: filepath.Join(root, "extension-started"), templateMarker: filepath.Join(root, "template-executed"),
+	}
+	fixture.extensionPath = filepath.Join(fixture.cwd, ".kodelet", "extensions", "kodelet-extension-poison")
+	recipeDir := filepath.Join(fixture.cwd, ".kodelet", "recipes")
+	for _, path := range []string{fixture.home, recipeDir, filepath.Dir(fixture.extensionPath)} {
+		require.NoError(t, os.MkdirAll(path, 0o700))
+	}
+	// A local runtime would start this executable even though initialization
+	// fails. Filesystem-only inspection must not run it at all.
+	script := "#!/bin/sh\nprintf started > \"$KODELET_TEST_EXTENSION_MARKER\"\nexit 73\n"
+	require.NoError(t, os.WriteFile(fixture.extensionPath, []byte(script), 0o700))
+	recipe := `---
+name: Poison recipe
+description: Host-only template execution fixture
+arguments:
+  subject:
+    default: world
+---
+Hello {{.subject}}! {{bash "/bin/sh" "-c" "printf rendered > \"$KODELET_TEST_TEMPLATE_MARKER\"; printf template-output"}}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, "poison.md"), []byte(recipe), 0o600))
+	state := filepath.Join(root, "not-a-state-directory")
+	require.NoError(t, os.WriteFile(state, []byte("no conversation store"), 0o600))
+	fixture.env = []string{
+		"HOME=" + fixture.home, "PATH=" + root, "KODELET_BASE_PATH=" + state, "KODELET_TEST_CLI_PROCESS=1",
+		"KODELET_SERVER=http://127.0.0.1:1", "KODELET_TEST_EXTENSION_MARKER=" + fixture.extensionMarker,
+		"KODELET_TEST_TEMPLATE_MARKER=" + fixture.templateMarker,
+	}
+	return fixture
+}
+
+func TestHostInspectionMigrationRejectsOldPathsBeforeEffects(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		args []string
+	}{
+		{"recipe", []string{"recipe"}},
+		{"recipe list", []string{"recipe", "list", "--json", "--show-path"}},
+		{"recipe list", []string{"recipe", "list", "--json=false", "--show-path=false"}},
+		{"recipe show", []string{"recipe", "show", "poison", "--arg=subject=unused", "-a", "another=value"}},
+		{"recipe show", []string{"recipe", "show", "missing"}},
+		{"extension", []string{"extension"}},
+		{"extension list", []string{"extension", "list", "--json"}},
+		{"extension inspect", []string{"extension", "inspect", "poison", "--json=false"}},
+		{"extension inspect", []string{"extension", "inspect", "missing", "--json"}},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			fixture := newHostInspectionFixture(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, test.args...).CombinedOutput()
+			require.Error(t, err, "%s", output)
+			assert.Contains(t, string(output), fmt.Sprintf("'%s' is host-only; use 'kodelet host %s' with the same arguments on the runner host in the intended workspace", test.path, test.path))
+			assert.NotContains(t, string(output), "unknown flag")
+			assert.NoFileExists(t, fixture.extensionMarker)
+			assert.NoFileExists(t, fixture.templateMarker)
+			assert.NoDirExists(t, filepath.Join(fixture.home, ".kodelet"))
+		})
+	}
+}
+
+func TestHostRecipeExplicitOperatorEffects(t *testing.T) {
+	for _, command := range []string{"list", "show"} {
+		t.Run(command, func(t *testing.T) {
+			fixture := newHostInspectionFixture(t)
+			args := []string{"host", "recipe", command}
+			if command == "list" {
+				args = append(args, "--show-path")
+			} else {
+				args = append(args, "poison", "-a", "subject=operator")
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, args...).CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			assert.Contains(t, string(output), "Poison recipe")
+			if command == "list" {
+				assert.FileExists(t, fixture.extensionMarker)
+				assert.NoFileExists(t, fixture.templateMarker)
+				assert.DirExists(t, filepath.Join(fixture.home, ".kodelet", "extensions", "data", "poison"))
+			} else {
+				assert.Contains(t, string(output), "Hello operator! template-output")
+				assert.FileExists(t, fixture.templateMarker)
+				assert.NoFileExists(t, fixture.extensionMarker)
+				assert.NoDirExists(t, filepath.Join(fixture.home, ".kodelet"))
+			}
+			assert.NoFileExists(t, filepath.Join(fixture.home, ".kodelet", "storage.db"))
+		})
+	}
+}
+
+func TestHostInspectionHelpDisclosesEffects(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"host", "recipe", "list", "--help"}, "Starts local extensions"},
+		{[]string{"host", "recipe", "show", "--help"}, "Template functions may execute commands on this host"},
+		{[]string{"host", "extension", "list", "--help"}, "without starting extension processes"},
+		{[]string{"host", "extension", "inspect", "--help"}, "without starting extension processes"},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			fixture := newHostInspectionFixture(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, test.args...).CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			assert.Contains(t, string(output), test.want)
+			assert.NoFileExists(t, fixture.extensionMarker)
+			assert.NoFileExists(t, fixture.templateMarker)
+		})
+	}
 }

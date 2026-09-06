@@ -67,6 +67,27 @@ func TestStorePersistsHostIdentityAndRegistration(t *testing.T) {
 	assert.Equal(t, newer.RunnerID, loaded.RunnerID)
 }
 
+func TestLoadDefaultHostIdentityDoesNotCreateState(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("KODELET_BASE_PATH", base)
+	_, err := LoadDefaultHostIdentity()
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.NoDirExists(t, base)
+
+	store, err := NewStore()
+	require.NoError(t, err)
+	want, err := store.LoadOrCreateHostIdentity()
+	require.NoError(t, err)
+	got, err := LoadDefaultHostIdentity()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	for _, invalid := range []string{`{"version":999,"instanceId":"host"}`, `{"version":1,"instanceId":""}`, `not JSON`} {
+		require.NoError(t, os.WriteFile(filepath.Join(store.Root(), "host.json"), []byte(invalid), 0o600))
+		_, err := LoadDefaultHostIdentity()
+		require.Error(t, err)
+	}
+}
+
 func TestRegistrationCacheUsesCanonicalServerIdentity(t *testing.T) {
 	store, err := NewStoreAt(t.TempDir())
 	require.NoError(t, err)

@@ -2,13 +2,173 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWebUIInputOwnershipFencesObserversAndDismissedRequests(t *testing.T) {
+	original, viewer := &recordingChatSink{}, &recordingChatSink{}
+	broker := newWebUIInputBroker("conversation", original)
+	t.Cleanup(broker.close)
+	broker.setOwner(t.Context(), "original", original)
+	start := func() <-chan extensions.UIInputResponse {
+		response := make(chan extensions.UIInputResponse, 1)
+		go func() {
+			result, _ := broker.Input(t.Context(), extensions.UIInputRequest{ID: "reused-extension-id"})
+			response <- result
+		}()
+		return response
+	}
+	first := start()
+	require.Eventually(t, func() bool { return len(original.Events()) > 0 }, time.Second, time.Millisecond)
+	firstID := original.Events()[0].UIInput.ID
+	assert.Empty(t, viewer.Events(), "observers must never receive interactive prompts")
+	assert.NotEqual(t, "reused-extension-id", firstID)
+	assert.False(t, broker.respondOwned("viewer", firstID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))
+	viewerCtx, detach := context.WithCancel(t.Context())
+	defer detach()
+	broker.setOwner(viewerCtx, "viewer", viewer)
+	select {
+	case response := <-first:
+		assert.Equal(t, extensions.UIInputStatusDismissed, response.Status)
+	case <-time.After(time.Second):
+		t.Fatal("takeover did not dismiss the previous owner's prompt")
+	}
+	require.Len(t, original.Events(), 2)
+	assert.Equal(t, "ui-request-end", original.Events()[1].Kind)
+	assert.Equal(t, firstID, original.Events()[1].UIRequestID)
+	assert.Empty(t, viewer.Events(), "takeover must not replay an already dismissed prompt")
+	second := start()
+	require.Eventually(t, func() bool { return len(viewer.Events()) > 0 }, time.Second, time.Millisecond)
+	secondID := viewer.Events()[0].UIInput.ID
+	assert.NotEqual(t, firstID, secondID)
+	answer := extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "new"}
+	assert.False(t, broker.respondOwned("original", secondID, answer))
+	assert.False(t, broker.respondOwned("viewer", firstID, answer))
+	require.True(t, broker.respondOwned("viewer", secondID, answer))
+	assert.False(t, broker.respondOwned("viewer", secondID, answer), "a response capability is single-use")
+	assert.Equal(t, answer, <-second)
+	third := start()
+	require.Eventually(t, func() bool { return len(viewer.Events()) == 3 }, time.Second, time.Millisecond)
+	detach()
+	select {
+	case response := <-third:
+		assert.Equal(t, extensions.UIInputStatusDismissed, response.Status)
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not dismiss the pending prompt")
+	}
+	response, err := broker.Input(t.Context(), extensions.UIInputRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
+	assert.NoError(t, t.Context().Err(), "UI detach must not cancel execution")
+}
+
+func TestTakeUIOwnershipRequiresExplicitCapableAttachment(t *testing.T) {
+	sink := &recordingChatSink{}
+	broker := newWebUIInputBroker("conversation", sink)
+	t.Cleanup(broker.close)
+	broker.setOwner(t.Context(), "original", sink)
+	server := &Server{activeChats: map[string]*activeChatRun{"conversation": {uiInput: broker}}, chatSubscribers: make(map[string]map[*subscriberEventSink]struct{})}
+	take := func(id string) *httptest.ResponseRecorder {
+		request := mux.SetURLVars(httptest.NewRequest(http.MethodPost, "/", nil), map[string]string{"id": "conversation"})
+		request.Header.Set(chat.ClientIDHeader, id)
+		result := httptest.NewRecorder()
+		server.handleTakeUIOwnership(result, request)
+		return result
+	}
+	assert.Equal(t, http.StatusBadRequest, take("").Code)
+	assert.Equal(t, http.StatusConflict, take("viewer").Code)
+	subscriber := newSubscriberEventSink()
+	subscriber.ctx = t.Context()
+	subscriber.clientID = "viewer"
+	_, registered := server.registerChatSubscriber("conversation", subscriber)
+	require.True(t, registered)
+	assert.Equal(t, http.StatusConflict, take("viewer").Code)
+	subscriber.interactive = true
+	assert.Equal(t, "original", broker.owner.clientID, "attaching a capable observer must not take ownership")
+	assert.Equal(t, http.StatusOK, take("viewer").Code)
+	assert.Equal(t, "viewer", broker.owner.clientID)
+	server.removeChatSubscriber("conversation", subscriber)
+	assert.Nil(t, broker.owner, "removing a slow stream must immediately revoke response authority")
+	assert.Equal(t, http.StatusConflict, take("viewer").Code)
+}
+
+func TestChatHTTPPromptIsDeliveredOnlyToInitiatingClient(t *testing.T) {
+	observer := newSubscriberEventSink()
+	t.Cleanup(observer.Close)
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              t.Context(),
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers:     map[string]map[*subscriberEventSink]struct{}{"conversation": {observer: {}}},
+	}
+	server.chatRunner = &mockChatRunner{runFunc: func(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
+		broker := server.uiInputBrokerForRun(request.ConversationID)
+		response, err := broker.Input(ctx, extensions.UIInputRequest{ID: "extension-id", Title: "Only the owner"})
+		assert.NoError(t, err)
+		assert.Equal(t, "owner-answer", response.Value)
+		assert.NoError(t, sink.Send(chat.ChatEvent{Kind: "text-delta", ConversationID: request.ConversationID, Delta: "Visible to observers"}))
+		return request.ConversationID, nil
+	}}
+	router := mux.NewRouter()
+	router.HandleFunc("/api/chat", server.handleChat).Methods(http.MethodPost)
+	router.HandleFunc("/api/conversations/{id}/ui-input/{requestId}", server.handleRespondUIInput).Methods(http.MethodPost)
+	httpServer := httptest.NewServer(router)
+	defer httpServer.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/api/chat", strings.NewReader(`{"message":"hello","conversationId":"conversation","clientCapabilities":{"interactiveUI":true}}`))
+	require.NoError(t, err)
+	request.Header.Set(chat.ClientIDHeader, "initiator")
+	stream, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer stream.Body.Close()
+	require.Equal(t, http.StatusOK, stream.StatusCode)
+	decoder := json.NewDecoder(stream.Body)
+	var prompt chat.ChatEvent
+	require.NoError(t, decoder.Decode(&prompt))
+	require.NotNil(t, prompt.UIInput)
+	for _, clientID := range []string{"observer", "initiator"} {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/api/conversations/conversation/ui-input/"+prompt.UIInput.ID, strings.NewReader(`{"status":"submitted","value":"owner-answer"}`))
+		require.NoError(t, err)
+		request.Header.Set(chat.ClientIDHeader, clientID)
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		if clientID == "observer" {
+			assert.Equal(t, http.StatusNotFound, response.StatusCode)
+		} else {
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+		}
+	}
+	var event chat.ChatEvent
+	for {
+		require.NoError(t, decoder.Decode(&event))
+		if event.Kind == "done" {
+			break
+		}
+	}
+	var observerKinds []string
+	for range 4 {
+		select {
+		case event := <-observer.ch:
+			observerKinds = append(observerKinds, event.Kind)
+		case <-ctx.Done():
+			t.Fatal("observer did not receive normal model events")
+		}
+	}
+	assert.Equal(t, []string{"conversation", "user-message", "text-delta", "done"}, observerKinds)
+}
 
 func TestWebUIInputBrokerSendsEventAndWaitsForResponse(t *testing.T) {
 	sink := &recordingChatSink{}

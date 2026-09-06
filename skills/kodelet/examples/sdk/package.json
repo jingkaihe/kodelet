@@ -4,7 +4,7 @@
   "scripts": {
     "basic": "tsx basic-agent-session.ts",
     "streaming": "tsx streaming-agent-session.ts",
-    "inline-extension": "tsx inline-extension-session.ts",
+    "code-search-extension": "tsx delegated-code-search.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

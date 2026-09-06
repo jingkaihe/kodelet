@@ -2,6 +2,9 @@ package llm
 
 import (
 	"encoding/json"
+	"maps"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -102,11 +105,105 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Runtime feature toggle configuration
-	ExtensionSettings   map[string]any `mapstructure:"extensions" json:"-" yaml:"-"`                                                       // ExtensionSettings is the configuration projection used before constructing a runtime
-	Extensions          any            `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
-	EnableFSSearchTools bool           `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
-	RecipeName          string         `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
-	CompactRatio        float64        `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
+	ExtensionSettings   map[string]any    `mapstructure:"extensions" json:"-" yaml:"-"`                                                       // ExtensionSettings is the configuration projection used before constructing a runtime
+	Extensions          any               `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
+	ExecutionOptions    *ExecutionOptions `mapstructure:"-" json:"-" yaml:"-"`                                                                // ExecutionOptions is the immutable request-scoped execution contract, never persisted as configuration.
+	EnableFSSearchTools bool              `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	RecipeName          string            `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
+	CompactRatio        float64           `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
+}
+
+// Clone copies mutable settings while retaining opaque runtime identity. It is
+// used at run boundaries so per-run restrictions cannot mutate shared config.
+func (c Config) Clone() Config {
+	c.AllowedTools = slices.Clone(c.AllowedTools)
+	c.AllowedCommands = slices.Clone(c.AllowedCommands)
+	c.AllowedReasoningEfforts = slices.Clone(c.AllowedReasoningEfforts)
+	c.Aliases = maps.Clone(c.Aliases)
+	c.SyspromptArgs = maps.Clone(c.SyspromptArgs)
+	c.SystemInformation = c.SystemInformation.Clone()
+	c.ExecutionOptions = c.ExecutionOptions.Clone()
+	c.ExtensionSettings = cloneConfigMap(c.ExtensionSettings)
+	c.Profiles = cloneProfiles(c.Profiles)
+	c.EnvironmentProfiles = cloneProfiles(c.EnvironmentProfiles)
+	if c.OpenAI != nil {
+		openAI := *c.OpenAI
+		openAI.EnableSearch = cloneOption(openAI.EnableSearch)
+		openAI.WebSocketMode = cloneOption(openAI.WebSocketMode)
+		openAI.Models = cloneCustomModels(openAI.Models)
+		openAI.Pricing = cloneModelPricing(openAI.Pricing)
+		c.OpenAI = &openAI
+	}
+	c.Anthropic = cloneOption(c.Anthropic)
+	c.Bash = cloneOption(c.Bash)
+	if c.Skills != nil {
+		skills := *c.Skills
+		skills.Allowed = slices.Clone(skills.Allowed)
+		c.Skills = &skills
+	}
+	if c.Context != nil {
+		c.Context = &ContextConfig{Patterns: slices.Clone(c.Context.Patterns)}
+	}
+	return c
+}
+
+func cloneProfiles(profiles map[string]ProfileConfig) map[string]ProfileConfig {
+	if profiles == nil {
+		return nil
+	}
+	result := make(map[string]ProfileConfig, len(profiles))
+	for name, config := range profiles {
+		result[name] = cloneConfigMap(config)
+	}
+	return result
+}
+
+func cloneConfigMap(settings map[string]any) map[string]any {
+	if settings == nil {
+		return nil
+	}
+	result := make(map[string]any, len(settings))
+	for name, value := range settings {
+		result[name] = cloneConfigValue(value)
+	}
+	return result
+}
+
+func cloneConfigValue(value any) any {
+	if value == nil {
+		return value
+	}
+	return cloneConfigContainer(reflect.ValueOf(value)).Interface()
+}
+
+// Settings may come from JSON/YAML or typed Go maps and slices. Copy their
+// containers without converting types or serializing opaque runtime values.
+func cloneConfigContainer(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Interface:
+		if !value.IsNil() {
+			result := reflect.New(value.Type()).Elem()
+			result.Set(cloneConfigContainer(value.Elem()))
+			return result
+		}
+	case reflect.Map:
+		if !value.IsNil() {
+			result := reflect.MakeMapWithSize(value.Type(), value.Len())
+			for iter := value.MapRange(); iter.Next(); {
+				result.SetMapIndex(iter.Key(), cloneConfigContainer(iter.Value()))
+			}
+			return result
+		}
+	case reflect.Slice:
+		if !value.IsNil() {
+			result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+			for i := range value.Len() {
+				result.Index(i).Set(cloneConfigContainer(value.Index(i)))
+			}
+			return result
+		}
+	}
+	return value
 }
 
 // BashConfig holds configuration for the bash tool.

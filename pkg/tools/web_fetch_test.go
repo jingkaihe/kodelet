@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -232,15 +233,86 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 	tool := &WebFetchTool{}
 	state := &BasicState{}
 
-	// Test missing sub-agent config error
-	t.Run("Missing sub-agent config returns error", func(t *testing.T) {
+	t.Run("Prompt validation does not require local provider configuration", func(t *testing.T) {
 		// Test the validation part without actual network calls
 		params := `{"url": "https://example.com/page.html", "prompt": "What is the main heading?"}`
 		err := tool.ValidateInput(state, params)
 		assert.NoError(t, err, "Validation should pass")
 	})
 
-	// AI extraction tests require integration testing (shell-out via exec.CommandContext)
+	// Prompt extraction delegates to the host-installed central model helper.
+	for _, tt := range []struct {
+		name        string
+		contentType string
+		content     string
+	}{
+		{name: "HTML", contentType: "text/html", content: "<h1>Title</h1><p>Body</p>"},
+		{name: "Markdown", contentType: "text/markdown", content: "# Title\n\nBody"},
+	} {
+		t.Run(tt.name+" delegates extraction", func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				_, _ = fmt.Fprint(w, tt.content)
+			}))
+			defer server.Close()
+			input := WebFetchInput{URL: server.URL, Prompt: "Extract the heading"}
+			params, err := json.Marshal(input)
+			require.NoError(t, err)
+			calls := 0
+			ctx := tooltypes.ContextWithModelHelper(t.Context(), func(ctx context.Context, request tooltypes.ModelHelperRequest) (string, error) {
+				calls++
+				assert.NoError(t, ctx.Err())
+				assert.Equal(t, tooltypes.ModelHelperRequest{
+					Operation: tooltypes.ModelHelperWebFetchExtract, URL: input.URL, Prompt: input.Prompt, Content: "# Title\n\nBody",
+				}, request)
+				return "  Title\n", nil
+			})
+			result := tool.Execute(ctx, state, string(params))
+			require.False(t, result.IsError(), result.GetError())
+			assert.Equal(t, "Title", result.GetResult())
+			assert.Equal(t, 1, calls)
+			assert.Empty(t, result.(*WebFetchToolResult).filePath)
+		})
+	}
+
+	t.Run("Missing helper fails closed without a local provider", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		result := tool.handleHTMLMarkdownWithPrompt(t.Context(), &WebFetchInput{
+			URL: "https://example.com", Prompt: "Extract title",
+		}, "# Title", "text/markdown")
+		require.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "central model helper is unavailable")
+		assert.Empty(t, result.GetResult())
+	})
+
+	t.Run("Helper failure is returned without fallback", func(t *testing.T) {
+		calls := 0
+		ctx := tooltypes.ContextWithModelHelper(t.Context(), func(context.Context, tooltypes.ModelHelperRequest) (string, error) {
+			calls++
+			return "partial result", context.DeadlineExceeded
+		})
+		result := tool.handleHTMLMarkdownWithPrompt(ctx, &WebFetchInput{
+			URL: "https://example.com", Prompt: "Extract title",
+		}, "# Title", "text/markdown")
+		require.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), context.DeadlineExceeded.Error())
+		assert.Empty(t, result.GetResult())
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("Canceled extraction never invokes helper", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(tooltypes.ContextWithModelHelper(t.Context(), func(context.Context, tooltypes.ModelHelperRequest) (string, error) {
+			assert.Fail(t, "canceled extraction invoked helper")
+			return "", nil
+		}))
+		cancel()
+		result := tool.handleHTMLMarkdownWithPrompt(ctx, &WebFetchInput{
+			URL: "https://example.com", Prompt: "Extract title",
+		}, "# Title", "text/markdown")
+		require.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), context.Canceled.Error())
+	})
 
 	// Test HTML content without prompt - should return markdown directly
 	t.Run("HTML content without prompt returns markdown directly", func(t *testing.T) {

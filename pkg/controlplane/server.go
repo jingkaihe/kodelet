@@ -13,8 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,7 +26,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
@@ -36,7 +33,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
-	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -78,13 +74,11 @@ type Server struct {
 	frontendHandler       FrontendHandler
 	runCtx                context.Context
 	runCancel             context.CancelFunc
-	terminalSessions      *terminalSessionManager
-	terminalSessionsMu    sync.Mutex
 	remoteTerminals       map[string]int
 	remoteTerminalsMu     sync.Mutex
-	extensionRuntimes     *extensions.RuntimeManager
 	extensionUI           *webExtensionUIHost
 	runnerRegistry        *runnerregistry.Registry
+	turns                 *turnStore
 	authStore             *authStore
 	oidcFlow              OIDCFlow
 	activeChats           map[string]*activeChatRun
@@ -105,6 +99,9 @@ type Server struct {
 	anthropicOAuthLogin   *anthropicOAuthLoginSession
 	anthropicOAuthLoginMu sync.Mutex
 	shutdownTimeout       time.Duration
+	stopping              bool
+	embeddedMu            sync.Mutex
+	embeddedStatus        EmbeddedRunnerStatus
 }
 
 type activeChatRun struct {
@@ -118,18 +115,17 @@ type activeChatRun struct {
 }
 
 const (
-	pendingChatStopTTL                   = 30 * time.Second
-	maxPendingChatStops                  = 1024
-	conversationStreamKeepAliveInterval  = 15 * time.Second
-	publicAuthRateWindow                 = time.Minute
-	maxPublicAuthRateEntries             = 4096
-	maxOIDCLoginRequestsPerWindow        = 60
-	maxEnrollmentStartsPerWindow         = 30
-	maxEnrollmentPollsPerWindow          = 8192
-	maxUserLoginStartsPerWindow          = 30
-	maxUserLoginPollsPerWindow           = 8192
-	defaultHTTPShutdownTimeout           = 30 * time.Second
-	controlPlaneWorkspaceDisabledMessage = "control-plane workspace is disabled"
+	pendingChatStopTTL                  = 30 * time.Second
+	maxPendingChatStops                 = 1024
+	conversationStreamKeepAliveInterval = 15 * time.Second
+	publicAuthRateWindow                = time.Minute
+	maxPublicAuthRateEntries            = 4096
+	maxOIDCLoginRequestsPerWindow       = 60
+	maxEnrollmentStartsPerWindow        = 30
+	maxEnrollmentPollsPerWindow         = 8192
+	maxUserLoginStartsPerWindow         = 30
+	maxUserLoginPollsPerWindow          = 8192
+	defaultHTTPShutdownTimeout          = 30 * time.Second
 )
 
 type publicAuthRateEntry struct {
@@ -174,15 +170,16 @@ func (r *activeChatRun) markDone() {
 type ServerConfig struct {
 	Host                         string
 	Port                         int
-	CWD                          string
+	CWD                          string // Deprecated: rejected; configure the runner workspace instead.
 	CompactRatio                 float64
 	AuthToken                    string
 	RunnerAuthToken              string
 	WebAuthMode                  WebAuthMode
 	RunnerAuthMode               RunnerAuthMode
 	OIDC                         OIDCConfig
-	DisableControlPlaneWorkspace bool
+	DisableControlPlaneWorkspace bool // Deprecated: control-plane-local execution is always disabled.
 	CORSOrigins                  []string
+	EmbeddedRunner               *EmbeddedRunnerConfig
 }
 
 // Validate validates the server configuration
@@ -204,15 +201,17 @@ func (c *ServerConfig) Validate() error {
 	}
 
 	// Validate port
-	if c.Port < 1 || c.Port > 65535 {
-		return errors.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	if c.Port < 0 || c.Port > 65535 {
+		return errors.Errorf("port must be between 0 and 65535, got %d", c.Port)
 	}
+	// Retained for config compatibility, never an execution-mode switch.
+	c.DisableControlPlaneWorkspace = true
 
 	if c.CompactRatio <= 0.0 || c.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
-	if c.DisableControlPlaneWorkspace && strings.TrimSpace(c.CWD) != "" {
-		return errors.New("cwd cannot be set when the control-plane workspace is disabled")
+	if c.CWD != "" {
+		return errors.New("control-plane cwd is no longer supported; use --runner-workspace or select a registered runner")
 	}
 
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
@@ -224,12 +223,6 @@ func (c *ServerConfig) Validate() error {
 
 	if _, err := normalizeConfiguredCORSOrigins(c.CORSOrigins); err != nil {
 		return err
-	}
-
-	if strings.TrimSpace(c.CWD) != "" {
-		if _, err := chat.ResolveConfiguredDefaultCWD(c.CWD); err != nil {
-			return errors.Wrap(err, "invalid cwd")
-		}
 	}
 
 	return nil
@@ -246,13 +239,6 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		return nil, errors.New("frontend handler is required when OIDC authentication or runner enrollment is enabled")
 	}
 
-	if strings.TrimSpace(config.CWD) != "" {
-		normalizedCWD, err := chat.ResolveConfiguredDefaultCWD(config.CWD)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid server configuration")
-		}
-		config.CWD = normalizedCWD
-	}
 	normalizedCORSOrigins, err := normalizeConfiguredCORSOrigins(config.CORSOrigins)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid server configuration")
@@ -265,13 +251,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		return nil, errors.Wrap(err, "failed to create conversation service")
 	}
 
-	runCtx, runCancel := context.WithCancel(ctx)
-	var extensionRuntimes *extensions.RuntimeManager
-	var terminalSessions *terminalSessionManager
-	if !config.DisableControlPlaneWorkspace {
-		extensionRuntimes = extensions.NewRuntimeManager()
-		terminalSessions = newTerminalSessionManager(runCtx)
-	}
+	runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
 	dbPath, err := db.DefaultDBPath()
 	if err != nil {
 		runCancel()
@@ -307,7 +287,9 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		_ = conversationService.Close()
 		return nil, errors.Wrap(err, "failed to open runner persistence")
 	}
-	runnerRegistry, err := runnerregistry.New(runCtx, runnerregistry.Options{Persistence: runnerPersistence, Credentials: authenticationStore})
+	// Registry.Close must persist interrupted runs and offline registrations
+	// after execution cancellation; its own close controls its context lifetime.
+	runnerRegistry, err := runnerregistry.New(context.WithoutCancel(runCtx), runnerregistry.Options{Persistence: runnerPersistence, Credentials: authenticationStore})
 	if err != nil {
 		runCancel()
 		_ = authenticationStore.Close()
@@ -315,19 +297,26 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		return nil, errors.Wrap(err, "failed to create runner registry")
 	}
 
+	turns, err := newTurnStore(runCtx, dbPath)
+	if err != nil {
+		runCancel()
+		_ = runnerRegistry.Close()
+		_ = authenticationStore.Close()
+		_ = conversationService.Close()
+		return nil, err
+	}
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		chatRunner: &serverChatRunner{
-			runner: chat.NewDefaultChatRunner(config.CWD, extensionRuntimes),
+			runner: chat.NewDefaultChatRunner("", nil),
 		},
 		config:                config,
 		frontendHandler:       frontendHandler,
 		runCtx:                runCtx,
 		runCancel:             runCancel,
-		terminalSessions:      terminalSessions,
-		extensionRuntimes:     extensionRuntimes,
 		runnerRegistry:        runnerRegistry,
+		turns:                 turns,
 		authStore:             authenticationStore,
 		oidcFlow:              oidcFlow,
 		activeChats:           make(map[string]*activeChatRun),
@@ -366,6 +355,7 @@ func (s *Server) setupRoutes() {
 
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/status", s.handleStatus).Methods("GET")
 	api.HandleFunc("/auth/me", s.handleAuthMe).Methods("GET")
 	api.HandleFunc("/auth/v1/device/context", s.handleUserLoginContext).Methods("GET")
 	api.HandleFunc("/auth/v1/device/decision", s.handleUserLoginDecision).Methods("POST")
@@ -378,6 +368,8 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/providers/copilot/device-login/{id}", s.requireRole(RoleAdmin, s.handleGetCopilotDeviceLogin)).Methods("GET")
 	api.HandleFunc("/providers/copilot/device-login/{id}", s.requireRole(RoleAdmin, s.handleCancelCopilotDeviceLogin)).Methods("DELETE")
 	api.HandleFunc("/providers/anthropic", s.requireRole(RoleAdmin, s.handleGetAnthropicProvider)).Methods("GET")
+	api.HandleFunc("/providers/anthropic/accounts", s.requireRole(RoleAdmin, s.handleAnthropicAccounts)).Methods("GET", "POST")
+	api.HandleFunc("/providers/anthropic/accounts/usage", s.requireRole(RoleAdmin, s.handleAnthropicAccountUsage)).Methods("POST")
 	api.HandleFunc("/providers/anthropic/oauth-login", s.requireRole(RoleAdmin, s.handleStartAnthropicOAuthLogin)).Methods("POST")
 	api.HandleFunc("/providers/anthropic/oauth-login/{id}/complete", s.requireRole(RoleAdmin, s.handleCompleteAnthropicOAuthLogin)).Methods("POST")
 	api.HandleFunc("/providers/anthropic/oauth-login/{id}", s.requireRole(RoleAdmin, s.handleCancelAnthropicOAuthLogin)).Methods("DELETE")
@@ -385,8 +377,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/runner/v1/enrollment/decision", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentDecision)).Methods("POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
+	api.HandleFunc("/chat/shortcuts", s.requireRole(RoleUser, s.handleWorkspaceShortcut)).Methods("POST")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
+	api.HandleFunc("/git/commit", s.requireRole(RoleUser, s.handleWorkspaceCommit)).Methods("GET", "POST")
 	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
 	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
 	api.HandleFunc("/runners", s.requireRole(RoleUser, s.handleListRunners)).Methods("GET")
@@ -396,10 +390,15 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/fork", s.handleForkConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/adopt", s.handleAdoptConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/turns/{turnId}", s.handleGetTurnReceipt).Methods("GET")
 	api.HandleFunc("/conversations/{id}/ui-input/{requestId}", s.handleRespondUIInput).Methods("POST")
+	api.HandleFunc("/conversations/{id}/ui-owner", s.handleTakeUIOwnership).Methods("POST")
+	api.HandleFunc("/conversations/{id}/ui-persistent/ack", s.handlePersistentUIAck).Methods("POST")
+	api.HandleFunc("/conversations/{id}/ui-persistent/input", s.handlePersistentUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -802,21 +801,6 @@ func (s *Server) chatExecutionContext(requestCtx context.Context) context.Contex
 	return logger.WithLogger(baseCtx, logger.G(requestCtx))
 }
 
-func (s *Server) terminalSessionManager() *terminalSessionManager {
-	s.terminalSessionsMu.Lock()
-	defer s.terminalSessionsMu.Unlock()
-
-	if s.terminalSessions == nil {
-		baseCtx := s.runCtx
-		if baseCtx == nil {
-			baseCtx = context.Background()
-		}
-		s.terminalSessions = newTerminalSessionManager(baseCtx)
-	}
-
-	return s.terminalSessions
-}
-
 func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) bool {
 	if strings.TrimSpace(conversationID) == "" || run == nil || run.cancel == nil {
 		return false
@@ -824,6 +808,9 @@ func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) b
 
 	s.activeChatsMu.Lock()
 	defer s.activeChatsMu.Unlock()
+	if s.stopping {
+		return false
+	}
 	if s.activeChats == nil {
 		s.activeChats = make(map[string]*activeChatRun)
 	}
@@ -983,11 +970,6 @@ func (s *Server) uiInputBrokerForRun(conversationID string) *webUIInputBroker {
 	return run.uiInput
 }
 
-func (s *Server) respondToUIInput(conversationID, requestID string, response extensions.UIInputResponse) bool {
-	broker := s.uiInputBrokerForRun(conversationID)
-	return broker != nil && broker.Respond(requestID, response)
-}
-
 func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) (bool, bool) {
 	if strings.TrimSpace(conversationID) == "" || sink == nil {
 		return false, false
@@ -1019,6 +1001,9 @@ func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEve
 		return
 	}
 
+	if broker := s.uiInputBrokerForRun(conversationID); broker != nil {
+		broker.detachSink(sink)
+	}
 	s.chatSubscribersMu.Lock()
 	defer s.chatSubscribersMu.Unlock()
 	subscribers := s.chatSubscribers[conversationID]
@@ -1083,6 +1068,9 @@ func (s *Server) closeChatSubscribers(conversationID string) {
 	s.chatSubscribersMu.Unlock()
 
 	for sink := range subscribers {
+		if broker := s.uiInputBrokerForRun(conversationID); broker != nil {
+			broker.detachSink(sink)
+		}
 		sink.Close()
 	}
 }
@@ -1097,39 +1085,61 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	query := r.URL.Query()
 	searchTerm := strings.TrimSpace(query.Get("search"))
 	req := &conversations.ListConversationsRequest{
-		SearchTerm:    searchTerm,
-		SearchCWDTerm: expandCompactHomePath(searchTerm),
-		CWD:           expandCompactHomePath(query.Get("cwd")),
-		RunnerID:      strings.TrimSpace(query.Get("runnerId")),
-		SortBy:        query.Get("sortBy"),
-		SortOrder:     query.Get("sortOrder"),
+		SearchTerm: searchTerm,
+		Provider:   strings.ToLower(strings.TrimSpace(query.Get("provider"))),
+		CWD:        strings.TrimSpace(query.Get("cwd")),
+		RunnerID:   strings.TrimSpace(query.Get("runnerId")),
+		SortBy:     query.Get("sortBy"),
+		SortOrder:  query.Get("sortOrder"),
 	}
 
-	// Parse limit
-	if limitStr := query.Get("limit"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil {
-			req.Limit = limit
+	// All clients receive canonical persisted runner paths, never daemon-home
+	// expansion or shortening of paths that may belong to another host.
+	raw := query.Get("format") == "raw"
+	for name, target := range map[string]*int{"limit": &req.Limit, "offset": &req.Offset} {
+		if value := query.Get(name); value != "" {
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed < 0 {
+				s.writeErrorResponse(w, http.StatusBadRequest, name+" must be a nonnegative integer", nil)
+				return
+			}
+			*target = parsed
 		}
 	}
-
-	// Parse offset
-	if offsetStr := query.Get("offset"); offsetStr != "" {
-		if offset, err := strconv.Atoi(offsetStr); err == nil {
-			req.Offset = offset
+	for name, target := range map[string]**time.Time{"startDate": &req.StartDate, "endDate": &req.EndDate} {
+		if value := query.Get(name); value != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				parsed, err = time.Parse("2006-01-02", value)
+				if err == nil && name == "endDate" {
+					parsed = parsed.Add(24*time.Hour - time.Nanosecond)
+				}
+			}
+			if err != nil {
+				s.writeErrorResponse(w, http.StatusBadRequest, name+" must be YYYY-MM-DD or RFC3339", nil)
+				return
+			}
+			*target = &parsed
 		}
 	}
-
-	// Parse date filters
-	if startStr := query.Get("startDate"); startStr != "" {
-		if start, err := time.Parse("2006-01-02", startStr); err == nil {
-			req.StartDate = &start
-		}
+	if req.StartDate != nil && req.EndDate != nil && req.StartDate.After(*req.EndDate) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "startDate must not be after endDate", nil)
+		return
 	}
-
-	if endStr := query.Get("endDate"); endStr != "" {
-		if end, err := time.Parse("2006-01-02", endStr); err == nil {
-			req.EndDate = &end
-		}
+	switch req.SortBy {
+	case "", "updated", "updated_at", "updatedAt":
+		req.SortBy = "updatedAt"
+	case "created", "created_at", "createdAt":
+		req.SortBy = "createdAt"
+	case "messages", "messageCount":
+		req.SortBy = "messageCount"
+	default:
+		s.writeErrorResponse(w, http.StatusBadRequest, "unsupported conversation sort field", nil)
+		return
+	}
+	if req.SortOrder != "" && req.SortOrder != "asc" && req.SortOrder != "desc" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "sortOrder must be asc or desc", nil)
+		return
 	}
 
 	// Get conversations
@@ -1142,8 +1152,9 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	for i := range response.Conversations {
 		summary := &response.Conversations[i]
 		platform, apiMode := extractProviderMetadata(summary.Provider, summary.Metadata)
-		summary.Provider = displayProviderName(summary.Provider)
-		summary.CWD = compactHomePath(summary.CWD)
+		if !raw {
+			summary.Provider = displayProviderName(summary.Provider)
+		}
 		summary.IsRunning = s.isActiveChat(summary.ID)
 		if summary.Metadata == nil {
 			summary.Metadata = make(map[string]any)
@@ -1166,10 +1177,6 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
-	for i := range response.CWDs {
-		response.CWDs[i] = compactHomePath(response.CWDs[i])
-	}
-
 	s.writeJSONResponse(w, response)
 }
 
@@ -1227,20 +1234,9 @@ type ChatSettingsResponse struct {
 	ReasoningEffortOptions       []string            `json:"reasoningEffortOptions"`
 	DefaultCWD                   string              `json:"defaultCWD,omitempty"`
 	ControlPlaneWorkspaceEnabled bool                `json:"controlPlaneWorkspaceEnabled"`
-}
-
-type SlashCommandsResponse struct {
-	Commands []slashcommands.Command `json:"commands"`
-}
-
-type CWDHint struct {
-	Path string `json:"path"`
-}
-
-type CWDHintsResponse struct {
-	BaseDir string    `json:"baseDir,omitempty"`
-	Query   string    `json:"query,omitempty"`
-	Hints   []CWDHint `json:"hints"`
+	DefaultRunnerID              string              `json:"defaultRunnerId,omitempty"`
+	DefaultRunnerReady           bool                `json:"defaultRunnerReady"`
+	DefaultRunnerHostID          string              `json:"defaultRunnerHostId,omitempty"`
 }
 
 const (
@@ -1335,57 +1331,6 @@ func displayProviderName(provider string) string {
 	default:
 		return provider
 	}
-}
-
-func compactHomePath(path string) string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return strings.TrimSpace(path)
-	}
-	return compactPathForHome(path, homeDir)
-}
-
-func expandCompactHomePath(path string) string {
-	path = strings.TrimSpace(path)
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return path
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if path == "~" {
-		return filepath.Clean(homeDir)
-	}
-
-	return filepath.Join(homeDir, filepath.FromSlash(strings.TrimPrefix(path, "~/")))
-}
-
-func compactPathForHome(path, homeDir string) string {
-	path = strings.TrimSpace(path)
-	homeDir = strings.TrimSpace(homeDir)
-	if path == "" || homeDir == "" || path == "~" || strings.HasPrefix(path, "~/") {
-		return path
-	}
-	if !filepath.IsAbs(path) || !filepath.IsAbs(homeDir) {
-		return path
-	}
-
-	cleanPath := filepath.Clean(path)
-	cleanHomeDir := filepath.Clean(homeDir)
-	pathFromHome, err := filepath.Rel(cleanHomeDir, cleanPath)
-	if err != nil {
-		return path
-	}
-	if pathFromHome == "." {
-		return "~"
-	}
-	if pathFromHome == ".." || strings.HasPrefix(pathFromHome, ".."+string(filepath.Separator)) {
-		return path
-	}
-
-	return "~/" + filepath.ToSlash(pathFromHome)
 }
 
 func resolveConversationProfile(metadata map[string]any) string {
@@ -1497,12 +1442,11 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	controlPlaneWorkspaceEnabled := s.controlPlaneWorkspaceEnabled()
-	defaultCWD := ""
-	if controlPlaneWorkspaceEnabled {
-		defaultCWD, err = s.defaultCWD()
-		if err != nil {
-			defaultCWD = ""
+	status := s.EmbeddedRunnerStatus()
+	defaultCWD, hostID := "", ""
+	if status.Ready && s.runnerRegistry != nil {
+		if runner, found := s.runnerRegistry.Runner(status.RunnerID); found && runner.Connected {
+			defaultCWD, hostID = runner.Workspace.Path, runner.Host.InstanceID
 		}
 	}
 
@@ -1511,246 +1455,20 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		Profiles:                     getWebUIProfileOptions(),
 		ReasoningEffort:              config.ReasoningEffort,
 		ReasoningEffortOptions:       llmtypes.ReasoningEffortOptions(config),
-		DefaultCWD:                   compactHomePath(defaultCWD),
-		ControlPlaneWorkspaceEnabled: controlPlaneWorkspaceEnabled,
+		DefaultCWD:                   defaultCWD,
+		ControlPlaneWorkspaceEnabled: false,
+		DefaultRunnerID:              status.RunnerID,
+		DefaultRunnerReady:           status.Ready && hostID != "",
+		DefaultRunnerHostID:          hostID,
 	})
 }
 
 func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) {
-	if !s.requireControlPlaneWorkspace(w) {
-		return
-	}
-	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)
-		return
-	}
-
-	processor, err := fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(resolvedCWD))
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize slash commands", err)
-		return
-	}
-
-	commands := slashcommands.List(r.Context(), processor)
-	extensionCtx := r.Context()
-	if s.extensionUI != nil {
-		extensionCtx = extensions.ContextWithExtensionUIHost(extensionCtx, s.extensionUI)
-	}
-	var extensionRuntime *extensions.Runtime
-	if s.extensionRuntimes != nil {
-		extensionRuntime, err = s.extensionRuntimes.RuntimeForCommandDiscovery(extensionCtx, resolvedCWD)
-	} else {
-		runtimeManager := extensions.NewRuntimeManager()
-		defer func() { _ = runtimeManager.Close() }()
-		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(extensionCtx, resolvedCWD)
-	}
-	if err != nil {
-		logger.G(r.Context()).WithError(err).Warn("Failed to initialize extensions for slash command discovery")
-	} else if extensionRuntime != nil {
-		commands = append(commands, extensionRuntime.SlashCommands()...)
-	}
-
-	s.writeJSONResponse(w, SlashCommandsResponse{Commands: commands})
+	s.handleRunnerDiscovery(w, r, protocol.MethodWorkspaceDiscover)
 }
 
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
-	if !s.requireControlPlaneWorkspace(w) {
-		return
-	}
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	defaultCWD, err := s.defaultCWD()
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to resolve default cwd", err)
-		return
-	}
-
-	baseDir, filter, err := resolveSuggestionBaseDir(query, defaultCWD)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd query", err)
-		return
-	}
-
-	hints, err := listDirectoryHints(baseDir, filter)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "failed to list cwd suggestions", err)
-		return
-	}
-
-	if chat.IsNaturalDirectoryQuery(query) {
-		siblingBaseDir, siblingErr := conversations.NormalizeCWD(filepath.Dir(defaultCWD))
-		if siblingErr == nil && siblingBaseDir != baseDir {
-			siblingHints, err := listDirectoryHints(siblingBaseDir, filter)
-			if err == nil {
-				hints = mergeDirectoryHints(hints, siblingHints)
-			}
-		}
-	}
-	for i := range hints {
-		hints[i].Path = compactHomePath(hints[i].Path)
-	}
-
-	s.writeJSONResponse(w, CWDHintsResponse{
-		BaseDir: compactHomePath(baseDir),
-		Query:   compactHomePath(query),
-		Hints:   hints,
-	})
-}
-
-func (s *Server) defaultCWD() (string, error) {
-	if !s.controlPlaneWorkspaceEnabled() {
-		return "", errors.New(controlPlaneWorkspaceDisabledMessage)
-	}
-	configuredCWD := ""
-	if s != nil && s.config != nil {
-		configuredCWD = s.config.CWD
-	}
-
-	return chat.ResolveConfiguredDefaultCWD(configuredCWD)
-}
-
-func (s *Server) controlPlaneWorkspaceEnabled() bool {
-	return s == nil || s.config == nil || !s.config.DisableControlPlaneWorkspace
-}
-
-func (s *Server) requireControlPlaneWorkspace(w http.ResponseWriter) bool {
-	if s.controlPlaneWorkspaceEnabled() {
-		return true
-	}
-	s.writeErrorResponse(w, http.StatusForbidden, controlPlaneWorkspaceDisabledMessage, nil)
-	return false
-}
-
-func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
-	defaultCWD, err := s.defaultCWD()
-	if err != nil {
-		return "", err
-	}
-
-	expandedRequestedCWD, err := chat.ExpandCWDInput(requestedCWD, defaultCWD)
-	if err != nil {
-		return "", err
-	}
-
-	if strings.TrimSpace(expandedRequestedCWD) == "" {
-		return defaultCWD, nil
-	}
-
-	return conversations.NormalizeCWD(expandedRequestedCWD)
-}
-
-func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) {
-	expandedQuery, err := chat.ExpandCWDInput(query, defaultCWD)
-	if err != nil {
-		return "", "", err
-	}
-
-	if expandedQuery == "" {
-		return defaultCWD, "", nil
-	}
-
-	hasTrailingSlash := strings.HasSuffix(expandedQuery, string(os.PathSeparator))
-	cleanQuery := filepath.Clean(expandedQuery)
-	if hasTrailingSlash {
-		return cleanQuery, "", nil
-	}
-
-	baseDir := filepath.Dir(cleanQuery)
-	filter := filepath.Base(cleanQuery)
-	if baseDir == "." {
-		baseDir = defaultCWD
-	}
-
-	baseDir, err = conversations.NormalizeCWD(baseDir)
-	if err != nil {
-		return "", "", err
-	}
-
-	return baseDir, filter, nil
-}
-
-func listDirectoryHints(baseDir, filter string) ([]CWDHint, error) {
-	entries, err := os.ReadDir(baseDir)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read suggestion directory")
-	}
-
-	filter = strings.ToLower(strings.TrimSpace(filter))
-	hints := make([]CWDHint, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if filter != "" && !matchesDirectoryHint(name, filter) {
-			continue
-		}
-
-		hints = append(hints, CWDHint{Path: filepath.Join(baseDir, name)})
-	}
-
-	sort.Slice(hints, func(i, j int) bool {
-		left := strings.ToLower(filepath.Base(hints[i].Path))
-		right := strings.ToLower(filepath.Base(hints[j].Path))
-		return left < right
-	})
-
-	if len(hints) > 20 {
-		hints = hints[:20]
-	}
-
-	return hints, nil
-}
-
-func mergeDirectoryHints(groups ...[]CWDHint) []CWDHint {
-	merged := make([]CWDHint, 0)
-	seen := make(map[string]struct{})
-
-	for _, group := range groups {
-		for _, hint := range group {
-			if _, ok := seen[hint.Path]; ok {
-				continue
-			}
-			seen[hint.Path] = struct{}{}
-			merged = append(merged, hint)
-		}
-	}
-
-	sort.Slice(merged, func(i, j int) bool {
-		left := strings.ToLower(filepath.Base(merged[i].Path))
-		right := strings.ToLower(filepath.Base(merged[j].Path))
-		if left == right {
-			return merged[i].Path < merged[j].Path
-		}
-		return left < right
-	})
-
-	if len(merged) > 20 {
-		merged = merged[:20]
-	}
-
-	return merged
-}
-
-func matchesDirectoryHint(name, filter string) bool {
-	lowerName := strings.ToLower(name)
-	if strings.HasPrefix(lowerName, filter) || strings.Contains(lowerName, filter) {
-		return true
-	}
-
-	filterRunes := []rune(filter)
-	filterIndex := 0
-	for _, char := range lowerName {
-		if filterIndex >= len(filterRunes) {
-			break
-		}
-		if char == filterRunes[filterIndex] {
-			filterIndex++
-		}
-	}
-
-	return filterIndex == len(filterRunes)
+	s.handleRunnerDiscovery(w, r, protocol.MethodWorkspaceCWDHints)
 }
 
 // handleGetConversation handles GET /api/conversations/{id}
@@ -1762,7 +1480,20 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	// Get conversation
 	response, err := s.conversationService.GetConversation(ctx, id)
 	if err != nil {
+		if errors.Is(err, conversationtypes.ErrConversationNotFound) {
+			s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
+			return
+		}
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get conversation", err)
+		return
+	}
+	if r.URL.Query().Get("format") == "raw" {
+		s.writeJSONResponse(w, conversationtypes.ConversationRecord{
+			ID: response.ID, CWD: response.CWD, Provider: response.Provider,
+			CreatedAt: response.CreatedAt, UpdatedAt: response.UpdatedAt,
+			RawMessages: response.RawMessages, Summary: response.Summary,
+			Usage: response.Usage, Metadata: response.Metadata, ToolResults: response.ToolResults,
+		})
 		return
 	}
 	if r.URL.Query().Get("format") == "stream" {
@@ -1797,7 +1528,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:             response.CreatedAt,
 		UpdatedAt:             response.UpdatedAt,
 		Provider:              providerLabel,
-		CWD:                   compactHomePath(response.CWD),
+		CWD:                   response.CWD,
 		CWDLocked:             response.ID != "" && strings.TrimSpace(response.CWD) != "",
 		Profile:               resolveConversationProfile(response.Metadata),
 		ProfileLocked:         response.ID != "",
@@ -1817,6 +1548,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 			logger.G(ctx).WithError(affinityErr).WithField("conversation_id", response.ID).Warn("failed to refresh runner affinity")
 		} else if ok {
 			webResponse.RunnerID = affinity.RunnerID
+			// Runner paths must not be shortened using the daemon host's home directory.
+			webResponse.CWD = response.CWD
 			webResponse.EnvironmentProfile = affinity.EnvironmentProfile
 			if runner, found := s.runnerRegistry.Runner(affinity.RunnerID); found {
 				webResponse.Runner = &runner
@@ -2268,6 +2001,10 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	subscriber := newSubscriberEventSink()
+	subscriber.clientID = strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	subscriber.interactive = validUIClientID(subscriber.clientID) && strings.Contains(","+r.Header.Get(chat.UICapabilitiesHeader)+",", ",interactive,")
+	subscriber.capabilities = parseClientUICapabilities(r.Header.Get(chat.UICapabilitiesHeader))
+	subscriber.ctx = r.Context()
 	active, registered := s.registerChatSubscriber(conversationID, subscriber)
 	if !registered {
 		subscriber.Close()
@@ -2419,6 +2156,9 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 
 // handleStopConversation handles POST /api/conversations/{id}/stop
 func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) {
+	if s.handleDurableTurnStop(w, r) {
+		return
+	}
 	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
 	if conversationID == "" {
 		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
@@ -2483,7 +2223,13 @@ func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
 		response.Confirmed = true
 	}
 
-	if !s.respondToUIInput(conversationID, requestID, response) {
+	clientID := strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	if !validUIClientID(clientID) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "a valid X-Kodelet-Client-ID header is required", nil)
+		return
+	}
+	broker := s.uiInputBrokerForRun(conversationID)
+	if broker == nil || !broker.respondOwned(clientID, requestID, response) {
 		s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
 		return
 	}
@@ -2583,26 +2329,12 @@ func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, messa
 
 // Start starts the web server
 func (s *Server) Start(ctx context.Context) error {
-	address := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
-		Addr:    address,
-		Handler: s.router,
+	listener, err := net.Listen("tcp", net.JoinHostPort(s.config.Host, strconv.Itoa(s.config.Port)))
+	if err != nil {
+		return errors.Wrap(err, "failed to bind control-plane listener")
 	}
-
-	presenter.Info(fmt.Sprintf("Starting web server on http://%s", address))
-
-	// Start server in a goroutine
-	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.G(ctx).WithError(err).Error("Web server error")
-		}
-	}()
-
-	// Wait for context cancellation
-	<-ctx.Done()
-
-	return s.shutdownHTTPServer()
+	presenter.Info(fmt.Sprintf("Starting web server on http://%s", listener.Addr()))
+	return s.Serve(ctx, listener)
 }
 
 func (s *Server) shutdownHTTPServer() error {
@@ -2625,19 +2357,8 @@ func (s *Server) Stop() error {
 		return &httpShutdownError{err: err}
 	}
 
-	s.terminalSessionsMu.Lock()
-	terminalSessions := s.terminalSessions
-	s.terminalSessionsMu.Unlock()
-	if terminalSessions != nil {
-		terminalSessions.Close()
-	}
 	if closer, ok := s.chatRunner.(interface{ Close() error }); ok {
 		if err := closer.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if s.extensionRuntimes != nil {
-		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -2648,6 +2369,11 @@ func (s *Server) Stop() error {
 	}
 	if s.authStore != nil {
 		if err := s.authStore.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if s.turns != nil {
+		if err := s.turns.db.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

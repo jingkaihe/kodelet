@@ -27,6 +27,19 @@ func (t *Thread) cleanupOrphanedMessages() {
 	t.messages = cleanedOpenAIMessages(t.messages)
 }
 
+// SavePendingUserMessage saves an admission checkpoint without changing live history.
+// The caller must own the thread, just as when calling SendMessage.
+func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
+	if !t.Persisted || t.Store == nil {
+		return errors.New("conversation persistence is unavailable")
+	}
+	original := t.messages
+	t.messages = slices.Clone(original)
+	defer func() { t.messages = original }()
+	t.AddUserMessage(ctx, message, images...)
+	return t.SaveConversation(ctx)
+}
+
 func cleanedOpenAIMessages(messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
 	cleaned := slices.Clone(messages)
 	for len(cleaned) > 0 {

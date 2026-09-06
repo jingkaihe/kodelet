@@ -1,27 +1,19 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
-	"github.com/jingkaihe/kodelet/pkg/acp/session"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -125,72 +117,42 @@ var conversationListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved conversations",
 	Long:  `List saved conversations with filtering and sorting options.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-		config := getConversationListConfigFromFlags(cmd)
-		listConversationsCmd(ctx, config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationDeleteCmd = &cobra.Command{
 	Use:   "delete [conversationID]",
 	Short: "Delete a specific conversation",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getConversationDeleteConfigFromFlags(cmd)
-		deleteConversationCmd(ctx, args[0], config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationShowCmd = &cobra.Command{
 	Use:   "show [conversationID]",
 	Short: "Show a specific conversation",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getConversationShowConfigFromFlags(cmd)
-		showConversationCmd(ctx, args[0], config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationImportCmd = &cobra.Command{
 	Use:   "import [path_or_url]",
 	Short: "Import a conversation from a file or URL",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getConversationImportConfigFromFlags(cmd)
-		importConversationCmd(ctx, args[0], config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationExportCmd = &cobra.Command{
 	Use:   "export [conversationID] [path]",
 	Short: "Export a conversation to a file or create a gist",
 	Args:  cobra.RangeArgs(1, 2),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getConversationExportConfigFromFlags(cmd)
-
-		var path string
-		if len(args) > 1 {
-			path = args[1]
-		}
-
-		exportConversationCmd(ctx, args[0], path, config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationEditCmd = &cobra.Command{
 	Use:   "edit [conversationID]",
 	Short: "Edit a conversation record in JSON format",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getConversationEditConfigFromFlags(cmd)
-		editConversationCmd(ctx, args[0], config)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 var conversationForkCmd = &cobra.Command{
@@ -198,14 +160,7 @@ var conversationForkCmd = &cobra.Command{
 	Short: "Fork a conversation to create a copy with reset usage statistics",
 	Long:  "Fork a conversation by copying its messages and context while resetting usage statistics (tokens and costs). If no conversation ID is provided, the most recent conversation will be forked.",
 	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		conversationID := ""
-		if len(args) > 0 {
-			conversationID = args[0]
-		}
-		forkConversationCmd(ctx, conversationID)
-	},
+	RunE:  runRemoteConversationCommand,
 }
 
 func init() {
@@ -247,6 +202,8 @@ func init() {
 	conversationCmd.AddCommand(conversationExportCmd)
 	conversationCmd.AddCommand(conversationEditCmd)
 	conversationCmd.AddCommand(conversationForkCmd)
+	addRemoteConversationCommands(conversationCmd)
+	conversationCmd.AddCommand(conversationTurnCmd)
 }
 
 func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListConfig {
@@ -535,104 +492,6 @@ type ConversationSummaryOutput struct {
 	MaxContext     int       `json:"max_context_window"`
 }
 
-func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	options := convtypes.QueryOptions{
-		SearchTerm: config.Search,
-		Provider:   config.Provider,
-		Limit:      config.Limit,
-		Offset:     config.Offset,
-		SortBy:     config.SortBy,
-		SortOrder:  config.SortOrder,
-	}
-
-	if config.StartDate != "" {
-		startDate, err := time.Parse("2006-01-02", config.StartDate)
-		if err != nil {
-			presenter.Error(err, "Invalid start date format. Please use YYYY-MM-DD")
-			os.Exit(1)
-		}
-		options.StartDate = &startDate
-	}
-
-	if config.EndDate != "" {
-		endDate, err := time.Parse("2006-01-02", config.EndDate)
-		if err != nil {
-			presenter.Error(err, "Invalid end date format. Please use YYYY-MM-DD")
-			os.Exit(1)
-		}
-		// Set to end of day
-		endDate = endDate.Add(24*time.Hour - time.Second)
-		options.EndDate = &endDate
-	}
-
-	result, err := store.Query(ctx, options)
-	if err != nil {
-		presenter.Error(err, "Failed to list conversations")
-		os.Exit(1)
-	}
-
-	summaries := result.ConversationSummaries
-	if len(summaries) == 0 {
-		presenter.Info("No conversations found matching your criteria.")
-		return
-	}
-
-	metadataByID := make(map[string]map[string]any, len(summaries))
-	for _, summary := range summaries {
-		metadataByID[summary.ID] = summary.Metadata
-	}
-
-	format := TableFormat
-	if config.JSONOutput {
-		format = JSONFormat
-	}
-	output := NewConversationListOutput(summaries, metadataByID, format)
-	if err := output.Render(os.Stdout); err != nil {
-		presenter.Error(err, "Failed to render conversation list")
-		os.Exit(1)
-	}
-}
-
-func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	if !config.NoConfirm {
-		response := presenter.Prompt(fmt.Sprintf("Are you sure you want to delete conversation %s?", id), "y", "N")
-
-		if response != "y" && response != "Y" {
-			presenter.Info("Deletion cancelled.")
-			return
-		}
-	}
-	err = store.Delete(ctx, id)
-	if err != nil {
-		presenter.Error(err, "Failed to delete conversation")
-		os.Exit(1)
-	}
-
-	// Also clean up ACP session data if it exists
-	if storage, err := session.NewStorage(ctx); err == nil {
-		if err := storage.Delete(acptypes.SessionID(id)); err != nil {
-			logger.G(ctx).WithError(err).Debug("Failed to delete ACP session data")
-		}
-		storage.Close()
-	}
-
-	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
-}
-
 type ConversationShowOutput struct {
 	ID        string             `json:"id"`
 	Provider  string             `json:"provider"`
@@ -645,31 +504,15 @@ type ConversationShowOutput struct {
 	Messages  []llmtypes.Message `json:"messages,omitempty"`
 }
 
-func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	record, err := store.Load(ctx, id)
-	if err != nil {
-		presenter.Error(err, "Failed to load conversation")
-		os.Exit(1)
-	}
-
+func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, config *ConversationShowConfig) error {
 	platform, apiMode := extractProviderMetadata(record.Provider, record.Metadata)
 	providerDisplay := displayProviderName(record.Provider)
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
 
 	switch config.Format {
 	case "raw":
-		outputJSON, err := json.MarshalIndent(record, "", "  ")
-		if err != nil {
-			presenter.Error(err, "Failed to generate JSON output")
-			os.Exit(1)
-		}
-		fmt.Println(string(outputJSON))
+		return encoder.Encode(record)
 	case "json":
 		output := ConversationShowOutput{
 			ID:        record.ID,
@@ -684,50 +527,37 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		if !config.StatsOnly {
 			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 			if err != nil {
-				presenter.Error(err, "Failed to parse conversation messages")
-				os.Exit(1)
+				return errors.Wrap(err, "failed to parse conversation messages")
 			}
 			output.Messages = messages
 		}
 		if config.NoHeader {
-			outputJSON, err := json.MarshalIndent(output.Messages, "", "  ")
-			if err != nil {
-				presenter.Error(err, "Failed to generate JSON output")
-				os.Exit(1)
-			}
-			fmt.Println(string(outputJSON))
-		} else {
-			outputJSON, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				presenter.Error(err, "Failed to generate JSON output")
-				os.Exit(1)
-			}
-			fmt.Println(string(outputJSON))
+			return encoder.Encode(output.Messages)
 		}
+		return encoder.Encode(output)
 	case "text":
 		showHeader := !config.NoHeader
 		showMessages := !config.StatsOnly
 		if showHeader {
-			displayConversationHeader(record, providerDisplay, platform, apiMode)
+			displayConversationHeader(w, record, providerDisplay, platform, apiMode)
 			if showMessages {
-				fmt.Println()
+				fmt.Fprintln(w)
 			}
 		}
 		if showMessages {
 			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 			if err != nil {
-				presenter.Error(err, "Failed to parse conversation messages")
-				os.Exit(1)
+				return errors.Wrap(err, "failed to parse conversation messages")
 			}
-			displayConversation(messages)
+			displayConversation(w, messages)
 		}
 	case "markdown":
 		showHeader := !config.NoHeader
 		showMessages := !config.StatsOnly
 		if showHeader {
-			fmt.Print(renderConversationHeaderMarkdown(record, providerDisplay, platform, apiMode))
+			fmt.Fprint(w, renderConversationHeaderMarkdown(record, providerDisplay, platform, apiMode))
 			if showMessages {
-				fmt.Println()
+				fmt.Fprintln(w)
 			}
 		}
 		if showMessages {
@@ -741,53 +571,55 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 				},
 			)
 			if err != nil {
-				presenter.Error(err, "Failed to render conversation markdown")
-				os.Exit(1)
+				return errors.Wrap(err, "failed to render conversation markdown")
 			}
-			fmt.Print(markdown)
+			_, err = fmt.Fprint(w, markdown)
+			return err
 		}
 	default:
-		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, text, and markdown")
-		os.Exit(1)
+		return errors.Errorf("unsupported format %q; use raw, json, text, or markdown", config.Format)
 	}
+	return nil
 }
 
-func displayConversationHeader(record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) {
-	presenter.Section("Conversation Info")
-	fmt.Printf("ID:        %s\n", record.ID)
-	fmt.Printf("Provider:  %s\n", providerDisplay)
+func displayConversationHeader(w io.Writer, record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) {
+	presentation := presenter.NewWithOptions(w, w, presenter.ColorAuto)
+	presentation.Section("Conversation Info")
+	fmt.Fprintf(w, "ID:        %s\n", record.ID)
+	fmt.Fprintf(w, "Provider:  %s\n", providerDisplay)
 	if platform != "" {
-		fmt.Printf("Platform:  %s\n", platform)
+		fmt.Fprintf(w, "Platform:  %s\n", platform)
 	}
 	if apiMode != "" {
-		fmt.Printf("API Mode:  %s\n", apiMode)
+		fmt.Fprintf(w, "API Mode:  %s\n", apiMode)
 	}
-	fmt.Printf("Created:   %s\n", record.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("Updated:   %s\n", record.UpdatedAt.Format(time.RFC3339))
+	fmt.Fprintf(w, "Created:   %s\n", record.CreatedAt.Format(time.RFC3339))
+	fmt.Fprintf(w, "Updated:   %s\n", record.UpdatedAt.Format(time.RFC3339))
 
 	if record.Summary != "" {
-		fmt.Printf("Summary:   %s\n", record.Summary)
+		fmt.Fprintf(w, "Summary:   %s\n", record.Summary)
 	}
 
 	usage := record.Usage
-	fmt.Println()
-	presenter.Section("Usage Stats")
-	fmt.Printf("Input Tokens:   %d\n", usage.InputTokens)
-	fmt.Printf("Output Tokens:  %d\n", usage.OutputTokens)
+	fmt.Fprintln(w)
+	presentation.Section("Usage Stats")
+	fmt.Fprintf(w, "Input Tokens:   %d\n", usage.InputTokens)
+	fmt.Fprintf(w, "Output Tokens:  %d\n", usage.OutputTokens)
 	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
-		fmt.Printf("Cache Read:     %d\n", usage.CacheReadInputTokens)
-		fmt.Printf("Cache Creation: %d\n", usage.CacheCreationInputTokens)
+		fmt.Fprintf(w, "Cache Read:     %d\n", usage.CacheReadInputTokens)
+		fmt.Fprintf(w, "Cache Creation: %d\n", usage.CacheCreationInputTokens)
 	}
-	fmt.Printf("Total Cost:     $%.4f\n", usage.TotalCost())
+	fmt.Fprintf(w, "Total Cost:     $%.4f\n", usage.TotalCost())
 	if usage.MaxContextWindow > 0 {
-		fmt.Printf("Context Window: %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
+		fmt.Fprintf(w, "Context Window: %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
 	}
 }
 
-func displayConversation(messages []llmtypes.Message) {
+func displayConversation(w io.Writer, messages []llmtypes.Message) {
+	presentation := presenter.NewWithOptions(w, w, presenter.ColorAuto)
 	for i, msg := range messages {
 		if i > 0 {
-			presenter.Separator()
+			presentation.Separator()
 		}
 
 		roleLabel := ""
@@ -804,8 +636,8 @@ func displayConversation(messages []llmtypes.Message) {
 				roleLabel = msg.Role
 			}
 		}
-		presenter.Section(roleLabel)
-		fmt.Printf("%s\n", msg.Content)
+		presentation.Section(roleLabel)
+		fmt.Fprintf(w, "%s\n", msg.Content)
 	}
 }
 
@@ -856,150 +688,6 @@ func sanitizeMarkdownText(value string) string {
 	return strings.ReplaceAll(value, "\n", " ")
 }
 
-func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	data, err := readConversationData(source)
-	if err != nil {
-		presenter.Error(err, "Failed to read conversation data")
-		os.Exit(1)
-	}
-
-	record, err := validateConversationRecord(data)
-	if err != nil {
-		presenter.Error(err, "Invalid conversation data")
-		os.Exit(1)
-	}
-	if _, err := store.Load(ctx, record.ID); err == nil {
-		if !config.Force {
-			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
-			os.Exit(1)
-		}
-	}
-	if err := store.Save(ctx, *record); err != nil {
-		presenter.Error(err, "Failed to save conversation")
-		os.Exit(1)
-	}
-
-	presenter.Success(fmt.Sprintf("Conversation %s imported successfully", record.ID))
-}
-
-func exportConversationCmd(ctx context.Context, conversationID string, path string, config *ConversationExportConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	record, err := store.Load(ctx, conversationID)
-	if err != nil {
-		presenter.Error(err, "Failed to load conversation")
-		os.Exit(1)
-	}
-
-	jsonData, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		presenter.Error(err, "Failed to serialize conversation")
-		os.Exit(1)
-	}
-	if config.UseGist || config.UsePublicGist {
-		// Check for conflicting flags
-		if config.UseGist && config.UsePublicGist {
-			presenter.Error(errors.New("cannot use both --gist and --public-gist flags"), "Conflicting flags")
-			os.Exit(1)
-		}
-
-		isPrivate := config.UseGist // private if --gist, public if --public-gist
-		if err := createGist(conversationID, jsonData, isPrivate); err != nil {
-			presenter.Error(err, "Failed to create gist")
-			os.Exit(1)
-		}
-		return
-	}
-
-	if path == "" {
-		path = fmt.Sprintf("%s.json", conversationID)
-	}
-
-	if err := os.WriteFile(path, jsonData, 0o644); err != nil {
-		presenter.Error(err, "Failed to write file")
-		os.Exit(1)
-	}
-
-	presenter.Success(fmt.Sprintf("Conversation %s exported to %s", conversationID, path))
-}
-
-func readConversationData(source string) ([]byte, error) {
-	if parsedURL, err := url.Parse(source); err == nil && parsedURL.Scheme != "" {
-		return readFromURL(source)
-	}
-
-	return os.ReadFile(source)
-}
-
-func readFromURL(urlStr string) ([]byte, error) {
-	resp, err := http.Get(urlStr)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to fetch from URL")
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
-	}
-
-	return io.ReadAll(resp.Body)
-}
-
-func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, error) {
-	var record convtypes.ConversationRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, errors.Wrap(err, "invalid JSON format")
-	}
-
-	if record.ID == "" {
-		return nil, errors.New("conversation ID is required")
-	}
-
-	if record.Provider == "" {
-		return nil, errors.New("model type is required")
-	}
-
-	if record.Provider != "anthropic" && record.Provider != "openai" && record.Provider != "openai-responses" {
-		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai, openai-responses)", record.Provider)
-	}
-
-	if len(record.RawMessages) == 0 {
-		return nil, errors.New("raw messages are required")
-	}
-
-	if record.ToolResults == nil {
-		record.ToolResults = make(map[string]tools.StructuredToolResult)
-	}
-	if _, _, err := conversations.ConfigSnapshotFromMetadata(record.Metadata); err != nil {
-		return nil, errors.Wrap(err, "invalid conversation config snapshot")
-	}
-
-	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to extract messages")
-	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = time.Now()
-	}
-	if record.UpdatedAt.IsZero() {
-		record.UpdatedAt = time.Now()
-	}
-
-	return &record, nil
-}
-
 func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	tmpFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
 	if err != nil {
@@ -1035,114 +723,4 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	presenter.Info(result)
 	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist", conversationID, visibility))
 	return nil
-}
-
-func editConversationCmd(ctx context.Context, conversationID string, config *ConversationEditConfig) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	record, err := store.Load(ctx, conversationID)
-	if err != nil {
-		presenter.Error(err, "Failed to load conversation")
-		os.Exit(1)
-	}
-
-	jsonData, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		presenter.Error(err, "Failed to serialize conversation")
-		os.Exit(1)
-	}
-
-	tempFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
-	if err != nil {
-		presenter.Error(err, "Failed to create temporary file")
-		os.Exit(1)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.Write(jsonData); err != nil {
-		presenter.Error(err, "Failed to write to temporary file")
-		os.Exit(1)
-	}
-	tempFile.Close()
-
-	editor := config.Editor
-	if editor == "" {
-		editor = getEditor()
-	}
-
-	editorCmd := []string{editor}
-	if config.EditArgs != "" {
-		args := strings.Fields(config.EditArgs)
-		editorCmd = append(editorCmd, args...)
-	}
-	editorCmd = append(editorCmd, tempFile.Name())
-	cmd := exec.Command(editorCmd[0], editorCmd[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		presenter.Error(err, "Failed to open editor")
-		os.Exit(1)
-	}
-
-	editedData, err := os.ReadFile(tempFile.Name())
-	if err != nil {
-		presenter.Error(err, "Failed to read edited file")
-		os.Exit(1)
-	}
-
-	editedRecord, err := validateConversationRecord(editedData)
-	if err != nil {
-		presenter.Error(err, "Invalid edited conversation data")
-		os.Exit(1)
-	}
-	if err := store.Save(ctx, *editedRecord); err != nil {
-		presenter.Error(err, "Failed to save edited conversation")
-		os.Exit(1)
-	}
-
-	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
-}
-
-func forkConversationCmd(ctx context.Context, conversationID string) {
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
-	}
-	defer store.Close()
-
-	// If no conversation ID is provided, get the most recent one
-	if conversationID == "" {
-		conversationID, err = conversations.GetMostRecentConversationID(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to get most recent conversation")
-			os.Exit(1)
-		}
-		presenter.Info(fmt.Sprintf("Forking most recent conversation: %s", conversationID))
-	}
-
-	// Load the source conversation
-	sourceRecord, err := store.Load(ctx, conversationID)
-	if err != nil {
-		presenter.Error(err, fmt.Sprintf("Failed to load conversation %s", conversationID))
-		os.Exit(1)
-	}
-
-	forkedRecord, err := conversations.PersistConversationFork(ctx, store, sourceRecord, convtypes.ConversationForkOptions{
-		Mode: convtypes.ConversationForkModeStoredCopy,
-	})
-	if err != nil {
-		presenter.Error(err, "Failed to save forked conversation")
-		os.Exit(1)
-	}
-
-	presenter.Success(fmt.Sprintf("Conversation forked successfully. New ID: %s", forkedRecord.ID))
-	presenter.Info(fmt.Sprintf("Original: %s → Forked: %s", conversationID, forkedRecord.ID))
 }

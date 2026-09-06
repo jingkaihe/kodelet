@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -53,6 +54,38 @@ func TestRunExtensionListJSONEmpty(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(listOutput), &payload))
 	assert.Empty(t, payload.Extensions)
 	assert.NotContains(t, listOutput, "No extensions found")
+}
+
+func TestHostExtensionInspectionNeverStartsProcesses(t *testing.T) {
+	for _, command := range []string{"list", "inspect"} {
+		t.Run(command, func(t *testing.T) {
+			fixture := newHostInspectionFixture(t)
+			args := []string{"host", "extension", command, "--json"}
+			if command == "inspect" {
+				args = append(args, fixture.extensionPath)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, args...).CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			var ext ExtensionOutput
+			if command == "list" {
+				var result struct {
+					Extensions []ExtensionOutput `json:"extensions"`
+				}
+				require.NoError(t, json.Unmarshal(output, &result))
+				require.Len(t, result.Extensions, 1)
+				ext = result.Extensions[0]
+			} else {
+				require.NoError(t, json.Unmarshal(output, &ext))
+			}
+			assert.Equal(t, "poison", ext.ID)
+			assert.Equal(t, fixture.extensionPath, ext.Path)
+			assert.NoFileExists(t, fixture.extensionMarker)
+			assert.NoFileExists(t, fixture.templateMarker)
+			assert.NoDirExists(t, filepath.Join(fixture.home, ".kodelet"))
+		})
+	}
 }
 
 func restoreExtensionCommandViper(t *testing.T, globalDir string) {

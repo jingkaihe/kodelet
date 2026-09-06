@@ -702,8 +702,9 @@ OUTER:
 		}
 	}
 
-	// Save conversation state
-	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
+	// A cancelled pre-turn hook can leave input only in the durable admission
+	// checkpoint. Do not overwrite it with the pre-input compaction context.
+	if incomingUserAppended && t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
 		t.SaveConversation(saveCtx)
 	}
@@ -2564,6 +2565,21 @@ func rawMessagesForName(items []StoredInputItem) json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// SavePendingUserMessage saves an admission checkpoint without changing the live
+// context, including the Responses pre-turn compaction ordering.
+func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
+	if !t.Persisted || t.Store == nil {
+		return errors.New("conversation persistence is unavailable")
+	}
+	snapshot := t.snapshotNoSaveState()
+	defer t.restoreNoSaveState(snapshot)
+	ctx = context.WithValue(ctx, responsesNoSaveOperationContextKey{}, snapshot.operation)
+	t.AddUserMessage(ctx, message, images...)
+	return t.SaveConversation(ctx)
 }
 
 // SaveConversation saves the current thread to the conversation store.

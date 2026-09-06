@@ -9,12 +9,22 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
 var codexLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Logout from OpenAI Codex and remove stored credentials",
+	Short: "Explain the daemon-host logout procedure",
+	Args:  cobra.NoArgs,
+	RunE: func(*cobra.Command, []string) error {
+		return errors.New("daemon Codex logout is not available remotely: stop the daemon, run 'kodelet host codex logout' on its host, then restart it; no client credentials were changed")
+	},
+}
+
+var hostCodexLogoutCmd = &cobra.Command{
+	Use:   "logout",
+	Short: "Remove this host's Codex credentials (daemon must be stopped)",
 	Long: `Logout from OpenAI Codex and remove stored credentials.
 
 This command will:
@@ -35,7 +45,10 @@ Codex models until you authenticate again.`,
 }
 
 func init() {
-	codexLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
+	codexLogoutCmd.Flags().Bool("no-confirm", false, "Legacy flag; remote logout is not supported")
+	hostCodexLogoutCmd.Flags().Bool("no-confirm", false, "Explicitly approve deleting credentials on this host")
+	hostCodexCmd.AddCommand(hostCodexLogoutCmd)
+	hostCmd.AddCommand(hostCodexCmd)
 }
 
 func runCodexLogout(_ context.Context, noConfirm bool) error {

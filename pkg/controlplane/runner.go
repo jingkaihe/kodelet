@@ -225,13 +225,8 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, identity runnerregis
 		}
 		response, err := broker.Notify(ctx, value.Request)
 		return runnerUIResponse(response, err)
-	case protocol.MethodUITranscriptAppend:
-		value, rpcErr := decodeRunnerUIParams[runnerpayload.UITranscriptAppendParams](s, runnerID, params)
-		if rpcErr != nil {
-			return nil, rpcErr
-		}
-		_ = value
-		return extensions.UITranscriptAppendResponse{Reason: "web ui extension transcript proxy is not available"}, nil
+	case protocol.MethodUITranscriptAppend, protocol.MethodUIExtensionCleanup:
+		return s.handleNativeRunnerUI(ctx, identity, method, params)
 	case protocol.MethodUIWidgetSet:
 		value, rpcErr := decodeRunnerUIWidgetParams[runnerpayload.UIWidgetSetParams](params)
 		if rpcErr != nil {
@@ -289,10 +284,7 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, identity runnerregis
 	case protocol.MethodUISurfaceOpen,
 		protocol.MethodUISurfaceFrame,
 		protocol.MethodUISurfaceClose:
-		if rpcErr := validateRunnerUIRun(s, runnerID, params); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return extensions.UIFrameResponse{Reason: "web ui persistent extension surfaces are not available"}, nil
+		return s.handleNativeRunnerUI(ctx, identity, method, params)
 	default:
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeMethodNotFound, Message: "runner UI method not found"}
 	}

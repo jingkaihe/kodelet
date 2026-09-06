@@ -21,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -1218,7 +1219,7 @@ func TestEffectiveExtensionShortcutsFiltersReservedBindings(t *testing.T) {
 }
 
 func TestExtensionShortcutOverridesBuiltInComposerBinding(t *testing.T) {
-	m := newModel(context.Background(), Config{})
+	m := newModel(context.Background(), Config{Runner: &remoteShortcutRunner{}, Remote: true})
 	t.Cleanup(m.cancel)
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "workspace"}}
@@ -1247,7 +1248,7 @@ func TestExtensionShortcutDispatchesSupportedTeaKeyMessages(t *testing.T) {
 		{name: "function key", key: "f5", msg: keyPress(tea.KeyF5)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			m := newModel(context.Background(), Config{})
+			m := newModel(context.Background(), Config{Runner: &remoteShortcutRunner{}, Remote: true})
 			t.Cleanup(m.cancel)
 			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 			m.extensionShortcuts = []extensions.Shortcut{{Key: test.key, Description: "Action", ExtensionID: "workspace"}}
@@ -1264,11 +1265,11 @@ func TestExtensionShortcutDispatchesSupportedTeaKeyMessages(t *testing.T) {
 	}
 }
 
-func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
+func TestExtensionShortcutCommandUsesInjectedRunnerWithoutLocalRuntime(t *testing.T) {
 	workspace := t.TempDir()
 	extensionRoot := t.TempDir()
 	contextPath := filepath.Join(t.TempDir(), "shortcut-context.json")
-	runner := &recordingRunner{conversationID: "conversation-shortcut"}
+	runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{CWD: workspace, Digest: "sha256:runner", Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "shortcut-test", Generation: 2}}}}
 	writeTUIShortcutExtension(t, extensionRoot)
 	t.Setenv("KODELET_TUI_SHORTCUT_CONTEXT_PATH", contextPath)
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
@@ -1282,10 +1283,11 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 		"extensions.max_output_size": 102400,
 	})
 
-	m := newModel(t.Context(), Config{CWD: workspace, Profile: "default", Runner: runner})
+	m := newModel(t.Context(), Config{CWD: workspace, Profile: "default", Runner: runner, Remote: true})
 	t.Cleanup(m.cancel)
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "shortcut-test"}}
+	m.shortcutDigest = "sha256:runner"
 
 	updated, cmd := m.Update(keyPressWithMod('r', tea.ModCtrl))
 	m = updated.(model)
@@ -1294,23 +1296,13 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, done.err)
 	assert.True(t, done.matched)
-	assert.Equal(t, &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"}, done.result)
-
-	payload, err := os.ReadFile(contextPath)
-	require.NoError(t, err)
-	var request struct {
-		Key     string                          `json:"key"`
-		Context extensions.ExtensionCallContext `json:"context"`
-	}
-	require.NoError(t, json.Unmarshal(payload, &request))
-	assert.Equal(t, "ctrl+r", request.Key)
-	assert.Equal(t, workspace, request.Context.CWD)
-	assert.Equal(t, "anthropic", request.Context.Provider)
-	assert.Equal(t, "claude-test", request.Context.Model)
-	assert.Equal(t, "default", request.Context.Profile)
-	assert.Equal(t, "review", request.Context.RecipeName)
-	assert.Equal(t, "main", request.Context.InvokedBy)
-	assert.Equal(t, m.key, request.Context.UIScopeID)
+	assert.Equal(t, &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/review"}, done.result)
+	require.NotNil(t, runner.request)
+	assert.Equal(t, workspace, runner.request.Target.CWD)
+	assert.Equal(t, "ctrl+r", runner.request.Shortcut.Key)
+	assert.Equal(t, uint64(2), runner.request.Shortcut.Generation)
+	assert.Nil(t, m.extensionRuntimes)
+	assert.NoFileExists(t, contextPath, "shortcut must not start the discoverable client extension")
 
 	updated, followUp := m.Update(done)
 	m = updated.(model)
@@ -1318,7 +1310,7 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 	assert.Empty(t, m.shortcutCalls)
 	assert.True(t, m.running)
 	require.Len(t, m.entries, 1)
-	assert.Equal(t, chatEntry{kind: entryUser, content: "/dictate"}, m.entries[0])
+	assert.Equal(t, chatEntry{kind: entryUser, content: "/review"}, m.entries[0])
 }
 
 func TestExtensionShortcutSubmitPreservesComposerAndQueuesDuringRun(t *testing.T) {
@@ -2018,19 +2010,9 @@ func TestSubmitGoalSlashCommandDisplaysObjectiveImmediately(t *testing.T) {
 	assert.Equal(t, "/goal run ls -la", runner.req.Message)
 }
 
-func TestSubmitWithDefaultRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {
+func TestSubmitWithInjectedRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {
 	runner := &recordingRunner{conversationID: "conversation-done"}
-	capturedDefaultCWD := "unset"
-	previous := newDefaultChatRunner
-	newDefaultChatRunner = func(defaultCWD string, _ chat.ExtensionRuntimeProvider) chat.ChatRunner {
-		capturedDefaultCWD = defaultCWD
-		return runner
-	}
-	t.Cleanup(func() {
-		newDefaultChatRunner = previous
-	})
-
-	m := newModel(context.Background(), Config{ConversationID: "conversation-123", CWD: "./backend"})
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true, ConversationID: "conversation-123", CWD: "./backend"})
 	t.Cleanup(m.cancel)
 	m.textarea.SetValue("hello")
 
@@ -2041,7 +2023,6 @@ func TestSubmitWithDefaultRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {
 	_ = receiveRunMsg(t, m.runCh)
 	_ = receiveRunMsg(t, m.runCh)
 
-	assert.Empty(t, capturedDefaultCWD)
 	assert.Equal(t, "./backend", runner.req.CWD)
 }
 

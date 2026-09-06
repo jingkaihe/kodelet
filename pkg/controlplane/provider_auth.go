@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -117,6 +116,8 @@ func (defaultAnthropicProviderAuthService) ExchangeCode(ctx context.Context, cod
 }
 
 func (defaultAnthropicProviderAuthService) SaveCredentials(credentials *providerauth.AnthropicCredentials) error {
+	anthropicAccountMutationMu.Lock()
+	defer anthropicAccountMutationMu.Unlock()
 	accounts, err := providerauth.ListAnthropicAccounts()
 	if err != nil {
 		return err
@@ -128,6 +129,13 @@ func (defaultAnthropicProviderAuthService) SaveCredentials(credentials *provider
 		}
 	}
 	_, err = providerauth.SaveAnthropicCredentials(credentials)
+	return err
+}
+
+func (defaultAnthropicProviderAuthService) SaveCredentialsWithAlias(credentials *providerauth.AnthropicCredentials, alias string) error {
+	anthropicAccountMutationMu.Lock()
+	defer anthropicAccountMutationMu.Unlock()
+	_, err := providerauth.SaveAnthropicCredentialsWithAlias(alias, credentials)
 	return err
 }
 
@@ -145,7 +153,6 @@ const (
 	copilotDeviceCodeRequestLimit = 30 * time.Second
 	anthropicOAuthLoginTimeout    = 15 * time.Minute
 	anthropicOAuthExchangeLimit   = 30 * time.Second
-	providerLoginBodyLimit        = 16 << 10
 )
 
 type codexDeviceLoginSession struct {
@@ -225,7 +232,8 @@ type anthropicOAuthLoginResponse struct {
 }
 
 type completeAnthropicOAuthLoginRequest struct {
-	Code string `json:"code"`
+	Code  string  `json:"code"`
+	Alias *string `json:"alias,omitempty"`
 }
 
 func (s *Server) codexProviderAuth() codexProviderAuthService {
@@ -640,18 +648,33 @@ func (s *Server) handleCompleteAnthropicOAuthLogin(w http.ResponseWriter, r *htt
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, providerLoginBodyLimit)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	var request completeAnthropicOAuthLoginRequest
-	if err := decoder.Decode(&request); err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "invalid Anthropic login request", err)
+	if !s.decodeProviderAccountRequest(w, r, &request) {
 		return
 	}
 	request.Code = strings.TrimSpace(request.Code)
-	if request.Code == "" {
+	if request.Code == "" || len(request.Code) > 8192 {
 		s.writeErrorResponse(w, http.StatusBadRequest, "Anthropic authorization code is required", nil)
 		return
+	}
+	var aliasSaver interface {
+		SaveCredentialsWithAlias(*providerauth.AnthropicCredentials, string) error
+	}
+	if request.Alias != nil {
+		if *request.Alias != "" {
+			if err := providerauth.ValidateAlias(*request.Alias); err != nil {
+				s.writeErrorResponse(w, http.StatusBadRequest, "invalid account alias", err)
+				return
+			}
+		}
+		var ok bool
+		aliasSaver, ok = s.anthropicProviderAuth().(interface {
+			SaveCredentialsWithAlias(*providerauth.AnthropicCredentials, string) error
+		})
+		if !ok {
+			s.writeErrorResponse(w, http.StatusNotImplemented, "provider does not support account aliases", nil)
+			return
+		}
 	}
 
 	s.anthropicOAuthLoginMu.Lock()
@@ -660,9 +683,9 @@ func (s *Server) handleCompleteAnthropicOAuthLogin(w http.ResponseWriter, r *htt
 		s.writeErrorResponse(w, http.StatusNotFound, "Anthropic login not found", nil)
 		return
 	}
-	if s.anthropicOAuthLogin.Status != anthropicOAuthLoginPending {
+	if s.anthropicOAuthLogin.Status != anthropicOAuthLoginPending || !time.Now().Before(s.anthropicOAuthLogin.ExpiresAt) {
 		s.anthropicOAuthLoginMu.Unlock()
-		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is not awaiting a code", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is not awaiting a code or has expired", nil)
 		return
 	}
 	s.anthropicOAuthLogin.Status = anthropicOAuthLoginCompleting
@@ -679,7 +702,12 @@ func (s *Server) handleCompleteAnthropicOAuthLogin(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := s.anthropicProviderAuth().SaveCredentials(credentials); err != nil {
+	if request.Alias != nil {
+		err = aliasSaver.SaveCredentialsWithAlias(credentials, *request.Alias)
+	} else {
+		err = s.anthropicProviderAuth().SaveCredentials(credentials)
+	}
+	if err != nil {
 		logger.G(r.Context()).WithError(err).Error("failed to save Anthropic credentials")
 		s.finishAnthropicOAuthLogin(loginID, anthropicOAuthLoginFailed, "Could not save the Anthropic connection. Please try again.")
 		s.writeAnthropicOAuthLoginResponse(w, loginID)

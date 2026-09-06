@@ -10,12 +10,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -27,7 +24,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -187,6 +184,14 @@ func TestServerConfig_Validate(t *testing.T) {
 			},
 		},
 		{
+			name: "ephemeral listener port",
+			config: &ServerConfig{
+				Host:         "localhost",
+				Port:         0,
+				CompactRatio: 0.8,
+			},
+		},
+		{
 			name: "empty host",
 			config: &ServerConfig{
 				Host: "",
@@ -198,9 +203,9 @@ func TestServerConfig_Validate(t *testing.T) {
 			name: "invalid port - too low",
 			config: &ServerConfig{
 				Host: "localhost",
-				Port: 0,
+				Port: -1,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "invalid port - too high",
@@ -208,7 +213,7 @@ func TestServerConfig_Validate(t *testing.T) {
 				Host: "localhost",
 				Port: 65536,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "invalid compact ratio",
@@ -246,7 +251,7 @@ func TestServerConfig_Validate(t *testing.T) {
 				CWD:                          "/srv/kodelet",
 				DisableControlPlaneWorkspace: true,
 			},
-			expectedError: "cwd cannot be set when the control-plane workspace is disabled",
+			expectedError: "control-plane cwd is no longer supported; use --runner-workspace",
 		},
 	}
 
@@ -464,11 +469,9 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
-	defaultCWD := t.TempDir()
 	config := &ServerConfig{
 		Host:            "127.0.0.1",
 		Port:            1,
-		CWD:             defaultCWD,
 		CompactRatio:    0.8,
 		AuthToken:       "token",
 		RunnerAuthToken: "runner-token",
@@ -482,7 +485,8 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	assert.NotNil(t, server.router)
 	assert.NotNil(t, server.conversationService)
 	assert.NotNil(t, server.chatRunner)
-	assert.Equal(t, defaultCWD, config.CWD)
+	assert.Empty(t, config.CWD)
+	assert.True(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, "token", config.AuthToken)
 	assert.Equal(t, "runner-token", config.RunnerAuthToken)
 	assert.Equal(t, []string{"https://example.com"}, config.CORSOrigins)
@@ -814,17 +818,13 @@ func TestAuthHelpersAdditionalBranches(t *testing.T) {
 	assert.False(t, constantTimeStringEqual("same", "diff"))
 }
 
-func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
-	config := &ServerConfig{
-		Host:         "localhost",
-		Port:         8080,
-		CWD:          filepath.Join(t.TempDir(), "missing"),
-		CompactRatio: 0.8,
+func TestServerConfig_Validate_RejectsLocalCWD(t *testing.T) {
+	for _, cwd := range []string{t.TempDir(), "/missing/daemon/workspace", "relative", "   "} {
+		for _, disabled := range []bool{false, true} {
+			config := &ServerConfig{Host: "localhost", Port: 8080, CWD: cwd, CompactRatio: 0.8, DisableControlPlaneWorkspace: disabled}
+			require.ErrorContains(t, config.Validate(), "control-plane cwd is no longer supported; use --runner-workspace")
+		}
 	}
-
-	err := config.Validate()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid cwd")
 }
 
 func TestServer_handleListConversations(t *testing.T) {
@@ -836,8 +836,8 @@ func TestServer_handleListConversations(t *testing.T) {
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			assert.Equal(t, "~/workspace/kodelet", request.SearchTerm)
-			assert.Equal(t, conversationCWD, request.SearchCWDTerm)
-			assert.Equal(t, conversationCWD, request.CWD)
+			assert.Empty(t, request.SearchCWDTerm, "never expand a runner path against daemon HOME")
+			assert.Equal(t, "~/workspace/kodelet", request.CWD)
 			assert.Equal(t, "runner-1", request.RunnerID)
 			return &conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
@@ -880,8 +880,8 @@ func TestServer_handleListConversations(t *testing.T) {
 	assert.Equal(t, 2, len(response.Conversations))
 	assert.Equal(t, 2, response.Total)
 	assert.Equal(t, "OpenAI", response.Conversations[0].Provider)
-	assert.Equal(t, "~/workspace/kodelet", response.Conversations[0].CWD)
-	assert.Equal(t, []string{"~/workspace/kodelet"}, response.CWDs)
+	assert.Equal(t, conversationCWD, response.Conversations[0].CWD)
+	assert.Equal(t, []string{conversationCWD}, response.CWDs)
 	assert.True(t, response.Conversations[0].IsRunning)
 	assert.Equal(t, "fireworks", response.Conversations[0].Metadata["platform"])
 	assert.Equal(t, "chat_completions", response.Conversations[0].Metadata["api_mode"])
@@ -943,7 +943,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
 	assert.Equal(t, "OpenAI", response.Provider)
-	assert.Equal(t, "~/workspace/project", response.CWD)
+	assert.Equal(t, conversationCWD, response.CWD)
 	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
@@ -951,6 +951,77 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.True(t, response.ReasoningEffortLocked)
 	assert.True(t, response.IsRunning)
 	assert.Equal(t, 1, response.MessageCount)
+}
+
+func TestDaemonHistoryFiltersValidateAndPreserveRunnerPaths(t *testing.T) {
+	var calls int
+	server := &Server{conversationService: &mockConversationService{
+		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
+			calls++
+			assert.Equal(t, "~/runner-only", request.CWD)
+			assert.Empty(t, request.SearchCWDTerm)
+			assert.Equal(t, "anthropic", request.Provider)
+			assert.Equal(t, "messageCount", request.SortBy)
+			assert.Equal(t, "asc", request.SortOrder)
+			assert.Equal(t, 2, request.Limit)
+			assert.Equal(t, 3, request.Offset)
+			require.NotNil(t, request.StartDate)
+			require.NotNil(t, request.EndDate)
+			assert.Equal(t, "2026-09-05T00:00:00Z", request.StartDate.Format(time.RFC3339Nano))
+			assert.Equal(t, "2026-09-05T23:59:59.999999999Z", request.EndDate.Format(time.RFC3339Nano))
+			return &conversations.ListConversationsResponse{Conversations: []convtypes.ConversationSummary{{ID: "history", Provider: "anthropic", CWD: "/runner/project"}}}, nil
+		},
+	}}
+	response := httptest.NewRecorder()
+	server.handleListConversations(response, httptest.NewRequest(http.MethodGet, "/api/conversations?format=raw&provider=anthropic&cwd=~/runner-only&sortBy=messages&sortOrder=asc&startDate=2026-09-05&endDate=2026-09-05&limit=2&offset=3", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"provider":"anthropic"`)
+	assert.Contains(t, response.Body.String(), `"cwd":"/runner/project"`)
+	assert.Equal(t, 1, calls)
+
+	for _, query := range []string{"limit=no", "limit=-1", "offset=-1", "offset=bad", "sortBy=unknown", "sortOrder=other", "startDate=bad", "endDate=bad", "startDate=2026-09-06&endDate=2026-09-05"} {
+		t.Run(query, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			server.handleListConversations(response, httptest.NewRequest(http.MethodGet, "/api/conversations?"+query, nil))
+			assert.Equal(t, http.StatusBadRequest, response.Code)
+			assert.Equal(t, 1, calls, "invalid filters must not silently query different history")
+		})
+	}
+}
+
+func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
+	created := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	server := &Server{conversationService: &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+		if id == "missing" {
+			return nil, convtypes.ErrConversationNotFound
+		}
+		return &conversations.GetConversationResponse{
+			ID: id, CWD: "/runner/not-on-daemon", CreatedAt: created, UpdatedAt: created,
+			Provider: "anthropic", RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
+			Summary: "original summary", Usage: llmtypes.Usage{InputTokens: 42, InputCost: 0.123},
+			Metadata: map[string]any{"custom": "preserved"},
+		}, nil
+	}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/conversations/history?format=raw", nil)
+	request = mux.SetURLVars(request, map[string]string{"id": "history"})
+	response := httptest.NewRecorder()
+	server.handleGetConversation(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	var record convtypes.ConversationRecord
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &record))
+	assert.Equal(t, "history", record.ID)
+	assert.Equal(t, "/runner/not-on-daemon", record.CWD)
+	assert.Equal(t, "anthropic", record.Provider)
+	assert.Equal(t, "original summary", record.Summary)
+	assert.Equal(t, created, record.CreatedAt)
+	assert.Equal(t, created, record.UpdatedAt)
+	assert.Equal(t, 42, record.Usage.InputTokens)
+	assert.Equal(t, 0.123, record.Usage.InputCost)
+	assert.Equal(t, "preserved", record.Metadata["custom"])
+	assert.JSONEq(t, `[{"role":"user","content":"hello"}]`, string(record.RawMessages))
+	response = httptest.NewRecorder()
+	server.handleGetConversation(response, mux.SetURLVars(request, map[string]string{"id": "missing"}))
+	assert.Equal(t, http.StatusNotFound, response.Code)
 }
 
 func TestServer_handleGetConversationStreamFormatReturnsAuthoritativeEntries(t *testing.T) {
@@ -1007,7 +1078,7 @@ func TestServer_handleGetConversationStreamFormatSupportsLegacyResponsesProvider
 	assert.Equal(t, "hello", response.Entries[0].Content)
 }
 
-func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
+func TestServer_handleGetChatSettings_NeverUsesLocalCWD(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("USERPROFILE", homeDir)
@@ -1027,8 +1098,10 @@ func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
 	var response ChatSettingsResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, "~/workspace/kodelet", response.DefaultCWD)
-	assert.True(t, response.ControlPlaneWorkspaceEnabled)
+	assert.Empty(t, response.DefaultCWD)
+	assert.Empty(t, response.DefaultRunnerHostID)
+	assert.False(t, response.DefaultRunnerReady)
+	assert.False(t, response.ControlPlaneWorkspaceEnabled)
 }
 
 func TestServer_handleGetChatSettings_DisablesControlPlaneWorkspace(t *testing.T) {
@@ -1046,202 +1119,184 @@ func TestServer_handleGetChatSettings_DisablesControlPlaneWorkspace(t *testing.T
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.False(t, response.ControlPlaneWorkspaceEnabled)
 	assert.Empty(t, response.DefaultCWD)
-
-	defaultCWD, err := server.defaultCWD()
-	require.ErrorContains(t, err, controlPlaneWorkspaceDisabledMessage)
-	assert.Empty(t, defaultCWD)
 }
 
 func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
-	server := &Server{config: &ServerConfig{DisableControlPlaneWorkspace: true}}
-	tests := []struct {
-		name    string
-		path    string
-		handler http.HandlerFunc
-	}{
-		{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
-		{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
-		{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
-		{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
-	}
+	originalSettings := viper.AllSettings()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", ".kodelet/extensions")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	t.Setenv("HOME", workspace)
+	marker := filepath.Join(workspace, "local-process-started")
+	script := []byte(fmt.Sprintf("#!/bin/sh\nprintf ran > %q\nexit 1\n", marker))
+	bin := filepath.Join(workspace, "bin")
+	require.NoError(t, os.MkdirAll(bin, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "git"), script, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "shell"), script, 0o700))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SHELL", filepath.Join(bin, "shell"))
+	extensionsDir := filepath.Join(workspace, ".kodelet", "extensions")
+	require.NoError(t, os.MkdirAll(extensionsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "kodelet-extension-local"), script, 0o700))
+	recipesDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipesDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "local-secret.md"), []byte("Local recipe must not be discovered"), 0o600))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
-			w := httptest.NewRecorder()
+	for _, disabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy-disable-flag-%t", disabled), func(t *testing.T) {
+			server, err := NewServer(t.Context(), &ServerConfig{Host: "localhost", CompactRatio: 0.8, DisableControlPlaneWorkspace: disabled}, nil)
+			require.NoError(t, err)
+			defer func() { assert.NoError(t, server.Close()) }()
+			assert.True(t, server.config.DisableControlPlaneWorkspace)
+			assert.FileExists(t, filepath.Join(extensionsDir, "kodelet-extension-local"))
+			tests := []struct {
+				name    string
+				path    string
+				handler http.HandlerFunc
+			}{
+				{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
+				{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
+				{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
+				{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
+			}
 
-			tt.handler(w, req)
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					req := httptest.NewRequest(http.MethodGet, tt.path+"?cwd="+url.QueryEscape(workspace)+"&q=local", nil)
+					w := httptest.NewRecorder()
 
-			assert.Equal(t, http.StatusForbidden, w.Code)
-			assert.Contains(t, w.Body.String(), controlPlaneWorkspaceDisabledMessage)
+					tt.handler(w, req)
+
+					assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+					assert.Contains(t, w.Body.String(), "no ready default runner")
+					assert.NotContains(t, w.Body.String(), "local-secret")
+					assert.NoFileExists(t, marker, "no daemon-local git, PTY or extension process")
+				})
+			}
 		})
 	}
 }
 
-func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {
-	server := &Server{
-		config: &ServerConfig{CWD: filepath.Join(t.TempDir(), "missing")},
-	}
+func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	workspace := config.EmbeddedRunner.Workspace
+	t.Setenv("HOME", workspace) // Even coincident daemon HOME must not abbreviate runner paths.
+	shell := filepath.Join(t.TempDir(), "runner-shell")
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/sh\nprintf 'runner-terminal:%s\\n' \"$PWD\"\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done\n"), 0o700))
+	t.Setenv("SHELL", shell)
+	recipes := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipes, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(recipes, "runner-only.md"), []byte("---\ndescription: Runner recipe\n---\nRunner-owned prompt\n"), 0o600))
+	child := filepath.Join(workspace, "runner-child")
+	require.NoError(t, os.MkdirAll(child, 0o755))
+	server, endpoint, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	id := server.EmbeddedRunnerStatus().RunnerID
+	runner, ok := server.runnerRegistry.Runner(id)
+	require.True(t, ok)
 
-	defaultCWD, err := server.defaultCWD()
-	require.Error(t, err)
-	assert.Empty(t, defaultCWD)
-	assert.Contains(t, err.Error(), "cwd directory does not exist")
+	settings := httptest.NewRecorder()
+	server.handleGetChatSettings(settings, httptest.NewRequest(http.MethodGet, "/api/chat/settings", nil))
+	require.Equal(t, http.StatusOK, settings.Code, settings.Body.String())
+	var response ChatSettingsResponse
+	require.NoError(t, json.Unmarshal(settings.Body.Bytes(), &response))
+	assert.Equal(t, id, response.DefaultRunnerID)
+	assert.True(t, response.DefaultRunnerReady)
+	assert.NotEmpty(t, response.DefaultRunnerHostID)
+	assert.Equal(t, runner.Host.InstanceID, response.DefaultRunnerHostID)
+	assert.Equal(t, runner.Workspace.Path, response.DefaultCWD)
+	assert.False(t, response.ControlPlaneWorkspaceEnabled)
+	assert.Contains(t, settings.Body.String(), `"defaultRunnerHostId"`)
+
+	commands := httptest.NewRecorder()
+	server.handleGetSlashCommands(commands, httptest.NewRequest(http.MethodGet, "/api/chat/slash-commands", nil))
+	require.Equal(t, http.StatusOK, commands.Code, commands.Body.String())
+	var discovery protocol.WorkspaceDiscoverResult
+	require.NoError(t, json.Unmarshal(commands.Body.Bytes(), &discovery))
+	assert.Equal(t, runner.Workspace.Path, discovery.CWD)
+	assert.NotEmpty(t, discovery.Digest)
+	assert.Contains(t, commands.Body.String(), "runner-only")
+
+	hints := httptest.NewRecorder()
+	server.handleGetCWDHints(hints, httptest.NewRequest(http.MethodGet, "/api/chat/cwd-suggestions?q=runner-child", nil))
+	require.Equal(t, http.StatusOK, hints.Code, hints.Body.String())
+	var directories protocol.WorkspaceCWDHintsResult
+	require.NoError(t, json.Unmarshal(hints.Body.Bytes(), &directories))
+	assert.Contains(t, directories.Hints, protocol.DirectoryHint{Path: filepath.Join(runner.Workspace.Path, "runner-child")})
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(endpoint, "http")+"/api/terminal/ws", http.Header{"Authorization": {"Bearer web-secret"}})
+	require.NoError(t, err)
+	defer conn.Close()
+	ready := readTerminalReady(t, conn)
+	assert.Equal(t, runner.Workspace.Path, ready.CWD)
+	requireTerminalBinaryContains(t, conn, "runner-terminal:"+runner.Workspace.Path)
+	require.NoError(t, conn.Close())
+
+	// Stopped defaults remain identified but cannot authorize workspace calls or
+	// advertise a filesystem identity, and are never replaced by a local service.
+	stop()
+	settings = httptest.NewRecorder()
+	server.handleGetChatSettings(settings, httptest.NewRequest(http.MethodGet, "/api/chat/settings", nil))
+	response = ChatSettingsResponse{}
+	require.NoError(t, json.Unmarshal(settings.Body.Bytes(), &response))
+	assert.Equal(t, id, response.DefaultRunnerID)
+	assert.False(t, response.DefaultRunnerReady)
+	assert.Empty(t, response.DefaultRunnerHostID)
+	assert.Empty(t, response.DefaultCWD)
+	commands = httptest.NewRecorder()
+	server.handleGetSlashCommands(commands, httptest.NewRequest(http.MethodGet, "/api/chat/slash-commands", nil))
+	assert.Equal(t, http.StatusServiceUnavailable, commands.Code)
 }
 
-func TestServer_handleGetCWDHints(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	t.Setenv("USERPROFILE", homeDir)
-	tmpDir := filepath.Join(homeDir, "workspace")
-	require.NoError(t, os.Mkdir(tmpDir, 0o755))
-	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "kodelet"), 0o755))
-	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "koala"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644))
-
-	server := &Server{
-		config: &ServerConfig{CWD: tmpDir},
+func TestDefaultRunnerWorkspaceNeverFallsBackToAnotherRunner(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	server.config.EmbeddedRunner = &EmbeddedRunnerConfig{}
+	var calls []string
+	var registrations []protocol.RegisterResult
+	for _, name := range []string{"embedded", "external"} {
+		link := newRunnerAPITestLink()
+		link.call = func(_ context.Context, method string, params, result any) error {
+			calls = append(calls, name)
+			assert.Equal(t, protocol.MethodWorkspaceGitDiff, method)
+			assert.Equal(t, protocol.WorkspaceGitDiffParams{}, params)
+			*result.(*protocol.WorkspaceGitDiffResult) = protocol.WorkspaceGitDiffResult{CWD: "/runner/" + name}
+			return nil
+		}
+		registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+			ProtocolVersions: []int{protocol.Version},
+			Host:             protocol.Host{InstanceID: name, Hostname: "same-hostname", OS: "linux", Arch: "amd64"},
+			Workspace:        protocol.Workspace{Path: "/runner/" + name, Name: name},
+			Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true},
+		}, link)
+		require.NoError(t, err)
+		require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle}))
+		registrations = append(registrations, registration)
 	}
-
-	req := httptest.NewRequest("GET", "/api/chat/cwd-suggestions?q=ko", nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetCWDHints(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response CWDHintsResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	require.Len(t, response.Hints, 2)
-	assert.Equal(t, "~/workspace/koala", response.Hints[0].Path)
-	assert.Equal(t, "~/workspace/kodelet", response.Hints[1].Path)
-	assert.Equal(t, "~/workspace", response.BaseDir)
-}
-
-func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
-	parentDir := t.TempDir()
-	t.Setenv("HOME", parentDir)
-	t.Setenv("USERPROFILE", parentDir)
-	defaultDir := filepath.Join(parentDir, "workspace")
-	require.NoError(t, os.Mkdir(defaultDir, 0o755))
-	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet"), 0o755))
-	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet-website"), 0o755))
-
-	server := &Server{
-		config: &ServerConfig{CWD: defaultDir},
+	server.embeddedStatus.RunnerID = registrations[0].RunnerID
+	request := func(query string, status int) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		server.handleGetGitDiff(response, httptest.NewRequest(http.MethodGet, "/api/git/diff"+query, nil))
+		assert.Equal(t, status, response.Code, response.Body.String())
 	}
-
-	req := httptest.NewRequest("GET", "/api/chat/cwd-suggestions?q=kodelet", nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetCWDHints(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response CWDHintsResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	require.Len(t, response.Hints, 2)
-	assert.Equal(t, "~/kodelet", response.Hints[0].Path)
-	assert.Equal(t, "~/kodelet-website", response.Hints[1].Path)
-}
-
-func TestServer_resolveRequestedCWD(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("USERPROFILE", tmpDir)
-	server := &Server{config: &ServerConfig{CWD: tmpDir}}
-
-	resolved, err := server.resolveRequestedCWD("")
-	require.NoError(t, err)
-	assert.Equal(t, tmpDir, resolved)
-
-	childDir := filepath.Join(tmpDir, "child")
-	require.NoError(t, os.Mkdir(childDir, 0o755))
-
-	resolved, err = server.resolveRequestedCWD("child")
-	require.NoError(t, err)
-	assert.Equal(t, childDir, resolved)
-
-	resolved, err = server.resolveRequestedCWD("~/child")
-	require.NoError(t, err)
-	assert.Equal(t, childDir, resolved)
-}
-
-func TestServer_handleGetGitDiff(t *testing.T) {
-	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, string(output))
-	}
-
-	runGit("init")
-	runGit("config", "user.email", "test@example.com")
-	runGit("config", "user.name", "Test User")
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("old\n"), 0o644))
-	runGit("add", "file.txt")
-	runGit("commit", "-m", "initial")
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("new\n"), 0o644))
-
-	server := &Server{config: &ServerConfig{CWD: repoDir}}
-	req := httptest.NewRequest("GET", "/api/git/diff", nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetGitDiff(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response gitDiffResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	assert.True(t, response.HasDiff)
-	assert.Equal(t, repoDir, response.CWD)
-	assert.Equal(t, repoDir, response.GitRoot)
-	assert.Contains(t, response.Diff, "diff --git a/file.txt b/file.txt")
-	assert.Contains(t, response.Diff, "-old")
-	assert.Contains(t, response.Diff, "+new")
-	assert.Equal(t, 0, response.ExitCode)
-}
-
-func TestGitDiffDisablesTextconv(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses a POSIX shell script as the configured textconv command")
-	}
-
-	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, string(output))
-	}
-
-	runGit("init")
-	runGit("config", "user.email", "test@example.com")
-	runGit("config", "user.name", "Test User")
-
-	markerPath := filepath.Join(repoDir, "textconv-ran")
-	scriptPath := filepath.Join(repoDir, "textconv-fail")
-	script := fmt.Sprintf("#!/bin/sh\nprintf ran > %q\nexit 42\n", markerPath)
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".gitattributes"), []byte("*.bin diff=fail\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("old\n"), 0o644))
-	runGit("config", "diff.fail.textconv", fmt.Sprintf("%q", scriptPath))
-	runGit("add", ".gitattributes", "file.bin")
-	runGit("commit", "-m", "initial")
-
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("new\n"), 0o644))
-
-	diff, exitCode, err := gitDiff(context.Background(), repoDir)
-
-	require.NoError(t, err)
-	assert.Equal(t, 0, exitCode)
-	assert.Contains(t, diff, "diff --git a/file.bin b/file.bin")
-	_, statErr := os.Stat(markerPath)
-	assert.True(t, os.IsNotExist(statErr), "textconv command should not run")
+	request("", http.StatusOK)
+	registration := registrations[0]
+	server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, errors.New("offline"))
+	request("", http.StatusServiceUnavailable)
+	request("?runnerId="+registrations[1].RunnerID, http.StatusOK)
+	request("?runnerId=unknown", http.StatusNotFound)
+	request("?conversationId=unbound", http.StatusBadRequest)
+	request("?runnerId="+registrations[1].RunnerID+"&cwd=/daemon/local", http.StatusBadRequest)
+	assert.Equal(t, []string{"embedded", "external"}, calls)
 }
 
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
@@ -1532,92 +1587,6 @@ func TestServer_handleGetChatSettingsUsesProviderReasoningEffortsWithoutAllowlis
 	require.NoError(t, err)
 	assert.Equal(t, "medium", response.ReasoningEffort)
 	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, response.ReasoningEffortOptions)
-}
-
-func TestServer_handleGetSlashCommands(t *testing.T) {
-	server := &Server{router: mux.NewRouter()}
-	req := httptest.NewRequest("GET", "/api/chat/slash-commands", nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetSlashCommands(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var response SlashCommandsResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	require.NotEmpty(t, response.Commands)
-	assert.NotEmpty(t, response.Commands[0].Name)
-}
-
-func TestServer_handleGetSlashCommandsUsesRequestedCWD(t *testing.T) {
-	workspace := t.TempDir()
-	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
-	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(recipeDir, "workspace-only.md"),
-		[]byte("---\ndescription: Workspace-only recipe\n---\nWorkspace recipe\n"),
-		0o644,
-	))
-
-	server := &Server{config: &ServerConfig{CWD: t.TempDir()}}
-	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetSlashCommands(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var response SlashCommandsResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	var names []string
-	for _, command := range response.Commands {
-		names = append(names, command.Name)
-	}
-	assert.Contains(t, names, "workspace-only")
-}
-
-func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
-	originalSettings := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalSettings {
-			viper.Set(key, value)
-		}
-	}()
-
-	workspace := t.TempDir()
-	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
-	viper.Reset()
-	viper.Set("extensions.enabled", true)
-	viper.Set("extensions.local_dir", "./.kodelet/extensions")
-	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
-	viper.Set("extensions.max_output_size", 102400)
-
-	extensionRuntimes := extensions.NewRuntimeManager()
-	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
-	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
-	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetSlashCommands(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var response SlashCommandsResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	commandsByName := map[string]slashcommands.Command{}
-	for _, command := range response.Commands {
-		commandsByName[command.Name] = command
-	}
-	assert.Contains(t, commandsByName, "doctor")
-	reviewCommand, ok := commandsByName["review"]
-	require.True(t, ok)
-	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Hint)
-	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
-	_, err = os.ReadFile(filepath.Join(workspace, "web-session-start.log"))
-	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
@@ -2216,7 +2185,10 @@ func TestServer_handleStopConversationBlocksMatchingTurnBeforeRegistration(t *te
 }
 
 func TestServer_handleRespondUIInput(t *testing.T) {
-	broker := newWebUIInputBroker("conv-123", &recordingChatSink{})
+	sink := &recordingChatSink{}
+	broker := newWebUIInputBroker("conv-123", sink)
+	detach := broker.setOwner(t.Context(), "client-1", sink)
+	defer detach()
 	server := &Server{
 		conversationService: &mockConversationService{},
 		router:              mux.NewRouter(),
@@ -2239,15 +2211,12 @@ func TestServer_handleRespondUIInput(t *testing.T) {
 		resultCh <- result
 	}()
 
-	require.Eventually(t, func() bool {
-		broker.mu.Lock()
-		defer broker.mu.Unlock()
-		_, ok := broker.pending["input-1"]
-		return ok
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return len(sink.Events()) == 1 }, time.Second, 10*time.Millisecond)
+	requestID := sink.Events()[0].UIInput.ID
 
-	req := httptest.NewRequest("POST", "/api/conversations/conv-123/ui-input/input-1", strings.NewReader(`{"status":"submitted","value":"2"}`))
-	req = mux.SetURLVars(req, map[string]string{"id": "conv-123", "requestId": "input-1"})
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/ui-input/"+requestID, strings.NewReader(`{"status":"submitted","value":"2"}`))
+	req.Header.Set(chat.ClientIDHeader, "client-1")
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123", "requestId": requestID})
 	w := httptest.NewRecorder()
 
 	server.handleRespondUIInput(w, req)
@@ -2897,15 +2866,6 @@ func TestServer_handleSteerConversationRejectsMessagesThatAreTooLong(t *testing.
 	assert.Contains(t, w.Body.String(), "message must be 10000 characters or fewer")
 }
 
-func TestParseTerminalSignal(t *testing.T) {
-	signal, ok := parseTerminalSignal("sigint")
-	assert.True(t, ok)
-	assert.Equal(t, syscall.SIGINT, signal)
-
-	_, ok = parseTerminalSignal("nope")
-	assert.False(t, ok)
-}
-
 func TestTerminalOriginAllowed(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/terminal/ws", nil)
 	req.Host = "127.0.0.1:8080"
@@ -2933,140 +2893,6 @@ func TestBoundedTerminalDimensions(t *testing.T) {
 	assert.Equal(t, defaultTerminalCols, boundedTerminalCols(0))
 	assert.Equal(t, maxTerminalCols, boundedTerminalCols(maxTerminalCols+50))
 	assert.Equal(t, 80, boundedTerminalCols(80))
-}
-
-func TestTerminalWebsocketClosesAfterShellExitWithoutClientInput(t *testing.T) {
-	tmpDir := t.TempDir()
-	shellPath := filepath.Join(tmpDir, "exit-shell")
-	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\nexit 0\n"), 0o700))
-	t.Setenv("SHELL", shellPath)
-
-	server := &Server{
-		config: &ServerConfig{CWD: tmpDir},
-		runCtx: context.Background(),
-	}
-	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
-	defer httpServer.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-	defer conn.Close()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		require.NoError(t, conn.SetReadDeadline(deadline))
-		_, _, readErr := conn.ReadMessage()
-		if readErr == nil {
-			continue
-		}
-
-		var netErr net.Error
-		require.False(t, errors.As(readErr, &netErr) && netErr.Timeout(), "terminal websocket did not close after shell exit")
-		return
-	}
-}
-
-func TestTerminalWebsocketReconnectsToRunningSession(t *testing.T) {
-	tmpDir := t.TempDir()
-	shellPath := filepath.Join(tmpDir, "persistent-shell")
-	require.NoError(t, os.WriteFile(shellPath, []byte(`#!/bin/sh
-echo session-started
-while IFS= read -r line; do
-  printf 'line:%s\n' "$line"
-done
-`), 0o700))
-	t.Setenv("SHELL", shellPath)
-
-	runCtx, runCancel := context.WithCancel(context.Background())
-	defer runCancel()
-	server := &Server{
-		config: &ServerConfig{CWD: tmpDir},
-		runCtx: runCtx,
-	}
-	defer server.terminalSessionManager().Close()
-
-	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
-	defer httpServer.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-	ready := readTerminalReady(t, conn)
-	require.NotZero(t, ready.PID)
-	requireTerminalBinaryContains(t, conn, "session-started")
-	require.NoError(t, conn.Close())
-
-	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-	defer reconnected.Close()
-
-	reconnectedReady := readTerminalReady(t, reconnected)
-	assert.Equal(t, ready.PID, reconnectedReady.PID)
-	requireTerminalBinaryContains(t, reconnected, "session-started")
-
-	input, err := json.Marshal(terminalMessage{Type: "input", Data: "persist-check\n"})
-	require.NoError(t, err)
-	require.NoError(t, reconnected.WriteMessage(websocket.TextMessage, input))
-	requireTerminalBinaryContains(t, reconnected, "line:persist-check")
-}
-
-func TestTerminalWebsocketReconnectSignalsReplayCompletion(t *testing.T) {
-	tmpDir := t.TempDir()
-	shellPath := filepath.Join(tmpDir, "persistent-shell")
-	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\necho session-started\nsleep 10\n"), 0o700))
-	t.Setenv("SHELL", shellPath)
-
-	runCtx, runCancel := context.WithCancel(context.Background())
-	defer runCancel()
-	server := &Server{
-		config: &ServerConfig{CWD: tmpDir},
-		runCtx: runCtx,
-	}
-	defer server.terminalSessionManager().Close()
-
-	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
-	defer httpServer.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-	readTerminalReady(t, conn)
-	requireTerminalBinaryContains(t, conn, "session-started")
-	require.NoError(t, conn.Close())
-
-	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-	defer reconnected.Close()
-
-	readTerminalReady(t, reconnected)
-
-	deadline := time.Now().Add(2 * time.Second)
-	sawReplay := false
-	for !sawReplay {
-		require.NoError(t, reconnected.SetReadDeadline(deadline))
-		messageType, payload, err := reconnected.ReadMessage()
-		require.NoError(t, err)
-
-		switch messageType {
-		case websocket.BinaryMessage:
-			assert.Contains(t, string(payload), "session-started")
-			sawReplay = true
-		case websocket.TextMessage:
-			var message terminalMessage
-			require.NoError(t, json.Unmarshal(payload, &message))
-			require.NotEqual(t, "replay-complete", message.Type, "replay completion arrived before replay data")
-		}
-	}
-
-	require.NoError(t, reconnected.SetReadDeadline(deadline))
-	messageType, payload, err := reconnected.ReadMessage()
-	require.NoError(t, err)
-	require.Equal(t, websocket.TextMessage, messageType)
-
-	var message terminalMessage
-	require.NoError(t, json.Unmarshal(payload, &message))
-	assert.Equal(t, "replay-complete", message.Type)
 }
 
 func readTerminalReady(t *testing.T, conn *websocket.Conn) terminalMessage {
@@ -3138,17 +2964,6 @@ func TestDisplayProviderName(t *testing.T) {
 			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
 		})
 	}
-}
-
-func TestCompactPathForHome(t *testing.T) {
-	homeDir := t.TempDir()
-	outsideHome := filepath.Join(filepath.Dir(homeDir), filepath.Base(homeDir)+"-other", "project")
-
-	assert.Equal(t, "~", compactPathForHome(homeDir, homeDir))
-	assert.Equal(t, "~/workspace/project", compactPathForHome(filepath.Join(homeDir, "workspace", "project"), homeDir))
-	assert.Equal(t, outsideHome, compactPathForHome(outsideHome, homeDir))
-	assert.Equal(t, "relative/project", compactPathForHome("relative/project", homeDir))
-	assert.Equal(t, "~/already-compact", compactPathForHome("~/already-compact", homeDir))
 }
 
 func TestExtractProviderMetadata(t *testing.T) {
@@ -3384,130 +3199,4 @@ func TestServer_Close(t *testing.T) {
 	err := server.Close()
 	assert.NoError(t, err)
 	assert.True(t, closeCalled)
-}
-
-func writeWebExtensionExecutable(t *testing.T, path string) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	script := fmt.Sprintf("#!/bin/sh\nKODELET_WEBUI_TEST_EXTENSION_HELPER=1 exec %q -test.run TestWebExtensionHelperProcess --\n", executable)
-	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
-}
-
-func TestWebExtensionHelperProcess(t *testing.T) {
-	if os.Getenv("KODELET_WEBUI_TEST_EXTENSION_HELPER") != "1" {
-		return
-	}
-	runWebExtensionHelperProcess()
-	os.Exit(0)
-}
-
-func runWebExtensionHelperProcess() {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		payload, err := readWebRPCFrame(reader)
-		if err != nil {
-			return
-		}
-
-		var request struct {
-			JSONRPC string          `json:"jsonrpc"`
-			ID      int64           `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params"`
-		}
-		if err := json.Unmarshal(payload, &request); err != nil {
-			writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32700, "message": err.Error()})
-			continue
-		}
-
-		switch request.Method {
-		case "extension.initialize":
-			writeWebRPCResponse(request.ID, extensions.InitializeResult{
-				Name:          "commands",
-				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart}},
-				Commands: []extensions.CommandRegistration{{
-					Name:        "doctor",
-					Aliases:     []string{"/doctor"},
-					Description: "Inspect extension runtime health",
-				}, {
-					Name:        "review",
-					Aliases:     []string{"/review"},
-					Description: "Review local git changes",
-					Kind:        "recipe",
-					InputSchema: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"target": map[string]any{"type": "string", "default": "HEAD"},
-							"focus":  map[string]any{"type": "string", "default": "correctness, tests"},
-						},
-					},
-				}},
-			}, nil)
-		case "extension.command.execute":
-			var params struct {
-				Name    string                          `json:"name"`
-				Context extensions.ExtensionCallContext `json:"context"`
-			}
-			if err := json.Unmarshal(request.Params, &params); err != nil {
-				writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
-				continue
-			}
-			writeWebRPCResponse(request.ID, extensions.CommandResult{
-				Action:   extensions.CommandActionRespond,
-				Response: fmt.Sprintf("All extensions are healthy for %s.", params.Context.ConversationID),
-			}, nil)
-		case "extension.event.handle":
-			var params struct {
-				Event   string                          `json:"event"`
-				Context extensions.ExtensionCallContext `json:"context"`
-			}
-			if err := json.Unmarshal(request.Params, &params); err != nil {
-				writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
-				continue
-			}
-			if params.Event == extensions.EventSessionStart && params.Context.CWD != "" {
-				_ = os.WriteFile(filepath.Join(params.Context.CWD, "web-session-start.log"), []byte(params.Context.ConversationID), 0o644)
-			}
-			writeWebRPCResponse(request.ID, extensions.EventResult{}, nil)
-		default:
-			writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
-		}
-	}
-}
-
-func readWebRPCFrame(reader *bufio.Reader) ([]byte, error) {
-	contentLength := -1
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
-			_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &contentLength)
-		}
-	}
-	if contentLength < 0 {
-		return nil, fmt.Errorf("missing Content-Length")
-	}
-	payload := make([]byte, contentLength)
-	_, err := reader.Read(payload)
-	return payload, err
-}
-
-func writeWebRPCResponse(id int64, result any, rpcErr any) {
-	response := map[string]any{"jsonrpc": "2.0", "id": id}
-	if rpcErr != nil {
-		response["error"] = rpcErr
-	} else {
-		response["result"] = result
-	}
-	payload, _ := json.Marshal(response)
-	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(payload), payload)
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1052,7 +1053,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 			return llmtypes.Config{
 				Provider:          "openai",
 				Model:             "gpt-test",
-				ExtensionSettings: map[string]any{"enabled": false},
+				ExtensionSettings: map[string]any{"enabled": true},
 			}, nil
 		},
 	})
@@ -1074,7 +1075,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	assert.Equal(t, 1, provider.activeCalls)
 	assert.Equal(t, []string{"", "runner-work"}, loadedProfiles)
 	assert.Equal(t, "runner-work", provider.activeVariant)
-	assert.False(t, provider.activeConfig.Enabled)
+	assert.True(t, provider.activeConfig.Enabled)
 	assert.Equal(t, "conversation-1", provider.activeCallContext.ConversationID)
 	assert.Equal(t, "anthropic", provider.activeCallContext.Provider)
 	assert.Equal(t, "claude-test", provider.activeCallContext.Model)
@@ -1285,8 +1286,6 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 		assert.True(t, response.Accepted)
 		assert.Equal(t, uint64(7), response.LatestSequence)
 	}
-	service.CleanupExtensionUI(source.owner)
-
 	peer.mu.Lock()
 	assert.Equal(t, []string{
 		protocol.MethodUIInput,
@@ -1314,6 +1313,12 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 	assert.NotEqual(t, confirmParams.Request.ID, selectParams.Request.ID)
 	assert.Equal(t, "run-1", widgetParams.RunID)
 	assert.Equal(t, runnerpayload.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, widgetParams.Owner)
+	service.CleanupExtensionUI(source.owner)
+	require.Eventually(t, func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return slices.Contains(peer.calls, protocol.MethodUIExtensionCleanup)
+	}, time.Second, time.Millisecond)
 
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 	_, err = service.Input(t.Context(), extensions.UIInputRequest{Title: "closed"})

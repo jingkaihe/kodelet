@@ -1,114 +1,17 @@
 package main
 
-import (
-	"context"
-	"fmt"
-	"os"
-	"time"
-
-	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-)
-
-const copilotConfigSuggestion = `provider: "openai"
-model: "gpt-4.1"
-weak_model: "gpt-4.1"
-max_tokens: 16000
-openai:
-  platform: copilot
-
-# Anthropic also supports Copilot-backed routing:
-# provider: "anthropic"
-# model: "claude-sonnet-4-6"
-# anthropic:
-#   platform: copilot`
+import "github.com/spf13/cobra"
 
 var copilotLoginCmd = &cobra.Command{
-	Use:   "copilot-login",
-	Short: "Login to GitHub Copilot via OAuth to access subscription-based models",
-	Long: `Login to GitHub Copilot via OAuth to access subscription-based models.
-
-This command will:
-1. Generate a device authorization code
-2. Automatically open your browser to authenticate with GitHub
-3. Exchange the OAuth token for a GitHub Copilot-specific token
-4. Save the authentication credentials to ~/.kodelet/copilot-subscription.json
-
-The saved credentials will allow you to use GitHub Copilot subscription-based models
-through Kodelet.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-
-		if err := runCopilotLogin(ctx); err != nil {
-			presenter.Error(err, "Failed to complete GitHub Copilot login")
-			os.Exit(1)
-		}
-	},
+	Use:               "copilot-login",
+	Short:             "Connect a GitHub Copilot subscription to the daemon",
+	Long:              "Start daemon-owned device-code sign-in. Provider credentials are exchanged and stored only by the daemon.",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE:              func(cmd *cobra.Command, _ []string) error { return runRemoteProviderDeviceLogin(cmd, "copilot") },
 }
 
-func runCopilotLogin(ctx context.Context) error {
-	presenter.Section("GitHub Copilot OAuth Login")
-	presenter.Info("Starting GitHub Copilot OAuth device flow...")
-
-	deviceResp, err := auth.GenerateCopilotDeviceFlow(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to start device flow")
-	}
-
-	fmt.Println()
-	presenter.Info("To authenticate with GitHub Copilot:")
-	fmt.Printf("   1. Open this URL in your browser: %s\n", deviceResp.VerificationURI)
-	fmt.Printf("   2. Enter this code when prompted: %s\n", deviceResp.UserCode)
-	fmt.Println()
-
-	presenter.Info("Opening your browser for authentication...")
-	if err := osutil.OpenBrowser(deviceResp.VerificationURI); err != nil {
-		presenter.Warning("Could not open browser automatically. Please visit the URL manually.")
-	} else {
-		presenter.Info("If your browser didn't open automatically, visit the URL above.")
-	}
-
-	presenter.Info("Waiting for authentication to complete...")
-	fmt.Println("(You can close this terminal after completing authentication in your browser)")
-
-	// Poll for token with timeout
-	pollCtx, cancel := context.WithTimeout(ctx, time.Duration(deviceResp.ExpiresIn)*time.Second)
-	defer cancel()
-
-	tokenResp, err := auth.PollCopilotToken(pollCtx, deviceResp.DeviceCode, deviceResp.Interval)
-	if err != nil {
-		return errors.Wrap(err, "failed to get OAuth access token")
-	}
-
-	copilotToken, err := auth.ExchangeCopilotToken(ctx, tokenResp.AccessToken)
-	if err != nil {
-		return errors.Wrap(err, "failed to exchange token for Copilot access")
-	}
-
-	creds := &auth.CopilotCredentials{
-		AccessToken:    tokenResp.AccessToken,
-		CopilotToken:   copilotToken.Token,
-		Scope:          tokenResp.Scope,
-		CopilotExpires: copilotToken.ExpiresAt,
-	}
-
-	_, err = auth.SaveCopilotCredentials(creds)
-	if err != nil {
-		return errors.Wrap(err, "failed to save credentials")
-	}
-
-	fmt.Println()
-	presenter.Success("Authentication successful!")
-	fmt.Println()
-	presenter.Info("You can now use GitHub Copilot subscription-based models with Kodelet.")
-	fmt.Println()
-	presenter.Info("To use Copilot features, consider adding the following to your ~/.kodelet/config.yaml:")
-	fmt.Println()
-	fmt.Println(copilotConfigSuggestion)
-	fmt.Println()
-
-	return nil
+func init() {
+	addRemoteAdministrationFlags(copilotLoginCmd)
+	copilotLoginCmd.Flags().Bool("no-browser", false, "Print the sign-in URL without opening a browser")
 }

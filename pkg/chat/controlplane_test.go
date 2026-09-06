@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -151,18 +152,25 @@ func TestControlPlaneHTTPErrorRetryability(t *testing.T) {
 
 func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(t *testing.T) {
 	responses := make(chan extensions.UIInputResponse, 1)
+	responded := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.Method {
 		case http.MethodGet:
 			_, _ = w.Write([]byte("{\"kind\":\"conversation\",\"conversation_id\":\"conversation-1\"}\n"))
 			_, _ = w.Write([]byte("{\"kind\":\"ui-confirm-request\",\"conversation_id\":\"conversation-1\",\"ui_confirm\":{\"id\":\"confirm-1\",\"title\":\"Approve\"}}\n"))
 			_, _ = w.Write([]byte("{\"kind\":\"done\",\"conversation_id\":\"conversation-1\"}\n"))
+			w.(http.Flusher).Flush()
+			select {
+			case <-responded:
+			case <-request.Context().Done():
+			}
 		case http.MethodPost:
 			assert.Equal(t, "/api/conversations/conversation-1/ui-input/confirm-1", request.URL.Path)
 			var response extensions.UIInputResponse
 			require.NoError(t, json.NewDecoder(request.Body).Decode(&response))
 			responses <- response
 			_, _ = w.Write([]byte(`{"success":true}`))
+			close(responded)
 		default:
 			http.NotFound(w, request)
 		}
@@ -187,6 +195,63 @@ func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(
 		assert.True(t, response.Confirmed)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for conversation stream ui response")
+	}
+}
+
+type blockingControlPlaneUIBroker struct {
+	recordingControlPlaneUIBroker
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (b *blockingControlPlaneUIBroker) Input(ctx context.Context, _ extensions.UIInputRequest) (extensions.UIInputResponse, error) {
+	close(b.started)
+	<-ctx.Done()
+	close(b.stopped)
+	return extensions.UIInputResponse{}, ctx.Err()
+}
+
+func TestControlPlaneChatRunnerDismissesPromptWithoutStoppingExecution(t *testing.T) {
+	for _, endEvent := range []bool{false, true} {
+		t.Run(fmt.Sprint("end-event=", endEvent), func(t *testing.T) {
+			broker := &blockingControlPlaneUIBroker{started: make(chan struct{}), stopped: make(chan struct{})}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				assert.Equal(t, http.MethodGet, request.Method, "detach or dismissal must not send stop or stale UI replies")
+				assert.NotEmpty(t, request.Header.Get(ClientIDHeader))
+				assert.Contains(t, request.Header.Get(UICapabilitiesHeader), "interactive")
+				_, _ = w.Write([]byte("{\"kind\":\"ui-input-request\",\"ui_input\":{\"id\":\"prompt-1\",\"title\":\"Pending\"}}\n"))
+				w.(http.Flusher).Flush()
+				select {
+				case <-broker.started:
+				case <-request.Context().Done():
+					return
+				}
+				_, _ = w.Write([]byte("{\"kind\":\"text-delta\",\"delta\":\"Still running\"}\n"))
+				if endEvent {
+					_, _ = w.Write([]byte("{\"kind\":\"ui-request-end\",\"ui_request_id\":\"prompt-1\"}\n"))
+					w.(http.Flusher).Flush()
+					select {
+					case <-broker.stopped:
+					case <-request.Context().Done():
+					}
+				}
+			}))
+			defer server.Close()
+			runner, err := NewControlPlaneChatRunner(server.URL, "", "")
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
+			sink := &collectingChatSink{}
+			require.NoError(t, runner.StreamConversation(ctx, "conversation-1", sink))
+			select {
+			case <-broker.stopped:
+			default:
+				t.Fatal("stream did not cancel its local prompt")
+			}
+			require.Len(t, sink.events, 1)
+			assert.Equal(t, "Still running", sink.events[0].Delta)
+		})
 	}
 }
 

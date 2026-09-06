@@ -17,32 +17,24 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 )
 
-var newDefaultChatRunner = func(defaultCWD string, extensionRuntimes chat.ExtensionRuntimeProvider) chat.ChatRunner {
-	return chat.NewDefaultChatRunner(defaultCWD, extensionRuntimes)
-}
-
 func Run(ctx context.Context, config Config) error {
+	if config.Runner == nil {
+		return errors.New("TUI requires an explicit daemon runner; connect to kodelet serve before starting chat")
+	}
+	// A TUI owns presentation and input, never a local execution environment.
+	config.Remote = true
 	theme, err := resolveTheme(config.Theme)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(config.ConversationID) == "" && !config.Remote {
-		if _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
-			return errors.Wrap(err, "invalid reasoning effort configuration")
-		}
-	}
 	applyTheme(theme)
 
 	initialModel := newModel(ctx, config)
-	if initialModel.extensionRuntimes != nil {
-		defer func() {
-			_ = initialModel.extensionRuntimes.Close()
-		}()
-	}
 	if closer, ok := initialModel.runner.(interface{ Close() error }); ok {
 		defer func() {
 			_ = closer.Close()
@@ -71,7 +63,6 @@ func newModel(ctx context.Context, config Config) model {
 	extensionUI := newTUIExtensionUIHost(runCh, mctx.Done())
 	mctx = extensions.ContextWithExtensionUIHost(mctx, extensionUI)
 	mctx = extensions.ContextWithUIInputBroker(mctx, newTUIUIBroker(runCh, 0))
-	extensionRuntimes := extensions.NewRuntimeManager()
 	themeSelection := normalizedThemeSelection(config.Theme)
 	theme, err := resolveTheme(themeSelection)
 	if err != nil {
@@ -95,11 +86,6 @@ func newModel(ctx context.Context, config Config) model {
 	sp.Spinner = spinner.Dot
 
 	runner := config.Runner
-	if runner == nil {
-		// The TUI sends --cwd as a per-request override below; leave the runner
-		// default empty so relative overrides resolve against the process cwd.
-		runner = newDefaultChatRunner("", extensionRuntimes)
-	}
 	conversationSource, _ := runner.(chat.ConversationSource)
 	conversationStream, _ := runner.(chat.ConversationStreamer)
 	requestedCWD := strings.TrimSpace(config.CWD)
@@ -112,7 +98,10 @@ func newModel(ctx context.Context, config Config) model {
 			cwd = wd
 		}
 	}
-	messageHistoryStore, _ := messagehistory.NewStore()
+	var messageHistoryStore *messagehistory.Store
+	if !config.Remote {
+		messageHistoryStore, _ = messagehistory.NewStore()
+	}
 	conversationID := strings.TrimSpace(config.ConversationID)
 	conversationWasResumed := conversationID != ""
 	initialHistoryPending := conversationID != ""
@@ -185,7 +174,6 @@ func newModel(ctx context.Context, config Config) model {
 		remoteDefaultCWD:      strings.TrimSpace(config.DefaultCWD),
 		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),
 		profileSettings:       cloneProfileSettings(config.ProfileSettings),
-		extensionRuntimes:     extensionRuntimes,
 		extensionUI:           extensionUI,
 		extensionWidgets:      map[extensionUIKey]tuiExtensionWidget{},
 		widgetOrder:           []extensionUIKey{},
@@ -215,7 +203,7 @@ func (m model) Init() tea.Cmd {
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
-		loadConversationHistoryFromSource(m.ctx, m.activeConversationKey, m.conversationID, m.requestedCWD, m.conversationSource),
+		loadConversationHistoryFromSource(m.ctx, m.activeConversationKey, m.conversationID, m.conversationSource),
 	}
 	if !m.remote {
 		cmds = append(cmds, loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD))
@@ -231,6 +219,30 @@ func (m model) Init() tea.Cmd {
 
 func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
 	return loadSlashCommandsForConversation(ctx, "", cwd)
+}
+
+func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
+	discovery, ok := m.runner.(interface {
+		DiscoverWorkspace(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
+	})
+	if !ok || state == nil {
+		return nil
+	}
+	key, cwd := state.key, slashCommandCWDForState(state)
+	target := chat.WorkspaceTarget{ConversationID: state.conversationID}
+	if target.ConversationID == "" {
+		target.CWD, target.EnvironmentProfile = cwd, m.environmentProfile
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+		result, err := discovery.DiscoverWorkspace(ctx, target)
+		var shortcuts []extensions.Shortcut
+		for _, shortcut := range result.Shortcuts {
+			shortcuts = append(shortcuts, extensions.Shortcut{Key: shortcut.Key, Description: shortcut.Description, ExtensionID: shortcut.ExtensionID, Generation: shortcut.Generation})
+		}
+		return slashCommandsMsg{conversationKey: key, cwd: cwd, commands: withTUIBuiltInSlashCommands(result.Commands), shortcuts: shortcuts, shortcutDigest: result.Digest, remote: true, err: err}
+	}
 }
 
 func loadSlashCommandsForConversation(ctx context.Context, conversationKey, cwd string) tea.Cmd {

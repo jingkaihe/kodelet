@@ -57,6 +57,7 @@ const mockStopConversation = vi.fn();
 const mockDeleteConversation = vi.fn();
 const mockForkConversation = vi.fn();
 const mockRespondToUIInput = vi.fn();
+const mockTakeUIOwnership = vi.fn();
 let routeParams: { id?: string } = {};
 
 const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
@@ -137,6 +138,7 @@ vi.mock('../services/api', () => ({
     deleteConversation: (...args: unknown[]) => mockDeleteConversation(...args),
     forkConversation: (...args: unknown[]) => mockForkConversation(...args),
     respondToUIInput: (...args: unknown[]) => mockRespondToUIInput(...args),
+    takeUIOwnership: (...args: unknown[]) => mockTakeUIOwnership(...args),
   },
 }));
 
@@ -990,7 +992,7 @@ describe('ChatPage', () => {
     const textarea = screen.getByTestId('composer-textarea');
     fireEvent.change(textarea, { target: { value: '/intro ' } });
 
-    expect(screen.getByTestId('composer-slash-usage-hint')).toHaveTextContent(
+    expect(await screen.findByTestId('composer-slash-usage-hint')).toHaveTextContent(
       '/intro [name=<value> occupation=<value>] additional instructions'
     );
   });
@@ -1492,6 +1494,89 @@ describe('ChatPage', () => {
       }),
       expect.any(Object)
     );
+  });
+
+  it('discovers commands and directory hints on the selected runner and profile', async () => {
+    vi.useFakeTimers();
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceDiscovery: true })] });
+    mockGetCWDHints.mockResolvedValue({ hints: [{ path: '/runner/selected-project' }] });
+    try {
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+      fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+      fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-1' } });
+      fireEvent.change(screen.getByLabelText('Runner profile'), { target: { value: 'review' } });
+      const cwdInput = screen.getByLabelText('Working directory');
+      fireEvent.focus(cwdInput);
+      fireEvent.change(cwdInput, { target: { value: '~/proj' } });
+      await runCwdSuggestionDebounce();
+      expect(mockGetCWDHints).toHaveBeenLastCalledWith('~/proj', {
+        runnerId: 'runner-1', environmentProfile: 'review',
+      });
+      expect(screen.getByTestId('cwd-suggestions')).toHaveTextContent('/runner/selected-project');
+      fireEvent.click(screen.getByText('/runner/selected-project'));
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+      await flushAsyncUpdates();
+      expect(mockGetSlashCommands).toHaveBeenLastCalledWith('/runner/selected-project', {
+        runnerId: 'runner-1', conversationId: undefined, environmentProfile: 'review',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards pending runner directory hints after the profile changes', async () => {
+    vi.useFakeTimers();
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceDiscovery: true })] });
+    let resolveOldHints: ((result: { hints: { path: string }[] }) => void) | undefined;
+    mockGetCWDHints.mockImplementationOnce(() => new Promise((resolve) => { resolveOldHints = resolve; }))
+      .mockResolvedValue({ hints: [{ path: '/runner/new-profile' }] });
+    try {
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+      fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+      fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-1' } });
+      const cwdInput = screen.getByLabelText('Working directory');
+      fireEvent.focus(cwdInput);
+      fireEvent.change(cwdInput, { target: { value: 'project' } });
+      await runCwdSuggestionDebounce();
+      expect(resolveOldHints).toBeDefined();
+      fireEvent.change(screen.getByLabelText('Runner profile'), { target: { value: 'new' } });
+      await act(async () => { resolveOldHints?.({ hints: [{ path: '/runner/old-profile' }] }); });
+      expect(screen.queryByText('/runner/old-profile')).not.toBeInTheDocument();
+      await runCwdSuggestionDebounce();
+      expect(mockGetCWDHints).toHaveBeenLastCalledWith('project', {
+        runnerId: 'runner-1', environmentProfile: 'new',
+      });
+      expect(screen.getByTestId('cwd-suggestions')).toHaveTextContent('/runner/new-profile');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('gates conversation-directory workspace tools on runner support (%s)', async (workspaceCwd) => {
+    routeParams = { id: 'conv-selected-directory' };
+    const runner = makeRunner({ workspaceCwd, workspaceDiscovery: true, workspaceTerminal: true, workspaceGitDiff: true });
+    mockGetRunners.mockResolvedValue({ runners: [runner] });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-selected-directory', cwd: '/runner/different-directory', runnerId: runner.id,
+      environmentProfile: 'review', runner, messages: [{ role: 'user', content: 'remote' }], toolResults: {},
+    });
+    render(<ChatPage />);
+    await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalledWith(undefined, {
+      runnerId: 'runner-1', conversationId: 'conv-selected-directory', environmentProfile: 'review',
+    }));
+    await waitForTerminalAccess();
+    if (!workspaceCwd) {
+      expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+      return;
+    }
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    expect(await screen.findByTestId('terminal-panel')).toHaveAttribute('data-conversation-id', 'conv-selected-directory');
+    fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
+    await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith({
+      kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-selected-directory',
+    }));
   });
 
   it('shows remote terminal and changes when the runner advertises workspace tools', async () => {
@@ -3017,6 +3102,38 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('conversation-search-dialog')).not.toBeInTheDocument();
     expect(screen.getByTestId('ui-input-dialog')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
+
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'ui-request-end', conversation_id: 'other-conversation', ui_request_id: 'input-1' });
+    });
+    expect(screen.getByTestId('ui-input-dialog')).toBeInTheDocument();
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'ui-request-end', conversation_id: 'conv-123', ui_request_id: 'old-input' });
+    });
+    expect(screen.getByTestId('ui-input-dialog')).toBeInTheDocument();
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'ui-request-end', conversation_id: 'conv-123', ui_request_id: 'input-1' });
+    });
+    expect(screen.queryByTestId('ui-input-dialog')).not.toBeInTheDocument();
+    expect(mockRespondToUIInput).not.toHaveBeenCalled();
+    expect(mockStopConversation).not.toHaveBeenCalled();
+  });
+
+  it('takes UI ownership only after an explicit observer action', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversations.mockResolvedValue({
+      conversations: [{ id: 'conv-123', createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-03T00:00:00Z', messageCount: 1, summary: 'Running task', isRunning: true }],
+      hasMore: false, total: 1, limit: 40, offset: 0,
+    });
+    mockGetConversation.mockResolvedValue({ id: 'conv-123', messages: [], toolResults: {}, isRunning: true });
+    mockStreamConversation.mockImplementation(async () => new Promise<void>(() => {}));
+    mockTakeUIOwnership.mockResolvedValue({ success: true });
+    render(<ChatPage />);
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalled());
+    expect(mockTakeUIOwnership).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Take control' }));
+    await waitFor(() => expect(mockTakeUIOwnership).toHaveBeenCalledWith('conv-123'));
+    expect(mockStopConversation).not.toHaveBeenCalled();
   });
 
   it('shows blocking UI prompts from background running conversations', async () => {

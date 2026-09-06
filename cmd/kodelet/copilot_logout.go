@@ -14,8 +14,18 @@ import (
 )
 
 var copilotLogoutCmd = &cobra.Command{
+	Use:               "copilot-logout",
+	Short:             "Explain the daemon-host Copilot logout procedure",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE: func(*cobra.Command, []string) error {
+		return errors.New("daemon Copilot logout is not available remotely: stop the daemon, run 'kodelet host copilot-logout' on its host, then restart it; no client credentials were changed")
+	},
+}
+
+var hostCopilotLogoutCmd = &cobra.Command{
 	Use:   "copilot-logout",
-	Short: "Logout from GitHub Copilot and remove stored credentials",
+	Short: "Remove this host's Copilot credentials (daemon must be stopped)",
 	Long: `Logout from GitHub Copilot and remove stored credentials.
 
 This command will:
@@ -37,7 +47,10 @@ subscription-based models until you authenticate again.`,
 }
 
 func init() {
-	copilotLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
+	addRemoteAdministrationFlags(copilotLogoutCmd)
+	copilotLogoutCmd.Flags().Bool("no-confirm", false, "Legacy flag; remote logout is not supported")
+	hostCopilotLogoutCmd.Flags().Bool("no-confirm", false, "Explicitly approve deleting credentials on this host")
+	hostCmd.AddCommand(hostCopilotLogoutCmd)
 }
 
 func runCopilotLogout(_ context.Context, noConfirm bool) error {

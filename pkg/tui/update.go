@@ -114,6 +114,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForMsg(m.runCh)
 
 	case uiPromptRequestMsg:
+		if msg.prompt.ctx != nil && msg.prompt.ctx.Err() != nil {
+			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+			return m, waitForMsg(m.runCh)
+		}
 		state := m.uiBrokerState(msg.runID, msg.conversationKey)
 		if state == nil {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui input request is no longer active"})
@@ -126,6 +130,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg.prompt.runID = msg.runID
 		cmd := m.openUIPromptForState(state, msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
+	case uiPromptDismissMsg:
+		state := m.uiBrokerState(msg.runID, msg.conversationKey)
+		if state != nil && state.activeUIPrompt != nil && state.activeUIPrompt.response == msg.response {
+			cmd := m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+			return m, tea.Batch(waitForMsg(m.runCh), cmd)
+		}
+		return m, waitForMsg(m.runCh)
 
 	case uiNotificationMsg:
 		state := m.uiBrokerState(msg.runID, msg.conversationKey)
@@ -265,6 +277,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if reloadSlashCommands {
 			cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD()))
+		}
+		if m.remote && msg.err == nil {
+			cmds = append(cmds, m.loadRemoteSlashCommands(state))
 		}
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
@@ -488,7 +503,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.slashCommands = msg.commands
 			m.extensionShortcuts = nil
-			if !m.extensionDiscoveryBlocked {
+			m.shortcutDigest = ""
+			if msg.remote && msg.err == nil {
+				m.extensionShortcuts = effectiveExtensionShortcuts(m.ctx, msg.shortcuts)
+				m.shortcutDigest = msg.shortcutDigest
+			}
+			if !msg.remote && !m.extensionDiscoveryBlocked {
 				cmds = append(cmds, loadExtensionSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD(), m.extensionRuntimes))
 			}
 		}
@@ -513,6 +533,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var promptFocusCmd tea.Cmd
 		if state.activeUIPrompt != nil && state.activeUIPrompt.runID == msg.callID {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		}
+		if m.remote {
+			promptFocusCmd = tea.Batch(promptFocusCmd, m.loadRemoteSlashCommands(state))
 		}
 		if msg.err == nil && msg.result != nil {
 			switch msg.result.Action {

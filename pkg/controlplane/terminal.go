@@ -6,12 +6,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -108,157 +105,18 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
 		return
 	}
-	if target != nil {
-		if err := s.runnerRegistry.ValidateRunnerCall(target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalOpen); err != nil {
-			if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
-				s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support workspace terminal", nil)
-				return
-			}
-			s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner terminal is unavailable", err)
+	if err := s.runnerRegistry.ValidateRunnerCall(target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalOpen); err != nil {
+		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
+			s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support workspace terminal", nil)
 			return
 		}
-		s.handleRemoteTerminalWebsocket(w, r, target.Runner.ID, target.Runner.Generation)
+		s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner terminal is unavailable", err)
 		return
 	}
-	if !s.requireControlPlaneWorkspace(w) {
-		return
-	}
-	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)
-		return
-	}
-
-	upgrader := s.terminalUpgrader()
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		logger.G(r.Context()).WithError(err).Warn("failed to upgrade terminal websocket")
-		return
-	}
-
-	ctx, cancel := context.WithCancel(s.chatExecutionContext(r.Context()))
-	defer cancel()
-
-	rows := boundedTerminalRows(parseTerminalDimension(r.URL.Query().Get("rows")))
-	cols := boundedTerminalCols(parseTerminalDimension(r.URL.Query().Get("cols")))
-
-	session, err := s.terminalSessionManager().getOrCreate(r.Context(), terminalSessionKey(resolvedCWD), resolvedCWD, rows, cols)
-	if err != nil {
-		_ = conn.Close()
-		logger.G(r.Context()).WithError(err).Warn("failed to get terminal session")
-		return
-	}
-
-	writer := &websocketWriter{conn: conn}
-	defer func() { _ = conn.Close() }()
-
-	conn.SetReadLimit(terminalReadLimit)
-	_ = conn.SetReadDeadline(time.Now().Add(terminalPongWait))
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(terminalPongWait))
-	})
-
-	attachment, replay, err := session.attach()
-	if err != nil {
-		logger.G(r.Context()).WithError(err).Debug("terminal session ended before websocket attach")
-		return
-	}
-	defer session.detach(attachment)
-
-	if err := session.resize(rows, cols); err != nil && !errors.Is(err, errTerminalSessionClosed) {
-		logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
-	}
-
-	if err := writer.writeJSON(session.readyMessage()); err != nil {
-		return
-	}
-	if len(replay) > 0 {
-		if err := writer.Write(websocket.BinaryMessage, replay); err != nil {
-			return
-		}
-	}
-	if err := writer.writeJSON(terminalMessage{Type: "replay-complete"}); err != nil {
-		return
-	}
-
-	go func() {
-		ticker := time.NewTicker(terminalPingPeriod)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := writer.Write(websocket.PingMessage, nil); err != nil {
-					attachment.notify(err)
-					return
-				}
-			}
-		}
-	}()
-
-	readCh := make(chan terminalSocketRead, 1)
-	go readTerminalWebsocket(ctx, conn, readCh)
-
-	for {
-		select {
-		case output := <-attachment.outputCh:
-			if err := writer.Write(websocket.BinaryMessage, output); err != nil {
-				return
-			}
-		case code := <-attachment.exitCh:
-			_ = writer.writeJSON(terminalMessage{Type: "exit", Code: terminalExitCode(code)})
-			return
-		case asyncErr := <-attachment.errCh:
-			if !terminalAttachmentErrorCloses(asyncErr) {
-				continue
-			}
-			if asyncErr != nil && !errors.Is(asyncErr, errTerminalSessionClosed) {
-				var closeErr *websocket.CloseError
-				if !errors.As(asyncErr, &closeErr) {
-					logger.G(r.Context()).WithError(asyncErr).Debug("terminal session closed")
-				}
-			}
-			return
-		case socketRead := <-readCh:
-			if socketRead.Err != nil {
-				return
-			}
-
-			switch socketRead.MessageType {
-			case websocket.BinaryMessage:
-				if err := session.writeInput(socketRead.Payload); err != nil {
-					return
-				}
-			case websocket.TextMessage:
-				var message terminalMessage
-				if err := json.Unmarshal(socketRead.Payload, &message); err != nil {
-					continue
-				}
-
-				switch message.Type {
-				case "input":
-					if message.Data == "" {
-						continue
-					}
-					if err := session.writeInput([]byte(message.Data)); err != nil {
-						return
-					}
-				case "resize":
-					if err := session.resize(message.Rows, message.Cols); err != nil && !errors.Is(err, errTerminalSessionClosed) {
-						logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
-					}
-				case "signal":
-					if sig, ok := parseTerminalSignal(message.Name); ok {
-						_ = session.signal(sig)
-					}
-				}
-			}
-		}
-	}
+	s.handleRemoteTerminalWebsocket(w, r, target.Runner.ID, target.Runner.Generation, target.CWD)
 }
 
-func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Request, runnerID string, generation int64) {
+func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Request, runnerID string, generation int64, cwd string) {
 	if !s.acquireRemoteTerminalAttachment(runnerID) {
 		s.writeErrorResponse(w, http.StatusTooManyRequests, "too many terminal attachments for runner", nil)
 		return
@@ -281,7 +139,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	writer := &websocketWriter{conn: conn}
 	var opened protocol.WorkspaceTerminalOpenResult
 	openCtx, cancelOpen := context.WithTimeout(ctx, remoteTerminalOpenTimeout)
-	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: rows, Cols: cols}, &opened)
+	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: cwd, Rows: rows, Cols: cols}, &opened)
 	cancelOpen()
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Warn("failed to open runner terminal")
@@ -528,10 +386,6 @@ func (s *Server) callRemoteTerminal(ctx context.Context, runnerID string, genera
 	return nil
 }
 
-func terminalAttachmentErrorCloses(err error) bool {
-	return err == nil || !errors.Is(err, errTerminalClientSlow)
-}
-
 func terminalExitCode(code int) *int {
 	return &code
 }
@@ -582,58 +436,6 @@ func boundedTerminalCols(value int) int {
 		return maxTerminalCols
 	}
 	return value
-}
-
-func resolveTerminalShell() (string, string) {
-	shell := strings.TrimSpace(os.Getenv("SHELL"))
-	if shell == "" {
-		shell = "/bin/bash"
-	}
-
-	name := filepath.Base(shell)
-	if name == "." || name == string(os.PathSeparator) || name == "" {
-		name = shell
-	}
-
-	return shell, name
-}
-
-func terminalEnv(shell string) []string {
-	env := os.Environ()
-	hasTerm := false
-	hasShell := false
-	for _, entry := range env {
-		if strings.HasPrefix(entry, "TERM=") {
-			hasTerm = true
-		}
-		if strings.HasPrefix(entry, "SHELL=") {
-			hasShell = true
-		}
-	}
-
-	if !hasTerm {
-		env = append(env, "TERM=xterm-256color")
-	}
-	if !hasShell {
-		env = append(env, "SHELL="+shell)
-	}
-
-	return env
-}
-
-func parseTerminalSignal(name string) (syscall.Signal, bool) {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "INT", "SIGINT":
-		return syscall.SIGINT, true
-	case "TERM", "SIGTERM":
-		return syscall.SIGTERM, true
-	case "HUP", "SIGHUP":
-		return syscall.SIGHUP, true
-	case "QUIT", "SIGQUIT":
-		return syscall.SIGQUIT, true
-	default:
-		return 0, false
-	}
 }
 
 func terminalOriginAllowed(r *http.Request) bool {

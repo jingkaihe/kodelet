@@ -39,6 +39,7 @@ const (
 	workspaceTerminalCleanupPollWait   = 20 * time.Millisecond
 	workspaceTerminalProcessKillWait   = 2 * time.Second
 	workspaceTerminalShutdownWait      = 4 * time.Second
+	workspaceTerminalDirectoryLimit    = 8
 )
 
 type cappedBuffer struct {
@@ -66,18 +67,21 @@ func (b *cappedBuffer) String() string {
 	return b.buffer.String()
 }
 
-func (s *Service) workspaceGitDiff(ctx context.Context) (protocol.WorkspaceGitDiffResult, error) {
+func (s *Service) workspaceGitDiff(ctx context.Context, cwd string) (protocol.WorkspaceGitDiffResult, error) {
 	if s == nil {
 		return protocol.WorkspaceGitDiffResult{}, errors.New("runner service is required")
 	}
 	s.mu.Lock()
 	closed := s.closed
-	workspace := s.workspace
 	s.mu.Unlock()
 	if closed {
 		return protocol.WorkspaceGitDiffResult{}, errors.New("runner service is closed")
 	}
 
+	workspace, err := s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
+	if err != nil {
+		return protocol.WorkspaceGitDiffResult{}, err
+	}
 	gitRoot, err := resolveWorkspaceGitRoot(ctx, workspace)
 	if err != nil {
 		return protocol.WorkspaceGitDiffResult{}, err
@@ -164,6 +168,7 @@ type workspaceTerminalManager struct {
 	closeMu  sync.Mutex
 	current  *workspaceTerminalSession
 	closed   bool
+	closedCh chan struct{}
 	closeErr error
 }
 
@@ -208,11 +213,14 @@ func newWorkspaceTerminalManager(ctx context.Context, cwd string) *workspaceTerm
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	manager := &workspaceTerminalManager{ctx: ctx, cwd: cwd}
+	manager := &workspaceTerminalManager{ctx: ctx, cwd: cwd, closedCh: make(chan struct{})}
 	if done := ctx.Done(); done != nil {
 		go func() {
-			<-done
-			_ = manager.Close()
+			select {
+			case <-done:
+				_ = manager.Close()
+			case <-manager.closedCh:
+			}
 		}()
 	}
 	return manager
@@ -347,6 +355,9 @@ func (m *workspaceTerminalManager) Close() error {
 		return m.closeErr
 	}
 	m.closed = true
+	if m.closedCh != nil {
+		close(m.closedCh)
+	}
 	session := m.current
 	m.mu.Unlock()
 
@@ -755,28 +766,84 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 	if s == nil || s.workspaceTerminals == nil {
 		return protocol.WorkspaceTerminalOpenResult{}, errors.New("workspace terminal is unavailable")
 	}
-	return s.workspaceTerminals.Open(ctx, params.Rows, params.Cols)
+	cwd, err := s.instanceProvider.ResolveWorkingDirectory(ctx, params.CWD)
+	if err != nil {
+		return protocol.WorkspaceTerminalOpenResult{}, err
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return protocol.WorkspaceTerminalOpenResult{}, errors.New("runner service is closed")
+	}
+	manager := s.directoryTerminals[cwd]
+	if manager == nil {
+		if len(s.directoryTerminals) >= workspaceTerminalDirectoryLimit {
+			for directory, candidate := range s.directoryTerminals {
+				candidate.mu.Lock()
+				idle := candidate.current == nil || (workspaceTerminalDone(candidate.current.done) && candidate.current.cleanupError() == nil)
+				if idle && !candidate.closed {
+					candidate.closed = true
+					if candidate.closedCh != nil {
+						close(candidate.closedCh)
+					}
+				}
+				candidate.mu.Unlock()
+				if idle {
+					delete(s.directoryTerminals, directory)
+					break
+				}
+			}
+		}
+		if len(s.directoryTerminals) >= workspaceTerminalDirectoryLimit {
+			s.mu.Unlock()
+			return protocol.WorkspaceTerminalOpenResult{}, errors.New("runner terminal directory limit reached (8); exit an existing terminal to release its slot")
+		}
+		manager = newWorkspaceTerminalManager(s.ctx, cwd)
+		s.directoryTerminals[cwd] = manager
+	}
+	s.mu.Unlock()
+	return manager.Open(ctx, params.Rows, params.Cols)
 }
 
 func (s *Service) readWorkspaceTerminal(ctx context.Context, params protocol.WorkspaceTerminalReadParams) (protocol.WorkspaceTerminalReadResult, error) {
-	if s == nil || s.workspaceTerminals == nil {
-		return protocol.WorkspaceTerminalReadResult{}, errors.New("workspace terminal is unavailable")
+	manager, err := s.terminalManagerForSession(params.SessionID)
+	if err != nil {
+		return protocol.WorkspaceTerminalReadResult{}, err
 	}
-	return s.workspaceTerminals.Read(ctx, params)
+	return manager.Read(ctx, params)
 }
 
 func (s *Service) writeWorkspaceTerminal(ctx context.Context, params protocol.WorkspaceTerminalInputParams) error {
-	if s == nil || s.workspaceTerminals == nil {
-		return errors.New("workspace terminal is unavailable")
+	manager, err := s.terminalManagerForSession(params.SessionID)
+	if err != nil {
+		return err
 	}
-	return s.workspaceTerminals.Write(ctx, params)
+	return manager.Write(ctx, params)
 }
 
 func (s *Service) resizeWorkspaceTerminal(params protocol.WorkspaceTerminalResizeParams) error {
-	if s == nil || s.workspaceTerminals == nil {
-		return errors.New("workspace terminal is unavailable")
+	manager, err := s.terminalManagerForSession(params.SessionID)
+	if err != nil {
+		return err
 	}
-	return s.workspaceTerminals.Resize(params)
+	return manager.Resize(params)
+}
+
+func (s *Service) terminalManagerForSession(id string) (*workspaceTerminalManager, error) {
+	if s == nil || s.workspaceTerminals == nil {
+		return nil, errors.New("workspace terminal is unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errors.New("runner service is closed")
+	}
+	for _, manager := range s.directoryTerminals {
+		if _, err := manager.session(id); err == nil {
+			return manager, nil
+		}
+	}
+	return nil, errors.New("terminal session was not found")
 }
 
 func newWorkspaceTerminalSessionID() (string, error) {

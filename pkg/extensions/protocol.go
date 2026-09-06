@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/pkg/errors"
 )
 
@@ -126,6 +127,7 @@ type initializeExtensionInfo struct {
 
 // InitializeResult is returned by extension.initialize.
 type InitializeResult struct {
+	Profiles      []delegation.Profile   `json:"profiles,omitempty"`
 	Name          string                 `json:"name"`
 	Version       string                 `json:"version,omitempty"`
 	Tools         []ToolRegistration     `json:"tools,omitempty"`

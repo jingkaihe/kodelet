@@ -39,13 +39,20 @@ type ExtensionListOutput struct {
 
 var extensionCmd = &cobra.Command{
 	Use:   "extension",
-	Short: "Manage extensions",
-	Long:  "Discover and inspect Kodelet extensions loaded from standalone and plugin extension directories.",
+	Short: "Moved to kodelet host extension",
+	RunE:  hostInspectionMigration,
+}
+
+var hostExtensionCmd = &cobra.Command{
+	Use:   "extension",
+	Short: "Inspect extension files on this host",
+	Long:  "Inspect installed extension files in the intended workspace on the runner host. This starts no processes and does not inspect live registrations or a remote daemon.",
 }
 
 var extensionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List discovered extensions",
+	Long:  "List extension files on this host without starting extension processes.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
 		return runExtensionList(cmd.Context(), ExtensionListConfig{JSONOutput: jsonOutput})
@@ -55,6 +62,7 @@ var extensionListCmd = &cobra.Command{
 var extensionInspectCmd = &cobra.Command{
 	Use:   "inspect <extension>",
 	Short: "Inspect a discovered extension",
+	Long:  "Inspect extension file metadata on this host without starting extension processes.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
@@ -63,10 +71,14 @@ var extensionInspectCmd = &cobra.Command{
 }
 
 func init() {
-	extensionListCmd.Flags().Bool("json", false, "Output in JSON format")
-	extensionInspectCmd.Flags().Bool("json", false, "Output in JSON format")
-	extensionCmd.AddCommand(extensionListCmd)
-	extensionCmd.AddCommand(extensionInspectCmd)
+	hostExtensionCmd.AddCommand(extensionListCmd, extensionInspectCmd)
+	hostCmd.AddCommand(hostExtensionCmd)
+	legacyList := &cobra.Command{Use: "list", Short: "Moved to kodelet host extension list", RunE: hostInspectionMigration}
+	legacyInspect := &cobra.Command{Use: "inspect <extension>", Short: "Moved to kodelet host extension inspect", RunE: hostInspectionMigration}
+	extensionCmd.AddCommand(legacyList, legacyInspect)
+	for _, cmd := range []*cobra.Command{extensionListCmd, extensionInspectCmd, legacyList, legacyInspect} {
+		cmd.Flags().Bool("json", false, "Output in JSON format")
+	}
 	rootCmd.AddCommand(extensionCmd)
 }
 

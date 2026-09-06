@@ -58,28 +58,14 @@ type conversationListMsg struct {
 
 func loadConversationListFromSource(ctx context.Context, requestID int, source chat.ConversationSource) tea.Cmd {
 	return func() tea.Msg {
-		if source != nil {
-			summaries, err := source.ListConversations(ctx, conversationPickerLimit)
-			if err != nil {
-				return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list control-plane conversations")}
-			}
-			return conversationListMsg{requestID: requestID, summaries: summaries}
+		if source == nil {
+			return conversationListMsg{requestID: requestID, err: errors.New("daemon runner does not support conversation history")}
 		}
-		service, err := conversations.GetDefaultConversationService(ctx)
+		summaries, err := source.ListConversations(ctx, conversationPickerLimit)
 		if err != nil {
-			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to open conversation store")}
+			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list control-plane conversations")}
 		}
-		defer service.Close()
-
-		response, err := service.ListConversations(ctx, &conversations.ListConversationsRequest{
-			Limit:     conversationPickerLimit,
-			SortBy:    "updated",
-			SortOrder: "desc",
-		})
-		if err != nil {
-			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list conversations")}
-		}
-		return conversationListMsg{requestID: requestID, summaries: response.Conversations}
+		return conversationListMsg{requestID: requestID, summaries: summaries}
 	}
 }
 
@@ -393,7 +379,7 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	}
 	m.conversations[item.key] = state
 	_, activateCmd := m.activateConversation(item.key)
-	return tea.Batch(activateCmd, m.closeConversationPicker(), loadConversationHistoryFromSource(m.ctx, item.key, item.id, state.requestedCWD, m.conversationSource))
+	return tea.Batch(activateCmd, m.closeConversationPicker(), loadConversationHistoryFromSource(m.ctx, item.key, item.id, m.conversationSource))
 }
 
 func (m model) renderConversationPicker() string {

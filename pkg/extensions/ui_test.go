@@ -3,8 +3,11 @@ package extensions
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,6 +21,52 @@ func TestTerminalUIInputBrokerUnavailableWhenNonInteractive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, UIInputStatusUnavailable, result.Status)
 	assert.Contains(t, result.Reason, "terminal input is not available")
+}
+
+func TestTerminalUIInputBrokerCancelsBlockedFileReadsAndPreservesInput(t *testing.T) {
+	input, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = input.Close(); _ = writer.Close() })
+	broker := NewTerminalUIInputBroker(input, io.Discard)
+	broker.Interactive = true // Exercise terminal file reads using a deterministic pipe.
+	for _, prompt := range []func(context.Context) (UIInputResponse, error){
+		func(ctx context.Context) (UIInputResponse, error) { return broker.Input(ctx, UIInputRequest{}) },
+		func(ctx context.Context) (UIInputResponse, error) { return broker.Confirm(ctx, UIConfirmRequest{}) },
+		func(ctx context.Context) (UIInputResponse, error) { return broker.Select(ctx, UISelectRequest{}) },
+	} {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { _, err := prompt(ctx); done <- err }()
+		select {
+		case err := <-done:
+			t.Fatalf("terminal read returned without input or cancellation: %v", err)
+		case <-time.After(20 * time.Millisecond):
+		}
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("terminal prompt did not unblock on cancellation")
+		}
+	}
+	_, err = writer.WriteString("yes\n2\n")
+	require.NoError(t, err, "cancellation must not close caller-owned stdin")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	confirm, err := broker.Confirm(ctx, UIConfirmRequest{})
+	require.NoError(t, err)
+	assert.True(t, confirm.Confirmed)
+	selection, err := broker.Select(ctx, UISelectRequest{Options: []string{"one", "two"}})
+	require.NoError(t, err)
+	assert.Equal(t, "two", selection.Value, "read-ahead must survive between prompts")
+}
+
+func TestTerminalUIInputBrokerDoesNotTreatDevNullAsInteractive(t *testing.T) {
+	input, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	defer input.Close()
+	assert.False(t, NewTerminalUIInputBroker(input, io.Discard).Interactive)
 }
 
 func TestUIExtensionOwnerContextRoundTrip(t *testing.T) {

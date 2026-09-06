@@ -56,6 +56,91 @@ func TestSystemInformationCloneAndTransientConfigSerialization(t *testing.T) {
 	assert.NotContains(t, string(payload), "macOS 26.0")
 }
 
+func TestConfigClonePinsMutableSettings(t *testing.T) {
+	original := Config{
+		Provider:                "openai",
+		Model:                   "main",
+		AllowedTools:            []string{"file_read"},
+		AllowedCommands:         []string{"git status"},
+		AllowedReasoningEfforts: []string{"medium"},
+		Aliases:                 map[string]string{"short": "main"},
+		SyspromptArgs:           map[string]string{"name": "original"},
+		SystemInformation:       &SystemInformation{Platform: "linux"},
+		ExecutionOptions:        &ExecutionOptions{Model: new("main"), AllowedTools: new([]string{})},
+		Extensions:              new("opaque runtime"),
+		ExtensionSettings: map[string]any{
+			"entries": []any{map[string]any{"args": []string{"original"}}, nil},
+			"typed":   []map[string][]int{{"limits": {1, 2}}},
+			"flags":   []bool{true},
+			"nil":     []any(nil),
+			"empty":   []any{},
+			"profile": ProfileConfig{"env": map[string]string{"KEY": "original"}},
+		},
+		Profiles: map[string]ProfileConfig{
+			"work": {"openai": map[string]any{"models": []any{"main"}}},
+		},
+		EnvironmentProfiles: map[string]ProfileConfig{
+			"workspace": {"extensions": map[string]any{"paths": []string{"original"}}},
+		},
+		OpenAI: &OpenAIConfig{
+			EnableSearch:  new(true),
+			WebSocketMode: new(true),
+			Models:        &CustomModels{Reasoning: []string{"main"}, NonReasoning: []string{"weak"}},
+			Pricing:       map[string]ModelPricing{"main": {Input: 1}},
+		},
+		Anthropic: &AnthropicConfig{Platform: "anthropic"},
+		Bash:      &BashConfig{Timeout: time.Minute},
+		Skills:    &SkillsConfig{Enabled: true, Allowed: []string{"review"}},
+		Context:   &ContextConfig{Patterns: []string{"AGENTS.md"}},
+	}
+	// Include transient settings that Config intentionally excludes from JSON.
+	serialize := func() []byte {
+		data, err := json.Marshal([]any{original, original.ExecutionOptions, original.ExtensionSettings, original.SystemInformation})
+		require.NoError(t, err)
+		return data
+	}
+	before := serialize()
+	cloned := original.Clone()
+	assert.Equal(t, original, cloned)
+	assert.Same(t, original.Extensions, cloned.Extensions, "opaque runtime ownership is not duplicated")
+	cloned.AllowedTools[0] = "bash"
+	cloned.AllowedCommands[0] = "rm *"
+	cloned.AllowedReasoningEfforts[0] = "high"
+	cloned.Aliases["short"] = "other"
+	cloned.SyspromptArgs["name"] = "changed"
+	cloned.SystemInformation.Platform = "darwin"
+	*cloned.ExecutionOptions.Model = "other"
+	*cloned.ExecutionOptions.AllowedTools = append(*cloned.ExecutionOptions.AllowedTools, "bash")
+	cloned.ExtensionSettings["entries"].([]any)[0].(map[string]any)["args"].([]string)[0] = "changed"
+	cloned.ExtensionSettings["typed"].([]map[string][]int)[0]["limits"][0] = 99
+	cloned.ExtensionSettings["flags"].([]bool)[0] = false
+	cloned.ExtensionSettings["profile"].(ProfileConfig)["env"].(map[string]string)["KEY"] = "changed"
+	cloned.Profiles["work"]["openai"].(map[string]any)["models"].([]any)[0] = "changed"
+	cloned.EnvironmentProfiles["workspace"]["extensions"].(map[string]any)["paths"].([]string)[0] = "changed"
+	*cloned.OpenAI.EnableSearch = false
+	*cloned.OpenAI.WebSocketMode = false
+	cloned.OpenAI.Models.Reasoning[0] = "changed"
+	cloned.OpenAI.Models.NonReasoning[0] = "changed"
+	cloned.OpenAI.Pricing["main"] = ModelPricing{Input: 99}
+	cloned.Anthropic.Platform = "changed"
+	cloned.Bash.Timeout = time.Second
+	cloned.Skills.Allowed[0] = "changed"
+	cloned.Context.Patterns[0] = "changed"
+	assert.JSONEq(t, string(before), string(serialize()), "mutating a run snapshot must not mutate shared configuration")
+	assert.Equal(t, Config{}, (Config{}).Clone(), "absent configuration stays absent")
+}
+
+func TestConfigExecutionOptionsAreTransient(t *testing.T) {
+	config := Config{ExecutionOptions: &ExecutionOptions{NoTools: new(true), MaxTurns: new(0)}}
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "noTools")
+	assert.NotContains(t, string(data), "maxTurns")
+	data, err = yaml.Marshal(config)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "executionoptions")
+}
+
 func TestOpenAIServiceTierParsingAndWireValue(t *testing.T) {
 	tier, ok := ParseOpenAIServiceTier(" FAST ")
 	require.True(t, ok)

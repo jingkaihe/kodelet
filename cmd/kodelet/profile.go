@@ -32,8 +32,16 @@ const (
 
 var profileCmd = &cobra.Command{
 	Use:   "profile",
-	Short: "Manage configuration profiles",
-	Long:  "Manage named configuration profiles for different model setups",
+	Short: "Manage model profile files on this host",
+	Long:  "Inspect or edit this host's configuration files. Run on the daemon host with its configuration, then restart serve to apply changes. This command does not contact a remote daemon.",
+}
+
+var hostCmd = &cobra.Command{
+	Use:               "host",
+	Short:             "Administer configuration files on this host",
+	Long:              "Explicit host-only operator commands. These commands do not administer the daemon selected by --server or KODELET_SERVER.",
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE:              func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 }
 
 var profileCurrentCmd = &cobra.Command{
@@ -181,8 +189,9 @@ var profileShowCmd = &cobra.Command{
 
 var profileUseCmd = &cobra.Command{
 	Use:   "use [profile-name]",
-	Short: "Switch to a different profile",
-	Long: `Switch to a different profile. 
+	Short: "Set this host's configured default profile",
+	Long: `Set a profile in a host-local configuration file. Use -g for daemon defaults,
+then restart the daemon. Repository files do not configure daemon model profiles.
 Without -g flag: updates ./kodelet-config.yaml
 With -g flag: updates ~/.kodelet/config.yaml
 
@@ -212,6 +221,7 @@ Use "default" to use base configuration without any profile.`,
 }
 
 func init() {
+	hostCmd.AddCommand(profileCmd)
 	profileCmd.AddCommand(profileCurrentCmd)
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileShowCmd)

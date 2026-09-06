@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -851,6 +852,25 @@ func TestPrepareUtilityModeDisablesPersistenceAndExtensions(t *testing.T) {
 	assert.False(t, bt.Persisted)
 	assert.Nil(t, bt.Config.Extensions)
 	assert.NotNil(t, bt.Store)
+	assert.IsType(t, &agentenv.UtilityEnvironment{}, bt.GetEnvironment())
+}
+
+func TestPrepareUtilityModeDoesNotOwnParentEnvironment(t *testing.T) {
+	parent := &recordingAgentEnvironment{open: true, state: &mockState{}}
+	bt := NewThread(llmtypes.Config{Extensions: "parent extension"}, "helper")
+	bt.SetEnvironment(parent)
+	bt.SetEnvironmentState(parent.state)
+
+	bt.PrepareUtilityMode(t.Context())
+	assert.Nil(t, bt.GetState())
+	assert.True(t, parent.IsOpen())
+	assert.NotNil(t, parent.State())
+	assert.NotSame(t, parent, bt.GetEnvironment())
+	manifest, err := bt.GetEnvironment().Open(t.Context(), agentenv.RunSpec{})
+	require.NoError(t, err)
+	assert.Empty(t, manifest)
+	require.NoError(t, bt.GetEnvironment().Close(t.Context()))
+	assert.True(t, parent.IsOpen(), "helper cleanup must not close the parent lease")
 }
 
 func TestEnablePersistence_WithExistingStore(t *testing.T) {

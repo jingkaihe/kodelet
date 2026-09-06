@@ -114,7 +114,11 @@ type Runner struct {
 	Connected          bool               `json:"connected"`
 	ConcurrentRuns     bool               `json:"concurrentRuns"`
 	WorkspaceGitDiff   bool               `json:"workspaceGitDiff"`
+	WorkspaceGitCommit bool               `json:"workspaceGitCommit"`
 	WorkspaceTerminal  bool               `json:"workspaceTerminal"`
+	WorkspaceDiscovery bool               `json:"workspaceDiscovery"`
+	WorkspaceCWD       bool               `json:"workspaceCwd"`
+	RunCheckpoint      bool               `json:"runCheckpoint"`
 	ActiveRunID        string             `json:"activeRunId,omitempty"`
 	ActiveRunIDs       []string           `json:"activeRunIds,omitempty"`
 	ConnectionID       string             `json:"connectionId,omitempty"`
@@ -229,6 +233,7 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
+	checkpoint        *runCheckpoint
 	connectionID      string
 	generation        int64
 	leaseCancel       context.CancelFunc
@@ -263,6 +268,9 @@ type Registry struct {
 	affinities        *affinityIndex
 	toolUpdates       *toolUpdateRouter
 	toolForkers       map[toolForkKey]*toolForkRegistration
+	modelHelpers      map[modelHelperKey]*modelHelperRegistration
+	childTools        map[toolForkKey]*childGrant
+	childLeases       map[childLeaseKey]*childGrant
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -611,7 +619,11 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
@@ -655,6 +667,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		r.clearRunTransientStateLocked(lostRun.ID)
 		lostConversationIDs = append(lostConversationIDs, lostRun.ConversationID)
 	}
+	r.clearRunnerChildrenLocked(entry.ID)
 	result := protocol.RegisterResult{
 		RunnerID:            entry.ID,
 		ProtocolVersion:     protocol.Version,
@@ -737,7 +750,11 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -776,6 +793,7 @@ func (r *Registry) DisconnectRunnerExceptCredential(runnerID, allowedCredentialI
 	entry.ready = false
 	entry.ConnectionID = ""
 	entry.UpdatedAt = now
+	r.clearRunnerChildrenLocked(entry.ID)
 	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
 	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
 	for _, runID := range runnerActiveRunIDs(entry) {
@@ -818,6 +836,7 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 	entry.ready = false
 	entry.ConnectionID = ""
 	entry.UpdatedAt = now
+	r.clearRunnerChildrenLocked(entry.ID)
 	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
 	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
 	for _, runID := range runnerActiveRunIDs(entry) {
@@ -1013,6 +1032,11 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner not found")
 	}
+	checkpoint, _ := ctx.Value(runCheckpointKey{}).(*runCheckpoint)
+	if params.RequireCheckpoint && (checkpoint == nil || !entry.RunCheckpoint) {
+		r.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("runner must support admitted conversation checkpoints; upgrade the runner")
+	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	reservedAffinity := false
 	if affinity, exists := r.affinities.get(params.ConversationID); exists && affinity.RunnerID != runnerID {
@@ -1082,6 +1106,11 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		connectionID: connectionID,
 		generation:   generation,
 		leaseCancel:  leaseCancel,
+		checkpoint:   checkpoint,
+	}
+	if checkpoint != nil {
+		stop := context.AfterFunc(leaseCtx, checkpoint.cancel)
+		defer stop()
 	}
 	if err := r.persistRunnerAndRunLocked(runnerCandidate, run); err != nil {
 		leaseCancel()
@@ -1101,6 +1130,14 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	if err := link.Call(ctx, protocol.MethodRunOpen, params, &manifest); err != nil {
 		var rpcErr *protocol.RPCError
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, errors.As(err, &rpcErr))
+	}
+	if checkpoint != nil {
+		r.mu.RLock()
+		complete := checkpoint.complete && checkpoint.cwd == manifest.WorkingDirectory
+		r.mu.RUnlock()
+		if !complete {
+			return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, errors.New("runner did not acknowledge the admitted conversation checkpoint"), false)
+		}
 	}
 	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
@@ -1231,8 +1268,12 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return false
 	}
 	switch method {
+	case protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints:
+		return entry.WorkspaceDiscovery
 	case protocol.MethodWorkspaceGitDiff:
 		return entry.WorkspaceGitDiff
+	case protocol.MethodWorkspaceGitPrepare, protocol.MethodWorkspaceGitCommit:
+		return entry.WorkspaceGitCommit
 	case protocol.MethodWorkspaceTerminalOpen,
 		protocol.MethodWorkspaceTerminalRead,
 		protocol.MethodWorkspaceTerminalInput,
@@ -1260,6 +1301,16 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
+	cleanupHelper, err := r.registerToolModelHelper(ctx, params)
+	if err != nil {
+		return runnerpayload.ToolExecuteResult{}, err
+	}
+	defer cleanupHelper()
+	cleanupChildren, err := r.registerToolChildren(ctx, params)
+	if err != nil {
+		return runnerpayload.ToolExecuteResult{}, err
+	}
+	defer cleanupChildren()
 	toolContext := tools.ToolContextFromContext(ctx)
 	if forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker); ok {
 		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, params.Name, forker)
@@ -1346,6 +1397,10 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 	if err != nil {
 		return err
 	}
+	r.mu.Lock()
+	r.clearRunModelHelpersLocked(runID)
+	r.clearRunChildrenLocked(runID, false)
+	r.mu.Unlock()
 	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
 		return err
 	}
@@ -1811,6 +1866,9 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 
 func (r *Registry) clearRunTransientStateLocked(runID string) {
 	r.toolUpdates.clearRun(runID)
+	r.clearRunModelHelpersLocked(runID)
+	run := r.runs[runID]
+	r.clearRunChildrenLocked(runID, run != nil && run.Status == RunStatusSucceeded)
 }
 
 func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {

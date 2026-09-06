@@ -373,7 +373,8 @@ const getSlashCommandPlaceholder = (command: SlashCommandOption): string =>
 const isBlockingUIRequestEvent = (event: ChatStreamEvent): boolean =>
   event.kind === 'ui-input-request' ||
   event.kind === 'ui-confirm-request' ||
-  event.kind === 'ui-select-request';
+  event.kind === 'ui-select-request' ||
+  event.kind === 'ui-request-end';
 
 const widgetsFromSnapshot = (widgets: UIWidgetEvent[] | undefined): Record<string, UIWidgetEvent> =>
   Object.fromEntries(
@@ -561,6 +562,7 @@ const ChatPage: React.FC = () => {
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
+  const [takingUIOwnership, setTakingUIOwnership] = useState(false);
   const [statusTick, setStatusTick] = useState(0);
   const controlPlaneWorkspaceEnabled = chatSettings.controlPlaneWorkspaceEnabled !== false;
   const loadedConversationId = conversation?.id ?? null;
@@ -1837,8 +1839,13 @@ const ChatPage: React.FC = () => {
         const requestId = cwdSuggestionRequestRef.current + 1;
         cwdSuggestionRequestRef.current = requestId;
 
-        void apiService
-          .getCWDHints(query)
+        const request = newChatRunnerDraft
+          ? apiService.getCWDHints(query, {
+              runnerId: newChatRunnerDraft,
+              environmentProfile: newChatEnvironmentProfileDraft,
+            })
+          : apiService.getCWDHints(query);
+        void request
           .then((response) => {
             if (cwdSuggestionRequestRef.current !== requestId || viewedConversationIdRef.current) {
               return;
@@ -1858,17 +1865,27 @@ const ChatPage: React.FC = () => {
             setCwdSuggestionsOpen(false);
           });
       }, 150),
-    []
+    [newChatRunnerDraft, newChatEnvironmentProfileDraft]
   );
 
   useEffect(() => {
     return () => {
       requestCwdSuggestions.cancel();
+      cwdSuggestionRequestRef.current += 1;
     };
   }, [requestCwdSuggestions]);
 
   useEffect(() => {
-    if (conversationId || newChatRunnerDraft || !controlPlaneWorkspaceEnabled) {
+    cwdSuggestionRequestRef.current += 1;
+    setCwdSuggestions([]);
+    setCwdSuggestionsOpen(false);
+    setCwdSuggestionIndex(-1);
+    const runner = runners.find((candidate) => candidate.id === newChatRunnerDraft);
+    const discoveryAvailable = newChatRunnerDraft
+      ? runner?.connected && runner.workspaceDiscovery &&
+        (runner.status === 'idle' || runner.status === 'busy')
+      : controlPlaneWorkspaceEnabled;
+    if (!newChatDialogOpen || conversationId || !discoveryAvailable) {
       requestCwdSuggestions.cancel();
       cwdInputFocusedRef.current = false;
       setCwdSuggestions([]);
@@ -1898,7 +1915,7 @@ const ChatPage: React.FC = () => {
     cwdSuggestionSkipQueryRef.current = null;
 
     requestCwdSuggestions(cwdQuery);
-  }, [controlPlaneWorkspaceEnabled, conversationId, cwdQuery, newChatRunnerDraft, requestCwdSuggestions]);
+  }, [controlPlaneWorkspaceEnabled, conversationId, cwdQuery, newChatRunnerDraft, newChatDialogOpen, runners, requestCwdSuggestions]);
 
   const handleSelectConversation = (nextConversationId: string) => {
     closeMobileSidebar();
@@ -2055,6 +2072,13 @@ const ChatPage: React.FC = () => {
   };
 
   const handleUIInputRequest = (event: ChatStreamEvent) => {
+    if (event.kind === 'ui-request-end') {
+      setUIRequestDialog((current) =>
+        current && current.request.id === event.ui_request_id &&
+        current.request.conversationId === event.conversation_id ? null : current
+      );
+      return true;
+    }
     if (event.kind === 'ui-notification' && event.ui_notify) {
       showToast(event.ui_notify.message, 'info', event.ui_notify.title);
       return true;
@@ -2578,6 +2602,19 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  const handleTakeUIOwnership = async () => {
+    if (!activeRunningConversationId || takingUIOwnership) return;
+    setTakingUIOwnership(true);
+    try {
+      await apiService.takeUIOwnership(activeRunningConversationId);
+      showToast('Future extension prompts will appear in this client', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not take control', 'error');
+    } finally {
+      setTakingUIOwnership(false);
+    }
+  };
+
   const handleStop = () => {
     const conversationToStop = activeRunningConversationId;
     if (!conversationToStop) {
@@ -2726,13 +2763,6 @@ const ChatPage: React.FC = () => {
   const runnerWorkspaceAvailable = Boolean(
     currentRunner?.connected && (currentRunner.status === 'idle' || currentRunner.status === 'busy')
   );
-  const workspaceTerminalAvailable = isRemoteConversation
-    ? Boolean(terminalAuthorized && runnerWorkspaceAvailable && currentRunner?.workspaceTerminal)
-    : terminalAuthorized && workspaceContextReady && controlPlaneWorkspaceEnabled;
-  const workspaceGitDiffAvailable = isRemoteConversation
-    ? Boolean(runnerWorkspaceAvailable && currentRunner?.workspaceGitDiff)
-    : workspaceContextReady && controlPlaneWorkspaceEnabled;
-  const workspaceToolsAvailable = workspaceTerminalAvailable || workspaceGitDiffAvailable;
   const remoteWorkspaceConversationID =
     isRemoteConversation && conversationId && !hasOptimisticRemoteConversation
       ? conversationId
@@ -2767,6 +2797,17 @@ const ChatPage: React.FC = () => {
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
+  // Before affinity is persisted, runner-wide panels can only address its startup directory.
+  const runnerDirectoryAvailable =
+    currentCWDLabel === currentRunner?.workspace.path ||
+    Boolean(remoteWorkspaceConversationID && currentRunner?.workspaceCwd);
+  const workspaceTerminalAvailable = isRemoteConversation
+    ? Boolean(terminalAuthorized && runnerWorkspaceAvailable && runnerDirectoryAvailable && currentRunner?.workspaceTerminal)
+    : terminalAuthorized && workspaceContextReady && controlPlaneWorkspaceEnabled;
+  const workspaceGitDiffAvailable = isRemoteConversation
+    ? Boolean(runnerWorkspaceAvailable && runnerDirectoryAvailable && currentRunner?.workspaceGitDiff)
+    : workspaceContextReady && controlPlaneWorkspaceEnabled;
+  const workspaceToolsAvailable = workspaceTerminalAvailable || workspaceGitDiffAvailable;
   const workspaceTarget = useMemo<WorkspaceTarget>(
     () =>
       isRemoteConversation
@@ -2780,19 +2821,30 @@ const ChatPage: React.FC = () => {
   );
   const workspaceTargetKey =
     workspaceTarget.kind === 'runner'
-      ? `runner:${workspaceTarget.runnerId}:generation:${currentRunner?.generation || 0}`
+      ? `runner:${workspaceTarget.runnerId}:conversation:${workspaceTarget.conversationId || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`
       : `local:${workspaceTarget.cwd || ''}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
   useEffect(() => {
-    if (isRemoteConversation || !controlPlaneWorkspaceEnabled) {
-      setSlashCommands([]);
+    setSlashCommands([]);
+    if (isRemoteConversation
+      ? !runnerWorkspaceAvailable || !currentRunner?.workspaceDiscovery
+      : !controlPlaneWorkspaceEnabled) {
       return undefined;
     }
     let cancelled = false;
 
-    void apiService
-      .getSlashCommands(currentCWDLabel || undefined)
+    const request = isRemoteConversation
+      ? apiService.getSlashCommands(
+          remoteWorkspaceConversationID ? undefined : currentCWDLabel || undefined,
+          {
+            runnerId: currentRunnerID,
+            conversationId: remoteWorkspaceConversationID,
+            environmentProfile: currentEnvironmentProfile,
+          }
+        )
+      : apiService.getSlashCommands(currentCWDLabel || undefined);
+    void request
       .then((response) => {
         if (!cancelled) {
           setSlashCommands(response.commands || []);
@@ -2807,7 +2859,7 @@ const ChatPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation]);
+  }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation, runnerWorkspaceAvailable, currentRunner?.workspaceDiscovery, currentRunner?.generation, currentRunnerID, remoteWorkspaceConversationID, currentEnvironmentProfile]);
 
   useEffect(() => {
     if (
@@ -3317,7 +3369,7 @@ const ChatPage: React.FC = () => {
           onCwdInputFocus={() => {
             cwdInputFocusedRef.current = true;
             setCwdSuggestionsOpen(
-              !newChatRunnerDraft && cwdQuery.trim().length > 0 && cwdSuggestions.length > 0
+              cwdQuery.trim().length > 0 && cwdSuggestions.length > 0
             );
           }}
           onCwdInputKeyDown={handleCwdInputKeyDown}
@@ -3451,6 +3503,19 @@ const ChatPage: React.FC = () => {
           className="chat-main-panel relative flex h-full min-w-0 flex-1 flex-col overflow-hidden"
           inert={workspaceOverlayOpen || sidebarOverlayOpen || undefined}
         >
+          {activeRunningConversationId && !sendControllersRef.current[activeRunningConversationId] ? (
+            <div className="flex justify-end px-4 pt-2">
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={takingUIOwnership}
+                onClick={() => void handleTakeUIOwnership()}
+                title="Handle future extension prompts in this client"
+                type="button"
+              >
+                Take control
+              </button>
+            </div>
+          ) : null}
           <div
             className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
             data-testid="chat-transcript-scroll"

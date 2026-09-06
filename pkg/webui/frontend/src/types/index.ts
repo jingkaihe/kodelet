@@ -279,6 +279,8 @@ export interface Runner {
   concurrentRuns?: boolean;
   workspaceGitDiff?: boolean;
   workspaceTerminal?: boolean;
+  workspaceDiscovery?: boolean;
+  workspaceCwd?: boolean;
   activeRunId?: string;
   activeRunIds?: string[];
   generation: number;
@@ -331,6 +333,12 @@ export interface SlashCommandOption {
 
 export interface SlashCommandsResponse {
   commands: SlashCommandOption[];
+}
+
+export interface RunnerDiscoveryTarget {
+  runnerId: string;
+  conversationId?: string;
+  environmentProfile?: string;
 }
 
 export interface ChatSettings {
@@ -430,6 +438,7 @@ export interface ChatStreamEvent {
     | 'ui-confirm-request'
     | 'ui-select-request'
     | 'ui-notification'
+    | 'ui-request-end'
     | 'ui-widget'
     | 'ui-widgets'
     | 'thinking-start'
@@ -460,6 +469,7 @@ export interface ChatStreamEvent {
   ui_confirm?: UIConfirmRequestEvent;
   ui_select?: UISelectRequestEvent;
   ui_notify?: UINotifyEvent;
+  ui_request_id?: string;
   ui_widget?: UIWidgetEvent;
   ui_widgets?: UIWidgetEvent[];
   ui_widget_revision?: string;

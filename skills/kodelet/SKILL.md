@@ -34,13 +34,12 @@ When answering detailed or version-sensitive questions, prefer the current repos
 kodelet run "your query"
 
 # Continue the most recent conversation
-kodelet run -f "continue the task" # same as --follow
+kodelet run --cwd "$PWD" -f "continue the task" # scoped --follow
 
 # Resume a specific conversation
 kodelet run --resume CONVERSATION_ID "more questions"
 
-# Temporary or minimal runs
-kodelet run --no-save "temporary query"
+# Minimal output or tool-free runs (still saved by the daemon)
 kodelet run --result-only "what is 2+2"
 kodelet run --no-tools "what is the capital of France?"
 
@@ -54,9 +53,9 @@ kodelet serve
 ## Feature summary
 
 - Context files: Kodelet automatically loads `AGENTS.md`; bootstrap one with `kodelet run -r init`.
-- Recipes/fragments: User-invoked prompt templates in `./recipes/` or `~/.kodelet/recipes/`; list with `kodelet recipe list`, inspect with `kodelet recipe show <name>`, run with `kodelet run -r <name>`.
+- Recipes/fragments: Runner-owned prompt templates in `./recipes/` or `~/.kodelet/recipes/`; run with `kodelet run -r <name>`. On the runner host, `kodelet host recipe list` starts discovery extensions and `kodelet host recipe show <name>` renders executable templates.
 - Skills: Model-invoked domain guidance in `.kodelet/skills/<name>/SKILL.md`, plugins, or global skill dirs; disable with `--no-skills`.
-- Extensions: Long-running subprocesses can register model tools, prompt commands/dynamic recipes, native TUI shortcuts, and lifecycle event handlers; inspect with `kodelet extension list` and disable with `--no-extensions`.
+- Extensions: Runner subprocesses can register model tools, prompt commands/dynamic recipes, native TUI shortcuts, and lifecycle event handlers; inspect installation paths with `kodelet host extension list` on the runner host and disable per request with `--no-extensions`.
 - Plugins: Install bundled skills, recipes, and extensions with `kodelet plugin add org/repo`; inspect with `kodelet plugin list` and `kodelet plugin show org/repo`.
 - Conversations: Use `kodelet conversation list/show/delete/fork` for persisted runs.
 - Git helpers: `kodelet commit` generates commit messages; `kodelet pr` creates PRs.

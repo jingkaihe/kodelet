@@ -84,6 +84,8 @@ type activePrompt struct {
 	cancelling    bool
 	stopping      bool
 	stopDone      chan struct{}
+	stopErr       error
+	detached      bool
 }
 
 var errNoRunningTurn = errors.New("session does not have a running turn")
@@ -126,7 +128,7 @@ func WithContext(ctx context.Context) Option {
 }
 
 // WithRemoteSessions configures ACP to use a control-plane-owned agentic loop
-// backed by an embedded local workspace runner.
+// backed by a registered daemon-owned or standalone workspace runner.
 func WithRemoteSessions(config RemoteSessionConfig) Option {
 	return func(s *Server) {
 		s.remoteSessions = newRemoteSessionManager(config)
@@ -810,7 +812,7 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 }
 
 func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *activePrompt, req *acptypes.Request, params acptypes.PromptRequest) error {
-	firstPrompt, environmentProfile, err := s.remoteSessions.beginPrompt(params.SessionID)
+	firstPrompt, err := s.remoteSessions.beginPrompt(params.SessionID)
 	if err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 	}
@@ -819,41 +821,47 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 		s.remoteSessions.finishPrompt(params.SessionID, succeeded)
 	}()
 
-	client, runnerID, err := s.remoteSessions.waitForClient(promptCtx)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
-			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
-		}
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
-	}
+	client, request := s.remoteSessions.promptTarget(params.SessionID)
 	turnID, started := s.startRemotePrompt(params.SessionID, client)
 	if !started {
-		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+		if s.remotePromptCancellationConfirmed(params.SessionID) {
+			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+		}
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "ACP detached before submission; no turn was started", nil)
 	}
 	defer s.closePromptSteering(active)
 	message, images := bridge.ContentBlocksToMessage(params.Prompt)
-	request := chat.ChatRequest{
-		Message:        message,
-		Content:        chat.ContentBlocksForUserInput(message, images),
-		ConversationID: string(params.SessionID),
-		TurnID:         turnID,
-		RunnerID:       runnerID,
-	}
+	request.Message = message
+	request.Content = chat.ContentBlocksForUserInput(message, images)
+	request.ConversationID = string(params.SessionID)
+	request.TurnID = turnID
 	if firstPrompt {
 		request.Profile = strings.TrimSpace(s.remoteSessions.config.Profile)
 		request.ReasoningEffort = strings.TrimSpace(s.remoteSessions.config.ReasoningEffort)
-		request.EnvironmentProfile = environmentProfile
 	}
 
-	_, err = client.Run(promptCtx, request, bridge.NewACPChatEventSink(s, params.SessionID))
-	if err != nil {
-		if errors.Is(err, context.Canceled) || promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
-			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
-		}
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
-	}
-	if promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
+	sink := &remoteOutcomeSink{ChatEventSink: bridge.NewACPChatEventSink(s, params.SessionID)}
+	_, err = client.Run(promptCtx, request, sink)
+	if s.remotePromptCancellationConfirmed(params.SessionID) || sink.cancelled {
+		// A scoped stop can be acknowledged before submission is admitted.
+		// Only a terminal stream event confirms that first-turn configuration
+		// reached the daemon; otherwise retain it for the next prompt.
+		succeeded = sink.done
 		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+	}
+	if err != nil || promptCtx.Err() != nil {
+		if !sink.done {
+			s.remoteSessions.markUncertain(params.SessionID)
+		}
+		s.activePromptsMu.Lock()
+		stopErr := active.stopErr
+		s.activePromptsMu.Unlock()
+		if stopErr != nil {
+			err = pkgerrors.Wrap(stopErr, "cancellation was not acknowledged; daemon work may still be running")
+		} else if err == nil {
+			err = promptCtx.Err()
+		}
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, fmt.Sprintf("daemon execution failed or detached (conversation %s, turn %s): %v; inspect daemon history before resubmitting (not retried)", params.SessionID, turnID, err), nil)
 	}
 	succeeded = true
 	return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
@@ -882,7 +890,7 @@ func (s *Server) finishRemotePromptCancellation(sessionID acptypes.SessionID, pr
 		err = s.stopRemoteConversation(sessionID, prompt)
 	}
 	if shouldStop {
-		s.completeRemotePromptStop(sessionID, prompt)
+		s.completeRemotePromptStop(sessionID, prompt, err)
 	}
 	if err != nil {
 		logger.G(s.ctx).WithField("session_id", sessionID).WithError(err).Warn("Failed to stop remote ACP conversation")
@@ -902,7 +910,7 @@ func (s *Server) startRemotePrompt(sessionID acptypes.SessionID, client RemoteCh
 	s.activePromptsMu.Lock()
 	defer s.activePromptsMu.Unlock()
 	prompt := s.activePrompts[sessionID]
-	if prompt == nil || prompt.cancelling || client == nil {
+	if prompt == nil || prompt.cancelling || prompt.detached || client == nil {
 		return "", false
 	}
 	prompt.remoteClient = client
@@ -937,7 +945,7 @@ func (s *Server) beginRemotePromptStop(sessionID acptypes.SessionID) (*activePro
 	return prompt, prompt.remoteStarted
 }
 
-func (s *Server) completeRemotePromptStop(sessionID acptypes.SessionID, prompt *activePrompt) {
+func (s *Server) completeRemotePromptStop(sessionID acptypes.SessionID, prompt *activePrompt, err error) {
 	s.activePromptsMu.Lock()
 	defer s.activePromptsMu.Unlock()
 	if prompt == nil || s.activePrompts[sessionID] != prompt || !prompt.stopping {
@@ -945,6 +953,7 @@ func (s *Server) completeRemotePromptStop(sessionID acptypes.SessionID, prompt *
 	}
 	done := prompt.stopDone
 	prompt.stopping = false
+	prompt.stopErr = err
 	if done != nil {
 		close(done)
 	}
@@ -958,7 +967,7 @@ func (s *Server) remotePromptCancellationConfirmed(sessionID acptypes.SessionID)
 		return false
 	}
 	if !prompt.stopping || prompt.stopDone == nil {
-		cancelling := prompt.cancelling
+		cancelling := prompt.cancelling && prompt.stopErr == nil
 		s.activePromptsMu.Unlock()
 		return cancelling
 	}
@@ -968,46 +977,29 @@ func (s *Server) remotePromptCancellationConfirmed(sessionID acptypes.SessionID)
 	<-done
 	s.activePromptsMu.Lock()
 	defer s.activePromptsMu.Unlock()
-	return prompt.cancelling
+	return prompt.cancelling && prompt.stopErr == nil
 }
 
 func (s *Server) cancelActivePromptContexts() {
-	type promptCancellation struct {
-		sessionID acptypes.SessionID
-		prompt    *activePrompt
-		stop      bool
-	}
-
 	s.activePromptsMu.Lock()
-	prompts := make([]promptCancellation, 0, len(s.activePrompts))
-	for sessionID, prompt := range s.activePrompts {
+	prompts := make([]*activePrompt, 0, len(s.activePrompts))
+	for _, prompt := range s.activePrompts {
 		if prompt == nil {
 			continue
 		}
-		if prompt.cancelling {
-			prompts = append(prompts, promptCancellation{sessionID: sessionID, prompt: prompt})
-			continue
+		if s.remoteSessions != nil {
+			// EOF, process shutdown and transport loss detach the ACP client.
+			// Only an explicit session/cancel notification stops daemon work.
+			prompt.detached = true
+		} else {
+			prompt.cancelling = true
 		}
-		prompt.cancelling = true
-		shouldStop := prompt.remoteStarted && !prompt.stopping
-		if shouldStop {
-			prompt.stopping = true
-			prompt.stopDone = make(chan struct{})
-		}
-		prompts = append(prompts, promptCancellation{sessionID: sessionID, prompt: prompt, stop: shouldStop})
+		prompts = append(prompts, prompt)
 	}
 	s.activePromptsMu.Unlock()
 
-	for _, cancellation := range prompts {
-		cancellation.prompt.cancel()
-		if cancellation.stop {
-			if s.remoteSessions != nil && s.remoteSessions.isActive(cancellation.sessionID) {
-				if err := s.stopRemoteConversation(cancellation.sessionID, cancellation.prompt); err != nil {
-					logger.G(s.ctx).WithField("session_id", cancellation.sessionID).WithError(err).Warn("Failed to stop remote ACP conversation during shutdown")
-				}
-			}
-			s.completeRemotePromptStop(cancellation.sessionID, cancellation.prompt)
-		}
+	for _, prompt := range prompts {
+		prompt.cancel()
 	}
 }
 

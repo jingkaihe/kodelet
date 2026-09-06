@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/pkg/errors"
 )
 
@@ -85,7 +88,7 @@ func (m model) extensionShortcutForKey(key string) (extensions.Shortcut, bool) {
 }
 
 func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
-	if m == nil || m.conversationState == nil || m.extensionRuntimes == nil {
+	if m == nil || m.conversationState == nil || m.runner == nil {
 		return nil
 	}
 	state := m.conversationState
@@ -93,11 +96,6 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 	callID := m.nextRunID
 	conversationKey := state.key
 	conversationID := state.conversationID
-	profile := state.profile
-	reasoningEffort := state.reasoningEffort
-	if state.conversationWasResumed {
-		reasoningEffort = ""
-	}
 	cwd := state.requestedCWD
 	if strings.TrimSpace(cwd) == "" {
 		cwd = state.cwd
@@ -114,44 +112,48 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 		m.shortcutCalls = map[int]*extensionShortcutCall{}
 	}
 	m.shortcutCalls[callID] = &extensionShortcutCall{conversationKey: conversationKey, cancel: cancel}
-	runtimeManager := m.extensionRuntimes
+	runner, digest := m.runner, state.shortcutDigest
+	target := chat.WorkspaceTarget{ConversationID: conversationID}
+	if conversationID == "" {
+		target.CWD, target.EnvironmentProfile = cwd, m.environmentProfile
+	}
 
 	return func() tea.Msg {
 		defer broker.close()
 		defer cancel()
-		llmConfig, resolvedCWD, err := chat.ResolveConfigWithReasoning(
-			callCtx,
-			conversationID,
-			profileForRequest(profile),
-			reasoningEffort,
-			cwd,
-			"",
-		)
-		matched := false
-		var result *extensions.ShortcutResult
-		if err == nil {
-			extensionCallContext, contextErr := chat.ResolveExtensionCallContext(callCtx, conversationID, resolvedCWD, llmConfig)
-			if contextErr != nil {
-				err = errors.Wrap(contextErr, "failed to resolve extension shortcut context")
-			} else {
-				extensionRuntime, runtimeErr := runtimeManager.RuntimeWithCallContext(callCtx, resolvedCWD, extensionCallContext)
-				if runtimeErr != nil {
-					err = errors.Wrap(runtimeErr, "failed to initialize extensions for shortcut")
-				} else {
-					matched, result, err = extensionRuntime.ExecuteShortcutWithResult(callCtx, shortcut.Key, extensionCallContext)
-				}
+		result, err := executeRemoteShortcut(callCtx, runner, target, shortcut, digest)
+		return extensionShortcutDoneMsg{callID: callID, conversationKey: conversationKey, key: shortcut.Key, extensionID: shortcut.ExtensionID, matched: result.Matched, result: result.Result, err: err}
+	}
+}
+
+func executeRemoteShortcut(ctx context.Context, runner chat.ChatRunner, target chat.WorkspaceTarget, shortcut extensions.Shortcut, digest string) (runnerpayload.ShortcutExecuteResult, error) {
+	remote, ok := runner.(interface {
+		DiscoverWorkspace(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
+		ExecuteWorkspaceShortcut(context.Context, chat.WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error)
+	})
+	if !ok {
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("daemon runner does not support extension shortcuts")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	// Resolve active versus idle at this user gesture, not when the picker was
+	// last populated. Never substitute a new extension merely matching its key.
+	discovery, err := remote.DiscoverWorkspace(ctx, target)
+	if err != nil {
+		return runnerpayload.ShortcutExecuteResult{}, err
+	}
+	if digest == "" || discovery.Digest != digest {
+		return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut environment changed; refresh discovery")
+	}
+	for _, current := range discovery.Shortcuts {
+		if current.Key == shortcut.Key && current.ExtensionID == shortcut.ExtensionID {
+			if target.ConversationID == "" {
+				target.CWD, target.EnvironmentProfile = discovery.CWD, discovery.EnvironmentProfile
 			}
-		}
-		return extensionShortcutDoneMsg{
-			callID:          callID,
-			conversationKey: conversationKey,
-			key:             shortcut.Key,
-			extensionID:     shortcut.ExtensionID,
-			matched:         matched,
-			result:          result,
-			err:             err,
+			return remote.ExecuteWorkspaceShortcut(ctx, chat.WorkspaceShortcutRequest{Target: target, RunID: discovery.RunID, Digest: discovery.Digest, Shortcut: current})
 		}
 	}
+	return runnerpayload.ShortcutExecuteResult{}, errors.New("shortcut registration changed; refresh discovery")
 }
 
 func formatShortcutKey(key string) string {

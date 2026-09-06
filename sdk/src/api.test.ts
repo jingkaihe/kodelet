@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createToolContext, runWithHostRPCClient } from "./context.js";
+
 import {
   type BackgroundTaskLease,
   ConversationForkUnavailableError,
@@ -709,6 +711,70 @@ test("background task capability returns a local no-op lease and rejects unavail
   assert.deepEqual(await unavailableHarness.executeTool({ name: "background", input: {} }), {
     content: "unavailable",
   });
+});
+
+test("native UI takeover updates only its client and closes only the matching surface opening", async () => {
+  const clients = [0, 1].map(() => {
+    const handlers = new Set<(method: string, params: unknown) => void>();
+    const requests: Array<{ method: string; params?: unknown }> = [];
+    return {
+      handlers, requests,
+      async request(method: string, params?: unknown) {
+        requests.push({ method, params });
+        return { accepted: true };
+      },
+      onNotification(handler: (method: string, params: unknown) => void) {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
+      notify(method: string, params: unknown) {
+        for (const handler of handlers) handler(method, params);
+      },
+    };
+  });
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { widgets: false, surfaces: false, transcript: false } } };
+  const contexts = await Promise.all(clients.map((client) => runWithHostRPCClient(client, async () => createToolContext(init, { uiScopeId: "conversation" }))));
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /not available/);
+  clients[0].notify("kodelet.ui.capabilities", { widgets: true, surfaces: true, transcript: true });
+  await assert.rejects(contexts[1].ui.openSurface({ id: "canvas" }), /not available/);
+  assert.equal(init.capabilities.ui.surfaces, false, "notification must not mutate a shared initialization snapshot");
+  const surface = await contexts[0].ui.openSurface({ id: "canvas" });
+  const open = clients[0].requests.at(-1)?.params as { frame: { sequence: number } };
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "another", id: "canvas", openSequence: open.frame.sequence });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  const previousRequests = clients[0].requests.length;
+  surface.update(["late frame"]);
+  await surface.close();
+  assert.equal(clients[0].requests.length, previousRequests, "revoked handles cannot issue frames or close a replacement");
+  const replacement = await contexts[0].ui.openSurface({ id: "canvas" });
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  await replacement.close();
+  clients[0].notify("kodelet.ui.capabilities", { widgets: true, surfaces: false, transcript: false });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /not available/);
+  await contexts[0].ui.setWidget("background", ["still active"]);
+  assert.equal(clients[0].requests.at(-1)?.method, "kodelet.ui.widget.set");
+});
+
+test("native surface revoked while opening cannot activate a stale handle", async () => {
+  let notify: (method: string, params: unknown) => void = () => undefined;
+  let finishOpen: (value: unknown) => void = () => undefined;
+  const host = {
+    request(_method: string, params?: unknown): Promise<unknown> {
+      const request = params as { frame: { sequence: number } };
+      return new Promise((resolve) => {
+        finishOpen = resolve;
+        notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: request.frame.sequence });
+      });
+    },
+    onNotification(handler: typeof notify) { notify = handler; return () => undefined; },
+  };
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { surfaces: true } } };
+  const context = await runWithHostRPCClient(host, async () => createToolContext(init, { uiScopeId: "conversation" }));
+  const opening = context.ui.openSurface({ id: "canvas" });
+  finishOpen({ accepted: true });
+  await assert.rejects(opening, /closed.*while.*opening/);
 });
 
 test("widgets use sequences and surfaces route host events", async () => {

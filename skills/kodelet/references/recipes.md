@@ -18,15 +18,17 @@ kodelet run -r init
 
 ## Fragments/recipes
 
-Recipes are user-invoked prompt templates. Store custom recipes in `./recipes/` or `~/.kodelet/recipes/`.
+Recipes are runner-owned prompt templates. Store custom recipes in `./recipes/` or `~/.kodelet/recipes/` on the runner host.
 
 ```bash
-kodelet recipe list
-kodelet recipe show init
+kodelet host recipe list
+kodelet host recipe show init
 kodelet run -r init
 kodelet run -r my-recipe --arg project="Kodelet" --arg focus_area="security"
 kodelet run -r my-recipe "additional context"
 ```
+
+Run `host recipe` in the intended workspace on the runner host: `list` starts discovery extensions, and `show` renders templates, including Bash substitutions. Ordinary `run -r` resolves recipes through the selected runner; the old top-level inspection commands fail with migration guidance.
 
 Recipe capabilities:
 

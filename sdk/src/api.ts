@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { executionProfileSchema, type ExecutionProfile } from "./execution.js";
+
 import { createCommandContext, createEventContext, createShortcutContext, createToolContext } from "./context.js";
 import type {
   AnyZodSchema,
@@ -53,6 +55,7 @@ interface RegisteredEventHandler {
 
 export class ExtensionHost implements ExtensionAPI {
   private metadata: ExtensionMetadata = {};
+	private profiles = new Map<string, ExecutionProfile>();
   private tools = new Map<string, RegisteredTool>();
   private commands = new Map<string, RegisteredCommand>();
   private shortcuts = new Map<string, RegisteredShortcut>();
@@ -62,6 +65,13 @@ export class ExtensionHost implements ExtensionAPI {
 
   setMetadata(metadata: ExtensionMetadata): void {
     this.metadata = { ...this.metadata, ...metadata };
+  }
+
+  registerProfile(profile: ExecutionProfile): void {
+    const snapshot = executionProfileSchema.parse(profile);
+    if (this.profiles.has(snapshot.name)) throw new Error(`Duplicate execution preset: ${snapshot.name}`);
+    if (this.profiles.size >= 32) throw new Error("An extension supports at most 32 execution presets");
+    this.profiles.set(snapshot.name, snapshot);
   }
 
   registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void {
@@ -129,6 +139,7 @@ export class ExtensionHost implements ExtensionAPI {
     return {
       name: this.metadata.name ?? params.extension.id,
       version: this.metadata.version,
+      ...(this.profiles.size ? { profiles: structuredClone([...this.profiles.values()]) } : {}),
       tools: [...this.tools.values()].map(({ registration, inputSchema }) => ({
         name: registration.name,
         description: registration.description,

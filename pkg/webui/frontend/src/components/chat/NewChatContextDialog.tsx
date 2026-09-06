@@ -104,6 +104,25 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
               (selectedRunner.status === 'idle' ||
                 (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
           );
+    const directorySuggestions = cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+      <div
+        className="composer-cwd-suggestions composer-cwd-suggestions-inline"
+        data-testid="cwd-suggestions"
+      >
+        {cwdSuggestions.map((suggestion, index) => (
+          <button
+            className={cn('composer-cwd-suggestion', index === cwdSuggestionIndex && 'is-active')}
+            data-testid={`cwd-suggestion-${index}`}
+            key={suggestion.path}
+            onClick={() => onSelectCwdSuggestion(suggestion.path)}
+            onMouseDown={(event) => event.preventDefault()}
+            type="button"
+          >
+            <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
+          </button>
+        ))}
+      </div>
+    ) : null;
     return (
       <div className="new-chat-dialog-backdrop new-chat-context-backdrop">
         <div
@@ -235,30 +254,35 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     <label className="new-chat-field-label" htmlFor="new-chat-cwd">
                       Working directory
                     </label>
-                    <div className="new-chat-directory-shell">
-                      <FolderOpen
-                        aria-hidden="true"
-                        className="new-chat-directory-icon"
-                        strokeWidth={1.6}
-                      />
-                      <input
-                        aria-label="Working directory"
-                        autoCapitalize="off"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control"
-                        data-testid="cwd-input"
-                        id="new-chat-cwd"
-                        onBlur={onCwdInputBlur}
-                        onChange={(event) => onCwdInputChange(event.target.value)}
-                        onFocus={onCwdInputFocus}
-                        onKeyDown={onCwdInputKeyDown}
-                        placeholder={selectedRunner.workspace.path}
-                        ref={cwdInputRef}
-                        spellCheck={false}
-                        type="text"
-                        value={cwdQuery}
-                      />
+                    <div className="new-chat-field-autocomplete">
+                      <div className="new-chat-directory-shell">
+                        <FolderOpen
+                          aria-hidden="true"
+                          className="new-chat-directory-icon"
+                          strokeWidth={1.6}
+                        />
+                        <input
+                          aria-autocomplete="list"
+                          aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
+                          aria-label="Working directory"
+                          autoCapitalize="off"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control"
+                          data-testid="cwd-input"
+                          id="new-chat-cwd"
+                          onBlur={onCwdInputBlur}
+                          onChange={(event) => onCwdInputChange(event.target.value)}
+                          onFocus={onCwdInputFocus}
+                          onKeyDown={onCwdInputKeyDown}
+                          placeholder={selectedRunner.workspace.path}
+                          ref={cwdInputRef}
+                          spellCheck={false}
+                          type="text"
+                          value={cwdQuery}
+                        />
+                      </div>
+                      {directorySuggestions}
                     </div>
                     <span className="new-chat-recent-workspace-parent">
                       Optional. Relative paths and ~ are resolved on the runner host.
@@ -316,30 +340,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                       />
                     </div>
 
-                    {cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-                      <div
-                        className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-                        data-testid="cwd-suggestions"
-                      >
-                        {cwdSuggestions.map((suggestion, index) => (
-                          <button
-                            className={cn(
-                              'composer-cwd-suggestion',
-                              index === cwdSuggestionIndex && 'is-active'
-                            )}
-                            data-testid={`cwd-suggestion-${index}`}
-                            key={suggestion.path}
-                            onClick={() => onSelectCwdSuggestion(suggestion.path)}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                            }}
-                            type="button"
-                          >
-                            <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
+                    {directorySuggestions}
                   </div>
                   {recentWorkspaces.length > 0 ? (
                     <div className="new-chat-recent-section">

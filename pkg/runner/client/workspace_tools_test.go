@@ -74,11 +74,11 @@ func TestServiceWorkspaceGitDiff(t *testing.T) {
 
 func TestWorkspaceGitDiffErrors(t *testing.T) {
 	var nilService *Service
-	_, err := nilService.workspaceGitDiff(t.Context())
+	_, err := nilService.workspaceGitDiff(t.Context(), "")
 	require.ErrorContains(t, err, "runner service is required")
 
 	closedService := &Service{closed: true}
-	_, err = closedService.workspaceGitDiff(t.Context())
+	_, err = closedService.workspaceGitDiff(t.Context(), "")
 	require.ErrorContains(t, err, "runner service is closed")
 
 	nonRepository := t.TempDir()
@@ -98,6 +98,79 @@ func TestWorkspaceGitDiffErrors(t *testing.T) {
 	require.ErrorContains(t, err, "failed to execute git diff")
 	assert.Zero(t, exitCode)
 	assert.False(t, truncated)
+}
+
+func TestWorkspaceGitDiffUsesRequestedDirectory(t *testing.T) {
+	startup, selected := t.TempDir(), t.TempDir()
+	cmd := exec.Command("git", "init", selected)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	service, err := NewService(t.Context(), startup, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	result := callService[protocol.WorkspaceGitDiffResult](t, service, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{CWD: selected})
+	assert.Equal(t, selected, result.CWD)
+	assert.Equal(t, selected, result.GitRoot)
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceGitDiff, mustJSON(t, protocol.WorkspaceGitDiffParams{}))
+	require.NotNil(t, rpcErr, "startup directory is deliberately not a git repository")
+}
+
+func TestWorkspaceTerminalsStayInTheirRequestedDirectories(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	startup, selected := t.TempDir(), t.TempDir()
+	service, err := NewService(t.Context(), startup, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{})
+	second := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: selected})
+	assert.NotEqual(t, first.SessionID, second.SessionID)
+	assert.Equal(t, startup, first.CWD)
+	assert.Equal(t, selected, second.CWD)
+	for _, opened := range []protocol.WorkspaceTerminalOpenResult{first, second} {
+		reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: opened.CWD})
+		assert.Equal(t, opened.SessionID, reopened.SessionID)
+		callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: opened.SessionID, Data: []byte("pwd\n")})
+		var output strings.Builder
+		var cursor uint64
+		require.Eventually(t, func() bool {
+			read := callService[protocol.WorkspaceTerminalReadResult](t, service, protocol.MethodWorkspaceTerminalRead, protocol.WorkspaceTerminalReadParams{SessionID: opened.SessionID, Cursor: cursor, WaitMS: 10})
+			cursor = read.NextCursor
+			output.Write(read.Data)
+			return strings.Contains(output.String(), opened.CWD)
+		}, 3*time.Second, 10*time.Millisecond)
+	}
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{CWD: filepath.Join(selected, "missing")}))
+	require.NotNil(t, rpcErr)
+	assert.Len(t, service.directoryTerminals, 2, "invalid directories must not create a terminal")
+	require.NoError(t, service.Close())
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalInput, mustJSON(t, protocol.WorkspaceTerminalInputParams{SessionID: second.SessionID, Data: []byte("pwd\n")}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "closed")
+}
+
+func TestWorkspaceTerminalsReclaimExitedDirectories(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{})
+	manager, err := service.terminalManagerForSession(first.SessionID)
+	require.NoError(t, err)
+	session, err := manager.session(first.SessionID)
+	require.NoError(t, err)
+	for range workspaceTerminalDirectoryLimit - 1 {
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: t.TempDir()})
+	}
+	nextDirectory := t.TempDir()
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{CWD: nextDirectory}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "directory limit reached")
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: first.SessionID, Data: []byte("exit\n")})
+	require.Eventually(t, func() bool { return workspaceTerminalDone(session.done) }, 3*time.Second, 10*time.Millisecond)
+	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: nextDirectory})
+	assert.Equal(t, nextDirectory, next.CWD)
+	assert.True(t, workspaceTerminalDone(manager.closedCh), "reclaim also releases the manager's context watcher")
+	assert.Len(t, service.directoryTerminals, workspaceTerminalDirectoryLimit)
 }
 
 func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T) {

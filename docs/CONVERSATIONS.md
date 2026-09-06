@@ -62,12 +62,6 @@ kodelet run --resume <conversation-id> "new message"
 
 ## Storage
 
-Conversation data is stored locally using SQLite by default.
+Conversation data is stored in the daemon's SQLite database. Clients use the daemon API and do not open a local conversation store. Existing history remains readable after upgrading; continuing legacy history requires `kodelet conversation adopt` with an explicitly selected runner.
 
-## Disabling Persistence
-
-You can disable conversation persistence for any session:
-
-```bash
-kodelet run --no-save "query"
-```
+All user-facing runs save their conversations, including `--result-only`. The `--no-save` flag is removed and fails explicitly; there is no transient replacement mode.

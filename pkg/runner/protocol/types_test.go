@@ -2,12 +2,33 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
-	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWorkspaceGitCommitApprovalValidation(t *testing.T) {
+	valid := WorkspaceGitCommitParams{CWD: "/runner/repo", Generation: 1, Tree: strings.Repeat("a", 40), Message: "feat: commit"}
+	require.NoError(t, valid.Validate(), "unborn HEAD is allowed")
+	valid.Head, valid.Tree = strings.Repeat("b", 64), strings.Repeat("a", 64)
+	require.NoError(t, valid.Validate(), "SHA-256 repositories are allowed")
+	for _, change := range []func(*WorkspaceGitCommitParams){
+		func(p *WorkspaceGitCommitParams) { p.Tree = "" },
+		func(p *WorkspaceGitCommitParams) { p.Head = "--option" },
+		func(p *WorkspaceGitCommitParams) { p.Tree = strings.Repeat("z", 40) },
+		func(p *WorkspaceGitCommitParams) { p.CWD = "" },
+		func(p *WorkspaceGitCommitParams) { p.Generation = 0 },
+		func(p *WorkspaceGitCommitParams) { p.Message = "\x00" },
+		func(p *WorkspaceGitCommitParams) { p.Message = strings.Repeat("a", 64*1024+1) },
+		func(p *WorkspaceGitCommitParams) { p.HeadRef = "refs/heads/main\n" },
+	} {
+		invalid := valid
+		change(&invalid)
+		require.Error(t, invalid.Validate())
+	}
+}
 
 func TestDecodeMessageValidatesEnvelope(t *testing.T) {
 	id := "runner:1"
@@ -54,34 +75,6 @@ func TestRegisterParamsValidate(t *testing.T) {
 	missingHost := valid
 	missingHost.Host.InstanceID = ""
 	assert.ErrorContains(t, missingHost.Validate(), "host.instanceId")
-}
-
-func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
-	manifest := runnerpayload.Manifest{
-		ProtocolVersion:     Version,
-		RunnerID:            "runner-one",
-		RunID:               "run-one",
-		Generation:          1,
-		ExtensionGeneration: 1,
-		Tools: []runnerpayload.ToolDefinition{{
-			Name:        "bash",
-			Description: "execute a command",
-			InputSchema: map[string]any{"type": "object"},
-			Placement:   "environment",
-		}},
-	}
-
-	first, err := runnerpayload.ComputeManifestDigest(manifest)
-	require.NoError(t, err)
-	manifest.Digest = "stale"
-	manifest.RunnerID = "runner-two"
-	manifest.RunID = "run-two"
-	manifest.Generation = 2
-	manifest.ExtensionGeneration = 99
-	second, err := runnerpayload.ComputeManifestDigest(manifest)
-	require.NoError(t, err)
-	assert.Equal(t, first, second)
-	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, first)
 }
 
 func TestMessageAndRPCErrorValidationBranches(t *testing.T) {

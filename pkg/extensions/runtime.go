@@ -43,6 +43,7 @@ type Shortcut struct {
 	Key         string
 	Description string
 	ExtensionID string
+	Generation  uint64
 }
 
 type registeredShortcut struct {
@@ -226,11 +227,16 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 				proc.Extension.ID,
 			))
 		}
+		var generation uint64
+		if _, source := proc.rpcSession(); source != nil {
+			generation = source.owner.Generation
+		}
 		r.shortcuts[key] = registeredShortcut{
 			Shortcut: Shortcut{
 				Key:         key,
 				Description: strings.TrimSpace(registration.Description),
 				ExtensionID: proc.Extension.ID,
+				Generation:  generation,
 			},
 			process: proc,
 		}
@@ -338,6 +344,9 @@ func (r *Runtime) Commands() []Command {
 
 // Shortcuts returns effective extension shortcuts sorted by key.
 func (r *Runtime) Shortcuts() []Shortcut {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	shortcuts := make([]Shortcut, 0, len(r.shortcuts))
@@ -384,6 +393,40 @@ func (r *Runtime) notifySurfaceEvent(ctx context.Context, owner UIExtensionOwner
 	return errors.New("extension UI owner is no longer active")
 }
 
+// UpdateUICapabilities informs current processes of client availability changes.
+// It never initializes or restarts a process, including after a failed generation.
+func (r *Runtime) UpdateUICapabilities(ctx context.Context, capabilities ExtensionUIHostCapabilities) error {
+	if r == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.RLock()
+	processes := append([]*Process(nil), r.processes...)
+	r.mu.RUnlock()
+	done := make(chan error, 1)
+	go func() {
+		for _, process := range processes {
+			_, source := process.rpcSession()
+			if source == nil || !source.current() {
+				continue
+			}
+			if err := source.NotifyExtensionUI(ctx, "kodelet.ui.capabilities", map[string]bool{"widgets": capabilities.Widgets, "surfaces": capabilities.Surfaces, "transcript": capabilities.Transcript}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Close terminates all extension processes.
 func (r *Runtime) Close() error {
 	if r == nil {
@@ -401,7 +444,11 @@ func (r *Runtime) Close() error {
 		if lifecycleCtx == nil {
 			lifecycleCtx = context.Background()
 		}
+		// Shutdown is bounded even when an extension opts out of event timeouts.
+		// Keep processes alive for session.end, then reap their process groups.
+		lifecycleCtx, cancel := context.WithTimeout(lifecycleCtx, 5*time.Second)
 		r.DispatchSessionEnd(lifecycleCtx, lifecycleCallCtx)
+		cancel()
 	}
 	r.mu.Lock()
 	var firstErr error

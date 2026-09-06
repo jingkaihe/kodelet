@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
@@ -27,6 +28,9 @@ type serverChatRunner struct {
 
 func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
+	if r == nil || r.server == nil || r.runner == nil {
+		return conversationID, errors.New("daemon execution is unavailable; a configured runner is required")
+	}
 	if r != nil && r.server != nil && r.server.extensionUI != nil && conversationID != "" {
 		ctx = extensions.ContextWithExtensionUIHost(ctx, r.server.extensionUI)
 		ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
@@ -47,23 +51,28 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			}
 		}
 	}
-	if r != nil && r.server != nil && !r.server.controlPlaneWorkspaceEnabled() {
-		if strings.TrimSpace(req.RunnerID) == "" {
-			return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; select a workspace runner")
+	if r != nil && r.server != nil && strings.TrimSpace(req.RunnerID) == "" && r.server.config != nil && r.server.config.EmbeddedRunner != nil {
+		status := r.server.EmbeddedRunnerStatus()
+		if !status.Ready {
+			return conversationID, errors.New("default embedded runner is unavailable; inspect /api/status or explicitly select an available runner")
 		}
-		if conversationID != "" && !hasRunnerAffinity {
-			if r.server.conversationService == nil {
-				return conversationID, errors.New("conversation service is unavailable")
-			}
-			_, err := r.server.conversationService.GetConversation(ctx, conversationID)
-			switch {
-			case err == nil:
-				return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; existing local conversations are read-only")
-			case stdErrors.Is(err, convtypes.ErrConversationNotFound):
-				// A client may allocate the conversation ID before the first turn.
-			default:
-				return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
-			}
+		req.RunnerID = status.RunnerID
+	}
+	if strings.TrimSpace(req.RunnerID) == "" {
+		return conversationID, errors.New("workspace execution requires a runner; select --runner or enable the default embedded runner")
+	}
+	if conversationID != "" && !hasRunnerAffinity {
+		if r.server.conversationService == nil {
+			return conversationID, errors.New("conversation service is unavailable")
+		}
+		_, err := r.server.conversationService.GetConversation(ctx, conversationID)
+		switch {
+		case err == nil:
+			return conversationID, errors.New("existing local conversations are read-only; use conversation adopt before continuing")
+		case stdErrors.Is(err, convtypes.ErrConversationNotFound):
+			// A client may allocate the conversation ID before the first turn.
+		default:
+			return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
 		}
 	}
 	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
@@ -71,13 +80,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
 	}
-	var resultConversationID string
-	var runErr error
-	if r == nil || r.runner == nil {
-		resultConversationID, runErr = chat.RunDefaultChat(ctx, req, sink, "", nil)
-	} else {
-		resultConversationID, runErr = r.runner.Run(ctx, req, sink)
-	}
+	resultConversationID, runErr := r.runner.Run(ctx, req, sink)
 	if strings.TrimSpace(resultConversationID) == "" {
 		resultConversationID = conversationID
 	}
@@ -116,10 +119,30 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		capabilities.PersistentWidgets = req.ClientCapabilities.PersistentWidgets
 		capabilities.PersistentSurfaces = req.ClientCapabilities.PersistentSurfaces
 	}
+	if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
+		broker.mu.Lock()
+		capabilities.InteractiveUI, capabilities.PersistentSurfaces = false, false
+		if broker.owner != nil && broker.owner.ctx.Err() == nil {
+			caps := nativeCapabilities(broker.owner.ctx)
+			capabilities.InteractiveUI, capabilities.PersistentSurfaces = true, caps.PersistentSurfaces
+		}
+		broker.mu.Unlock()
+	}
+	var controller agentenv.RemoteController = r.server.runnerRegistry
+	admitted := ctx.Value(turnConversationIDKey{}) == conversationID
+	if admitted {
+		controller = admittedTurnController{Registry: r.server.runnerRegistry}
+	}
 	return agentenv.NewRemoteEnvironment(
-		r.server.runnerRegistry,
+		controller,
 		runnerID,
 		agentenv.WithRemoteClientCapabilities(capabilities),
+		agentenv.WithRemoteRunIDGenerator(func() (string, error) {
+			if id, ok := ctx.Value(turnRunIDKey{}).(string); ok && admitted {
+				return id, nil
+			}
+			return convtypes.GenerateID(), nil
+		}),
 	), nil
 }
 
@@ -161,9 +184,13 @@ type ndjsonEventSink struct {
 }
 
 type subscriberEventSink struct {
-	ch     chan chat.ChatEvent
-	mu     sync.RWMutex
-	closed bool
+	ch           chan chat.ChatEvent
+	mu           sync.RWMutex
+	closed       bool
+	clientID     string
+	interactive  bool
+	capabilities chat.ChatClientCapabilities
+	ctx          context.Context
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
@@ -181,6 +208,10 @@ func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
 func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A slow or vanished UI must not indefinitely hold the provider or UI broker.
+	controller := http.NewResponseController(s.w)
+	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -197,6 +228,9 @@ func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 func (s *ndjsonEventSink) KeepAlive() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	controller := http.NewResponseController(s.w)
+	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	if _, err := s.w.Write([]byte("\n")); err != nil {
 		return errors.Wrap(err, "failed to write chat stream keepalive")
 	}
@@ -242,6 +276,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid chat request", err)
 		return
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		s.writeErrorResponse(w, http.StatusBadRequest, "chat request must contain one JSON object", err)
+		return
+	}
+	clientID := strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	if chatSupportsInteractiveUI(req) && !validUIClientID(clientID) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "interactive requests require a valid X-Kodelet-Client-ID header; upgrade the client", nil)
+		return
+	}
 
 	message, imageInputs, err := chat.NormalizeRequest(req)
 	if err != nil {
@@ -271,25 +314,94 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		req.ConversationID = conversationID
 	}
 	registeredConversationID := conversationID
+	req.TurnID = strings.TrimSpace(req.TurnID)
+	if req.TurnID == "" {
+		req.TurnID = convtypes.GenerateID()
+	}
+	if !validReceiptID(conversationID) || !validReceiptID(req.TurnID) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid conversation or turn ID", nil)
+		return
+	}
+	req.ConversationID = conversationID
+	var receipt chat.TurnReceipt
+	if s.turns != nil {
+		var admitted bool
+		receipt, admitted, err = s.turns.admit(requestCtx, req)
+		if err != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(err, errTurnConflict) || errors.Is(err, errConversationBusy) {
+				code = http.StatusConflict
+			}
+			s.writeErrorResponse(w, code, err.Error(), nil)
+			return
+		}
+		if !admitted {
+			s.replyTurnReceipt(w, sink, receipt)
+			return
+		}
+		w.Header().Set("X-Kodelet-Conversation-ID", conversationID)
+		w.Header().Set("X-Kodelet-Turn-ID", req.TurnID)
+	}
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
+	if receipt.RunID != "" {
+		ctx = context.WithValue(ctx, turnRunIDKey{}, receipt.RunID)
+		ctx = context.WithValue(ctx, turnConversationIDKey{}, conversationID)
+	}
 	run := newActiveChatRun(cancel)
 	run.turnID = strings.TrimSpace(req.TurnID)
 	run.eventSink = sink
+	run.uiInput = newWebUIInputBroker(conversationID, sink)
+	run.uiInput.owner = nil
+	if chatSupportsInteractiveUI(req) {
+		detach := run.uiInput.setOwner(withNativeCapabilities(requestCtx, req.ClientCapabilities), clientID, sink)
+		defer detach()
+	}
+	defer run.uiInput.close()
 	if !s.registerActiveChat(conversationID, run) {
+		if s.turns != nil {
+			if err := s.turns.finish(context.WithoutCancel(requestCtx), conversationID, req.TurnID, "failed", nil, errConversationBusy); err != nil {
+				cancel()
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to finalize rejected turn", err)
+				return
+			}
+			if receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID); err == nil && receipt.Status == "cancelled" {
+				cancel()
+				s.replyTurnReceipt(w, sink, receipt)
+				return
+			}
+		}
 		cancel()
 		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)
 		return
 	}
 	defer s.unregisterActiveChat(registeredConversationID, run)
 	defer cancel()
+	if s.turns != nil {
+		started, startErr := s.turns.start(ctx, conversationID, req.TurnID)
+		if startErr != nil {
+			if err := s.turns.finish(context.WithoutCancel(ctx), conversationID, req.TurnID, "failed", nil, startErr); err != nil {
+				startErr = err
+			}
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to start durable turn", startErr)
+			return
+		}
+		if !started {
+			receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID)
+			if err != nil {
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to reconcile turn", err)
+				return
+			}
+			s.replyTurnReceipt(w, sink, receipt)
+			return
+		}
+	}
 
 	broadcastingSink := &broadcastingEventSink{
 		primary:        sink,
 		broadcast:      s.broadcastChatEvent,
 		conversationID: conversationID,
 	}
-	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
 	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "conversation",
@@ -307,7 +419,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Content:        userContent,
 	})
 
-	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
+	recordingSink := &turnEventSink{ChatEventSink: broadcastingSink}
+	conversationID, runErr := s.chatRunner.Run(ctx, req, recordingSink)
+	runErr = s.finishTurn(ctx, registeredConversationID, req.TurnID, recordingSink, runErr)
 	if strings.TrimSpace(conversationID) == "" {
 		conversationID = registeredConversationID
 	}

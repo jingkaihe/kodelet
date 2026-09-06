@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -28,15 +30,21 @@ const (
 	MethodRunnerManifestChanged   = "runner.manifestChanged"
 	MethodRunnerGoodbye           = "runner.goodbye"
 	MethodRunOpen                 = "run.open"
+	MethodRunCheckpoint           = "run.checkpoint"
 	MethodRunClose                = "run.close"
 	MethodRunCancel               = "run.cancel"
 	MethodRunEnvironmentError     = "run.environmentError"
 	MethodCommandExecute          = "command.execute"
+	MethodShortcutExecute         = "shortcut.execute"
 	MethodLifecycleDispatch       = "lifecycle.dispatch"
 	MethodToolExecute             = "tool.execute"
 	MethodToolUpdate              = "tool.update"
 	MethodConversationFork        = "conversation.fork"
 	MethodWorkspaceGitDiff        = "workspace.git.diff"
+	MethodWorkspaceGitPrepare     = "workspace.git.prepareCommit"
+	MethodWorkspaceGitCommit      = "workspace.git.commit"
+	MethodWorkspaceDiscover       = "workspace.discover"
+	MethodWorkspaceCWDHints       = "workspace.cwdHints"
 	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
 	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
@@ -54,6 +62,9 @@ const (
 	MethodUISurfaceClose          = "ui.surface.close"
 	MethodUISurfaceInput          = "ui.surface.input"
 	MethodUISurfaceResize         = "ui.surface.resize"
+	MethodUICapabilities          = "ui.capabilities"
+	MethodUISurfaceInvalidate     = "ui.surface.invalidate"
+	MethodUIExtensionCleanup      = "ui.extension.cleanup"
 	MethodOperationCancel         = "operation.cancel"
 )
 
@@ -184,9 +195,13 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	ConcurrentRuns    bool `json:"concurrentRuns,omitempty"`
-	WorkspaceGitDiff  bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceTerminal bool `json:"workspaceTerminal,omitempty"`
+	RunCheckpoint      bool `json:"runCheckpoint,omitempty"`
+	ConcurrentRuns     bool `json:"concurrentRuns,omitempty"`
+	WorkspaceGitDiff   bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal  bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceDiscovery bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceCWD       bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.
@@ -345,25 +360,47 @@ type ClientCapabilities struct {
 	PersistentSurfaces bool `json:"persistentSurfaces"`
 }
 
+// UICapabilitiesParams updates availability after explicit client takeover.
+type UICapabilitiesParams struct {
+	RunID        string             `json:"runId"`
+	Capabilities ClientCapabilities `json:"capabilities"`
+}
+
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
-	RunID              string             `json:"runId"`
-	ConversationID     string             `json:"conversationId"`
-	CWD                string             `json:"cwd,omitempty"`
-	ExpectedCWD        string             `json:"expectedCwd,omitempty"`
-	Agent              AgentDescriptor    `json:"agent"`
-	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
-	ReservedToolNames  []string           `json:"reservedToolNames"`
+	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
+	ChildPrompt        *string                    `json:"childPrompt,omitempty"`
+	RunID              string                     `json:"runId"`
+	ConversationID     string                     `json:"conversationId"`
+	CWD                string                     `json:"cwd,omitempty"`
+	ExpectedCWD        string                     `json:"expectedCwd,omitempty"`
+	Agent              AgentDescriptor            `json:"agent"`
+	ClientCapabilities ClientCapabilities         `json:"clientCapabilities"`
+	ReservedToolNames  []string                   `json:"reservedToolNames"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
 }
 
 func (p RunOpenParams) Validate() error {
+	if p.ChildPrompt != nil && len(*p.ChildPrompt) > 256*1024 {
+		return errors.New("child prompt exceeds limit")
+	}
 	if strings.TrimSpace(p.RunID) == "" {
 		return errors.New("runId is required")
 	}
 	if strings.TrimSpace(p.ConversationID) == "" {
 		return errors.New("conversationId is required")
 	}
-	return nil
+	if p.Options.HasModelOptions() || (p.Options != nil && (p.Options.MaxTurns != nil || p.Options.UseWeakModel != nil)) {
+		return errors.New("run.open options may contain only environment restrictions")
+	}
+	return p.Options.Validate()
+}
+
+// RunCheckpointParams acknowledges validated CWD/policy before extension startup.
+// The control plane supplies the user input and model policy; neither comes from the runner.
+type RunCheckpointParams struct {
+	RunID string `json:"runId"`
+	CWD   string `json:"cwd"`
 }
 
 // RunCloseParams releases a pinned run environment.
@@ -388,8 +425,83 @@ type OperationCancelParams struct {
 	RequestID string `json:"requestId"`
 }
 
-// WorkspaceGitDiffParams asks a runner to inspect its registered workspace.
-type WorkspaceGitDiffParams struct{}
+// WorkspaceDiscoverParams selects runner-owned resources without opening a model turn.
+type WorkspaceDiscoverParams struct {
+	CWD                string                     `json:"cwd,omitempty"`
+	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
+}
+
+// Validate rejects model choices before a discovery probe can start resources.
+func (p WorkspaceDiscoverParams) Validate() error {
+	if err := p.Options.Validate(); err != nil {
+		return err
+	}
+	if p.Options.HasModelOptions() || (p.Options != nil && (p.Options.MaxTurns != nil || p.Options.UseWeakModel != nil)) {
+		return errors.New("discovery options may contain only environment restrictions")
+	}
+	return nil
+}
+
+// UnmarshalJSON keeps explicit null restrictions distinct from omission.
+func (p *WorkspaceDiscoverParams) UnmarshalJSON(data []byte) error {
+	type plain WorkspaceDiscoverParams
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["options"]; ok && string(raw) == "null" {
+		return errors.New("discovery options must not be null; omit options to inherit")
+	}
+	*p = WorkspaceDiscoverParams(value)
+	return p.Validate()
+}
+
+// WorkspaceDiscoverResult identifies the exact runner environment used for discovery.
+type WorkspaceDiscoverResult struct {
+	RunID              string                  `json:"runId,omitempty"`
+	Shortcuts          []ShortcutDescriptor    `json:"shortcuts,omitempty"`
+	CWD                string                  `json:"cwd"`
+	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
+	Digest             string                  `json:"digest"`
+	Commands           []slashcommands.Command `json:"commands"`
+}
+
+// ShortcutDescriptor identifies one effective runner-owned registration.
+type ShortcutDescriptor struct {
+	Key         string `json:"key"`
+	Description string `json:"description,omitempty"`
+	ExtensionID string `json:"extensionId"`
+	Generation  uint64 `json:"generation"`
+}
+
+// WorkspaceCWDHintsParams resolves path suggestions on the runner host.
+type WorkspaceCWDHintsParams struct {
+	CWD                string `json:"cwd,omitempty"`
+	EnvironmentProfile string `json:"environmentProfile,omitempty"`
+	Query              string `json:"query,omitempty"`
+}
+
+// DirectoryHint is one accessible runner directory.
+type DirectoryHint struct {
+	Path string `json:"path"`
+}
+
+// WorkspaceCWDHintsResult contains runner-host paths, never daemon-home abbreviations.
+type WorkspaceCWDHintsResult struct {
+	BaseDir string          `json:"baseDir"`
+	Query   string          `json:"query,omitempty"`
+	Hints   []DirectoryHint `json:"hints"`
+}
+
+// WorkspaceGitDiffParams asks a runner to inspect the selected directory.
+type WorkspaceGitDiffParams struct {
+	CWD string `json:"cwd,omitempty"`
+}
 
 // WorkspaceGitDiffResult is a bounded git diff snapshot from a runner workspace.
 type WorkspaceGitDiffResult struct {
@@ -403,8 +515,9 @@ type WorkspaceGitDiffResult struct {
 
 // WorkspaceTerminalOpenParams opens or reattaches to the runner workspace terminal.
 type WorkspaceTerminalOpenParams struct {
-	Rows int `json:"rows,omitempty"`
-	Cols int `json:"cols,omitempty"`
+	CWD  string `json:"cwd,omitempty"`
+	Rows int    `json:"rows,omitempty"`
+	Cols int    `json:"cols,omitempty"`
 }
 
 // WorkspaceTerminalOpenResult describes one persistent runner terminal session.

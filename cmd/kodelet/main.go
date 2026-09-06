@@ -121,7 +121,8 @@ func loadConfigFiles() error {
 		return readConfigFile(overrideConfigFile, "isolated override")
 	}
 
-	// Layered config: global first, then repo-level override
+	// Process settings belong to the daemon/client/runner operator. Repository
+	// environment settings are loaded separately by each runner execution CWD.
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME/.kodelet")
@@ -131,11 +132,6 @@ func loadConfigFiles() error {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
-	}
-
-	// Then, try to merge repo-level config which will override global settings
-	if _, err := os.Stat("kodelet-config.yaml"); err == nil {
-		mergeRepositoryConfigFile("kodelet-config.yaml")
 	}
 
 	if overrideConfigFile != "" {
@@ -252,44 +248,18 @@ func configSecretPresent(value any) bool {
 	return ok && strings.TrimSpace(secret) != ""
 }
 
-func mergeRepositoryConfigFile(configFile string) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to read repo-level config file")
-		return
-	}
-
-	var settings map[string]any
-	if err := yaml.Unmarshal(data, &settings); err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to parse repo-level config file")
-		return
-	}
-	for key := range settings {
-		normalizedKey := strings.ToLower(strings.TrimSpace(key))
-		if normalizedKey == "server" || normalizedKey == "serve" || strings.HasPrefix(normalizedKey, "serve.") {
-			delete(settings, key)
-		}
-	}
-	if err := viper.MergeConfigMap(settings); err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to merge repo-level config file")
-		return
-	}
-	logger.G(context.TODO()).WithField("config_file", configFile).Debug("Merged repo-level config file")
-}
-
 var rootCmd = &cobra.Command{
 	Use:   "kodelet",
 	Short: "Kodelet is a CLI tool for software engineering and production operations tasks",
 	Long:  `Kodelet is a lightweight CLI tool that helps with software engineering and production operations tasks.`,
+	Args:  cobra.ArbitraryArgs,
 	// Default behavior is to show help if no arguments are provided
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			// If arguments are provided but no subcommand, forward to run command
-			runCmd.Run(cmd, args)
-		} else {
-			cmd.Help()
-			os.Exit(1)
+			return runControlPlaneCommand(cmd, args)
 		}
+		return cmd.Help()
 	},
 }
 
@@ -365,6 +335,7 @@ func main() {
 		}
 	})
 
+	addRunFlags(rootCmd)
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides config; defaults to gpt-6-astra for OpenAI and Codex)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
@@ -426,7 +397,8 @@ func main() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
-	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(remoteProfileCmd)
+	rootCmd.AddCommand(hostCmd)
 	rootCmd.AddCommand(dbCmd)
 
 	// Initialize telemetry with tracing
@@ -446,16 +418,9 @@ func main() {
 		}()
 	}
 
-	// Ensure required external binaries are installed
-	binaries.EnsureDepsInstalled(ctx)
-
-	// Run database migrations once at startup (skip for db commands to allow manual control)
-	skipMigrations := len(os.Args) > 1 && os.Args[1] == "db"
-	if !skipMigrations {
-		if err := db.RunMigrations(ctx, migrations.All()); err != nil {
-			logger.G(ctx).WithError(err).Fatal("Failed to run database migrations")
-		}
-	}
+	// Resolve the command and its flags before touching local execution resources.
+	// Thin clients must work even when no local conversation database is writable.
+	rootCmd.PersistentPreRunE = initializeCommandResources
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
@@ -478,6 +443,24 @@ func main() {
 
 	// Execute
 	if err := executeCLICommand(ctx, rootCmd); err != nil {
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130)
+		}
 		os.Exit(1)
 	}
+}
+
+func initializeCommandResources(cmd *cobra.Command, _ []string) error {
+	switch cmd.Name() {
+	case "serve":
+		binaries.EnsureDepsInstalled(cmd.Context())
+		return errors.Wrap(db.RunMigrations(cmd.Context(), migrations.All()), "failed to run database migrations")
+	case "start":
+		if parent := cmd.Parent(); parent != nil && parent.Name() == "runner" {
+			binaries.EnsureDepsInstalled(cmd.Context())
+		}
+	}
+	// Clients and installation/inspection commands do not own the conversation
+	// database. Explicit db administration initializes only what its command needs.
+	return nil
 }

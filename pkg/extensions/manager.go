@@ -98,6 +98,17 @@ func (m *RuntimeManager) RuntimeWithConfigAndCallContextForLease(ctx, leaseCtx c
 // another concurrent session. The returned release function synchronously
 // closes the runtime and is safe to call more than once.
 func (m *RuntimeManager) RuntimeWithConfigAndCallContextForIsolatedLease(ctx, leaseCtx context.Context, cwd, _ string, config Config, callContext ExtensionCallContext) (*Runtime, func() error, error) {
+	return m.isolatedRuntime(ctx, leaseCtx, cwd, config, true, callContext)
+}
+
+// RuntimeForCommandDiscoveryWithIsolatedLease creates a disposable discovery
+// runtime. It never starts session events or grants background-worker lifetime.
+func (m *RuntimeManager) RuntimeForCommandDiscoveryWithIsolatedLease(ctx context.Context, cwd, _ string, config Config) (*Runtime, func() error, error) {
+	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+	return m.isolatedRuntime(ctx, ctx, cwd, config, false, ExtensionCallContext{})
+}
+
+func (m *RuntimeManager) isolatedRuntime(ctx, leaseCtx context.Context, cwd string, config Config, startLifecycle bool, callContext ExtensionCallContext) (*Runtime, func() error, error) {
 	if m == nil {
 		return nil, nil, errors.New("extension runtime manager is required")
 	}
@@ -139,7 +150,9 @@ func (m *RuntimeManager) RuntimeWithConfigAndCallContextForIsolatedLease(ctx, le
 	}
 	m.retired[managed] = struct{}{}
 	m.mu.Unlock()
-	runtime.startLifecycle(ctx, callContext)
+	if startLifecycle {
+		runtime.startLifecycle(ctx, callContext)
+	}
 	release := func() error {
 		return m.release(managed)
 	}

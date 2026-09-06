@@ -27,6 +27,7 @@ import (
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 const defaultRunnerServer = "http://localhost:8080"
@@ -188,13 +189,18 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err := os.Setenv(controlPlaneServerEnv, strings.TrimSpace(config.Server)); err != nil {
 		return errors.Wrap(err, "failed to expose the control-plane server to runner subprocesses")
 	}
+	loader, err := runnerclient.NewWorkspaceConfigLoader(viper.AllSettings())
+	if err != nil {
+		return err
+	}
 
 	var registered bool
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
-		Server:      config.Server,
-		AuthToken:   config.AuthToken,
-		Workspace:   workspace,
-		DisplayName: config.DisplayName,
+		Server:         config.Server,
+		AuthToken:      config.AuthToken,
+		Workspace:      workspace,
+		DisplayName:    config.DisplayName,
+		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader},
 		OnRegistered: func(result protocol.RegisterResult) {
 			if registered {
 				presenter.Success(fmt.Sprintf("Runner reconnected as %s", result.RunnerID))

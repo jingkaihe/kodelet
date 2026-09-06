@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -18,7 +20,7 @@ import (
 )
 
 func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
-	msg, ok := loadInitialHistory(context.Background(), " \t\n ", "")().(initialHistoryMsg)
+	msg, ok := loadConversationHistoryFromSource(context.Background(), "", " \t\n ", nil)().(initialHistoryMsg)
 
 	require.True(t, ok)
 	assert.False(t, msg.loaded)
@@ -26,89 +28,50 @@ func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
 	assert.NoError(t, msg.err)
 }
 
-func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
-	ctx := context.Background()
-	basePath := setupTUIConversationStore(ctx, t)
-
-	store, err := conversations.GetConversationStore(ctx)
-	require.NoError(t, err)
-
-	record := convtypes.NewConversationRecord("conversation-history")
-	record.Provider = "anthropic"
-	record.CWD = t.TempDir()
-	record.Metadata, err = conversations.AddConfigSnapshot(map[string]any{"profile": " legacy "}, llmtypes.Config{
-		Profile:         "stored",
-		Provider:        "anthropic",
-		Model:           "claude-test",
-		ReasoningEffort: "high",
-	})
-	require.NoError(t, err)
-	record.Usage = llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100}
-	record.RawMessages = []byte(`[
-		{"role":"user","content":[{"type":"text","text":"old prompt"}]},
-		{"role":"assistant","content":[{"type":"text","text":"old answer"}]}
-	]`)
-	require.NoError(t, store.Save(ctx, record))
-	require.NoError(t, store.Close())
-
-	msg, ok := loadInitialHistory(ctx, record.ID, "")().(initialHistoryMsg)
+func TestLoadInitialHistoryUsesInjectedSource(t *testing.T) {
+	source := &conversationSourceRunner{history: chat.ConversationHistory{
+		ID: "conversation-history", CWD: "/only/on/runner", Profile: "stored", Provider: "anthropic", ReasoningEffort: "high",
+		Usage: llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100},
+		Messages: []conversations.StreamableMessage{
+			{Kind: "text", Role: "user", Content: "old prompt"},
+			{Kind: "text", Role: "assistant", Content: "old answer"},
+		},
+	}}
+	msg, ok := loadConversationHistoryFromSource(t.Context(), "state-key", source.history.ID, source)().(initialHistoryMsg)
 
 	require.True(t, ok)
 	require.NoError(t, msg.err)
 	assert.True(t, msg.loaded)
-	assert.Equal(t, record.CWD, msg.cwd)
+	assert.Equal(t, "/only/on/runner", msg.cwd)
+	assert.Equal(t, "state-key", msg.conversationKey)
 	assert.Equal(t, "stored", msg.profile)
 	assert.Equal(t, "anthropic", msg.provider)
-	assert.Equal(t, "claude-test", msg.model)
 	assert.Equal(t, "high", msg.reasoningEffort)
 	assert.Equal(t, 42, msg.usage.CurrentContextWindow)
 	require.Len(t, msg.entries, 2)
 	assert.Equal(t, "old prompt", msg.entries[0].content)
 	assert.Equal(t, "old answer", msg.entries[1].blocks[0].text)
-	assert.FileExists(t, filepath.Join(basePath, "storage.db"))
 }
 
-func TestLoadInitialHistoryRejectsConflictingRequestedCWD(t *testing.T) {
-	ctx := context.Background()
-	setupTUIConversationStore(ctx, t)
-	storedCWD := t.TempDir()
-	requestedCWD := t.TempDir()
-
-	store, err := conversations.GetConversationStore(ctx)
+func TestConversationSourcesNeverFallBackToLocalStore(t *testing.T) {
+	localState := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(localState, []byte("unchanged"), 0o600))
+	t.Setenv("KODELET_BASE_PATH", localState)
+	history := loadConversationHistoryFromSource(t.Context(), "key", "conversation", nil)().(initialHistoryMsg)
+	require.ErrorContains(t, history.err, "daemon runner does not support conversation history")
+	assert.False(t, history.loaded)
+	list := loadConversationListFromSource(t.Context(), 5, nil)().(conversationListMsg)
+	require.ErrorContains(t, list.err, "daemon runner does not support conversation history")
+	assert.Equal(t, 5, list.requestID)
+	source := &conversationSourceRunner{loadErr: assert.AnError, listErr: assert.AnError}
+	history = loadConversationHistoryFromSource(t.Context(), "key", "conversation", source)().(initialHistoryMsg)
+	require.ErrorIs(t, history.err, assert.AnError)
+	assert.False(t, history.loaded)
+	list = loadConversationListFromSource(t.Context(), 6, source)().(conversationListMsg)
+	require.ErrorIs(t, list.err, assert.AnError)
+	data, err := os.ReadFile(localState)
 	require.NoError(t, err)
-	record := convtypes.NewConversationRecord("conversation-cwd-conflict")
-	record.Provider = "anthropic"
-	record.CWD = storedCWD
-	record.RawMessages = []byte(`[]`)
-	require.NoError(t, store.Save(ctx, record))
-	require.NoError(t, store.Close())
-
-	msg, ok := loadInitialHistory(ctx, record.ID, requestedCWD)().(initialHistoryMsg)
-
-	require.True(t, ok)
-	assert.ErrorIs(t, msg.err, conversations.ErrCWDConflict)
-	assert.False(t, msg.loaded)
-}
-
-func TestLoadInitialHistoryReportsLoadAndParseErrors(t *testing.T) {
-	ctx := context.Background()
-	setupTUIConversationStore(ctx, t)
-
-	missing, ok := loadInitialHistory(ctx, "missing-conversation", "")().(initialHistoryMsg)
-	require.True(t, ok)
-	assert.ErrorContains(t, missing.err, "failed to load conversation")
-
-	store, err := conversations.GetConversationStore(ctx)
-	require.NoError(t, err)
-	record := convtypes.NewConversationRecord("bad-provider")
-	record.Provider = "unsupported"
-	record.RawMessages = []byte(`[]`)
-	require.NoError(t, store.Save(ctx, record))
-	require.NoError(t, store.Close())
-
-	parsed, ok := loadInitialHistory(ctx, record.ID, "")().(initialHistoryMsg)
-	require.True(t, ok)
-	assert.ErrorContains(t, parsed.err, "failed to parse conversation")
+	assert.Equal(t, "unchanged", string(data))
 }
 
 func setupTUIConversationStore(ctx context.Context, t *testing.T) string {

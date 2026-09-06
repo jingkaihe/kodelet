@@ -63,18 +63,19 @@ func allowedToolNameSet(config llmtypes.Config) map[string]struct{} {
 }
 
 func filterDiscoveredToolsByAllowed(config llmtypes.Config, tools []tooltypes.Tool) []tooltypes.Tool {
-	if len(tools) == 0 || !hasExplicitAllowedTools(config) {
+	if len(tools) == 0 || (!hasExplicitAllowedTools(config) && config.ExecutionOptions == nil) {
 		return tools
 	}
 
 	allowed := allowedToolNameSet(config)
-	if len(allowed) == 0 {
+	if len(allowed) == 0 && hasExplicitAllowedTools(config) {
 		return nil
 	}
 
 	filtered := make([]tooltypes.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if _, ok := allowed[tool.Name()]; ok {
+		_, ok := allowed[tool.Name()]
+		if (ok || !hasExplicitAllowedTools(config)) && config.ExecutionOptions.ToolAllowed(tool.Name()) {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -99,6 +100,9 @@ func filterDuplicateTools(tools []tooltypes.Tool, reserved map[string]struct{}) 
 }
 
 func skillsEnabledForConfig(config llmtypes.Config) bool {
+	if !config.ExecutionOptions.ToolAllowed("skill") {
+		return false
+	}
 	if config.Skills != nil && !config.Skills.Enabled {
 		return false
 	}
@@ -287,7 +291,7 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 		return nil
 	}
 
-	discovery, err := skills.NewDiscovery()
+	discovery, err := skills.NewDiscovery(skills.WithDefaultDirsForCWD(llmConfig.WorkingDirectory))
 	if err != nil {
 		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
 		return nil
@@ -378,7 +382,7 @@ func enforceToolModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []strin
 }
 
 func noToolsConfigured(config llmtypes.Config) bool {
-	return len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker
+	return config.ExecutionOptions.ToolsDisabled() || (len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker)
 }
 
 // LockFile acquires an exclusive lock for the given file path.
@@ -428,7 +432,13 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	reserved := map[string]struct{}{}
 	tools = append(tools, filterDuplicateTools(s.tools, reserved)...)
 	tools = append(tools, filterDuplicateTools(s.extensionTools, reserved)...)
-	return tools
+	filtered := tools[:0]
+	for _, tool := range tools {
+		if s.llmConfig.ExecutionOptions.ToolAllowed(tool.Name()) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // GetLLMConfig returns the LLM configuration

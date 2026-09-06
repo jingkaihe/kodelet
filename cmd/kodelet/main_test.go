@@ -200,7 +200,7 @@ func TestServerFlagOrConfig(t *testing.T) {
 }
 
 func TestServerResolutionUsesActualCommandPaths(t *testing.T) {
-	t.Run("chat stays local without a configured server", func(t *testing.T) {
+	t.Run("chat uses the default daemon without a configured server", func(t *testing.T) {
 		setServerConfigForTest(t, "")
 		t.Setenv(controlPlaneServerEnv, "")
 		cmd := parseActualCommandForTest(t, chatCmd)
@@ -208,7 +208,7 @@ func TestServerResolutionUsesActualCommandPaths(t *testing.T) {
 		config := getChatConfigFromFlags(cmd)
 
 		assert.Equal(t, defaultRunnerServer, config.Server)
-		assert.False(t, usesControlPlaneChat(config))
+		assert.True(t, usesControlPlaneChat(config))
 	})
 
 	t.Run("chat flag overrides environment and user config", func(t *testing.T) {
@@ -291,6 +291,20 @@ func setServerConfigForTest(t *testing.T, value string) {
 	})
 }
 
+func TestNonDaemonCommandsDoNotInitializeConversationStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	invalid := filepath.Join(home, "not-a-directory")
+	require.NoError(t, os.WriteFile(invalid, []byte("no local conversation store"), 0o600))
+	t.Setenv("KODELET_BASE_PATH", invalid)
+	for _, name := range []string{"kodelet", "run", "chat", "acp", "commit", "pr", "steer", "usage", "version", "setup", "list", "inspect", "show", "status"} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, initializeCommandResources(&cobra.Command{Use: name}, nil))
+		})
+	}
+	assert.NoDirExists(t, filepath.Join(home, ".kodelet"))
+}
+
 func TestAuthTokenFlagsDoNotCaptureEnvironmentDefaults(t *testing.T) {
 	commands := []*cobra.Command{runnerStartCmd, runnerListCmd, runnerInspectCmd, runnerRemoveCmd, chatCmd}
 	for _, command := range commands {
@@ -302,7 +316,7 @@ func TestAuthTokenFlagsDoNotCaptureEnvironmentDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
+func TestLoadConfigFilesMergesTrustedOverrideWithoutRepositorySettings(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 	home := t.TempDir()
@@ -347,20 +361,16 @@ extensions:
 	require.NoError(t, loadConfigFiles())
 
 	assert.Equal(t, "anthropic", viper.GetString("provider"))
-	assert.Equal(t, "repo-model", viper.GetString("model"))
+	assert.Equal(t, "default-model", viper.GetString("model"))
 	assert.Equal(t, "https://global.example/control", viper.GetString("server"))
-	assert.Nil(t, viper.Get("profile"))
+	assert.Equal(t, "global-profile", viper.GetString("profile"))
 	assert.Equal(t, "/tmp/sdk-extensions", viper.GetString("extensions.local_dir"))
 	assert.Equal(t, "oidc", viper.GetString("serve.web_auth_mode"))
 	assert.Equal(t, "enrollment", viper.GetString("serve.runner_auth_mode"))
 	assert.False(t, viper.GetBool("serve.skip_auth"))
 	assert.Empty(t, viper.GetString("serve.auth_token"))
 	assert.Equal(t, "https://global-issuer.example", viper.GetString("serve.oidc.issuer"))
-	tools := viper.GetStringMap("extensions.tools")
-	require.Contains(t, tools, "dangerous.tool")
-	toolConfig, ok := tools["dangerous.tool"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, false, toolConfig["enabled"])
+	assert.Empty(t, viper.GetStringMap("extensions.tools"), "startup repository policy must not leak into other execution directories")
 }
 
 func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
@@ -430,6 +440,14 @@ SeRvE:
   oidc:
     issuer: http://repo-issuer.example
 SERVE.SKIP_AUTH: true
+provider: repository-provider
+model: repository-model
+openai:
+  api_key_env_var: REPOSITORY_SECRET
+  base_url: https://repository.invalid/provider
+allowed_tools: [bash]
+extensions:
+  enabled: false
 `
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte(repositoryConfig), 0o644))
 
@@ -442,6 +460,11 @@ SERVE.SKIP_AUTH: true
 	assert.False(t, configured)
 	assert.Empty(t, viper.GetString("server"))
 	assert.Empty(t, viper.GetStringMap("serve"))
+	assert.Empty(t, viper.GetString("provider"))
+	assert.Empty(t, viper.GetString("model"))
+	assert.Empty(t, viper.GetStringMap("openai"))
+	assert.Empty(t, viper.GetStringSlice("allowed_tools"))
+	assert.Empty(t, viper.GetStringMap("extensions"))
 }
 
 func TestLoadConfigFilesFailsForInvalidExplicitConfigFile(t *testing.T) {

@@ -71,9 +71,9 @@ func TestValidateServeConfig(t *testing.T) {
 			name: "port too low",
 			config: &ServeConfig{
 				Host: "localhost",
-				Port: 0,
+				Port: -1,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "port too high",
@@ -81,7 +81,7 @@ func TestValidateServeConfig(t *testing.T) {
 				Host: "localhost",
 				Port: 65536,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "privileged port warning",
@@ -565,6 +565,73 @@ func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://app.example.com", "http://localhost:3000"}, config.CORSOrigins)
 }
 
+func TestServeEmbeddedRunnerConfiguration(t *testing.T) {
+	workspace := t.TempDir()
+	setTrustedServeConfigForTest(t, map[string]any{
+		"embedded_runner":  true,
+		"runner_workspace": workspace,
+		"port":             0,
+		"runner_settings":  map[string]any{"allowed_tools": []string{"file_read"}},
+	})
+	config := getServeConfigFromFlags(newServeCommandForTest())
+	require.NoError(t, config.ConfigError)
+	server, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	require.NotNil(t, server.EmbeddedRunner)
+	assert.True(t, server.DisableControlPlaneWorkspace)
+	assert.Equal(t, workspace, server.EmbeddedRunner.Workspace)
+	assert.Equal(t, 0, server.Port)
+	assert.Equal(t, config.RunnerSettings, server.EmbeddedRunner.Settings)
+
+	cmd := newServeCommandForTest()
+	otherWorkspace := t.TempDir()
+	require.NoError(t, cmd.Flags().Set("runner-workspace", otherWorkspace))
+	server, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	require.NoError(t, err)
+	assert.Equal(t, otherWorkspace, server.EmbeddedRunner.Workspace)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("runner-workspace", ""))
+	server, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	require.NoError(t, err)
+	startupCWD, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, startupCWD, server.EmbeddedRunner.Workspace)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("embedded-runner", "false"))
+	config = getServeConfigFromFlags(cmd)
+	server, err = buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.Nil(t, server.EmbeddedRunner)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("cwd", workspace))
+	_, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	assert.ErrorContains(t, err, "--runner-workspace")
+}
+
+func TestServeDefaultsToEmbeddedWithoutLocalFallback(t *testing.T) {
+	config := NewServeConfig()
+	require.True(t, config.EmbeddedRunner)
+	server, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	require.NotNil(t, server.EmbeddedRunner)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, cwd, server.EmbeddedRunner.Workspace)
+	assert.True(t, server.DisableControlPlaneWorkspace)
+
+	config.EmbeddedRunner, config.DisableControlPlaneWorkspace = false, false
+	server, err = buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.Nil(t, server.EmbeddedRunner)
+	assert.True(t, server.DisableControlPlaneWorkspace, "deprecated flag cannot restore local execution")
+	config.CWD = cwd
+	_, err = buildControlPlaneServerConfig(config)
+	require.ErrorContains(t, err, "--runner-workspace")
+}
+
 func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
 		"host":                            "127.0.0.1",
@@ -629,6 +696,8 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	t.Setenv("KODELET_SERVE_RUNNER_AUTH_MODE", "none")
 	t.Setenv("KODELET_SERVE_SKIP_AUTH", "true")
 	t.Setenv("KODELET_SERVE_OIDC_ISSUER", "https://environment.example.com")
+	t.Setenv("KODELET_SERVE_EMBEDDED_RUNNER", "false")
+	t.Setenv("KODELET_SERVE_RUNNER_WORKSPACE", "/untrusted/workspace")
 
 	config := getServeConfigFromFlags(newServeCommandForTest())
 
@@ -637,6 +706,8 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	assert.Equal(t, controlplane.RunnerAuthModeToken, config.RunnerAuthMode)
 	assert.False(t, config.SkipAuth)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
+	assert.True(t, config.EmbeddedRunner)
+	assert.Empty(t, config.RunnerWorkspace)
 }
 
 func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) {

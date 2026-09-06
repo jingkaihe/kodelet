@@ -11,11 +11,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -30,11 +32,15 @@ const (
 
 // ControlPlaneChatRunner streams chat turns and conversation history through kodelet serve.
 type ControlPlaneChatRunner struct {
-	baseURL   string
-	chatURL   string
-	authToken string
-	runnerID  string
-	client    *http.Client
+	baseURL         string
+	chatURL         string
+	authToken       string
+	runnerID        string
+	client          *http.Client
+	clientID        string
+	persistentMu    sync.Mutex
+	widgets         map[string]remoteWidget
+	widgetRevisions map[string]string
 }
 
 // ControlPlaneHTTPError reports a non-successful control-plane response.
@@ -104,6 +110,9 @@ type ControlPlaneChatSettings struct {
 	ReasoningEffort        string                      `json:"reasoningEffort"`
 	ReasoningEffortOptions []string                    `json:"reasoningEffortOptions"`
 	DefaultCWD             string                      `json:"defaultCWD,omitempty"`
+	DefaultRunnerID        string                      `json:"defaultRunnerId,omitempty"`
+	DefaultRunnerHostID    string                      `json:"defaultRunnerHostId,omitempty"`
+	DefaultRunnerReady     bool                        `json:"defaultRunnerReady"`
 }
 
 // NewControlPlaneChatRunner creates a TUI-compatible control-plane transport with an optional runner selection.
@@ -122,6 +131,7 @@ func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlan
 		chatURL:   chatURL,
 		authToken: strings.TrimSpace(authToken),
 		runnerID:  runnerID,
+		clientID:  convtypes.GenerateID(),
 		client:    &http.Client{Timeout: 0},
 	}, nil
 }
@@ -137,9 +147,15 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	if r.runnerID != "" {
 		request.RunnerID = r.runnerID
 	}
-	request.ClientCapabilities = &ChatClientCapabilities{
-		InteractiveUI: controlPlaneSupportsInteractiveUI(ctx),
+	request.ConversationID, request.TurnID = strings.TrimSpace(request.ConversationID), strings.TrimSpace(request.TurnID)
+	if request.ConversationID == "" {
+		request.ConversationID = convtypes.GenerateID()
 	}
+	if request.TurnID == "" {
+		request.TurnID = convtypes.GenerateID()
+	}
+	capabilities := controlPlaneClientCapabilities(ctx)
+	request.ClientCapabilities = &capabilities
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to encode control-plane chat request")
@@ -149,20 +165,44 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		return "", errors.Wrap(err, "failed to create control-plane chat request")
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set(ClientIDHeader, r.clientID)
 	if r.authToken != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+r.authToken)
 	}
 
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to stream control-plane chat")
+		return request.ConversationID, &UncertainSubmissionError{ConversationID: request.ConversationID, TurnID: request.TurnID, Err: err}
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusAccepted {
+		var receipt TurnReceipt
+		if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(&receipt); err != nil {
+			return request.ConversationID, &UncertainSubmissionError{ConversationID: request.ConversationID, TurnID: request.TurnID, Err: err}
+		}
+		if err := validateTurnReceipt(receipt, request.ConversationID, request.TurnID); err != nil {
+			return request.ConversationID, err
+		}
+		return request.ConversationID, &TurnPendingError{Receipt: receipt}
+	}
 	if response.StatusCode != http.StatusOK {
-		return "", controlPlaneResponseError(response)
+		err := controlPlaneResponseError(response)
+		if response.StatusCode >= http.StatusInternalServerError || response.StatusCode == http.StatusRequestTimeout {
+			return request.ConversationID, &UncertainSubmissionError{ConversationID: request.ConversationID, TurnID: request.TurnID, Err: err}
+		}
+		return "", err
 	}
 
-	return r.consumeChatStream(ctx, response.Body, strings.TrimSpace(request.ConversationID), sink, true, false, "")
+	terminal := false
+	id, err := r.consumeChatStream(ctx, response.Body, strings.TrimSpace(request.ConversationID), shortcutEventSink(func(event ChatEvent) error {
+		// Older servers end failed turns with an error event rather than done.
+		terminal = terminal || event.Kind == "done" || event.Kind == "error"
+		return sink.Send(event)
+	}), true, false, "")
+	if err != nil && !terminal {
+		return id, &UncertainSubmissionError{ConversationID: request.ConversationID, TurnID: request.TurnID, Err: err}
+	}
+	return id, err
 }
 
 // StreamConversation follows live events for one control-plane conversation across turns.
@@ -186,6 +226,8 @@ func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, convers
 		return errors.Wrap(err, "failed to create control-plane conversation stream request")
 	}
 	r.authorize(request)
+	request.Header.Set(ClientIDHeader, r.clientID)
+	request.Header.Set(UICapabilitiesHeader, controlPlaneUICapabilitiesHeader(ctx))
 	response, err := r.client.Do(request)
 	if err != nil {
 		return errors.Wrap(err, "failed to stream control-plane conversation")
@@ -206,8 +248,25 @@ func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, convers
 }
 
 func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader io.Reader, conversationID string, sink ChatEventSink, requireCompletion, asynchronousUI bool, expectedConversationID string) (string, error) {
+	persistentUI := newRemoteUIStream(ctx, r)
+	defer persistentUI.close()
 	var streamErr error
 	completed := false
+	// Prompt handlers must not block reading dismissal or ownership changes.
+	// Only this stream owns these contexts; losing it dismisses local dialogs,
+	// but does not issue a conversation cancellation request.
+	type pendingUI struct{ cancel context.CancelFunc }
+	pending := make(map[string]*pendingUI)
+	var pendingMu sync.Mutex
+	var handlers sync.WaitGroup
+	defer func() {
+		pendingMu.Lock()
+		for _, prompt := range pending {
+			prompt.cancel()
+		}
+		pendingMu.Unlock()
+		handlers.Wait()
+	}()
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), maxControlPlaneChatEventSize)
 	for scanner.Scan() {
@@ -226,14 +285,51 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 		if eventConversationID != "" {
 			conversationID = eventConversationID
 		}
-		if asynchronousUI {
-			if controlPlaneSupportsInteractiveUI(ctx) && isControlPlaneUIEvent(event.Kind) {
-				go func(event ChatEvent, eventConversationID string) {
-					_, _ = r.handleUIEvent(ctx, eventConversationID, event)
-				}(event, conversationID)
+		eventConversationID = conversationID
+		if handled, err := persistentUI.handle(ctx, conversationID, event); handled {
+			if err != nil {
+				return conversationID, err
+			}
+			continue
+		}
+		if event.Kind == "ui-request-end" {
+			pendingMu.Lock()
+			if prompt := pending[event.UIRequestID]; prompt != nil {
+				prompt.cancel()
+			}
+			pendingMu.Unlock()
+			continue
+		}
+		if isControlPlaneUIEvent(event.Kind) && (!asynchronousUI || controlPlaneSupportsInteractiveUI(ctx)) {
+			requestID := ""
+			switch {
+			case event.UIInput != nil:
+				requestID = event.UIInput.ID
+			case event.UIConfirm != nil:
+				requestID = event.UIConfirm.ID
+			case event.UISelect != nil:
+				requestID = event.UISelect.ID
+			}
+			if requestID != "" {
+				promptCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				prompt := &pendingUI{cancel: cancel}
+				pendingMu.Lock()
+				if previous := pending[requestID]; previous != nil {
+					previous.cancel()
+				}
+				pending[requestID] = prompt
+				pendingMu.Unlock()
+				handlers.Go(func() {
+					defer cancel()
+					_, _ = r.handleUIEvent(promptCtx, eventConversationID, event)
+					pendingMu.Lock()
+					if pending[requestID] == prompt {
+						delete(pending, requestID)
+					}
+					pendingMu.Unlock()
+				})
 				continue
 			}
-		} else {
 			handled, err := r.handleUIEvent(ctx, conversationID, event)
 			if err != nil {
 				return conversationID, err
@@ -285,43 +381,16 @@ func isControlPlaneUIEvent(kind string) bool {
 
 // ListConversations returns control-plane conversations visible to this client.
 func (r *ControlPlaneChatRunner) ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error) {
-	if r == nil || r.client == nil {
-		return nil, errors.New("control-plane chat runner is not initialized")
-	}
-	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations")
+	return r.ListConversationsInCWD(ctx, limit, "")
+}
+
+// ListConversationsInCWD lists history using runner-host CWD semantics. The daemon
+// applies the workspace filter before pagination, so follow never picks a turn
+// from another workspace merely because it was updated more recently.
+func (r *ControlPlaneChatRunner) ListConversationsInCWD(ctx context.Context, limit int, cwd string) ([]convtypes.ConversationSummary, error) {
+	result, err := r.QueryConversations(ctx, conversations.ListConversationsRequest{Limit: limit, CWD: cwd, SortBy: "updated", SortOrder: "desc"})
 	if err != nil {
 		return nil, err
-	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse control-plane conversations URL")
-	}
-	query := parsed.Query()
-	if limit > 0 {
-		query.Set("limit", strconv.Itoa(limit))
-	}
-	query.Set("sortBy", "updated")
-	query.Set("sortOrder", "desc")
-	if r.runnerID != "" {
-		query.Set("runnerId", r.runnerID)
-	}
-	parsed.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create control-plane conversations request")
-	}
-	r.authorize(request)
-	response, err := r.client.Do(request)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list control-plane conversations")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, controlPlaneResponseError(response)
-	}
-	var result conversations.ListConversationsResponse
-	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&result); err != nil {
-		return nil, errors.Wrap(err, "failed to decode control-plane conversations")
 	}
 	if r.runnerID == "" {
 		return result.Conversations, nil
@@ -334,6 +403,101 @@ func (r *ControlPlaneChatRunner) ListConversations(ctx context.Context, limit in
 		}
 	}
 	return filtered, nil
+}
+
+// QueryConversations applies history filters centrally, without requiring an
+// online runner. CWD filters match canonical persisted runner-host paths.
+func (r *ControlPlaneChatRunner) QueryConversations(ctx context.Context, options conversations.ListConversationsRequest) (conversations.ListConversationsResponse, error) {
+	query := url.Values{
+		"format": {"raw"}, "limit": {strconv.Itoa(options.Limit)}, "offset": {strconv.Itoa(options.Offset)},
+		"sortBy": {options.SortBy}, "sortOrder": {options.SortOrder}, "search": {options.SearchTerm},
+		"provider": {options.Provider}, "cwd": {options.CWD}, "runnerId": {options.RunnerID},
+	}
+	if r != nil && r.runnerID != "" {
+		query.Set("runnerId", r.runnerID)
+	}
+	if options.StartDate != nil {
+		query.Set("startDate", options.StartDate.Format(time.RFC3339Nano))
+	}
+	if options.EndDate != nil {
+		query.Set("endDate", options.EndDate.Format(time.RFC3339Nano))
+	}
+	var result conversations.ListConversationsResponse
+	err := r.conversationAPIRequest(ctx, http.MethodGet, []string{"api", "conversations"}, query, &result)
+	return result, err
+}
+
+// LoadConversationRecord returns the lossless export shape, not rendered UI history.
+func (r *ControlPlaneChatRunner) LoadConversationRecord(ctx context.Context, conversationID string) (convtypes.ConversationRecord, error) {
+	var record convtypes.ConversationRecord
+	if strings.TrimSpace(conversationID) == "" {
+		return record, errors.New("conversation id is required")
+	}
+	err := r.conversationAPIRequest(ctx, http.MethodGet, []string{"api", "conversations", conversationID}, url.Values{"format": {"raw"}}, &record)
+	return record, err
+}
+
+// DeleteConversation deletes persisted history on the daemon. Active executions
+// are rejected by the server; transport failures are never retried implicitly.
+func (r *ControlPlaneChatRunner) DeleteConversation(ctx context.Context, conversationID string) error {
+	if strings.TrimSpace(conversationID) == "" {
+		return errors.New("conversation id is required")
+	}
+	return r.conversationAPIRequest(ctx, http.MethodDelete, []string{"api", "conversations", conversationID}, nil, nil)
+}
+
+// ForkConversation creates a centrally persisted copy with normal lineage and affinity.
+func (r *ControlPlaneChatRunner) ForkConversation(ctx context.Context, conversationID string) (string, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return "", errors.New("conversation id is required")
+	}
+	var result struct {
+		Success        bool   `json:"success"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := r.conversationAPIRequest(ctx, http.MethodPost, []string{"api", "conversations", conversationID, "fork"}, nil, &result); err != nil {
+		return "", err
+	}
+	if !result.Success || strings.TrimSpace(result.ConversationID) == "" {
+		return "", errors.New("control-plane returned an invalid conversation fork response")
+	}
+	return result.ConversationID, nil
+}
+
+func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, method string, path []string, query url.Values, result any) error {
+	if r == nil || r.client == nil {
+		return errors.New("control-plane chat runner is not initialized")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, path...)
+	if err != nil {
+		return err
+	}
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create control-plane conversation request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return errors.Wrap(err, "control-plane conversation request failed (not retried)")
+	}
+	defer response.Body.Close()
+	wantStatus := http.StatusOK
+	if method == http.MethodDelete {
+		wantStatus = http.StatusNoContent
+	}
+	if response.StatusCode != wantStatus {
+		return controlPlaneResponseError(response)
+	}
+	if result != nil {
+		if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(result); err != nil {
+			return errors.Wrap(err, "failed to decode control-plane conversation response")
+		}
+	}
+	return nil
 }
 
 // LoadConversation returns normalized history from the control plane.
@@ -584,6 +748,59 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 	return settings, nil
 }
 
+// WorkspaceTarget selects runner-owned discovery without interpreting paths on
+// the client. ConversationID pins discovery to persisted runner/CWD affinity.
+type WorkspaceTarget struct {
+	RunnerID           string                     `json:"runnerId,omitempty"`
+	CWD                string                     `json:"cwd,omitempty"`
+	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
+	ConversationID     string                     `json:"conversationId,omitempty"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
+}
+
+// DiscoverWorkspace validates the target and discovers its slash commands on
+// the runner without starting a model turn or a workspace run lease.
+func (r *ControlPlaneChatRunner) DiscoverWorkspace(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+	var result protocol.WorkspaceDiscoverResult
+	err := r.workspaceDiscovery(ctx, "slash-commands", target, "", &result)
+	return result, err
+}
+
+// WorkspaceCWDSuggestions resolves directory hints using runner-host paths.
+func (r *ControlPlaneChatRunner) WorkspaceCWDSuggestions(ctx context.Context, target WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
+	var result protocol.WorkspaceCWDHintsResult
+	err := r.workspaceDiscovery(ctx, "cwd-suggestions", target, query, &result)
+	return result, err
+}
+
+func (r *ControlPlaneChatRunner) workspaceDiscovery(ctx context.Context, endpoint string, target WorkspaceTarget, query string, result any) error {
+	if target.RunnerID == "" && target.ConversationID == "" {
+		return errors.New("runnerId or conversationId is required for runner workspace discovery")
+	}
+	if err := (protocol.WorkspaceDiscoverParams{Options: target.Options}).Validate(); err != nil {
+		return err
+	}
+	values := url.Values{}
+	if target.Options != nil {
+		data, err := json.Marshal(target.Options)
+		if err != nil {
+			return err
+		}
+		if len(data) > 16*1024 {
+			return errors.New("discovery options exceed 16 KiB")
+		}
+		values.Set("options", string(data))
+	}
+	for name, value := range map[string]string{"runnerId": target.RunnerID, "cwd": target.CWD, "environmentProfile": target.EnvironmentProfile, "conversationId": target.ConversationID, "q": query} {
+		if value != "" {
+			values.Set(name, value)
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return r.conversationAPIRequest(ctx, http.MethodGet, []string{"api", "chat", endpoint}, values, result)
+}
+
 // StopConversation requests cancellation of central and runner work before the client stream closes.
 func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversationID string) error {
 	return r.StopConversationTurn(ctx, conversationID, "")
@@ -823,6 +1040,7 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 		return errors.Wrap(err, "failed to create control-plane ui response")
 	}
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(ClientIDHeader, r.clientID)
 	if r.authToken != "" {
 		request.Header.Set("Authorization", "Bearer "+r.authToken)
 	}
@@ -833,6 +1051,39 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 	defer httpResponse.Body.Close()
 	if httpResponse.StatusCode != http.StatusOK {
 		return controlPlaneResponseError(httpResponse)
+	}
+	return nil
+}
+
+// TakeUIOwnership explicitly selects this attached client for future prompts.
+// Existing prompts are dismissed, not replayed. StreamConversation must remain attached.
+func (r *ControlPlaneChatRunner) TakeUIOwnership(ctx context.Context, conversationID string) error {
+	if r == nil || r.client == nil {
+		return errors.New("control-plane chat runner is not initialized")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "ui-owner")
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create UI ownership request")
+	}
+	r.authorize(request)
+	request.Header.Set(ClientIDHeader, r.clientID)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return errors.Wrap(err, "failed to take UI ownership")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return controlPlaneResponseError(response)
 	}
 	return nil
 }

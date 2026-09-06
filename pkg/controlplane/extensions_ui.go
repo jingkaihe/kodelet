@@ -40,11 +40,16 @@ type webExtensionWidget struct {
 	frame           extensions.UIFrame
 }
 
+type webExtensionUIProcess struct {
+	namespace, extensionID, generation string
+}
+
 type webExtensionUIHost struct {
 	mu       sync.Mutex
 	epoch    uint64
 	revision uint64
 	widgets  map[webExtensionUIKey]webExtensionWidget
+	closed   map[webExtensionUIProcess]bool
 	emit     func(string, chat.ChatEvent)
 }
 
@@ -85,6 +90,10 @@ func (h *webExtensionUIHost) SetWidget(ctx context.Context, source extensions.UI
 	}
 
 	h.mu.Lock()
+	if h.closed[webExtensionUIProcess{key.namespace, key.extensionID, ownerGeneration}] {
+		h.mu.Unlock()
+		return extensions.UIFrameResponse{Reason: "extension process is closed"}, nil
+	}
 	current, exists := h.widgets[key]
 	latest := uint64(0)
 	if exists && current.ownerGeneration == ownerGeneration {

@@ -200,6 +200,19 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		}
 	}()
 
+	// A service host can provision enrollment after construction, while holding
+	// the workspace lock. Pin that credential before starting the transport.
+	if strings.TrimSpace(r.config.AuthToken) == "" {
+		credential, found, err := r.store.LoadCredential(r.server, r.workspace)
+		if err != nil {
+			return pkgerrors.Wrap(err, "failed to load enrolled runner credential")
+		}
+		r.credential = nil
+		if found {
+			r.credential = &credential
+		}
+	}
+
 	// The first snapshot may need to cold-start extensions. It is bounded by the
 	// runner lifetime rather than the short periodic-refresh timeout.
 	initialDigest, err := r.service.ProbeManifestDigest(ctx)
@@ -349,9 +362,13 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			ConcurrentRuns:    true,
-			WorkspaceGitDiff:  true,
-			WorkspaceTerminal: true,
+			ConcurrentRuns:     true,
+			WorkspaceGitDiff:   true,
+			WorkspaceGitCommit: true,
+			WorkspaceTerminal:  true,
+			WorkspaceDiscovery: true,
+			WorkspaceCWD:       true,
+			RunCheckpoint:      true,
 		},
 		DisplayName: r.config.DisplayName,
 		Host:        r.host,

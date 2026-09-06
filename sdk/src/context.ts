@@ -6,6 +6,8 @@ import path from "node:path";
 import nodeProcess from "node:process";
 import { promisify } from "node:util";
 
+import { createChildClient } from "./child.js";
+
 import type {
   BaseCallContext,
   BackgroundTaskLease,
@@ -69,6 +71,7 @@ const widgetSequencesByClient = new WeakMap<HostRPCClient, Map<string, number>>(
 const surfaceSequencesByClient = new WeakMap<HostRPCClient, Map<string, number>>();
 const activeSurfacesByClient = new WeakMap<HostRPCClient, Map<string, UISurfaceHandle>>();
 const notificationClients = new WeakSet<HostRPCClient>();
+const uiCapabilitiesByClient = new WeakMap<HostRPCClient, Record<string, unknown>>();
 
 export function setActiveHostRPCClient(client: HostRPCClient | undefined): void {
   activeHostRPCClient = client;
@@ -178,6 +181,7 @@ function createSharedContext(
   const log = createLogger(init?.extension.id);
   const persistentClient = client?.persistent ?? client;
   const uiScopeId = context.uiScopeId?.trim() ?? "";
+  ensurePersistentNotificationRouting(persistentClient);
 
   const requestPersistentUI = async (method: string, params?: unknown): Promise<unknown> => {
     const scopedParams = withUIScope(params, uiScopeId);
@@ -220,6 +224,7 @@ function createSharedContext(
 
   return {
     signal,
+    children: createChildClient(client),
     sessionId: context.sessionId,
     conversationId: context.conversationId,
     uiScopeId: uiScopeId || undefined,
@@ -409,14 +414,14 @@ function createSharedContext(
         await client.request("kodelet.ui.notify", payload);
       },
       async appendTranscript(request: string | UITranscriptAppendRequest) {
-        if (!extensionUISupported(init, "transcript") || !persistentClient) {
+        if (!extensionUISupported(init, "transcript", persistentClient) || !persistentClient) {
           return;
         }
         const payload = typeof request === "string" ? { message: request } : request;
         await requestPersistentUI("kodelet.ui.transcript.append", payload);
       },
       async setWidget(id, lines, options) {
-        if (!extensionUISupported(init, "widgets") || !persistentClient) {
+        if (!extensionUISupported(init, "widgets", persistentClient) || !persistentClient) {
           return;
         }
         const objectID = validateUIObjectID(id);
@@ -432,7 +437,7 @@ function createSharedContext(
         });
       },
       async openSurface(options) {
-        if (!extensionUISupported(init, "surfaces") || !persistentClient) {
+        if (!extensionUISupported(init, "surfaces", persistentClient) || !persistentClient) {
           throw new Error("Interactive extension surfaces are not available in this host");
         }
         const { id: requestedID, initialLines = [], ...surfaceOptions } = options;
@@ -489,6 +494,7 @@ class BackgroundTaskLeaseHandle implements BackgroundTaskLease {
 
 class UISurfaceHandle implements UISurface {
   private closed = false;
+  private openSequence = 0;
   private closing: Promise<void> | undefined;
   private active = false;
   private pendingLines: UIFrameLine[] | undefined;
@@ -512,10 +518,15 @@ class UISurfaceHandle implements UISurface {
   }
 
   nextSequence(): number {
-    return nextClientSequence(surfaceSequencesByClient, this.client, this.routingKey());
+    const sequence = nextClientSequence(surfaceSequencesByClient, this.client, this.routingKey());
+    this.openSequence ||= sequence;
+    return sequence;
   }
 
   activate(): void {
+    if (this.closed) {
+      throw new Error("The host closed the interactive surface while it was opening");
+    }
     this.active = true;
   }
 
@@ -567,6 +578,10 @@ class UISurfaceHandle implements UISurface {
         throw new Error(typeof response.reason === "string" ? response.reason : "The host rejected the surface close");
       }
     }
+    this.dispose();
+  }
+
+  private dispose(): void {
     this.closed = true;
     this.pendingLines = undefined;
     this.inputHandlers.clear();
@@ -600,6 +615,15 @@ class UISurfaceHandle implements UISurface {
   }
 
   handleNotification(method: string, params: unknown): void {
+    if (
+      method === "extension.ui.surface.closed" &&
+      isRecord(params) && params.id === this.id &&
+      normalizedUIScope(params.scopeId) === this.scopeId &&
+      params.openSequence === this.openSequence
+    ) {
+      this.dispose();
+      return;
+    }
     if (
       this.closed ||
       !isRecord(params) ||
@@ -674,6 +698,10 @@ function ensurePersistentNotificationRouting(client: HostRPCClient | undefined):
   }
   notificationClients.add(client);
   client.onNotification((method, params) => {
+    if (method === "kodelet.ui.capabilities" && isRecord(params)) {
+      uiCapabilitiesByClient.set(client, { ...params });
+      return;
+    }
     if (!isRecord(params) || typeof params.id !== "string") {
       return;
     }
@@ -733,8 +761,8 @@ function validateUIObjectID(id: string): string {
   return id;
 }
 
-function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces" | "transcript"): boolean {
-  const ui = init?.capabilities?.ui;
+function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces" | "transcript", client?: HostRPCClient): boolean {
+  const ui = (client && uiCapabilitiesByClient.get(client)) ?? init?.capabilities?.ui;
   return isRecord(ui) && ui[feature] === true;
 }
 

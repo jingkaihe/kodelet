@@ -30,8 +30,8 @@ type Config struct {
 	CWD                     string
 	DefaultCWD              string
 	Theme                   string
-	Runner                  chat.ChatRunner
-	Remote                  bool
+	Runner                  chat.ChatRunner // Required; execution is owned by the caller's daemon adapter.
+	Remote                  bool            // Deprecated: exported Run always uses daemon-backed discovery and history.
 }
 
 // ProfileSettings contains control-plane-owned reasoning policy for one model profile.
@@ -152,6 +152,7 @@ type conversationState struct {
 	slashCommandErr      error
 	slashDismissedDraft  string
 	extensionShortcuts   []extensions.Shortcut
+	shortcutDigest       string
 
 	messageHistoryScopeCWD                        string
 	initialHistoryPending                         bool
@@ -381,7 +382,9 @@ type slashCommandsMsg struct {
 	cwd             string
 	commands        []slashcommands.Command
 	shortcuts       []extensions.Shortcut
+	shortcutDigest  string
 	extensionsOnly  bool
+	remote          bool
 	err             error
 }
 

@@ -4,7 +4,7 @@ The TypeScript SDK package is imported as `kodelet`. It provides both an agent c
 
 ## Agent sessions
 
-Use `Client` to launch Kodelet from Node/TypeScript and run prompts programmatically. By default the client uses the normal `kodelet` executable and the user's default profile/configuration.
+Use `Client` to launch the thin `kodelet acp` daemon client from Node/TypeScript. Set `server` and `runner` on `Client`, or use the normal daemon selection configuration. Standalone clients authenticate with client credentials (for example `KODELET_AUTH_TOKEN`); provider credentials stay on the daemon. `cwd` is interpreted by the selected runner, not used as the local subprocess directory.
 
 ```typescript
 import { Client } from "kodelet";
@@ -25,57 +25,14 @@ ACP accepts individual stdout messages up to 64 MiB, including large saved-conve
 Streaming sessions emit typed SDK events derived from ACP `session/update` JSON-RPC notifications:
 
 ```typescript
-import { Client, Profile, defineExtension, z } from "kodelet";
-
-const askQuestionExtension = defineExtension((ext) => {
-  ext.setMetadata({ name: "workspace", version: "0.1.0" });
-
-  ext.registerTool({
-    name: "ask_user_question",
-    description: "Ask the user to choose one option.",
-    inputSchema: z.object({
-      question: z.string(),
-      options: z.array(z.string()).min(2).max(5),
-    }),
-    async execute(input, ctx) {
-      const choice = await ctx.ui.select({
-        title: input.question,
-        options: input.options,
-        submitButtonText: "Select",
-      });
-      return choice ? `User selected: ${choice}` : "User dismissed the question.";
-    },
-  });
-});
-
-const profile = new Profile({
-  name: "openai",
-  provider: "openai",
-  model: "gpt-5.5",
-  max_tokens: 128000,
-  reasoning_effort: "xhigh",
-  tool_mode: "patch",
-  weak_model: "gpt-5.4-mini",
-  weak_model_max_tokens: 8192,
-  enable_fs_search_tools: false,
-  openai: {
-    api_mode: "responses",
-    platform: "codex",
-    service_tier: "fast",
-  },
-});
+import { Client } from "kodelet";
 
 const client = new Client();
 const session = await client.createSession({
-  profile,
-  extensions: [askQuestionExtension],
+  profile: "work", // Daemon-owned model profile; optional.
+  environmentProfile: "workspace", // Runner-owned environment profile; optional.
+  options: { maxTokens: 8192, maxTurns: 4, noSkills: true },
   streaming: true,
-  ui: {
-    async select(request) {
-      console.error(request.title, request.options);
-      return request.options[0];
-    },
-  },
 });
 
 session.on("assistant.message_delta", (event) => {
@@ -99,7 +56,9 @@ await client.close();
 
 Listeners receive every `tool.update`. To keep completed responses bounded, `response.events` retains only the latest transient snapshot for each `toolCallId`, followed by the authoritative `tool.result`.
 
-Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
+`options` accepts the typed `ExecutionOptions` contract: provider/model/weak model, token and turn limits, reasoning effort, weak-model selection, tool/skill/extension restrictions, command allowlists, and filesystem-search enablement. Explicit `false`, `0` where permitted, and empty lists are preserved. Inline `Profile` values accept the same options (legacy snake_case aliases are converted); an inline `name` is only a label, not a required daemon profile. Arbitrary provider configuration, endpoints, credentials, and client-local prompt paths are rejected. Model settings are locked when resuming a persisted conversation.
+
+Temporary SDK config files and `createSession({ extensions, extensionTransport, ui })` no longer configure remote execution; unsupported inline callbacks fail before spawning. Install executable extensions on the runner instead. Use `ctx.children` for delegated model work, not another `Client` with inherited credentials. `session.close()` detaches; explicit `session.cancel()` cancels the active turn.
 
 ### Steering an active session
 
@@ -202,6 +161,41 @@ const conversationId = await ctx.forkConversation({ name: "Investigate authentic
 ```
 
 Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
+
+### Extension-owned execution presets and children
+
+Register the preset in the parent extension before invoking it. The name belongs to that extension and environment, not daemon YAML; another extension can register the same name without replacing it. Prompt paths are resolved relative to the extension directory on the runner and snapshotted before child execution.
+
+```typescript
+ext.registerProfile({
+  name: "code_search",
+  systemPromptPath: "search-prompt.md",
+  options: {
+    model: "gpt-4o-mini",
+    allowedTools: ["file_read", "grep_tool", "glob_tool"],
+    noExtensions: true,
+    noSkills: true,
+    enableFSSearchTools: true,
+    maxTurns: 3,
+  },
+});
+
+// Inside the owning extension's active tool handler:
+const child = await ctx.children.start({
+  profile: "code_search",
+  message: "Find the parser and explain its callers",
+  requestId: "this-tool-call-search-1", // Keep stable if reconciling an uncertain response.
+});
+const result = await child.wait({
+  signal: ctx.signal,
+  onEvent: event => ctx.update(event.text ?? event.kind),
+});
+return result.output;
+```
+
+Children have separate durable `conversationId`/`runId` values and parent metadata. `child.read()` reads status/progress; `child.cancel()` targets that child only. `wait()` rejects cancellation/failure and accepts an event callback. No client/admin token is injected and there is no subprocess/provider fallback. Model choices use daemon validation; tool/command permissions and resource limits cannot exceed the parent's effective policy. Optional per-invocation `options`, `systemPrompt` content, and descendant `cwd` remain subject to that ceiling. The saved child preset and prompt survive ordinary conversation resume.
+
+Foreground children are cancelled when the parent tool returns. To retain a child, acquire a real runner lease in the active tool, pass it as `lease` on the first `start`, and keep it until the child reaches a terminal state. Subsequent reads/cancels/submissions use that explicitly retained authority. Provisional `session.start` leases do not authorize children. Authority expires after one hour and ends on lease release, cancellation, runner/extension loss, or shutdown; request/result caches are bounded and not restart-replay credentials. Foreground child usage aggregates into the parent; retained children account to their own durable conversations. Live `forkConversation` only snapshots history; it does not grant permission to execute another session.
 
 ### Background extension work
 
@@ -312,7 +306,7 @@ Command result actions:
 - `respond`: display a direct terminal/Web UI response; it is not fed into the LLM.
 - `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input. Set optional `display` to replace the slash command with different visible and persisted user text.
 
-Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`.
+Recipe-like commands use `kind: "recipe"`, appear in `kodelet host recipe list` on the runner host, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`. Host recipe listing starts discovery extensions; host recipe rendering can execute template commands.
 
 ## Native TUI shortcuts
 
@@ -358,4 +352,4 @@ Runnable TypeScript SDK examples live in `skills/kodelet/examples/sdk/`:
 
 - `basic-agent-session.ts` runs one prompt and prints the final response.
 - `streaming-agent-session.ts` streams assistant deltas as they arrive.
-- `inline-extension-session.ts` exposes an in-process TypeScript extension with an `sdk_echo` tool for the session.
+- `delegated-code-search.ts` defines a runner-installed preset and scoped, read-only child execution.

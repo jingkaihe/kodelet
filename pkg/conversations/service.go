@@ -63,6 +63,7 @@ type ListConversationsRequest struct {
 	EndDate       *time.Time `json:"endDate,omitempty"`
 	SearchTerm    string     `json:"searchTerm,omitempty"`
 	SearchCWDTerm string     `json:"-"`
+	Provider      string     `json:"provider,omitempty"`
 	CWD           string     `json:"cwd,omitempty"`
 	RunnerID      string     `json:"runnerId,omitempty"`
 	Limit         int        `json:"limit,omitempty"`
@@ -121,6 +122,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		EndDate:       req.EndDate,
 		SearchTerm:    req.SearchTerm,
 		SearchCWDTerm: req.SearchCWDTerm,
+		Provider:      req.Provider,
 		CWD:           req.CWD,
 		RunnerID:      req.RunnerID,
 		Limit:         req.Limit,

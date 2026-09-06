@@ -9,6 +9,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
 import { HostRPCError, runWithHostRPCClient, type HostRPCClient } from "./context.js";
+import { executionArgs, executionOptionsSchema, remoteExecutionOptions, type ExecutionOptions } from "./execution.js";
 import type {
   ExtensionEntrypoint,
   UIConfirmRequest,
@@ -42,6 +43,9 @@ export interface AgentUIHandlers {
 }
 
 export interface ClientOptions {
+  /** Explicit daemon endpoint and registered runner; never use a local fallback. */
+  server?: string;
+  runner?: string;
   /** Kodelet executable to launch. Defaults to `kodelet`. */
   command?: string;
   /** Default working directory for sessions. Defaults to process.cwd(). */
@@ -53,9 +57,11 @@ export interface ClientOptions {
 }
 
 export interface CreateSessionOptions {
+  options?: ExecutionOptions;
+  environmentProfile?: string;
   /** Named profile, inline profile, or omitted to use the default Kodelet config. */
   profile?: string | Profile | ProfileInput;
-  /** In-process extension entrypoints to expose to Kodelet for this session. */
+  /** @deprecated Unsupported remotely. Install extensions on the selected runner. */
   extensions?: ExtensionEntrypoint[];
   /** Kept for API compatibility. ACP emits chunks as JSON-RPC session/update notifications. */
   streaming?: boolean;
@@ -293,34 +299,34 @@ export class Client {
   private readonly env: NodeJS.ProcessEnv;
   private readonly spawn: SpawnFunction;
   private readonly sessions = new Set<Session>();
+  private readonly endpointArgs: string[];
 
   constructor(options: ClientOptions = {}) {
     this.command = options.command ?? "kodelet";
-    this.cwd = path.resolve(options.cwd ?? process.cwd());
+    this.cwd = options.cwd ?? process.cwd();
+    this.endpointArgs = [...(options.server ? ["--server", options.server] : []), ...(options.runner ? ["--runner", options.runner] : [])];
     this.env = options.env ?? {};
     this.spawn = options.spawn ?? ((command, args, spawnOptions) => spawnProcess(command, args, spawnOptions) as SpawnedProcess);
   }
 
   async createSession(options: CreateSessionOptions = {}): Promise<Session> {
-    const bridge = options.extensions?.length
-      ? await InMemoryExtensionBridge.create(options.extensions, {
-          ui: options.ui,
-          transport: normalizeBridgeTransport(options),
-        })
-      : undefined;
-    const cwd = path.resolve(options.cwd ?? this.cwd);
+    if (options.extensions?.length || options.extensionTransport !== undefined) {
+      throw new Error("Inline executable extensions are not supported by daemon sessions; install the extension on the runner and use ctx.children for delegated execution");
+    }
+    if (options.ui !== undefined) throw new Error("Inline extension UI handlers are not supported by this ACP adapter");
+    const cwd = options.cwd ?? this.cwd;
     const profile = normalizeProfile(options.profile);
-    let launch: LaunchConfig | undefined;
+    const inline = profile && !profile.isNamedOnly() ? remoteExecutionOptions(profile.config) : {};
+    const overrides = options.options === undefined ? {} : executionOptionsSchema.parse(options.options);
+    const execution = executionOptionsSchema.parse({ ...inline, ...overrides, ...(options.maxTurns === undefined ? {} : { maxTurns: options.maxTurns }) });
     let rpc: ACPRPCClient | undefined;
 
     try {
-      launch = await buildLaunchConfig(profile, bridge);
-      const env = cleanEnv({
-        ...this._baseEnv({ isolateKodeletEnv: launch.configFileMode === "isolated" }),
-        ...launch.env,
-      });
-      const args = [...launch.args, "acp", ...acpServerArgs(options)];
-      rpc = new ACPRPCClient(this._spawn(args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] }));
+      const env = cleanEnv(this._baseEnv());
+      const args = ["acp", ...this.endpointArgs, ...executionArgs(execution),
+        ...(profile?.name && profile.isNamedOnly() ? [`--profile=${profile.name}`] : []),
+        ...(options.environmentProfile ? [`--runner-profile=${options.environmentProfile}`] : [])];
+      rpc = new ACPRPCClient(this._spawn(args, { cwd: process.cwd(), env, stdio: ["pipe", "pipe", "pipe"] }));
       await rpc.initialize();
       const sessionID = options.resume ? await rpc.loadSession(options.resume, cwd) : await rpc.createSession(cwd);
       const session = new Session(this, {
@@ -329,15 +335,11 @@ export class Client {
         profile,
         sessionID,
         rpc,
-        extensionBridge: bridge,
-        tempConfig: launch.tempConfig,
       });
       this.sessions.add(session);
       return session;
     } catch (error) {
       await rpc?.close();
-      await bridge?.close();
-      await launch?.tempConfig?.close();
       throw error;
     }
   }
@@ -351,16 +353,8 @@ export class Client {
     return this.spawn(this.command, args, options);
   }
 
-  _baseEnv(options: { isolateKodeletEnv?: boolean } = {}): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    if (options.isolateKodeletEnv) {
-      for (const key of Object.keys(env)) {
-        if (key.startsWith("KODELET_")) {
-          delete env[key];
-        }
-      }
-    }
-    return { ...env, ...this.env };
+  _baseEnv(): NodeJS.ProcessEnv {
+    return { ...process.env, ...this.env };
   }
 
   _deleteSession(session: Session): void {

@@ -41,6 +41,7 @@ type Manifest struct {
 
 // EnvironmentConfig is the runner-owned configuration projection pinned with a manifest.
 type EnvironmentConfig struct {
+	Options             *llmtypes.ExecutionOptions
 	AllowedCommands     []string
 	ToolMode            llmtypes.ToolMode
 	EnableFSSearchTools bool
@@ -56,6 +57,7 @@ func (c *EnvironmentConfig) Clone() *EnvironmentConfig {
 		return nil
 	}
 	cloned := *c
+	cloned.Options = c.Options.Clone()
 	cloned.AllowedCommands = slices.Clone(c.AllowedCommands)
 	cloned.SystemPromptArgs = maps.Clone(c.SystemPromptArgs)
 	cloned.SystemInformation = c.SystemInformation.Clone()
@@ -154,6 +156,7 @@ type RunSpec struct {
 // Clone returns a copy safe for retention by an environment implementation.
 func (s RunSpec) Clone() RunSpec {
 	s.Metadata = maps.Clone(s.Metadata)
+	s.Config = s.Config.Clone()
 	return s
 }
 

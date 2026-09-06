@@ -49,7 +49,13 @@ func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) 
 // GetConfigFromViperWithEnvironmentProfile loads runner-owned configuration from
 // the separate environment_profiles namespace without applying a model profile.
 func GetConfigFromViperWithEnvironmentProfile(profileName string) (llmtypes.Config, error) {
-	settings := cloneSettings(viper.AllSettings())
+	return GetConfigFromSettingsWithEnvironmentProfile(viper.AllSettings(), profileName)
+}
+
+// GetConfigFromSettingsWithEnvironmentProfile resolves a runner-owned settings
+// snapshot without consulting or mutating the process-global Viper instance.
+func GetConfigFromSettingsWithEnvironmentProfile(settings map[string]any, profileName string) (llmtypes.Config, error) {
+	settings = cloneSettings(settings)
 	delete(settings, "profile")
 
 	config, err := loadConfigFromSettings(settings)

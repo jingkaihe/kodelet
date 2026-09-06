@@ -173,14 +173,20 @@ func (o *RecipeListOutput) hasPath() bool {
 
 var recipeCmd = &cobra.Command{
 	Use:   "recipe",
-	Short: "Manage recipes/fragments",
-	Long:  `Manage recipes/fragments with metadata support`,
+	Short: "Moved to kodelet host recipe",
+	RunE:  hostInspectionMigration,
+}
+
+var hostRecipeCmd = &cobra.Command{
+	Use:   "recipe",
+	Short: "Inspect recipes on this host",
+	Long:  "Inspect local recipes in a trusted workspace on the runner host. Listing starts extensions; showing executes templates. This does not contact the selected daemon.",
 }
 
 var recipeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available recipes",
-	Long:  `List all available recipes with their metadata including ID, name and description`,
+	Long:  "List local recipes. Starts local extensions to discover dynamic recipes.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		config := NewRecipeListConfig()
 		config.ShowPath, _ = cmd.Flags().GetBool("show-path")
@@ -193,7 +199,7 @@ var recipeListCmd = &cobra.Command{
 var recipeShowCmd = &cobra.Command{
 	Use:   "show <recipe>",
 	Short: "Show recipe content with metadata",
-	Long:  `Show the rendered content of a recipe along with its metadata`,
+	Long:  "Render a local recipe. Template functions may execute commands on this host.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config := NewRecipeShowConfig()
@@ -212,13 +218,25 @@ var recipeShowCmd = &cobra.Command{
 }
 
 func init() {
-	recipeCmd.AddCommand(recipeListCmd)
-	recipeCmd.AddCommand(recipeShowCmd)
+	hostRecipeCmd.AddCommand(recipeListCmd, recipeShowCmd)
+	hostCmd.AddCommand(hostRecipeCmd)
+	legacyList := &cobra.Command{Use: "list", Short: "Moved to kodelet host recipe list", RunE: hostInspectionMigration}
+	legacyShow := &cobra.Command{Use: "show <recipe>", Short: "Moved to kodelet host recipe show", RunE: hostInspectionMigration}
+	recipeCmd.AddCommand(legacyList, legacyShow)
 
-	recipeListCmd.Flags().Bool("show-path", false, "Show the file path for each recipe")
-	recipeListCmd.Flags().Bool("json", false, "Output in JSON format")
+	for _, cmd := range []*cobra.Command{recipeListCmd, legacyList} {
+		cmd.Flags().Bool("show-path", false, "Show the file path for each recipe")
+		cmd.Flags().Bool("json", false, "Output in JSON format")
+	}
 
-	recipeShowCmd.Flags().StringSliceP("arg", "a", []string{}, "Template arguments in format key=value (can be specified multiple times)")
+	for _, cmd := range []*cobra.Command{recipeShowCmd, legacyShow} {
+		cmd.Flags().StringSliceP("arg", "a", []string{}, "Template arguments in format key=value (can be specified multiple times)")
+	}
+}
+
+func hostInspectionMigration(cmd *cobra.Command, _ []string) error {
+	path := strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()))
+	return errors.Errorf("'%s' is host-only; use 'kodelet host %s' with the same arguments on the runner host in the intended workspace", path, path)
 }
 
 func runRecipeList(ctx context.Context, config *RecipeListConfig) error {

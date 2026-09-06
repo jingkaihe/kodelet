@@ -284,6 +284,26 @@ func TestFragmentProcessor_DefaultDirsForCWDIncludesRepoHomeAndPlugins(t *testin
 	assert.Contains(t, fragmentIDs(fragments), "global@recipes/deploy")
 }
 
+func TestTemplateCommandsUseIndependentWorkingDirectories(t *testing.T) {
+	processCWD, err := os.Getwd()
+	require.NoError(t, err)
+	for _, marker := range []string{"first workspace", "second workspace"} {
+		cwd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(cwd, "template.txt"), []byte(marker), 0o600))
+		processor, err := NewFragmentProcessor(WithDefaultDirsForCWD(cwd))
+		require.NoError(t, err)
+		t.Run(marker, func(t *testing.T) {
+			t.Parallel()
+			content, err := processor.processTemplate(t.Context(), `{{bash "cat" "template.txt"}}`, nil)
+			require.NoError(t, err)
+			assert.Equal(t, marker, content)
+			currentCWD, err := os.Getwd()
+			require.NoError(t, err)
+			assert.Equal(t, processCWD, currentCWD)
+		})
+	}
+}
+
 func TestFragmentProcessor_DefaultDirsForCWDUsesDotForBlankCWD(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

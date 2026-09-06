@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/muesli/cancelreader"
+	"github.com/pkg/errors"
+	"golang.org/x/term"
 )
 
 const (
@@ -226,7 +230,7 @@ func (b *TerminalUIInputBroker) Input(ctx context.Context, request UIInputReques
 	}
 	fmt.Fprintf(b.Out, "%s> ", request.SubmitButtonText)
 
-	line, err := b.reader.ReadString('\n')
+	line, err := b.readLine(ctx)
 	if err != nil && len(line) == 0 {
 		if err == io.EOF {
 			return UIInputResponse{Status: UIInputStatusDismissed}, nil
@@ -277,7 +281,7 @@ func (b *TerminalUIInputBroker) Confirm(ctx context.Context, request UIConfirmRe
 	}
 	fmt.Fprintf(b.Out, "%s/%s> ", confirmText, cancelText)
 
-	line, err := b.reader.ReadString('\n')
+	line, err := b.readLine(ctx)
 	if err != nil && len(line) == 0 {
 		if err == io.EOF {
 			return UIInputResponse{Status: UIInputStatusDismissed}, nil
@@ -325,7 +329,7 @@ func (b *TerminalUIInputBroker) Select(ctx context.Context, request UISelectRequ
 	}
 	fmt.Fprintf(b.Out, "%s> ", submitText)
 
-	line, err := b.reader.ReadString('\n')
+	line, err := b.readLine(ctx)
 	if err != nil && len(line) == 0 {
 		if err == io.EOF {
 			return UIInputResponse{Status: UIInputStatusDismissed}, nil
@@ -366,14 +370,40 @@ func (b *TerminalUIInputBroker) Notify(ctx context.Context, request UINotifyRequ
 	return UIInputResponse{Status: UIInputStatusSubmitted}, nil
 }
 
+// readLine interrupts a terminal read without closing the caller's stdin. The
+// broker mutex serializes access; preserve read-ahead between ordinary prompts.
+func (b *TerminalUIInputBroker) readLine(ctx context.Context) (string, error) {
+	if _, ok := b.In.(cancelreader.File); !ok {
+		return b.reader.ReadString('\n')
+	}
+	reader, err := cancelreader.NewReader(b.In)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to prepare cancellable terminal input")
+	}
+	defer func() { _ = reader.Close() }()
+	buffered, _ := b.reader.Peek(b.reader.Buffered())
+	unread := append([]byte(nil), buffered...)
+	b.reader.Reset(io.MultiReader(bytes.NewReader(unread), reader))
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		reader.Cancel()
+		close(cancelled)
+	})
+	line, err := b.reader.ReadString('\n')
+	if !stop() {
+		<-cancelled // Do not close cancellation descriptors while the callback uses them.
+	}
+	if ctx.Err() != nil {
+		b.reader.Reset(b.In)
+		return "", ctx.Err()
+	}
+	return line, err
+}
+
 func readerIsTerminal(reader io.Reader) bool {
 	file, ok := reader.(*os.File)
 	if !ok || file == nil {
 		return false
 	}
-	stat, err := file.Stat()
-	if err != nil {
-		return false
-	}
-	return stat.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }

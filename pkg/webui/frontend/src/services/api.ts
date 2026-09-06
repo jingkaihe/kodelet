@@ -19,6 +19,7 @@ import {
 	ToolResult,
 	UIInputResponseResult,
 	RunnerListResponse,
+	RunnerDiscoveryTarget,
 	AuthPrincipal,
 	UserLoginDecisionResponse,
 	RunnerEnrollmentDecisionResponse,
@@ -35,6 +36,7 @@ class ApiService {
 	private baseUrl = "";
 	private csrfCookieName = "kodelet_csrf";
 	private csrfHeaderName = "X-CSRF-Token";
+	private clientId = crypto.randomUUID();
 
 	private async request<T>(
 		endpoint: string,
@@ -143,7 +145,9 @@ class ApiService {
 	async cancelCodexDeviceLogin(id: string): Promise<void> {
 		await this.request(
 			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
-			{ method: "DELETE" },
+			{
+				method: "DELETE",
+			},
 		);
 	}
 
@@ -154,7 +158,9 @@ class ApiService {
 	async startCopilotDeviceLogin(): Promise<CopilotDeviceLogin> {
 		return this.request<CopilotDeviceLogin>(
 			"/api/providers/copilot/device-login",
-			{ method: "POST" },
+			{
+				method: "POST",
+			},
 		);
 	}
 
@@ -167,7 +173,9 @@ class ApiService {
 	async cancelCopilotDeviceLogin(id: string): Promise<void> {
 		await this.request(
 			`/api/providers/copilot/device-login/${encodeURIComponent(id)}`,
-			{ method: "DELETE" },
+			{
+				method: "DELETE",
+			},
 		);
 	}
 
@@ -178,7 +186,9 @@ class ApiService {
 	async startAnthropicOAuthLogin(): Promise<AnthropicOAuthLogin> {
 		return this.request<AnthropicOAuthLogin>(
 			"/api/providers/anthropic/oauth-login",
-			{ method: "POST" },
+			{
+				method: "POST",
+			},
 		);
 	}
 
@@ -198,7 +208,9 @@ class ApiService {
 	async cancelAnthropicOAuthLogin(id: string): Promise<void> {
 		await this.request(
 			`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}`,
-			{ method: "DELETE" },
+			{
+				method: "DELETE",
+			},
 		);
 	}
 
@@ -302,10 +314,16 @@ class ApiService {
 		);
 	}
 
-	async getSlashCommands(cwd?: string): Promise<SlashCommandsResponse> {
+	async getSlashCommands(
+		cwd?: string,
+		target?: RunnerDiscoveryTarget,
+	): Promise<SlashCommandsResponse> {
 		const params = new URLSearchParams();
 		if (cwd) {
 			params.append("cwd", cwd);
+		}
+		for (const [key, value] of Object.entries(target || {})) {
+			if (value !== undefined) params.append(key, value);
 		}
 		const suffix = params.toString();
 		return this.request<SlashCommandsResponse>(
@@ -313,10 +331,16 @@ class ApiService {
 		);
 	}
 
-	async getCWDHints(query: string): Promise<CWDHintsResponse> {
+	async getCWDHints(
+		query: string,
+		target?: RunnerDiscoveryTarget,
+	): Promise<CWDHintsResponse> {
 		const params = new URLSearchParams();
 		if (query) {
 			params.append("q", query);
+		}
+		for (const [key, value] of Object.entries(target || {})) {
+			if (value !== undefined) params.append(key, value);
 		}
 		const suffix = params.toString();
 		return this.request<CWDHintsResponse>(
@@ -324,7 +348,9 @@ class ApiService {
 		);
 	}
 
-	async getGitDiff(target: WorkspaceTarget = { kind: "local" }): Promise<GitDiffResponse> {
+	async getGitDiff(
+		target: WorkspaceTarget = { kind: "local" },
+	): Promise<GitDiffResponse> {
 		const params = new URLSearchParams();
 		if (target.kind === "local") {
 			if (target.cwd) {
@@ -428,9 +454,17 @@ class ApiService {
 			`/api/conversations/${conversationId}/ui-input/${requestId}`,
 			{
 				method: "POST",
+				headers: { "X-Kodelet-Client-ID": this.clientId },
 				body: JSON.stringify(response),
 			},
 		);
+	}
+
+	async takeUIOwnership(conversationId: string): Promise<void> {
+		await this.request(`/api/conversations/${conversationId}/ui-owner`, {
+			method: "POST",
+			headers: { "X-Kodelet-Client-ID": this.clientId },
+		});
 	}
 
 	async getToolResult(
@@ -453,55 +487,17 @@ class ApiService {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
+				"X-Kodelet-Client-ID": this.clientId,
 				...this.getCSRFHeaders("POST"),
 			},
 			body: JSON.stringify(request),
 			signal: options.signal,
 		});
-
-		if (!response.ok) {
-			let error: ApiError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { error: `HTTP ${response.status}` };
-			}
-			throw new Error(
-				error.error || error.message || `HTTP ${response.status}`,
-			);
-		}
-
-		if (!response.body) {
-			throw new Error("Streaming response body is unavailable");
-		}
-
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
-
-		while (true) {
-			const { done, value } = await reader.read();
-			buffer += decoder.decode(value, { stream: !done });
-
-			const lines = buffer.split("\n");
-			buffer = lines.pop() || "";
-
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (!trimmed) {
-					continue;
-				}
-				options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
-			}
-
-			if (done) {
-				const trimmed = buffer.trim();
-				if (trimmed) {
-					options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
-				}
-				return;
-			}
-		}
+		return this.consumeChatStream(
+			response,
+			options.onEvent,
+			request.conversationId,
+		);
 	}
 
 	async streamConversation(
@@ -515,10 +511,21 @@ class ApiService {
 			`/api/conversations/${conversationId}/stream`,
 			{
 				method: "GET",
+				headers: {
+					"X-Kodelet-Client-ID": this.clientId,
+					"X-Kodelet-UI-Capabilities": "interactive",
+				},
 				signal: options.signal,
 			},
 		);
+		return this.consumeChatStream(response, options.onEvent, conversationId);
+	}
 
+	private async consumeChatStream(
+		response: Response,
+		onEvent: (event: ChatStreamEvent) => void,
+		conversationId?: string,
+	): Promise<void> {
 		if (!response.ok) {
 			let error: ApiError;
 			try {
@@ -538,29 +545,54 @@ class ApiService {
 		const reader = response.body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";
-
-		while (true) {
-			const { done, value } = await reader.read();
-			buffer += decoder.decode(value, { stream: !done });
-
-			const lines = buffer.split("\n");
-			buffer = lines.pop() || "";
-
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (!trimmed) {
-					continue;
-				}
-				options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+		const pendingPrompts = new Map<string, string | undefined>();
+		const deliver = (line: string) => {
+			const event = JSON.parse(line) as ChatStreamEvent;
+			conversationId = event.conversation_id || conversationId;
+			const id =
+				event.ui_input?.id || event.ui_confirm?.id || event.ui_select?.id;
+			if (id) pendingPrompts.set(id, conversationId);
+			if (event.kind === "ui-request-end" && event.ui_request_id) {
+				pendingPrompts.delete(event.ui_request_id);
 			}
+			onEvent(event);
+		};
 
-			if (done) {
-				const trimmed = buffer.trim();
-				if (trimmed) {
-					options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				buffer += decoder.decode(value, { stream: !done });
+
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+
+				for (const line of lines) {
+					const trimmed = line.trim();
+					if (!trimmed) {
+						continue;
+					}
+					deliver(trimmed);
 				}
-				return;
+
+				if (done) {
+					const trimmed = buffer.trim();
+					if (trimmed) {
+						deliver(trimmed);
+					}
+					return;
+				}
 			}
+		} finally {
+			// A disconnected stream loses response authority, not execution ownership.
+			for (const [id, scope] of pendingPrompts) {
+				onEvent({
+					kind: "ui-request-end",
+					conversation_id: scope,
+					ui_request_id: id,
+				});
+			}
+			await reader.cancel().catch(() => {});
+			reader.releaseLock();
 		}
 	}
 }

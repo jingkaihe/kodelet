@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,9 +19,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -54,6 +62,754 @@ func (*runnerAPITestLink) Notify(context.Context, string, any) error { return ni
 func (*runnerAPITestLink) Close() error                              { return nil }
 func (l *runnerAPITestLink) Done() <-chan struct{}                   { return l.done }
 func (*runnerAPITestLink) Err() error                                { return nil }
+
+func TestEmbeddedRunnerTransportLifecycle(t *testing.T) {
+	for _, mode := range []RunnerAuthMode{RunnerAuthModeToken, RunnerAuthModeEnrollment, RunnerAuthModeNone} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			workspace := t.TempDir()
+			store, err := localstate.NewStoreAt(t.TempDir())
+			require.NoError(t, err)
+			config := &ServerConfig{
+				Host: "127.0.0.1", Port: 0, CompactRatio: 0.8,
+				WebAuthMode: WebAuthModeToken, AuthToken: "web-secret", RunnerAuthMode: mode,
+				EmbeddedRunner: &EmbeddedRunnerConfig{Workspace: workspace, Store: store, Settings: map[string]any{
+					"extensions": map[string]any{"enabled": false}, "skills": map[string]any{"enabled": false},
+				}},
+			}
+			if mode == RunnerAuthModeToken {
+				config.RunnerAuthToken = "runner-secret"
+			}
+			server, err := NewServer(t.Context(), config, testFrontendHandler())
+			require.NoError(t, err)
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			endpoint := "http://" + listener.Addr().String()
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() { done <- server.Serve(ctx, listener) }()
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case err := <-done:
+					assert.NoError(t, err)
+				case <-time.After(10 * time.Second):
+					assert.Fail(t, "embedded service did not stop")
+				}
+				held, err := store.WorkspaceLockHeld(workspace)
+				assert.NoError(t, err)
+				assert.False(t, held, "shutdown must release the workspace lock")
+				assert.NoError(t, server.Close())
+			})
+			require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 10*time.Second, 20*time.Millisecond,
+				"embedded runner failed to become ready")
+			status := server.EmbeddedRunnerStatus()
+			assert.True(t, status.Enabled)
+			assert.Empty(t, status.Error)
+			runner, found := server.runnerRegistry.Runner(status.RunnerID)
+			require.True(t, found)
+			assert.NotEmpty(t, runner.ConnectionID, "embedding must register through the normal transport")
+			assert.Positive(t, runner.Generation)
+			assert.Equal(t, workspace, runner.Workspace.Path)
+			credential, enrolled, err := store.LoadCredential(endpoint, workspace)
+			require.NoError(t, err)
+			assert.Equal(t, mode == RunnerAuthModeEnrollment, enrolled)
+			if enrolled {
+				assert.NotEmpty(t, credential.AccessToken)
+				assert.NotEmpty(t, credential.PrivateKey)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+			response := httptest.NewRecorder()
+			server.router.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusUnauthorized, response.Code, "embedding must not bypass API authentication")
+			request.Header.Set("Authorization", "Bearer web-secret")
+			response = httptest.NewRecorder()
+			server.router.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusOK, response.Code)
+			assert.Contains(t, response.Body.String(), `"ready":true`)
+		})
+	}
+}
+
+func TestEmbeddedRunnerLockConflictKeepsAPIAvailable(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{RunnerID: "existing-owner"})
+	require.NoError(t, err)
+	defer lock.Close()
+	server, err := NewServer(t.Context(), &ServerConfig{
+		Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, WebAuthMode: WebAuthModeNone, RunnerAuthMode: RunnerAuthModeNone,
+		EmbeddedRunner: &EmbeddedRunnerConfig{Workspace: workspace, Store: store},
+	}, testFrontendHandler())
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "service did not stop after lock conflict")
+		}
+		assert.NoError(t, server.Close())
+	})
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 5*time.Second, 20*time.Millisecond)
+	status := server.EmbeddedRunnerStatus()
+	assert.False(t, status.Ready)
+	assert.Contains(t, status.Error, "existing-owner")
+	assert.Contains(t, status.Error, "disable --embedded-runner")
+	assert.Empty(t, server.runnerRegistry.Runners(), "lock conflict must not create a second enrolled owner")
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"apiReady":true`)
+	held, err := store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.True(t, held, "existing ownership must not be stolen")
+}
+
+func TestEmbeddedLoopbackEndpoint(t *testing.T) {
+	for _, test := range []struct{ address, expected string }{
+		{"0.0.0.0", "http://127.0.0.1:4321"},
+		{"127.0.0.1", "http://127.0.0.1:4321"},
+		{"::", "http://[::1]:4321"},
+		{"::1", "http://[::1]:4321"},
+	} {
+		endpoint, err := embeddedLoopbackEndpoint(&net.TCPAddr{IP: net.ParseIP(test.address), Port: 4321})
+		require.NoError(t, err)
+		assert.Equal(t, test.expected, endpoint)
+	}
+	_, err := embeddedLoopbackEndpoint(&net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: 4321})
+	assert.ErrorContains(t, err, "loopback or wildcard")
+}
+
+// The returned stop function closes persistence too, allowing restart tests to
+// reopen the same database and endpoint without retaining the previous registry.
+func startEmbeddedRunnerTestServer(t *testing.T, config *ServerConfig, address string) (*Server, string, func()) {
+	t.Helper()
+	server, err := NewServer(t.Context(), config, testFrontendHandler())
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		assert.NoError(t, server.Close())
+		require.NoError(t, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx, listener) }()
+	stop := sync.OnceFunc(func() {
+		cancel()
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "embedded service did not stop")
+		}
+		assert.NoError(t, server.Close())
+	})
+	t.Cleanup(stop)
+	return server, "http://" + listener.Addr().String(), stop
+}
+
+func embeddedRunnerTestConfig(t *testing.T) *ServerConfig {
+	t.Helper()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	return &ServerConfig{
+		Host: "127.0.0.1", Port: 0, CompactRatio: 0.8,
+		WebAuthMode: WebAuthModeToken, AuthToken: "web-secret", RunnerAuthMode: RunnerAuthModeNone,
+		EmbeddedRunner: &EmbeddedRunnerConfig{Workspace: t.TempDir(), Store: store, Settings: map[string]any{
+			"extensions": map[string]any{"enabled": false}, "skills": map[string]any{"enabled": false},
+		}},
+	}
+}
+
+func TestEmbeddedRunnerEnrollmentReuseAndRevocation(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	config.RunnerAuthMode = RunnerAuthModeEnrollment
+	store, workspace := config.EmbeddedRunner.Store, config.EmbeddedRunner.Workspace
+	server, endpoint, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	runnerID := server.EmbeddedRunnerStatus().RunnerID
+	credential, found, err := store.LoadCredential(endpoint, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	var approvedBy string
+	require.NoError(t, server.authStore.db.GetContext(t.Context(), &approvedBy, "SELECT approved_by FROM runner_enrollments WHERE runner_id = ?", runnerID))
+	assert.Equal(t, "daemon:embedded-runner", approvedBy)
+	stop()
+
+	server, _, stop = startEmbeddedRunnerTestServer(t, config, strings.TrimPrefix(endpoint, "http://"))
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, runnerID, server.EmbeddedRunnerStatus().RunnerID)
+	reused, found, err := store.LoadCredential(endpoint, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, credential, reused, "restart must reuse the approved identity and key")
+	var credentials int
+	require.NoError(t, server.authStore.db.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
+	assert.Equal(t, 1, credentials)
+	_, err = server.authStore.db.ExecContext(t.Context(), "UPDATE runner_credentials SET revoked_at = ?, revoke_reason = ? WHERE id = ?", time.Now().UTC(), "test revocation", credential.CredentialID)
+	require.NoError(t, err)
+	stop()
+
+	server, _, _ = startEmbeddedRunnerTestServer(t, config, strings.TrimPrefix(endpoint, "http://"))
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 5*time.Second, 10*time.Millisecond)
+	assert.False(t, server.EmbeddedRunnerStatus().Ready)
+	assert.Contains(t, server.EmbeddedRunnerStatus().Error, "re-enroll")
+	require.NoError(t, server.authStore.db.GetContext(t.Context(), &credentials, "SELECT COUNT(*) FROM runner_credentials"))
+	assert.Equal(t, 1, credentials, "revocation must not trigger a replacement enrollment")
+	assert.Len(t, server.runnerRegistry.Runners(), 1)
+	held, err := store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.False(t, held, "provisioning failure must release the workspace lock")
+	unchanged, found, err := store.LoadCredential(endpoint, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, credential, unchanged)
+}
+
+type embeddedTestEnvironment struct {
+	agentenv.Environment
+	open    func(context.Context, agentenv.RunSpec) (agentenv.Manifest, error)
+	close   func(context.Context) error
+	execute func(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error)
+}
+
+func (e *embeddedTestEnvironment) Open(ctx context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
+	if e.open != nil {
+		return e.open(ctx, spec)
+	}
+	return e.Environment.Open(ctx, spec)
+}
+
+func (e *embeddedTestEnvironment) Close(ctx context.Context) error {
+	if e.close != nil {
+		return e.close(ctx)
+	}
+	return e.Environment.Close(ctx)
+}
+
+func (e *embeddedTestEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	if e.execute != nil {
+		return e.execute(ctx, request, updates)
+	}
+	return e.Environment.ExecuteTool(ctx, request, updates)
+}
+
+func TestEmbeddedRunnerWaitsForEnvironmentReadiness(t *testing.T) {
+	for _, cancelDuringStartup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%v", cancelDuringStartup), func(t *testing.T) {
+			config := embeddedRunnerTestConfig(t)
+			started, release := make(chan struct{}), make(chan struct{})
+			var closed atomic.Bool
+			config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+				local := agentenv.NewLocalEnvironment(cwd, runtime)
+				return &embeddedTestEnvironment{
+					Environment: local,
+					open: func(ctx context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
+						close(started)
+						select {
+						case <-release:
+							return local.Open(ctx, spec)
+						case <-ctx.Done():
+							return agentenv.Manifest{}, ctx.Err()
+						}
+					},
+					close: func(ctx context.Context) error {
+						closed.Store(true)
+						return local.Close(ctx)
+					},
+				}
+			}
+			server, _, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "environment probe did not start")
+			}
+			assert.False(t, server.EmbeddedRunnerStatus().Ready)
+			assert.Empty(t, server.runnerRegistry.Runners(), "environment probe must complete before registration")
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+			request.Header.Set("Authorization", "Bearer web-secret")
+			server.router.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusOK, response.Code)
+			assert.Contains(t, response.Body.String(), `"apiReady":true`)
+			if !cancelDuringStartup {
+				close(release)
+				require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+			}
+			stop()
+			assert.True(t, closed.Load(), "startup probe resources must be closed, including on cancellation")
+			assert.Empty(t, server.EmbeddedRunnerStatus().Error, "shutdown cancellation is not a startup failure")
+			held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
+			require.NoError(t, err)
+			assert.False(t, held)
+		})
+	}
+}
+
+func TestEmbeddedRunnerStartupFailureReleasesLock(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	var closed atomic.Bool
+	config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+		local := agentenv.NewLocalEnvironment(cwd, runtime)
+		return &embeddedTestEnvironment{
+			Environment: local,
+			open: func(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
+				return agentenv.Manifest{}, errors.New("environment initialization failed")
+			},
+			close: func(ctx context.Context) error {
+				closed.Store(true)
+				return local.Close(ctx)
+			},
+		}
+	}
+	server, _, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 5*time.Second, 10*time.Millisecond)
+	assert.Contains(t, server.EmbeddedRunnerStatus().Error, "environment initialization failed")
+	assert.False(t, server.EmbeddedRunnerStatus().Ready)
+	assert.Empty(t, server.runnerRegistry.Runners())
+	assert.True(t, closed.Load())
+	held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
+	require.NoError(t, err)
+	assert.False(t, held)
+}
+
+func TestEmbeddedRunnerConcurrentCWDConfigIsolation(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	config.EmbeddedRunner.Settings["allowed_tools"] = []string{"bash", "file_read"}
+	config.EmbeddedRunner.Settings["sysprompt_args"] = map[string]any{"origin": "runner"}
+	config.EmbeddedRunner.Settings["environment_profiles"] = map[string]any{
+		"review": map[string]any{"sysprompt_args": map[string]any{"origin": "profile"}},
+	}
+	processCWD, err := os.Getwd()
+	require.NoError(t, err)
+	directories := []string{t.TempDir(), t.TempDir()}
+	for i, cwd := range directories {
+		require.NoError(t, os.WriteFile(filepath.Join(cwd, "AGENTS.md"), fmt.Appendf(nil, "Project %d context", i), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), []byte("sysprompt_args:\n  origin: workspace\n  directory: "+cwd+"\n"), 0o600))
+	}
+	server, _, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	runnerID := server.EmbeddedRunnerStatus().RunnerID
+	manifests := make([]runnerpayload.Manifest, len(directories))
+	var wg sync.WaitGroup
+	for i, cwd := range directories {
+		wg.Go(func() {
+			profile := ""
+			if i == 1 {
+				profile = "review"
+			}
+			manifest, err := server.runnerRegistry.OpenRun(t.Context(), runnerID, protocol.RunOpenParams{
+				RunID: fmt.Sprintf("run-%d", i), ConversationID: fmt.Sprintf("conversation-%d", i), CWD: cwd,
+				Agent: protocol.AgentDescriptor{EnvironmentProfile: profile},
+			})
+			if !assert.NoError(t, err) {
+				return
+			}
+			manifests[i] = manifest
+			assert.Equal(t, cwd, manifest.WorkingDirectory)
+			assert.Equal(t, cwd, manifest.Config.SystemPromptArgs["directory"])
+			contexts := make(map[string]string)
+			for _, file := range manifest.ContextFiles {
+				contexts[file.Path] = file.Content
+			}
+			assert.Equal(t, fmt.Sprintf("Project %d context", i), contexts[filepath.Join(cwd, "AGENTS.md")])
+			assert.NotContains(t, contexts, filepath.Join(directories[1-i], "AGENTS.md"))
+			result, err := server.runnerRegistry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+				RunID: manifest.RunID, ToolCallID: "pwd", Name: "bash",
+				Input: json.RawMessage(`{"command":"pwd","description":"Check effective execution working directory","timeout":10}`),
+			}, nil)
+			if assert.NoError(t, err) {
+				assert.Empty(t, result.Result.Error)
+				assert.Contains(t, result.Result.AssistantFacing, cwd)
+			}
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, "workspace", manifests[0].Config.SystemPromptArgs["origin"])
+	assert.Equal(t, "profile", manifests[1].Config.SystemPromptArgs["origin"])
+	assert.True(t, server.EmbeddedRunnerStatus().Ready, "a concurrent runner remains ready while busy")
+	// YAML changes affect a later run, never an already-pinned manifest.
+	require.NoError(t, os.WriteFile(filepath.Join(directories[0], "kodelet-config.yaml"), []byte("sysprompt_args:\n  origin: changed\n"), 0o600))
+	for _, manifest := range manifests {
+		require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), manifest.RunID, runnerregistry.RunStatusSucceeded, nil))
+	}
+	later, err := server.runnerRegistry.OpenRun(t.Context(), runnerID, protocol.RunOpenParams{RunID: "later", ConversationID: "later", CWD: directories[0]})
+	require.NoError(t, err)
+	assert.Equal(t, "changed", later.Config.SystemPromptArgs["origin"])
+	assert.Equal(t, "workspace", manifests[0].Config.SystemPromptArgs["origin"])
+	require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), later.RunID, runnerregistry.RunStatusSucceeded, nil))
+	currentCWD, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, processCWD, currentCWD)
+}
+
+func TestEmbeddedRunnerShutdownDrainsBeforeDisconnect(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	config.EmbeddedRunner.Settings["allowed_tools"] = []string{"file_read"}
+	closed := make(chan struct{})
+	toolStarted, toolCanceled := make(chan struct{}), make(chan struct{})
+	config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+		local := agentenv.NewLocalEnvironment(cwd, runtime)
+		var conversationID string
+		return &embeddedTestEnvironment{
+			Environment: local,
+			open: func(ctx context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
+				conversationID = spec.ConversationID
+				return local.Open(ctx, spec)
+			},
+			close: func(ctx context.Context) error {
+				if conversationID == "shutdown-conversation" {
+					close(closed)
+				}
+				return local.Close(ctx)
+			},
+			execute: func(ctx context.Context, _ agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+				close(toolStarted)
+				<-ctx.Done()
+				close(toolCanceled)
+				return agentenv.ToolExecution{}, ctx.Err()
+			},
+		}
+	}
+	server, _, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	runnerID := server.EmbeddedRunnerStatus().RunnerID
+	// Mirror the agent-owned lease lifetime without involving a provider.
+	runCtx, cancel := context.WithCancel(server.runCtx)
+	t.Cleanup(cancel)
+	_, err := server.runnerRegistry.OpenRun(runCtx, runnerID, protocol.RunOpenParams{RunID: "shutdown-run", ConversationID: "shutdown-conversation"})
+	require.NoError(t, err)
+	toolDone := make(chan error, 1)
+	go func() {
+		_, err := server.runnerRegistry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+			RunID: "shutdown-run", ToolCallID: "blocked-tool", Name: "file_read", Input: json.RawMessage(`{"path":"AGENTS.md"}`),
+		}, nil)
+		toolDone <- err
+	}()
+	select {
+	case <-toolStarted:
+	case <-time.After(3 * time.Second):
+		require.FailNow(t, "runner tool did not start")
+	}
+	run := &activeChatRun{cancel: cancel, done: make(chan struct{})}
+	require.True(t, server.registerActiveChat("shutdown-conversation", run))
+	go func() {
+		defer close(run.done)
+		<-runCtx.Done()
+		assert.False(t, server.EmbeddedRunnerStatus().Ready, "shutdown must withdraw readiness immediately")
+		runner, found := server.runnerRegistry.Runner(runnerID)
+		assert.True(t, found)
+		assert.True(t, runner.Connected, "execution cleanup must run before runner transport closes")
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cleanupCancel()
+		assert.NoError(t, server.runnerRegistry.CancelRun(cleanupCtx, "shutdown-run", "daemon shutdown"))
+		assert.NoError(t, server.runnerRegistry.CloseRun(cleanupCtx, "shutdown-run", runnerregistry.RunStatusCanceled, context.Canceled))
+	}()
+	stop()
+	select {
+	case err := <-toolDone:
+		assert.Error(t, err, "active tool must report cancellation, not success")
+	case <-time.After(time.Second):
+		assert.Fail(t, "tool RPC did not finish during shutdown")
+	}
+	select {
+	case <-toolCanceled:
+	default:
+		assert.Fail(t, "cancellation did not reach the runner tool")
+	}
+	select {
+	case <-closed:
+	default:
+		assert.Fail(t, "runner environment was not closed before shutdown completed")
+	}
+	assert.False(t, server.registerActiveChat("late-conversation", &activeChatRun{}), "shutdown must reject new admission")
+	held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
+	require.NoError(t, err)
+	assert.False(t, held)
+}
+
+func TestEmbeddedRunnerBoundedStartupCleanup(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	config.EmbeddedRunner.ServiceOptions.CleanupTimeout = 30 * time.Millisecond
+	release, cleanupDone := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		select {
+		case <-cleanupDone:
+		case <-time.After(time.Second):
+			assert.Fail(t, "test cleanup did not finish")
+		}
+	})
+	config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+		local := agentenv.NewLocalEnvironment(cwd, runtime)
+		return &embeddedTestEnvironment{Environment: local, close: func(ctx context.Context) error {
+			defer close(cleanupDone)
+			<-release // Deliberately ignore cancellation to verify bounded cleanup.
+			return local.Close(ctx)
+		}}
+	}
+	server, _, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 3*time.Second, 10*time.Millisecond)
+	assert.Contains(t, server.EmbeddedRunnerStatus().Error, "timed out")
+	assert.False(t, server.EmbeddedRunnerStatus().Ready)
+	stop()
+	held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
+	require.NoError(t, err)
+	assert.False(t, held, "bounded cleanup must release workspace ownership")
+}
+
+func TestEmbeddedRunnerReadinessRequiresHealthyHeartbeat(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	server.config.EmbeddedRunner = &EmbeddedRunnerConfig{Workspace: t.TempDir()}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-one", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: server.config.EmbeddedRunner.Workspace, Name: "workspace"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+	server.embeddedStatus.RunnerID = registration.RunnerID
+	assert.False(t, server.EmbeddedRunnerStatus().Ready, "registration alone is not readiness")
+	for _, state := range []protocol.RunnerState{protocol.RunnerStateError, protocol.RunnerStateIdle} {
+		require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+			RunnerID: registration.RunnerID, Generation: registration.Generation, State: state,
+		}))
+		assert.Equal(t, state == protocol.RunnerStateIdle, server.EmbeddedRunnerStatus().Ready)
+	}
+	server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, errors.New("connection lost"))
+	status := server.EmbeddedRunnerStatus()
+	assert.False(t, status.Ready)
+	assert.Equal(t, registration.RunnerID, status.RunnerID, "offline default identity must remain pinned")
+}
+
+func TestEmbeddedRunnerShutdownBoundsExecutionDrain(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	server, err := NewServer(t.Context(), config, testFrontendHandler())
+	require.NoError(t, err)
+	server.shutdownTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { assert.NoError(t, server.Close()) })
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx, listener) }()
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	var canceled atomic.Bool
+	// An uncooperative execution never acknowledges cancellation.
+	require.True(t, server.registerActiveChat("stuck", &activeChatRun{cancel: func() { canceled.Store(true) }, done: make(chan struct{})}))
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "active executions did not stop")
+	case <-time.After(3 * time.Second):
+		require.FailNow(t, "daemon shutdown exceeded its bound")
+	}
+	assert.True(t, canceled.Load())
+	assert.False(t, server.EmbeddedRunnerStatus().Ready)
+	require.Eventually(t, func() bool {
+		held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
+		return err == nil && !held
+	}, time.Second, 10*time.Millisecond)
+}
+
+type embeddedSelectionResolver struct {
+	requests []chat.ChatRequest
+}
+
+func (r *embeddedSelectionResolver) ResolveEnvironment(_ context.Context, request chat.ChatRequest, _ string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+	r.requests = append(r.requests, request)
+	return nil, errors.New("selection captured before provider execution")
+}
+
+func TestEmbeddedRunnerDefaultSelectionPrecedence(t *testing.T) {
+	for _, scenario := range []string{"default", "explicit", "affinity", "unavailable", "explicit while default offline", "affinity while default offline"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			server := newRunnerTestServer(t, "")
+			server.config.EmbeddedRunner = &EmbeddedRunnerConfig{}
+			registrations := make([]protocol.RegisterResult, 0, 2)
+			for _, host := range []string{"embedded", "external"} {
+				registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+					ProtocolVersions: []int{protocol.Version}, Host: protocol.Host{InstanceID: host, Hostname: host, OS: "linux", Arch: "amd64"},
+					Workspace: protocol.Workspace{Path: "/work/" + host, Name: host},
+				}, newRunnerAPITestLink())
+				require.NoError(t, err)
+				require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+					RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle,
+				}))
+				registrations = append(registrations, registration)
+			}
+			server.embeddedStatus.RunnerID = registrations[0].RunnerID
+			request := chat.ChatRequest{Message: "hello", CWD: "/requested/runner/directory"}
+			wantRunner := registrations[0].RunnerID
+			if strings.HasPrefix(scenario, "explicit") {
+				request.RunnerID = registrations[1].RunnerID
+				wantRunner = request.RunnerID
+			}
+			if strings.HasPrefix(scenario, "affinity") {
+				request.ConversationID = "existing"
+				require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "existing", registrations[1].RunnerID, "gpu"))
+				wantRunner = registrations[1].RunnerID
+			}
+			if scenario == "unavailable" || strings.HasSuffix(scenario, "offline") {
+				registration := registrations[0]
+				server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, errors.New("offline"))
+			}
+			resolver := &embeddedSelectionResolver{}
+			defaultRunner := NewDefaultChatRunner("")
+			defaultRunner.SetEnvironmentResolver(resolver)
+			t.Cleanup(func() { assert.NoError(t, defaultRunner.Close()) })
+			_, err := (&serverChatRunner{server: server, runner: defaultRunner}).Run(t.Context(), request, &recordingChatSink{})
+			if scenario == "unavailable" {
+				require.ErrorContains(t, err, "default embedded runner is unavailable")
+				assert.Empty(t, resolver.requests, "never silently select the available external runner")
+				return
+			}
+			require.ErrorContains(t, err, "selection captured before provider execution")
+			require.Len(t, resolver.requests, 1)
+			assert.Equal(t, wantRunner, resolver.requests[0].RunnerID)
+			assert.Equal(t, request.CWD, resolver.requests[0].CWD)
+			if request.ConversationID != "" {
+				assert.Equal(t, "gpu", resolver.requests[0].EnvironmentProfile)
+			}
+		})
+	}
+}
+
+type embeddedCrashState struct {
+	Address    string `json:"address"`
+	RunnerID   string `json:"runnerId"`
+	Generation int64  `json:"generation"`
+}
+
+func TestEmbeddedRunnerForcedCrashRestoresLostRunWithoutReplay(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	workspace := config.EmbeddedRunner.Workspace
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	logFile, err := os.Create(filepath.Join(t.TempDir(), "crash-process.log"))
+	require.NoError(t, err)
+	defer logFile.Close()
+	process := exec.CommandContext(t.Context(), executable, "-test.run=^TestEmbeddedRunnerCrashProcess$", "-test.timeout=60s")
+	process.Env = append(os.Environ(), "KODELET_EMBEDDED_CRASH_WORKSPACE="+workspace, "KODELET_EMBEDDED_CRASH_STORE="+config.EmbeddedRunner.Store.Root())
+	process.Stdout, process.Stderr = logFile, logFile
+	require.NoError(t, process.Start())
+	var waited bool
+	t.Cleanup(func() {
+		if !waited {
+			_ = process.Process.Kill()
+			_ = process.Wait()
+		}
+		if t.Failed() {
+			data, _ := os.ReadFile(logFile.Name())
+			if len(data) > 4096 {
+				data = data[len(data)-4096:]
+			}
+			t.Logf("crash helper output: %s", data)
+		}
+	})
+	var crashed embeddedCrashState
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(workspace, "crash-ready.json"))
+		return err == nil && json.Unmarshal(data, &crashed) == nil && crashed.RunnerID != ""
+	}, 10*time.Second, 20*time.Millisecond)
+	held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	require.True(t, held)
+	require.NoError(t, process.Process.Kill()) // No deferred Close, drain, or final database write.
+	require.Error(t, process.Wait())
+	waited = true
+	held, err = config.EmbeddedRunner.Store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.False(t, held, "OS ownership lock must release even after SIGKILL")
+	server, _, stop := startEmbeddedRunnerTestServer(t, config, crashed.Address)
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, crashed.RunnerID, server.EmbeddedRunnerStatus().RunnerID)
+	runner, found := server.runnerRegistry.Runner(crashed.RunnerID)
+	require.True(t, found)
+	assert.Greater(t, runner.Generation, crashed.Generation)
+	run, found := server.runnerRegistry.Run("crash-run")
+	require.True(t, found)
+	assert.Equal(t, runnerregistry.RunStatusLost, run.Status)
+	assert.Contains(t, run.Error, "control plane restarted")
+	affinity, found, err := server.runnerRegistry.ResolveConversationAffinity(t.Context(), "crash-conversation")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, crashed.RunnerID, affinity.RunnerID)
+	_, err = server.runnerRegistry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{RunID: "crash-run", ToolCallID: "replay", Name: "file_write", Input: json.RawMessage(`{}`)}, nil)
+	require.Error(t, err, "a lost run must not dispatch uncertain work again")
+	data, err := os.ReadFile(filepath.Join(workspace, "side-effects.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "effect\n", string(data), "startup must not replay the interrupted tool")
+	stop()
+}
+
+func TestEmbeddedRunnerCrashProcess(t *testing.T) {
+	workspace := os.Getenv("KODELET_EMBEDDED_CRASH_WORKSPACE")
+	if workspace == "" {
+		return
+	}
+	store, err := localstate.NewStoreAt(os.Getenv("KODELET_EMBEDDED_CRASH_STORE"))
+	require.NoError(t, err)
+	toolStarted := make(chan struct{})
+	config := &ServerConfig{
+		Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, WebAuthMode: WebAuthModeToken, AuthToken: "web-secret", RunnerAuthMode: RunnerAuthModeNone,
+		EmbeddedRunner: &EmbeddedRunnerConfig{Workspace: workspace, Store: store, Settings: map[string]any{
+			"extensions": map[string]any{"enabled": false}, "skills": map[string]any{"enabled": false}, "allowed_tools": []string{"file_write"},
+		}},
+	}
+	config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+		return &embeddedTestEnvironment{Environment: agentenv.NewLocalEnvironment(cwd, runtime), execute: func(ctx context.Context, _ agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+			file, err := os.OpenFile(filepath.Join(cwd, "side-effects.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return agentenv.ToolExecution{}, err
+			}
+			_, writeErr := file.WriteString("effect\n")
+			closeErr := file.Close()
+			if writeErr != nil || closeErr != nil {
+				return agentenv.ToolExecution{}, errors.New("failed to persist test side effect")
+			}
+			close(toolStarted)
+			<-ctx.Done()
+			return agentenv.ToolExecution{}, ctx.Err()
+		}}
+	}
+	server, endpoint, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	runnerID := server.EmbeddedRunnerStatus().RunnerID
+	_, err = server.runnerRegistry.OpenRun(t.Context(), runnerID, protocol.RunOpenParams{RunID: "crash-run", ConversationID: "crash-conversation"})
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.CommitConversationAffinity(t.Context(), "crash-conversation"))
+	go func() {
+		_, _ = server.runnerRegistry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{RunID: "crash-run", ToolCallID: "side-effect", Name: "file_write", Input: json.RawMessage(`{}`)}, nil)
+	}()
+	select {
+	case <-toolStarted:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "crash test tool did not start")
+	}
+	runner, found := server.runnerRegistry.Runner(runnerID)
+	require.True(t, found)
+	data, err := json.Marshal(embeddedCrashState{Address: strings.TrimPrefix(endpoint, "http://"), RunnerID: runnerID, Generation: runner.Generation})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "crash-ready.json"), data, 0o600))
+	select {} // The parent deliberately kills this daemon without graceful cleanup.
+}
 
 func TestRunnerWebsocketRegistersAndDetachesRunner(t *testing.T) {
 	server := newRunnerTestServer(t, "")
@@ -190,14 +946,17 @@ func TestRunnerRESTEndpointsExposeRegisteredStatus(t *testing.T) {
 
 func TestRemoteWorkspaceGitDiffUsesConversationRunner(t *testing.T) {
 	server := newRunnerTestServer(t, "")
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{ID: "conversation-git", CWD: "/runner/selected"}, nil
+	}}
 	link := newRunnerAPITestLink()
 	link.call = func(_ context.Context, method string, params any, result any) error {
 		assert.Equal(t, protocol.MethodWorkspaceGitDiff, method)
-		assert.IsType(t, protocol.WorkspaceGitDiffParams{}, params)
+		assert.Equal(t, protocol.WorkspaceGitDiffParams{CWD: "/runner/selected"}, params)
 		output := result.(*protocol.WorkspaceGitDiffResult)
 		*output = protocol.WorkspaceGitDiffResult{
-			CWD:      "/runner/project",
-			GitRoot:  "/runner/project",
+			CWD:      "/runner/selected",
+			GitRoot:  "/runner/selected",
 			Diff:     "diff --git a/file.txt b/file.txt\n",
 			HasDiff:  true,
 			ExitCode: 0,
@@ -208,6 +967,7 @@ func TestRemoteWorkspaceGitDiffUsesConversationRunner(t *testing.T) {
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
 			WorkspaceGitDiff: true,
+			WorkspaceCWD:     true,
 		},
 		Host:      protocol.Host{InstanceID: "host-git", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
@@ -227,7 +987,7 @@ func TestRemoteWorkspaceGitDiffUsesConversationRunner(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var response gitDiffResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "/runner/project", response.CWD)
+	assert.Equal(t, "/runner/selected", response.CWD)
 	assert.True(t, response.HasDiff)
 	assert.Contains(t, response.Diff, "diff --git")
 }
@@ -258,6 +1018,115 @@ func TestRemoteWorkspaceTargetRejectsUnreservedConversation(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.False(t, called)
+}
+
+func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testing.T) {
+	for _, method := range []string{protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints} {
+		t.Run(method, func(t *testing.T) {
+			server := newRunnerTestServer(t, "")
+			server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+				return &conversations.GetConversationResponse{ID: "conversation-discovery", CWD: "/runner/selected"}, nil
+			}}
+			link := newRunnerAPITestLink()
+			calls := 0
+			var expectedOptions *llmtypes.ExecutionOptions
+			link.call = func(ctx context.Context, gotMethod string, params, result any) error {
+				calls++
+				assert.Equal(t, method, gotMethod)
+				_, bounded := ctx.Deadline()
+				assert.True(t, bounded)
+				if method == protocol.MethodWorkspaceDiscover {
+					assert.Equal(t, protocol.WorkspaceDiscoverParams{CWD: "/runner/selected", EnvironmentProfile: "review", Options: expectedOptions}, params)
+					*result.(*protocol.WorkspaceDiscoverResult) = protocol.WorkspaceDiscoverResult{CWD: "/runner/selected", EnvironmentProfile: "review", Digest: "sha256:selected"}
+				} else {
+					assert.Equal(t, protocol.WorkspaceCWDHintsParams{CWD: "/runner/selected", EnvironmentProfile: "review", Query: "project"}, params)
+					*result.(*protocol.WorkspaceCWDHintsResult) = protocol.WorkspaceCWDHintsResult{Hints: []protocol.DirectoryHint{{Path: "/runner/selected/project"}}}
+				}
+				return nil
+			}
+			registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version},
+				Capabilities:     protocol.RunnerCapabilities{WorkspaceDiscovery: true},
+				Host:             protocol.Host{InstanceID: "host-discovery", Hostname: "worker", OS: "linux", Arch: "amd64"},
+				Workspace:        protocol.Workspace{Path: "/runner/startup", Name: "startup"},
+			}, link)
+			require.NoError(t, err)
+			require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle}))
+			require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-discovery", registration.RunnerID, "review"))
+			for _, query := range []string{
+				"runnerId=" + registration.RunnerID + "&cwd=/runner/selected&environmentProfile=review",
+				"conversationId=conversation-discovery",
+			} {
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequest(http.MethodGet, "/api/chat/discovery?"+query+"&q=project", nil)
+				if method == protocol.MethodWorkspaceDiscover {
+					server.handleGetSlashCommands(recorder, request)
+				} else {
+					server.handleGetCWDHints(recorder, request)
+				}
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				assert.Contains(t, recorder.Body.String(), "/runner/selected")
+			}
+			assert.Equal(t, 2, calls)
+			if method == protocol.MethodWorkspaceDiscover {
+				expectedOptions = &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true), AllowedTools: &[]string{}}
+				recorder := httptest.NewRecorder()
+				query := url.Values{"conversationId": {"conversation-discovery"}, "options": {`{"noExtensions":true,"noSkills":true,"allowedTools":[]}`}}
+				server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/discovery?"+query.Encode(), nil))
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				assert.Equal(t, 3, calls)
+			}
+			previousCalls := calls
+			for _, options := range [][]string{{"null"}, {`{"noExtensions":null}`}, {`{"model":"gpt-4.1"}`}, {`{"maxTurns":2}`}, {`{"unknown":true}`}, {"{}", "{}"}, {strings.Repeat(" ", 16*1024) + "{}"}} {
+				query := url.Values{"runnerId": {registration.RunnerID}, "options": options}
+				recorder := httptest.NewRecorder()
+				server.handleRunnerDiscovery(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil), method)
+				assert.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			}
+			assert.Equal(t, previousCalls, calls, "invalid restrictions must not reach the runner")
+		})
+	}
+}
+
+func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{ID: "conversation-scope", CWD: "/runner/selected"}, nil
+	}}
+	link := newRunnerAPITestLink()
+	link.call = func(context.Context, string, any, any) error {
+		t.Error("invalid or unsupported targets must not call the runner")
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true, WorkspaceTerminal: true},
+		Host:             protocol.Host{InstanceID: "host-scope", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/runner/startup", Name: "startup"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle}))
+	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-scope", registration.RunnerID, "review"))
+	for _, test := range []struct {
+		name    string
+		query   string
+		handler http.HandlerFunc
+		status  int
+	}{
+		{"old runner diff", "conversationId=conversation-scope", server.handleGetGitDiff, http.StatusNotImplemented},
+		{"old runner terminal", "conversationId=conversation-scope", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"old runner discovery", "runnerId=" + registration.RunnerID, server.handleGetSlashCommands, http.StatusNotImplemented},
+		{"wrong directory", "conversationId=conversation-scope&cwd=/runner/startup", server.handleGetSlashCommands, http.StatusBadRequest},
+		{"wrong profile", "conversationId=conversation-scope&environmentProfile=default", server.handleGetSlashCommands, http.StatusBadRequest},
+		{"wrong runner", "conversationId=conversation-scope&runnerId=other", server.handleGetSlashCommands, http.StatusBadRequest},
+		{"runner-wide custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleGetGitDiff, http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			test.handler(recorder, httptest.NewRequest(http.MethodGet, "/?"+test.query, nil))
+			assert.Equal(t, test.status, recorder.Code, recorder.Body.String())
+		})
+	}
 }
 
 func TestRemoteWorkspaceTargetRejectsConversationRunnerMismatch(t *testing.T) {
@@ -298,16 +1167,20 @@ func TestRemoteWorkspaceTargetRejectsConversationRunnerMismatch(t *testing.T) {
 
 func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	server := newRunnerTestServer(t, "")
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{ID: "conversation-terminal", CWD: "/runner/selected"}, nil
+	}}
 	link := newRunnerAPITestLink()
 	var readCount atomic.Int32
 	inputReceived := make(chan struct{})
 	link.call = func(_ context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceTerminalOpen:
+			assert.Equal(t, "/runner/selected", params.(protocol.WorkspaceTerminalOpenParams).CWD)
 			output := result.(*protocol.WorkspaceTerminalOpenResult)
 			*output = protocol.WorkspaceTerminalOpenResult{
 				SessionID:    "terminal-1",
-				CWD:          "/runner/project",
+				CWD:          "/runner/selected",
 				Name:         "bash",
 				Git:          true,
 				PID:          123,
@@ -337,6 +1210,7 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
 			WorkspaceTerminal: true,
+			WorkspaceCWD:      true,
 		},
 		Host:      protocol.Host{InstanceID: "host-terminal", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
@@ -356,7 +1230,7 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	ready := readTerminalReady(t, conn)
-	assert.Equal(t, "/runner/project", ready.CWD)
+	assert.Equal(t, "/runner/selected", ready.CWD)
 	assert.Equal(t, "bash", ready.Name)
 	messageType, payload, err := conn.ReadMessage()
 	require.NoError(t, err)
@@ -696,10 +1570,10 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	response := value.(extensions.UIInputResponse)
 	assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
 
-	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, runnerpayload.UITranscriptAppendParams{RunID: "run-ui"}))
-	require.Nil(t, rpcErr)
-	assert.Contains(t, value.(extensions.UITranscriptAppendResponse).Reason, "not available")
 	owner := runnerpayload.ExtensionOwner{ExtensionID: "subagent", Generation: 1}
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, runnerpayload.UITranscriptAppendParams{RunID: "run-ui", Owner: owner}))
+	require.Nil(t, rpcErr)
+	assert.Contains(t, value.(extensions.UITranscriptAppendResponse).Reason, "no owning execution")
 	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
 		RunID: "run-ui",
 		Owner: owner,
@@ -760,9 +1634,9 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 		protocol.MethodUISurfaceFrame,
 		protocol.MethodUISurfaceClose,
 	} {
-		value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, method, json.RawMessage(`{"runId":"run-ui"}`))
+		value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, method, json.RawMessage(`{"runId":"run-ui","owner":{"extensionId":"subagent","generation":1},"lifecycle":1,"request":{"id":"surface","frame":{"sequence":1},"sequence":2}}`))
 		require.Nil(t, rpcErr)
-		assert.Contains(t, value.(extensions.UIFrameResponse).Reason, "not available")
+		assert.Contains(t, value.(extensions.UIFrameResponse).Reason, "no owning execution")
 	}
 
 	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, json.RawMessage(`not-json`))
@@ -926,12 +1800,12 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 		ConversationID: "local-conversation",
 		Message:        "hello",
 	}, &recordingChatSink{})
-	require.ErrorContains(t, err, "control-plane workspace is disabled; select a workspace runner")
+	require.ErrorContains(t, err, "workspace execution requires a runner")
 	assert.Equal(t, "local-conversation", conversationID)
 
 	var nilRunner *serverChatRunner
 	conversationID, err = nilRunner.Run(t.Context(), ChatRequest{ConversationID: "local-conversation", Message: " "}, &recordingChatSink{})
-	require.ErrorContains(t, err, "message cannot be empty")
+	require.ErrorContains(t, err, "daemon execution is unavailable")
 	assert.Equal(t, "local-conversation", conversationID)
 
 	assert.True(t, chatSupportsInteractiveUI(ChatRequest{ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true}}))
@@ -963,7 +1837,8 @@ func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *test
 			return nil, errors.Errorf("unexpected conversation lookup %q", id)
 		}
 	}}
-	runner := &serverChatRunner{server: server}
+	runner := &serverChatRunner{server: server, runner: NewDefaultChatRunner("")}
+	t.Cleanup(func() { assert.NoError(t, runner.Close()) })
 
 	conversationID, err := runner.Run(t.Context(), ChatRequest{
 		ConversationID: "local-conversation",

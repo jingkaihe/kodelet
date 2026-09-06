@@ -158,3 +158,29 @@ func (r *Runtime) ExecuteShortcutWithResult(ctx context.Context, key string, cal
 	}
 	return true, result, nil
 }
+
+// ExecutePinnedShortcut never restarts an extension or substitutes another
+// registration for the advertised identity. The RPC uses the exact session
+// snapshot, so a concurrent restart cannot receive a stale shortcut call.
+func (r *Runtime) ExecutePinnedShortcut(ctx context.Context, expected Shortcut, callContext ExtensionCallContext) (bool, *ShortcutResult, error) {
+	if r == nil {
+		return false, nil, errors.New("shortcut runtime is unavailable")
+	}
+	r.mu.RLock()
+	shortcut, ok := r.shortcuts[expected.Key]
+	r.mu.RUnlock()
+	if !ok || shortcut.ExtensionID != expected.ExtensionID || shortcut.process == nil || expected.Generation == 0 || shortcut.Generation != expected.Generation {
+		return false, nil, errors.New("shortcut registration changed; refresh discovery")
+	}
+	client, source := shortcut.process.rpcSession()
+	if client == nil || source == nil || source.owner.Generation != expected.Generation || !source.current() {
+		return false, nil, errors.New("shortcut extension generation changed; refresh discovery")
+	}
+	params := executeShortcutParams{Key: expected.Key, Context: extensionCallContextWithUIScope(ctx, callContext)}
+	var result *ShortcutResult
+	err := client.callWithHostHandler(ctx, "extension.shortcut.execute", params, &result, source)
+	if err == nil && !source.current() {
+		err = errors.New("shortcut extension generation changed during execution")
+	}
+	return true, result, err
+}

@@ -300,6 +300,7 @@ export interface BackgroundTaskLease {
 }
 
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
+	children: import("./child.js").ChildClient;
   signal: AbortSignal;
   storage: StorageContext;
   path: PathContext;
@@ -485,6 +486,7 @@ export type EventHandler<Name extends EventName = EventName> = (
 ) => Awaitable<EventResult | void>;
 
 export interface ExtensionAPI {
+	registerProfile(profile: import("./execution.js").ExecutionProfile): void;
   setMetadata(metadata: ExtensionMetadata): void;
   registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void;
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(
@@ -510,6 +512,7 @@ export interface InitializeParams {
 }
 
 export interface InitializeResult {
+	profiles?: import("./execution.js").ExecutionProfile[];
   name: string;
   version?: string;
   tools: Array<{

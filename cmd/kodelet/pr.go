@@ -1,20 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +19,6 @@ type PRConfig struct {
 	Target       string
 	TemplateFile string
 	Draft        bool
-	NoSave       bool
 	ResultOnly   bool
 }
 
@@ -34,7 +28,6 @@ func NewPRConfig() *PRConfig {
 		Target:       "main",
 		TemplateFile: "",
 		Draft:        false,
-		NoSave:       false,
 		ResultOnly:   false,
 	}
 }
@@ -59,122 +52,76 @@ var prCmd = &cobra.Command{
 This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.
 
 Use the --draft flag to create a draft pull request that is not ready for review.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			presenter.Warning("Cancellation requested, shutting down...")
-			cancel()
-		}()
-
-		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
-		if err != nil {
-			presenter.Error(err, "Failed to load configuration")
-			return
-		}
-		config := getPRConfigFromFlags(cmd)
-
-		if !isGitRepository() {
-			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
-			os.Exit(1)
-		}
-
-		if !isGhCliInstalled() {
-			presenter.Error(errors.New("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
-			presenter.Info("Visit https://cli.github.com/ for installation instructions")
-			os.Exit(1)
-		}
-
-		if !isGhAuthenticated() {
-			presenter.Error(errors.New("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
-			os.Exit(1)
-		}
-
-		processor, err := fragments.NewFragmentProcessor()
-		if err != nil {
-			presenter.Error(err, "Failed to create fragment processor")
-			os.Exit(1)
-		}
-
-		fragmentArgs := map[string]string{
-			"target": config.Target,
-		}
-
-		if config.TemplateFile != "" {
-			fragmentArgs["template_file"] = config.TemplateFile
-		}
-
-		if config.Draft {
-			fragmentArgs["draft"] = "true"
-		} else {
-			fragmentArgs["draft"] = "false"
-		}
-
-		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-			FragmentName: "github/pr",
-			Arguments:    fragmentArgs,
-		})
-		if err != nil {
-			presenter.Error(err, "Failed to load built-in pr recipe")
-			os.Exit(1)
-		}
-
-		prompt := fragment.Content
-
-		extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, "")
-		if err != nil {
-			presenter.Error(err, "Failed to initialize extensions")
-			os.Exit(1)
-		}
-		if extensionRuntime != nil {
-			defer func() {
-				_ = extensionRuntime.Close()
-			}()
-			llmConfig.Extensions = extensionRuntime
-		}
-
-		stateOpts := []tools.BasicStateOption{tools.WithLLMConfig(llmConfig), tools.WithMainTools(), tools.WithSkillTool()}
-		if extensionRuntime != nil {
-			stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
-		}
-		s := tools.NewBasicState(ctx, stateOpts...)
-
-		if config.ResultOnly {
-			presenter.SetQuiet(true)
-			logger.SetLogLevel("error")
-		} else {
-			presenter.Info("Analyzing branch changes and generating PR description...")
-			presenter.Separator()
-		}
-
-		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, config.ResultOnly, llmtypes.MessageOpt{
-			PromptCache:        true,
-			NoSaveConversation: config.NoSave,
-		})
-
-		fmt.Println(out)
-
-		if !config.ResultOnly {
-			presenter.Separator()
-
-			usageStats := presenter.ConvertUsageStats(&usage)
-			presenter.Stats(usageStats)
-		}
-	},
+	RunE: func(cmd *cobra.Command, _ []string) error { return runRemotePR(cmd) },
 }
 
 func init() {
 	defaults := NewPRConfig()
+	addRemoteRunFlags(prCmd)
+	prCmd.Flags().String("cwd", "", "Repository directory on the selected runner")
 	prCmd.Flags().StringP("provider", "p", defaults.Provider, "The CVS provider to use")
 	prCmd.Flags().StringP("target", "t", defaults.Target, "The target branch to create the pull request on")
 	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
 	prCmd.Flags().BoolP("draft", "d", defaults.Draft, "Create the pull request as a draft")
-	prCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	prCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
+}
+
+func remotePRRequest(cmd *cobra.Command) (chat.ChatRequest, error) {
+	var request chat.ChatRequest
+	if err := validateRemoteChatFlags(cmd); err != nil {
+		return request, errors.Wrap(err, "invalid daemon PR options")
+	}
+	provider, _ := cmd.Flags().GetString("provider")
+	if provider != "github" {
+		return request, errors.New("PR provider must be github; select the model provider using a daemon --profile")
+	}
+	target, _ := cmd.Flags().GetString("target")
+	if strings.TrimSpace(target) == "" {
+		return request, errors.New("target branch cannot be empty")
+	}
+	// PR's --provider names the VCS, not the model provider. All other typed
+	// execution flags keep their ordinary validation and presence semantics.
+	options, err := remoteRunExecutionOptions(cmd, "provider")
+	if err != nil {
+		return request, err
+	}
+	request.Options = options
+	request.CWD, _ = cmd.Flags().GetString("cwd")
+	request.EnvironmentProfile, _ = cmd.Flags().GetString("runner-profile")
+	if cmd.Flags().Changed("profile") {
+		request.Profile, _ = cmd.Flags().GetString("profile")
+	}
+	template, _ := cmd.Flags().GetString("template-file")
+	draft, _ := cmd.Flags().GetBool("draft")
+	arguments := map[string]string{"target": target, "draft": strconv.FormatBool(draft)}
+	if template != "" {
+		arguments["template_file"] = template
+	}
+	request.Message = "/github/pr " + formatFragmentDisplayArgs(arguments)
+	return request, nil
+}
+
+func runRemotePR(cmd *cobra.Command) error {
+	request, err := remotePRRequest(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	server, _ := serverFlagOrConfig(cmd)
+	token, _, err := resolveControlPlaneAuthToken(cmd, server)
+	if err != nil {
+		return err
+	}
+	runner, err := prepareOneShotRunner(ctx, cmd, server, token, &request)
+	if err != nil {
+		return err
+	}
+	resultOnly, _ := cmd.Flags().GetBool("result-only")
+	if !resultOnly {
+		ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, cmd.ErrOrStderr()))
+	}
+	return executeRemoteRun(ctx, runner, request, resultOnly, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }
 
 func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
@@ -192,20 +139,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	if draft, err := cmd.Flags().GetBool("draft"); err == nil {
 		config.Draft = draft
 	}
-	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
-		config.NoSave = noSave
-	}
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
 		config.ResultOnly = resultOnly
 	}
 
 	return config
-}
-
-func isGhCliInstalled() bool {
-	return osutil.IsGHCLIInstalled()
-}
-
-func isGhAuthenticated() bool {
-	return osutil.IsGHCLIAuthenticated()
 }

@@ -11,6 +11,7 @@ pkg/             # Core packages
   ├── binaries/  # External binary management (ripgrep, fd)
   ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
   ├── conversations/  # Conversation storage (SQLite)
+  ├── delegation/ # Scoped child execution authority and presets
   ├── fragments/ # Fragment/recipe templates
   ├── llm/       # LLM clients (anthropic/, openai/)
   ├── plugins/   # Unified plugin system
@@ -55,9 +56,9 @@ mise run frontend-test           # Frontend tests
 ```bash
 # Core
 kodelet run "query"              # One-shot execution
-kodelet serve                    # Web UI server (localhost:8080)
+kodelet serve                    # Required daemon plus embedded runner (localhost:8080)
 kodelet run -r recipe-name       # Use recipe template
-kodelet run --follow "continue"  # Continue recent conversation
+kodelet run --follow --cwd "$PWD" "continue"  # Continue scoped daemon history
 
 # Git integration
 kodelet commit                   # AI commit messages
@@ -71,10 +72,10 @@ mise run build-dev               # Fast build (skip frontend)
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.
 
 ## Configuration
-Layered: env vars → global (`~/.kodelet/config.yaml`) → repo (`kodelet-config.yaml`)
+Trusted process defaults come from the user configuration (`~/.kodelet/config.yaml`), an explicit configuration file, environment and flags. Repository `kodelet-config.yaml` is loaded only by the runner for the execution CWD and only for permitted workspace settings; it cannot configure daemon models, credentials or endpoints. Daemon model profiles and runner environment profiles are separate namespaces. Ordinary CLI/TUI/ACP commands use the daemon and never initialize a local provider or conversation database; explicitly retained library-local ACP APIs are not a client fallback.
 
 ```bash
-# Required API keys
+# Provider API keys belong to the daemon environment
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export OPENAI_API_KEY="sk-..."
 
@@ -138,8 +139,8 @@ See [docs/extension-design.md](docs/extension-design.md).
 
 Discovery helpers:
 ```bash
-kodelet extension list
-kodelet extension inspect <name-or-id-or-path>
+kodelet host extension list
+kodelet host extension inspect <name-or-id-or-path>
 ```
 
 ## External Binary Management

@@ -63,6 +63,7 @@ type RemoteEnvironment struct {
 	opened             bool
 	opening            bool
 	closing            bool
+	childPrompt        *string
 }
 
 // NewRemoteEnvironment creates an unopened environment bound to one stable runner ID.
@@ -82,6 +83,7 @@ func NewRemoteEnvironment(controller RemoteController, runnerID string, options 
 
 // Open reserves runner capacity and pins the returned environment manifest.
 func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, error) {
+	spec = spec.Clone()
 	if e == nil || e.controller == nil {
 		return Manifest{}, errors.New("remote environment controller is required")
 	}
@@ -106,6 +108,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		return Manifest{}, errors.Wrap(err, "failed to generate remote run id")
 	}
 	params := protocol.RunOpenParams{
+		ChildPrompt:    e.childPrompt,
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
 		CWD:            strings.TrimSpace(spec.Config.WorkingDirectory),
@@ -120,6 +123,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		},
 		ClientCapabilities: e.clientCapabilities,
 		ReservedToolNames:  tools.ControlPlaneToolNames(),
+		Options:            spec.Config.EnvironmentOptions(),
 	}
 	wireManifest, err := e.controller.OpenRun(ctx, e.runnerID, params)
 	if err != nil {
@@ -492,6 +496,9 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		})
 	}
 	for _, definition := range wire.Tools {
+		if !config.EnvironmentOptions().ToolAllowed(definition.Name) {
+			continue
+		}
 		proxy := newRemoteToolProxy(definition)
 		definitions = append(definitions, ToolDefinition{
 			Name:        definition.Name,
@@ -508,6 +515,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		Tools:            definitions,
 		Commands:         slices.Clone(wire.Commands),
 		Config: (&EnvironmentConfig{
+			Options:             wire.Config.Options.Clone(),
 			AllowedCommands:     slices.Clone(wire.Config.AllowedCommands),
 			ToolMode:            wire.Config.ToolMode,
 			EnableFSSearchTools: wire.Config.EnableFSSearchTools,
@@ -521,7 +529,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 
 func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
 	available := tools.ControlPlaneTools()
-	if len(config.AllowedTools) == 0 {
+	if len(config.AllowedTools) == 0 && config.ExecutionOptions == nil {
 		return available
 	}
 
@@ -537,7 +545,8 @@ func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
 		if tool == nil {
 			continue
 		}
-		if _, ok := allowed[tool.Name()]; ok {
+		_, explicitlyAllowed := allowed[tool.Name()]
+		if (len(config.AllowedTools) == 0 || explicitlyAllowed) && config.ExecutionOptions.ToolAllowed(tool.Name()) {
 			filtered = append(filtered, tool)
 		}
 	}

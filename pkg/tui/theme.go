@@ -2,12 +2,14 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -116,6 +118,11 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 			Placeholder: "/theme [name]",
 		},
 		{
+			Name:        "take-control",
+			Description: "Handle future extension prompts in this client",
+			Placeholder: "/take-control",
+		},
+		{
 			Name:        "sessions",
 			Description: "Browse and switch conversations",
 			Hint:        "search (optional)",
@@ -142,6 +149,25 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	}
 
 	switch command {
+	case "take-control":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		runner, ok := m.runner.(interface {
+			TakeUIOwnership(context.Context, string) error
+		})
+		if !ok || !m.running || m.conversationID == "" || strings.TrimSpace(args) != "" {
+			return m.addUINotification(uiNotification{level: uiNotificationError, title: "Control unavailable", message: "Use /take-control while attached to an active daemon conversation."}), true
+		}
+		conversationID := m.conversationID
+		ctx := m.ctx
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := runner.TakeUIOwnership(ctx, conversationID); err != nil {
+				return uiDiagnosticMsg{notification: uiNotification{level: uiNotificationError, title: "Control unavailable", message: err.Error()}}
+			}
+			return uiDiagnosticMsg{notification: uiNotification{title: "Control transferred", message: "Future extension prompts will appear in this client."}}
+		}, true
 	case "stop":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()

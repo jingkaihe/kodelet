@@ -23,5 +23,6 @@ func All() []db.Migration {
 		Migration20260812120000CreateControlPlaneAuth(),
 		Migration20260813120000CreateUserAPICredentials(),
 		Migration20260813130000CreateRunnerDPoPReplays(),
+		Migration20260906130000CreateChatTurns(),
 	}
 }

@@ -3,10 +3,54 @@ package payload
 import (
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
+	manifest := Manifest{
+		ProtocolVersion:     protocol.Version,
+		RunnerID:            "runner-one",
+		RunID:               "run-one",
+		Generation:          1,
+		ExtensionGeneration: 1,
+		Tools: []ToolDefinition{{
+			Name:        "bash",
+			Description: "execute a command",
+			InputSchema: map[string]any{"type": "object"},
+			Placement:   "environment",
+		}},
+	}
+
+	first, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	manifest.Digest = "stale"
+	manifest.RunnerID = "runner-two"
+	manifest.RunID = "run-two"
+	manifest.Generation = 2
+	manifest.ExtensionGeneration = 99
+	second, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, first)
+}
+
+func TestShortcutManifestDigestIgnoresGenerationWithoutMutatingSnapshot(t *testing.T) {
+	manifest := Manifest{Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "review", Generation: 11}}}
+	digest, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(11), manifest.Shortcuts[0].Generation)
+	manifest.Shortcuts[0].Generation++
+	reopened, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, digest, reopened, "isolated probe and lease processes share a stable registration digest")
+	manifest.Shortcuts[0].ExtensionID = "replacement"
+	replacement, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.NotEqual(t, digest, replacement, "same key from another extension is not the same registration")
+}
 
 func TestComputeManifestDigestIgnoresRunIdentityAndDetectsContentChanges(t *testing.T) {
 	manifest := Manifest{
