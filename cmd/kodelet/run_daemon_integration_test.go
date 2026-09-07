@@ -95,7 +95,7 @@ func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
 	session, err := unix.Getsid(connection.PID)
 	require.NoError(t, err)
 	assert.Equal(t, connection.PID, session, "daemon owns a detached Unix session")
-	client, err := chat.NewControlPlaneChatRunner(connection.URL, string(token), "")
+	client, err := chat.NewClient(connection.URL, string(token), "")
 	require.NoError(t, err)
 	for _, cwd := range workspaces {
 		history, err := client.ListConversationsInCWD(ctx, 10, cwd)
@@ -512,7 +512,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			}
 			assert.EqualValues(t, 4, toolResults.Load())
 			assert.EqualValues(t, 1, helperCalls.Load(), "the active runner tool delegates exactly one provider call to the daemon")
-			client, err := chat.NewControlPlaneChatRunner(serverURL, "client-secret", runnerID)
+			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
 			require.NoError(t, err)
 			if background {
 				require.Eventually(t, func() bool {

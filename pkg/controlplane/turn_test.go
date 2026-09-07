@@ -206,7 +206,7 @@ func TestTurnStoreAdmissionWaitsForConcurrentWriter(t *testing.T) {
 	}
 }
 
-func serveTurnTestServer(t *testing.T, store *turnStore, runner chat.ChatRunner) (*httptest.Server, *chat.ControlPlaneChatRunner) {
+func serveTurnTestServer(t *testing.T, store *turnStore, runner chat.ChatRunner) (*httptest.Server, *chat.Client) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{turns: store, chatRunner: runner, runCtx: ctx, runCancel: cancel, config: &ServerConfig{AuthToken: "receipt-token"}}
@@ -216,7 +216,7 @@ func serveTurnTestServer(t *testing.T, store *turnStore, runner chat.ChatRunner)
 	router.HandleFunc("/api/conversations/{id}/stop", s.handleStopConversation).Methods(http.MethodPost)
 	server := httptest.NewServer(s.authMiddleware(router))
 	t.Cleanup(func() { cancel(); server.Close() })
-	client, err := chat.NewControlPlaneChatRunner(server.URL, "receipt-token", "")
+	client, err := chat.NewClient(server.URL, "receipt-token", "")
 	require.NoError(t, err)
 	return server, client
 }

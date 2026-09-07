@@ -73,20 +73,20 @@ type AnthropicAccountUsage struct {
 	Window7d AnthropicUsageWindow `json:"window_7d"`
 }
 
-func (r *ControlPlaneChatRunner) AnthropicAccounts(ctx context.Context) (AnthropicAccounts, error) {
+func (r *Client) AnthropicAccounts(ctx context.Context) (AnthropicAccounts, error) {
 	var result AnthropicAccounts
 	err := r.providerRequest(ctx, "anthropic", http.MethodGet, []string{"accounts"}, nil, &result)
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) MutateAnthropicAccount(ctx context.Context, mutation AnthropicAccountMutation) error {
+func (r *Client) MutateAnthropicAccount(ctx context.Context, mutation AnthropicAccountMutation) error {
 	if err := mutation.Validate(); err != nil {
 		return err
 	}
 	return r.providerRequest(ctx, "anthropic", http.MethodPost, []string{"accounts"}, mutation, nil)
 }
 
-func (r *ControlPlaneChatRunner) AnthropicAccountUsage(ctx context.Context, alias string) (AnthropicAccountUsage, error) {
+func (r *Client) AnthropicAccountUsage(ctx context.Context, alias string) (AnthropicAccountUsage, error) {
 	var result AnthropicAccountUsage
 	if alias != "" {
 		if err := auth.ValidateAlias(alias); err != nil {
@@ -99,7 +99,7 @@ func (r *ControlPlaneChatRunner) AnthropicAccountUsage(ctx context.Context, alia
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) StartAnthropicLogin(ctx context.Context) (AnthropicLogin, error) {
+func (r *Client) StartAnthropicLogin(ctx context.Context) (AnthropicLogin, error) {
 	var result AnthropicLogin
 	err := r.providerRequest(ctx, "anthropic", http.MethodPost, []string{"oauth-login"}, nil, &result)
 	return result, err
@@ -107,7 +107,7 @@ func (r *ControlPlaneChatRunner) StartAnthropicLogin(ctx context.Context) (Anthr
 
 // CompleteAnthropicLogin explicitly selects an alias (empty means derive from
 // the returned email) rather than overwriting the browser's default account.
-func (r *ControlPlaneChatRunner) CompleteAnthropicLogin(ctx context.Context, id, code, alias string) (AnthropicLogin, error) {
+func (r *Client) CompleteAnthropicLogin(ctx context.Context, id, code, alias string) (AnthropicLogin, error) {
 	var result AnthropicLogin
 	if id == "" || code == "" || len(code) > 8192 {
 		return result, errors.New("provide a login ID and an authorization code of at most 8192 bytes")
@@ -124,7 +124,7 @@ func (r *ControlPlaneChatRunner) CompleteAnthropicLogin(ctx context.Context, id,
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) CancelAnthropicLogin(ctx context.Context, id string) error {
+func (r *Client) CancelAnthropicLogin(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("login id is required")
 	}
@@ -146,13 +146,13 @@ type ProviderDeviceLogin struct {
 	Message         string `json:"message,omitempty"`
 }
 
-func (r *ControlPlaneChatRunner) ProviderConnection(ctx context.Context, provider string) (ProviderConnection, error) {
+func (r *Client) ProviderConnection(ctx context.Context, provider string) (ProviderConnection, error) {
 	var result ProviderConnection
 	err := r.providerRequest(ctx, provider, http.MethodGet, nil, nil, &result)
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) StartProviderDeviceLogin(ctx context.Context, provider string) (ProviderDeviceLogin, error) {
+func (r *Client) StartProviderDeviceLogin(ctx context.Context, provider string) (ProviderDeviceLogin, error) {
 	var result ProviderDeviceLogin
 	if provider != "codex" && provider != "copilot" {
 		return result, errors.New("provider does not support device login")
@@ -161,7 +161,7 @@ func (r *ControlPlaneChatRunner) StartProviderDeviceLogin(ctx context.Context, p
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) ProviderDeviceLogin(ctx context.Context, provider, id string) (ProviderDeviceLogin, error) {
+func (r *Client) ProviderDeviceLogin(ctx context.Context, provider, id string) (ProviderDeviceLogin, error) {
 	var result ProviderDeviceLogin
 	if id == "" || (provider != "codex" && provider != "copilot") {
 		return result, errors.New("device login provider and id are required")
@@ -170,14 +170,14 @@ func (r *ControlPlaneChatRunner) ProviderDeviceLogin(ctx context.Context, provid
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) CancelProviderDeviceLogin(ctx context.Context, provider, id string) error {
+func (r *Client) CancelProviderDeviceLogin(ctx context.Context, provider, id string) error {
 	if id == "" || (provider != "codex" && provider != "copilot") {
 		return errors.New("device login provider and id are required")
 	}
 	return r.providerRequest(ctx, provider, http.MethodDelete, []string{"device-login", id}, nil, nil)
 }
 
-func (r *ControlPlaneChatRunner) providerRequest(ctx context.Context, provider, method string, path []string, input, result any) error {
+func (r *Client) providerRequest(ctx context.Context, provider, method string, path []string, input, result any) error {
 	if provider != "anthropic" && provider != "codex" && provider != "copilot" {
 		return errors.New("unsupported provider")
 	}
@@ -226,7 +226,7 @@ type CodexStatus struct {
 	UsageMessage   string                `json:"usageMessage,omitempty"`
 }
 
-func (r *ControlPlaneChatRunner) CodexStatus(ctx context.Context) (CodexStatus, error) {
+func (r *Client) CodexStatus(ctx context.Context) (CodexStatus, error) {
 	var result CodexStatus
 	err := r.providerRequest(ctx, "codex", http.MethodGet, []string{"status"}, nil, &result)
 	return result, err

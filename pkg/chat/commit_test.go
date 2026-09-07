@@ -35,7 +35,7 @@ func TestControlPlaneCommitUncertainResultIsNeverRetried(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewControlPlaneChatRunner(server.URL, "client", "runner")
+			client, err := NewClient(server.URL, "client", "runner")
 			require.NoError(t, err)
 			_, err = client.CreateCommit(t.Context(), WorkspaceTarget{}, protocol.WorkspaceGitCommitParams{CWD: "/runner/repo", Tree: strings.Repeat("a", 40), Generation: 1, Message: "feat: test"})
 			require.ErrorContains(t, err, "check 'git log'")
@@ -48,7 +48,7 @@ func TestControlPlaneCommitRejectsMalformedApprovalBeforeSubmission(t *testing.T
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
-	client, err := NewControlPlaneChatRunner(server.URL, "", "runner")
+	client, err := NewClient(server.URL, "", "runner")
 	require.NoError(t, err)
 	_, err = client.CreateCommit(t.Context(), WorkspaceTarget{}, protocol.WorkspaceGitCommitParams{})
 	require.Error(t, err)

@@ -23,7 +23,7 @@ func runConversationTurnCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := chat.NewControlPlaneChatRunner(server, token, "")
+	client, err := chat.NewClient(server, token, "")
 	if err != nil {
 		return err
 	}

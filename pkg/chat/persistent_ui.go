@@ -69,7 +69,7 @@ func controlPlaneUICapabilitiesHeader(ctx context.Context) string {
 
 type remoteUISource struct {
 	owner          extensions.UIExtensionOwner
-	runner         *ControlPlaneChatRunner
+	runner         *Client
 	conversationID string
 	mu             sync.Mutex
 	routes         map[string]string
@@ -119,7 +119,7 @@ func (s *remoteUISource) NotifyExtensionUISurfaceEvent(ctx context.Context, life
 }
 
 type remoteUIStream struct {
-	runner  *ControlPlaneChatRunner
+	runner  *Client
 	host    extensions.ExtensionUIHost
 	id      string
 	sources map[string]*remoteUISource
@@ -193,7 +193,7 @@ func (s *remoteUIStream) handleWidgets(ctx context.Context, conversationID strin
 	return nil
 }
 
-func newRemoteUIStream(ctx context.Context, runner *ControlPlaneChatRunner) *remoteUIStream {
+func newRemoteUIStream(ctx context.Context, runner *Client) *remoteUIStream {
 	host, _ := extensions.ExtensionUIHostFromContext(ctx)
 	return &remoteUIStream{runner: runner, host: host, id: extensions.NewUIInputRequestID(), sources: make(map[string]*remoteUISource), events: make(map[string]UIPersistentEvent), closed: make(map[string]bool)}
 }
@@ -305,7 +305,7 @@ func (s *remoteUIStream) handle(ctx context.Context, conversationID string, even
 	return true, nil
 }
 
-func (r *ControlPlaneChatRunner) postPersistentUI(ctx context.Context, conversationID, action string, value any) error {
+func (r *Client) postPersistentUI(ctx context.Context, conversationID, action string, value any) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "ui-persistent", action)

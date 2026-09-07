@@ -121,9 +121,9 @@ func TestDefaultRunnerCWDRequiresMatchingInstallation(t *testing.T) {
 			_, err = runner.Run(t.Context(), request, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
 			require.NoError(t, err)
 			if test.conversation == "" && test.selector == "" {
-				client, err := chat.NewControlPlaneChatRunner(daemon.URL, "", "")
+				client, err := chat.NewClient(daemon.URL, "", "")
 				require.NoError(t, err)
-				runner := &configuredChatRunner{ControlPlaneChatRunner: client}
+				runner := &configuredChatRunner{Client: client}
 				target, err := runner.discoveryTarget(t.Context(), chat.WorkspaceTarget{CWD: test.requestedCWD})
 				require.NoError(t, err)
 				assert.Equal(t, test.wantCWD, target.CWD)
@@ -376,7 +376,7 @@ func TestRemoteRunCancellationWhileWaitingForTerminalPrompt(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runner, err := chat.NewControlPlaneChatRunner(server.URL, "", "")
+	runner, err := chat.NewClient(server.URL, "", "")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

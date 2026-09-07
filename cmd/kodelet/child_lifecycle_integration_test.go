@@ -93,7 +93,7 @@ func TestChildLifecycleAcrossRunnerPlacements(t *testing.T) {
 				}
 				return false
 			}, 20*time.Second, 20*time.Millisecond)
-			client, err := chat.NewControlPlaneChatRunner(serverURL, "client-secret", runnerID)
+			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
 			require.NoError(t, err)
 			invoke := func(parent, stage, childID string) map[string]any {
 				t.Helper()

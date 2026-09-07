@@ -45,7 +45,7 @@ type ConversationAdoptionResult struct {
 
 // AdoptConversation previews or confirms a daemon-owned legacy conversation.
 // It never retries a mutation after an uncertain transport outcome.
-func (r *ControlPlaneChatRunner) AdoptConversation(ctx context.Context, id string, params ConversationAdoptionRequest) (ConversationAdoptionResult, error) {
+func (r *Client) AdoptConversation(ctx context.Context, id string, params ConversationAdoptionRequest) (ConversationAdoptionResult, error) {
 	var result ConversationAdoptionResult
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(params.RunnerID) == "" {
 		return result, errors.New("conversation ID and explicit runner ID are required")

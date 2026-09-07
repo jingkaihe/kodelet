@@ -27,7 +27,7 @@ func TestProviderAccountsDaemonAdministration(t *testing.T) {
 	server.setupRoutes()
 	daemon := httptest.NewServer(server.router)
 	defer daemon.Close()
-	client, err := chat.NewControlPlaneChatRunner(daemon.URL, "admin", "")
+	client, err := chat.NewClient(daemon.URL, "admin", "")
 	require.NoError(t, err)
 	accounts, err := client.AnthropicAccounts(t.Context())
 	require.NoError(t, err)

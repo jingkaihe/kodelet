@@ -30,8 +30,8 @@ const (
 	maxControlPlaneConversationHistorySize = 64 << 20
 )
 
-// ControlPlaneChatRunner streams chat turns and conversation history through kodelet serve.
-type ControlPlaneChatRunner struct {
+// Client is a daemon HTTP client for chat turns, conversation history, and workspace operations.
+type Client struct {
 	baseURL         string
 	chatURL         string
 	authToken       string
@@ -115,8 +115,8 @@ type ControlPlaneChatSettings struct {
 	DefaultRunnerReady     bool                        `json:"defaultRunnerReady"`
 }
 
-// NewControlPlaneChatRunner creates a TUI-compatible control-plane transport with an optional runner selection.
-func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlaneChatRunner, error) {
+// NewClient creates a daemon HTTP client with an optional runner selection.
+func NewClient(server, authToken, runnerID string) (*Client, error) {
 	baseURL, err := controlPlaneBaseURL(server)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlan
 		return nil, err
 	}
 	runnerID = strings.TrimSpace(runnerID)
-	return &ControlPlaneChatRunner{
+	return &Client{
 		baseURL:   baseURL,
 		chatURL:   chatURL,
 		authToken: strings.TrimSpace(authToken),
@@ -136,8 +136,8 @@ func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlan
 	}, nil
 }
 
-// Run posts one chat request and forwards NDJSON events to the TUI sink.
-func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
+// Run posts one chat request and forwards NDJSON events to the event sink.
+func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
 	if r == nil || r.client == nil {
 		return "", errors.New("the chat connection is not initialized")
 	}
@@ -206,7 +206,7 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 }
 
 // StreamConversation follows live events for one control-plane conversation across turns.
-func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, conversationID string, sink ChatEventSink) error {
+func (r *Client) StreamConversation(ctx context.Context, conversationID string, sink ChatEventSink) error {
 	if r == nil || r.client == nil {
 		return errors.New("the chat connection is not initialized")
 	}
@@ -247,7 +247,7 @@ func (r *ControlPlaneChatRunner) StreamConversation(ctx context.Context, convers
 	return err
 }
 
-func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader io.Reader, conversationID string, sink ChatEventSink, requireCompletion, asynchronousUI bool, expectedConversationID string) (string, error) {
+func (r *Client) consumeChatStream(ctx context.Context, reader io.Reader, conversationID string, sink ChatEventSink, requireCompletion, asynchronousUI bool, expectedConversationID string) (string, error) {
 	persistentUI := newRemoteUIStream(ctx, r)
 	defer persistentUI.close()
 	var streamErr error
@@ -380,14 +380,14 @@ func isControlPlaneUIEvent(kind string) bool {
 }
 
 // ListConversations returns control-plane conversations visible to this client.
-func (r *ControlPlaneChatRunner) ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error) {
+func (r *Client) ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error) {
 	return r.ListConversationsInCWD(ctx, limit, "")
 }
 
 // ListConversationsInCWD lists history using runner-host CWD semantics. The daemon
 // applies the workspace filter before pagination, so follow never picks a turn
 // from another workspace merely because it was updated more recently.
-func (r *ControlPlaneChatRunner) ListConversationsInCWD(ctx context.Context, limit int, cwd string) ([]convtypes.ConversationSummary, error) {
+func (r *Client) ListConversationsInCWD(ctx context.Context, limit int, cwd string) ([]convtypes.ConversationSummary, error) {
 	result, err := r.QueryConversations(ctx, conversations.ListConversationsRequest{Limit: limit, CWD: cwd, SortBy: "updated", SortOrder: "desc"})
 	if err != nil {
 		return nil, err
@@ -407,7 +407,7 @@ func (r *ControlPlaneChatRunner) ListConversationsInCWD(ctx context.Context, lim
 
 // QueryConversations applies history filters centrally, without requiring an
 // online runner. CWD filters match canonical persisted runner-host paths.
-func (r *ControlPlaneChatRunner) QueryConversations(ctx context.Context, options conversations.ListConversationsRequest) (conversations.ListConversationsResponse, error) {
+func (r *Client) QueryConversations(ctx context.Context, options conversations.ListConversationsRequest) (conversations.ListConversationsResponse, error) {
 	query := url.Values{
 		"format": {"raw"}, "limit": {strconv.Itoa(options.Limit)}, "offset": {strconv.Itoa(options.Offset)},
 		"sortBy": {options.SortBy}, "sortOrder": {options.SortOrder}, "search": {options.SearchTerm},
@@ -428,7 +428,7 @@ func (r *ControlPlaneChatRunner) QueryConversations(ctx context.Context, options
 }
 
 // LoadConversationRecord returns the lossless export shape, not rendered UI history.
-func (r *ControlPlaneChatRunner) LoadConversationRecord(ctx context.Context, conversationID string) (convtypes.ConversationRecord, error) {
+func (r *Client) LoadConversationRecord(ctx context.Context, conversationID string) (convtypes.ConversationRecord, error) {
 	var record convtypes.ConversationRecord
 	if strings.TrimSpace(conversationID) == "" {
 		return record, errors.New("conversation ID is required")
@@ -439,7 +439,7 @@ func (r *ControlPlaneChatRunner) LoadConversationRecord(ctx context.Context, con
 
 // DeleteConversation deletes persisted history on the daemon. Active executions
 // are rejected by the server; transport failures are never retried implicitly.
-func (r *ControlPlaneChatRunner) DeleteConversation(ctx context.Context, conversationID string) error {
+func (r *Client) DeleteConversation(ctx context.Context, conversationID string) error {
 	if strings.TrimSpace(conversationID) == "" {
 		return errors.New("conversation ID is required")
 	}
@@ -447,7 +447,7 @@ func (r *ControlPlaneChatRunner) DeleteConversation(ctx context.Context, convers
 }
 
 // ForkConversation creates a centrally persisted copy with normal lineage and affinity.
-func (r *ControlPlaneChatRunner) ForkConversation(ctx context.Context, conversationID string) (string, error) {
+func (r *Client) ForkConversation(ctx context.Context, conversationID string) (string, error) {
 	if strings.TrimSpace(conversationID) == "" {
 		return "", errors.New("conversation ID is required")
 	}
@@ -464,7 +464,7 @@ func (r *ControlPlaneChatRunner) ForkConversation(ctx context.Context, conversat
 	return result.ConversationID, nil
 }
 
-func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, method string, path []string, query url.Values, result any) error {
+func (r *Client) conversationAPIRequest(ctx context.Context, method string, path []string, query url.Values, result any) error {
 	if r == nil || r.client == nil {
 		return errors.New("the chat connection is not initialized")
 	}
@@ -501,7 +501,7 @@ func (r *ControlPlaneChatRunner) conversationAPIRequest(ctx context.Context, met
 }
 
 // LoadConversation returns normalized history from the control plane.
-func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error) {
+func (r *Client) LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error) {
 	if r == nil || r.client == nil {
 		return ConversationHistory{}, errors.New("the chat connection is not initialized")
 	}
@@ -710,7 +710,7 @@ func controlPlaneMessageText(content json.RawMessage) (string, error) {
 }
 
 // ChatSettings fetches control-plane model profiles and reasoning policy.
-func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile string) (ControlPlaneChatSettings, error) {
+func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlaneChatSettings, error) {
 	if r == nil || r.client == nil {
 		return ControlPlaneChatSettings{}, errors.New("the chat connection is not initialized")
 	}
@@ -765,20 +765,20 @@ type WorkspaceTarget struct {
 
 // DiscoverWorkspace validates the target and discovers its slash commands on
 // the runner without starting a model turn or a workspace run lease.
-func (r *ControlPlaneChatRunner) DiscoverWorkspace(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+func (r *Client) DiscoverWorkspace(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
 	var result protocol.WorkspaceDiscoverResult
 	err := r.workspaceDiscovery(ctx, "slash-commands", target, "", &result)
 	return result, err
 }
 
 // WorkspaceCWDSuggestions resolves directory hints using runner-host paths.
-func (r *ControlPlaneChatRunner) WorkspaceCWDSuggestions(ctx context.Context, target WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
+func (r *Client) WorkspaceCWDSuggestions(ctx context.Context, target WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
 	var result protocol.WorkspaceCWDHintsResult
 	err := r.workspaceDiscovery(ctx, "cwd-suggestions", target, query, &result)
 	return result, err
 }
 
-func (r *ControlPlaneChatRunner) workspaceDiscovery(ctx context.Context, endpoint string, target WorkspaceTarget, query string, result any) error {
+func (r *Client) workspaceDiscovery(ctx context.Context, endpoint string, target WorkspaceTarget, query string, result any) error {
 	if target.RunnerID == "" && target.ConversationID == "" {
 		target.RunnerID = r.runnerID
 	}
@@ -810,12 +810,12 @@ func (r *ControlPlaneChatRunner) workspaceDiscovery(ctx context.Context, endpoin
 }
 
 // StopConversation requests cancellation of central and runner work before the client stream closes.
-func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversationID string) error {
+func (r *Client) StopConversation(ctx context.Context, conversationID string) error {
 	return r.StopConversationTurn(ctx, conversationID, "")
 }
 
 // StopConversationTurn requests cancellation of one specific control-plane turn.
-func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conversationID, turnID string) error {
+func (r *Client) StopConversationTurn(ctx context.Context, conversationID, turnID string) error {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		return errors.New("conversation ID is required")
@@ -865,7 +865,7 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 }
 
 // SteerConversation queues steering content in the control plane that owns the active provider loop.
-func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error) {
+func (r *Client) SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	message = strings.TrimSpace(message)
 	if conversationID == "" {
@@ -916,7 +916,7 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 	return result.Queued, nil
 }
 
-func (r *ControlPlaneChatRunner) authorize(request *http.Request) {
+func (r *Client) authorize(request *http.Request) {
 	if r != nil && request != nil && r.authToken != "" {
 		request.Header.Set("Authorization", "Bearer "+r.authToken)
 	}
@@ -938,7 +938,7 @@ func controlPlaneSupportsInteractiveUI(ctx context.Context) bool {
 	return hasInput && hasConfirm && hasSelect && hasNotify
 }
 
-func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversationID string, event ChatEvent) (bool, error) {
+func (r *Client) handleUIEvent(ctx context.Context, conversationID string, event ChatEvent) (bool, error) {
 	var (
 		requestID string
 		response  extensions.UIInputResponse
@@ -1029,7 +1029,7 @@ func (r *ControlPlaneChatRunner) handleUIEvent(ctx context.Context, conversation
 	return true, r.respondToUIInput(responseCtx, conversationID, requestID, response)
 }
 
-func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversationID, requestID string, response extensions.UIInputResponse) error {
+func (r *Client) respondToUIInput(ctx context.Context, conversationID, requestID string, response extensions.UIInputResponse) error {
 	conversationID = strings.TrimSpace(conversationID)
 	requestID = strings.TrimSpace(requestID)
 	if conversationID == "" || requestID == "" {
@@ -1086,4 +1086,4 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-var _ ChatRunner = (*ControlPlaneChatRunner)(nil)
+var _ ChatRunner = (*Client)(nil)

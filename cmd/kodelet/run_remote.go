@@ -185,15 +185,15 @@ func remoteRunExecutionOptions(cmd *cobra.Command, ignoredFlags ...string) (*llm
 	return options, options.Validate()
 }
 
-func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token string, request *chat.ChatRequest) (*chat.ControlPlaneChatRunner, error) {
+func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token string, request *chat.ChatRequest) (*chat.Client, error) {
 	selector, _ := cmd.Flags().GetString("runner")
-	var runner *chat.ControlPlaneChatRunner
+	var runner *chat.Client
 	var defaultCWD string
 	var err error
 	if strings.TrimSpace(selector) != "" {
 		runner, defaultCWD, err = prepareRemoteChatRunner(ctx, &ChatConfig{Server: server, AuthToken: token, Runner: selector})
 	} else {
-		runner, err = chat.NewControlPlaneChatRunner(server, token, "")
+		runner, err = chat.NewClient(server, token, "")
 	}
 	if err != nil {
 		return nil, err

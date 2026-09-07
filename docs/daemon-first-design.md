@@ -218,7 +218,7 @@ Each workstream should land in small, independently testable changes. The table 
 | 3. Nested execution and SDK | `pkg/tools/web_fetch.go`, `pkg/controlplane`, `pkg/acp`, runner/extension protocol, SDK APIs | 1; registration lifetime rules from 4 | Supported extraction and subagent examples, including extension-defined profiles, run without provider credentials on clients or standalone runners; authorization and cancellation are tested. |
 | 4. Extension lifetime/context | `pkg/extensions`, `pkg/runner/client`, SDK extension APIs | Lifecycle/context decisions from 1 | Representative extensions work across submissions, concurrent conversations, background work, and cleanup with one documented lifetime contract. |
 | 5. Client UI/discovery/workspace parity | Control-plane routes, runner protocol/service, TUI, ACP, Web UI | Relevant contracts from 1 and 4 | Supported features within each client behave the same with embedded and external runners. |
-| 6. Thin-client conversion | `cmd/kodelet`, `pkg/chat/controlplane.go`, `pkg/acp`, SDK | 1; specific features from 3–5 | Supported commands use the daemon for execution and persistence, with no client-local provider or database dependency. |
+| 6. Thin-client conversion | `cmd/kodelet`, `pkg/chat/client.go`, `pkg/acp`, SDK | 1; specific features from 3–5 | Supported commands use the daemon for execution and persistence, with no client-local provider or database dependency. |
 | 7. Migration and cutover | CLI/server composition, persistence migration, docs, packaging | Agreed release criteria from 1–6 | Existing data is preserved, daemon absence is explicit, and direct-local execution bypasses are removed. |
 
 ### Workstream 1: contract before convenience

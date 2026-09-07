@@ -112,7 +112,7 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 				}
 				return false
 			}, 20*time.Second, 20*time.Millisecond)
-			client, err := chat.NewControlPlaneChatRunner(serverURL, "client-secret", runnerID)
+			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
 			require.NoError(t, err)
 			req := chat.ChatRequest{ConversationID: "receipt-crash-conversation", TurnID: "receipt-crash-turn", RunnerID: runnerID, CWD: workspace, Message: "perform effect once"}
 			data, err := json.Marshal(req)

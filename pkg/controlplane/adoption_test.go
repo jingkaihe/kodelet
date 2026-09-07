@@ -112,7 +112,7 @@ func TestAdoptionPreservesLegacyHistoryAcrossRunnerPlacements(t *testing.T) {
 			require.NoError(t, store.Save(t.Context(), record))
 			record, err = store.Load(t.Context(), record.ID)
 			require.NoError(t, err)
-			client, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", "")
+			client, err := chat.NewClient(endpoint, "web-secret", "")
 			require.NoError(t, err)
 			params := chat.ConversationAdoptionRequest{RunnerID: runnerID, EnvironmentProfile: "restricted"}
 			preview, err := client.AdoptConversation(t.Context(), record.ID, params)
@@ -171,7 +171,7 @@ func TestAdoptionRejectsUnsafeTargetsAndRollsBack(t *testing.T) {
 	server, endpoint, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
 	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
 	runnerID := server.EmbeddedRunnerStatus().RunnerID
-	client, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", "")
+	client, err := chat.NewClient(endpoint, "web-secret", "")
 	require.NoError(t, err)
 	store, err := conversations.GetConversationStore(t.Context())
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestAdoptionRejectsUnsafeTargetsAndRollsBack(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, response.StatusCode)
 		require.NoError(t, response.Body.Close())
 	}
-	unauthorized, err := chat.NewControlPlaneChatRunner(endpoint, "wrong", "")
+	unauthorized, err := chat.NewClient(endpoint, "wrong", "")
 	require.NoError(t, err)
 	_, err = unauthorized.AdoptConversation(t.Context(), "legacy", chat.ConversationAdoptionRequest{RunnerID: runnerID})
 	var httpErr *chat.ControlPlaneHTTPError
@@ -293,7 +293,7 @@ func TestAdoptionFencesHostGenerationAndActiveReservation(t *testing.T) {
 	require.NoError(t, store.Save(t.Context(), record))
 	record, err = store.Load(t.Context(), record.ID)
 	require.NoError(t, err)
-	client, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", "")
+	client, err := chat.NewClient(endpoint, "web-secret", "")
 	require.NoError(t, err)
 	params := chat.ConversationAdoptionRequest{RunnerID: firstID}
 	preview, err := client.AdoptConversation(t.Context(), record.ID, params)

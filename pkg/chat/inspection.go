@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (r *ControlPlaneChatRunner) InspectWorkspace(ctx context.Context, target WorkspaceTarget, params protocol.WorkspaceInspectParams) (protocol.WorkspaceInspectResult, error) {
+func (r *Client) InspectWorkspace(ctx context.Context, target WorkspaceTarget, params protocol.WorkspaceInspectParams) (protocol.WorkspaceInspectResult, error) {
 	var result protocol.WorkspaceInspectResult
 	if err := params.Validate(); err != nil {
 		return result, err
@@ -60,7 +60,7 @@ func (r *ControlPlaneChatRunner) InspectWorkspace(ctx context.Context, target Wo
 }
 
 // WorkspaceRunners lists the available targets using this client's server and credential.
-func (r *ControlPlaneChatRunner) WorkspaceRunners(ctx context.Context) ([]runnerregistry.Runner, error) {
+func (r *Client) WorkspaceRunners(ctx context.Context) ([]runnerregistry.Runner, error) {
 	var result struct {
 		Runners []runnerregistry.Runner `json:"runners"`
 	}

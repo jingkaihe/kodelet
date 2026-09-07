@@ -92,7 +92,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 			cwd = runner.Workspace.Path
 		}
 	}
-	client, err := chat.NewControlPlaneChatRunner(server, token, runnerID)
+	client, err := chat.NewClient(server, token, runnerID)
 	if err != nil {
 		return err
 	}

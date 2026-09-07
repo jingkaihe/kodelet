@@ -33,7 +33,7 @@ func TestTurnClientUncertainSubmissionRetainsIDsWithoutRetry(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewControlPlaneChatRunner(server.URL, "token", "")
+			client, err := NewClient(server.URL, "token", "")
 			require.NoError(t, err)
 			id, err := client.Run(t.Context(), ChatRequest{Message: "once"}, &collectingChatSink{})
 			var uncertain *UncertainSubmissionError
@@ -73,7 +73,7 @@ func TestTurnClientReceiptQueryValidatesScopeAndStatus(t *testing.T) {
 				require.NoError(t, json.NewEncoder(w).Encode(receipt))
 			}))
 			defer server.Close()
-			client, err := NewControlPlaneChatRunner(server.URL, "client-token", "")
+			client, err := NewClient(server.URL, "client-token", "")
 			require.NoError(t, err)
 			receipt, err := client.GetTurnReceipt(t.Context(), "conversation", "turn")
 			if mode == "valid" {

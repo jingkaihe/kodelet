@@ -76,7 +76,7 @@ func (r *WorkspaceShortcutRequest) UnmarshalJSON(data []byte) error {
 
 // ExecuteWorkspaceShortcut performs one bounded runner-side invocation. Stream
 // loss cancels this invocation; it never cancels an active conversation turn.
-func (r *ControlPlaneChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, request WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error) {
+func (r *Client) ExecuteWorkspaceShortcut(ctx context.Context, request WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error) {
 	var result runnerpayload.ShortcutExecuteResult
 	if err := request.Validate(); err != nil {
 		return result, err

@@ -100,7 +100,7 @@ func TestRemoteACPSelectsRegisteredRunnerAndUsesDiscoveryClient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/runner-only/repo", result.CWD)
 	assert.Equal(t, []chat.WorkspaceTarget{target}, targets)
-	hints, err := client.(*chat.ControlPlaneChatRunner).WorkspaceCWDSuggestions(t.Context(), chat.WorkspaceTarget{ConversationID: "saved"}, "../oth")
+	hints, err := client.(*chat.Client).WorkspaceCWDSuggestions(t.Context(), chat.WorkspaceTarget{ConversationID: "saved"}, "../oth")
 	require.NoError(t, err)
 	assert.Equal(t, "/runner-only/other", hints.Hints[0].Path)
 }
@@ -131,7 +131,7 @@ func TestRemoteACPDiscoveryRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
-	client, err := chat.NewControlPlaneChatRunner(server.URL, "client-token", "")
+	client, err := chat.NewClient(server.URL, "client-token", "")
 	require.NoError(t, err)
 	for _, options := range []*llmtypes.ExecutionOptions{
 		{Model: new("model")},

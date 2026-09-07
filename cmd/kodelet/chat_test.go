@@ -229,7 +229,7 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 		require.NoError(t, json.NewEncoder(w).Encode(response))
 	}))
 	defer server.Close()
-	runner, err := chatpkg.NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := chatpkg.NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
 	profile, options, settings, defaultCWD, err := prepareRemoteChatSettings(t.Context(), runner, "work")
@@ -266,7 +266,7 @@ func TestResolveFollowConversationUsesSelectedSource(t *testing.T) {
 }
 
 func TestResolveFollowConversationRejectsNilSourceWithoutLocalStore(t *testing.T) {
-	var runner *chatpkg.ControlPlaneChatRunner
+	var runner *chatpkg.Client
 	_, err := resolveFollowConversation(t.Context(), runner)
 	require.ErrorContains(t, err, "conversation history is unavailable")
 }
@@ -465,9 +465,9 @@ func TestConfiguredChatRunnerMessageHistoryUsesSelectedTarget(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := chatpkg.NewControlPlaneChatRunner(server.URL, "", "wrong-promoted-runner")
+			client, err := chatpkg.NewClient(server.URL, "", "wrong-promoted-runner")
 			require.NoError(t, err)
-			runner := &configuredChatRunner{ControlPlaneChatRunner: client, runnerID: "configured", defaultCWD: "/runner/project", environmentProfile: "environment", options: &llmtypes.ExecutionOptions{NoExtensions: new(true)}}
+			runner := &configuredChatRunner{Client: client, runnerID: "configured", defaultCWD: "/runner/project", environmentProfile: "environment", options: &llmtypes.ExecutionOptions{NoExtensions: new(true)}}
 			target := chatpkg.WorkspaceTarget{}
 			switch scenario {
 			case "explicit":

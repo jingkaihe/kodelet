@@ -75,7 +75,7 @@ func validateRemoteChatFlags(cmd *cobra.Command) error {
 // configuredChatRunner keeps command-scoped options out of the TUI and promotes
 // the shared transport's history, streams, cancellation and UI response APIs.
 type configuredChatRunner struct {
-	*chatpkg.ControlPlaneChatRunner
+	*chatpkg.Client
 	options            *llmtypes.ExecutionOptions
 	runnerID           string
 	explicitRunnerID   string
@@ -120,7 +120,7 @@ func (r *configuredChatRunner) DiscoverWorkspace(ctx context.Context, target cha
 	if err != nil {
 		return protocol.WorkspaceDiscoverResult{}, err
 	}
-	return r.ControlPlaneChatRunner.DiscoverWorkspace(ctx, target)
+	return r.Client.DiscoverWorkspace(ctx, target)
 }
 
 func (r *configuredChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, request chatpkg.WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error) {
@@ -129,7 +129,7 @@ func (r *configuredChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, req
 		return runnerpayload.ShortcutExecuteResult{}, err
 	}
 	request.Target = target
-	return r.ControlPlaneChatRunner.ExecuteWorkspaceShortcut(ctx, request)
+	return r.Client.ExecuteWorkspaceShortcut(ctx, request)
 }
 
 func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, target chatpkg.WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
@@ -139,7 +139,7 @@ func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, targ
 	}
 	// Directory resolution does not execute extensions and accepts no run options.
 	target.Options = nil
-	return r.ControlPlaneChatRunner.WorkspaceCWDSuggestions(ctx, target, query)
+	return r.Client.WorkspaceCWDSuggestions(ctx, target, query)
 }
 
 func (r *configuredChatRunner) LoadMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
@@ -148,7 +148,7 @@ func (r *configuredChatRunner) LoadMessageHistory(ctx context.Context, target ch
 		return protocol.WorkspaceMessageHistoryResult{}, err
 	}
 	target.Options = nil
-	return r.ControlPlaneChatRunner.LoadMessageHistory(ctx, target)
+	return r.Client.LoadMessageHistory(ctx, target)
 }
 
 func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget, entry messagehistory.Entry) error {
@@ -157,7 +157,7 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 		return err
 	}
 	target.Options = nil
-	return r.ControlPlaneChatRunner.AppendMessageHistory(ctx, target, entry)
+	return r.Client.AppendMessageHistory(ctx, target, entry)
 }
 
 func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
@@ -181,13 +181,13 @@ func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequ
 		if err != nil {
 			return request.ConversationID, err
 		}
-		discovery, err := r.ControlPlaneChatRunner.DiscoverWorkspace(ctx, target)
+		discovery, err := r.Client.DiscoverWorkspace(ctx, target)
 		if err != nil {
 			return request.ConversationID, err
 		}
 		request.RunnerID, request.CWD, request.EnvironmentProfile = target.RunnerID, discovery.CWD, discovery.EnvironmentProfile
 	}
-	id, err := r.ControlPlaneChatRunner.Run(ctx, request, sink)
+	id, err := r.Client.Run(ctx, request, sink)
 	if err != nil {
 		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
 	}
@@ -237,7 +237,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 	if err != nil {
 		return result, err
 	}
-	runner := &configuredChatRunner{ControlPlaneChatRunner: client, options: config.Options.Clone(), environmentProfile: config.RunnerProfile}
+	runner := &configuredChatRunner{Client: client, options: config.Options.Clone(), environmentProfile: config.RunnerProfile}
 	if config.Runner != "" {
 		runners, _, err := fetchRunners(ctx, config.Server, config.AuthToken)
 		if err != nil {
@@ -258,7 +258,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if err != nil {
 			return result, err
 		}
-		source, err := chatpkg.NewControlPlaneChatRunner(config.Server, config.AuthToken, runner.explicitRunnerID)
+		source, err := chatpkg.NewClient(config.Server, config.AuthToken, runner.explicitRunnerID)
 		if err != nil {
 			return result, err
 		}
@@ -392,7 +392,7 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	return config
 }
 
-func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, string, error) {
+func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.Client, string, error) {
 	if config == nil || strings.TrimSpace(config.Runner) == "" {
 		return nil, "", errors.New("runner selector is required")
 	}
@@ -419,18 +419,18 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if selected.Status == runnerregistry.RunnerStatusBusy && !selected.ConcurrentRuns {
 		return nil, "", errors.New("runner does not support concurrent runs")
 	}
-	runner, err := chatpkg.NewControlPlaneChatRunner(server, config.AuthToken, selected.ID)
+	runner, err := chatpkg.NewClient(server, config.AuthToken, selected.ID)
 	if err != nil {
 		return nil, "", err
 	}
 	return runner, selected.Workspace.Path, nil
 }
 
-func prepareServerChatRunner(config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, error) {
+func prepareServerChatRunner(config *ChatConfig) (*chatpkg.Client, error) {
 	if config == nil {
 		return nil, errors.New("chat configuration is required")
 	}
-	return chatpkg.NewControlPlaneChatRunner(config.Server, config.AuthToken, "")
+	return chatpkg.NewClient(config.Server, config.AuthToken, "")
 }
 
 func usesControlPlaneChat(config *ChatConfig) bool {
@@ -441,7 +441,7 @@ func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationS
 	if source == nil {
 		return "", errors.New("conversation history is unavailable")
 	}
-	if runner, ok := source.(*chatpkg.ControlPlaneChatRunner); ok && runner == nil {
+	if runner, ok := source.(*chatpkg.Client); ok && runner == nil {
 		return "", errors.New("conversation history is unavailable")
 	}
 	summaries, err := source.ListConversations(ctx, 1)
@@ -454,7 +454,7 @@ func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationS
 	return strings.TrimSpace(summaries[0].ID), nil
 }
 
-func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlaneChatRunner, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
+func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
 		return "", nil, nil, "", errors.New("chat runner is required")
 	}

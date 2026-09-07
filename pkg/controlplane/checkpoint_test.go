@@ -104,9 +104,9 @@ func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing
 			} else {
 				runnerID = startNativeReleaseRunnerProcess(t, server, endpoint, workspace)
 			}
-			client, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", runnerID)
+			client, err := chat.NewClient(endpoint, "web-secret", runnerID)
 			require.NoError(t, err)
-			observer, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", "")
+			observer, err := chat.NewClient(endpoint, "web-secret", "")
 			require.NoError(t, err)
 			for _, outcome := range []string{"success", "cancel", "save-failure"} {
 				t.Run(outcome, func(t *testing.T) {

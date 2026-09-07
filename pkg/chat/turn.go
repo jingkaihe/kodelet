@@ -35,7 +35,7 @@ func (r TurnReceipt) Terminal() bool {
 }
 
 // GetTurnReceipt queries durable status without submitting or restarting work.
-func (r *ControlPlaneChatRunner) GetTurnReceipt(ctx context.Context, conversationID, turnID string) (TurnReceipt, error) {
+func (r *Client) GetTurnReceipt(ctx context.Context, conversationID, turnID string) (TurnReceipt, error) {
 	conversationID, turnID = strings.TrimSpace(conversationID), strings.TrimSpace(turnID)
 	for _, id := range []string{conversationID, turnID} {
 		if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {

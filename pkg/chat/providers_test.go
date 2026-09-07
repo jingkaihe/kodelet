@@ -18,7 +18,7 @@ func TestControlPlaneProviderValidationBeforeTransport(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	client, err := NewControlPlaneChatRunner(server.URL, "secret", "")
+	client, err := NewClient(server.URL, "secret", "")
 	require.NoError(t, err)
 	for _, mutation := range []AnthropicAccountMutation{{}, {Action: "unknown"}, {Action: "logout", Alias: "work"}, {Action: "rename", Alias: "work"}, {Action: "remove", Alias: "bad name"}, {Action: "default", Alias: "work", NewAlias: "bad"}} {
 		require.Error(t, client.MutateAnthropicAccount(t.Context(), mutation))

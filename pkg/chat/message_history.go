@@ -16,12 +16,12 @@ import (
 )
 
 // LoadMessageHistory recalls raw composer messages from the selected runner's workspace.
-func (r *ControlPlaneChatRunner) LoadMessageHistory(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
+func (r *Client) LoadMessageHistory(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
 	return r.messageHistoryRequest(ctx, target, nil)
 }
 
 // AppendMessageHistory saves a raw composer message without starting a conversation or model turn.
-func (r *ControlPlaneChatRunner) AppendMessageHistory(ctx context.Context, target WorkspaceTarget, entry messagehistory.Entry) error {
+func (r *Client) AppendMessageHistory(ctx context.Context, target WorkspaceTarget, entry messagehistory.Entry) error {
 	if strings.TrimSpace(entry.Text) == "" {
 		return errors.New("message history requires nonempty text")
 	}
@@ -29,7 +29,7 @@ func (r *ControlPlaneChatRunner) AppendMessageHistory(ctx context.Context, targe
 	return err
 }
 
-func (r *ControlPlaneChatRunner) messageHistoryRequest(ctx context.Context, target WorkspaceTarget, entry *messagehistory.Entry) (protocol.WorkspaceMessageHistoryResult, error) {
+func (r *Client) messageHistoryRequest(ctx context.Context, target WorkspaceTarget, entry *messagehistory.Entry) (protocol.WorkspaceMessageHistoryResult, error) {
 	var result protocol.WorkspaceMessageHistoryResult
 	if r == nil || r.client == nil {
 		return result, errors.New("the chat connection is not initialized")

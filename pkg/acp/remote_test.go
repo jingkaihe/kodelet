@@ -775,7 +775,7 @@ func TestRemoteACPCancelTreatsControlPlaneEOFAsCancelled(t *testing.T) {
 		}
 	}))
 	t.Cleanup(controlPlane.Close)
-	client, err := chat.NewControlPlaneChatRunner(controlPlane.URL, "", "runner-1")
+	client, err := chat.NewClient(controlPlane.URL, "", "runner-1")
 	require.NoError(t, err)
 	output := bytes.NewBuffer(nil)
 	server := newRemoteACPTestServer(t, workspace, client, output)

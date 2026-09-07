@@ -22,7 +22,7 @@ func TestWorkspaceShortcutOptionsValidateBeforeTransport(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	t.Cleanup(server.Close)
-	client, err := NewControlPlaneChatRunner(server.URL, "token", "")
+	client, err := NewClient(server.URL, "token", "")
 	require.NoError(t, err)
 	valid := WorkspaceShortcutRequest{Target: WorkspaceTarget{RunnerID: "runner", CWD: "/runner/only"}, Digest: "sha256:discovery", Shortcut: protocol.ShortcutDescriptor{Key: "ctrl+r", ExtensionID: "review", Generation: 4}}
 	for _, options := range []*llmtypes.ExecutionOptions{
@@ -83,7 +83,7 @@ func TestControlPlaneShortcutStreamsUIAndResultWithoutProviderTurn(t *testing.T)
 		}
 	}))
 	t.Cleanup(server.Close)
-	client, err := NewControlPlaneChatRunner(server.URL, "token", "")
+	client, err := NewClient(server.URL, "token", "")
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()

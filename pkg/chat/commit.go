@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (r *ControlPlaneChatRunner) commitTargetQuery(target WorkspaceTarget) (url.Values, error) {
+func (r *Client) commitTargetQuery(target WorkspaceTarget) (url.Values, error) {
 	if target.RunnerID == "" && target.ConversationID == "" {
 		target.RunnerID = r.runnerID
 	}
@@ -30,7 +30,7 @@ func (r *ControlPlaneChatRunner) commitTargetQuery(target WorkspaceTarget) (url.
 }
 
 // PrepareCommit reads a bounded, immutable staged diff on the selected runner.
-func (r *ControlPlaneChatRunner) PrepareCommit(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceGitCommitSnapshot, error) {
+func (r *Client) PrepareCommit(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceGitCommitSnapshot, error) {
 	var result protocol.WorkspaceGitCommitSnapshot
 	query, err := r.commitTargetQuery(target)
 	if err != nil {
@@ -49,7 +49,7 @@ func (r *ControlPlaneChatRunner) PrepareCommit(ctx context.Context, target Works
 }
 
 // CreateCommit submits one explicit approval without retrying an uncertain mutation.
-func (r *ControlPlaneChatRunner) CreateCommit(ctx context.Context, target WorkspaceTarget, approval protocol.WorkspaceGitCommitParams) (protocol.WorkspaceGitCommitResult, error) {
+func (r *Client) CreateCommit(ctx context.Context, target WorkspaceTarget, approval protocol.WorkspaceGitCommitParams) (protocol.WorkspaceGitCommitResult, error) {
 	var result protocol.WorkspaceGitCommitResult
 	if err := approval.Validate(); err != nil {
 		return result, err

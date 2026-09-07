@@ -123,7 +123,7 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, stderr, "HTTP 404")
 
-	client, err := chat.NewControlPlaneChatRunner(endpoint, "history-token", "")
+	client, err := chat.NewClient(endpoint, "history-token", "")
 	require.NoError(t, err)
 	history, err := client.QueryConversations(ctx, conversations.ListConversationsRequest{})
 	require.NoError(t, err)

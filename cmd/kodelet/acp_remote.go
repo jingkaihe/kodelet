@@ -14,7 +14,7 @@ import (
 // selection lets new sessions use the daemon default and resumed sessions use
 // their stored runner, even when that default is unavailable or has changed.
 type daemonACPProvider struct {
-	client   *chat.ControlPlaneChatRunner
+	client   *chat.Client
 	runnerID string
 }
 
@@ -51,7 +51,7 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 	if err != nil {
 		return config, err
 	}
-	client, err := chat.NewControlPlaneChatRunner(serverURL, token, "")
+	client, err := chat.NewClient(serverURL, token, "")
 	if err != nil {
 		return config, err
 	}

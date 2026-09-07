@@ -62,13 +62,13 @@ func addRemoteAdministrationFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 }
 
-func remoteAdministrationClient(cmd *cobra.Command) (*chat.ControlPlaneChatRunner, error) {
+func remoteAdministrationClient(cmd *cobra.Command) (*chat.Client, error) {
 	server, _ := serverFlagOrConfig(cmd)
 	token, _, err := resolveControlPlaneAuthToken(cmd, server)
 	if err != nil {
 		return nil, err
 	}
-	return chat.NewControlPlaneChatRunner(server, token, "")
+	return chat.NewClient(server, token, "")
 }
 
 func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {

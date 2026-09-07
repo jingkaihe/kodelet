@@ -432,7 +432,7 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			host := &nativeReleaseHost{webExtensionUIHost: newWebExtensionUIHost(nil), surfaces: make(map[extensions.UIExtensionOwner]extensions.UIExtensionSource), opened: make(chan extensions.UIExtensionSource, 8), frames: make(chan extensions.UISurfaceFrameRequest, 8), transcript: make(chan extensions.UITranscriptAppendRequest, 8)}
 			prompts := make(nativeReleasePrompts, 8)
 			nativeCtx := extensions.ContextWithUIInputBroker(extensions.ContextWithExtensionUIHost(t.Context(), host), prompts)
-			native, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", runnerID)
+			native, err := chat.NewClient(endpoint, "web-secret", runnerID)
 			require.NoError(t, err)
 			nativeDone := make(chan error, 2)
 			firstCtx, detachFirst := context.WithCancel(nativeCtx)

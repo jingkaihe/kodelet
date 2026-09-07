@@ -72,7 +72,7 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := chat.NewControlPlaneChatRunner(server, token, "")
+	client, err := chat.NewClient(server, token, "")
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []string, client *chat.ControlPlaneChatRunner, query conversations.ListConversationsRequest) error {
+func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []string, client *chat.Client, query conversations.ListConversationsRequest) error {
 	switch cmd.Name() {
 	case "list":
 		result, err := client.QueryConversations(ctx, query)
@@ -179,7 +179,7 @@ func newConversationAdoptCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := chat.NewControlPlaneChatRunner(server, token, "")
+			client, err := chat.NewClient(server, token, "")
 			if err != nil {
 				return err
 			}

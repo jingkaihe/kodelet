@@ -244,7 +244,7 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 			waitRendered(t, "Dismiss this request to finish the PTY gate.")
 			write(t, "\x1b")
 			waitRendered(t, "pty-answer-and-cancel-complete")
-			client, err := chat.NewControlPlaneChatRunner(endpoint, "client-secret", runnerID)
+			client, err := chat.NewClient(endpoint, "client-secret", runnerID)
 			require.NoError(t, err)
 			var conversationID string
 			require.Eventually(t, func() bool {

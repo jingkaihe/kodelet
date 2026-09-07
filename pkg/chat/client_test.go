@@ -77,7 +77,7 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 					}
 				}))
 				t.Cleanup(server.Close)
-				runner, err := NewControlPlaneChatRunner(server.URL+"/base", "client-token", "")
+				runner, err := NewClient(server.URL+"/base", "client-token", "")
 				require.NoError(t, err)
 				if endpoint == "cwd-suggestions" {
 					_, err = runner.WorkspaceCWDSuggestions(t.Context(), target, "../other")
@@ -91,7 +91,7 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 	}
 }
 
-func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
+func TestClientStreamsSelectedRunner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "/base/api/chat", request.URL.Path)
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
@@ -109,7 +109,7 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
+	runner, err := NewClient(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
 	sink := &collectingChatSink{}
 	conversationID, err := runner.Run(context.Background(), ChatRequest{Message: "hello", CWD: "/local/path", EnvironmentProfile: "runner-work"}, sink)
@@ -120,7 +120,7 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 	assert.Equal(t, "hello", sink.events[1].Delta)
 }
 
-func TestControlPlaneChatRunnerStreamsWithoutSelectingRunner(t *testing.T) {
+func TestClientStreamsWithoutSelectingRunner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var payload ChatRequest
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
@@ -131,7 +131,7 @@ func TestControlPlaneChatRunnerStreamsWithoutSelectingRunner(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "")
+	runner, err := NewClient(server.URL, "", "")
 	require.NoError(t, err)
 	conversationID, err := runner.Run(t.Context(), ChatRequest{Message: "continue", ConversationID: "conversation-bound"}, &collectingChatSink{})
 
@@ -139,7 +139,7 @@ func TestControlPlaneChatRunnerStreamsWithoutSelectingRunner(t *testing.T) {
 	assert.Equal(t, "conversation-bound", conversationID)
 }
 
-func TestControlPlaneChatRunnerFollowsConversationAcrossTurns(t *testing.T) {
+func TestClientFollowsConversationAcrossTurns(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, http.MethodGet, request.Method)
 		assert.Equal(t, "/base/api/conversations/conversation-1/stream", request.URL.Path)
@@ -156,7 +156,7 @@ func TestControlPlaneChatRunnerFollowsConversationAcrossTurns(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
+	runner, err := NewClient(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
 	sink := &lifecycleCollectingChatSink{}
 
@@ -195,7 +195,7 @@ func TestControlPlaneHTTPErrorRetryability(t *testing.T) {
 	assert.Equal(t, "server returned HTTP 403: access denied", responseErr.Error())
 }
 
-func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(t *testing.T) {
+func TestClientHandlesConversationStreamUIWithoutBlockingEvents(t *testing.T) {
 	responses := make(chan extensions.UIInputResponse, 1)
 	responded := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -222,7 +222,7 @@ func TestControlPlaneChatRunnerHandlesConversationStreamUIWithoutBlockingEvents(
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 	broker := &recordingControlPlaneUIBroker{response: extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true}}
 	ctx := extensions.ContextWithUIInputBroker(t.Context(), broker)
@@ -256,7 +256,7 @@ func (b *blockingControlPlaneUIBroker) Input(ctx context.Context, _ extensions.U
 	return extensions.UIInputResponse{}, ctx.Err()
 }
 
-func TestControlPlaneChatRunnerDismissesPromptWithoutStoppingExecution(t *testing.T) {
+func TestClientDismissesPromptWithoutStoppingExecution(t *testing.T) {
 	for _, endEvent := range []bool{false, true} {
 		t.Run(fmt.Sprint("end-event=", endEvent), func(t *testing.T) {
 			broker := &blockingControlPlaneUIBroker{started: make(chan struct{}), stopped: make(chan struct{})}
@@ -282,7 +282,7 @@ func TestControlPlaneChatRunnerDismissesPromptWithoutStoppingExecution(t *testin
 				}
 			}))
 			defer server.Close()
-			runner, err := NewControlPlaneChatRunner(server.URL, "", "")
+			runner, err := NewClient(server.URL, "", "")
 			require.NoError(t, err)
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
@@ -300,13 +300,13 @@ func TestControlPlaneChatRunnerDismissesPromptWithoutStoppingExecution(t *testin
 	}
 }
 
-func TestControlPlaneChatRunnerRejectsMismatchedConversationStreamEvents(t *testing.T) {
+func TestClientRejectsMismatchedConversationStreamEvents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("{\"kind\":\"conversation\",\"conversation_id\":\"conversation-other\"}\n"))
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
 	err = runner.StreamConversation(t.Context(), "conversation-1", &collectingChatSink{})
@@ -317,8 +317,8 @@ func TestControlPlaneChatRunnerRejectsMismatchedConversationStreamEvents(t *test
 	assert.False(t, protocolErr.Retryable())
 }
 
-func TestControlPlaneChatRunnerClassifiesOversizedStreamEvents(t *testing.T) {
-	runner := &ControlPlaneChatRunner{}
+func TestClientClassifiesOversizedStreamEvents(t *testing.T) {
+	runner := &Client{}
 	_, err := runner.consumeChatStream(
 		t.Context(),
 		strings.NewReader(strings.Repeat("x", maxControlPlaneChatEventSize+1)),
@@ -335,7 +335,7 @@ func TestControlPlaneChatRunnerClassifiesOversizedStreamEvents(t *testing.T) {
 	assert.False(t, protocolErr.Retryable())
 }
 
-func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
+func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 	updatedAt := time.Date(2026, time.August, 9, 12, 35, 0, 0, time.UTC)
 	structuredResult := tooltypes.StructuredToolResult{ToolName: "bash", Success: true, Timestamp: updatedAt}
 	listedRunnerIDs := make(chan string, 2)
@@ -394,14 +394,14 @@ func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL, "secret", "runner-1")
+	runner, err := NewClient(server.URL, "secret", "runner-1")
 	require.NoError(t, err)
 	summaries, err := runner.ListConversations(t.Context(), 200)
 	require.NoError(t, err)
 	assert.Equal(t, "runner-1", <-listedRunnerIDs)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "conversation-bound", summaries[0].ID)
-	serverOnlyRunner, err := NewControlPlaneChatRunner(server.URL, "secret", "")
+	serverOnlyRunner, err := NewClient(server.URL, "secret", "")
 	require.NoError(t, err)
 	allSummaries, err := serverOnlyRunner.ListConversations(t.Context(), 200)
 	require.NoError(t, err)
@@ -433,7 +433,7 @@ func mustStructuredToolResultJSON(t *testing.T, result tooltypes.StructuredToolR
 	return payload
 }
 
-func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
+func TestClientSettingsSteeringAndStop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
 		switch request.URL.Path {
@@ -461,7 +461,7 @@ func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
+	runner, err := NewClient(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
 	settings, err := runner.ChatSettings(t.Context(), "work")
 	require.NoError(t, err)
@@ -473,14 +473,14 @@ func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
 	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-1"))
 }
 
-func TestControlPlaneChatRunnerTreatsStaleScopedStopAsSuccess(t *testing.T) {
+func TestClientTreatsStaleScopedStopAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		turnID := request.URL.Query().Get("turnId")
 		assert.True(t, turnID == "" || turnID == "turn-old")
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]bool{"stopped": false}))
 	}))
 	defer server.Close()
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
 	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-old"))
@@ -537,7 +537,7 @@ func (b *recordingControlPlaneUIBroker) Notify(_ context.Context, request extens
 	return b.response, b.err
 }
 
-func TestControlPlaneChatRunnerRoutesUIResponsesBackToServer(t *testing.T) {
+func TestClientRoutesUIResponsesBackToServer(t *testing.T) {
 	uiResponse := make(chan extensions.UIInputResponse, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
@@ -567,7 +567,7 @@ func TestControlPlaneChatRunnerRoutesUIResponsesBackToServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
+	runner, err := NewClient(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
 	broker := &staticControlPlaneUIBroker{}
 	ctx := extensions.ContextWithUIInputBroker(t.Context(), broker)
@@ -584,7 +584,7 @@ func TestControlPlaneChatRunnerRoutesUIResponsesBackToServer(t *testing.T) {
 	assert.Equal(t, "done", sink.events[1].Kind)
 }
 
-func TestControlPlaneChatRunnerDoesNotRespondToUIAfterContextCancellation(t *testing.T) {
+func TestClientDoesNotRespondToUIAfterContextCancellation(t *testing.T) {
 	requests := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests <- struct{}{}
@@ -592,7 +592,7 @@ func TestControlPlaneChatRunnerDoesNotRespondToUIAfterContextCancellation(t *tes
 	}))
 	defer server.Close()
 
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 	broker := &recordingControlPlaneUIBroker{response: extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -613,13 +613,13 @@ func TestControlPlaneChatRunnerDoesNotRespondToUIAfterContextCancellation(t *tes
 	}
 }
 
-func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
+func TestClientReturnsStreamAndHTTPError(t *testing.T) {
 	t.Run("stream error", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("{\"kind\":\"error\",\"conversation_id\":\"conversation-1\",\"error\":\"runner is offline\"}\n"))
 		}))
 		defer server.Close()
-		runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+		runner, err := NewClient(server.URL, "", "runner-1")
 		require.NoError(t, err)
 
 		conversationID, err := runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
@@ -634,7 +634,7 @@ func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"runner is busy"}`))
 		}))
 		defer server.Close()
-		runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+		runner, err := NewClient(server.URL, "", "runner-1")
 		require.NoError(t, err)
 
 		_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
@@ -647,7 +647,7 @@ func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
 			_, _ = w.Write([]byte("{\"kind\":\"conversation\",\"conversation_id\":\"conversation-1\"}\n"))
 		}))
 		defer server.Close()
-		runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+		runner, err := NewClient(server.URL, "", "runner-1")
 		require.NoError(t, err)
 
 		conversationID, err := runner.Run(t.Context(), ChatRequest{Message: "hello"}, &collectingChatSink{})
@@ -657,7 +657,7 @@ func TestControlPlaneChatRunnerReturnsStreamAndHTTPError(t *testing.T) {
 	})
 }
 
-func TestControlPlaneChatRunnerHandlesInteractiveEventVariants(t *testing.T) {
+func TestClientHandlesInteractiveEventVariants(t *testing.T) {
 	responses := make(chan struct {
 		path     string
 		response extensions.UIInputResponse
@@ -672,7 +672,7 @@ func TestControlPlaneChatRunnerHandlesInteractiveEventVariants(t *testing.T) {
 		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 	broker := &recordingControlPlaneUIBroker{response: extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "one", Confirmed: true}}
 	ctx := extensions.ContextWithUIInputBroker(t.Context(), broker)
@@ -710,14 +710,14 @@ func TestControlPlaneChatRunnerHandlesInteractiveEventVariants(t *testing.T) {
 	assert.False(t, handled)
 }
 
-func TestControlPlaneChatRunnerUIFallbacksAndValidation(t *testing.T) {
+func TestClientUIFallbacksAndValidation(t *testing.T) {
 	var unavailable extensions.UIInputResponse
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&unavailable))
 		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
 	handled, err := runner.handleUIEvent(t.Context(), "conversation-1", ChatEvent{Kind: "ui-input-request", UIInput: &UIInputEvent{ID: "input-1"}})
@@ -743,11 +743,11 @@ func TestControlPlaneChatRunnerUIFallbacksAndValidation(t *testing.T) {
 	require.ErrorIs(t, err, brokerErr)
 }
 
-func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
-	serverOnly, err := NewControlPlaneChatRunner("https://example.com", "", " ")
+func TestClientValidationAndMalformedResponses(t *testing.T) {
+	serverOnly, err := NewClient("https://example.com", "", " ")
 	require.NoError(t, err)
 	assert.Empty(t, serverOnly.runnerID)
-	var nilRunner *ControlPlaneChatRunner
+	var nilRunner *Client
 	_, err = nilRunner.Run(t.Context(), ChatRequest{}, &collectingChatSink{})
 	require.ErrorContains(t, err, "not initialized")
 	_, err = nilRunner.ListConversations(t.Context(), 10)
@@ -767,7 +767,7 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	runner, err := NewClient(server.URL, "", "runner-1")
 	require.NoError(t, err)
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, nil)
 	require.ErrorContains(t, err, "chat event sink is required")
@@ -792,7 +792,7 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 		_, _ = w.Write([]byte(`{"kind":"text","content":"hello"}` + "\n"))
 	}))
 	defer streamServer.Close()
-	runner, err = NewControlPlaneChatRunner(streamServer.URL, "", "runner-1")
+	runner, err = NewClient(streamServer.URL, "", "runner-1")
 	require.NoError(t, err)
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, failingControlPlaneChatSink{err: sinkErr})
 	require.ErrorIs(t, err, sinkErr)
@@ -801,7 +801,7 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer invalidSteeringServer.Close()
-	runner, err = NewControlPlaneChatRunner(invalidSteeringServer.URL, "", "runner-1")
+	runner, err = NewClient(invalidSteeringServer.URL, "", "runner-1")
 	require.NoError(t, err)
 	_, err = runner.SteerConversation(t.Context(), "conversation", "message", nil)
 	require.ErrorContains(t, err, "invalid steering response")
@@ -812,6 +812,6 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 }
 
 func TestControlPlaneChatURLRequiresTLSOffLoopback(t *testing.T) {
-	_, err := NewControlPlaneChatRunner("http://example.com", "", "runner-1")
+	_, err := NewClient("http://example.com", "", "runner-1")
 	require.ErrorContains(t, err, "require https")
 }

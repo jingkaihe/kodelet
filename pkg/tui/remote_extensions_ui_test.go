@@ -59,7 +59,7 @@ func TestRemoteNativeUIUsesExistingRendererAndFencesCleanup(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runner, err := chat.NewControlPlaneChatRunner(server.URL, "", "")
+	runner, err := chat.NewClient(server.URL, "", "")
 	require.NoError(t, err)
 	m := newModel(t.Context(), Config{Runner: runner, Remote: true})
 	t.Cleanup(m.cancel)

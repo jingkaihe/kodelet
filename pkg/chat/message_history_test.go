@@ -48,7 +48,7 @@ func TestControlPlaneMessageHistoryTransport(t *testing.T) {
 				require.NoError(t, json.NewEncoder(w).Encode(result))
 			}))
 			defer server.Close()
-			client, err := NewControlPlaneChatRunner(server.URL+"/prefix", "client", "runner")
+			client, err := NewClient(server.URL+"/prefix", "client", "runner")
 			require.NoError(t, err)
 			target := WorkspaceTarget{CWD: "~/project with spaces", Profile: "model", EnvironmentProfile: "environment"}
 			if saved {
@@ -76,7 +76,7 @@ func TestControlPlaneMessageHistoryValidationAndErrors(t *testing.T) {
 		http.Error(w, "history unavailable", http.StatusBadGateway)
 	}))
 	defer server.Close()
-	client, err := NewControlPlaneChatRunner(server.URL, "", "")
+	client, err := NewClient(server.URL, "", "")
 	require.NoError(t, err)
 	_, err = client.LoadMessageHistory(t.Context(), WorkspaceTarget{})
 	require.ErrorContains(t, err, "requires a runner or conversation")
@@ -84,7 +84,7 @@ func TestControlPlaneMessageHistoryValidationAndErrors(t *testing.T) {
 	require.ErrorContains(t, err, "execution options")
 	require.ErrorContains(t, client.AppendMessageHistory(t.Context(), WorkspaceTarget{RunnerID: "runner"}, messagehistory.Entry{Text: " "}), "nonempty text")
 	require.ErrorContains(t, client.AppendMessageHistory(t.Context(), WorkspaceTarget{RunnerID: "runner"}, messagehistory.Entry{Text: strings.Repeat("x", 1<<20)}), "exceeds 1 MiB")
-	var uninitialized *ControlPlaneChatRunner
+	var uninitialized *Client
 	_, err = uninitialized.LoadMessageHistory(t.Context(), WorkspaceTarget{RunnerID: "runner"})
 	require.ErrorContains(t, err, "not initialized")
 	assert.Zero(t, calls.Load())

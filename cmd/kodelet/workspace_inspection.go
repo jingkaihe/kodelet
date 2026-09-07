@@ -40,7 +40,7 @@ func inspectCommandWorkspace(cmd *cobra.Command, params protocol.WorkspaceInspec
 		}
 		target.RunnerID = selected.ID
 	}
-	configured := &configuredChatRunner{ControlPlaneChatRunner: client}
+	configured := &configuredChatRunner{Client: client}
 	target, err = configured.discoveryTarget(cmd.Context(), target)
 	if err != nil {
 		return protocol.WorkspaceInspectResult{}, err
