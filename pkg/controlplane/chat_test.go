@@ -19,7 +19,7 @@ type (
 	ChatEventSink      = chat.ChatEventSink
 )
 
-var NewDefaultChatRunner = chat.NewDefaultChatRunner
+var NewExecutor = chat.NewExecutor
 
 type recordingChatSink struct {
 	mu     sync.Mutex

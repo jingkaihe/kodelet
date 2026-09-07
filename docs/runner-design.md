@@ -1091,7 +1091,7 @@ Keep extension discovery, subprocess management, stdio JSON-RPC, event ordering,
 
 ### `pkg/chat`
 
-`ChatRunner` remains the client-facing persisted-run interface, but `DefaultChatRunner` must be refactored so central run setup can open either a local or remote `agentenv.Environment` before constructing the provider turn flow.
+`ChatRunner` remains the client-facing persisted-run interface, but `Executor` must be refactored so central run setup can open either a local or remote `agentenv.Environment` before constructing the provider turn flow.
 
 ### `pkg/controlplane`
 

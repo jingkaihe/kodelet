@@ -165,23 +165,23 @@ func (f *fakeMetadataThread) SetEnvironment(environment agentenv.Environment) {
 	f.environment = environment
 }
 
-func TestNewDefaultChatRunnerStoresDefaultCWD(t *testing.T) {
-	runner := NewDefaultChatRunner("/workspace")
+func TestNewExecutorStoresDefaultCWD(t *testing.T) {
+	runner := NewExecutor("/workspace")
 
 	require.NotNil(t, runner)
 	assert.Equal(t, "/workspace", runner.defaultCWD)
 	assert.Equal(t, "/workspace", runner.DefaultCWD())
-	assert.Empty(t, (*DefaultChatRunner)(nil).DefaultCWD())
+	assert.Empty(t, (*Executor)(nil).DefaultCWD())
 }
 
-func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
+func TestNewExecutorStoresExtensionRuntimeProvider(t *testing.T) {
 	provider := &fakeExtensionRuntimeProvider{}
-	runner := NewDefaultChatRunner("/workspace", provider)
+	runner := NewExecutor("/workspace", provider)
 
 	require.NotNil(t, runner)
 	assert.Same(t, provider, runner.extensionRuntimes)
 	assert.Same(t, provider, runner.ExtensionRuntimeProvider())
-	assert.Nil(t, (*DefaultChatRunner)(nil).ExtensionRuntimeProvider())
+	assert.Nil(t, (*Executor)(nil).ExtensionRuntimeProvider())
 }
 
 type staticEnvironmentResolver struct{}
@@ -221,13 +221,13 @@ func (e *directCommandEnvironment) ExecuteCommand(_ context.Context, request age
 	return e.result, nil
 }
 
-func TestDefaultChatRunnerStoresEnvironmentResolver(t *testing.T) {
-	runner := NewDefaultChatRunner("")
+func TestExecutorStoresEnvironmentResolver(t *testing.T) {
+	runner := NewExecutor("")
 	resolver := staticEnvironmentResolver{}
 
 	runner.SetEnvironmentResolver(resolver)
 	assert.Equal(t, resolver, runner.environmentResolver)
-	(*DefaultChatRunner)(nil).SetEnvironmentResolver(resolver)
+	(*Executor)(nil).SetEnvironmentResolver(resolver)
 }
 
 func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) {
@@ -318,7 +318,7 @@ func TestResolveExtensionCallContextDefaultsNewConversationOrigin(t *testing.T) 
 	assert.Equal(t, "review", callContext.RecipeName)
 }
 
-func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testing.T) {
+func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -361,7 +361,7 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 		},
 	}
 	resolver := &recordingEnvironmentResolver{environment: environment}
-	runner := NewDefaultChatRunner("")
+	runner := NewExecutor("")
 	runner.SetEnvironmentResolver(resolver)
 	t.Cleanup(func() { require.NoError(t, runner.Close()) })
 	sink := &recordingChatSink{}
@@ -415,7 +415,7 @@ func TestResolveRemoteWorkingDirectoryPinsExistingConversation(t *testing.T) {
 	assert.Empty(t, expected)
 }
 
-func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
+func TestExecutorStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -444,7 +444,7 @@ func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T)
 		Display:         "What should I make for breakfast?",
 		DisplayOverride: true,
 	}}
-	runner := NewDefaultChatRunner("")
+	runner := NewExecutor("")
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -478,7 +478,7 @@ func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T)
 	assert.Empty(t, display.Command)
 }
 
-func TestDefaultChatRunnerIncludesImagesInExplicitCommandDisplay(t *testing.T) {
+func TestExecutorIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -507,7 +507,7 @@ func TestDefaultChatRunnerIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 		Display:         "What is in this image?",
 		DisplayOverride: true,
 	}}
-	runner := NewDefaultChatRunner("")
+	runner := NewExecutor("")
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -553,12 +553,12 @@ func TestDefaultChatRunnerIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 	assert.Equal(t, 1, thread.sendCalls)
 }
 
-func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
+func TestExecutorReusesAndClosesConversationThread(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{}
-	runner := NewDefaultChatRunner("/workspace")
+	runner := NewExecutor("/workspace")
 	runner.sessions["conv-1"] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -578,7 +578,7 @@ func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
 	require.NoError(t, runner.Close())
 }
 
-func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T) {
+func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -600,7 +600,7 @@ func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T)
 	require.NoError(t, err)
 
 	thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
-	runner := NewDefaultChatRunner(workspace, &fakeExtensionRuntimeProvider{})
+	runner := NewExecutor(workspace, &fakeExtensionRuntimeProvider{})
 	runner.sessions[conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -676,7 +676,7 @@ func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{conversationID: "conv-command"}
-	runner := NewDefaultChatRunner("/workspace")
+	runner := NewExecutor("/workspace")
 	runner.sessions[thread.conversationID] = &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -706,7 +706,7 @@ func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {
 	fingerprint, err := chatThreadConfigFingerprint(config)
 	require.NoError(t, err)
 	thread := &fakeMetadataThread{}
-	runner := NewDefaultChatRunner("/workspace")
+	runner := NewExecutor("/workspace")
 	session := &defaultChatSession{
 		thread:            thread,
 		configFingerprint: fingerprint,
@@ -785,8 +785,8 @@ func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {
 	runner.sessionsMu.Unlock()
 }
 
-func TestDefaultChatRunnerEvictsIdleConversationThreads(t *testing.T) {
-	runner := NewDefaultChatRunner("/workspace")
+func TestExecutorEvictsIdleConversationThreads(t *testing.T) {
+	runner := NewExecutor("/workspace")
 	defer func() { require.NoError(t, runner.Close()) }()
 	idleThread := &fakeMetadataThread{}
 	runner.sessions["idle"] = &defaultChatSession{
@@ -809,8 +809,8 @@ func TestDefaultChatRunnerEvictsIdleConversationThreads(t *testing.T) {
 	assert.Contains(t, runner.sessions, "active")
 }
 
-func TestDefaultChatRunnerClosesDeletedConversationThread(t *testing.T) {
-	runner := NewDefaultChatRunner("/workspace")
+func TestExecutorClosesDeletedConversationThread(t *testing.T) {
+	runner := NewExecutor("/workspace")
 	defer func() { require.NoError(t, runner.Close()) }()
 	thread := &fakeMetadataThread{}
 	runner.sessions["conv-1"] = &defaultChatSession{thread: thread, lastUsed: time.Now()}

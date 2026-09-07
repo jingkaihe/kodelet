@@ -257,7 +257,7 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &recordingEnvironmentResolver{}
 			runtimes := &fakeExtensionRuntimeProvider{}
-			runner := NewDefaultChatRunner("", runtimes)
+			runner := NewExecutor("", runtimes)
 			runner.SetEnvironmentResolver(resolver)
 			t.Cleanup(func() { require.NoError(t, runner.Close()) })
 			tt.request.Message = "/command-that-must-not-run"

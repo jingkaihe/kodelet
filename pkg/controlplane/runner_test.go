@@ -701,7 +701,7 @@ func TestEmbeddedRunnerDefaultSelectionPrecedence(t *testing.T) {
 				server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, errors.New("offline"))
 			}
 			resolver := &embeddedSelectionResolver{}
-			defaultRunner := NewDefaultChatRunner("")
+			defaultRunner := NewExecutor("")
 			defaultRunner.SetEnvironmentResolver(resolver)
 			t.Cleanup(func() { assert.NoError(t, defaultRunner.Close()) })
 			_, err := (&serverChatRunner{server: server, runner: defaultRunner}).Run(t.Context(), request, &recordingChatSink{})
@@ -1884,7 +1884,7 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-chat", registration.RunnerID, "gpu"))
 
-	defaultRunner := NewDefaultChatRunner("")
+	defaultRunner := NewExecutor("")
 	runner := &serverChatRunner{runner: defaultRunner, server: server}
 	defaultRunner.SetEnvironmentResolver(runner)
 	server.config.DisableControlPlaneWorkspace = true
@@ -1948,7 +1948,7 @@ func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *test
 			return nil, errors.Errorf("unexpected conversation lookup %q", id)
 		}
 	}}
-	runner := &serverChatRunner{server: server, runner: NewDefaultChatRunner("")}
+	runner := &serverChatRunner{server: server, runner: NewExecutor("")}
 	t.Cleanup(func() { assert.NoError(t, runner.Close()) })
 
 	conversationID, err := runner.Run(t.Context(), ChatRequest{

@@ -23,7 +23,7 @@ import (
 )
 
 type serverChatRunner struct {
-	runner *chat.DefaultChatRunner
+	runner *chat.Executor
 	server *Server
 }
 

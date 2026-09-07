@@ -311,7 +311,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		chatRunner: &serverChatRunner{
-			runner: chat.NewDefaultChatRunner("", nil),
+			runner: chat.NewExecutor("", nil),
 		},
 		config:                config,
 		frontendHandler:       frontendHandler,

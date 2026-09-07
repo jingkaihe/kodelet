@@ -223,8 +223,8 @@ type EnvironmentResolver interface {
 	ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, config llmtypes.Config, resolvedCWD string) (agentenv.Environment, error)
 }
 
-// DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
-type DefaultChatRunner struct {
+// Executor orchestrates persisted chat turns, LLM threads, and execution environments.
+type Executor struct {
 	defaultCWD          string
 	extensionRuntimes   ExtensionRuntimeProvider
 	environmentResolver EnvironmentResolver
@@ -246,13 +246,13 @@ const (
 	defaultChatSessionIdleTTL = 30 * time.Minute
 )
 
-// NewDefaultChatRunner creates a default chat runner.
-func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *DefaultChatRunner {
+// NewExecutor creates a chat executor with cached conversation threads.
+func NewExecutor(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *Executor {
 	var provider ExtensionRuntimeProvider
 	if len(extensionRuntimes) > 0 {
 		provider = extensionRuntimes[0]
 	}
-	return &DefaultChatRunner{
+	return &Executor{
 		defaultCWD:        defaultCWD,
 		extensionRuntimes: provider,
 		sessions:          make(map[string]*defaultChatSession),
@@ -260,7 +260,7 @@ func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRunti
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
-func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+func (r *Executor) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	if r == nil {
 		return runDefaultChat(ctx, req, sink, "", nil, nil, nil)
 	}
@@ -271,7 +271,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 }
 
 // SetEnvironmentResolver configures remote environment selection for subsequent requests.
-func (r *DefaultChatRunner) SetEnvironmentResolver(resolver EnvironmentResolver) {
+func (r *Executor) SetEnvironmentResolver(resolver EnvironmentResolver) {
 	if r == nil {
 		return
 	}
@@ -281,7 +281,7 @@ func (r *DefaultChatRunner) SetEnvironmentResolver(resolver EnvironmentResolver)
 }
 
 // Close releases cached conversation threads and their persistent transports.
-func (r *DefaultChatRunner) Close() error {
+func (r *Executor) Close() error {
 	if r == nil {
 		return nil
 	}
@@ -309,7 +309,7 @@ func (r *DefaultChatRunner) Close() error {
 }
 
 // CloseConversation releases a cached thread when its conversation is removed.
-func (r *DefaultChatRunner) CloseConversation(conversationID string) error {
+func (r *Executor) CloseConversation(conversationID string) error {
 	if r == nil {
 		return nil
 	}
@@ -324,16 +324,16 @@ func (r *DefaultChatRunner) CloseConversation(conversationID string) error {
 	return closeDefaultChatSession(session)
 }
 
-// DefaultCWD returns the runner's configured default working directory.
-func (r *DefaultChatRunner) DefaultCWD() string {
+// DefaultCWD returns the executor's configured default working directory.
+func (r *Executor) DefaultCWD() string {
 	if r == nil {
 		return ""
 	}
 	return r.defaultCWD
 }
 
-// ExtensionRuntimeProvider returns the runner's configured extension runtime provider.
-func (r *DefaultChatRunner) ExtensionRuntimeProvider() ExtensionRuntimeProvider {
+// ExtensionRuntimeProvider returns the executor's configured extension runtime provider.
+func (r *Executor) ExtensionRuntimeProvider() ExtensionRuntimeProvider {
 	if r == nil {
 		return nil
 	}
@@ -351,7 +351,7 @@ func runDefaultChat(
 	sink ChatEventSink,
 	defaultCWD string,
 	extensionRuntimes ExtensionRuntimeProvider,
-	threadOwner *DefaultChatRunner,
+	threadOwner *Executor,
 	environmentResolver EnvironmentResolver,
 ) (resultSessionID string, resultErr error) {
 	req.Options = req.Options.Clone()
@@ -727,7 +727,7 @@ type assistantMessageAppender interface {
 
 func persistDirectCommandResponse(
 	ctx context.Context,
-	owner *DefaultChatRunner,
+	owner *Executor,
 	conversationID string,
 	config llmtypes.Config,
 	runnerID string,
@@ -769,7 +769,7 @@ func saveDirectCommandResponse(ctx context.Context, thread llmtypes.Thread, mess
 }
 
 func acquireChatThread(
-	owner *DefaultChatRunner,
+	owner *Executor,
 	sessionID string,
 	config llmtypes.Config,
 ) (thread llmtypes.Thread, newThread bool, release func(), err error) {
@@ -864,7 +864,7 @@ func chatThreadConfigFingerprint(config llmtypes.Config) (string, error) {
 	return string(data), nil
 }
 
-func (r *DefaultChatRunner) evictIdleSessionsLocked(currentID string, now time.Time) []*defaultChatSession {
+func (r *Executor) evictIdleSessionsLocked(currentID string, now time.Time) []*defaultChatSession {
 	evicted := make([]*defaultChatSession, 0)
 	for id, session := range r.sessions {
 		if id == currentID || session.inUse != 0 || now.Sub(session.lastUsed) < defaultChatSessionIdleTTL {
