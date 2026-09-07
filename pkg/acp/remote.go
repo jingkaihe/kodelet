@@ -45,8 +45,10 @@ type RemoteSessionConfig struct {
 type remoteSessionManager struct {
 	config RemoteSessionConfig
 
-	mu       sync.Mutex
-	sessions map[acptypes.SessionID]*remoteSession
+	mu               sync.Mutex
+	sessions         map[acptypes.SessionID]*remoteSession
+	closed           bool
+	attachExtensions func(*remoteSession, map[string]any) error
 }
 
 type remoteSession struct {
@@ -59,6 +61,10 @@ type remoteSession struct {
 	cwd                string
 	options            *llmtypes.ExecutionOptions
 	environmentProfile string
+	initializing       bool
+	extensionRelay     chat.SessionExtensionRelay
+	extensionErr       error
+	extensionChannels  map[extensionChannel]struct{}
 }
 
 type remoteOutcomeSink struct {
@@ -109,9 +115,9 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		return "", errors.New("the runner did not return a working directory; check the directory and runner logs")
 	}
 	id := acptypes.SessionID(convtypes.GenerateID())
-	m.mu.Lock()
-	m.sessions[id] = &remoteSession{id: id, client: client, runnerID: runnerID, cwd: discovery.CWD, options: m.config.Options.Clone(), environmentProfile: chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile)}
-	m.mu.Unlock()
+	if err := m.installSession(&remoteSession{id: id, client: client, runnerID: runnerID, cwd: discovery.CWD, options: m.config.Options.Clone(), environmentProfile: chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile)}, request.Meta); err != nil {
+		return "", err
+	}
 	return id, nil
 }
 
@@ -159,12 +165,7 @@ func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes
 	if discovery.CWD != history.CWD || chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile) != chat.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
 		return chat.ConversationHistory{}, errors.New("the runner returned a different directory or environment profile than this conversation saved")
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if previous := m.sessions[request.SessionID]; previous != nil && previous.active {
-		return chat.ConversationHistory{}, errors.New("cannot reload a session with an active prompt")
-	}
-	m.sessions[request.SessionID] = &remoteSession{
+	if err := m.installSession(&remoteSession{
 		id:                 request.SessionID,
 		started:            true,
 		client:             client,
@@ -172,8 +173,49 @@ func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes
 		cwd:                history.CWD,
 		options:            m.config.Options.Clone(),
 		environmentProfile: chat.NormalizeEnvironmentProfile(history.EnvironmentProfile),
+	}, request.Meta); err != nil {
+		return chat.ConversationHistory{}, err
 	}
 	return history, nil
+}
+
+func (m *remoteSessionManager) installSession(session *remoteSession, meta map[string]any) error {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return errors.New("ACP client connection is closed")
+	}
+	previous := m.sessions[session.id]
+	if previous != nil && (previous.active || previous.initializing) {
+		m.mu.Unlock()
+		return errors.New("cannot reload a session with an active prompt or attachment")
+	}
+	session.initializing = true
+	m.sessions[session.id] = session
+	m.mu.Unlock()
+	if previous != nil && previous.extensionRelay != nil {
+		_ = previous.extensionRelay.Close()
+	}
+	var err error
+	if m.attachExtensions != nil {
+		err = m.attachExtensions(session, meta)
+	}
+	m.mu.Lock()
+	if err == nil && m.closed {
+		err = errors.New("ACP client connection is closed")
+	}
+	if err == nil && session.extensionErr != nil {
+		err = session.extensionErr
+	}
+	session.initializing = false
+	if err != nil {
+		delete(m.sessions, session.id)
+	}
+	m.mu.Unlock()
+	if err != nil && session.extensionRelay != nil {
+		_ = session.extensionRelay.Close()
+	}
+	return err
 }
 
 func (m *remoteSessionManager) commands(ctx context.Context, sessionID acptypes.SessionID) ([]slashcommands.Command, error) {
@@ -223,6 +265,19 @@ func (m *remoteSessionManager) beginPrompt(sessionID acptypes.SessionID) (bool, 
 	if session.active {
 		return false, errors.Errorf("session %s already has an active prompt", sessionID)
 	}
+	if session.initializing {
+		return false, errors.New("session attachment is not ready")
+	}
+	if session.extensionErr != nil {
+		return false, errors.Wrap(session.extensionErr, "inline extensions disconnected; reload the session with callbacks before sending another message")
+	}
+	if session.extensionRelay != nil {
+		select {
+		case <-session.extensionRelay.Done():
+			return false, errors.New("inline extensions disconnected; reload the session with callbacks before sending another message")
+		default:
+		}
+	}
 	if session.uncertain {
 		return false, errors.New("the previous message may still be running; check the conversation history and reload the session before sending another message")
 	}
@@ -234,7 +289,11 @@ func (m *remoteSessionManager) promptTarget(sessionID acptypes.SessionID) (Remot
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session := m.sessions[sessionID]
-	return session.client, chat.ChatRequest{RunnerID: session.runnerID, CWD: session.cwd, EnvironmentProfile: session.environmentProfile, Options: session.options.Clone()}
+	request := chat.ChatRequest{RunnerID: session.runnerID, CWD: session.cwd, EnvironmentProfile: session.environmentProfile, Options: session.options.Clone()}
+	if session.extensionRelay != nil {
+		request.SessionExtensionsID = session.extensionRelay.Attachment().ID
+	}
+	return session.client, request
 }
 
 func (m *remoteSessionManager) finishPrompt(sessionID acptypes.SessionID, succeeded bool) {

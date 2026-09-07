@@ -101,6 +101,12 @@ func (m *RuntimeManager) RuntimeWithConfigAndCallContextForIsolatedLease(ctx, le
 	return m.isolatedRuntime(ctx, leaseCtx, cwd, config, true, callContext)
 }
 
+// RuntimeWithAttachmentsForIsolatedLease takes ownership of all attachment
+// transports, including on failure, and never inserts them into the shared cache.
+func (m *RuntimeManager) RuntimeWithAttachmentsForIsolatedLease(ctx, leaseCtx context.Context, cwd string, config Config, callContext ExtensionCallContext, attachments []Attachment) (*Runtime, func() error, error) {
+	return m.isolatedRuntime(ctx, leaseCtx, cwd, config, true, callContext, attachments...)
+}
+
 // RuntimeForCommandDiscoveryWithIsolatedLease creates a disposable discovery
 // runtime. It never starts session events or grants background-worker lifetime.
 func (m *RuntimeManager) RuntimeForCommandDiscoveryWithIsolatedLease(ctx context.Context, cwd, _ string, config Config) (*Runtime, func() error, error) {
@@ -108,7 +114,16 @@ func (m *RuntimeManager) RuntimeForCommandDiscoveryWithIsolatedLease(ctx context
 	return m.isolatedRuntime(ctx, ctx, cwd, config, false, ExtensionCallContext{})
 }
 
-func (m *RuntimeManager) isolatedRuntime(ctx, leaseCtx context.Context, cwd string, config Config, startLifecycle bool, callContext ExtensionCallContext) (*Runtime, func() error, error) {
+func (m *RuntimeManager) isolatedRuntime(ctx, leaseCtx context.Context, cwd string, config Config, startLifecycle bool, callContext ExtensionCallContext, attachments ...Attachment) (result *Runtime, releaseResult func() error, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			for _, attachment := range attachments {
+				if attachment.Transport != nil {
+					_ = attachment.Transport.Close()
+				}
+			}
+		}
+	}()
 	if m == nil {
 		return nil, nil, errors.New("extension runtime manager is required")
 	}
@@ -131,6 +146,10 @@ func (m *RuntimeManager) isolatedRuntime(ctx, leaseCtx context.Context, cwd stri
 
 	runtime, err := factory(ctx, cwd, config)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := runtime.attach(ctx, attachments); err != nil {
+		_ = runtime.Close()
 		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {

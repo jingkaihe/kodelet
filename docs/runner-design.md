@@ -413,7 +413,7 @@ The manifest exposes skill names, descriptions, sources, and digests. The `skill
 
 ### Local extension processes remain unchanged
 
-Extensions continue to run as subprocesses owned by the runner and communicate with the runner using the existing stdio JSON-RPC protocol. Extension SDKs do not connect to or know about the control plane.
+Installed extensions continue to run as subprocesses owned by the runner and communicate with the runner using the existing stdio JSON-RPC protocol. SDK agent sessions can also attach in-memory callbacks through the authenticated session relay described in [Session callback attachments](extension-design.md#session-callback-attachments). These callbacks execute in the SDK process, while the runner mounts nonrestartable proxies through the same extension runtime and policy checks; the daemon still owns the model loop.
 
 ```text
 control plane ← WebSocket JSON-RPC → runner ← stdio JSON-RPC → extension

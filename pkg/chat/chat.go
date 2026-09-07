@@ -42,17 +42,18 @@ const (
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message            string                     `json:"message"`
-	Content            []ChatContentBlock         `json:"content,omitempty"`
-	ConversationID     string                     `json:"conversationId,omitempty"`
-	TurnID             string                     `json:"turnId,omitempty"`
-	RunnerID           string                     `json:"runnerId,omitempty"`
-	Profile            string                     `json:"profile,omitempty"`
-	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
-	ReasoningEffort    string                     `json:"reasoningEffort,omitempty"`
-	CWD                string                     `json:"cwd,omitempty"`
-	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
-	ClientCapabilities *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
+	Message             string                     `json:"message"`
+	Content             []ChatContentBlock         `json:"content,omitempty"`
+	ConversationID      string                     `json:"conversationId,omitempty"`
+	TurnID              string                     `json:"turnId,omitempty"`
+	RunnerID            string                     `json:"runnerId,omitempty"`
+	SessionExtensionsID string                     `json:"sessionExtensionsId,omitempty"`
+	Profile             string                     `json:"profile,omitempty"`
+	EnvironmentProfile  string                     `json:"environmentProfile,omitempty"`
+	ReasoningEffort     string                     `json:"reasoningEffort,omitempty"`
+	CWD                 string                     `json:"cwd,omitempty"`
+	Options             *llmtypes.ExecutionOptions `json:"options,omitempty"`
+	ClientCapabilities  *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
 }
 
 const (

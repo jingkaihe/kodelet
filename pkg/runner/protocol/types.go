@@ -3,6 +3,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -23,6 +24,9 @@ const (
 	Subprotocol = "kodelet.runner.v1.jsonrpc"
 	// Endpoint is the control-plane WebSocket endpoint used by runners.
 	Endpoint = "/api/runner/v1/connect"
+	// SessionExtensionsEndpoint carries authenticated session callback channels.
+	SessionExtensionsEndpoint    = "/api/session/extensions"
+	SessionExtensionsSubprotocol = "kodelet.session.extensions.v1.jsonrpc"
 )
 
 const (
@@ -68,6 +72,8 @@ const (
 	MethodUISurfaceInvalidate     = "ui.surface.invalidate"
 	MethodUIExtensionCleanup      = "ui.extension.cleanup"
 	MethodOperationCancel         = "operation.cancel"
+	MethodSessionExtensionsAttach = "session.extensions.attach"
+	MethodSessionExtensionFrame   = "session.extension.frame"
 )
 
 const (
@@ -197,6 +203,7 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
+	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
 	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
 	ConcurrentRuns          bool `json:"concurrentRuns,omitempty"`
 	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
@@ -366,6 +373,7 @@ type ClientCapabilities struct {
 
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
+	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`
 	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
 	ChildPrompt        *string                    `json:"childPrompt,omitempty"`
 	RunID              string                     `json:"runId"`
@@ -379,6 +387,11 @@ type RunOpenParams struct {
 }
 
 func (p RunOpenParams) Validate() error {
+	if p.SessionExtensions != nil {
+		if err := p.SessionExtensions.Validate(); err != nil {
+			return err
+		}
+	}
 	if p.ChildPrompt != nil && len(*p.ChildPrompt) > 256*1024 {
 		return errors.New("child prompt exceeds limit")
 	}
@@ -392,6 +405,64 @@ func (p RunOpenParams) Validate() error {
 		return errors.New("run.open options may contain only environment restrictions")
 	}
 	return p.Options.Validate()
+}
+
+// SessionExtensions identifies a live session attachment, never executable paths.
+type SessionExtensions struct {
+	ID           string   `json:"id"`
+	ExtensionIDs []string `json:"extensionIds"`
+}
+
+// Validate rejects ambiguous attachment identities and duplicate channels.
+func (s SessionExtensions) Validate() error {
+	if strings.TrimSpace(s.ID) == "" || s.ID != strings.TrimSpace(s.ID) || strings.ContainsAny(s.ID, "\x00\r\n\t") {
+		return errors.New("session extensions id is required and must not contain surrounding whitespace")
+	}
+	if len(s.ExtensionIDs) == 0 {
+		return errors.New("session extensions extensionIds must not be empty")
+	}
+	seen := make(map[string]bool, len(s.ExtensionIDs))
+	for _, id := range s.ExtensionIDs {
+		if id == "" || strings.ContainsAny(id, "/\\:\x00\r\n\t ") {
+			return errors.New("session extension id must be a nonempty logical name")
+		}
+		if seen[id] {
+			return errors.Errorf("duplicate session extension id %q", id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// ExtensionFrame relays one opaque inner JSON-RPC message or closes one channel.
+type ExtensionFrame struct {
+	AttachmentID string          `json:"attachmentId"`
+	RunID        string          `json:"runId"`
+	ExtensionID  string          `json:"extensionId"`
+	Message      json.RawMessage `json:"message,omitempty"`
+	Close        bool            `json:"close,omitempty"`
+}
+
+// Validate checks only the relay envelope. Inner RPC ids, parentId and payload
+// fields remain opaque and are never decoded into lossy generic numbers.
+func (f ExtensionFrame) Validate() error {
+	if err := (SessionExtensions{ID: f.AttachmentID, ExtensionIDs: []string{f.ExtensionID}}).Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.RunID) == "" || f.RunID != strings.TrimSpace(f.RunID) || strings.ContainsAny(f.RunID, "\x00\r\n\t") {
+		return errors.New("session extension frame runId is required and must be a valid identity")
+	}
+	if f.Close {
+		if len(f.Message) != 0 {
+			return errors.New("session extension frame cannot contain both message and close")
+		}
+		return nil
+	}
+	message := bytes.TrimSpace(f.Message)
+	if len(message) == 0 || message[0] != '{' || !json.Valid(message) {
+		return errors.New("session extension frame message must be a JSON-RPC object")
+	}
+	return nil
 }
 
 // RunCheckpointParams acknowledges validated CWD/policy before extension startup.

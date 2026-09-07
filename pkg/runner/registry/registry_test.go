@@ -1515,12 +1515,28 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 		loaded[run.ID] = struct{}{}
 	}
 	assert.NotContains(t, loaded, "run-0000")
+	// A callback requirement from a non-cached conversation must still be read
+	// from the durable manifest instead of silently disappearing after restart.
+	_, err = persistence.db.ExecContext(t.Context(), `UPDATE runner_runs SET manifest_json = ? WHERE id = ?`,
+		`{"sessionExtensionIds":["inline-1"]}`, "run-0000")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{Persistence: persistence})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	ids, err := registry.RequiredSessionExtensions("conversation-one")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inline-1"}, ids)
 	assert.Contains(t, loaded, fmt.Sprintf("run-%04d", defaultLoadedRunHistory+4))
 	assert.NotContains(t, loaded, "orphan-terminal")
 	assert.Contains(t, loaded, "orphan-active")
 	var orphanCount int
 	require.NoError(t, persistence.db.GetContext(t.Context(), &orphanCount, "SELECT COUNT(*) FROM runner_runs WHERE id = ?", "orphan-terminal"))
 	assert.Zero(t, orphanCount)
+	_, err = registry.RemoveRunner(t.Context(), "runner-one", false)
+	require.NoError(t, err)
+	ids, err = registry.RequiredSessionExtensions("conversation-one")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inline-1"}, ids, "removal must preserve requirements outside the restored history cache")
 }
 
 func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) {
@@ -1577,7 +1593,8 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 		Metadata: map[string]any{
 			conversationtypes.RunnerIDMetadataKey:                 "runner-stale",
 			conversationtypes.RunnerEnvironmentProfileMetadataKey: "gpu",
-			"preserve": "metadata",
+			sessionExtensionIDsMetadataKey:                        []string{"obsolete"},
+			"preserve":                                            "metadata",
 		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -1605,9 +1622,39 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	require.NoError(t, firstRegistry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	firstRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
+	// Later pinned callback requirements override both older manifests and
+	// previously preserved metadata; a subsequent failed open has no manifest.
+	requiredIDs := []string{"inline-1", "inline-2"}
+	for i, snapshot := range []string{string(mustRegistryJSON(t, runnerpayload.Manifest{SessionExtensionIDs: requiredIDs})), ""} {
+		require.NoError(t, firstPersistence.SaveRun(t.Context(), Run{
+			ID: fmt.Sprintf("later-%d", i), ConversationID: conversation.ID, RunnerID: registration.RunnerID,
+			Status: RunStatusFailed, ManifestJSON: snapshot,
+			CreatedAt: time.Now().Add(time.Duration(i+1) * time.Second), UpdatedAt: time.Now(),
+		}))
+	}
+	ids, err := firstRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids)
+
+	// Failure after metadata preservation must roll back both metadata and
+	// deletion, leaving the registry and durable state safe to retry.
+	_, err = firstPersistence.db.ExecContext(t.Context(), `CREATE TRIGGER fail_runner_removal
+		BEFORE DELETE ON runner_registrations BEGIN SELECT RAISE(ABORT, 'test removal failure'); END`)
+	require.NoError(t, err)
+	_, err = firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
+	require.ErrorContains(t, err, "test removal failure")
+	unchanged, err := conversationStore.Load(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []any{"obsolete"}, unchanged.Metadata[sessionExtensionIDsMetadataKey])
+	ids, err = firstRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids)
+	_, err = firstPersistence.db.ExecContext(t.Context(), `DROP TRIGGER fail_runner_removal`)
+	require.NoError(t, err)
+
 	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
 	require.NoError(t, err)
-	assert.Equal(t, 1, result.RemovedRuns)
+	assert.Equal(t, 3, result.RemovedRuns)
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
 	require.NoError(t, firstRegistry.Close())
 
@@ -1633,6 +1680,10 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerIDMetadataKey)
 	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, "metadata", loadedConversation.Metadata["preserve"])
+	assert.Equal(t, []any{"inline-1", "inline-2"}, loadedConversation.Metadata[sessionExtensionIDsMetadataKey])
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids, "callback identities survive removal and restart without run history")
 	queryResult, err := conversationStore.Query(t.Context(), conversationtypes.QueryOptions{})
 	require.NoError(t, err)
 	require.Len(t, queryResult.ConversationSummaries, 1)
@@ -1641,6 +1692,36 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerIDMetadataKey)
 	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, "metadata", queryResult.ConversationSummaries[0].Metadata["preserve"])
+	assert.Equal(t, []any{"inline-1", "inline-2"}, queryResult.ConversationSummaries[0].Metadata[sessionExtensionIDsMetadataKey])
+
+	replacementParams := testRegisterParams("replacement-host", "/work/project")
+	replacementParams.Capabilities.WorkspaceDiscovery = true
+	replacement, err := secondRegistry.Register(replacementParams, newFakeLink())
+	require.NoError(t, err)
+	markRunnerReady(t, secondRegistry, replacement)
+	require.NoError(t, secondRegistry.AdoptConversation(t.Context(), loadedConversation, replacement.RunnerID, replacement.Generation, "default"))
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids, "adoption must not discard preserved callback identities")
+
+	// Ordinary manifest updates, including an explicitly callback-free manifest,
+	// remain authoritative rather than reviving stale fallback requirements.
+	for i, updatedIDs := range [][]string{{"inline-3"}, {}} {
+		require.NoError(t, secondPersistence.SaveRun(t.Context(), Run{
+			ID: fmt.Sprintf("replacement-%d", i), ConversationID: conversation.ID, RunnerID: replacement.RunnerID,
+			Status: RunStatusSucceeded, ManifestJSON: string(mustRegistryJSON(t, runnerpayload.Manifest{SessionExtensionIDs: updatedIDs})),
+			CreatedAt: time.Now().Add(time.Duration(i+1) * time.Second), UpdatedAt: time.Now(),
+		}))
+		ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, updatedIDs, ids)
+	}
+	secondRegistry.Detach(replacement.RunnerID, replacement.ConnectionID, replacement.Generation, nil)
+	_, err = secondRegistry.RemoveRunner(t.Context(), replacement.RunnerID, false)
+	require.NoError(t, err)
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Empty(t, ids, "removal must replace obsolete fallback requirements with the latest empty list")
 }
 
 func TestRemoveRunnerClearsPersistedMetadataWithoutDurableAffinity(t *testing.T) {

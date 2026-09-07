@@ -362,6 +362,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
+			SessionExtensions:       true,
 			ConcurrentRuns:          true,
 			WorkspaceGitDiff:        true,
 			WorkspaceGitCommit:      true,

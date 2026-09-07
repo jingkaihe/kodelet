@@ -1354,7 +1354,7 @@ Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` f
 
 ### TypeScript Agent SDK
 
-The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, built-in tools, skills, and extension behavior.
+The `kodelet` TypeScript package lets Node.js applications create, resume, and stream agent sessions using your configured Kodelet daemon and runner.
 
 ```typescript
 import { Client } from "kodelet";
@@ -1367,52 +1367,9 @@ console.log(response.content);
 await client.close();
 ```
 
-Create streaming sessions with an inline or named profile, and optionally pass in-process extension definitions. Inline extensions are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead.
+Select a named daemon profile with `profile: "my-profile"`, stream output with `session.on("assistant.message_delta", ...)`, or add inline tools with `extensions: [extension]`. Inline callbacks run in your application process. When resuming, supply the same extensions in the same order.
 
-```typescript
-import { Client, Profile, defineExtension, z } from "kodelet";
-
-const workspace = defineExtension((ext) => {
-  ext.setMetadata({ name: "workspace", version: "0.1.0" });
-  ext.registerTool({
-    name: "ask_user_question",
-    description: "Ask the user to choose one option.",
-    inputSchema: z.object({ question: z.string(), options: z.array(z.string()).min(2).max(5) }),
-    async execute(input, ctx) {
-      const choice = await ctx.ui.select({ title: input.question, options: input.options });
-      return choice ? `User selected: ${choice}` : "User dismissed the question.";
-    },
-  });
-});
-
-const profile = new Profile({
-  provider: "openai",
-  model: "gpt-6-astra",
-  reasoning_effort: "max",
-  tool_mode: "patch",
-  openai: { api_mode: "responses", platform: "codex", service_tier: "fast" },
-});
-
-const client = new Client();
-const session = await client.createSession({
-  profile,
-  extensions: [workspace],
-  streaming: true,
-  // Optional: use loopback TCP instead of the default socket/named-pipe bridge.
-  extensionTransport: "tcp",
-});
-
-session.on("assistant.message_delta", (event) => process.stdout.write(event.data.deltaContent));
-session.on("tool.call", (event) => console.error(event.data.toolName, event.data.input));
-session.on("tool.update", (event) => console.error("partial:", event.data.result));
-session.on("tool.result", (event) => console.error("final:", event.data.result));
-
-const response = await session.runAndWait({ message: "help me choose an approach" });
-console.log("\nfinal:", response.content);
-await client.close();
-```
-
-SDK listeners receive every `tool.update`. The returned `response.events` array coalesces transient snapshots by `toolCallId`, retaining the latest update and the authoritative final `tool.result` without growing with every accumulated snapshot.
+See the [SDK guide](../sdk/README.md) for setup and compatibility requirements, or try the [runnable inline-extension example](../sdk/examples/inline-extension-session.ts).
 
 ### Creating TypeScript Extensions
 

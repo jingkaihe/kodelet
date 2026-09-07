@@ -25,6 +25,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -55,14 +56,16 @@ type Server struct {
 	config            *ServerConfig
 	fragmentProcessor *fragments.Processor
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	clientCtx   context.Context
+	closeClient context.CancelFunc
 
 	// wg tracks in-flight request handlers for graceful shutdown
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
 
-	pendingRequests map[string]chan json.RawMessage
+	pendingRequests map[string]chan clientRPCResponse
 	pendingMu       sync.Mutex
 	nextRequestID   int64
 
@@ -70,6 +73,11 @@ type Server struct {
 	// Only one prompt can be active per session at a time.
 	activePrompts   map[acptypes.SessionID]*activePrompt
 	activePromptsMu sync.Mutex
+}
+
+type clientRPCResponse struct {
+	result json.RawMessage
+	err    *acptypes.RPCError
 }
 
 type activePrompt struct {
@@ -144,13 +152,17 @@ func NewServer(opts ...Option) *Server {
 		output:          os.Stdout,
 		ctx:             ctx,
 		cancel:          cancel,
-		pendingRequests: make(map[string]chan json.RawMessage),
+		pendingRequests: make(map[string]chan clientRPCResponse),
 		activePrompts:   make(map[acptypes.SessionID]*activePrompt),
 		config:          &ServerConfig{},
 	}
 
 	for _, opt := range opts {
 		opt(s)
+	}
+	s.clientCtx, s.closeClient = context.WithCancel(s.ctx)
+	if s.remoteSessions != nil {
+		s.remoteSessions.attachExtensions = s.attachSessionExtensions
 	}
 
 	if s.remoteSessions == nil {
@@ -192,6 +204,7 @@ func (s *Server) Run() error {
 	for scanner.Scan() {
 		select {
 		case <-s.ctx.Done():
+			s.closeSessionExtensions()
 			s.cancelActivePromptContexts()
 			s.wg.Wait()
 			return s.ctx.Err()
@@ -219,6 +232,7 @@ func (s *Server) Run() error {
 		}()
 	}
 
+	s.closeSessionExtensions()
 	s.cancelActivePromptContexts()
 	s.wg.Wait()
 	return scanner.Err()
@@ -329,6 +343,8 @@ func (s *Server) handleRequest(data []byte) error {
 		return s.handleSessionSteering(&req)
 	case "session/set_mode":
 		return s.handleSetMode(&req)
+	case sessionExtensionFrameMethod:
+		return s.handleSessionExtensionFrame(&req)
 	default:
 		return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "Method not found", nil)
 	}
@@ -503,12 +519,7 @@ func (s *Server) handleResponse(id json.RawMessage, result json.RawMessage, rpcE
 		return nil
 	}
 
-	if rpcErr != nil {
-		ch <- nil
-		return nil
-	}
-
-	ch <- result
+	ch <- clientRPCResponse{result: result, err: rpcErr}
 	return nil
 }
 
@@ -552,6 +563,9 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 			},
 		},
 	}
+	if s.remoteSessions != nil {
+		result.Meta["sessionExtensions"] = map[string]any{"version": 1}
+	}
 
 	s.initialized.Store(true)
 	return s.sendResult(req.ID, result)
@@ -569,6 +583,9 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 	var params acptypes.NewSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	if _, err := s.requestedSessionExtensions(params.Meta); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 	}
 	if s.remoteSessions != nil {
 		sessionID, err := s.remoteSessions.newSession(s.ctx, params)
@@ -605,6 +622,9 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 	var params acptypes.LoadSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	if _, err := s.requestedSessionExtensions(params.Meta); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 	}
 	if s.remoteSessions != nil {
 		history, err := s.remoteSessions.loadSession(s.ctx, params)
@@ -824,7 +844,11 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 	client, request := s.remoteSessions.promptTarget(params.SessionID)
 	turnID, started := s.startRemotePrompt(params.SessionID, client)
 	if !started {
-		if s.remotePromptCancellationConfirmed(params.SessionID) {
+		cancelled := s.remotePromptCancellationConfirmed(params.SessionID)
+		if err := s.sessionExtensionPromptError(params.SessionID); err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		if cancelled {
 			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
 		}
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "ACP detached before submission; no turn was started", nil)
@@ -842,7 +866,11 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 
 	sink := &remoteOutcomeSink{ChatEventSink: bridge.NewACPChatEventSink(s, params.SessionID)}
 	_, err = client.Run(promptCtx, request, sink)
-	if s.remotePromptCancellationConfirmed(params.SessionID) || sink.cancelled {
+	cancelled := s.remotePromptCancellationConfirmed(params.SessionID) || sink.cancelled
+	if err := s.sessionExtensionPromptError(params.SessionID); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	if cancelled {
 		// A scoped stop can be acknowledged before submission is admitted.
 		// Only a terminal stream event confirms that first-turn configuration
 		// reached the daemon; otherwise retain it for the next prompt.
@@ -1176,11 +1204,17 @@ func (s *Server) storeUpdate(sessionID acptypes.SessionID, update any) {
 
 // CallClient makes an RPC call to the client and waits for response
 func (s *Server) CallClient(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.clientCtx.Err() != nil {
+		return nil, pkgerrors.New("ACP client connection is closed")
+	}
 	s.pendingMu.Lock()
 	s.nextRequestID++
 	id := s.nextRequestID
 	idStr := fmt.Sprintf("%d", id)
-	ch := make(chan json.RawMessage, 1)
+	ch := make(chan clientRPCResponse, 1)
 	s.pendingRequests[idStr] = ch
 	s.pendingMu.Unlock()
 
@@ -1192,6 +1226,11 @@ func (s *Server) CallClient(ctx context.Context, method string, params any) (jso
 	}
 
 	select {
+	case <-s.clientCtx.Done():
+		s.pendingMu.Lock()
+		delete(s.pendingRequests, idStr)
+		s.pendingMu.Unlock()
+		return nil, pkgerrors.New("ACP client connection is closed")
 	case <-ctx.Done():
 		s.pendingMu.Lock()
 		delete(s.pendingRequests, idStr)
@@ -1202,11 +1241,11 @@ func (s *Server) CallClient(ctx context.Context, method string, params any) (jso
 		default:
 		}
 		return nil, ctx.Err()
-	case result := <-ch:
-		if result == nil {
-			return nil, pkgerrors.New("client returned error")
+	case response := <-ch:
+		if response.err != nil {
+			return nil, pkgerrors.Wrap(&protocol.RPCError{Code: response.err.Code, Message: response.err.Message, Data: response.err.Data}, "client returned error")
 		}
-		return result, nil
+		return response.result, nil
 	}
 }
 
@@ -1277,6 +1316,9 @@ func (s *Server) send(v any) error {
 	s.outputMu.Lock()
 	_, err = s.output.Write(append(data, '\n'))
 	s.outputMu.Unlock()
+	if err != nil {
+		s.closeClient()
+	}
 	return err
 }
 
@@ -1400,6 +1442,7 @@ func buildCommandHint(arguments map[string]fragments.ArgumentMeta) string {
 // It cancels the context and waits for in-flight requests to complete.
 func (s *Server) Shutdown() {
 	s.shutdownOnce.Do(func() {
+		s.closeSessionExtensions()
 		s.cancelActivePromptContexts()
 		s.cancel()
 		s.wg.Wait()

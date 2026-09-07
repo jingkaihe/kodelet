@@ -114,6 +114,10 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	if !runner.Connected {
 		return nil, errors.New("runner is offline")
 	}
+	attachmentOption, err := r.server.sessionExtensionEnvironmentOption(ctx, req, conversationID, runnerID)
+	if err != nil {
+		return nil, err
+	}
 	var profileOption agentenv.RemoteEnvironmentOption
 	if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
 		if r.server.conversationService == nil {
@@ -157,6 +161,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		controller,
 		runnerID,
 		profileOption,
+		attachmentOption,
 		agentenv.WithRemoteClientCapabilities(capabilities),
 		agentenv.WithRemoteRunIDGenerator(func() (string, error) {
 			if id, ok := ctx.Value(turnRunIDKey{}).(string); ok && admitted {
@@ -312,6 +317,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clientID := strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	attachment, err := s.sessionExtensionsForRequest(r, req)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusForbidden, err.Error(), nil)
+		return
+	}
 	if chatSupportsInteractiveUI(req) && !validUIClientID(clientID) {
 		s.writeErrorResponse(w, http.StatusBadRequest, "interactive requests require a valid X-Kodelet-Client-ID header; upgrade the client", nil)
 		return
@@ -376,6 +386,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
+	if attachment != nil {
+		ctx = context.WithValue(ctx, sessionExtensionContextKey{}, attachment)
+		stop := context.AfterFunc(attachment.ctx, cancel)
+		defer stop()
+	}
 	if receipt.RunID != "" {
 		ctx = context.WithValue(ctx, turnRunIDKey{}, receipt.RunID)
 		ctx = context.WithValue(ctx, turnConversationIDKey{}, conversationID)

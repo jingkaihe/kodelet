@@ -10,6 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestManifestDigestPinsSessionExtensionsWithoutTools(t *testing.T) {
+	manifest := Manifest{SessionExtensionIDs: []string{"inline-1"}}
+	digest, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	manifest.RunID = "another-run"
+	reattached, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, digest, reattached)
+	manifest.SessionExtensionIDs = nil
+	withoutCallbacks, err := ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.NotEqual(t, digest, withoutCallbacks)
+}
+
 func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
 	manifest := Manifest{
 		ProtocolVersion:     protocol.Version,

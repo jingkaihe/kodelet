@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
-import { Client, Profile, defineExtension } from "./index.js";
+import { Client, Profile, defineExtension, type ToolContext } from "./index.js";
 import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
@@ -14,7 +14,7 @@ interface JsonRPCRequest {
   method?: string;
   params?: unknown;
   result?: unknown;
-  error?: { message?: string };
+  error?: { code?: number; message?: string };
 }
 
 interface FakeACPProcessOptions {
@@ -23,6 +23,7 @@ interface FakeACPProcessOptions {
   onPrompt?(request: JsonRPCRequest, process: FakeACPProcess): Promise<void> | void;
   steerResult?: unknown;
   steeringSupported?: boolean;
+  sessionExtensionsVersion?: number;
 }
 
 class FakeACPProcess extends EventEmitter implements SpawnedProcess {
@@ -32,6 +33,9 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
   requests: JsonRPCRequest[] = [];
   private inputBuffer = "";
   private closed = false;
+  private nextServerId = 0;
+  private readonly serverPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+  responses: JsonRPCRequest[] = [];
 
   constructor(private readonly options: FakeACPProcessOptions = {}) {
     super();
@@ -63,6 +67,14 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
     this.write({ jsonrpc: "2.0", method, params });
   }
 
+  requestClient(method: string, params?: unknown): Promise<unknown> {
+    const id = `server-${++this.nextServerId}`;
+    return new Promise((resolve, reject) => {
+      this.serverPending.set(id, { resolve, reject });
+      this.write({ jsonrpc: "2.0", id, method, params });
+    });
+  }
+
   private handleInput(chunk: string): void {
     this.inputBuffer += chunk;
     while (true) {
@@ -81,6 +93,14 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
       return;
     }
     const request = JSON.parse(line) as JsonRPCRequest;
+    if (!request.method && typeof request.id === "string") {
+      this.responses.push(request);
+      const pending = this.serverPending.get(request.id);
+      this.serverPending.delete(request.id);
+      if (request.error) pending?.reject(new Error(request.error.message));
+      else pending?.resolve(request.result);
+      return;
+    }
     if (!request.method || request.id === undefined || request.id === null) {
       return;
     }
@@ -98,7 +118,8 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
           protocolVersion: 1,
           agentCapabilities: {},
           authMethods: [],
-          _meta: this.options.steeringSupported === false ? undefined : { steering: { supported: true } },
+          _meta: { ...(this.options.steeringSupported === false ? {} : { steering: { supported: true } }),
+            ...(this.options.sessionExtensionsVersion === undefined ? {} : { sessionExtensions: { version: this.options.sessionExtensionsVersion } }) },
         });
         return;
       case "session/new":
@@ -677,20 +698,14 @@ test("Session rejects already-aborted run signals without starting a run", async
   await client.close();
 });
 
-test("Session rejects inline extensions, bridge transports, and UI handlers before spawning any process", async () => {
+test("Session rejects unsupported bridge transport values and daemon settings before spawning", async () => {
   let spawned = false;
-  let invoked = false;
   const client = new Client({ spawn: () => { spawned = true; return new FakeACPProcess(); } });
-  await assert.rejects(client.createSession({ extensions: [defineExtension(() => { invoked = true; })] }), /install the extension on the runner/);
-  await assert.rejects(client.createSession({ extensionTransport: "tcp" }), /Inline executable extensions/);
-  await assert.rejects(client.createSession({ extensions: [], extensionTransport: "unix" }), /Inline executable extensions/);
-  await assert.rejects(client.createSession({ ui: {} }), /UI handlers/);
-  await assert.rejects(client.createSession({ ui: { notify() { invoked = true; } } }), /UI handlers/);
+  await assert.rejects(client.createSession({ extensionTransport: "socket" as never }), /extensionTransport must be unix or tcp/);
   await assert.rejects(client.createSession({ profile: { openai: { api_key_env_var: "LOCAL_KEY" } } }));
   await assert.rejects(client.createSession({ profile: { sysprompt: "/client/prompt.md" } }));
   await assert.rejects(client.createSession({ options: null as never }));
   assert.equal(spawned, false);
-  assert.equal(invoked, false);
 });
 
 test("Session accepts empty extensions and undefined bridge/UI options", async () => {
@@ -723,4 +738,347 @@ test("Remote session flags preserve runner paths and named profile selection", a
   assert.equal(processes[1].requests[1].method, "session/load");
   assert.deepEqual(processes[1].requests[1].params, { sessionId: "existing", cwd: "/stored/path" });
   await client.close();
+});
+
+interface RelayFrame {
+  sessionId: string;
+  runId: string;
+  extensionId: string;
+  message?: JsonRPCRequest;
+  close?: boolean;
+}
+
+class InlineRelay {
+  readonly process: FakeACPProcess;
+  readonly frames: RelayFrame[] = [];
+  hostRequest?: (message: JsonRPCRequest, frame: RelayFrame) => Promise<unknown> | unknown;
+  private nextId = 0;
+  private readonly pending = new Map<string, { resolve(value: any): void; reject(error: Error): void }>();
+
+  constructor(readonly sessionId = "conv-inline") {
+    this.process = new FakeACPProcess({ sessionId, sessionExtensionsVersion: 1, onRequest: (request, child) => {
+      if (request.method !== "kodelet/extensionFrame") return false;
+      const frame = request.params as RelayFrame;
+      this.frames.push(frame);
+      child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} })}\n`);
+      const message = frame.message!;
+      if (!message.method) {
+        const key = this.key(frame);
+        const pending = this.pending.get(key);
+        this.pending.delete(key);
+        if (message.error) pending?.reject(new Error(message.error.message));
+        else pending?.resolve(message.result);
+      } else if (message.id !== undefined && this.hostRequest) {
+        void Promise.resolve().then(() => this.hostRequest!(message, frame)).then(
+          (result) => this.send({ jsonrpc: "2.0", id: message.id, result }, frame),
+          (error) => this.send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: String(error) } }, frame),
+        ).catch(() => undefined);
+      }
+      return true;
+    } });
+  }
+
+  send(message: JsonRPCRequest, route: Partial<RelayFrame> = {}): Promise<unknown> {
+    return this.process.requestClient("kodelet/extensionFrame", { sessionId: this.sessionId, runId: "run-1", extensionId: "inline-1", ...route, message });
+  }
+
+  beginCall(method: string, params: unknown, route: Partial<RelayFrame> = {}) {
+    const id = ++this.nextId;
+    const frame = { sessionId: this.sessionId, runId: "run-1", extensionId: "inline-1", ...route, message: { jsonrpc: "2.0" as const, id, method, params } };
+    const result = new Promise<any>((resolve, reject) => this.pending.set(this.key(frame), { resolve, reject }));
+    const accepted = this.send(frame.message, frame);
+    return { id, accepted, result };
+  }
+
+  async call(method: string, params: unknown, route: Partial<RelayFrame> = {}): Promise<any> {
+    const { accepted, result } = this.beginCall(method, params, route);
+    await accepted;
+    return result;
+  }
+
+  initialize(route: Partial<RelayFrame> = {}): Promise<any> {
+    return this.call("extension.initialize", {
+      protocolVersion: "2026-05-30", extension: { id: `session:${route.extensionId ?? "inline-1"}`, cwd: "/runner/workspace" },
+      capabilities: { toolUpdates: true, conversations: { fork: true }, ui: { confirm: false, widgets: false } },
+    }, route);
+  }
+
+  close(route: Partial<RelayFrame> = {}): Promise<unknown> {
+    return this.process.requestClient("kodelet/extensionFrame", { sessionId: this.sessionId, runId: "run-1", extensionId: "inline-1", ...route, close: true });
+  }
+
+  private key(frame: RelayFrame): string {
+    return JSON.stringify([frame.sessionId, frame.runId, frame.extensionId, frame.message?.id]);
+  }
+}
+
+for (const version of [undefined, 2]) {
+  test(`Inline extensions fail fast and close incompatible ACP version ${version}`, async () => {
+    const child = new FakeACPProcess({ sessionExtensionsVersion: version });
+    let invoked = false, exited = false;
+    child.once("close", () => { exited = true; });
+    const client = new Client({ spawn: () => child });
+    await assert.rejects(client.createSession({ extensions: [() => { invoked = true; }] }), /sessionExtensions version 1.*update Kodelet/);
+    assert.equal(invoked, false);
+    assert.equal(exited, true);
+    assert.deepEqual(child.requests.map(({ method }) => method), ["initialize"]);
+  });
+}
+
+test("Inline extensions negotiate deterministic IDs for new and resumed sessions without launch configuration", async () => {
+  const children: FakeACPProcess[] = [];
+  const args: string[][] = [];
+  const client = new Client({ spawn: (_command, flags) => {
+    args.push(flags);
+    const child = new FakeACPProcess({ sessionExtensionsVersion: 1 });
+    children.push(child);
+    return child;
+  } });
+  let invoked = false;
+  const extensions = [defineExtension(() => { invoked = true; }), defineExtension(() => {})];
+  try {
+    await client.createSession({ extensions, extensionTransport: "unix", ui: {}, cwd: "/runner/path" });
+    await client.createSession({ extensions, extensionTransport: "tcp", resume: "saved", cwd: "/runner/path" });
+    for (const child of children) {
+      assert.deepEqual((child.requests[0].params as any).clientCapabilities._meta, { sessionExtensions: { version: 1 } });
+      assert.deepEqual((child.requests[1].params as any)._meta, { sessionExtensions: { version: 1, extensionIds: ["inline-1", "inline-2"] } });
+    }
+    assert.equal(children[1].requests[1].method, "session/load");
+    assert.deepEqual(args, [["acp"], ["acp"]]);
+    assert.equal(invoked, false, "entrypoints are lazy until runner initialization");
+  } finally { await client.close(); }
+});
+
+test("Inline callbacks ACK before dispatch, preserve nested RPC parent IDs, updates, local UI, and errors", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let calls = 0, confirms = 0, toolContext: ToolContext | undefined;
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  const session = await client.createSession({ extensions: [api => {
+    api.registerTool({ name: "echo", description: "Echo", inputSchema: { type: "object" }, async execute(input, ctx) {
+      calls++;
+      toolContext = ctx;
+      assert.ok(relay.process.responses.some(response => response.id === "server-2" && !response.error), "tool frame must already be ACKed");
+      if ((input as { fail?: boolean }).fail) throw new Error("callback boom");
+      assert.equal(await ctx.ui.confirm({ message: "Confirm?" }), true);
+      await ctx.ui.notify("hello");
+      const [, fork] = await Promise.all([ctx.update("progress"), ctx.forkConversation({ name: "branch" })]);
+      return `${ctx.conversationId}:${fork}:${calls}`;
+    } });
+  }], ui: { confirm: () => { confirms++; return true; }, notify: () => {} } });
+  relay.hostRequest = (message) => {
+    if (message.method === "kodelet.tool.update") return {};
+    if (message.method === "kodelet.conversation.fork") return { conversationId: "forked" };
+    throw new Error(`Unexpected host method ${message.method}`);
+  };
+  assert.equal((await relay.initialize()).tools[0].name, "echo");
+  assert.deepEqual(await relay.call("extension.tool.execute", { name: "echo", input: {}, context: { conversationId: session.id } }), { content: "conv-inline:forked:1" });
+  const hostRequests = relay.frames.filter(frame => frame.message?.method);
+  assert.deepEqual(hostRequests.map(frame => frame.message?.method), ["kodelet.tool.update", "kodelet.conversation.fork"]);
+  assert.ok(hostRequests.every(frame => frame.message?.parentId === 2));
+  assert.equal(confirms, 1);
+  assert.equal(toolContext?.signal.aborted, true);
+  await assert.rejects(toolContext!.update("late"), /no longer active/);
+  await assert.rejects(relay.call("extension.tool.execute", { name: "echo", input: { fail: true } }), /callback boom/);
+  await assert.rejects(relay.call("unknown.extension.method", {}), /Unknown JSON-RPC method/);
+  assert.equal(relay.frames.at(-1)?.message?.error?.code, -32601);
+  assert.equal(calls, 2);
+});
+
+test("Inline hosts are isolated per session, run, and extension while retaining original closure callbacks", { timeout: 5000 }, async (t) => {
+  const relays = [new InlineRelay("session-a"), new InlineRelay("session-b")];
+  let spawnIndex = 0, registrations = 0, callbacks = 0, ended = 0;
+  const client = new Client({ spawn: () => relays[spawnIndex++].process });
+  t.after(() => client.close());
+  const extension = defineExtension(api => {
+    registrations++;
+    let localCount = 0;
+    api.on("session.end", () => { ended++; });
+    api.registerTool({ name: "count", description: "Counter", inputSchema: {}, execute() { callbacks++; return `${++localCount}:${callbacks}`; } });
+  });
+  await client.createSession({ extensions: [extension, extension] });
+  await client.createSession({ extensions: [extension] });
+  await Promise.all([relays[0].initialize(), relays[0].initialize({ extensionId: "inline-2" }), relays[1].initialize()]);
+  assert.equal(registrations, 3);
+  const params = { name: "count", input: {} };
+  assert.deepEqual(await relays[0].call("extension.tool.execute", params), { content: "1:1" });
+  assert.deepEqual(await relays[0].call("extension.tool.execute", params), { content: "2:2" });
+  assert.deepEqual(await relays[0].call("extension.tool.execute", params, { extensionId: "inline-2" }), { content: "1:3" });
+  assert.deepEqual(await relays[1].call("extension.tool.execute", params), { content: "1:4" });
+  await relays[0].close();
+  await relays[0].initialize({ runId: "run-2" });
+  assert.deepEqual(await relays[0].call("extension.tool.execute", params, { runId: "run-2" }), { content: "1:5" });
+  assert.equal(registrations, 4);
+  await client.close();
+  assert.equal(ended, 4);
+});
+
+test("Inline relay rejects unknown sessions, extension IDs, malformed frames, replay, and non-initialize creation", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let registered = 0;
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  await client.createSession({ extensions: [() => { registered++; }] });
+  const execute = { jsonrpc: "2.0" as const, id: 1, method: "extension.tool.execute", params: {} };
+  await assert.rejects(relay.send(execute), /must start with extension.initialize/);
+  await assert.rejects(relay.send(execute, { extensionId: "inline-2" }), /Invalid or unsupported/);
+  await assert.rejects(relay.send(execute, { sessionId: "other" }), /different ACP session/);
+  await assert.rejects(relay.send({ jsonrpc: "2.0", id: 1, method: "extension.initialize", params: { extension: {} } }), /requires an extension identity/);
+  await assert.rejects(relay.process.requestClient("kodelet/extensionFrame", { sessionId: relay.sessionId, runId: "run-1", extensionId: "inline-1", message: null }), /Invalid or unsupported/);
+  assert.equal(registered, 0);
+  await relay.initialize();
+  await assert.rejects(relay.send({ jsonrpc: "2.0", id: 3, method: "extension.initialize", params: { extension: { id: "inline-1" } } }), /cannot be initialized again/);
+  await relay.close();
+  await assert.rejects(relay.send(execute), /cannot be replayed/);
+  assert.equal(registered, 1);
+  await assert.rejects(relay.process.requestClient("unknown/clientMethod", {}), /Unsupported client RPC/);
+  assert.equal(relay.process.responses.at(-1)?.error?.code, -32601);
+});
+
+for (const cause of ["cancel", "relay close", "session close", "process failure"] as const) {
+  test(`Inline ${cause} aborts callbacks and rejects pending reverse calls without late output`, { timeout: 5000 }, async (t) => {
+    const relay = new InlineRelay();
+    let ctx!: ToolContext;
+    let started!: () => void, stopped!: () => void;
+    const startedPromise = new Promise<void>(resolve => { started = resolve; });
+    const stoppedPromise = new Promise<void>(resolve => { stopped = resolve; });
+    let reverseError = "", ended = 0;
+    const client = new Client({ spawn: () => relay.process });
+    t.after(() => client.close());
+    const session = await client.createSession({ extensions: [api => {
+      api.on("session.end", () => { ended++; });
+      api.registerTool({ name: "wait", description: "Wait", inputSchema: {}, async execute(_input, context) {
+        ctx = context;
+        try {
+          const pending = ctx.update("waiting");
+          started();
+          await pending;
+        } catch (error) { reverseError = String(error); }
+        finally { stopped(); }
+        return "late result";
+      } });
+    }] });
+    await relay.initialize();
+    const call = relay.beginCall("extension.tool.execute", { name: "wait", input: {} });
+    await call.accepted;
+    await startedPromise;
+    if (cause === "cancel") await relay.send({ jsonrpc: "2.0", method: "$/cancelRequest", params: { id: call.id } });
+    else if (cause === "relay close") await relay.close();
+    else if (cause === "session close") await session.close();
+    else relay.process.stdout.emit("error", new Error("broken relay"));
+    await stoppedPromise;
+    assert.equal(ctx.signal.aborted, true);
+    assert.match(reverseError, /cancelled|disconnected|closed|broken relay/);
+    await assert.rejects(ctx.update("stale"), /active|disconnected|closed|broken relay/);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(!relay.frames.some(frame => !frame.message?.method && frame.message?.id === call.id), "cancelled execution must not send late results");
+    await session.close();
+    assert.equal(ended, 1);
+  });
+}
+
+test("Inline entrypoint failures are returned as raw errors and never restarted", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let registrations = 0;
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  await client.createSession({ extensions: [() => { registrations++; throw new Error("registration boom"); }] });
+  await assert.rejects(relay.initialize(), /registration boom/);
+  await assert.rejects(relay.send({ jsonrpc: "2.0", id: 2, method: "extension.initialize", params: { extension: { id: "inline-1" } } }), /cannot be replayed/);
+  assert.equal(registrations, 1);
+});
+
+test("Inline ACK and close do not wait for an asynchronous entrypoint", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let release!: () => void, started!: () => void;
+  const registration = new Promise<void>(resolve => { release = resolve; });
+  const registering = new Promise<void>(resolve => { started = resolve; });
+  let ended!: () => void;
+  const cleanup = new Promise<void>(resolve => { ended = resolve; });
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  const session = await client.createSession({ extensions: [async api => {
+    started();
+    await registration;
+    api.on("session.end", () => { ended(); });
+  }] });
+  assert.deepEqual(await relay.send({ jsonrpc: "2.0", id: 1, method: "extension.initialize", params: { extension: { id: "session:inline-1" } } }), {});
+  await registering;
+  await relay.close();
+  await session.close();
+  release();
+  await cleanup;
+  assert.equal(relay.frames.length, 0, "closed initialization must not send a late response");
+});
+
+test("Inline local UI cancellation settles pending calls even when a handler ignores its signal", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let entered!: () => void, stopped!: () => void, release!: (value: boolean) => void;
+  const interacting = new Promise<void>(resolve => { entered = resolve; });
+  const finished = new Promise<void>(resolve => { stopped = resolve; });
+  const interaction = new Promise<boolean>(resolve => { release = resolve; });
+  let uiSignal: AbortSignal | undefined;
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  const session = await client.createSession({ extensions: [api => {
+    api.registerTool({ name: "confirm", description: "Confirm", inputSchema: {}, async execute(_input, ctx) {
+      try { await ctx.ui.confirm({ message: "Wait" }); }
+      finally { stopped(); }
+      return "late UI result";
+    } });
+  }], ui: { confirm: (_request, signal) => { uiSignal = signal; entered(); return interaction; } } });
+  await relay.initialize();
+  const call = relay.beginCall("extension.tool.execute", { name: "confirm", input: {} });
+  await call.accepted;
+  await interacting;
+  await relay.send({ jsonrpc: "2.0", method: "$/cancelRequest", params: { id: call.id } });
+  await finished;
+  assert.equal(uiSignal?.aborted, true);
+  release(true);
+  await session.close();
+  assert.equal(relay.frames.length, 1, "local UI must not relay requests or cancelled results");
+});
+
+test("Inline UI overrides preserve runner capability gates and return dismissal/unavailable values", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  await client.createSession({ extensions: [api => {
+    api.registerTool({ name: "ui", description: "UI", inputSchema: {}, async execute(_input, ctx) {
+      assert.equal(await ctx.ui.input({ message: "Dismiss" }), undefined);
+      assert.equal(await ctx.ui.select({ message: "Select", options: ["one"] }), "one");
+      assert.equal(await ctx.ui.confirm({ message: "Unavailable" }), false);
+      await ctx.ui.notify("Unavailable");
+      await ctx.ui.setWidget("not-enabled", ["hidden"]);
+      await ctx.update("not-enabled");
+      await assert.rejects(ctx.forkConversation(), /not supported/);
+      return "ok";
+    } });
+  }], ui: { input: () => undefined, select: () => "one" } });
+  await relay.call("extension.initialize", {
+    protocolVersion: "2026-05-30", extension: { id: "session:inline-1" },
+    capabilities: { toolUpdates: false, conversations: { fork: false }, ui: { widgets: false } },
+  });
+  assert.deepEqual(await relay.call("extension.tool.execute", { name: "ui", input: {} }), { content: "ok" });
+  assert.equal(relay.frames.filter(frame => frame.message?.method).length, 0);
+});
+
+test("Inline cleanup runs session.end once and is bounded when the callback does not finish", { timeout: 5000 }, async (t) => {
+  const relay = new InlineRelay();
+  let ended = 0;
+  let cleanupSignal: AbortSignal | undefined;
+  const client = new Client({ spawn: () => relay.process });
+  t.after(() => client.close());
+  const session = await client.createSession({ extensions: [api => {
+    api.on("session.end", async (_event, ctx) => {
+      ended++;
+      cleanupSignal = ctx.signal;
+      await new Promise(() => {});
+    });
+  }] });
+  await relay.initialize();
+  await relay.close();
+  await session.close();
+  assert.equal(ended, 1);
+  assert.equal(cleanupSignal?.aborted, true);
 });

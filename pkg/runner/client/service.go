@@ -55,6 +55,10 @@ type isolatedRuntimeLeaseProvider interface {
 	RuntimeWithConfigAndCallContextForIsolatedLease(ctx, leaseCtx context.Context, cwd, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, func() error, error)
 }
 
+type attachedRuntimeLeaseProvider interface {
+	RuntimeWithAttachmentsForIsolatedLease(ctx, leaseCtx context.Context, cwd string, config extensions.Config, callContext extensions.ExtensionCallContext, attachments []extensions.Attachment) (*extensions.Runtime, func() error, error)
+}
+
 type runtimeDiscoveryProvider interface {
 	RuntimeForCommandDiscoveryWithConfig(ctx context.Context, cwd, variant string, config extensions.Config) (*extensions.Runtime, error)
 }
@@ -122,6 +126,7 @@ type Service struct {
 }
 
 type activeRun struct {
+	attachments          map[string]*sessionExtensionTransport
 	id                   string
 	conversationID       string
 	invokedBy            string
@@ -248,6 +253,12 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner service is unavailable"}
 	}
 	switch method {
+	case protocol.MethodSessionExtensionFrame:
+		value, rpcErr := decodeParams[protocol.ExtensionFrame](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(struct{}{}, s.receiveExtensionFrame(value))
 	case protocol.MethodRunOpen:
 		value, rpcErr := decodeParams[protocol.RunOpenParams](params)
 		if rpcErr != nil {
@@ -482,6 +493,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	resources := s.backgrounds[params.ConversationID]
 	if resources != nil {
+		if params.SessionExtensions != nil || resources.runtime.HasSessionExtensions() {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.New("cannot reattach session extensions to retained background resources; release background leases first")
+		}
 		if resources.attachedRunID != "" {
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.Errorf("conversation already has attached background run %s", resources.attachedRunID)
@@ -618,6 +633,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
 	}
+	if params.SessionExtensions != nil && !extensionConfig.Enabled {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.New("session extensions are disabled by runner extension policy")
+	}
 	if params.RequireCheckpoint {
 		peer := s.currentPeer()
 		if peer == nil {
@@ -659,7 +678,19 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		if runtimeLeaseCtx == nil {
 			runtimeLeaseCtx = s.ctx
 		}
-		if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
+		if params.SessionExtensions != nil {
+			provider, ok := s.runtimeProvider.(attachedRuntimeLeaseProvider)
+			if !ok {
+				s.failOpen(run)
+				return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support isolated session extensions")
+			}
+			attachments, attachErr := s.attachSessionExtensions(run, *params.SessionExtensions)
+			if attachErr != nil {
+				s.failOpen(run)
+				return runnerpayload.Manifest{}, attachErr
+			}
+			runtime, runtimeRelease, err = provider.RuntimeWithAttachmentsForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, extensionConfig, callContext, attachments)
+		} else if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
 			runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
 		} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
 			runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
@@ -692,6 +723,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
 	wireManifest, err := buildWireManifest(localManifest, config, runtime, runnerID, params.RunID, generation, params.ReservedToolNames)
+	if err == nil && params.SessionExtensions != nil {
+		wireManifest.SessionExtensionIDs = append([]string(nil), params.SessionExtensions.ExtensionIDs...)
+		wireManifest.Digest, err = runnerpayload.ComputeManifestDigest(wireManifest)
+	}
 	if err == nil {
 		err = operationCtx.Err()
 	}
@@ -749,14 +784,13 @@ func (s *Service) failOpen(run *activeRun) {
 		return
 	}
 	logCtx := s.decorateRunLogContext(s.ctx, run.id, run.conversationID)
+	defer s.closeRunAttachments(run)
 	run.cancel()
 	if err := s.closeRunEnvironment(context.Background(), run); err != nil {
 		logger.G(logCtx).WithError(err).Warn("failed to close runner environment after open failure")
 	}
 	s.mu.Lock()
-	if s.runs[run.id] == run {
-		delete(s.runs, run.id)
-	}
+	run.closing = true
 	s.clearRunSurfacesLocked(run.id)
 	s.revokeBackgroundTasksLocked(run, true)
 	resources := run.resources
@@ -771,6 +805,11 @@ func (s *Service) failOpen(run *activeRun) {
 			logger.G(logCtx).WithError(err).Warn("failed to close runner background resources after open failure")
 		}
 	}
+	s.mu.Lock()
+	if s.runs[run.id] == run {
+		delete(s.runs, run.id)
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) closeRunEnvironment(ctx context.Context, run *activeRun) error {
@@ -817,6 +856,7 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		return nil
 	}
 	run.cleanupOnce.Do(func() {
+		defer s.closeRunAttachments(run)
 		logCtx := s.decorateRunLogContext(ctx, run.id, run.conversationID)
 		startedAt := time.Now()
 		logger.G(logCtx).Info("closing runner run")
@@ -840,10 +880,11 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
 		closeErr := s.closeRunEnvironment(ctx, run)
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)
-		s.mu.Lock()
-		if s.runs[run.id] == run {
-			delete(s.runs, run.id)
+		if run.runtime.HasSessionExtensions() {
+			attachmentErr := run.runtime.CloseSessionExtensions(context.WithoutCancel(ctx))
+			run.cleanupErr = combineCleanupErrors(run.cleanupErr, attachmentErr)
 		}
+		s.mu.Lock()
 		resources := run.resources
 		cleanup := false
 		if resources != nil && resources.attachedRunID == run.id {
@@ -854,6 +895,11 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		if cleanup {
 			run.cleanupErr = combineCleanupErrors(run.cleanupErr, s.closeBackgroundResources(ctx, resources))
 		}
+		s.mu.Lock()
+		if s.runs[run.id] == run {
+			delete(s.runs, run.id)
+		}
+		s.mu.Unlock()
 	})
 	return run.cleanupErr
 }

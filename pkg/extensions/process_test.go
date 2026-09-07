@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,153 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1", Kind: SourceKindSession}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	reader := bufio.NewReader(sdk)
+	read := func() rpcIncomingMessage {
+		message, err := readIncomingMessage(reader)
+		require.NoError(t, err)
+		return message
+	}
+	send := func(value any) {
+		payload, err := json.Marshal(value)
+		require.NoError(t, err)
+		require.NoError(t, writeFrame(sdk, payload))
+	}
+	ctx := ContextWithUIInputBroker(t.Context(), staticUIInputBroker{value: "runner-owned"})
+	initialized := make(chan error, 1)
+	go func() {
+		_, err := process.Initialize(ctx, "/workspace")
+		initialized <- err
+	}()
+	init := read()
+	assert.Equal(t, "extension.initialize", init.Method)
+	var params initializeParams
+	require.NoError(t, json.Unmarshal(init.Params, &params))
+	assert.Equal(t, "session:inline-1", params.Extension.ID)
+	assert.False(t, params.Capabilities["runtime"].(map[string]any)["backgroundTasks"].(bool))
+	send(map[string]any{"jsonrpc": "2.0", "id": 100, "parentId": init.ID, "method": "kodelet.ui.input", "params": map[string]any{"title": "initialize"}})
+	assert.Contains(t, string(read().Result), "runner-owned")
+	send(map[string]any{"jsonrpc": "2.0", "id": init.ID, "result": InitializeResult{Name: "inline"}})
+	require.NoError(t, <-initialized)
+
+	updates := make(chan ToolExecutionResult, 1)
+	completed := make(chan error, 1)
+	store := &forkableMetadataStore{conversationID: "forked"}
+	ctx = kodelettools.ContextWithToolContext(ctx, kodelettools.ToolContext{MetadataStore: store})
+	go func() {
+		result, err := process.ExecuteToolStreaming(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{}, func(update ToolExecutionResult) { updates <- update })
+		if err == nil {
+			assert.Equal(t, "finished", result.Content)
+		}
+		completed <- err
+	}()
+	tool := read()
+	assert.Equal(t, "extension.tool.execute", tool.Method)
+	for _, method := range []string{"kodelet.tool.update", ConversationForkMethod, BackgroundTaskAcquireMethod} {
+		send(map[string]any{"jsonrpc": "2.0", "id": 101, "parentId": tool.ID, "method": method, "params": map[string]any{"content": "working"}})
+		response := read()
+		switch method {
+		case "kodelet.tool.update":
+			assert.Nil(t, response.Error)
+			assert.Equal(t, "working", (<-updates).Content)
+		case ConversationForkMethod:
+			assert.Contains(t, string(response.Result), "forked")
+		case BackgroundTaskAcquireMethod:
+			require.NotNil(t, response.Error)
+			assert.Contains(t, response.Error.Message, "not available")
+		}
+	}
+	send(map[string]any{"jsonrpc": "2.0", "id": 102, "parentId": 999999, "method": "kodelet.tool.update", "params": map[string]any{}})
+	require.NotNil(t, read().Error, "stale parents must not acquire another tool's update sink")
+	send(map[string]any{"jsonrpc": "2.0", "id": tool.ID, "result": ToolExecutionResult{Content: "finished"}})
+	require.NoError(t, <-completed)
+	assert.Nil(t, process.cmd)
+	assert.True(t, RuntimeCapabilitiesFromContext(ctx).BackgroundTasks, "attached capability narrowing must not mutate the host context")
+}
+
+func TestAttachedProcessCancellationAndDisconnectDoNotReplay(t *testing.T) {
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1"}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	reader := bufio.NewReader(sdk)
+	ctx, cancel := context.WithCancel(t.Context())
+	completed := make(chan error, 1)
+	go func() {
+		_, err := process.ExecuteTool(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	request, err := readIncomingMessage(reader)
+	require.NoError(t, err)
+	cancel()
+	notification, err := readIncomingMessage(reader)
+	require.NoError(t, err)
+	assert.Equal(t, "$/cancelRequest", notification.Method)
+	assert.JSONEq(t, `{"id":`+string(request.ID)+`}`, string(notification.Params))
+	require.ErrorIs(t, <-completed, context.Canceled)
+	go func() {
+		_, err := process.ExecuteTool(t.Context(), "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	_, err = readIncomingMessage(reader)
+	require.NoError(t, err)
+	require.NoError(t, sdk.Close())
+	select {
+	case err := <-completed:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not fail pending execution")
+	}
+	_, err = process.ExecuteTool(t.Context(), "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+	require.ErrorContains(t, err, "reattachment")
+	assert.Nil(t, process.cmd)
+}
+
+func TestAttachedProcessDisconnectCancelsParentBoundReverseRequest(t *testing.T) {
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1"}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	broker := &cancelAwareUIInputBroker{started: make(chan struct{}), canceled: make(chan struct{})}
+	ctx := ContextWithUIInputBroker(t.Context(), broker)
+	completed := make(chan error, 1)
+	go func() {
+		_, err := process.ExecuteTool(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	request, err := readIncomingMessage(bufio.NewReader(sdk))
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(sdk, []byte(`{"jsonrpc":"2.0","id":100,"parentId":`+string(request.ID)+`,"method":"kodelet.ui.input","params":{"title":"waiting"}}`)))
+	select {
+	case <-broker.started:
+	case <-time.After(time.Second):
+		t.Fatal("reverse request did not start")
+	}
+	require.NoError(t, sdk.Close())
+	select {
+	case <-broker.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not cancel the parent-bound reverse request")
+	}
+	select {
+	case err := <-completed:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("generation cleanup deadlocked waiting for reverse request")
+	}
+}
 
 func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 	basePath := t.TempDir()

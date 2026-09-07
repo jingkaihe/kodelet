@@ -3,6 +3,7 @@ package extensions
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,13 @@ import (
 )
 
 const maxConcurrentExtensionInitializations = 4
+
+// Attachment supplies one run-scoped callback channel. ID is the wire identity;
+// registration and policy use the logical identity "session:" + ID.
+type Attachment struct {
+	ID        string
+	Transport io.ReadWriteCloser
+}
 
 // Runtime manages discovered extension processes and registrations.
 type Runtime struct {
@@ -32,6 +40,7 @@ type Runtime struct {
 	lifecycleStarted    bool
 	lifecycleCtx        context.Context
 	lifecycleCallCtx    ExtensionCallContext
+	sessionExtensions   bool
 }
 
 // Command is an extension command registration bound to its process.
@@ -175,6 +184,77 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		}
 	}
 	return nil
+}
+
+// attach runs only during isolated runtime construction, before lifecycle events.
+func (r *Runtime) attach(ctx context.Context, attachments []Attachment) error {
+	r.sessionExtensions = len(attachments) > 0
+	allow := newMatcher(r.config.Allow, r.workingDir)
+	deny := newMatcher(r.config.Deny, r.workingDir)
+	seen := make(map[string]bool, len(attachments))
+	for _, attachment := range attachments {
+		ext := Extension{ID: "session:" + attachment.ID, Name: attachment.ID, Kind: SourceKindSession}
+		if attachment.ID == "" || strings.ContainsAny(attachment.ID, "/\\:\x00\r\n\t ") || seen[ext.ID] {
+			return errors.Errorf("invalid or duplicate session extension id %q", attachment.ID)
+		}
+		seen[ext.ID] = true
+		if !r.config.Enabled || deny.matches(ext) || !allow.allows(ext) {
+			return errors.Errorf("session extension %s is not allowed by extension policy", ext.ID)
+		}
+	}
+	for _, attachment := range attachments {
+		ext := Extension{ID: "session:" + attachment.ID, Name: attachment.ID, Kind: SourceKindSession}
+		proc, err := AttachProcess(r.runtimeCtx, ext, r.config, r.workingDir, attachment.Transport)
+		if err != nil {
+			return err
+		}
+		r.processes = append(r.processes, proc)
+		initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
+		result, err := proc.Initialize(initCtx, r.workingDir)
+		cancel()
+		if err != nil {
+			return errors.Wrapf(err, "failed to initialize session extension %s", ext.ID)
+		}
+		if err := r.register(ctx, proc, result); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HasSessionExtensions reports whether this runtime is pinned to callback channels.
+func (r *Runtime) HasSessionExtensions() bool {
+	return r != nil && r.sessionExtensions
+}
+
+// CloseSessionExtensions ends run-scoped channels even if installed extensions
+// retain background leases. Closed callback registrations cannot be reused.
+func (r *Runtime) CloseSessionExtensions(ctx context.Context) error {
+	if !r.HasSessionExtensions() {
+		return nil
+	}
+	r.mu.RLock()
+	started, callContext := r.lifecycleStarted, r.lifecycleCallCtx
+	processes := append([]*Process(nil), r.processes...)
+	r.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if started {
+		for _, handler := range r.eventHandlers(EventSessionEnd) {
+			if handler.process.transport != nil {
+				_, _ = r.dispatchEventToHandler(ctx, handler, EventSessionEnd, sessionEndPayload{}, callContext)
+			}
+		}
+	}
+	var firstErr error
+	for _, proc := range processes {
+		if proc.transport != nil {
+			if err := proc.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallContext) {

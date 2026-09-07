@@ -64,6 +64,7 @@ type EnvironmentCapabilities struct {
 
 // Manifest is the immutable wire snapshot returned by run.open.
 type Manifest struct {
+	SessionExtensionIDs []string                      `json:"sessionExtensionIds,omitempty"`
 	Shortcuts           []protocol.ShortcutDescriptor `json:"shortcuts,omitempty"`
 	Profiles            []delegation.Preset           `json:"profiles,omitempty"`
 	ProtocolVersion     int                           `json:"protocolVersion"`

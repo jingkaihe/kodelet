@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -121,6 +122,7 @@ type Runner struct {
 	WorkspaceMessageHistory bool               `json:"workspaceMessageHistory"`
 	WorkspaceCWD            bool               `json:"workspaceCwd"`
 	RunCheckpoint           bool               `json:"runCheckpoint"`
+	SessionExtensions       bool               `json:"sessionExtensions"`
 	ActiveRunID             string             `json:"activeRunId,omitempty"`
 	ActiveRunIDs            []string           `json:"activeRunIds,omitempty"`
 	ConnectionID            string             `json:"connectionId,omitempty"`
@@ -235,6 +237,7 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
+	sessionExtensions *protocol.SessionExtensions
 	checkpoint        *runCheckpoint
 	connectionID      string
 	generation        int64
@@ -629,6 +632,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
+	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
@@ -762,6 +766,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
+	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -1044,6 +1049,10 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("this runner cannot save conversations before starting work; update the runner")
 	}
+	if params.SessionExtensions != nil && !entry.SessionExtensions {
+		r.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("this runner does not support session extensions; update the runner")
+	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	reservedAffinity := false
 	if affinity, exists := r.affinities.get(params.ConversationID); exists && affinity.RunnerID != runnerID {
@@ -1114,6 +1123,11 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		generation:   generation,
 		leaseCancel:  leaseCancel,
 		checkpoint:   checkpoint,
+	}
+	if params.SessionExtensions != nil {
+		run.sessionExtensions = &protocol.SessionExtensions{
+			ID: params.SessionExtensions.ID, ExtensionIDs: append([]string(nil), params.SessionExtensions.ExtensionIDs...),
+		}
 	}
 	if checkpoint != nil {
 		stop := context.AfterFunc(leaseCtx, checkpoint.cancel)
@@ -2006,6 +2020,13 @@ func (r *Registry) expireStaleConnections() {
 }
 
 func validateManifest(manifest runnerpayload.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
+	var sessionExtensionIDs []string
+	if params.SessionExtensions != nil {
+		sessionExtensionIDs = params.SessionExtensions.ExtensionIDs
+	}
+	if !slices.Equal(manifest.SessionExtensionIDs, sessionExtensionIDs) {
+		return errors.New("runner manifest session extensions do not match the opened run")
+	}
 	if manifest.ProtocolVersion != protocol.Version {
 		return errors.Errorf("runner manifest uses protocol version %d", manifest.ProtocolVersion)
 	}

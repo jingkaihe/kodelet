@@ -114,6 +114,18 @@ Kodelet itself should only need the generated JSON Schema for LLM tool registrat
 
 ## Extension discovery
 
+### Session callback attachments
+
+SDK sessions can additionally attach in-memory extensions without installing executables on the runner. TypeScript uses `client.createSession({ extensions: [entrypoint] })`; Python uses `client.create_session(extensions=[ext])` with ordinary `@ext.tool` registrations. Both SDKs and ACP negotiate `_meta.sessionExtensions = { "version": 1 }`; new/load requests provide `{ "version": 1, "extensionIds": ["inline-1", ...] }` in that metadata key.
+
+ACP opens an authenticated WebSocket at `/api/session/extensions` with subprotocol `kodelet.session.extensions.v1.jsonrpc`. `session.extensions.attach` binds one live connection to a client/principal, conversation, and runner generation. `session.extension.frame` carries `{ attachmentId, runId, extensionId, message }`, or `close: true` instead of `message`; ACP relays the same inner payload using `kodelet/extensionFrame` and replaces the attachment identity with the session ID. Frames acknowledge delivery, not callback execution. The inner extension JSON-RPC, including IDs, `parentId`, cancellations, errors, and updates, is unchanged.
+
+The runner mounts each callback as a nonrestartable `Process` in an isolated runtime before lifecycle startup. It uses the logical policy identity `session:<extensionId>`, ordinary registration/collision checks, effective extension settings, and model tool ceilings. Only run.open-pinned channels accept frames, including bounded cancellation and session-end replies during cleanup. A late close notice carries no execution authority. The manifest persists the required extension IDs, not the live attachment capability, so resuming requires explicit reattachment even after daemon restart. Session callbacks are excluded from ordinary workspace discovery and shared runtime caches.
+
+Basic SDK UI handlers may service input, confirm, select, and notify locally. Other supported context RPCs use the normal runner execution handler and its originating-request authority. Callback channels cannot acquire background leases, cannot transfer to another runner generation, and close at run end or transport failure without reconnect/replay. Installed extensions retain their existing subprocess and background-lifetime behavior. Callback closures execute on the SDK host; workspace paths in their context do not make direct language-runtime file or process operations remote.
+
+### Installed extension discovery
+
 Kodelet should discover extension executables from configured extension roots. By default these roots are:
 
 1. `./.kodelet/extensions`

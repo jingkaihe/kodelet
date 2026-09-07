@@ -453,17 +453,17 @@ func TestServer_HandleResponseRoutesPendingClientCalls(t *testing.T) {
 		WithOutput(io.Discard),
 		WithContext(context.Background()),
 	)
-	resultCh := make(chan json.RawMessage, 1)
+	resultCh := make(chan clientRPCResponse, 1)
 	server.pendingRequests["1"] = resultCh
 
 	require.NoError(t, server.handleResponse(json.RawMessage(`1`), json.RawMessage(`{"ok":true}`), nil))
-	assert.JSONEq(t, `{"ok":true}`, string(<-resultCh))
+	assert.JSONEq(t, `{"ok":true}`, string((<-resultCh).result))
 	_, stillPending := server.pendingRequests["1"]
 	assert.False(t, stillPending)
 
 	server.pendingRequests["2"] = resultCh
 	require.NoError(t, server.handleResponse(json.RawMessage(`2`), nil, &acptypes.RPCError{Code: acptypes.ErrCodeInternalError, Message: "boom"}))
-	assert.Nil(t, <-resultCh)
+	assert.Equal(t, "boom", (<-resultCh).err.Message)
 
 	require.NoError(t, server.handleResponse(json.RawMessage(`unknown`), json.RawMessage(`{}`), nil))
 }

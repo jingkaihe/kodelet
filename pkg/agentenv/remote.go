@@ -41,6 +41,17 @@ func WithRemoteClientCapabilities(capabilities protocol.ClientCapabilities) Remo
 	}
 }
 
+// WithRemoteSessionExtensions attaches client callbacks to this environment only.
+func WithRemoteSessionExtensions(attachment *protocol.SessionExtensions) RemoteEnvironmentOption {
+	return func(environment *RemoteEnvironment) {
+		if attachment != nil {
+			environment.sessionExtensions = &protocol.SessionExtensions{
+				ID: attachment.ID, ExtensionIDs: append([]string(nil), attachment.ExtensionIDs...),
+			}
+		}
+	}
+}
+
 // WithRemoteModelProfile overrides only the runner's environment selector. The
 // trusted server uses this for embedded snapshot fallback without changing the
 // resolved model configuration or its immutable saved profile identity.
@@ -66,6 +77,7 @@ type RemoteEnvironment struct {
 	runnerID           string
 	modelProfile       string
 	clientCapabilities protocol.ClientCapabilities
+	sessionExtensions  *protocol.SessionExtensions
 	newRunID           func() (string, error)
 	runID              string
 	manifest           Manifest
@@ -142,6 +154,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 			InvokedBy:          firstNonEmpty(spec.InvokedBy, "main"),
 		},
 		ClientCapabilities: e.clientCapabilities,
+		SessionExtensions:  e.sessionExtensions,
 		ReservedToolNames:  tools.ControlPlaneToolNames(),
 		Options:            spec.Config.EnvironmentOptions(),
 	}

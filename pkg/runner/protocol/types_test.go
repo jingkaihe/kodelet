@@ -10,6 +10,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSessionExtensionWireContract(t *testing.T) {
+	descriptor := SessionExtensions{ID: "attachment-1", ExtensionIDs: []string{"inline-1", "inline-2"}}
+	require.NoError(t, descriptor.Validate())
+	encoded, err := json.Marshal(descriptor)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"attachment-1","extensionIds":["inline-1","inline-2"]}`, string(encoded))
+	for _, ids := range [][]string{nil, {""}, {"inline-1", "inline-1"}, {"../tool"}, {"session:inline-1"}} {
+		assert.Error(t, (SessionExtensions{ID: "attachment-1", ExtensionIDs: ids}).Validate())
+	}
+	frame := ExtensionFrame{AttachmentID: "attachment-1", RunID: "run-1", ExtensionID: "inline-1", Message: json.RawMessage(`{"jsonrpc":"2.0","id":9007199254740993,"parentId":9007199254740992,"method":"kodelet.tool.update"}`)}
+	require.NoError(t, frame.Validate())
+	encoded, err = json.Marshal(frame)
+	require.NoError(t, err)
+	var decoded ExtensionFrame
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, frame, decoded, "inner request identities must not pass through float64")
+	for _, raw := range []string{"", "null", "[]", `"text"`, "{invalid}"} {
+		invalid := frame
+		invalid.Message = json.RawMessage(raw)
+		assert.Error(t, invalid.Validate(), raw)
+	}
+	frame.Close = true
+	assert.Error(t, frame.Validate())
+	frame.Message = nil
+	require.NoError(t, frame.Validate())
+	frame.RunID = ""
+	assert.Error(t, frame.Validate())
+}
+
 func TestWorkspaceMessageHistoryWireContract(t *testing.T) {
 	assert.Equal(t, "workspace.messageHistory", MethodWorkspaceMessageHistory)
 	for _, raw := range []string{`{}`, `{"entry":null}`} {

@@ -704,7 +704,7 @@ func (p *Peer) startWorker(worker func()) bool {
 
 func isControlRequest(method string) bool {
 	switch strings.TrimSpace(method) {
-	case MethodRunCancel, MethodRunClose:
+	case MethodRunCancel, MethodRunClose, MethodSessionExtensionFrame:
 		return true
 	default:
 		return false

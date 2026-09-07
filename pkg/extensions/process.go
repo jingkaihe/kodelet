@@ -22,13 +22,15 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Process is a running extension subprocess.
+// Process is an extension RPC endpoint backed by a subprocess or session transport.
 type Process struct {
 	Extension    Extension
 	cmd          *exec.Cmd
 	client       *rpcClient
 	stdin        io.WriteCloser
 	stdout       io.ReadCloser
+	transport    io.ReadWriteCloser
+	attachCancel context.CancelFunc
 	config       Config
 	workspaceCWD string
 	runtimeCtx   context.Context
@@ -98,6 +100,35 @@ func StartProcess(ctx context.Context, ext Extension, config Config, workspaceCW
 	return p, nil
 }
 
+// AttachProcess binds an already connected, nonrestartable session transport.
+// The process takes ownership of the transport; callers still invoke Initialize.
+func AttachProcess(ctx context.Context, ext Extension, config Config, cwd string, transport io.ReadWriteCloser) (*Process, error) {
+	if transport == nil {
+		return nil, errors.New("session extension transport is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtimeCtx, cancel := context.WithCancel(ctx)
+	p := &Process{Extension: ext, config: config, workspaceCWD: cwd, runtimeCtx: runtimeCtx, transport: transport, attachCancel: cancel}
+	p.bindRPC(transport, transport)
+	return p, nil
+}
+
+// attachedCallContext ties reverse requests to the callback generation as well
+// as their originating operation. Installed subprocess lifetime is unchanged.
+func (p *Process) attachedCallContext(ctx context.Context) (context.Context, func()) {
+	if p.transport == nil {
+		return ctx, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(p.runtimeCtx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 func (p *Process) start() error {
 	runtimeCtx := p.runtimeCtx
 	if runtimeCtx == nil {
@@ -124,7 +155,15 @@ func (p *Process) start() error {
 		return errors.Wrap(err, "failed to start extension process")
 	}
 
-	client := newRPCClient(stdout, stdin)
+	p.cmd = cmd
+	p.stdin = stdin
+	p.stdout = stdout
+	p.bindRPC(stdout, stdin)
+	return nil
+}
+
+func (p *Process) bindRPC(reader io.Reader, writer io.Writer) {
+	client := newRPCClient(reader, writer)
 	generation := extensionProcessGeneration.Add(1)
 	source := &processExtensionUISource{
 		process: p,
@@ -133,13 +172,9 @@ func (p *Process) start() error {
 	}
 	client.setHostRequestHandler(source)
 	client.setTerminalHandler(func(error) { p.failClientGeneration(client) })
-	p.cmd = cmd
 	p.client = client
 	p.uiSource = source
-	p.stdin = stdin
-	p.stdout = stdout
 	p.closed = false
-	return nil
 }
 
 func extensionProcessEnv(workspaceCWD string) []string {
@@ -174,6 +209,10 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 	if !p.closed {
 		p.mu.Unlock()
 		return nil
+	}
+	if p.transport != nil {
+		p.mu.Unlock()
+		return errors.Errorf("session extension %s is disconnected; explicit reattachment is required", p.Extension.ID)
 	}
 
 	backoff := restartBackoffBase
@@ -247,6 +286,8 @@ func (p *Process) recordFailureLocked() {
 
 // Initialize initializes the extension process and returns its registrations.
 func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult, error) {
+	ctx, cancel := p.attachedCallContext(ctx)
+	defer cancel()
 	p.lifecycleMu.Lock()
 	defer p.lifecycleMu.Unlock()
 
@@ -259,6 +300,9 @@ func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult
 }
 
 func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient, source *processExtensionUISource) (*InitializeResult, error) {
+	if p.transport != nil {
+		ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+	}
 	if source != nil {
 		source.setHostContext(ctx)
 	}
@@ -404,6 +448,8 @@ func (p *Process) ExecuteToolStreaming(ctx context.Context, name string, input j
 }
 
 func (p *Process) executeTool(ctx context.Context, name string, input json.RawMessage, callContext ExtensionCallContext, onUpdate func(ToolExecutionResult)) (*ToolExecutionResult, error) {
+	ctx, cancel := p.attachedCallContext(ctx)
+	defer cancel()
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -487,6 +533,8 @@ func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method s
 
 // ExecuteCommand invokes an extension-provided command over JSON-RPC.
 func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[string]any, invocation CommandInvocation, callContext ExtensionCallContext) (*CommandResult, error) {
+	ctx, cancel := p.attachedCallContext(ctx)
+	defer cancel()
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -522,6 +570,8 @@ func (p *Process) ExecuteShortcut(ctx context.Context, key string, callContext E
 // ExecuteShortcutWithResult invokes an extension-provided keyboard shortcut
 // and returns its optional host action.
 func (p *Process) ExecuteShortcutWithResult(ctx context.Context, key string, callContext ExtensionCallContext) (*ShortcutResult, error) {
+	ctx, cancel := p.attachedCallContext(ctx)
+	defer cancel()
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -544,6 +594,8 @@ func (p *Process) ExecuteShortcutWithResult(ctx context.Context, key string, cal
 
 // HandleEvent invokes an extension event handler.
 func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
+	ctx, cancel := p.attachedCallContext(ctx)
+	defer cancel()
 	// Cleanup must never restart a failed generation merely to notify it that
 	// its session ended. Ordinary events retain their existing restart policy.
 	if eventName != EventSessionEnd {
@@ -584,6 +636,9 @@ func (p *Process) HandleRPCRequest(ctx context.Context, method string, params js
 }
 
 func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource, method string, params json.RawMessage) (any, *rpcError) {
+	if p.transport != nil {
+		ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+	}
 	if isPersistentExtensionUIRequest(method) && !hasExplicitExtensionUIScope(params) {
 		ctx = ContextWithExtensionUIImplicitScope(ctx)
 	}
@@ -1126,6 +1181,13 @@ func (p *Process) closeProcessLocked() (*rpcClient, error) {
 	}
 	if backgroundHost != nil && owner.Generation != 0 {
 		backgroundHost.CleanupBackgroundTasks(owner)
+	}
+	if p.transport != nil {
+		// Also fail calls when no reader has started yet. Closing the transport
+		// must unblock both reads and writes without waiting for remote execution.
+		p.attachCancel()
+		client.fail(io.ErrClosedPipe)
+		return client, p.transport.Close()
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		return client, nil

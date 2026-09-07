@@ -65,6 +65,16 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 	if !registered {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidRequest, Message: "runner.register must be the first request"}
 	}
+	if method == protocol.MethodSessionExtensionFrame {
+		if router, ok := s.ui.(interface {
+			HandleRunnerExtensionFrame(context.Context, UIRequestIdentity, json.RawMessage) (any, *protocol.RPCError)
+		}); ok {
+			return router.HandleRunnerExtensionFrame(ctx, UIRequestIdentity{
+				RunnerID: runnerID, ConnectionID: connectionID, Generation: generation,
+			}, params)
+		}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "session extension routing is unavailable"}
+	}
 	if method == protocol.MethodRunCheckpoint {
 		value, err := decodeParams[protocol.RunCheckpointParams](params)
 		if err != nil {
@@ -157,6 +167,9 @@ func (s *Session) Detach(cause error) {
 		s.registry.Detach(runnerID, connectionID, generation, cause)
 		if ui, ok := s.ui.(interface{ RunnerUIDetached(UIRequestIdentity) }); ok {
 			ui.RunnerUIDetached(UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation})
+		}
+		if router, ok := s.ui.(interface{ RunnerExtensionsDetached(UIRequestIdentity) }); ok {
+			router.RunnerExtensionsDetached(UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation})
 		}
 	}
 }

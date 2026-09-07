@@ -2,6 +2,8 @@ import { spawn as spawnProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 
+import { createExtensionHost } from "./api.js";
+import { ExtensionRuntime, type ExtensionRPCMessage } from "./runtime.js";
 import { executionArgs, executionOptionsSchema, remoteExecutionOptions, type ExecutionOptions } from "./execution.js";
 import type {
   ExtensionEntrypoint,
@@ -13,6 +15,7 @@ import type {
 
 const ACP_PROTOCOL_VERSION = 1;
 const ACP_MESSAGE_LIMIT = 64 * 1024 * 1024;
+const EXTENSION_FRAME_METHOD = "kodelet/extensionFrame";
 
 export type BridgeTransport = "unix" | "tcp";
 
@@ -54,7 +57,7 @@ export interface CreateSessionOptions {
   environmentProfile?: string;
   /** Named profile, inline profile, or omitted to use the default Kodelet config. */
   profile?: string | Profile | ProfileInput;
-  /** @deprecated Unsupported remotely. Install extensions on the selected runner. */
+  /** Session-scoped callbacks hosted in this SDK process and exposed by the selected runner. */
   extensions?: ExtensionEntrypoint[];
   /** Kept for API compatibility. ACP emits chunks as JSON-RPC session/update notifications. */
   streaming?: boolean;
@@ -64,9 +67,9 @@ export interface CreateSessionOptions {
   resume?: string;
   /** Maximum agentic turns for each run. 0/undefined means Kodelet default. */
   maxTurns?: number;
-  /** @deprecated Unsupported by this ACP adapter. Retained for API compatibility. */
+  /** Local handlers for inline extension ctx.ui input, confirm, select, and notify requests. */
   ui?: AgentUIHandlers;
-  /** @deprecated Unsupported remotely. Retained for API compatibility; any supplied value is rejected. */
+  /** @deprecated Compatibility no-op. Inline extensions use the authenticated ACP relay, not local sockets. */
   extensionTransport?: BridgeTransport;
 }
 
@@ -286,10 +289,9 @@ export class Client {
   }
 
   async createSession(options: CreateSessionOptions = {}): Promise<Session> {
-    if (options.extensions?.length || options.extensionTransport !== undefined) {
-      throw new Error("Inline executable extensions are not supported by server sessions; install the extension on the runner and use ctx.children for delegated execution");
+    if (options.extensionTransport !== undefined && options.extensionTransport !== "unix" && options.extensionTransport !== "tcp") {
+      throw new Error("extensionTransport must be unix or tcp (both are compatibility no-ops)");
     }
-    if (options.ui !== undefined) throw new Error("Inline extension UI handlers are not supported by this ACP adapter");
     const cwd = options.cwd ?? this.cwd;
     const profile = normalizeProfile(options.profile);
     const inline = profile && !profile.isNamedOnly() ? remoteExecutionOptions(profile.config) : {};
@@ -302,7 +304,7 @@ export class Client {
       const args = ["acp", ...this.endpointArgs, ...executionArgs(execution),
         ...(profile?.name && profile.isNamedOnly() ? [`--profile=${profile.name}`] : []),
         ...(options.environmentProfile ? [`--runner-profile=${options.environmentProfile}`] : [])];
-      rpc = new ACPRPCClient(this._spawn(args, { cwd: process.cwd(), env, stdio: ["pipe", "pipe", "pipe"] }));
+      rpc = new ACPRPCClient(this._spawn(args, { cwd: process.cwd(), env, stdio: ["pipe", "pipe", "pipe"] }), options.extensions, options.ui);
       await rpc.initialize();
       const sessionID = options.resume ? await rpc.loadSession(options.resume, cwd) : await rpc.createSession(cwd);
       const session = new Session(this, {
@@ -588,6 +590,21 @@ export class Session extends EventEmitter {
   }
 }
 
+interface ExtensionFrame {
+  sessionId: string;
+  runId: string;
+  extensionId: string;
+  message?: ExtensionRPCMessage;
+  close?: boolean;
+}
+
+interface InlineExtensionRuntime {
+  ready?: Promise<ExtensionRuntime>;
+  runtime?: ExtensionRuntime;
+  cleanup?: Promise<void>;
+  closed: boolean;
+}
+
 class ACPRPCClient {
   private nextId = 0;
   private pending = new Map<number, PendingRPCRequest>();
@@ -599,8 +616,14 @@ class ACPRPCClient {
   private exited = false;
   private readonly processClosed: Promise<void>;
   private closePromise?: Promise<void>;
+  private readonly extensions: Map<string, ExtensionEntrypoint>;
+  private readonly extensionRuntimes = new Map<string, InlineExtensionRuntime>();
+  private sessionId?: string;
+  private sessionExtensionsSupported = false;
+  private extensionsClosePromise?: Promise<void>;
 
-  constructor(private readonly child: SpawnedProcess) {
+  constructor(private readonly child: SpawnedProcess, extensions: ExtensionEntrypoint[] = [], private readonly ui?: AgentUIHandlers) {
+    this.extensions = new Map(extensions.map((entrypoint, index) => [`inline-${index + 1}`, entrypoint]));
     if (!child.stdin) {
       throw new Error("kodelet acp process did not expose stdin");
     }
@@ -638,7 +661,9 @@ class ACPRPCClient {
     child.once("close", (code: number | null, signal: NodeJS.Signals | null) => {
       this.closed = true;
       const message = this.stderrChunks.join("").trim() || `kodelet acp exited with status ${code ?? "unknown"}${signal ? ` (${signal})` : ""}`;
-      this.rejectPending(new AgentRunError(message, { code, signal, stderr: this.stderrChunks.join("") }));
+      const error = new AgentRunError(message, { code, signal, stderr: this.stderrChunks.join("") });
+      this.rejectPending(error);
+      void this.closeExtensions(error);
     });
   }
 
@@ -648,6 +673,7 @@ class ACPRPCClient {
       clientCapabilities: {
         terminal: true,
         fs: { readTextFile: false, writeTextFile: false },
+        _meta: { sessionExtensions: { version: 1 } },
       },
       clientInfo: { name: "kodelet-sdk", title: "Kodelet SDK" },
     });
@@ -655,18 +681,30 @@ class ACPRPCClient {
       && isRecord(result._meta)
       && isRecord(result._meta.steering)
       && result._meta.steering.supported === true;
+    this.sessionExtensionsSupported = isRecord(result)
+      && isRecord(result._meta)
+      && isRecord(result._meta.sessionExtensions)
+      && result._meta.sessionExtensions.version === 1;
+    if (this.extensions.size && !this.sessionExtensionsSupported) {
+      throw new Error("kodelet acp does not support inline session extensions (sessionExtensions version 1); update Kodelet and the selected runner");
+    }
   }
 
   async createSession(cwd: string): Promise<string> {
-    const result = await this.request("session/new", { cwd });
+    const result = await this.request("session/new", { cwd, ...this.extensionMetadata() });
     if (!isRecord(result) || typeof result.sessionId !== "string") {
       throw new Error("Invalid session/new response from kodelet acp");
     }
-    return result.sessionId;
+    if (this.sessionId !== undefined && this.sessionId !== result.sessionId) {
+      throw new Error("Inline extension frame belongs to a different ACP session");
+    }
+    this.sessionId = result.sessionId;
+    return this.sessionId;
   }
 
   async loadSession(sessionId: string, cwd: string): Promise<string> {
-    await this.request("session/load", { sessionId, cwd });
+    this.sessionId = sessionId;
+    await this.request("session/load", { sessionId, cwd, ...this.extensionMetadata() });
     return sessionId;
   }
 
@@ -711,7 +749,9 @@ class ACPRPCClient {
 
   async close(): Promise<void> {
     this.closed = true;
-    this.rejectPending(new Error("kodelet acp process closed"));
+    const error = new Error("kodelet acp process closed");
+    this.rejectPending(error);
+    const extensionsClosed = this.closeExtensions(error);
     this.closePromise ??= (async () => {
       if (this.exited) {
         return;
@@ -728,7 +768,7 @@ class ACPRPCClient {
       this.closePromise = undefined;
       throw error;
     });
-    await this.closePromise;
+    await Promise.all([this.closePromise, extensionsClosed]);
   }
 
   private async waitForExit(): Promise<boolean> {
@@ -749,6 +789,7 @@ class ACPRPCClient {
     }
     this.closed = true;
     this.rejectPending(error);
+    void this.closeExtensions(error);
     // Stop a child blocked on a broken/full pipe even if its caller does not
     // immediately close the session. close() still awaits actual process exit.
     this.child.kill("SIGKILL");
@@ -828,12 +869,156 @@ class ACPRPCClient {
   }
 
   private respondToServerRequest(message: JsonRPCMessage): void {
+    if (message.method === EXTENSION_FRAME_METHOD) {
+      try {
+        const dispatch = this.acceptExtensionFrame(message.params);
+        // ACK acceptance before invoking callbacks: nested host RPC uses this same duplex pipe.
+        this.write({ jsonrpc: "2.0", id: message.id, result: {} });
+        queueMicrotask(dispatch);
+      } catch (error) {
+        this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: errorMessage(error) } });
+      }
+      return;
+    }
     this.write({
       jsonrpc: "2.0",
       id: message.id,
       error: { code: -32601, message: `Unsupported client RPC method: ${message.method}` },
     });
   }
+
+  private extensionMetadata(): Record<string, unknown> {
+    return this.extensions.size ? { _meta: { sessionExtensions: { version: 1, extensionIds: [...this.extensions.keys()] } } } : {};
+  }
+
+  private acceptExtensionFrame(params: unknown): () => void {
+    if (!this.sessionExtensionsSupported || !isRecord(params)
+      || typeof params.sessionId !== "string" || !params.sessionId
+      || typeof params.runId !== "string" || !params.runId
+      || typeof params.extensionId !== "string" || !this.extensions.has(params.extensionId)
+      || (params.close !== undefined && typeof params.close !== "boolean")
+      || (params.close === true ? params.message !== undefined : !validExtensionMessage(params.message))) {
+      throw new Error("Invalid or unsupported inline extension frame");
+    }
+    if (this.sessionId !== undefined && this.sessionId !== params.sessionId) {
+      throw new Error("Inline extension frame belongs to a different ACP session");
+    }
+    const frame = params as unknown as ExtensionFrame;
+    this.sessionId = frame.sessionId;
+    const key = JSON.stringify([frame.runId, frame.extensionId]);
+    let state = this.extensionRuntimes.get(key);
+    if (frame.close) {
+      if (!state) throw new Error("Unknown inline extension runtime");
+      state.closed = true;
+      const closing = state;
+      return () => { void this.closeInlineRuntime(closing); };
+    }
+    if (state?.closed) throw new Error("Inline extension runtime is closed; callbacks cannot be replayed");
+    const message = frame.message!;
+    const initializing = "method" in message && message.method === "extension.initialize";
+    // The runner owns the raw extension identity (for example session:inline-1).
+    // Only the outer extensionId identifies the SDK callback entrypoint.
+    if (initializing && (!isRecord(message.params) || !isRecord(message.params.extension)
+      || typeof message.params.extension.id !== "string" || !message.params.extension.id)) {
+      throw new Error("Inline extension initialize requires an extension identity");
+    }
+    if (!state) {
+      if (!initializing || message.id === undefined || message.id === null) {
+        throw new Error("An inline extension runtime must start with extension.initialize");
+      }
+      const entrypoint = this.extensions.get(frame.extensionId)!;
+      const created: InlineExtensionRuntime = { closed: false };
+      // Promise callbacks do not run until after the acceptance ACK above has been written.
+      created.ready = Promise.resolve().then(async () => {
+        if (created.closed || this.closed) throw new Error("Inline extension runtime is closed");
+        const host = await createExtensionHost(entrypoint);
+        const runtime = new ExtensionRuntime(host, {
+          send: async (message) => {
+            if (created.closed || this.closed) throw new Error("Inline extension runtime is closed");
+            try {
+              await this.request(EXTENSION_FRAME_METHOD, { sessionId: frame.sessionId, runId: frame.runId, extensionId: frame.extensionId, message });
+            } catch (error) {
+              void this.closeInlineRuntime(created, error instanceof Error ? error : new Error(String(error)));
+              throw error;
+            }
+          },
+          request: (method, params, signal) => this.localUIRequest(method, params, signal),
+        });
+        if (created.closed || this.closed) {
+          void runtime.close();
+          throw new Error("Inline extension runtime is closed");
+        }
+        created.runtime = runtime;
+        return runtime;
+      });
+      state = created;
+      this.extensionRuntimes.set(key, state);
+    } else if (initializing) {
+      throw new Error("Inline extension runtime cannot be initialized again");
+    }
+    const target = state;
+    const ready = target.ready!;
+    return () => {
+      void ready.then((runtime) => {
+        if (target.closed || this.closed) return;
+        if (initializing && this.ui && isRecord(message.params)) {
+          const capabilities = isRecord(message.params.capabilities) ? message.params.capabilities : {};
+          runtime.receive({ ...message, params: { ...message.params, capabilities: {
+            ...capabilities, ui: { ...(isRecord(capabilities.ui) ? capabilities.ui : {}),
+              input: !!this.ui.input, confirm: !!this.ui.confirm, select: !!this.ui.select, notify: !!this.ui.notify },
+          } } });
+        } else {
+          runtime.receive(message);
+        }
+      }).catch((error) => {
+        if (target.closed || this.closed) return;
+        void this.closeInlineRuntime(target, error instanceof Error ? error : new Error(String(error)));
+        if (!this.closed && message.id !== undefined && message.id !== null) {
+          void this.request(EXTENSION_FRAME_METHOD, { sessionId: frame.sessionId, runId: frame.runId, extensionId: frame.extensionId,
+            message: { jsonrpc: "2.0", id: message.id, error: { code: -32000, message: errorMessage(error) } },
+          }).catch(() => undefined);
+        }
+      });
+    };
+  }
+
+  private localUIRequest(method: string, params: unknown, signal: AbortSignal): Promise<unknown> | undefined {
+    if (!this.ui) return undefined;
+    const unavailable = { status: "unavailable" };
+    switch (method) {
+      case "kodelet.ui.input":
+        return this.ui.input ? Promise.resolve(this.ui.input(params as UIInputRequest, signal)).then((value) => value === undefined ? { status: "dismissed" } : { status: "submitted", value }) : Promise.resolve(unavailable);
+      case "kodelet.ui.confirm":
+        return this.ui.confirm ? Promise.resolve(this.ui.confirm(params as UIConfirmRequest, signal)).then((confirmed) => ({ status: "submitted", confirmed })) : Promise.resolve(unavailable);
+      case "kodelet.ui.select":
+        return this.ui.select ? Promise.resolve(this.ui.select(params as UISelectRequest, signal)).then((value) => value === undefined ? { status: "dismissed" } : { status: "submitted", value }) : Promise.resolve(unavailable);
+      case "kodelet.ui.notify":
+        return this.ui.notify ? Promise.resolve(this.ui.notify(params as UINotifyRequest, signal)).then(() => ({ status: "submitted" })) : Promise.resolve(unavailable);
+      default:
+        return undefined;
+    }
+  }
+
+  private closeExtensions(error: Error): Promise<void> {
+    this.extensionsClosePromise ??= Promise.all([...this.extensionRuntimes.values()].map(state => this.closeInlineRuntime(state, error))).then(() => undefined);
+    return this.extensionsClosePromise;
+  }
+
+  private closeInlineRuntime(state: InlineExtensionRuntime, error?: Error): Promise<void> | undefined {
+    state.closed = true;
+    state.cleanup ??= state.runtime?.close(error);
+    // Retain only a tombstone, not every completed run's host and callback context.
+    state.runtime = undefined;
+    state.ready = undefined;
+    return state.cleanup;
+  }
+}
+
+function validExtensionMessage(message: unknown): message is ExtensionRPCMessage {
+  if (!isRecord(message) || message.jsonrpc !== "2.0") return false;
+  if (message.id !== undefined && message.id !== null && typeof message.id !== "number" && typeof message.id !== "string") return false;
+  if (message.method !== undefined) return typeof message.method === "string" && !!message.method && message.result === undefined && message.error === undefined;
+  return message.id !== undefined && (("result" in message) !== ("error" in message));
 }
 
 class LineBuffer {
