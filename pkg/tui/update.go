@@ -312,7 +312,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD()))
 		}
 		if m.remote && msg.err == nil {
-			cmds = append(cmds, m.loadRemoteSlashCommands(state))
+			cmds = append(cmds, m.loadRemoteSlashCommands(state), m.loadRemoteMessageHistory(state))
 		}
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
@@ -629,6 +629,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil {
 			break
 		}
+		if msg.remote {
+			if msg.cwd != slashCommandCWDForState(state) {
+				break
+			}
+			if msg.err != nil {
+				return m, m.addUINotification(uiNotification{conversationKey: state.key, level: uiNotificationWarning, title: "Message history unavailable", message: msg.err.Error()})
+			}
+			currentState := m.conversationState
+			m.conversationState = state
+			m.messageHistoryScopeCWD = msg.scopeCWD
+			// Loading is asynchronous: prompts submitted in the meantime must
+			// remain newer than the saved history, not be reordered behind it.
+			m.prependMessageHistoryTexts(msg.messages)
+			if state == currentState && m.historySearch != nil {
+				m.applyHistorySearchQuery()
+				m.resize()
+				m.refreshViewport(false)
+			}
+			m.conversationState = currentState
+			break
+		}
 		currentState := m.conversationState
 		m.conversationState = state
 		if strings.TrimSpace(msg.scopeCWD) != strings.TrimSpace(m.messageHistoryScopeCWD) {
@@ -643,6 +664,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.appendMessageHistoryTexts(msg.messages)
 		m.conversationState = currentState
+
+	case messageHistorySavedMsg:
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && m.stateForKey(msg.conversationKey) != nil {
+			return m, tea.Batch(waitForMsg(m.runCh), m.addUINotification(uiNotification{conversationKey: msg.conversationKey, level: uiNotificationWarning, title: "Message history was not saved", message: msg.err.Error()}))
+		}
+		return m, waitForMsg(m.runCh)
 
 	case conversationListMsg:
 		m.applyConversationList(msg)
@@ -1804,7 +1831,12 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 
 	return func() tea.Msg {
 		if persistMessageHistory != nil {
-			_ = persistMessageHistory()
+			if msg := persistMessageHistory(); msg != nil {
+				select {
+				case runCh <- msg:
+				case <-uiDone:
+				}
+			}
 		}
 		go func() {
 			defer uiBroker.close()

@@ -415,8 +415,15 @@ type slashCommandsMsg struct {
 
 type messageHistoryMsg struct {
 	conversationKey string
+	cwd             string
 	scopeCWD        string
 	messages        []string
+	remote          bool
+	err             error
+}
+
+type messageHistorySavedMsg struct {
+	conversationKey string
 	err             error
 }
 

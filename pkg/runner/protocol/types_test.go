@@ -5,9 +5,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWorkspaceMessageHistoryWireContract(t *testing.T) {
+	assert.Equal(t, "workspace.messageHistory", MethodWorkspaceMessageHistory)
+	for _, raw := range []string{`{}`, `{"entry":null}`} {
+		var params WorkspaceMessageHistoryParams
+		require.NoError(t, json.Unmarshal([]byte(raw), &params))
+		assert.Nil(t, params.Entry, "omitted and null entries both list history")
+	}
+	params := WorkspaceMessageHistoryParams{CWD: "/runner/workspace", Entry: &messagehistory.Entry{Text: " /goal raw\nmessage "}}
+	encoded, err := json.Marshal(params)
+	require.NoError(t, err)
+	var decoded WorkspaceMessageHistoryParams
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, params, decoded)
+	result := WorkspaceMessageHistoryResult{CWD: "/runner/workspace/pkg", ScopeCWD: "/runner/workspace"}
+	encoded, err = json.Marshal(result)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"cwd":"/runner/workspace/pkg","scopeCwd":"/runner/workspace"}`, string(encoded))
+	result.Messages = []string{"one", "two"}
+	encoded, err = json.Marshal(result)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"cwd":"/runner/workspace/pkg","scopeCwd":"/runner/workspace","messages":["one","two"]}`, string(encoded))
+	encoded, err = json.Marshal(RunnerCapabilities{WorkspaceMessageHistory: true})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"workspaceMessageHistory":true}`, string(encoded))
+}
 
 func TestWorkspaceGitCommitApprovalValidation(t *testing.T) {
 	valid := WorkspaceGitCommitParams{CWD: "/runner/repo", Generation: 1, Tree: strings.Repeat("a", 40), Message: "feat: commit"}

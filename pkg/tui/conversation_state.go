@@ -169,7 +169,7 @@ func (m *model) createNewConversationAt(cwd string) tea.Cmd {
 			loadMessageHistoryForConversation(m.ctx, key, m.messageHistoryStore, state.messageHistoryScopeCWD),
 		)
 	} else {
-		cmds = append(cmds, m.loadRemoteSlashCommands(state))
+		cmds = append(cmds, m.loadRemoteSlashCommands(state), m.loadRemoteMessageHistory(state))
 	}
 	return tea.Batch(cmds...)
 }

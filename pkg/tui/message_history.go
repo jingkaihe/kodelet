@@ -7,9 +7,40 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 )
+
+type runnerMessageHistory interface {
+	LoadMessageHistory(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error)
+	AppendMessageHistory(context.Context, chat.WorkspaceTarget, messagehistory.Entry) error
+}
+
+func (m model) messageHistoryTarget(state *conversationState) chat.WorkspaceTarget {
+	if state.conversationWasResumed {
+		return chat.WorkspaceTarget{ConversationID: state.conversationID}
+	}
+	// A fresh conversation receives its ID before its first submission is saved
+	// by the daemon. Use the selected workspace, not that not-yet-saved ID.
+	return chat.WorkspaceTarget{CWD: slashCommandCWDForState(state), Profile: profileForRequest(state.profile), EnvironmentProfile: m.environmentProfile}
+}
+
+func (m model) loadRemoteMessageHistory(state *conversationState) tea.Cmd {
+	source, ok := m.runner.(runnerMessageHistory)
+	if !ok || state == nil {
+		return nil
+	}
+	key, cwd := state.key, slashCommandCWDForState(state)
+	target := m.messageHistoryTarget(state)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+		defer cancel()
+		result, err := source.LoadMessageHistory(ctx, target)
+		return messageHistoryMsg{conversationKey: key, cwd: cwd, scopeCWD: result.ScopeCWD, messages: result.Messages, remote: true, err: err}
+	}
+}
 
 func loadMessageHistoryForConversation(ctx context.Context, conversationKey string, store *messagehistory.Store, scopeCWD string) tea.Cmd {
 	return func() tea.Msg {
@@ -50,7 +81,7 @@ func (m *model) appendSubmittedMessageToHistory(message string) {
 	if message == "" {
 		return
 	}
-	if strings.TrimSpace(m.messageHistoryScopeCWD) == "" && !m.initialHistoryPending {
+	if !m.remote && strings.TrimSpace(m.messageHistoryScopeCWD) == "" && !m.initialHistoryPending {
 		if scopeCWD, err := messagehistory.ResolveScopeCWD(m.cwd); err == nil {
 			m.messageHistoryScopeCWD = scopeCWD
 		}
@@ -61,11 +92,24 @@ func (m *model) appendSubmittedMessageToHistory(message string) {
 func (m *model) persistSubmittedMessageCommandForState(state *conversationState, message string) tea.Cmd {
 	message = strings.TrimSpace(message)
 	store := m.messageHistoryStore
-	if state == nil {
+	if state == nil || message == "" {
 		return nil
 	}
+	if m.remote {
+		source, ok := m.runner.(runnerMessageHistory)
+		if !ok {
+			return nil
+		}
+		key, target := state.key, m.messageHistoryTarget(state)
+		entry := messagehistory.Entry{CreatedAt: time.Now().UTC(), ConversationID: state.conversationID, Profile: state.profile, Source: "tui", Text: message}
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+			defer cancel()
+			return messageHistorySavedMsg{conversationKey: key, err: source.AppendMessageHistory(ctx, target, entry)}
+		}
+	}
 	scopeCWD := strings.TrimSpace(state.messageHistoryScopeCWD)
-	if store == nil || message == "" {
+	if store == nil {
 		return nil
 	}
 	conversationID := strings.TrimSpace(state.conversationID)

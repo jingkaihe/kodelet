@@ -3,21 +3,184 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type remoteMessageHistoryRunner struct {
+	recordingRunner
+	result       protocol.WorkspaceMessageHistoryResult
+	loadTarget   chat.WorkspaceTarget
+	appendTarget chat.WorkspaceTarget
+	entry        messagehistory.Entry
+	historyErr   error
+}
+
+func (r *remoteMessageHistoryRunner) LoadMessageHistory(ctx context.Context, target chat.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
+	_, bounded := ctx.Deadline()
+	if !bounded {
+		return protocol.WorkspaceMessageHistoryResult{}, errors.New("history request must have a deadline")
+	}
+	r.loadTarget = target
+	return r.result, r.historyErr
+}
+
+func (r *remoteMessageHistoryRunner) AppendMessageHistory(ctx context.Context, target chat.WorkspaceTarget, entry messagehistory.Entry) error {
+	_, bounded := ctx.Deadline()
+	if !bounded {
+		return errors.New("history request must have a deadline")
+	}
+	r.appendTarget, r.entry = target, entry
+	return r.historyErr
+}
+
+func TestRemoteMessageHistoryLoadsAfterInitializationAndRefreshesSearch(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(base, []byte("no client storage"), 0o600))
+	t.Setenv("KODELET_BASE_PATH", base)
+	runner := &remoteMessageHistoryRunner{result: protocol.WorkspaceMessageHistoryResult{CWD: "/runner/project/subdir", ScopeCWD: "/runner/project", Messages: []string{"run old tests"}}}
+	m := newModel(t.Context(), Config{Initialize: func(context.Context) (Config, error) {
+		return Config{Runner: runner, CWD: "/runner/project/subdir", Profile: "work", EnvironmentProfile: "sandbox"}, nil
+	}})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 100, 30
+	updated, initial := m.Update(m.initializeCommand()())
+	m = updated.(model)
+	require.NotNil(t, initial)
+	updated, load := m.Update(initial())
+	m = updated.(model)
+	require.NotNil(t, load, "daemon mode must load composer history, not just the transcript")
+	assert.Empty(t, runner.loadTarget, "history loading must be asynchronous")
+
+	// A submission and Ctrl+R can happen while the initial history request is
+	// in flight. The current message stays newest and results refresh in place.
+	m.appendSubmittedMessageToHistory("run new tests")
+	m.textarea.SetValue("draft")
+	updated, _ = m.Update(keyPressWithMod('r', tea.ModCtrl))
+	m = updated.(model)
+	updated, _ = m.Update(textKeyPress("old"))
+	m = updated.(model)
+	assert.Empty(t, m.historySearch.matches)
+	updated, _ = m.Update(load())
+	m = updated.(model)
+	assert.Equal(t, chat.WorkspaceTarget{CWD: "/runner/project/subdir", Profile: "work", EnvironmentProfile: "sandbox"}, runner.loadTarget)
+	assert.Equal(t, "/runner/project", m.messageHistoryScopeCWD)
+	assert.Equal(t, []string{"run old tests", "run new tests"}, m.messageHistory)
+	assert.Equal(t, []string{"run old tests"}, m.historySearch.matches)
+	assert.Equal(t, "run old tests", m.textarea.Value())
+	assert.Nil(t, m.messageHistoryStore)
+	data, err := os.ReadFile(base)
+	require.NoError(t, err)
+	assert.Equal(t, "no client storage", string(data))
+}
+
+func TestRemoteMessageHistoryUsesSavedAffinityAndDiscardsStaleResults(t *testing.T) {
+	runner := &remoteMessageHistoryRunner{result: protocol.WorkspaceMessageHistoryResult{CWD: "/runner/stored", ScopeCWD: "/runner/stored", Messages: []string{"saved prompt"}}}
+	m := newModel(t.Context(), Config{Runner: runner, Remote: true, ConversationID: "saved-id", CWD: "/client/wrong"})
+	t.Cleanup(m.cancel)
+	updated, load := m.Update(initialHistoryMsg{conversationKey: m.key, loaded: true, cwd: "/runner/stored"})
+	m = updated.(model)
+	require.NotNil(t, load)
+	result := load().(messageHistoryMsg)
+	assert.Equal(t, chat.WorkspaceTarget{ConversationID: "saved-id"}, runner.loadTarget)
+	saved := m.conversationState
+
+	newConversation := m.createNewConversationAt("/runner/other")
+	m.textarea.SetValue("unrelated draft")
+	updated, _ = m.Update(result)
+	m = updated.(model)
+	assert.Equal(t, []string{"saved prompt"}, saved.messageHistory)
+	assert.Empty(t, m.messageHistory)
+	assert.Equal(t, "unrelated draft", m.textarea.Value(), "background history must not replace the active composer")
+
+	// The /new workflow must schedule a fresh history load for its directory.
+	batch := newConversation().(tea.BatchMsg)
+	runner.result = protocol.WorkspaceMessageHistoryResult{CWD: "/runner/other", ScopeCWD: "/runner/other", Messages: []string{"other prompt"}}
+	result = batch[len(batch)-1]().(messageHistoryMsg)
+	assert.Equal(t, "/runner/other", runner.loadTarget.CWD)
+	assert.Empty(t, runner.loadTarget.ConversationID)
+	m.requestedCWD = "/runner/changed"
+	updated, _ = m.Update(result)
+	m = updated.(model)
+	assert.Empty(t, m.messageHistory, "ignore history for a directory that is no longer selected")
+}
+
+func TestRemoteMessageHistoryPersistsRawSubmissionsWithoutLocalScopeResolution(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		for _, historyErr := range []error{nil, assert.AnError} {
+			t.Run(fmt.Sprintf("resumed=%t/error=%t", resumed, historyErr != nil), func(t *testing.T) {
+				runner := &remoteMessageHistoryRunner{historyErr: historyErr}
+				config := Config{Runner: runner, Remote: true, CWD: "/only/on/runner", Profile: "work", EnvironmentProfile: "sandbox"}
+				if resumed {
+					config.ConversationID = "saved-id"
+				}
+				m := newModel(t.Context(), config)
+				t.Cleanup(m.cancel)
+				m.initialHistoryPending = false
+				m.textarea.SetValue(" /goal ship raw history ")
+				submit := m.submit()
+				require.NotNil(t, submit)
+				assert.Empty(t, m.messageHistoryScopeCWD, "the TUI must not resolve a remote path on the client")
+				assert.Nil(t, submit())
+				saved := receiveRunMsg(t, m.runCh).(messageHistorySavedMsg)
+				assert.Equal(t, historyErr, saved.err)
+				for {
+					if _, done := receiveRunMsg(t, m.runCh).(chatDoneMsg); done {
+						break
+					}
+				}
+				assert.Equal(t, "/goal ship raw history", runner.req.Message)
+				assert.Equal(t, runner.req.Message, runner.entry.Text)
+				assert.Equal(t, m.conversationID, runner.entry.ConversationID)
+				assert.Equal(t, "work", runner.entry.Profile)
+				assert.Equal(t, "tui", runner.entry.Source)
+				assert.Empty(t, runner.entry.ScopeCWD, "only the runner determines the history scope")
+				if resumed {
+					assert.Equal(t, chat.WorkspaceTarget{ConversationID: "saved-id"}, runner.appendTarget)
+				} else {
+					assert.Equal(t, chat.WorkspaceTarget{CWD: "/only/on/runner", Profile: "work", EnvironmentProfile: "sandbox"}, runner.appendTarget)
+				}
+				updated, _ := m.Update(saved)
+				m = updated.(model)
+				if historyErr != nil {
+					require.Len(t, m.uiNotifications, 1)
+					assert.Equal(t, "Message history was not saved", m.uiNotifications[0].title)
+					assert.Equal(t, uiNotificationWarning, m.uiNotifications[0].level)
+				}
+			})
+		}
+	}
+}
+
+func TestRemoteMessageHistoryLoadFailureKeepsInMemoryHistory(t *testing.T) {
+	runner := &remoteMessageHistoryRunner{historyErr: assert.AnError}
+	m := newModel(t.Context(), Config{Runner: runner, Remote: true, CWD: "/only/on/runner"})
+	t.Cleanup(m.cancel)
+	m.messageHistory = []string{"current prompt"}
+	m.textarea.SetValue("draft")
+	updated, _ := m.Update(m.loadRemoteMessageHistory(m.conversationState)())
+	m = updated.(model)
+	assert.Equal(t, []string{"current prompt"}, m.messageHistory)
+	assert.Equal(t, "draft", m.textarea.Value())
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, "Message history unavailable", m.uiNotifications[0].title)
+	assert.Nil(t, m.messageHistoryStore, "a failed runner must never fall back to the client store")
+}
 
 func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
 	msg, ok := loadConversationHistoryFromSource(context.Background(), "", " \t\n ", nil)().(initialHistoryMsg)

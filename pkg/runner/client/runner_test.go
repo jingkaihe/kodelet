@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	pkglogger "github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -276,6 +277,7 @@ func TestRunnerCloseReleasesWorkspaceLockAfterBoundedTerminalCleanup(t *testing.
 
 func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	workspace := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	store, err := localstate.NewStoreAt(t.TempDir())
 	require.NoError(t, err)
 
@@ -365,6 +367,20 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		entry, ok := registry.Runner(registration.RunnerID)
 		return ok && entry.Status == runnerregistry.RunnerStatusIdle && entry.ManifestDigest != ""
 	}, 5*time.Second, 10*time.Millisecond)
+
+	t.Run("composer-history", func(t *testing.T) {
+		entry, found := registry.Runner(registration.RunnerID)
+		require.True(t, found)
+		assert.True(t, entry.WorkspaceMessageHistory, "the runner must advertise history support on registration")
+		var appended protocol.WorkspaceMessageHistoryResult
+		require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory,
+			protocol.WorkspaceMessageHistoryParams{Entry: &messagehistory.Entry{Text: "/goal raw message over the wire"}}, &appended))
+		assert.Equal(t, protocol.WorkspaceMessageHistoryResult{CWD: workspace, ScopeCWD: workspace}, appended)
+		var listed protocol.WorkspaceMessageHistoryResult
+		require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory,
+			protocol.WorkspaceMessageHistoryParams{}, &listed))
+		assert.Equal(t, []string{"/goal raw message over the wire"}, listed.Messages)
+	})
 
 	metadata, found, err := store.ReadWorkspaceLockMetadata(workspace)
 	require.NoError(t, err)

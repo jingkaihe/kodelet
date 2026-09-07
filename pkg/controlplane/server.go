@@ -382,6 +382,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/runner/v1/enrollment/context", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentContext)).Methods("GET")
 	api.HandleFunc("/runner/v1/enrollment/decision", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentDecision)).Methods("POST")
 	api.HandleFunc("/chat/workspace-inspection", s.requireRole(RoleUser, s.handleWorkspaceInspection)).Methods("POST")
+	api.HandleFunc("/chat/message-history", s.requireRole(RoleUser, s.handleMessageHistory)).Methods("GET", "POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/shortcuts", s.requireRole(RoleUser, s.handleWorkspaceShortcut)).Methods("POST")

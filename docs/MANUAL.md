@@ -203,6 +203,8 @@ The server runs the AI model and saves your conversations. Its built-in runner p
 
 The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
+Use `Ctrl+R` and type part of a previously sent message to search composer history; press `Ctrl+R` again to cycle matches, `Enter` to copy a match into the composer without submitting it, or `Esc` to restore your draft. History is stored on the selected runner and shared across conversations in the same Git worktree (or directory outside Git), including after restarting chat. The built-in runner reuses existing `message-history/by-cwd` files under its Kodelet base directory. The TUI never reads history from the client machine when connected to another runner. An extension can override this shortcut.
+
 The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
 
 Before the first message, use `Ctrl+T` to choose a profile and `Ctrl+Y` to choose a reasoning effort. These settings are fixed after the conversation starts.

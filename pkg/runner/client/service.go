@@ -348,6 +348,13 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		}
 		result, err := s.inspectWorkspace(ctx, value)
 		return rpcResult(result, err)
+	case protocol.MethodWorkspaceMessageHistory:
+		value, rpcErr := decodeParams[protocol.WorkspaceMessageHistoryParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.workspaceMessageHistory(ctx, value)
+		return rpcResult(result, err)
 	case protocol.MethodWorkspaceDiscover:
 		value, rpcErr := decodeParams[protocol.WorkspaceDiscoverParams](params)
 		if rpcErr != nil {

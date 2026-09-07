@@ -29,6 +29,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -72,6 +73,21 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 				git("-c", "user.name=PTY test", "-c", "user.email=pty@example.test", "-c", "commit.gpgSign=false", "commit", "-m", "panel baseline")
 				require.NoError(t, os.WriteFile(filepath.Join(cwd, "panel-marker.txt"), []byte(filepath.Base(cwd)+"-only-diff\n"), 0o600))
 			}
+			// Seed the existing JSONL format before any CLI starts. The embedded
+			// runner shares the daemon home; a standalone runner owns its own store.
+			historyBasePath := filepath.Join(root, "daemon-store")
+			if placement == "standalone" {
+				historyBasePath = filepath.Join(root, "runner-store")
+			}
+			historyStore := messagehistory.NewStoreWithBasePath(historyBasePath)
+			workspaceScope, err := messagehistory.ResolveScopeCWD(workspace)
+			require.NoError(t, err)
+			startupScope, err := messagehistory.ResolveScopeCWD(startup)
+			require.NoError(t, err)
+			const legacyRawMessage = "/goal legacy-raw-history ship the old task"
+			const otherProjectMessage = "isolated-project history must stay in the other repository"
+			require.NoError(t, historyStore.Append(ctx, messagehistory.Entry{ScopeCWD: workspaceScope, Source: "tui", Text: legacyRawMessage}))
+			require.NoError(t, historyStore.Append(ctx, messagehistory.Entry{ScopeCWD: startupScope, Source: "tui", Text: otherProjectMessage}))
 			executable, err := os.Executable()
 			require.NoError(t, err)
 			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_CHAT_EXTENSION=1 exec %q -test.run '^TestDaemonChatExtensionProcess$'\n", executable)
@@ -339,6 +355,80 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				require.FailNow(t, "public chat did not exit after Ctrl-C")
 			}
+			t.Run("builtin-history-recall-across-processes", func(t *testing.T) {
+				entries, err := historyStore.List(ctx, workspaceScope, messagehistory.MaxEntriesPerScope)
+				require.NoError(t, err)
+				var messages []string
+				for _, entry := range entries {
+					messages = append(messages, entry.Text)
+				}
+				require.Contains(t, messages, legacyRawMessage, "existing raw composer history must remain readable")
+				require.Contains(t, messages, "exercise native PTY prompts", "the first CLI must persist new submissions on its runner")
+				assert.NotContains(t, messages, otherProjectMessage)
+
+				// A fresh conversation in a subdirectory must recall the same Git
+				// project's messages, not load a saved conversation transcript.
+				subdirectory := filepath.Join(workspace, "history-subdirectory")
+				require.NoError(t, os.MkdirAll(subdirectory, 0o700))
+				callsBefore := providerCalls.Load()
+				fresh := daemonCLIProcess(ctx, t, clientCWD, clientEnv, "chat", "--server="+endpoint, "--auth-token=client-secret", "--runner="+runnerID, "--cwd="+subdirectory, "--no-extensions")
+				terminal, err := pty.StartWithSize(fresh, &pty.Winsize{Rows: 40, Cols: 120})
+				require.NoError(t, err)
+				var screen daemonChatPTYOutput
+				readDone, done := make(chan struct{}), make(chan error, 1)
+				go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
+				go func() { done <- fresh.Wait() }()
+				exited := false
+				t.Cleanup(func() {
+					if !exited {
+						_ = fresh.Process.Kill()
+						<-done
+					}
+					_ = terminal.Close()
+					<-readDone
+					if t.Failed() {
+						t.Logf("fresh history terminal: %.6000s", screen.String())
+					}
+				})
+				waitRendered := func(text string) {
+					t.Helper()
+					require.Eventually(t, func() bool { return strings.Contains(screen.String(), text) }, 5*time.Second, 10*time.Millisecond, "fresh terminal did not render %q", text)
+				}
+				write := func(text string) {
+					t.Helper()
+					_, err := io.WriteString(terminal, text)
+					require.NoError(t, err)
+				}
+				waitRendered("0 extensions · ")
+				assert.NotContains(t, screen.String(), "pty-answer-and-cancel-complete", "fresh chat must not resume the old transcript")
+				assert.NotContains(t, screen.String(), "exercise native PTY prompts")
+				// --no-extensions prevents the fixture's Ctrl-R shortcut from
+				// overriding the built-in search. Never submit a recalled message.
+				// Paste each query atomically: per-key matching can select a shared
+				// prefix first, leaving only a suffix in Bubble Tea's delta output.
+				// ansi.Strip removes escapes but does not reconstruct the screen.
+				write("\x12\x1b[200~legacy-raw-history\x1b[201~")
+				waitRendered("reverse-i-search:")
+				waitRendered(legacyRawMessage)
+				write("\x15\x1b[200~native PTY\x1b[201~")
+				waitRendered("exercise native PTY prompts")
+				write("\x15\x1b[200~isolated-project\x1b[201~")
+				waitRendered("isolated-project  no matches")
+				assert.NotContains(t, screen.String(), otherProjectMessage)
+				write("\x03")
+				select {
+				case err := <-done:
+					exited = true
+					require.NoError(t, err)
+				case <-time.After(5 * time.Second):
+					require.FailNow(t, "fresh history CLI did not exit after Ctrl-C")
+				}
+				assert.Equal(t, callsBefore, providerCalls.Load(), "composer history search must not call a model")
+				conversations, err := client.ListConversations(ctx, 10)
+				require.NoError(t, err)
+				require.Len(t, conversations, 1, "recalling history must not create a conversation")
+				assert.Equal(t, conversationID, conversations[0].ID)
+			})
 			t.Run("same-history-cli-and-native-resume", func(t *testing.T) {
 				expected, err := client.LoadConversationRecord(ctx, conversationID)
 				require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -45,6 +46,7 @@ const (
 	MethodWorkspaceGitCommit      = "workspace.git.commit"
 	MethodWorkspaceDiscover       = "workspace.discover"
 	MethodWorkspaceInspect        = "workspace.inspect"
+	MethodWorkspaceMessageHistory = "workspace.messageHistory"
 	MethodWorkspaceCWDHints       = "workspace.cwdHints"
 	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
@@ -195,14 +197,15 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	RunCheckpoint       bool `json:"runCheckpoint,omitempty"`
-	ConcurrentRuns      bool `json:"concurrentRuns,omitempty"`
-	WorkspaceGitDiff    bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceGitCommit  bool `json:"workspaceGitCommit,omitempty"`
-	WorkspaceTerminal   bool `json:"workspaceTerminal,omitempty"`
-	WorkspaceDiscovery  bool `json:"workspaceDiscovery,omitempty"`
-	WorkspaceInspection bool `json:"workspaceInspection,omitempty"`
-	WorkspaceCWD        bool `json:"workspaceCwd,omitempty"`
+	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
+	ConcurrentRuns          bool `json:"concurrentRuns,omitempty"`
+	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceDiscovery      bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
+	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
+	WorkspaceCWD            bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.
@@ -496,6 +499,23 @@ type WorkspaceCWDHintsResult struct {
 	BaseDir string          `json:"baseDir"`
 	Query   string          `json:"query,omitempty"`
 	Hints   []DirectoryHint `json:"hints"`
+}
+
+// WorkspaceMessageHistoryParams lists composer history when Entry is nil, or
+// appends one raw message otherwise. The runner resolves CWD and replaces the
+// entry's scope and source with its own workspace scope and "tui".
+type WorkspaceMessageHistoryParams struct {
+	CWD   string                `json:"cwd,omitempty"`
+	Entry *messagehistory.Entry `json:"entry,omitempty"`
+}
+
+// WorkspaceMessageHistoryResult returns runner-resolved paths. List responses
+// contain a bounded selection of newest complete messages in chronological order;
+// append responses omit Messages.
+type WorkspaceMessageHistoryResult struct {
+	CWD      string   `json:"cwd"`
+	ScopeCWD string   `json:"scopeCwd"`
+	Messages []string `json:"messages,omitempty"`
 }
 
 // WorkspaceGitDiffParams asks a runner to inspect the selected directory.

@@ -10,6 +10,7 @@ import (
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -139,6 +140,24 @@ func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, targ
 	// Directory resolution does not execute extensions and accepts no run options.
 	target.Options = nil
 	return r.ControlPlaneChatRunner.WorkspaceCWDSuggestions(ctx, target, query)
+}
+
+func (r *configuredChatRunner) LoadMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return protocol.WorkspaceMessageHistoryResult{}, err
+	}
+	target.Options = nil
+	return r.ControlPlaneChatRunner.LoadMessageHistory(ctx, target)
+}
+
+func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget, entry messagehistory.Entry) error {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return err
+	}
+	target.Options = nil
+	return r.ControlPlaneChatRunner.AppendMessageHistory(ctx, target, entry)
 }
 
 func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {

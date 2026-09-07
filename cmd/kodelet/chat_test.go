@@ -14,6 +14,7 @@ import (
 	"time"
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tui"
@@ -433,4 +434,61 @@ func TestDaemonChatProcessFailsWithoutLocalFallback(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, string(output), "could not start chat")
 	assert.NotContains(t, strings.ToLower(string(output)), "database")
+}
+
+func TestConfiguredChatRunnerMessageHistoryUsesSelectedTarget(t *testing.T) {
+	for _, scenario := range []string{"configured", "explicit", "default", "saved", "unavailable-default"} {
+		t.Run(scenario, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/chat/settings":
+					assert.Contains(t, []string{"default", "unavailable-default"}, scenario)
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{DefaultRunnerID: "default", DefaultRunnerReady: scenario == "default"}))
+				case "/api/chat/message-history":
+					calls.Add(1)
+					assert.False(t, r.URL.Query().Has("options"), "history access must not execute extensions or carry run restrictions")
+					if scenario == "saved" {
+						assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
+						assert.False(t, r.URL.Query().Has("runnerId"))
+						assert.False(t, r.URL.Query().Has("cwd"))
+						assert.False(t, r.URL.Query().Has("environmentProfile"))
+					} else {
+						assert.Equal(t, scenario, r.URL.Query().Get("runnerId"))
+						assert.Equal(t, "/runner/project", r.URL.Query().Get("cwd"))
+						assert.Equal(t, "environment", r.URL.Query().Get("environmentProfile"))
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceMessageHistoryResult{CWD: "/runner/project", ScopeCWD: "/runner/project", Messages: []string{"previous raw message"}}))
+				default:
+					assert.Fail(t, "unexpected history endpoint", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client, err := chatpkg.NewControlPlaneChatRunner(server.URL, "", "wrong-promoted-runner")
+			require.NoError(t, err)
+			runner := &configuredChatRunner{ControlPlaneChatRunner: client, runnerID: "configured", defaultCWD: "/runner/project", environmentProfile: "environment", options: &llmtypes.ExecutionOptions{NoExtensions: new(true)}}
+			target := chatpkg.WorkspaceTarget{}
+			switch scenario {
+			case "explicit":
+				target.RunnerID = "explicit"
+			case "default", "unavailable-default":
+				runner.runnerID = ""
+			case "saved":
+				target.ConversationID = "saved"
+			}
+			result, loadErr := runner.LoadMessageHistory(t.Context(), target)
+			appendErr := runner.AppendMessageHistory(t.Context(), target, messagehistory.Entry{Text: "raw composer message"})
+			if scenario == "unavailable-default" {
+				require.ErrorContains(t, loadErr, "default runner is unavailable")
+				require.ErrorContains(t, appendErr, "default runner is unavailable")
+				assert.Zero(t, calls.Load())
+			} else {
+				require.NoError(t, loadErr)
+				require.NoError(t, appendErr)
+				assert.Equal(t, []string{"previous raw message"}, result.Messages)
+				assert.EqualValues(t, 2, calls.Load())
+			}
+		})
+	}
 }

@@ -328,6 +328,41 @@ func TestCallRunnerRejectsUnsupportedWorkspaceCapabilityBeforeRPC(t *testing.T) 
 	assert.False(t, capableCalled)
 }
 
+func TestCallRunnerMessageHistoryCapability(t *testing.T) {
+	registry := newTestRegistry(t)
+	params := testRegisterParams("history-host", "/runner/workspace")
+	params.Capabilities.WorkspaceInspection = true
+	for _, supported := range []bool{false, true, false} {
+		params.Capabilities.WorkspaceMessageHistory = supported
+		link := newFakeLink()
+		calls := 0
+		link.call = func(_ context.Context, method string, params, result any) error {
+			calls++
+			assert.Equal(t, protocol.MethodWorkspaceMessageHistory, method)
+			assert.Equal(t, protocol.WorkspaceMessageHistoryParams{CWD: "/runner/selected"}, params)
+			*result.(*protocol.WorkspaceMessageHistoryResult) = protocol.WorkspaceMessageHistoryResult{CWD: "/runner/selected", ScopeCWD: "/runner/selected", Messages: []string{"stored message"}}
+			return nil
+		}
+		registration, err := registry.Register(params, link)
+		require.NoError(t, err)
+		params.RunnerID = registration.RunnerID
+		markRunnerReady(t, registry, registration)
+		runner, found := registry.Runner(registration.RunnerID)
+		require.True(t, found)
+		assert.Equal(t, supported, runner.WorkspaceMessageHistory, "reconnection must refresh the capability")
+		var result protocol.WorkspaceMessageHistoryResult
+		err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory, protocol.WorkspaceMessageHistoryParams{CWD: "/runner/selected"}, &result)
+		if supported {
+			require.NoError(t, err)
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, []string{"stored message"}, result.Messages)
+		} else {
+			require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
+			assert.Zero(t, calls, "inspection support alone must not authorize history RPCs")
+		}
+	}
+}
+
 func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing.T) {
 	registry := newTestRegistry(t)
 	enrollment := testEnrollmentStartRequest(t, "host-enrolled", "/work/enrolled")
@@ -1698,6 +1733,7 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	registry := newTestRegistry(t)
 	params := testRegisterParams("host-one", "/work/project")
 	params.ProtocolVersions = []int{protocol.Version + 1}
+	params.Capabilities.WorkspaceMessageHistory = true
 
 	_, err := registry.Register(params, newFakeLink())
 	require.ErrorContains(t, err, "does not support protocol version")
@@ -1706,6 +1742,7 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	require.Len(t, runners, 1)
 	assert.Equal(t, RunnerStatusIncompatible, runners[0].Status)
 	assert.False(t, runners[0].Connected)
+	assert.True(t, runners[0].WorkspaceMessageHistory)
 	assert.Contains(t, runners[0].CompatibilityError, "does not support protocol version")
 }
 
