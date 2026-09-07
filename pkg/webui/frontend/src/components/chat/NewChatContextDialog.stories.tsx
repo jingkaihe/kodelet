@@ -2,23 +2,16 @@ import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { fn } from 'storybook/test';
 import NewChatContextDialog from './NewChatContextDialog';
-import { sampleCwdHints, sampleProfiles, sampleConversations } from '../../stories/fixtures';
+import { sampleCwdHints, sampleProfiles } from '../../stories/fixtures';
 
 type NewChatContextDialogStoryProps = React.ComponentProps<typeof NewChatContextDialog>;
-
-const recentWorkspaces = Array.from(
-  new Set(
-    sampleConversations
-      .map((conversation) => conversation.cwd)
-      .filter((cwd): cwd is string => Boolean(cwd))
-  )
-);
 
 const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
   const [profileDraft, setProfileDraft] = React.useState(args.profileDraft);
   const [reasoningEffortDraft, setReasoningEffortDraft] = React.useState(args.reasoningEffortDraft);
   const [cwdQuery, setCwdQuery] = React.useState(args.cwdQuery);
   const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = React.useState(args.cwdSuggestionsOpen);
+  const [runnerIdDraft, setRunnerIdDraft] = React.useState(args.runnerIdDraft);
 
   return (
     <NewChatContextDialog
@@ -27,6 +20,11 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
       cwdSuggestionsOpen={cwdSuggestionsOpen}
       profileDraft={profileDraft}
       reasoningEffortDraft={reasoningEffortDraft}
+      runnerIdDraft={runnerIdDraft}
+      onRunnerDraftChange={(runnerId) => {
+        setRunnerIdDraft(runnerId);
+        args.onRunnerDraftChange(runnerId);
+      }}
       onCwdInputBlur={() => {
         setCwdSuggestionsOpen(false);
         args.onCwdInputBlur();
@@ -47,10 +45,6 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
       onReasoningEffortDraftChange={(reasoningEffort) => {
         setReasoningEffortDraft(reasoningEffort);
         args.onReasoningEffortDraftChange(reasoningEffort);
-      }}
-      onRecentWorkspaceSelect={(path) => {
-        setCwdQuery(path);
-        args.onRecentWorkspaceSelect(path);
       }}
       onSelectCwdSuggestion={(path) => {
         setCwdQuery(path);
@@ -74,15 +68,20 @@ const meta = {
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
-    controlPlaneWorkspaceEnabled: true,
-    defaultCWD: '/home/jingkaihe/workspace/kodelet',
     profileDraft: 'default',
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
-    recentWorkspaces,
-    runners: [],
-    runnerIdDraft: '',
+    runners: [{
+      id: 'runner-1',
+      host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
+      workspace: { path: '/home/jingkaihe/workspace/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'idle',
+      connected: true,
+      generation: 1,
+    }],
+    runnerIdDraft: 'runner-1',
     environmentProfileDraft: '',
     onCancel: fn(),
     onCommit: fn(),
@@ -92,7 +91,6 @@ const meta = {
     onCwdInputKeyDown: fn(),
     onProfileDraftChange: fn(),
     onReasoningEffortDraftChange: fn(),
-    onRecentWorkspaceSelect: fn(),
     onRunnerDraftChange: fn(),
     onEnvironmentProfileDraftChange: fn(),
     onSelectCwdSuggestion: fn(),
@@ -110,6 +108,9 @@ export const Compact: Story = {
     cwdQuery: '',
     cwdSuggestions: [],
     cwdSuggestionsOpen: false,
-    recentWorkspaces: [],
   },
+};
+
+export const RunnerRequired: Story = {
+  args: { runnerIdDraft: '' },
 };

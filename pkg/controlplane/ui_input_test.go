@@ -16,6 +16,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWebUIInputBrokerRequiresExplicitOwner(t *testing.T) {
+	sink := &recordingChatSink{}
+	broker := newWebUIInputBroker("conversation", sink)
+	t.Cleanup(broker.close)
+	assert.Nil(t, broker.owner)
+	for _, request := range []struct {
+		name string
+		send func() (extensions.UIInputResponse, error)
+	}{
+		{name: "input", send: func() (extensions.UIInputResponse, error) {
+			return broker.Input(t.Context(), extensions.UIInputRequest{})
+		}},
+		{name: "confirm", send: func() (extensions.UIInputResponse, error) {
+			return broker.Confirm(t.Context(), extensions.UIConfirmRequest{})
+		}},
+		{name: "select", send: func() (extensions.UIInputResponse, error) {
+			return broker.Select(t.Context(), extensions.UISelectRequest{})
+		}},
+		{name: "notify", send: func() (extensions.UIInputResponse, error) {
+			return broker.Notify(t.Context(), extensions.UINotifyRequest{})
+		}},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			response, err := request.send()
+			require.NoError(t, err)
+			assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
+		})
+	}
+	assert.Empty(t, sink.Events())
+	assert.Empty(t, broker.pending)
+}
+
 func TestWebUIInputOwnershipFencesObserversAndDismissedRequests(t *testing.T) {
 	original := &recordingChatSink{}
 	broker := newWebUIInputBroker("conversation", original)
@@ -165,6 +197,7 @@ func TestChatHTTPPromptIsDeliveredOnlyToInitiatingClient(t *testing.T) {
 func TestWebUIInputBrokerSendsEventAndWaitsForResponse(t *testing.T) {
 	sink := &recordingChatSink{}
 	broker := newWebUIInputBroker("conv-123", sink)
+	t.Cleanup(broker.setOwner(t.Context(), "", sink))
 
 	resultCh := make(chan extensions.UIInputResponse, 1)
 	errCh := make(chan error, 1)
@@ -206,6 +239,7 @@ func TestWebUIInputBrokerSendsEventAndWaitsForResponse(t *testing.T) {
 func TestWebUIInputBrokerSendsSeparateConfirmSelectAndNotifyEvents(t *testing.T) {
 	sink := &recordingChatSink{}
 	broker := newWebUIInputBroker("conv-123", sink)
+	t.Cleanup(broker.setOwner(t.Context(), "", sink))
 
 	confirmCh := make(chan extensions.UIInputResponse, 1)
 	go func() {
@@ -256,6 +290,7 @@ func TestWebUIInputBrokerSendsSeparateConfirmSelectAndNotifyEvents(t *testing.T)
 func TestWebUIInputBrokerDuplicateIDKeepsNewestPromptRegistered(t *testing.T) {
 	sink := &recordingChatSink{}
 	broker := newWebUIInputBroker("conv-123", sink)
+	t.Cleanup(broker.setOwner(t.Context(), "", sink))
 
 	firstResult := make(chan extensions.UIInputResponse, 1)
 	go func() {

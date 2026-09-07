@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, Check, ChevronDown, FolderOpen, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, FolderOpen, X } from 'lucide-react';
 import type { ChatProfileOption, CWDHint, Runner } from '../../types';
 import { cn, formatRunnerStatus } from '../../utils';
 
@@ -10,13 +10,10 @@ interface NewChatContextDialogProps {
   cwdSuggestionIndex: number;
   cwdSuggestions: CWDHint[];
   cwdSuggestionsOpen: boolean;
-  controlPlaneWorkspaceEnabled: boolean;
-  defaultCWD?: string;
   profileDraft: string;
   reasoningEffortDraft: string;
   reasoningEffortLoading: boolean;
   reasoningEffortOptions: string[];
-  recentWorkspaces: string[];
   runners: Runner[];
   runnerIdDraft: string;
   environmentProfileDraft: string;
@@ -28,38 +25,10 @@ interface NewChatContextDialogProps {
   onCwdInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   onProfileDraftChange: (profileName: string) => void;
   onReasoningEffortDraftChange: (reasoningEffort: string) => void;
-  onRecentWorkspaceSelect: (path: string) => void;
   onRunnerDraftChange: (runnerId: string) => void;
   onEnvironmentProfileDraftChange: (profileName: string) => void;
   onSelectCwdSuggestion: (path: string) => void;
 }
-
-const getWorkspaceLabelParts = (workspace: string): { name: string; parent: string } => {
-  const trimmedWorkspace = workspace.trim();
-  const normalizedWorkspace =
-    trimmedWorkspace.length > 1 ? trimmedWorkspace.replace(/[\\/]+$/, '') : trimmedWorkspace;
-  const lastSeparatorIndex = Math.max(
-    normalizedWorkspace.lastIndexOf('/'),
-    normalizedWorkspace.lastIndexOf('\\')
-  );
-  const name =
-    lastSeparatorIndex >= 0
-      ? normalizedWorkspace.slice(lastSeparatorIndex + 1) || normalizedWorkspace
-      : normalizedWorkspace || '/';
-  const parent =
-    lastSeparatorIndex > 0
-      ? normalizedWorkspace.slice(0, lastSeparatorIndex)
-      : lastSeparatorIndex === 0
-        ? '/'
-        : '';
-
-  return { name, parent };
-};
-
-const normalizeWorkspacePath = (workspace: string): string => {
-  const trimmedWorkspace = workspace.trim();
-  return trimmedWorkspace.length > 1 ? trimmedWorkspace.replace(/[\\/]+$/, '') : trimmedWorkspace;
-};
 
 const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDialogProps>(
   (
@@ -70,13 +39,10 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       cwdSuggestionIndex,
       cwdSuggestions,
       cwdSuggestionsOpen,
-      controlPlaneWorkspaceEnabled,
-      defaultCWD,
       profileDraft,
       reasoningEffortDraft,
       reasoningEffortLoading,
       reasoningEffortOptions,
-      recentWorkspaces,
       runners,
       runnerIdDraft,
       environmentProfileDraft,
@@ -88,7 +54,6 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       onCwdInputKeyDown,
       onProfileDraftChange,
       onReasoningEffortDraftChange,
-      onRecentWorkspaceSelect,
       onRunnerDraftChange,
       onEnvironmentProfileDraftChange,
       onSelectCwdSuggestion,
@@ -96,14 +61,11 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     ref
   ) => {
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
-    const selectedRunnerAvailable =
-      runnerIdDraft === ''
-        ? controlPlaneWorkspaceEnabled
-        : Boolean(
-            selectedRunner?.connected &&
-              (selectedRunner.status === 'idle' ||
-                (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
-          );
+    const selectedRunnerAvailable = Boolean(
+      runnerIdDraft && selectedRunner?.connected &&
+        (selectedRunner.status === 'idle' ||
+          (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
+    );
     const directorySuggestions = cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
       <div
         className="composer-cwd-suggestions composer-cwd-suggestions-inline"
@@ -205,10 +167,8 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     onChange={(event) => onRunnerDraftChange(event.target.value)}
                     value={runnerIdDraft}
                   >
-                    <option disabled={!controlPlaneWorkspaceEnabled} value="">
-                      {controlPlaneWorkspaceEnabled
-                        ? 'Local control-plane workspace'
-                        : 'Select a workspace runner'}
+                    <option disabled value="">
+                      Select a workspace runner
                     </option>
                     {runners.map((runner) => {
                       const available =
@@ -306,87 +266,6 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     </span>
                   </div>
                 </>
-              ) : controlPlaneWorkspaceEnabled ? (
-                <div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
-                  <label className="new-chat-field-label" htmlFor="new-chat-cwd">
-                    Working directory
-                  </label>
-                  <div className="new-chat-field-autocomplete">
-                    <div className="new-chat-directory-shell">
-                      <FolderOpen
-                        aria-hidden="true"
-                        className="new-chat-directory-icon"
-                        strokeWidth={1.6}
-                      />
-                      <input
-                        aria-autocomplete="list"
-                        aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
-                        aria-label="Working directory"
-                        autoCapitalize="off"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control"
-                        data-testid="cwd-input"
-                        id="new-chat-cwd"
-                        onBlur={onCwdInputBlur}
-                        onChange={(event) => onCwdInputChange(event.target.value)}
-                        onFocus={onCwdInputFocus}
-                        onKeyDown={onCwdInputKeyDown}
-                        placeholder={defaultCWD || '/path/to/project'}
-                        ref={cwdInputRef}
-                        spellCheck={false}
-                        type="text"
-                        value={cwdQuery}
-                      />
-                    </div>
-
-                    {directorySuggestions}
-                  </div>
-                  {recentWorkspaces.length > 0 ? (
-                    <div className="new-chat-recent-section">
-                      <div className="new-chat-recent-heading">
-                        <span className="new-chat-recent-title">Recent workspaces</span>
-                      </div>
-                      <div className="new-chat-recent-workspaces" data-testid="recent-workspaces">
-                        {recentWorkspaces.map((workspace) => {
-                          const { name, parent } = getWorkspaceLabelParts(workspace);
-                          const selected =
-                            normalizeWorkspacePath(workspace) === normalizeWorkspacePath(cwdQuery);
-
-                          return (
-                            <button
-                              aria-label={workspace}
-                              aria-pressed={selected}
-                              className={cn('new-chat-recent-workspace', selected && 'is-selected')}
-                              key={workspace}
-                              onClick={() => onRecentWorkspaceSelect(workspace)}
-                              title={workspace}
-                              type="button"
-                            >
-                              <span className="new-chat-recent-workspace-icon" aria-hidden="true">
-                                <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.7} />
-                              </span>
-                              <span className="new-chat-recent-workspace-text">
-                                <span className="new-chat-recent-workspace-name">{name}</span>
-                                {parent ? (
-                                  <span className="new-chat-recent-workspace-parent">{parent}</span>
-                                ) : null}
-                              </span>
-                              {selected ? (
-                                <span
-                                  className="new-chat-recent-workspace-check"
-                                  aria-hidden="true"
-                                >
-                                  <Check className="h-3 w-3" strokeWidth={2.2} />
-                                </span>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
               ) : (
                 <div
                   className="new-chat-field new-chat-field-wide new-chat-workspace-card"

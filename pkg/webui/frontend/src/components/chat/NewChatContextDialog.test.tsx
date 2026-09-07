@@ -1,16 +1,8 @@
 import type React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import NewChatContextDialog from './NewChatContextDialog';
-import { sampleCwdHints, sampleProfiles, sampleConversations } from '../../stories/fixtures';
-
-const recentWorkspaces = Array.from(
-  new Set(
-    sampleConversations
-      .map((conversation) => conversation.cwd)
-      .filter((cwd): cwd is string => Boolean(cwd))
-  )
-);
+import { sampleCwdHints, sampleProfiles } from '../../stories/fixtures';
 
 const renderDialog = (
   overrides: Partial<React.ComponentProps<typeof NewChatContextDialog>> = {}
@@ -21,15 +13,20 @@ const renderDialog = (
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
-    controlPlaneWorkspaceEnabled: true,
-    defaultCWD: '/home/jingkaihe/workspace/kodelet',
     profileDraft: 'default',
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
-    recentWorkspaces,
-    runners: [],
-    runnerIdDraft: '',
+    runners: [{
+      id: 'runner-1',
+      host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
+      workspace: { path: '/workspace/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'idle',
+      connected: true,
+      generation: 1,
+    }],
+    runnerIdDraft: 'runner-1',
     environmentProfileDraft: '',
     onCancel: vi.fn(),
     onCommit: vi.fn(),
@@ -39,7 +36,6 @@ const renderDialog = (
     onCwdInputKeyDown: vi.fn(),
     onProfileDraftChange: vi.fn(),
     onReasoningEffortDraftChange: vi.fn(),
-    onRecentWorkspaceSelect: vi.fn(),
     onRunnerDraftChange: vi.fn(),
     onEnvironmentProfileDraftChange: vi.fn(),
     onSelectCwdSuggestion: vi.fn(),
@@ -52,23 +48,12 @@ const renderDialog = (
 };
 
 describe('NewChatContextDialog', () => {
-  it('presents a labeled modal and highlights the current workspace', () => {
-    const props = renderDialog({
-      cwdQuery: '~/workspace/kodelet',
-      recentWorkspaces: ['~/workspace/kodelet', '~/workspace/comet'],
-    });
+  it('presents a labeled modal with the selected runner workspace', () => {
+    const props = renderDialog();
 
     expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('aria-modal', 'true');
-
-    const selectedWorkspace = screen.getByRole('button', {
-      name: '~/workspace/kodelet',
-    });
-    expect(selectedWorkspace).toHaveAttribute('aria-pressed', 'true');
-    expect(within(selectedWorkspace).getByText('~/workspace')).toBeVisible();
-    expect(screen.getByRole('button', { name: '~/workspace/comet' })).toHaveAttribute(
-      'aria-pressed',
-      'false'
-    );
+    expect(screen.getByText('/workspace/kodelet')).toBeVisible();
+    expect(screen.queryByTestId('recent-workspaces')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
     expect(props.onCancel).toHaveBeenCalledTimes(1);
@@ -87,7 +72,6 @@ describe('NewChatContextDialog', () => {
       target: { value: '/tmp/project' },
     });
     fireEvent.click(screen.getByTestId('cwd-suggestion-1'));
-    fireEvent.click(screen.getByLabelText('/home/jingkaihe/workspace/plugins'));
 
     expect(props.onProfileDraftChange).toHaveBeenCalledWith('code-review');
     expect(props.onReasoningEffortDraftChange).toHaveBeenCalledWith('high');
@@ -95,7 +79,6 @@ describe('NewChatContextDialog', () => {
     expect(props.onSelectCwdSuggestion).toHaveBeenCalledWith(
       '/home/jingkaihe/workspace/kodelet/pkg/webui/frontend'
     );
-    expect(props.onRecentWorkspaceSelect).toHaveBeenCalledWith('/home/jingkaihe/workspace/plugins');
   });
 
   it('keeps dialog actions external', () => {
@@ -115,8 +98,8 @@ describe('NewChatContextDialog', () => {
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 
-  it('requires a workspace runner when the control-plane workspace is disabled', () => {
-    renderDialog({ controlPlaneWorkspaceEnabled: false });
+  it('requires a workspace runner', () => {
+    renderDialog({ runnerIdDraft: '' });
 
     expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
     expect(screen.queryByRole('option', { name: 'Local control-plane workspace' })).not.toBeInTheDocument();

@@ -677,18 +677,35 @@ test("Session rejects already-aborted run signals without starting a run", async
   await client.close();
 });
 
-test("Session rejects inline executable callbacks before spawning any process", async () => {
+test("Session rejects inline extensions, bridge transports, and UI handlers before spawning any process", async () => {
   let spawned = false;
   let invoked = false;
   const client = new Client({ spawn: () => { spawned = true; return new FakeACPProcess(); } });
   await assert.rejects(client.createSession({ extensions: [defineExtension(() => { invoked = true; })] }), /install the extension on the runner/);
   await assert.rejects(client.createSession({ extensionTransport: "tcp" }), /Inline executable extensions/);
-  await assert.rejects(client.createSession({ ui: { notify() {} } }), /UI handlers/);
+  await assert.rejects(client.createSession({ extensions: [], extensionTransport: "unix" }), /Inline executable extensions/);
+  await assert.rejects(client.createSession({ ui: {} }), /UI handlers/);
+  await assert.rejects(client.createSession({ ui: { notify() { invoked = true; } } }), /UI handlers/);
   await assert.rejects(client.createSession({ profile: { openai: { api_key_env_var: "LOCAL_KEY" } } }));
   await assert.rejects(client.createSession({ profile: { sysprompt: "/client/prompt.md" } }));
   await assert.rejects(client.createSession({ options: null as never }));
   assert.equal(spawned, false);
   assert.equal(invoked, false);
+});
+
+test("Session accepts empty extensions and undefined bridge/UI options", async () => {
+  const process = new FakeACPProcess();
+  const client = new Client({ spawn: () => process });
+  try {
+    const session = await client.createSession({ extensions: [], extensionTransport: undefined, ui: undefined });
+    const response = await session.runAndWait({ message: "hello" });
+
+    assert.equal(response.conversationId, "conv-1");
+    assert.equal(response.exitCode, 0);
+    assert.deepEqual(process.requests.map((request) => request.method), ["initialize", "session/new", "session/prompt"]);
+  } finally {
+    await client.close();
+  }
 });
 
 test("Remote session flags preserve runner paths and named profile selection", async () => {

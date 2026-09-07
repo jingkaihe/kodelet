@@ -208,7 +208,6 @@ func TestServerResolutionUsesActualCommandPaths(t *testing.T) {
 		config := getChatConfigFromFlags(cmd)
 
 		assert.Equal(t, defaultRunnerServer, config.Server)
-		assert.True(t, usesControlPlaneChat(config))
 	})
 
 	t.Run("chat flag overrides environment and user config", func(t *testing.T) {
@@ -219,7 +218,6 @@ func TestServerResolutionUsesActualCommandPaths(t *testing.T) {
 		config := getChatConfigFromFlags(cmd)
 
 		assert.Equal(t, "https://flag.example", config.Server)
-		assert.True(t, usesControlPlaneChat(config))
 	})
 
 	t.Run("ACP uses the user-configured server", func(t *testing.T) {

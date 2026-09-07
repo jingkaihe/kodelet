@@ -168,20 +168,19 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the control-plane server.
 type ServerConfig struct {
-	Host                         string
-	Port                         int
-	CWD                          string // Deprecated: rejected; configure the runner workspace instead.
-	CompactRatio                 float64
-	AuthToken                    string
-	RunnerAuthToken              string
-	WebAuthMode                  WebAuthMode
-	RunnerAuthMode               RunnerAuthMode
-	OIDC                         OIDCConfig
-	DisableControlPlaneWorkspace bool // Deprecated: control-plane-local execution is always disabled.
-	CORSOrigins                  []string
-	EmbeddedRunner               *EmbeddedRunnerConfig
-	InstanceID                   string             // Identity of this process for local discovery.
-	LocalShutdown                context.CancelFunc // Set only by managed loopback server hosts.
+	Host            string
+	Port            int
+	CWD             string // Deprecated: rejected; configure the runner workspace instead.
+	CompactRatio    float64
+	AuthToken       string
+	RunnerAuthToken string
+	WebAuthMode     WebAuthMode
+	RunnerAuthMode  RunnerAuthMode
+	OIDC            OIDCConfig
+	CORSOrigins     []string
+	EmbeddedRunner  *EmbeddedRunnerConfig
+	InstanceID      string             // Identity of this process for local discovery.
+	LocalShutdown   context.CancelFunc // Set only by managed loopback server hosts.
 }
 
 // Validate validates the server configuration
@@ -206,8 +205,6 @@ func (c *ServerConfig) Validate() error {
 	if c.Port < 0 || c.Port > 65535 {
 		return errors.Errorf("port must be between 0 and 65535, got %d", c.Port)
 	}
-	// Retained for config compatibility, never an execution-mode switch.
-	c.DisableControlPlaneWorkspace = true
 
 	if c.CompactRatio <= 0.0 || c.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
@@ -1233,15 +1230,14 @@ type ChatProfileOption struct {
 
 // ChatSettingsResponse contains new-conversation settings for the web chat composer.
 type ChatSettingsResponse struct {
-	CurrentProfile               string              `json:"currentProfile,omitempty"`
-	Profiles                     []ChatProfileOption `json:"profiles"`
-	ReasoningEffort              string              `json:"reasoningEffort"`
-	ReasoningEffortOptions       []string            `json:"reasoningEffortOptions"`
-	DefaultCWD                   string              `json:"defaultCWD,omitempty"`
-	ControlPlaneWorkspaceEnabled bool                `json:"controlPlaneWorkspaceEnabled"`
-	DefaultRunnerID              string              `json:"defaultRunnerId,omitempty"`
-	DefaultRunnerReady           bool                `json:"defaultRunnerReady"`
-	DefaultRunnerHostID          string              `json:"defaultRunnerHostId,omitempty"`
+	CurrentProfile         string              `json:"currentProfile,omitempty"`
+	Profiles               []ChatProfileOption `json:"profiles"`
+	ReasoningEffort        string              `json:"reasoningEffort"`
+	ReasoningEffortOptions []string            `json:"reasoningEffortOptions"`
+	DefaultCWD             string              `json:"defaultCWD,omitempty"`
+	DefaultRunnerID        string              `json:"defaultRunnerId,omitempty"`
+	DefaultRunnerReady     bool                `json:"defaultRunnerReady"`
+	DefaultRunnerHostID    string              `json:"defaultRunnerHostId,omitempty"`
 }
 
 const (
@@ -1456,15 +1452,14 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, ChatSettingsResponse{
-		CurrentProfile:               profile,
-		Profiles:                     getWebUIProfileOptions(),
-		ReasoningEffort:              config.ReasoningEffort,
-		ReasoningEffortOptions:       llmtypes.ReasoningEffortOptions(config),
-		DefaultCWD:                   defaultCWD,
-		ControlPlaneWorkspaceEnabled: false,
-		DefaultRunnerID:              status.RunnerID,
-		DefaultRunnerReady:           status.Ready && hostID != "",
-		DefaultRunnerHostID:          hostID,
+		CurrentProfile:         profile,
+		Profiles:               getWebUIProfileOptions(),
+		ReasoningEffort:        config.ReasoningEffort,
+		ReasoningEffortOptions: llmtypes.ReasoningEffortOptions(config),
+		DefaultCWD:             defaultCWD,
+		DefaultRunnerID:        status.RunnerID,
+		DefaultRunnerReady:     status.Ready && hostID != "",
+		DefaultRunnerHostID:    hostID,
 	})
 }
 

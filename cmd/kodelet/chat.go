@@ -433,27 +433,6 @@ func prepareServerChatRunner(config *ChatConfig) (*chatpkg.Client, error) {
 	return chatpkg.NewClient(config.Server, config.AuthToken, "")
 }
 
-func usesControlPlaneChat(config *ChatConfig) bool {
-	return config != nil
-}
-
-func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationSource) (string, error) {
-	if source == nil {
-		return "", errors.New("conversation history is unavailable")
-	}
-	if runner, ok := source.(*chatpkg.Client); ok && runner == nil {
-		return "", errors.New("conversation history is unavailable")
-	}
-	summaries, err := source.ListConversations(ctx, 1)
-	if err != nil {
-		return "", err
-	}
-	if len(summaries) == 0 || strings.TrimSpace(summaries[0].ID) == "" {
-		return "", errors.New("no conversations found")
-	}
-	return strings.TrimSpace(summaries[0].ID), nil
-}
-
 func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
 		return "", nil, nil, "", errors.New("chat runner is required")

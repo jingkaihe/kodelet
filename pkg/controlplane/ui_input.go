@@ -45,7 +45,6 @@ func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUII
 		conversationID: conversationID,
 		sink:           sink,
 		pending:        make(map[string]chan extensions.UIInputResponse),
-		owner:          &uiInputOwner{sink: sink, ctx: context.Background()},
 	}
 }
 

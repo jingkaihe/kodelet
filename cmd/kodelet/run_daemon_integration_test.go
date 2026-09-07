@@ -406,7 +406,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			t.Setenv("KODELET_TEST_PROVIDER_KEY", "daemon-only-key")
 			t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-store"))
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			config := &controlplane.ServerConfig{Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, AuthToken: "client-secret", RunnerAuthToken: "runner-secret", DisableControlPlaneWorkspace: true}
+			config := &controlplane.ServerConfig{Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, AuthToken: "client-secret", RunnerAuthToken: "runner-secret"}
 			settings := map[string]any{"tool_mode": "full", "enable_fs_search_tools": true, "allowed_tools": []string{"file_read", "web_fetch", "grep_tool", "glob_tool", "code_search", "bash"}, "extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}}
 			if placement == "embedded" {
 				store, err := localstate.NewStore()

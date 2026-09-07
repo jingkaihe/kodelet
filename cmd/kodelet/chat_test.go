@@ -79,7 +79,6 @@ func TestGetChatConfigFromFlagsLoadsServerFromConfig(t *testing.T) {
 
 	assert.Equal(t, "https://kodelet.example/control", config.Server)
 	assert.True(t, config.ServerConfigured)
-	assert.True(t, usesControlPlaneChat(config))
 }
 
 func TestChatResumeShortFlag(t *testing.T) {
@@ -185,19 +184,20 @@ func TestPrepareRemoteChatRunnerRejectsBusyLegacyRunner(t *testing.T) {
 	require.ErrorContains(t, err, "does not support concurrent runs")
 }
 
-func TestPrepareServerChatRunnerAndModeSelection(t *testing.T) {
+func TestPrepareServerChatRunner(t *testing.T) {
 	setServerConfigForTest(t, "")
 	t.Setenv(controlPlaneServerEnv, "")
 	cmd := &cobra.Command{Use: "chat"}
 	cmd.Flags().String("server", defaultRunnerServer, "")
 	cmd.Flags().String("auth-token", "", "")
 	config := getChatConfigFromFlags(cmd)
-	assert.True(t, usesControlPlaneChat(config), "even the implicit default endpoint is daemon-backed")
+	runner, err := prepareServerChatRunner(config)
+	require.NoError(t, err)
+	assert.NotNil(t, runner)
+
 	require.NoError(t, cmd.Flags().Set("server", "http://localhost:8080"))
 	config = getChatConfigFromFlags(cmd)
-	assert.True(t, usesControlPlaneChat(config))
-
-	runner, err := prepareServerChatRunner(config)
+	runner, err = prepareServerChatRunner(config)
 	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	runner, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, CWD: "/tmp/project"})
@@ -241,34 +241,6 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	assert.Equal(t, "/control-plane/workspace", defaultCWD)
 	require.NoError(t, validateRemoteReasoningEffort("high", settings["work"].ReasoningEffortOptions))
 	require.ErrorContains(t, validateRemoteReasoningEffort("max", settings["work"].ReasoningEffortOptions), "not allowed")
-}
-
-type staticChatConversationSource struct {
-	summaries []convtypes.ConversationSummary
-	err       error
-}
-
-func (s staticChatConversationSource) ListConversations(context.Context, int) ([]convtypes.ConversationSummary, error) {
-	return s.summaries, s.err
-}
-
-func (staticChatConversationSource) LoadConversation(context.Context, string) (chatpkg.ConversationHistory, error) {
-	return chatpkg.ConversationHistory{}, nil
-}
-
-func TestResolveFollowConversationUsesSelectedSource(t *testing.T) {
-	id, err := resolveFollowConversation(t.Context(), staticChatConversationSource{summaries: []convtypes.ConversationSummary{{ID: "conversation-latest"}}})
-	require.NoError(t, err)
-	assert.Equal(t, "conversation-latest", id)
-
-	_, err = resolveFollowConversation(t.Context(), staticChatConversationSource{})
-	require.ErrorContains(t, err, "no conversations")
-}
-
-func TestResolveFollowConversationRejectsNilSourceWithoutLocalStore(t *testing.T) {
-	var runner *chatpkg.Client
-	_, err := resolveFollowConversation(t.Context(), runner)
-	require.ErrorContains(t, err, "conversation history is unavailable")
 }
 
 func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {

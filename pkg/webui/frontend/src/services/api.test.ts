@@ -727,7 +727,6 @@ describe("ApiService", () => {
 				ok: true,
 				json: async () => ({
 					currentProfile: "work",
-					controlPlaneWorkspaceEnabled: false,
 					defaultCWD: "/workspace/default",
 					profiles: [{ name: "default", scope: "built-in" }],
 					reasoningEffort: "high",
@@ -743,7 +742,6 @@ describe("ApiService", () => {
 			);
 			expect(result.currentProfile).toBe("work");
 			expect(result.defaultCWD).toBe("/workspace/default");
-			expect(result.controlPlaneWorkspaceEnabled).toBe(false);
 			expect(result.reasoningEffort).toBe("high");
 		});
 

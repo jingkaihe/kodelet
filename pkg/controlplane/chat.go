@@ -32,12 +32,12 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	if r == nil || r.server == nil || r.runner == nil {
 		return conversationID, errors.New("cannot start work because no runner is configured")
 	}
-	if r != nil && r.server != nil && r.server.extensionUI != nil && conversationID != "" {
+	if r.server.extensionUI != nil && conversationID != "" {
 		ctx = extensions.ContextWithExtensionUIHost(ctx, r.server.extensionUI)
 		ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
 	}
 	hasRunnerAffinity := false
-	if r != nil && r.server != nil && r.server.runnerRegistry != nil && conversationID != "" {
+	if r.server.runnerRegistry != nil && conversationID != "" {
 		affinity, ok, err := r.server.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
 		if err != nil {
 			return conversationID, err
@@ -52,7 +52,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			}
 		}
 	}
-	if r != nil && r.server != nil && strings.TrimSpace(req.RunnerID) == "" && r.server.config != nil && r.server.config.EmbeddedRunner != nil {
+	if strings.TrimSpace(req.RunnerID) == "" && r.server.config != nil && r.server.config.EmbeddedRunner != nil {
 		status := r.server.EmbeddedRunnerStatus()
 		if !status.Ready {
 			return conversationID, errors.New("the default runner is unavailable; check /api/status and the server logs, or select another runner")
@@ -76,7 +76,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
 		}
 	}
-	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
+	if conversationID != "" && chatSupportsInteractiveUI(req) {
 		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
@@ -85,7 +85,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	if strings.TrimSpace(resultConversationID) == "" {
 		resultConversationID = conversationID
 	}
-	if strings.TrimSpace(req.RunnerID) != "" && r != nil && r.server != nil {
+	if strings.TrimSpace(req.RunnerID) != "" {
 		if err := r.server.commitRunnerAffinity(context.WithoutCancel(ctx), resultConversationID); err != nil && runErr == nil {
 			runErr = err
 		}
@@ -384,7 +384,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	run.turnID = strings.TrimSpace(req.TurnID)
 	run.eventSink = sink
 	run.uiInput = newWebUIInputBroker(conversationID, sink)
-	run.uiInput.owner = nil
 	if chatSupportsInteractiveUI(req) {
 		detach := run.uiInput.setOwner(withNativeCapabilities(requestCtx, req.ClientCapabilities), clientID, sink)
 		defer detach()

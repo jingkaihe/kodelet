@@ -54,7 +54,7 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	require.NoError(t, store.Save(ctx, other))
 	daemon, err := controlplane.NewServer(ctx, &controlplane.ServerConfig{
 		Host: "127.0.0.1", Port: 0, CompactRatio: 0.8,
-		AuthToken: "history-token", RunnerAuthToken: "runner-token", DisableControlPlaneWorkspace: true,
+		AuthToken: "history-token", RunnerAuthToken: "runner-token",
 	}, nil)
 	require.NoError(t, err)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

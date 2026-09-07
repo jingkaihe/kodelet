@@ -59,7 +59,7 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			config := &controlplane.ServerConfig{Host: "127.0.0.1", AuthToken: "client-secret", RunnerAuthToken: "runner-secret", CompactRatio: 0.8, DisableControlPlaneWorkspace: true}
+			config := &controlplane.ServerConfig{Host: "127.0.0.1", AuthToken: "client-secret", RunnerAuthToken: "runner-secret", CompactRatio: 0.8}
 			if placement == "embedded" {
 				store, err := localstate.NewStore()
 				require.NoError(t, err)

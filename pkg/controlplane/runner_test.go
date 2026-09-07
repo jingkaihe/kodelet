@@ -1887,7 +1887,6 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	defaultRunner := NewExecutor("")
 	runner := &serverChatRunner{runner: defaultRunner, server: server}
 	defaultRunner.SetEnvironmentResolver(runner)
-	server.config.DisableControlPlaneWorkspace = true
 	active := newActiveChatRun(func() {})
 	active.uiInput = newWebUIInputBroker("conversation-chat", &recordingChatSink{})
 	server.activeChats["conversation-chat"] = active
@@ -1929,7 +1928,6 @@ func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 
 func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testing.T) {
 	server := newRunnerTestServer(t, "")
-	server.config.DisableControlPlaneWorkspace = true
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Host:             protocol.Host{InstanceID: "host-chat-migration", Hostname: "host", OS: "linux", Arch: "amd64"},
@@ -2224,6 +2222,7 @@ func openRunnerUIRun(t *testing.T, server *Server) (protocol.RegisterResult, *ru
 	require.NoError(t, err)
 	sink := &runnerUIEventSink{events: make(chan ChatEvent, 8)}
 	broker := newWebUIInputBroker("conversation-ui", sink)
+	t.Cleanup(broker.setOwner(t.Context(), "", sink))
 	active := newActiveChatRun(func() {})
 	active.uiInput = broker
 	server.activeChats["conversation-ui"] = active

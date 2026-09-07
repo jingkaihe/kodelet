@@ -392,6 +392,8 @@ The embedded runner starts and stops with the daemon. `--runner-workspace` defau
 
 Configure `serve.embedded_runner`, `serve.runner_workspace`, and optional `serve.runner_settings` in your trusted user configuration or `KODELET_CONFIG_FILE`. The embedded runner inherits trusted daemon top-level environment settings: `tool_mode`, `sysprompt`, `sysprompt_args`, `enable_fs_search_tools`, `bash`, `context`, `skills`, `extensions`, `allowed_tools`, `allowed_commands`, `allowed_domains_file`, and `environment_profiles`. You do not need to duplicate these settings under `serve.runner_settings`.
 
+The deprecated `--disable-control-plane-workspace` flag and `serve.disable_control_plane_workspace` configuration key are accepted but ignored, regardless of their value. Use `--embedded-runner=false` or `serve.embedded_runner: false` to disable the built-in runner; neither legacy setting can restore control-plane-local execution.
+
 For each embedded-runner execution, environment preferences use this order, from lowest to highest precedence; mandatory permission ceilings described below are not last-write-wins settings:
 
 1. Trusted daemon base settings and defaults

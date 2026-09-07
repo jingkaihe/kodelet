@@ -243,13 +243,12 @@ func TestServerConfig_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "control-plane workspace disabled with cwd",
+			name: "control-plane workspace rejects cwd",
 			config: &ServerConfig{
-				Host:                         "localhost",
-				Port:                         8080,
-				CompactRatio:                 0.8,
-				CWD:                          "/srv/kodelet",
-				DisableControlPlaneWorkspace: true,
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				CWD:          "/srv/kodelet",
 			},
 			expectedError: "serve --cwd is no longer supported; use --runner-workspace",
 		},
@@ -486,7 +485,6 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	assert.NotNil(t, server.conversationService)
 	assert.NotNil(t, server.chatRunner)
 	assert.Empty(t, config.CWD)
-	assert.True(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, "token", config.AuthToken)
 	assert.Equal(t, "runner-token", config.RunnerAuthToken)
 	assert.Equal(t, []string{"https://example.com"}, config.CORSOrigins)
@@ -820,10 +818,8 @@ func TestAuthHelpersAdditionalBranches(t *testing.T) {
 
 func TestServerConfig_Validate_RejectsLocalCWD(t *testing.T) {
 	for _, cwd := range []string{t.TempDir(), "/missing/daemon/workspace", "relative", "   "} {
-		for _, disabled := range []bool{false, true} {
-			config := &ServerConfig{Host: "localhost", Port: 8080, CWD: cwd, CompactRatio: 0.8, DisableControlPlaneWorkspace: disabled}
-			require.ErrorContains(t, config.Validate(), "serve --cwd is no longer supported; use --runner-workspace")
-		}
+		config := &ServerConfig{Host: "localhost", Port: 8080, CWD: cwd, CompactRatio: 0.8}
+		require.ErrorContains(t, config.Validate(), "serve --cwd is no longer supported; use --runner-workspace")
 	}
 }
 
@@ -1101,24 +1097,7 @@ func TestServer_handleGetChatSettings_NeverUsesLocalCWD(t *testing.T) {
 	assert.Empty(t, response.DefaultCWD)
 	assert.Empty(t, response.DefaultRunnerHostID)
 	assert.False(t, response.DefaultRunnerReady)
-	assert.False(t, response.ControlPlaneWorkspaceEnabled)
-}
-
-func TestServer_handleGetChatSettings_DisablesControlPlaneWorkspace(t *testing.T) {
-	server := &Server{
-		config: &ServerConfig{DisableControlPlaneWorkspace: true},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/chat/settings", nil)
-	w := httptest.NewRecorder()
-
-	server.handleGetChatSettings(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var response ChatSettingsResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.False(t, response.ControlPlaneWorkspaceEnabled)
-	assert.Empty(t, response.DefaultCWD)
+	assert.NotContains(t, w.Body.String(), `"controlPlaneWorkspaceEnabled"`)
 }
 
 func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
@@ -1151,37 +1130,32 @@ func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
 	require.NoError(t, os.MkdirAll(recipesDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "local-secret.md"), []byte("Local recipe must not be discovered"), 0o600))
 
-	for _, disabled := range []bool{false, true} {
-		t.Run(fmt.Sprintf("legacy-disable-flag-%t", disabled), func(t *testing.T) {
-			server, err := NewServer(t.Context(), &ServerConfig{Host: "localhost", CompactRatio: 0.8, DisableControlPlaneWorkspace: disabled}, nil)
-			require.NoError(t, err)
-			defer func() { assert.NoError(t, server.Close()) }()
-			assert.True(t, server.config.DisableControlPlaneWorkspace)
-			assert.FileExists(t, filepath.Join(extensionsDir, "kodelet-extension-local"))
-			tests := []struct {
-				name    string
-				path    string
-				handler http.HandlerFunc
-			}{
-				{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
-				{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
-				{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
-				{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
-			}
+	server, err := NewServer(t.Context(), &ServerConfig{Host: "localhost", CompactRatio: 0.8}, nil)
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, server.Close()) }()
+	assert.FileExists(t, filepath.Join(extensionsDir, "kodelet-extension-local"))
+	tests := []struct {
+		name    string
+		path    string
+		handler http.HandlerFunc
+	}{
+		{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
+		{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
+		{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
+		{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
+	}
 
-			for _, tt := range tests {
-				t.Run(tt.name, func(t *testing.T) {
-					req := httptest.NewRequest(http.MethodGet, tt.path+"?cwd="+url.QueryEscape(workspace)+"&q=local", nil)
-					w := httptest.NewRecorder()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path+"?cwd="+url.QueryEscape(workspace)+"&q=local", nil)
+			w := httptest.NewRecorder()
 
-					tt.handler(w, req)
+			tt.handler(w, req)
 
-					assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-					assert.Contains(t, w.Body.String(), "default runner is unavailable")
-					assert.NotContains(t, w.Body.String(), "local-secret")
-					assert.NoFileExists(t, marker, "no daemon-local git, PTY or extension process")
-				})
-			}
+			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+			assert.Contains(t, w.Body.String(), "default runner is unavailable")
+			assert.NotContains(t, w.Body.String(), "local-secret")
+			assert.NoFileExists(t, marker, "no daemon-local git, PTY or extension process")
 		})
 	}
 }
@@ -1214,7 +1188,7 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	assert.NotEmpty(t, response.DefaultRunnerHostID)
 	assert.Equal(t, runner.Host.InstanceID, response.DefaultRunnerHostID)
 	assert.Equal(t, runner.Workspace.Path, response.DefaultCWD)
-	assert.False(t, response.ControlPlaneWorkspaceEnabled)
+	assert.NotContains(t, settings.Body.String(), `"controlPlaneWorkspaceEnabled"`)
 	assert.Contains(t, settings.Body.String(), `"defaultRunnerHostId"`)
 
 	commands := httptest.NewRecorder()
