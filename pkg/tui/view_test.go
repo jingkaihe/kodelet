@@ -454,7 +454,7 @@ func TestReadinessLabelPreservesActivityPriority(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)
 	m.readyDuration = 1200 * time.Millisecond
-	assert.Equal(t, "Ready in 1.2 s", m.inputBottomLeftLabel())
+	assert.Equal(t, "Ready · 1.2 s", m.inputBottomLeftLabel())
 	m.status = "editing"
 	assert.Equal(t, "Editing…", m.inputBottomLeftLabel())
 	m.status = "ready"
@@ -677,12 +677,21 @@ func TestElapsedPlaceholdersResetWhenSwitchingConversations(t *testing.T) {
 }
 
 func TestComposerLabelThemeColors(t *testing.T) {
+	t.Cleanup(func() { applyTheme(themes[DefaultThemeName]) })
 	for _, theme := range themes {
 		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
 		assert.NotEmpty(t, theme.ComposerFlow)
 		assert.NotEmpty(t, theme.SlashCommand.Selected)
 		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Description)
 		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Hint)
+		applyTheme(theme)
+		label := renderComposerBottomLeftLabel("9 extensions · 627 ms")
+		assert.Equal(t, themeColor(theme.ComposerFlow), composerFlowStyle.GetForeground())
+		assert.Equal(t, themeColor(theme.ComposerLabel), composerLabelStyle.GetForeground())
+		accent, _ := styleSequences(composerFlowStyle)
+		muted, _ := styleSequences(composerLabelStyle)
+		assert.Contains(t, label, accent+"9", theme.Name)
+		assert.Contains(t, label, muted+" extensions · 627 ms", theme.Name)
 	}
 	assert.Equal(t, themes[DefaultThemeName].Markdown.Code, themes[DefaultThemeName].SlashCommand.Command)
 }

@@ -219,7 +219,7 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 				_, err := io.WriteString(terminal, text)
 				require.NoError(t, err)
 			}
-			waitRendered(t, "extension ready in ")
+			waitRendered(t, "extension · ")
 			write(t, "exercise native PTY prompts\r")
 			waitRendered(t, "PTY answer prompt")
 			write(t, "terminal-answer\r")

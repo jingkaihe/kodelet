@@ -161,7 +161,7 @@ func TestDeferredInitializationKeepsComposerResponsive(t *testing.T) {
 	m = updated.(model)
 	assert.False(t, m.resourcesLoading)
 	assert.GreaterOrEqual(t, m.readyDuration, 1200*time.Millisecond, "ready timing includes bootstrap, not just command discovery")
-	assert.Contains(t, m.inputBottomLeftLabel(), "Ready in ")
+	assert.Contains(t, m.inputBottomLeftLabel(), "Ready · ")
 	assert.Contains(t, slashCommandNames(m.slashCommands), "runner-only")
 	assert.Equal(t, "draft while starting", m.textarea.Value())
 	assert.NotNil(t, m.submit(), "the user can explicitly submit their retained draft after readiness")
@@ -329,7 +329,7 @@ func TestRemoteDiscoveryReadinessIgnoresStaleResults(t *testing.T) {
 	updated, _ = m.Update(current)
 	m = updated.(model)
 	assert.False(t, m.resourcesLoading)
-	assert.Equal(t, "Ready in 627 ms", m.inputBottomLeftLabel())
+	assert.Equal(t, "Ready · 627 ms", m.inputBottomLeftLabel())
 	for _, staleTarget := range []string{"directory", "profile", "conversation"} {
 		message := current
 		switch staleTarget {
@@ -343,7 +343,7 @@ func TestRemoteDiscoveryReadinessIgnoresStaleResults(t *testing.T) {
 		message.err = assert.AnError
 		updated, _ = m.Update(message)
 		m = updated.(model)
-		assert.Equal(t, "Ready in 627 ms", m.inputBottomLeftLabel(), staleTarget)
+		assert.Equal(t, "Ready · 627 ms", m.inputBottomLeftLabel(), staleTarget)
 	}
 	current.err = assert.AnError
 	updated, _ = m.Update(current)
@@ -359,13 +359,13 @@ func TestRemoteDiscoveryReadinessLabels(t *testing.T) {
 		duration time.Duration
 		want     string
 	}{
-		{name: "older server", duration: 1900 * time.Millisecond, want: "Ready in 1.9 s"},
-		{name: "older server milliseconds", duration: 627 * time.Millisecond, want: "Ready in 627 ms"},
-		{name: "zero", count: new(0), duration: 1900 * time.Millisecond, want: "0 extensions ready in 1.9 s"},
-		{name: "singular", count: new(1), duration: 1900 * time.Millisecond, want: "1 extension ready in 1.9 s"},
-		{name: "multiple", count: new(9), duration: 1900 * time.Millisecond, want: "9 extensions ready in 1.9 s"},
-		{name: "milliseconds", count: new(9), duration: 627 * time.Millisecond, want: "9 extensions ready in 627 ms"},
-		{name: "submillisecond", count: new(1), duration: time.Microsecond, want: "1 extension ready in 1 ms"},
+		{name: "older server", duration: 1900 * time.Millisecond, want: "Ready · 1.9 s"},
+		{name: "older server milliseconds", duration: 627 * time.Millisecond, want: "Ready · 627 ms"},
+		{name: "zero", count: new(0), duration: 1900 * time.Millisecond, want: "0 extensions · 1.9 s"},
+		{name: "singular", count: new(1), duration: 1900 * time.Millisecond, want: "1 extension · 1.9 s"},
+		{name: "multiple", count: new(9), duration: 1900 * time.Millisecond, want: "9 extensions · 1.9 s"},
+		{name: "milliseconds", count: new(9), duration: 627 * time.Millisecond, want: "9 extensions · 627 ms"},
+		{name: "submillisecond", count: new(1), duration: time.Microsecond, want: "1 extension · 1 ms"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{ExtensionCount: test.count}}
@@ -392,7 +392,7 @@ func TestConversationReadinessEndsAtFirstRun(t *testing.T) {
 			if initialDiscovery == "complete" {
 				updated, _ := m.Update(discover())
 				m = updated.(model)
-				assert.Contains(t, m.inputBottomLeftLabel(), "9 extensions ready in ")
+				assert.Contains(t, m.inputBottomLeftLabel(), "9 extensions · ")
 			}
 			m.textarea.SetValue("first turn")
 			require.NotNil(t, m.submit())
@@ -439,7 +439,7 @@ func TestResumedReadinessStaysHiddenAcrossBackgroundDiscovery(t *testing.T) {
 	_, _ = m.activateConversation(other.key)
 	updated, _ = m.Update(discover())
 	m = updated.(model)
-	assert.Equal(t, "Ready in 42 ms", m.inputBottomLeftLabel(), "background discovery must not change the active conversation's readiness")
+	assert.Equal(t, "Ready · 42 ms", m.inputBottomLeftLabel(), "background discovery must not change the active conversation's readiness")
 	assert.Zero(t, state.readyDuration)
 	state.streamRunID = 1
 	m.runs[1] = &conversationRun{conversationKey: state.key, observed: true}

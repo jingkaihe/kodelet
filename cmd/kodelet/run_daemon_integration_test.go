@@ -163,7 +163,7 @@ func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
 				t.Logf("chat screen: %s", screen.String())
 			}
 		}()
-		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "extensions ready in ") }, 10*time.Second, 20*time.Millisecond)
+		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "extensions · ") }, 10*time.Second, 20*time.Millisecond)
 		_, err = io.WriteString(terminal, "cold chat query\r")
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "tool-free answer") }, 10*time.Second, 20*time.Millisecond)
@@ -302,10 +302,10 @@ func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *te
 	write("@")
 	waitRendered("@")
 	assert.Zero(t, modelCalls.Load(), "loading resources must not start a model run")
-	assert.NotContains(t, screen.String(), "extensions ready in ")
+	assert.NotContains(t, screen.String(), "extensions · ")
 
 	close(discoveryGate)
-	readyLabel := regexp.MustCompile(`9 extensions ready in [0-9]+(?:\.[0-9]+)? (?:ms|s)`)
+	readyLabel := regexp.MustCompile(`9 extensions · [0-9]+(?:\.[0-9]+)? (?:ms|s)`)
 	require.Eventually(t, func() bool { return readyLabel.MatchString(screen.String()) }, 5*time.Second, 10*time.Millisecond, "terminal did not render elapsed readiness")
 	assert.Zero(t, modelCalls.Load())
 	write("\x03")

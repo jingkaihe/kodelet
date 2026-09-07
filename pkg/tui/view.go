@@ -1316,15 +1316,15 @@ func (m model) inputBottomLeftLabel() string {
 	if m.readyDuration > 0 {
 		label := "Ready"
 		if m.extensionCount != nil {
-			label = fmt.Sprintf("%d extensions ready", *m.extensionCount)
+			label = fmt.Sprintf("%d extensions", *m.extensionCount)
 			if *m.extensionCount == 1 {
-				label = "1 extension ready"
+				label = "1 extension"
 			}
 		}
 		if m.readyDuration < time.Second {
-			return fmt.Sprintf("%s in %d ms", label, max(1, m.readyDuration.Milliseconds()))
+			return fmt.Sprintf("%s · %d ms", label, max(1, m.readyDuration.Milliseconds()))
 		}
-		return fmt.Sprintf("%s in %.1f s", label, m.readyDuration.Seconds())
+		return fmt.Sprintf("%s · %.1f s", label, m.readyDuration.Seconds())
 	}
 	return ""
 }
