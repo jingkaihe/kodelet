@@ -266,28 +266,6 @@ func (s *Service) CleanupExtensionUI(owner extensions.UIExtensionOwner) {
 	}()
 }
 
-func (s *Service) updateUICapabilities(ctx context.Context, params protocol.UICapabilitiesParams) error {
-	s.mu.Lock()
-	run, err := s.activeRunLocked(params.RunID)
-	if err != nil {
-		s.mu.Unlock()
-		return err
-	}
-	if run.closing || run.stopping {
-		s.mu.Unlock()
-		return errors.New("the run that opened this interactive UI is stopping")
-	}
-	s.clearRunSurfacesLocked(run.id)
-	// Widgets have passive observers and do not lose support on interactive takeover.
-	params.Capabilities.PersistentWidgets = params.Capabilities.PersistentWidgets || run.clientCaps.PersistentWidgets
-	run.clientCaps = params.Capabilities
-	if run.resources != nil {
-		run.resources.clientCaps = params.Capabilities
-	}
-	s.mu.Unlock()
-	return s.syncRunUICapabilities(ctx, params.RunID)
-}
-
 func (s *Service) syncRunUICapabilities(ctx context.Context, runID string) error {
 	s.uiCapabilitiesMu.Lock()
 	defer s.uiCapabilitiesMu.Unlock()

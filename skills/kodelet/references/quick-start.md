@@ -72,7 +72,7 @@ kodelet chat --theme catppuccin-latte
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 
-Chat starts or reuses the local server automatically unless a server is explicitly selected. Directories refer to paths on the runner's machine. Resuming keeps the saved runner, directory, and profiles; use `--follow` with `--runner` or `--cwd` to choose which history to search. Exiting chat leaves work running; `/stop` cancels it. Use `/take-control` to receive future interactive prompts in this client. Previously dismissed prompts are not shown again.
+Chat starts or reuses the local server unless one is explicitly selected. Directories are runner-side; resuming preserves the runner, directory, and profiles. Scope `--follow` with `--runner` or `--cwd`. Exiting leaves work running; `/stop` cancels it. Each turn's submitting client handles interactive extension UI; disconnecting dismisses it, and reconnecting does not restore it mid-turn.
 
 ### Local server lifecycle
 

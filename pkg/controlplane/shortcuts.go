@@ -93,7 +93,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 		}
 		broker := s.uiInputBrokerForRun(request.Target.ConversationID)
 		if broker == nil {
-			s.writeErrorResponse(w, http.StatusConflict, "connect to the conversation and use /take-control before running this shortcut", nil)
+			s.writeErrorResponse(w, http.StatusConflict, "this shortcut requires the connected client that submitted the active turn; otherwise, wait for the turn to finish", nil)
 			return
 		}
 		finish, err := broker.beginOwnedShortcut(ctx, clientID, cancel)
@@ -226,7 +226,7 @@ func (b *webUIInputBroker) beginOwnedShortcut(ctx context.Context, clientID stri
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed || b.owner == nil || b.owner.ctx.Err() != nil || b.owner.clientID != clientID || ctx.Err() != nil {
-		return nil, errors.New("use /take-control before running this shortcut from another client")
+		return nil, errors.New("run this shortcut from the connected client that submitted the active turn, or wait for the turn to finish")
 	}
 	if len(b.shortcutCancels) >= 8 {
 		return nil, errors.New("too many active shortcut requests")

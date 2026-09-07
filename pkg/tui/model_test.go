@@ -174,10 +174,10 @@ func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing
 	assert.Empty(t, m.messageHistoryScopeCWD)
 	assert.True(t, m.extensionDiscoveryBlocked)
 	assert.Equal(t, "~/runner/kodelet", displayCWD(m.cwd))
-	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "stop", "theme", "take-control"}, slashCommandNames(m.slashCommands))
+	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
 
 	m.createNewConversation()
-	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "stop", "theme", "take-control"}, slashCommandNames(m.slashCommands))
+	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
 }
 
 func TestNewModelRemoteModeKeepsExplicitRequestedCWD(t *testing.T) {

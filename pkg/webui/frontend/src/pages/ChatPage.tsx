@@ -562,7 +562,6 @@ const ChatPage: React.FC = () => {
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
-  const [takingUIOwnership, setTakingUIOwnership] = useState(false);
   const [statusTick, setStatusTick] = useState(0);
   const controlPlaneWorkspaceEnabled = chatSettings.controlPlaneWorkspaceEnabled !== false;
   const loadedConversationId = conversation?.id ?? null;
@@ -2603,19 +2602,6 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleTakeUIOwnership = async () => {
-    if (!activeRunningConversationId || takingUIOwnership) return;
-    setTakingUIOwnership(true);
-    try {
-      await apiService.takeUIOwnership(activeRunningConversationId);
-      showToast('Future extension prompts will appear in this client', 'info');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not take control', 'error');
-    } finally {
-      setTakingUIOwnership(false);
-    }
-  };
-
   const handleStop = () => {
     const conversationToStop = activeRunningConversationId;
     if (!conversationToStop) {
@@ -3510,19 +3496,6 @@ const ChatPage: React.FC = () => {
           className="chat-main-panel relative flex h-full min-w-0 flex-1 flex-col overflow-hidden"
           inert={workspaceOverlayOpen || sidebarOverlayOpen || undefined}
         >
-          {activeRunningConversationId && !sendControllersRef.current[activeRunningConversationId] ? (
-            <div className="flex justify-end px-4 pt-2">
-              <button
-                className="btn btn-ghost btn-sm"
-                disabled={takingUIOwnership}
-                onClick={() => void handleTakeUIOwnership()}
-                title="Handle future extension prompts in this client"
-                type="button"
-              >
-                Take control
-              </button>
-            </div>
-          ) : null}
           <div
             className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
             data-testid="chat-transcript-scroll"

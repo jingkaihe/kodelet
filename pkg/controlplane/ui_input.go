@@ -15,7 +15,6 @@ type webUIInputBroker struct {
 	sink            chat.ChatEventSink
 	pending         map[string]chan extensions.UIInputResponse
 	mu              sync.Mutex
-	transferMu      sync.Mutex
 	owner           *uiInputOwner
 	closed          bool
 	native          *nativeUIState
@@ -29,6 +28,18 @@ type uiInputOwner struct {
 	stop     func() bool
 }
 
+func validUIClientID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, char := range id {
+		if char != '-' && char != '_' && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUIInputBroker {
 	return &webUIInputBroker{
 		conversationID: conversationID,
@@ -38,8 +49,8 @@ func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUII
 	}
 }
 
-// setOwner transfers only future interactions. Pending prompts are dismissed,
-// never replayed to another client with their old response authority.
+// setOwner binds interactive UI to the submitting client for this execution.
+// Disconnecting dismisses pending prompts without selecting an attached viewer.
 func (b *webUIInputBroker) setOwner(ctx context.Context, clientID string, sink chat.ChatEventSink) func() {
 	owner := &uiInputOwner{clientID: clientID, sink: sink, ctx: ctx}
 	b.mu.Lock()
@@ -68,19 +79,6 @@ func (b *webUIInputBroker) detachOwner(owner *uiInputOwner) {
 	}
 }
 
-func (b *webUIInputBroker) detachSink(sink chat.ChatEventSink) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.owner != nil && b.owner.sink == sink {
-		b.invalidateNativeUILocked()
-		if b.owner.stop != nil {
-			b.owner.stop()
-		}
-		b.owner = nil
-		b.dismissPendingLocked()
-	}
-}
-
 func (b *webUIInputBroker) dismissPendingLocked() {
 	for id, cancel := range b.shortcutCancels {
 		cancel()
@@ -89,7 +87,7 @@ func (b *webUIInputBroker) dismissPendingLocked() {
 	for id, response := range b.pending {
 		delete(b.pending, id)
 		select {
-		case response <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed, Reason: "interactive client detached or ownership changed"}:
+		case response <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed, Reason: "interactive client detached or execution ended"}:
 		default:
 		}
 	}
@@ -246,7 +244,7 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event c
 		}
 		b.mu.Unlock()
 		if owner.clientID != "" {
-			// Clear a visible prompt on takeover, expiry, or cancellation. This is
+			// Clear a visible prompt on expiry or cancellation. This is
 			// sent only to its original owner, never to an observing client.
 			_ = owner.sink.Send(chat.ChatEvent{Kind: "ui-request-end", ConversationID: b.conversationID, UIRequestID: requestID})
 		}

@@ -285,12 +285,21 @@ func nativeReleasePost(t *testing.T, endpoint, clientID, path string, body any) 
 	return response.StatusCode
 }
 
-func nativeReleaseBrowser(t *testing.T, endpoint string) (<-chan chat.ChatEvent, func()) {
+func nativeReleaseBrowser(t *testing.T, endpoint, message string) <-chan chat.ChatEvent {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/api/conversations/native-release/stream", nil)
+	method, path := http.MethodGet, "/api/conversations/native-release/stream"
+	var body io.Reader
+	if message != "" {
+		method, path = http.MethodPost, "/api/chat"
+		data, err := json.Marshal(chat.ChatRequest{ConversationID: "native-release", Message: message, ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true, PersistentWidgets: true}})
+		require.NoError(t, err)
+		body = bytes.NewReader(data)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint+path, body)
 	require.NoError(t, err)
 	request.Header.Set("Authorization", "Bearer web-secret")
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(chat.ClientIDHeader, "browser")
 	request.Header.Set(chat.UICapabilitiesHeader, "interactive,widgets")
 	response, err := http.DefaultClient.Do(request)
@@ -313,7 +322,7 @@ func nativeReleaseBrowser(t *testing.T, endpoint string) (<-chan chat.ChatEvent,
 		}
 	}()
 	t.Cleanup(cancel)
-	return events, cancel
+	return events
 }
 
 func TestNativeUIReleaseRunnerProcess(t *testing.T) {
@@ -402,7 +411,13 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			opened, finish := make(chan string, 2), make(chan struct{}, 2)
 			server.chatRunner = &mockChatRunner{runFunc: func(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
 				runID := ctx.Value(turnRunIDKey{}).(string)
-				_, err := server.runnerRegistry.OpenRun(ctx, runnerID, protocol.RunOpenParams{RunID: runID, ConversationID: request.ConversationID, CWD: workspace, ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentWidgets: true, PersistentSurfaces: true}})
+				capabilities := protocol.ClientCapabilities{}
+				if request.ClientCapabilities != nil {
+					capabilities.InteractiveUI = request.ClientCapabilities.InteractiveUI
+					capabilities.PersistentWidgets = request.ClientCapabilities.PersistentWidgets
+					capabilities.PersistentSurfaces = request.ClientCapabilities.PersistentSurfaces
+				}
+				_, err := server.runnerRegistry.OpenRun(ctx, runnerID, protocol.RunOpenParams{RunID: runID, ConversationID: request.ConversationID, CWD: workspace, ClientCapabilities: capabilities})
 				if err != nil {
 					return request.ConversationID, err
 				}
@@ -420,8 +435,10 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			native, err := chat.NewControlPlaneChatRunner(endpoint, "web-secret", runnerID)
 			require.NoError(t, err)
 			nativeDone := make(chan error, 2)
+			firstCtx, detachFirst := context.WithCancel(nativeCtx)
+			t.Cleanup(detachFirst)
 			go func() {
-				_, err := native.Run(nativeCtx, chat.ChatRequest{ConversationID: record.ID, Message: "first UI turn"}, &recordingChatSink{})
+				_, err := native.Run(firstCtx, chat.ChatRequest{ConversationID: record.ID, Message: "first UI turn"}, &recordingChatSink{})
 				nativeDone <- err
 			}()
 			runID := nativeReleaseNext(t, opened)
@@ -436,7 +453,7 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 				}
 				return nativeID != ""
 			}, time.Second, time.Millisecond)
-			browser, _ := nativeReleaseBrowser(t, endpoint)
+			browser := nativeReleaseBrowser(t, endpoint, "")
 			invoke := func(method string, request any) <-chan runnerpayload.ToolExecuteResult {
 				result := make(chan runnerpayload.ToolExecuteResult, 1)
 				data := mustRunnerJSON(t, map[string]any{"method": method, "request": request})
@@ -478,56 +495,90 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 				assert.Nil(t, event.UIInput, "observer must not receive native prompts")
 				assert.Nil(t, event.UIPersistent, "observer must not receive interactive surfaces")
 			}
-			promptResult = invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "dismiss on takeover"})
+			promptResult = invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "dismiss on disconnect"})
 			stalePrompt := nativeReleaseNext(t, prompts)
-			assert.Equal(t, http.StatusOK, nativeReleasePost(t, endpoint, "browser", "ui-owner", nil))
+			detachFirst()
+			require.Error(t, nativeReleaseNext(t, nativeDone))
 			assert.Contains(t, nativeReleaseNext(t, promptResult).Result.AssistantFacing, "dismissed")
 			waitClosed()
 			require.Error(t, first.NotifyExtensionUI(t.Context(), extensions.UISurfaceInputMethod, input))
 			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, nativeID, "ui-input/"+stalePrompt.request.ID, answer))
-			promptResult = invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "browser future prompt"})
+			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, "browser", "ui-input/"+stalePrompt.request.ID, answer))
+			require.Eventually(t, func() bool { broker.mu.Lock(); defer broker.mu.Unlock(); return broker.owner == nil }, 5*time.Second, time.Millisecond)
+			assert.True(t, server.isActiveChat(record.ID), "owner disconnect must not cancel admitted execution")
+
+			// Reconnecting the original client only observes the ongoing turn.
+			streamCtx, detach := context.WithCancel(nativeCtx)
+			t.Cleanup(detach)
+			streamDone := make(chan error, 1)
+			go func() { streamDone <- native.StreamConversation(streamCtx, record.ID, &recordingChatSink{}) }()
+			require.Eventually(t, func() bool {
+				server.chatSubscribersMu.Lock()
+				defer server.chatSubscribersMu.Unlock()
+				return len(server.chatSubscribers[record.ID]) == 2
+			}, 5*time.Second, time.Millisecond)
+			broker.mu.Lock()
+			assert.Nil(t, broker.owner, "neither the browser observer nor the reconnected submitter inherits ownership")
+			broker.mu.Unlock()
+			unavailable := nativeReleaseNext(t, invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "unattended"}))
+			assert.Contains(t, unavailable.Result.AssistantFacing, "unavailable")
+			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 3}}))
+			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
+			detach()
+			_ = nativeReleaseNext(t, streamDone)
+			finish <- struct{}{}
+			for {
+				event := nativeReleaseNext(t, browser)
+				assert.Nil(t, event.UIInput, "observer must not inherit prompts after the submitter disconnects")
+				assert.Nil(t, event.UIPersistent, "observer must not inherit native surfaces")
+				if event.Kind == "done" {
+					break
+				}
+			}
+			assert.False(t, server.isActiveChat(record.ID))
+
+			// A browser owns its next submitted turn, without native capabilities.
+			browserTurn := nativeReleaseBrowser(t, endpoint, "browser UI turn")
+			runID = nativeReleaseNext(t, opened)
+			broker = server.uiInputBrokerForRun(record.ID)
+			require.NotNil(t, broker)
+			broker.mu.Lock()
+			owner := broker.owner
+			broker.mu.Unlock()
+			require.NotNil(t, owner)
+			assert.Equal(t, "browser", owner.clientID)
+			assert.False(t, nativeCapabilities(owner.ctx).PersistentSurfaces)
+			promptResult = invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "browser submitted prompt"})
 			var browserPrompt *chat.UIInputEvent
 			for browserPrompt == nil {
-				browserPrompt = nativeReleaseNext(t, browser).UIInput
+				browserPrompt = nativeReleaseNext(t, browserTurn).UIInput
 			}
 			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, nativeID, "ui-input/"+browserPrompt.ID, answer))
 			assert.Equal(t, http.StatusOK, nativeReleasePost(t, endpoint, "browser", "ui-input/"+browserPrompt.ID, answer))
 			assert.Contains(t, nativeReleaseNext(t, promptResult).Result.AssistantFacing, "native answer")
-			unavailable := nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 3}}))
+			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 4}}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
 			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.transcript.append", extensions.UITranscriptAppendRequest{Message: "unavailable browser transcript"}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
-			// A later native owner is enabled by the real capability-update RPC.
-			attachNative := func() (context.CancelFunc, <-chan error) {
-				streamCtx, detach := context.WithCancel(nativeCtx)
-				t.Cleanup(detach)
-				done := make(chan error, 1)
-				go func() { done <- native.StreamConversation(streamCtx, record.ID, &recordingChatSink{}) }()
-				require.Eventually(t, func() bool {
-					server.chatSubscribersMu.Lock()
-					defer server.chatSubscribersMu.Unlock()
-					for subscriber := range server.chatSubscribers[record.ID] {
-						if subscriber.clientID == nativeID && subscriber.ctx.Err() == nil {
-							return true
-						}
-					}
-					return false
-				}, 5*time.Second, time.Millisecond)
-				require.NoError(t, native.TakeUIOwnership(t.Context(), record.ID))
-				return detach, done
+			finish <- struct{}{}
+			for nativeReleaseNext(t, browserTurn).Kind != "done" {
 			}
-			detach, streamDone := attachNative()
-			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 4}})
-			second := nativeReleaseNext(t, host.opened)
-			detach()
-			_ = nativeReleaseNext(t, streamDone)
-			waitClosed()
-			require.Error(t, second.NotifyExtensionUI(t.Context(), extensions.UISurfaceInputMethod, input))
-			require.Eventually(t, func() bool { broker.mu.Lock(); defer broker.mu.Unlock(); return broker.owner == nil }, 5*time.Second, time.Millisecond)
-			assert.True(t, server.isActiveChat(record.ID), "owner disconnect must not cancel admitted execution")
-			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "unattended"}))
-			assert.Contains(t, unavailable.Result.AssistantFacing, "unavailable")
-			finalDetach, finalStream := attachNative()
+			assert.False(t, server.isActiveChat(record.ID))
+
+			// The next native submission restores its own capabilities on activation.
+			go func() {
+				_, err := native.Run(nativeCtx, chat.ChatRequest{ConversationID: record.ID, Message: "next native UI turn"}, &recordingChatSink{})
+				nativeDone <- err
+			}()
+			runID = nativeReleaseNext(t, opened)
+			broker = server.uiInputBrokerForRun(record.ID)
+			require.NotNil(t, broker)
+			broker.mu.Lock()
+			owner = broker.owner
+			broker.mu.Unlock()
+			require.NotNil(t, owner)
+			assert.Equal(t, nativeID, owner.clientID)
+			assert.True(t, nativeCapabilities(owner.ctx).PersistentSurfaces)
 			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 5}})
 			finalSource := nativeReleaseNext(t, host.opened)
 			finish <- struct{}{}
@@ -548,11 +599,8 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			require.Len(t, widgets, 1)
 			for {
 				event := nativeReleaseNext(t, browser)
-				if event.UIPersistent != nil {
-					assert.Equal(t, "ui-persistent-reset", event.Kind, "browser may receive its retired owner epoch, never native output")
-					assert.Empty(t, event.UIPersistent.Method)
-					assert.Empty(t, event.UIPersistent.Request)
-				}
+				assert.Nil(t, event.UIInput, "the observer stream must not receive another connection's prompts")
+				assert.Nil(t, event.UIPersistent, "browser observer must never receive native output")
 				if event.UIWidget != nil && event.UIWidget.Frame.Sequence == widgets[0].Frame.Sequence {
 					assert.Equal(t, "worker", event.UIWidget.ID)
 					assert.False(t, event.UIWidget.Removed)
@@ -565,8 +613,6 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			assert.Contains(t, string(data), extensions.UISurfaceResizeMethod)
 			assert.Contains(t, string(data), "extension.ui.surface.closed")
 			assert.Contains(t, string(data), "background-widget")
-			finalDetach()
-			_ = nativeReleaseNext(t, finalStream)
 			stop()
 			require.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 10*time.Millisecond)
 		})

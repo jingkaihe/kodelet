@@ -267,6 +267,7 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	assert.Empty(t, f.methods)
 	response := f.invoke(t.Context(), t, f.request, "observer")
 	assert.Equal(t, http.StatusConflict, response.Code)
+	assert.Contains(t, response.Body.String(), "client that submitted the active turn")
 	assert.Empty(t, f.methods)
 	stale := f.request
 	stale.Shortcut.Generation--
@@ -285,12 +286,11 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	case <-time.After(time.Second):
 		require.FailNow(t, "shortcut did not start")
 	}
-	newDetach := broker.setOwner(t.Context(), "new-owner", sink)
-	defer newDetach()
+	detach()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		require.FailNow(t, "ownership loss did not cancel shortcut")
+		require.FailNow(t, "owner disconnect did not cancel shortcut")
 	}
 	assert.Equal(t, []string{protocol.MethodShortcutExecute, protocol.MethodShortcutExecute}, f.methods, "must not cancel active conversation")
 	run, found := f.server.runnerRegistry.Run("active-run")

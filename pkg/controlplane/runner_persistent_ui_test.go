@@ -125,7 +125,7 @@ func TestNativeRunnerUISurfacesTranscriptAndInput(t *testing.T) {
 }
 
 func TestNativeRunnerUILifecycleInvalidatesPendingAndLateInput(t *testing.T) {
-	for _, finish := range []string{"takeover", "disconnect", "completion", "process", "runner", "deadline"} {
+	for _, finish := range []string{"disconnect", "completion", "process", "runner", "deadline"} {
 		t.Run(finish, func(t *testing.T) {
 			server := newRunnerTestServer(t, "")
 			registration, sink, broker := openRunnerUIRun(t, server)
@@ -139,8 +139,6 @@ func TestNativeRunnerUILifecycleInvalidatesPendingAndLateInput(t *testing.T) {
 			defer cancel()
 			event, result := nativeUITestStart(ctx, t, server, identity, sink, protocol.MethodUISurfaceOpen, open)
 			switch finish {
-			case "takeover":
-				broker.setOwner(ownerCtx, "replacement", &recordingChatSink{})
 			case "disconnect":
 				detach()
 			case "completion":

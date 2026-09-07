@@ -403,7 +403,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/turns/{turnId}", s.handleGetTurnReceipt).Methods("GET")
 	api.HandleFunc("/conversations/{id}/ui-input/{requestId}", s.handleRespondUIInput).Methods("POST")
-	api.HandleFunc("/conversations/{id}/ui-owner", s.handleTakeUIOwnership).Methods("POST")
 	api.HandleFunc("/conversations/{id}/ui-persistent/ack", s.handlePersistentUIAck).Methods("POST")
 	api.HandleFunc("/conversations/{id}/ui-persistent/input", s.handlePersistentUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
@@ -1012,9 +1011,6 @@ func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEve
 		return
 	}
 
-	if broker := s.uiInputBrokerForRun(conversationID); broker != nil {
-		broker.detachSink(sink)
-	}
 	s.chatSubscribersMu.Lock()
 	defer s.chatSubscribersMu.Unlock()
 	subscribers := s.chatSubscribers[conversationID]
@@ -1079,9 +1075,6 @@ func (s *Server) closeChatSubscribers(conversationID string) {
 	s.chatSubscribersMu.Unlock()
 
 	for sink := range subscribers {
-		if broker := s.uiInputBrokerForRun(conversationID); broker != nil {
-			broker.detachSink(sink)
-		}
 		sink.Close()
 	}
 }
@@ -2013,10 +2006,6 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	subscriber := newSubscriberEventSink()
-	subscriber.clientID = strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
-	subscriber.interactive = validUIClientID(subscriber.clientID) && strings.Contains(","+r.Header.Get(chat.UICapabilitiesHeader)+",", ",interactive,")
-	subscriber.capabilities = parseClientUICapabilities(r.Header.Get(chat.UICapabilitiesHeader))
-	subscriber.ctx = r.Context()
 	active, registered := s.registerChatSubscriber(conversationID, subscriber)
 	if !registered {
 		subscriber.Close()

@@ -69,7 +69,7 @@ func validateRemoteChatFlags(cmd *cobra.Command) error {
 }
 
 // configuredChatRunner keeps command-scoped options out of the TUI and promotes
-// the shared transport's history, streams, cancellation and UI ownership APIs.
+// the shared transport's history, streams, cancellation and UI response APIs.
 type configuredChatRunner struct {
 	*chatpkg.ControlPlaneChatRunner
 	options            *llmtypes.ExecutionOptions

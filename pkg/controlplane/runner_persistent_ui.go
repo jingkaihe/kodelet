@@ -69,7 +69,7 @@ func (b *webUIInputBroker) invalidateNativeUILocked() {
 	}
 	for _, pending := range b.native.pending {
 		select {
-		case pending.response <- extensions.UIFrameResponse{Reason: "native UI owner changed or execution ended"}:
+		case pending.response <- extensions.UIFrameResponse{Reason: "native UI client detached or execution ended"}:
 		default:
 		}
 	}
@@ -260,7 +260,7 @@ func (s *Server) handleNativeRunnerUI(ctx context.Context, identity runnerregist
 	}
 	broker.mu.Lock()
 	if broker.owner != owner || broker.closed {
-		response = extensions.UIFrameResponse{Reason: "native UI owner changed or execution ended"}
+		response = extensions.UIFrameResponse{Reason: "native UI client detached or execution ended"}
 	}
 	if route != nil && state.routes[routeID] != route {
 		response = extensions.UIFrameResponse{Reason: "this interactive view has closed"}
@@ -387,24 +387,6 @@ func (s *Server) handlePersistentUIInput(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeJSONResponse(w, map[string]bool{"success": true})
-}
-
-func (s *Server) updateRunnerUICapabilities(ctx context.Context, conversationID string, caps chat.ChatClientCapabilities) error {
-	if s.runnerRegistry == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	for _, runner := range s.runnerRegistry.Runners() {
-		for _, id := range runner.ActiveRunIDs {
-			run, ok := s.runnerRegistry.Run(id)
-			if !ok || run.ConversationID != conversationID {
-				continue
-			}
-			return s.runnerRegistry.CallRun(ctx, id, protocol.MethodUICapabilities, protocol.UICapabilitiesParams{RunID: id, Capabilities: protocol.ClientCapabilities{InteractiveUI: caps.InteractiveUI, PersistentWidgets: caps.PersistentWidgets, PersistentSurfaces: caps.PersistentSurfaces}}, nil)
-		}
-	}
-	return nil // The environment resolver reads the current owner if opening has not begun.
 }
 
 func (h *webExtensionUIHost) cleanupRunnerOwner(identity runnerregistry.UIRequestIdentity, owner runnerpayload.ExtensionOwner) {

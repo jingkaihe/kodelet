@@ -267,12 +267,6 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		return rpcResult(nil, s.cancelRun(ctx, value.RunID))
-	case protocol.MethodUICapabilities:
-		value, rpcErr := decodeParams[protocol.UICapabilitiesParams](params)
-		if rpcErr != nil {
-			return nil, rpcErr
-		}
-		return rpcResult(nil, s.updateUICapabilities(ctx, value))
 	case protocol.MethodUISurfaceInvalidate:
 		value, rpcErr := decodeParams[runnerpayload.UISurfaceInvalidateParams](params)
 		if rpcErr != nil {

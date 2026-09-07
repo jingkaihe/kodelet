@@ -16,7 +16,7 @@ Moved provider authentication and account management, profile and usage inspecti
 
 Added extension-owned execution presets and TypeScript SDK child agents through `ext.registerProfile` and `ctx.children`, supporting fresh or forked context, explicit follow-ups, scoped steering and cancellation, tool progress metadata, and inherited policy limits. Hardened background leases and extension cleanup across cancellation, runner disconnects, process failures, and shutdown, and routed web-fetch extraction through the daemon's model helper instead of a nested CLI process.
 
-Enabled runner-backed native TUI extension shortcuts, transcript entries, and interactive surfaces, with `/take-control` for transferring extension input ownership, capability refresh on client takeover, and `surface.onClose` cleanup callbacks. Improved ACP subprocess streaming and shutdown handling in the TypeScript SDK.
+Enabled runner-backed native TUI extension shortcuts, transcript entries, and interactive surfaces with `surface.onClose` cleanup. Each turn's submitting client handles interactive UI; disconnecting dismisses it without cancelling execution. Improved ACP subprocess streaming and shutdown handling in the TypeScript SDK.
 
 **Breaking changes:** All user-facing runs now persist, including `--result-only`; `--no-save` is removed. `--follow` requires a runner or working-directory scope. Replace `serve --cwd` with `--runner-workspace` and `--disable-control-plane-workspace` with `--embedded-runner=false`. SDK sessions use typed execution options and runner-installed extensions instead of temporary configuration files or inline extension/UI callbacks.
 

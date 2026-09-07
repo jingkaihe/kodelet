@@ -207,7 +207,7 @@ The default `auto` theme follows the terminal's light or dark appearance. Use `-
 
 Before the first message, use `Ctrl+T` to choose a profile and `Ctrl+Y` to choose a reasoning effort. These settings are fixed after the conversation starts.
 
-While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, and `/take-control` run immediately; other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the active turn. `/take-control` receives future interactive prompts; dismissed prompts are not replayed.
+While a turn is running, `Enter` queues steering. `/sessions`, `/new`, and `/stop` run immediately; other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Only the capable submitting client handles interactive extension UI; disconnecting dismisses it, and reconnecting does not restore it mid-turn. Other clients can watch, steer, and stop.
 
 Extension shortcuts run on the selected runner, including before the first message. During an active turn, only its current UI owner can invoke them. Shortcuts that submit messages use the same submission or queueing behavior as typed messages.
 

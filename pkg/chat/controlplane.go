@@ -252,7 +252,7 @@ func (r *ControlPlaneChatRunner) consumeChatStream(ctx context.Context, reader i
 	defer persistentUI.close()
 	var streamErr error
 	completed := false
-	// Prompt handlers must not block reading dismissal or ownership changes.
+	// Prompt handlers must not block reading dismissal or execution completion.
 	// Only this stream owns these contexts; losing it dismisses local dialogs,
 	// but does not issue a conversation cancellation request.
 	type pendingUI struct{ cancel context.CancelFunc }
@@ -1059,39 +1059,6 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 	defer httpResponse.Body.Close()
 	if httpResponse.StatusCode != http.StatusOK {
 		return controlPlaneResponseError(httpResponse)
-	}
-	return nil
-}
-
-// TakeUIOwnership explicitly selects this attached client for future prompts.
-// Existing prompts are dismissed, not replayed. StreamConversation must remain attached.
-func (r *ControlPlaneChatRunner) TakeUIOwnership(ctx context.Context, conversationID string) error {
-	if r == nil || r.client == nil {
-		return errors.New("the chat connection is not initialized")
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return errors.New("conversation ID is required")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "ui-owner")
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return errors.Wrap(err, "failed to create the request to take control of interactive prompts")
-	}
-	r.authorize(request)
-	request.Header.Set(ClientIDHeader, r.clientID)
-	response, err := r.client.Do(request)
-	if err != nil {
-		return errors.Wrap(err, "failed to take control of interactive prompts")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return controlPlaneResponseError(response)
 	}
 	return nil
 }

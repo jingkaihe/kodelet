@@ -465,13 +465,6 @@ class ApiService {
 		);
 	}
 
-	async takeUIOwnership(conversationId: string): Promise<void> {
-		await this.request(`/api/conversations/${conversationId}/ui-owner`, {
-			method: "POST",
-			headers: { "X-Kodelet-Client-ID": this.clientId },
-		});
-	}
-
 	async getToolResult(
 		conversationId: string,
 		toolCallId: string,

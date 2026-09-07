@@ -17,49 +17,49 @@ import (
 )
 
 func TestWebUIInputOwnershipFencesObserversAndDismissedRequests(t *testing.T) {
-	original, viewer := &recordingChatSink{}, &recordingChatSink{}
+	original := &recordingChatSink{}
 	broker := newWebUIInputBroker("conversation", original)
 	t.Cleanup(broker.close)
-	broker.setOwner(t.Context(), "original", original)
-	start := func() <-chan extensions.UIInputResponse {
+	detach := broker.setOwner(t.Context(), "original", original)
+	t.Cleanup(detach)
+	start := func(ctx context.Context) <-chan extensions.UIInputResponse {
 		response := make(chan extensions.UIInputResponse, 1)
 		go func() {
-			result, _ := broker.Input(t.Context(), extensions.UIInputRequest{ID: "reused-extension-id"})
+			result, _ := broker.Input(ctx, extensions.UIInputRequest{ID: "reused-extension-id"})
 			response <- result
 		}()
 		return response
 	}
-	first := start()
+	promptCtx, cancelPrompt := context.WithCancel(t.Context())
+	defer cancelPrompt()
+	first := start(promptCtx)
 	require.Eventually(t, func() bool { return len(original.Events()) > 0 }, time.Second, time.Millisecond)
 	firstID := original.Events()[0].UIInput.ID
-	assert.Empty(t, viewer.Events(), "observers must never receive interactive prompts")
 	assert.NotEqual(t, "reused-extension-id", firstID)
 	assert.False(t, broker.respondOwned("viewer", firstID, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))
-	viewerCtx, detach := context.WithCancel(t.Context())
-	defer detach()
-	broker.setOwner(viewerCtx, "viewer", viewer)
+	cancelPrompt()
 	select {
 	case response := <-first:
 		assert.Equal(t, extensions.UIInputStatusDismissed, response.Status)
 	case <-time.After(time.Second):
-		t.Fatal("takeover did not dismiss the previous owner's prompt")
+		t.Fatal("cancellation did not dismiss the pending prompt")
 	}
 	require.Len(t, original.Events(), 2)
 	assert.Equal(t, "ui-request-end", original.Events()[1].Kind)
 	assert.Equal(t, firstID, original.Events()[1].UIRequestID)
-	assert.Empty(t, viewer.Events(), "takeover must not replay an already dismissed prompt")
-	second := start()
-	require.Eventually(t, func() bool { return len(viewer.Events()) > 0 }, time.Second, time.Millisecond)
-	secondID := viewer.Events()[0].UIInput.ID
+	second := start(t.Context())
+	require.Eventually(t, func() bool { return len(original.Events()) == 3 }, time.Second, time.Millisecond)
+	secondID := original.Events()[2].UIInput.ID
 	assert.NotEqual(t, firstID, secondID)
 	answer := extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "new"}
-	assert.False(t, broker.respondOwned("original", secondID, answer))
-	assert.False(t, broker.respondOwned("viewer", firstID, answer))
-	require.True(t, broker.respondOwned("viewer", secondID, answer))
-	assert.False(t, broker.respondOwned("viewer", secondID, answer), "a response capability is single-use")
+	assert.False(t, broker.respondOwned("viewer", secondID, answer))
+	assert.False(t, broker.respondOwned("original", firstID, answer))
+	require.True(t, broker.respondOwned("original", secondID, answer))
+	assert.False(t, broker.respondOwned("original", secondID, answer), "a response capability is single-use")
 	assert.Equal(t, answer, <-second)
-	third := start()
-	require.Eventually(t, func() bool { return len(viewer.Events()) == 3 }, time.Second, time.Millisecond)
+	third := start(t.Context())
+	require.Eventually(t, func() bool { return len(original.Events()) == 5 }, time.Second, time.Millisecond)
+	thirdID := original.Events()[4].UIInput.ID
 	detach()
 	select {
 	case response := <-third:
@@ -67,40 +67,32 @@ func TestWebUIInputOwnershipFencesObserversAndDismissedRequests(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("disconnect did not dismiss the pending prompt")
 	}
+	assert.False(t, broker.respondOwned("original", thirdID, answer))
 	response, err := broker.Input(t.Context(), extensions.UIInputRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
 	assert.NoError(t, t.Context().Err(), "UI detach must not cancel execution")
 }
 
-func TestTakeUIOwnershipRequiresExplicitCapableAttachment(t *testing.T) {
+func TestChatObserverAttachmentDoesNotChangeUIOwnership(t *testing.T) {
 	sink := &recordingChatSink{}
 	broker := newWebUIInputBroker("conversation", sink)
 	t.Cleanup(broker.close)
-	broker.setOwner(t.Context(), "original", sink)
+	detach := broker.setOwner(t.Context(), "original", sink)
+	t.Cleanup(detach)
 	server := &Server{activeChats: map[string]*activeChatRun{"conversation": {uiInput: broker}}, chatSubscribers: make(map[string]map[*subscriberEventSink]struct{})}
-	take := func(id string) *httptest.ResponseRecorder {
-		request := mux.SetURLVars(httptest.NewRequest(http.MethodPost, "/", nil), map[string]string{"id": "conversation"})
-		request.Header.Set(chat.ClientIDHeader, id)
-		result := httptest.NewRecorder()
-		server.handleTakeUIOwnership(result, request)
-		return result
-	}
-	assert.Equal(t, http.StatusBadRequest, take("").Code)
-	assert.Equal(t, http.StatusConflict, take("viewer").Code)
 	subscriber := newSubscriberEventSink()
-	subscriber.ctx = t.Context()
-	subscriber.clientID = "viewer"
+	t.Cleanup(subscriber.Close)
 	_, registered := server.registerChatSubscriber("conversation", subscriber)
 	require.True(t, registered)
-	assert.Equal(t, http.StatusConflict, take("viewer").Code)
-	subscriber.interactive = true
-	assert.Equal(t, "original", broker.owner.clientID, "attaching a capable observer must not take ownership")
-	assert.Equal(t, http.StatusOK, take("viewer").Code)
-	assert.Equal(t, "viewer", broker.owner.clientID)
+	assert.Equal(t, "original", broker.owner.clientID, "attaching an observer must not take ownership")
+	detach()
+	assert.Nil(t, broker.owner, "owner disconnect must not select an attached observer")
 	server.removeChatSubscriber("conversation", subscriber)
-	assert.Nil(t, broker.owner, "removing a slow stream must immediately revoke response authority")
-	assert.Equal(t, http.StatusConflict, take("viewer").Code)
+	_, registered = server.registerChatSubscriber("conversation", subscriber)
+	require.True(t, registered)
+	assert.Nil(t, broker.owner, "reconnecting must not claim an unattended execution")
+	server.removeChatSubscriber("conversation", subscriber)
 }
 
 func TestChatHTTPPromptIsDeliveredOnlyToInitiatingClient(t *testing.T) {

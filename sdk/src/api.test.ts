@@ -713,7 +713,7 @@ test("background task capability returns a local no-op lease and rejects unavail
   });
 });
 
-test("native UI takeover updates only its client and closes only the matching surface opening", async () => {
+test("native UI capability refresh updates only its client and closes only the matching surface opening", async () => {
   const clients = [0, 1].map(() => {
     const handlers = new Set<(method: string, params: unknown) => void>();
     const requests: Array<{ method: string; params?: unknown }> = [];

@@ -206,13 +206,9 @@ type ndjsonEventSink struct {
 }
 
 type subscriberEventSink struct {
-	ch           chan chat.ChatEvent
-	mu           sync.RWMutex
-	closed       bool
-	clientID     string
-	interactive  bool
-	capabilities chat.ChatClientCapabilities
-	ctx          context.Context
+	ch     chan chat.ChatEvent
+	mu     sync.RWMutex
+	closed bool
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestServiceNativeSurfaceInputLifecycleAndTakeoverCapabilities(t *testing.T) {
+func TestServiceNativeSurfaceInputLifecycleAndRunCapabilities(t *testing.T) {
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
@@ -29,13 +29,16 @@ func TestServiceNativeSurfaceInputLifecycleAndTakeoverCapabilities(t *testing.T)
 	peer := &recordingPeer{}
 	service.Attach(peer)
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner", Generation: 1}))
-	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run", ConversationID: "conversation"})
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "unattended", ConversationID: "conversation"})
 	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "native", Generation: 4}}
 	request := extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 1}}
 	response, err := service.OpenSurface(t.Context(), source, request)
 	require.NoError(t, err)
-	assert.False(t, response.Accepted, "unattended runs initially have no native UI")
-	callService[any](t, service, protocol.MethodUICapabilities, protocol.UICapabilitiesParams{RunID: "run", Capabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentWidgets: true, PersistentSurfaces: true}})
+	assert.False(t, response.Accepted, "unattended runs have no native UI")
+	assert.Empty(t, service.ExtensionUIHostCapabilities(t.Context()))
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "unattended"})
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run", ConversationID: "conversation", ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentWidgets: true, PersistentSurfaces: true}})
+	assert.Equal(t, extensions.ExtensionUIHostCapabilities{Widgets: true, Surfaces: true, Transcript: true}, service.ExtensionUIHostCapabilities(t.Context()))
 	service.mu.Lock()
 	service.runs["run"].opening = true // session.start can await surface input before run.open returns.
 	service.mu.Unlock()
@@ -70,9 +73,6 @@ func TestServiceNativeSurfaceInputLifecycleAndTakeoverCapabilities(t *testing.T)
 	wrong.Request.ScopeID = "other"
 	require.Error(t, service.notifySurfaceInput(t.Context(), wrong))
 	require.NoError(t, service.notifySurfaceInput(t.Context(), input))
-	callService[any](t, service, protocol.MethodUICapabilities, protocol.UICapabilitiesParams{RunID: "run"})
-	assert.True(t, service.ExtensionUIHostCapabilities(t.Context()).Widgets, "passive widgets remain supported on interactive takeover")
-	assert.False(t, service.ExtensionUIHostCapabilities(t.Context()).Surfaces)
 	service.mu.Lock()
 	service.runs["run"].opening = false
 	service.mu.Unlock()
@@ -81,8 +81,6 @@ func TestServiceNativeSurfaceInputLifecycleAndTakeoverCapabilities(t *testing.T)
 	service.mu.Lock()
 	assert.Empty(t, service.uiSurfaces)
 	service.mu.Unlock()
-	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodUICapabilities, mustJSON(t, protocol.UICapabilitiesParams{RunID: "run"}))
-	require.NotNil(t, rpcErr)
 }
 
 func TestServiceNativeSurfaceCleanupDoesNotRetainSource(t *testing.T) {

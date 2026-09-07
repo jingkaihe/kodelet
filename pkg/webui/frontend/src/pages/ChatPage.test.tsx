@@ -57,7 +57,6 @@ const mockStopConversation = vi.fn();
 const mockDeleteConversation = vi.fn();
 const mockForkConversation = vi.fn();
 const mockRespondToUIInput = vi.fn();
-const mockTakeUIOwnership = vi.fn();
 let routeParams: { id?: string } = {};
 
 const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
@@ -138,7 +137,6 @@ vi.mock('../services/api', () => ({
     deleteConversation: (...args: unknown[]) => mockDeleteConversation(...args),
     forkConversation: (...args: unknown[]) => mockForkConversation(...args),
     respondToUIInput: (...args: unknown[]) => mockRespondToUIInput(...args),
-    takeUIOwnership: (...args: unknown[]) => mockTakeUIOwnership(...args),
   },
 }));
 
@@ -3175,7 +3173,7 @@ describe('ChatPage', () => {
     expect(mockStopConversation).not.toHaveBeenCalled();
   });
 
-  it('takes UI ownership only after an explicit observer action', async () => {
+  it('observes a running conversation without offering UI takeover', async () => {
     routeParams = { id: 'conv-123' };
     mockGetConversations.mockResolvedValue({
       conversations: [{ id: 'conv-123', createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-03T00:00:00Z', messageCount: 1, summary: 'Running task', isRunning: true }],
@@ -3183,12 +3181,12 @@ describe('ChatPage', () => {
     });
     mockGetConversation.mockResolvedValue({ id: 'conv-123', messages: [], toolResults: {}, isRunning: true });
     mockStreamConversation.mockImplementation(async () => new Promise<void>(() => {}));
-    mockTakeUIOwnership.mockResolvedValue({ success: true });
     render(<ChatPage />);
     await waitFor(() => expect(mockStreamConversation).toHaveBeenCalled());
-    expect(mockTakeUIOwnership).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: 'Take control' }));
-    await waitFor(() => expect(mockTakeUIOwnership).toHaveBeenCalledWith('conv-123'));
+    expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Take control' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ui-input-dialog')).not.toBeInTheDocument();
+    expect(mockRespondToUIInput).not.toHaveBeenCalled();
     expect(mockStopConversation).not.toHaveBeenCalled();
   });
 

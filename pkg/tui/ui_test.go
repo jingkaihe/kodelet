@@ -11,7 +11,6 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,32 +69,6 @@ func TestTUIUIBrokerDismissesVisibleAndQueuedCancelledPrompts(t *testing.T) {
 			assert.True(t, m.running, "dismissing UI must not stop the run")
 		})
 	}
-}
-
-type ownershipCheckingRunner struct {
-	recordingRunner
-	conversationID string
-}
-
-func (r *ownershipCheckingRunner) TakeUIOwnership(ctx context.Context, conversationID string) error {
-	if _, ok := ctx.Deadline(); !ok {
-		return errors.New("ownership requests must be bounded")
-	}
-	r.conversationID = conversationID
-	return nil
-}
-
-func TestTUITakeControlUsesRunnerInterface(t *testing.T) {
-	runner := &ownershipCheckingRunner{}
-	m := newModel(t.Context(), Config{Runner: runner})
-	t.Cleanup(m.cancel)
-	m.running, m.conversationID = true, "conversation-1"
-	cmd, handled := m.handleLocalSlashCommand("/take-control")
-	require.True(t, handled)
-	require.NotNil(t, cmd)
-	message := cmd().(uiDiagnosticMsg)
-	assert.Equal(t, "Control transferred", message.notification.title)
-	assert.Equal(t, "conversation-1", runner.conversationID)
 }
 
 func TestTUIUIBrokerInputDialogResolvesResponse(t *testing.T) {

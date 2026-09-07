@@ -25,8 +25,19 @@ describe("ApiService", () => {
 			vi.stubGlobal("crypto", crypto);
 			try {
 				const { default: client } = await import("./api");
-				mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-				await client.takeUIOwnership("conversation-1");
+				mockFetch.mockResolvedValue({
+					ok: true,
+					body: new ReadableStream({
+						start(controller) {
+							controller.close();
+						},
+					}),
+					json: async () => ({}),
+				});
+				await client.streamChat(
+					{ message: "hello", conversationId: "conversation-1" },
+					{ onEvent: vi.fn() },
+				);
 				await client.respondToUIInput("conversation-1", "request-1", {
 					status: "dismissed",
 				});
@@ -39,24 +50,35 @@ describe("ApiService", () => {
 			}
 		},
 	);
-	it("uses one client identity for prompt replies and explicit ownership", async () => {
-		mockFetch.mockResolvedValue({
+	it("uses one client identity for submissions, observation, and prompt replies", async () => {
+		mockFetch.mockImplementation(async () => ({
 			ok: true,
+			body: new ReadableStream({
+				start(controller) {
+					controller.close();
+				},
+			}),
 			json: async () => ({ success: true }),
-		});
+		}));
+		await apiService.streamChat(
+			{ message: "hello", conversationId: "conversation-1" },
+			{ onEvent: vi.fn() },
+		);
+		await apiService.streamConversation("conversation-1", { onEvent: vi.fn() });
 		await apiService.respondToUIInput("conversation-1", "request-1", {
 			status: "dismissed",
 		});
-		await apiService.takeUIOwnership("conversation-1");
 		const identity = mockFetch.mock.calls[0][1].headers["X-Kodelet-Client-ID"];
 		expect(identity).toEqual(expect.any(String));
 		expect(identity.length).toBeGreaterThan(0);
-		expect(mockFetch.mock.calls[1][0]).toBe(
-			"/api/conversations/conversation-1/ui-owner",
-		);
-		expect(mockFetch.mock.calls[1][1].headers["X-Kodelet-Client-ID"]).toBe(
-			identity,
-		);
+		expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+			"/api/chat",
+			"/api/conversations/conversation-1/stream",
+			"/api/conversations/conversation-1/ui-input/request-1",
+		]);
+		for (const [, options] of mockFetch.mock.calls) {
+			expect(options.headers["X-Kodelet-Client-ID"]).toBe(identity);
+		}
 	});
 	beforeEach(() => {
 		mockFetch.mockClear();

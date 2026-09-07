@@ -63,7 +63,6 @@ const (
 	MethodUISurfaceClose          = "ui.surface.close"
 	MethodUISurfaceInput          = "ui.surface.input"
 	MethodUISurfaceResize         = "ui.surface.resize"
-	MethodUICapabilities          = "ui.capabilities"
 	MethodUISurfaceInvalidate     = "ui.surface.invalidate"
 	MethodUIExtensionCleanup      = "ui.extension.cleanup"
 	MethodOperationCancel         = "operation.cancel"
@@ -360,12 +359,6 @@ type ClientCapabilities struct {
 	InteractiveUI      bool `json:"interactiveUI"`
 	PersistentWidgets  bool `json:"persistentWidgets"`
 	PersistentSurfaces bool `json:"persistentSurfaces"`
-}
-
-// UICapabilitiesParams updates availability after explicit client takeover.
-type UICapabilitiesParams struct {
-	RunID        string             `json:"runId"`
-	Capabilities ClientCapabilities `json:"capabilities"`
 }
 
 // RunOpenParams asks a runner to pin one environment snapshot.
