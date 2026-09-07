@@ -1,26 +1,18 @@
 # Kodelet
 
-## 0.6.0-alpha
+## 0.6.1-alpha
 
-Alpha preview of the daemon-first architecture, intended primarily for testing and validation, not production use. This release introduces breaking changes to execution, configuration, and SDK integrations.
+Alpha preview of the daemon-first architecture for testing, not production use.
 
-Made ordinary CLI, native TUI, and ACP workflows daemon-backed, with centralized model execution, provider credentials, and conversation storage. Workspace tools, terminals, Git operations, recipes, and extensions now execute through an embedded or standalone runner instead of falling back to client-local execution.
+- Made CLI, TUI, and ACP workflows daemon-backed, with automatic local server startup and `kodelet server` lifecycle commands.
+- Added durable turn tracking, execution checkpoints, scoped cancellation, and legacy conversation adoption.
+- Separated daemon model profiles from runner environments, enforcing permission limits and per-conversation working directories.
+- Added SDK child agents, execution presets, and authenticated inline extension callbacks with local UI handlers.
+- Improved TUI startup, extension shortcuts and surfaces, runner-backed `Ctrl+R` history, and disconnect cleanup.
 
-Added automatic local background server startup and reuse for `kodelet chat`, `run`, and `acp`, plus `kodelet server start`, `status`, `logs`, `stop`, and `restart`. Explicit server selections and existing OIDC setups remain connect-only; the managed server stays alive after clients exit.
+**Breaking changes:** All runs persist; `--no-save` is removed and `--follow` requires runner or directory scope. Replace `serve --cwd` with `--runner-workspace` and `--disable-control-plane-workspace` with `--embedded-runner=false`. SDK sessions use typed execution options instead of temporary configuration files.
 
-Added durable turn receipts, duplicate-submission protection, persisted execution checkpoints, and exact-turn cancellation, with `kodelet conversation turn` for checking submitted work after a disconnect and `kodelet conversation adopt` for binding legacy history to a runner.
-
-Separated daemon-owned model profiles from runner-owned environment profiles, with embedded-runner inheritance, per-conversation working directories, isolated per-run settings, and enforced permission ceilings. Repository configuration can configure workspace resources and narrow permissions, but cannot redefine daemon models, credentials, endpoints, or profiles; trusted default changes require restarting the owning daemon or runner.
-
-Moved provider authentication and account management, profile and usage inspection, conversation management, commit and PR workflows, and recipe and extension inspection to server-backed commands. Web UI terminals and Git diffs now follow the saved conversation directory rather than the runner's startup workspace.
-
-Added extension-owned execution presets and TypeScript SDK child agents through `ext.registerProfile` and `ctx.children`, supporting fresh or forked context, explicit follow-ups, scoped steering and cancellation, tool progress metadata, and inherited policy limits. Hardened background leases and extension cleanup across cancellation, runner disconnects, process failures, and shutdown, and routed web-fetch extraction through the daemon's model helper instead of a nested CLI process.
-
-Enabled runner-backed native TUI extension shortcuts, transcript entries, and interactive surfaces with `surface.onClose` cleanup. Each turn's submitting client handles interactive UI; disconnecting dismisses it without cancelling execution. Improved ACP subprocess streaming and shutdown handling in the TypeScript SDK.
-
-**Breaking changes:** All user-facing runs now persist, including `--result-only`; `--no-save` is removed. `--follow` requires a runner or working-directory scope. Replace `serve --cwd` with `--runner-workspace` and `--disable-control-plane-workspace` with `--embedded-runner=false`. SDK sessions use typed execution options and runner-installed extensions instead of temporary configuration files or inline extension/UI callbacks.
-
-**Before testing an upgrade:** Stop older Kodelet processes and back up `~/.kodelet` (or your configured base directory). Upgrade clients, daemon, standalone runners, and SDK integrations together. Existing history remains readable, but legacy conversations require explicit runner adoption before continuation; do not run older direct-write clients against the upgraded database.
+**Upgrade:** Stop older processes, back up your Kodelet state directory, and upgrade clients, daemon, runners, and SDK together. Use `kodelet conversation adopt` before continuing legacy history; never use older direct-write clients with the upgraded database.
 
 ## 0.5.47-beta
 
