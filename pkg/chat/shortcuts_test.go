@@ -51,6 +51,46 @@ func TestWorkspaceShortcutOptionsValidateBeforeTransport(t *testing.T) {
 	assert.Zero(t, calls.Load())
 }
 
+func TestWorkspaceShortcutRequestJSONStrictEnvelope(t *testing.T) {
+	valid := WorkspaceShortcutRequest{
+		Target: WorkspaceTarget{RunnerID: "runner", CWD: "/runner/repo"},
+		Digest: "sha256:discovery", Shortcut: protocol.ShortcutDescriptor{Key: "ctrl+r", ExtensionID: "review", Generation: 4},
+	}
+	data, err := json.Marshal(valid)
+	require.NoError(t, err)
+	payload := string(data)
+	invalid := []string{
+		`null`, `[]`, `{}`, payload + ` {}`,
+		strings.Replace(payload, `"digest":`, `"unknown":true,"digest":`, 1),
+		strings.Replace(payload, `"shortcut":{`, `"shortcut":{"unknown":true,`, 1),
+		strings.Replace(payload, `"digest":"sha256:discovery"`, `"digest":""`, 1),
+	}
+	for _, fields := range []string{
+		`"unknown":true`, `"options":null`, `"Options":null`, `"oPtIoNs": null `,
+		`"options":null,"Options":{}`, `"Options":null,"options":{}`,
+		`"options":[]`, `"options":{"unknown":true}`, `"options":{"noSkills":null}`,
+		`"options":{"noExtensions":true}`, `"options":{"model":"gpt-4.1"}`,
+	} {
+		invalid = append(invalid, strings.Replace(payload, `"target":{`, `"target":{`+fields+`,`, 1))
+	}
+	invalid = append(invalid, strings.Replace(payload, `"target":{`, `"TARGET":{"OPTIONS":null,`, 1))
+	for _, input := range invalid {
+		t.Run(input, func(t *testing.T) {
+			request := valid
+			require.Error(t, json.Unmarshal([]byte(input), &request))
+			assert.Equal(t, valid, request, "invalid decoding must leave the receiver untouched")
+			require.Error(t, request.UnmarshalJSON([]byte(input)))
+			assert.Equal(t, valid, request)
+		})
+	}
+	var request WorkspaceShortcutRequest
+	require.NoError(t, json.Unmarshal(data, &request))
+	assert.Equal(t, valid, request)
+	input := strings.Replace(payload, `"target":{`, `"TARGET":{"OPTIONS":{},`, 1)
+	require.NoError(t, json.Unmarshal([]byte(input), &request))
+	assert.Equal(t, &llmtypes.ExecutionOptions{}, request.Target.Options)
+}
+
 func TestControlPlaneShortcutStreamsUIAndResultWithoutProviderTurn(t *testing.T) {
 	replied := make(chan struct{})
 	var clientID atomic.Value

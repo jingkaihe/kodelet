@@ -20,13 +20,18 @@ import (
 func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 	for _, input := range []string{
 		`null`, `[]`, `{"message":"hello","options":null}`, `{"message":"hello","Options":null}`,
+		`{"message":"hello","oPtIoNs": null }`, `{"message":"hello","options":null,"Options":{}}`,
+		`{"message":"hello","Options":null,"options":{}}`, `{"message":"hello","options":[]}`,
 		`{"message":"hello","options":{"noTools":null}}`, `{"message":"hello","options":{"noSave":true}}`,
 		`{"message":"hello","options":{"allowedTools":null}}`, `{"message":"hello","options":{"maxTurns":-1}}`,
-		`{"message":"hello","provider":"openai"}`, `{"message":"hello","options":{}} {}`,
+		`{"message":"hello","provider":"openai"}`, `{"message":"hello","clientCapabilities":{"unknown":true}}`,
+		`{"message":"hello","options":{}} {}`,
 	} {
 		t.Run(input, func(t *testing.T) {
 			request := ChatRequest{Message: "original"}
 			require.Error(t, json.Unmarshal([]byte(input), &request))
+			assert.Equal(t, ChatRequest{Message: "original"}, request)
+			require.Error(t, request.UnmarshalJSON([]byte(input)))
 			assert.Equal(t, ChatRequest{Message: "original"}, request)
 		})
 	}
@@ -39,6 +44,8 @@ func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 	assert.Equal(t, new(false), request.Options.NoTools)
 	assert.Equal(t, new(0), request.Options.MaxTurns)
 	assert.True(t, request.Options.ToolsDisabled())
+	require.NoError(t, json.Unmarshal([]byte(`{"message":"hello","OPTIONS":{}}`), &request))
+	assert.Equal(t, &llmtypes.ExecutionOptions{}, request.Options)
 }
 
 func TestExecutionModelAllowed(t *testing.T) {

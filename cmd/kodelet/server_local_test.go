@@ -100,6 +100,42 @@ func TestLocalServerStateAndAuthentication(t *testing.T) {
 	assert.Equal(t, "flag-token", token)
 }
 
+func TestReadLocalServerConnectionRequiresLoopbackEndpoint(t *testing.T) {
+	directory := localServerTestState(t)
+	require.NoError(t, os.MkdirAll(directory, 0o700))
+	for _, test := range []struct {
+		endpoint string
+		valid    bool
+	}{
+		{"http://localhost:8080", true},
+		{"http://LOCALHOST.:8080", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://127.0.0.2:8080", true},
+		{"http://[::1]:8080", true},
+		{"http://localhost.example:8080", false},
+		{"http://0.0.0.0:8080", false},
+		{"http://[::]:8080", false},
+		{"http://192.0.2.1:8080", false},
+		{"http://localhost", false},
+		{"https://localhost:8080", false},
+		{"http://user@localhost:8080", false},
+		{"http://localhost:8080/path", false},
+		{"http://localhost:8080?query=value", false},
+		{"http://localhost:8080#fragment", false},
+	} {
+		t.Run(test.endpoint, func(t *testing.T) {
+			require.NoError(t, publishLocalServer(directory, test.endpoint, "private-token", "instance", true))
+			connection, err := readLocalServerConnection(directory)
+			if !test.valid {
+				require.ErrorContains(t, err, "expected a loopback HTTP address")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.endpoint, connection.URL)
+		})
+	}
+}
+
 func TestPrepareClientExplicitServerNeverStartsLocalDaemon(t *testing.T) {
 	for _, source := range []string{"flag", "environment", "configuration"} {
 		t.Run(source, func(t *testing.T) {
@@ -387,6 +423,13 @@ func TestPrepareLocalServeConfig(t *testing.T) {
 	config := NewServeConfig()
 	require.NoError(t, prepareLocalServeConfig(config))
 	assert.Equal(t, os.Getenv("HOME"), config.RunnerWorkspace)
+	for _, host := range []string{"localhost", "LOCALHOST.", "127.0.0.1", "127.0.0.2", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			config := NewServeConfig()
+			config.Host = host
+			require.NoError(t, prepareLocalServeConfig(config))
+		})
+	}
 	for _, mutate := range []func(*ServeConfig){
 		func(c *ServeConfig) { c.Host = "0.0.0.0" },
 		func(c *ServeConfig) { c.SkipAuth = true },

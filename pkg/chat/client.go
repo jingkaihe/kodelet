@@ -763,6 +763,17 @@ type WorkspaceTarget struct {
 	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
 }
 
+// queryValues encodes workspace identity without endpoint-specific options.
+func (t WorkspaceTarget) queryValues() url.Values {
+	values := url.Values{}
+	for name, value := range map[string]string{"runnerId": t.RunnerID, "conversationId": t.ConversationID, "cwd": t.CWD, "profile": t.Profile, "environmentProfile": t.EnvironmentProfile} {
+		if value != "" {
+			values.Set(name, value)
+		}
+	}
+	return values
+}
+
 // DiscoverWorkspace validates the target and discovers its slash commands on
 // the runner without starting a model turn or a workspace run lease.
 func (r *Client) DiscoverWorkspace(ctx context.Context, target WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
@@ -788,7 +799,7 @@ func (r *Client) workspaceDiscovery(ctx context.Context, endpoint string, target
 	if err := (protocol.WorkspaceDiscoverParams{Options: target.Options}).Validate(); err != nil {
 		return err
 	}
-	values := url.Values{}
+	values := target.queryValues()
 	if target.Options != nil {
 		data, err := json.Marshal(target.Options)
 		if err != nil {
@@ -799,10 +810,8 @@ func (r *Client) workspaceDiscovery(ctx context.Context, endpoint string, target
 		}
 		values.Set("options", string(data))
 	}
-	for name, value := range map[string]string{"runnerId": target.RunnerID, "cwd": target.CWD, "profile": target.Profile, "environmentProfile": target.EnvironmentProfile, "conversationId": target.ConversationID, "q": query} {
-		if value != "" {
-			values.Set(name, value)
-		}
+	if query != "" {
+		values.Set("q", query)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
@@ -286,22 +285,15 @@ func (s *Server) provisionEmbeddedCredential(ctx context.Context, store *localst
 	if err != nil {
 		return errors.Wrap(err, "failed to generate embedded runner key")
 	}
-	encodedKey, err := protocol.EncodePublicKey(publicKey)
-	if err != nil {
-		return err
-	}
-	fingerprint, err := protocol.CredentialFingerprint(publicKey)
-	if err != nil {
-		return err
-	}
 	hostname, err := os.Hostname()
 	if err != nil {
 		return errors.Wrap(err, "failed to determine embedded runner hostname")
 	}
-	request := protocol.EnrollmentStartRequest{
-		ProtocolVersions: []int{protocol.Version}, PublicKey: encodedKey, Fingerprint: fingerprint,
-		Host:      protocol.Host{InstanceID: identity.InstanceID, Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, PID: os.Getpid()},
-		Workspace: protocol.Workspace{Path: workspace, Name: filepath.Base(workspace)}, DisplayName: "Embedded runner",
+	request, err := runnerclient.NewEnrollmentStartRequest(publicKey, protocol.Host{
+		InstanceID: identity.InstanceID, Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, PID: os.Getpid(),
+	}, workspace, "Embedded runner", version.Get().Version)
+	if err != nil {
+		return err
 	}
 	enrollment, err := s.authStore.StartRunnerEnrollment(ctx, request, endpoint+"/runner/enroll")
 	if err != nil {
@@ -318,7 +310,7 @@ func (s *Server) provisionEmbeddedCredential(ctx context.Context, store *localst
 	if err != nil {
 		return err
 	}
-	if err := store.SaveCredential(localstate.Credential{Server: endpoint, Workspace: workspace, CredentialID: approved.CredentialID, AccessToken: approved.AccessToken, PublicKey: publicKey, PrivateKey: privateKey, Fingerprint: fingerprint}); err != nil {
+	if err := store.SaveCredential(localstate.Credential{Server: endpoint, Workspace: workspace, CredentialID: approved.CredentialID, AccessToken: approved.AccessToken, PublicKey: publicKey, PrivateKey: privateKey, Fingerprint: request.Fingerprint}); err != nil {
 		return err
 	}
 	return store.SaveRegistration(localstate.Registration{Server: endpoint, Workspace: workspace, RunnerID: runner.ID, DisplayName: request.DisplayName})

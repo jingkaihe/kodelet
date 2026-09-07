@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,15 +24,10 @@ func TestControlPlaneMessageHistoryTransport(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/prefix/api/chat/message-history", r.URL.Path)
 				assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
-				assert.False(t, r.URL.Query().Has("options"))
 				if saved {
-					assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
-					assert.False(t, r.URL.Query().Has("runnerId"))
+					assert.Equal(t, url.Values{"conversationId": {"saved"}}, r.URL.Query())
 				} else {
-					assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
-					assert.Equal(t, "~/project with spaces", r.URL.Query().Get("cwd"))
-					assert.Equal(t, "model", r.URL.Query().Get("profile"))
-					assert.Equal(t, "environment", r.URL.Query().Get("environmentProfile"))
+					assert.Equal(t, url.Values{"runnerId": {"runner"}, "cwd": {"~/project with spaces"}, "profile": {"model"}, "environmentProfile": {"environment"}}, r.URL.Query())
 				}
 				result := protocol.WorkspaceMessageHistoryResult{CWD: "/runner/project/subdir", ScopeCWD: "/runner/project"}
 				if r.Method == http.MethodPost {

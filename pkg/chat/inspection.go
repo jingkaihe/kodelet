@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -29,12 +28,7 @@ func (r *Client) InspectWorkspace(ctx context.Context, target WorkspaceTarget, p
 	if err != nil {
 		return result, err
 	}
-	query := url.Values{}
-	for key, value := range map[string]string{"runnerId": target.RunnerID, "cwd": target.CWD, "profile": target.Profile, "environmentProfile": target.EnvironmentProfile} {
-		if value != "" {
-			query.Set(key, value)
-		}
-	}
+	query := target.queryValues()
 	data, err := json.Marshal(params)
 	if err != nil {
 		return result, err

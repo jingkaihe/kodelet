@@ -248,45 +248,18 @@ func (c *enrollmentClient) start(ctx context.Context) (localstate.PendingEnrollm
 	if err != nil {
 		return localstate.PendingEnrollment{}, errors.Wrap(err, "failed to determine runner hostname")
 	}
-	hostname = strings.TrimSpace(hostname)
-	if hostname == "" {
-		return localstate.PendingEnrollment{}, errors.New("runner hostname is required")
-	}
-	kodeletVersion := strings.TrimSpace(c.deps.kodeletVersion())
-	if kodeletVersion == "" {
-		return localstate.PendingEnrollment{}, errors.New("Kodelet version is required for runner enrollment")
-	}
 	publicKey, privateKey, err := ed25519.GenerateKey(c.deps.random)
 	if err != nil {
 		return localstate.PendingEnrollment{}, errors.Wrap(err, "failed to generate runner enrollment key")
 	}
-	encodedPublicKey, err := protocol.EncodePublicKey(publicKey)
+	request, err := NewEnrollmentStartRequest(publicKey, protocol.Host{
+		InstanceID: identity.InstanceID,
+		Hostname:   hostname,
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+	}, c.workspace, c.displayName, c.deps.kodeletVersion())
 	if err != nil {
 		return localstate.PendingEnrollment{}, err
-	}
-	fingerprint, err := protocol.CredentialFingerprint(publicKey)
-	if err != nil {
-		return localstate.PendingEnrollment{}, err
-	}
-	request := protocol.EnrollmentStartRequest{
-		ProtocolVersions: []int{protocol.Version},
-		PublicKey:        encodedPublicKey,
-		Fingerprint:      fingerprint,
-		Host: protocol.Host{
-			InstanceID: identity.InstanceID,
-			Hostname:   hostname,
-			OS:         runtime.GOOS,
-			Arch:       runtime.GOARCH,
-		},
-		Workspace: protocol.Workspace{
-			Path: c.workspace,
-			Name: filepath.Base(c.workspace),
-		},
-		DisplayName:    c.displayName,
-		KodeletVersion: kodeletVersion,
-	}
-	if err := request.Validate(); err != nil {
-		return localstate.PendingEnrollment{}, errors.Wrap(err, "runner enrollment request is invalid")
 	}
 
 	response, err := c.postJSON(ctx, c.startURL, request, "start")
@@ -314,7 +287,7 @@ func (c *enrollmentClient) start(ctx context.Context) (localstate.PendingEnrollm
 		UserCode:                started.UserCode,
 		VerificationURL:         started.VerificationURL,
 		VerificationURLComplete: started.VerificationURLComplete,
-		Fingerprint:             fingerprint,
+		Fingerprint:             request.Fingerprint,
 		PublicKey:               publicKey,
 		PrivateKey:              privateKey,
 		ExpiresAt:               started.ExpiresAt,
@@ -323,6 +296,40 @@ func (c *enrollmentClient) start(ctx context.Context) (localstate.PendingEnrollm
 		UpdatedAt:               now,
 	}
 	return pending, nil
+}
+
+// NewEnrollmentStartRequest assembles and validates the identity shared by standalone and embedded enrollment.
+// The caller supplies host metadata and an already-canonical workspace path.
+func NewEnrollmentStartRequest(publicKey ed25519.PublicKey, host protocol.Host, workspace, displayName, kodeletVersion string) (protocol.EnrollmentStartRequest, error) {
+	host.Hostname = strings.TrimSpace(host.Hostname)
+	if host.Hostname == "" {
+		return protocol.EnrollmentStartRequest{}, errors.New("runner hostname is required")
+	}
+	kodeletVersion = strings.TrimSpace(kodeletVersion)
+	if kodeletVersion == "" {
+		return protocol.EnrollmentStartRequest{}, errors.New("Kodelet version is required for runner enrollment")
+	}
+	encodedPublicKey, err := protocol.EncodePublicKey(publicKey)
+	if err != nil {
+		return protocol.EnrollmentStartRequest{}, err
+	}
+	fingerprint, err := protocol.CredentialFingerprint(publicKey)
+	if err != nil {
+		return protocol.EnrollmentStartRequest{}, err
+	}
+	request := protocol.EnrollmentStartRequest{
+		ProtocolVersions: []int{protocol.Version},
+		PublicKey:        encodedPublicKey,
+		Fingerprint:      fingerprint,
+		Host:             host,
+		Workspace:        protocol.Workspace{Path: workspace, Name: filepath.Base(workspace)},
+		DisplayName:      strings.TrimSpace(displayName),
+		KodeletVersion:   kodeletVersion,
+	}
+	if err := request.Validate(); err != nil {
+		return protocol.EnrollmentStartRequest{}, errors.Wrap(err, "runner enrollment request is invalid")
+	}
+	return request, nil
 }
 
 func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingEnrollment) (protocol.EnrollmentPollResponse, error) {

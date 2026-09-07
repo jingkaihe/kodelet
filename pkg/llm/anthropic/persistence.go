@@ -122,14 +122,11 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 // SavePendingUserMessage saves an admission checkpoint without changing live history.
 // The caller must own the thread, just as when calling SendMessage.
 func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
-	if !t.Persisted || t.Store == nil {
-		return errors.New("conversation persistence is unavailable")
-	}
-	original := t.messages
-	t.messages = slices.Clone(original)
-	defer func() { t.messages = original }()
-	t.AddUserMessage(ctx, message, images...)
-	return t.SaveConversation(ctx)
+	return t.Thread.SavePendingUserMessage(ctx, t, func(ctx context.Context) (context.Context, func()) {
+		original := t.messages
+		t.messages = slices.Clone(original)
+		return ctx, func() { t.messages = original }
+	}, message, images...)
 }
 
 // SnapshotConversationFork captures the safe live fork source without publishing a new ID.
@@ -148,19 +145,7 @@ func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.Conver
 
 // ForkConversation snapshots the live thread into a new persisted conversation.
 func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
-	record, err := t.SnapshotConversationFork(ctx)
-	if err != nil {
-		return "", err
-	}
-	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
-	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
-		forkOptions.Initiator = &initiator
-	}
-	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
-	if err != nil {
-		return "", err
-	}
-	return forked.ID, nil
+	return t.Thread.ForkConversation(ctx, t.SnapshotConversationFork)
 }
 
 func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []anthropic.MessageParam, updateThreadMetadata bool) (convtypes.ConversationRecord, error) {

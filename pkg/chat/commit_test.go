@@ -3,14 +3,41 @@ package chat
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestControlPlaneCommitTargetQuery(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		runnerID string
+		target   WorkspaceTarget
+		want     url.Values
+	}{
+		{"default runner", "default-runner", WorkspaceTarget{}, url.Values{"runnerId": {"default-runner"}}},
+		{"saved conversation", "default-runner", WorkspaceTarget{ConversationID: "saved"}, url.Values{"conversationId": {"saved"}}},
+		{"explicit identity only", "default-runner", WorkspaceTarget{RunnerID: "runner", ConversationID: "saved", CWD: "~/repo & work", Profile: "model", EnvironmentProfile: "environment", Options: &llmtypes.ExecutionOptions{}}, url.Values{"runnerId": {"runner"}, "conversationId": {"saved"}, "cwd": {"~/repo & work"}}},
+		{"missing identity", "", WorkspaceTarget{CWD: "~/repo"}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{runnerID: tt.runnerID}
+			query, err := client.commitTargetQuery(tt.target)
+			if tt.want == nil {
+				require.ErrorContains(t, err, "requires a runner or conversation target")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, query)
+		})
+	}
+}
 
 func TestControlPlaneCommitUncertainResultIsNeverRetried(t *testing.T) {
 	for _, failure := range []string{"lost-connection", "invalid-json", "empty-result", "http-error"} {

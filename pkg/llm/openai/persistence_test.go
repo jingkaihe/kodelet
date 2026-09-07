@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,11 +32,12 @@ func skipIfNoOpenAIAPIKeyPersistence(t *testing.T) {
 type MockConversationStore struct {
 	SavedRecords []conversations.ConversationRecord
 	LoadedRecord *conversations.ConversationRecord
+	SaveErr      error
 }
 
 func (m *MockConversationStore) Save(_ context.Context, record conversations.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
-	return nil
+	return m.SaveErr
 }
 
 func (m *MockConversationStore) Load(_ context.Context, id string) (conversations.ConversationRecord, error) {
@@ -568,6 +571,49 @@ func TestSaveConversation_CleansCopyWithoutMutatingLiveMessages(t *testing.T) {
 	assert.Equal(t, openai.ChatMessageRoleTool, savedMessages[len(savedMessages)-1].Role)
 }
 
+func TestSavePendingUserMessageRestoresLiveHistory(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		saveErr error
+	}{
+		{name: "success"},
+		{name: "save error", saveErr: errors.New("save failed")},
+		{name: "cancelled", saveErr: context.Canceled},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "checkpoint")}
+			store := &MockConversationStore{SaveErr: tt.saveErr}
+			thread.Store, thread.Persisted = store, true
+			backing := []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleUser, Content: "previous"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "outside live history"},
+			}
+			original := slices.Clone(backing)
+			thread.messages = backing[:1]
+
+			err := thread.SavePendingUserMessage(t.Context(), "pending", "data:image/png;base64,aGVsbG8=")
+			if tt.saveErr != nil {
+				require.ErrorIs(t, err, tt.saveErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, original[:1], thread.messages)
+			assert.Same(t, &backing[0], &thread.messages[0], "restore the original slice, not its clone")
+			assert.Equal(t, original, backing, "checkpoint appends must not overwrite spare backing capacity")
+			require.Len(t, store.SavedRecords, 1)
+			var saved []openai.ChatCompletionMessage
+			require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &saved))
+			require.Len(t, saved, 2)
+			require.Len(t, saved[1].MultiContent, 2)
+			require.NotNil(t, saved[1].MultiContent[0].ImageURL)
+			assert.Equal(t, "data:image/png;base64,aGVsbG8=", saved[1].MultiContent[0].ImageURL.URL)
+			assert.Equal(t, "pending", saved[1].MultiContent[1].Text)
+			assert.Equal(t, "checkpoint", store.SavedRecords[0].ID)
+			assert.Equal(t, "previous", conversationmeta.AutomaticConversationName(thread.GetMetadata()), "checkpoint naming retains its existing live metadata update")
+		})
+	}
+}
+
 func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
@@ -598,6 +644,9 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 		},
 	}
 
+	originalMessages, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	originalMetadata, originalUsage := thread.GetMetadata(), thread.GetUsage()
 	snapshot, err := thread.SnapshotConversationFork(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, thread.ConversationID, snapshot.ID)
@@ -610,6 +659,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.NotEqual(t, thread.ConversationID, forkedID)
 	assert.Equal(t, forkedID, store.SavedRecords[0].ID)
 	assert.Len(t, thread.messages, 2)
+	liveMessages, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	assert.Equal(t, originalMessages, liveMessages)
+	assert.Equal(t, originalMetadata, thread.GetMetadata())
+	assert.Equal(t, originalUsage, thread.GetUsage())
+	assert.Equal(t, "parent-conversation", thread.ConversationID)
 	var savedMessages []openai.ChatCompletionMessage
 	require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &savedMessages))
 	require.Len(t, savedMessages, 2)
@@ -627,6 +682,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, thread.ConversationID, forkMetadata["root_conversation_id"])
 	assert.Equal(t, 1, forkMetadata["depth"])
 	assert.Equal(t, string(conversations.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
+	assert.NotContains(t, forkMetadata, "initiator")
 }
 
 func TestCleanedOpenAIMessagesForForkDropsAssistantWithoutReplayableContent(t *testing.T) {

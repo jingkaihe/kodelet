@@ -130,6 +130,64 @@ func TestBlockConversationFork(t *testing.T) {
 	assert.False(t, thread.ConversationForkBlocked(), "release must be idempotent")
 }
 
+func TestForkConversationErrors(t *testing.T) {
+	wantErr := errors.New("persistence failed")
+	for _, snapshotFails := range []bool{true, false} {
+		name := "save error"
+		if snapshotFails {
+			name = "snapshot error"
+		}
+		t.Run(name, func(t *testing.T) {
+			thread := NewThread(llmtypes.Config{}, "parent")
+			saves := 0
+			thread.Store = &mockConversationStore{saveFunc: func(ctx context.Context, record convtypes.ConversationRecord) error {
+				assert.Equal(t, t.Context(), ctx)
+				assert.NotEqual(t, thread.ConversationID, record.ID)
+				saves++
+				return wantErr
+			}}
+			forkID, err := thread.ForkConversation(t.Context(), func(ctx context.Context) (convtypes.ConversationRecord, error) {
+				assert.Equal(t, t.Context(), ctx)
+				if snapshotFails {
+					return convtypes.ConversationRecord{}, wantErr
+				}
+				return convtypes.ConversationRecord{ID: thread.ConversationID}, nil
+			})
+			require.ErrorIs(t, err, wantErr)
+			assert.Empty(t, forkID, "a failed fork must not publish an ID")
+			if snapshotFails {
+				assert.Zero(t, saves)
+				assert.Same(t, wantErr, err)
+			} else {
+				assert.Equal(t, 1, saves)
+			}
+		})
+	}
+}
+
+func TestSavePendingUserMessageUnavailable(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		persisted bool
+		store     ConversationStore
+	}{
+		{name: "disabled", store: &mockConversationStore{}},
+		{name: "no store", persisted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := NewThread(llmtypes.Config{}, "conversation")
+			thread.Persisted, thread.Store = tt.persisted, tt.store
+			snapshotCalled := false
+			err := thread.SavePendingUserMessage(t.Context(), nil, func(ctx context.Context) (context.Context, func()) {
+				snapshotCalled = true
+				return ctx, func() {}
+			}, "pending")
+			require.EqualError(t, err, "conversation persistence is unavailable")
+			assert.False(t, snapshotCalled, "unavailable checkpoints must not mutate provider state")
+		})
+	}
+}
+
 func TestGetUsage(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 

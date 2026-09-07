@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -47,12 +46,7 @@ func (r *Client) messageHistoryRequest(ctx context.Context, target WorkspaceTarg
 	if err != nil {
 		return result, err
 	}
-	query := url.Values{}
-	for key, value := range map[string]string{"runnerId": target.RunnerID, "conversationId": target.ConversationID, "cwd": target.CWD, "profile": target.Profile, "environmentProfile": target.EnvironmentProfile} {
-		if value != "" {
-			query.Set(key, value)
-		}
-	}
+	query := target.queryValues()
 	method := http.MethodGet
 	var body io.Reader
 	if entry != nil {

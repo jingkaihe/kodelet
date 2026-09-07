@@ -32,6 +32,7 @@ import (
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -277,6 +278,9 @@ func TestEmbeddedRunnerEnrollmentReuseAndRevocation(t *testing.T) {
 	var approvedBy string
 	require.NoError(t, server.authStore.db.GetContext(t.Context(), &approvedBy, "SELECT approved_by FROM runner_enrollments WHERE runner_id = ?", runnerID))
 	assert.Equal(t, "daemon:embedded-runner", approvedBy)
+	var enrolledVersion string
+	require.NoError(t, server.authStore.db.GetContext(t.Context(), &enrolledVersion, "SELECT kodelet_version FROM runner_enrollments WHERE runner_id = ?", runnerID))
+	assert.Equal(t, version.Get().Version, enrolledVersion)
 	stop()
 
 	server, _, stop = startEmbeddedRunnerTestServer(t, config, strings.TrimPrefix(endpoint, "http://"))

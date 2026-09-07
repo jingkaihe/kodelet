@@ -3187,10 +3187,14 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 type mockResponsesConversationStore struct {
 	savedRecords []convtypes.ConversationRecord
 	loadedRecord *convtypes.ConversationRecord
+	saveFunc     func(context.Context, convtypes.ConversationRecord) error
 }
 
-func (m *mockResponsesConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
+func (m *mockResponsesConversationStore) Save(ctx context.Context, record convtypes.ConversationRecord) error {
 	m.savedRecords = append(m.savedRecords, record)
+	if m.saveFunc != nil {
+		return m.saveFunc(ctx, record)
+	}
 	return nil
 }
 
@@ -3528,12 +3532,20 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	thread.Store = store
 	thread.Persisted = true
 
-	snapshot, err := thread.SnapshotConversationFork(context.Background())
+	originalHistory := thread.snapshotHistory()
+	originalMetadata, originalUsage := thread.GetMetadata(), thread.GetUsage()
+	initiator := convtypes.ConversationForkInitiator{
+		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent",
+		ToolName:    "subagent",
+	}
+	forkContext := convtypes.ContextWithConversationForkInitiator(t.Context(), initiator)
+	snapshot, err := thread.SnapshotConversationFork(forkContext)
 	require.NoError(t, err)
 	assert.Equal(t, thread.ConversationID, snapshot.ID)
 	assert.Empty(t, store.savedRecords, "capturing a child seed must not publish a temporary conversation")
 	assert.NotContains(t, string(snapshot.RawMessages), "call-subagent")
-	forkedID, err := thread.ForkConversation(context.Background())
+	forkedID, err := thread.ForkConversation(forkContext)
 
 	require.NoError(t, err)
 	require.Len(t, store.savedRecords, 1)
@@ -3541,6 +3553,10 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, forkedID, store.savedRecords[0].ID)
 	assert.Len(t, thread.inputItems, 2)
 	assert.Len(t, thread.storedItems, 2)
+	assert.Equal(t, originalHistory, thread.snapshotHistory())
+	assert.Equal(t, originalMetadata, thread.GetMetadata())
+	assert.Equal(t, originalUsage, thread.GetUsage())
+	assert.Equal(t, "parent-conversation", thread.ConversationID)
 	var savedItems []StoredInputItem
 	require.NoError(t, json.Unmarshal(store.savedRecords[0].RawMessages, &savedItems))
 	require.Len(t, savedItems, 1)
@@ -3558,6 +3574,9 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, thread.ConversationID, forkMetadata["root_conversation_id"])
 	assert.Equal(t, 1, forkMetadata["depth"])
 	assert.Equal(t, string(convtypes.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
+	savedInitiator, ok := convtypes.ConversationForkInitiatorFromMetadata(store.savedRecords[0].Metadata)
+	require.True(t, ok)
+	assert.Equal(t, initiator, savedInitiator)
 }
 
 func TestResponsesSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {

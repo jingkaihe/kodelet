@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	conversations "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -23,11 +25,12 @@ import (
 type MockConversationStore struct {
 	SavedRecords []convtypes.ConversationRecord
 	LoadedRecord *convtypes.ConversationRecord
+	SaveErr      error
 }
 
 func (m *MockConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
-	return nil
+	return m.SaveErr
 }
 
 func (m *MockConversationStore) Load(_ context.Context, id string) (convtypes.ConversationRecord, error) {
@@ -772,6 +775,49 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
+func TestSavePendingUserMessageRestoresLiveHistory(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		saveErr error
+	}{
+		{name: "success"},
+		{name: "save error", saveErr: errors.New("save failed")},
+		{name: "cancelled", saveErr: context.Canceled},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6}, "checkpoint")}
+			store := &MockConversationStore{SaveErr: tt.saveErr}
+			thread.Store, thread.Persisted = store, true
+			backing := []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("previous")),
+				anthropic.NewAssistantMessage(anthropic.NewTextBlock("outside live history")),
+			}
+			original := slices.Clone(backing)
+			thread.messages = backing[:1]
+
+			err := thread.SavePendingUserMessage(t.Context(), "pending", "data:image/png;base64,aGVsbG8=")
+			if tt.saveErr != nil {
+				require.ErrorIs(t, err, tt.saveErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, original[:1], thread.messages)
+			assert.Same(t, &backing[0], &thread.messages[0], "restore the original slice, not its clone")
+			assert.Equal(t, original, backing, "checkpoint appends must not overwrite spare backing capacity")
+			require.Len(t, store.SavedRecords, 1)
+			saved, err := DeserializeMessages(store.SavedRecords[0].RawMessages)
+			require.NoError(t, err)
+			require.Len(t, saved, 2)
+			require.Len(t, saved[1].Content, 2)
+			require.NotNil(t, saved[1].Content[0].OfImage)
+			require.NotNil(t, saved[1].Content[1].OfText)
+			assert.Equal(t, "pending", saved[1].Content[1].OfText.Text)
+			assert.Equal(t, "checkpoint", store.SavedRecords[0].ID)
+			assert.Equal(t, "previous", conversations.AutomaticConversationName(thread.GetMetadata()), "checkpoint naming retains its existing live metadata update")
+		})
+	}
+}
+
 func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
 	require.NoError(t, err)
@@ -795,6 +841,9 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 		},
 	}
 
+	originalMessages, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	originalMetadata, originalUsage := thread.GetMetadata(), thread.GetUsage()
 	forkContext := convtypes.ContextWithConversationForkInitiator(context.Background(), convtypes.ConversationForkInitiator{
 		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
 		ExtensionID: "subagent",
@@ -813,6 +862,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.NotEqual(t, thread.ConversationID, forkedID)
 	assert.Equal(t, forkedID, store.SavedRecords[0].ID)
 	assert.Len(t, thread.messages, 2)
+	liveMessages, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	assert.Equal(t, originalMessages, liveMessages)
+	assert.Equal(t, originalMetadata, thread.GetMetadata())
+	assert.Equal(t, originalUsage, thread.GetUsage())
+	assert.Equal(t, "parent-conversation", thread.ConversationID)
 	var savedMessages []anthropic.MessageParam
 	require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &savedMessages))
 	require.Len(t, savedMessages, 2)

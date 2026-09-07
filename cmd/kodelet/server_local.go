@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -118,17 +118,13 @@ func readLocalServerConnection(directory string) (localServerConnection, error) 
 		return connection, errors.Wrap(err, "invalid local server connection state")
 	}
 	parsed, err := url.Parse(connection.URL)
-	if err != nil || parsed.Scheme != "http" || !localServerHost(parsed.Hostname()) || parsed.Port() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" {
+	if err != nil || parsed.Scheme != "http" || !controlplaneurl.IsLoopbackHostname(parsed.Hostname()) || parsed.Port() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" {
 		return connection, errors.New("invalid local server endpoint; expected a loopback HTTP address")
 	}
 	if connection.SchemaVersion != 1 || connection.InstanceID == "" {
 		return connection, errors.New("unsupported local server connection state")
 	}
 	return connection, nil
-}
-
-func localServerHost(host string) bool {
-	return host == "localhost" || net.ParseIP(host).IsLoopback()
 }
 
 func writeLocalServerFile(directory, name string, data []byte) error {
@@ -220,7 +216,7 @@ func probeLocalServer(ctx context.Context, connection localServerConnection, tok
 // prepareLocalServeConfig validates rather than silently overriding an operator's
 // network/auth policy. Request-scoped CLI model flags are never forwarded.
 func prepareLocalServeConfig(config *ServeConfig) error {
-	if !localServerHost(config.Host) || config.SkipAuth || !config.EmbeddedRunner {
+	if !controlplaneurl.IsLoopbackHostname(config.Host) || config.SkipAuth || !config.EmbeddedRunner {
 		return errors.New("automatic startup requires a loopback host, authentication, and an embedded runner; use 'kodelet serve' and --server for custom deployments")
 	}
 	webMode, runnerMode, err := resolveServeAuthModes(config)

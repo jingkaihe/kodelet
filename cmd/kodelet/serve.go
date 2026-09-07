@@ -23,6 +23,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
@@ -639,7 +640,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
 	// Foreground loopback token servers are discoverable too, but remain
 	// operator-owned: local lifecycle commands may not stop/restart them.
-	if localServerHost(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken {
+	if controlplaneurl.IsLoopbackHostname(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken {
 		if err := publishLocalServer(directory, baseURL, serverConfig.AuthToken, serverConfig.InstanceID, config.Managed); err != nil {
 			return errors.Wrap(err, "failed to publish local server connection")
 		}

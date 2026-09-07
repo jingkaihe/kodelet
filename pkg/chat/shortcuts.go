@@ -50,9 +50,7 @@ func (r WorkspaceShortcutRequest) Validate() error {
 func (r *WorkspaceShortcutRequest) UnmarshalJSON(data []byte) error {
 	type wire WorkspaceShortcutRequest
 	var value wire
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := decodeStrictRequestJSON(data, &value); err != nil {
 		return err
 	}
 	var envelope struct {
@@ -61,10 +59,8 @@ func (r *WorkspaceShortcutRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return err
 	}
-	for key, raw := range envelope.Target {
-		if strings.EqualFold(key, "options") && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return errors.New("shortcut options must not be null")
-		}
+	if hasNullExecutionOptions(envelope.Target) {
+		return errors.New("shortcut options must not be null")
 	}
 	request := WorkspaceShortcutRequest(value)
 	if err := request.Validate(); err != nil {

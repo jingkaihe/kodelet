@@ -52,6 +52,44 @@ func (failingEnrollmentReader) Read([]byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
 
+func TestNewEnrollmentStartRequest(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	host := protocol.Host{InstanceID: "host-one", Hostname: " host.example.test ", OS: runtime.GOOS, Arch: runtime.GOARCH, PID: 42}
+	request, err := NewEnrollmentStartRequest(publicKey, host, "/work/project", " project runner ", " v-test ")
+	require.NoError(t, err)
+	require.NoError(t, request.Validate())
+	assert.Equal(t, []int{protocol.Version}, request.ProtocolVersions)
+	decodedKey, err := protocol.DecodePublicKey(request.PublicKey)
+	require.NoError(t, err)
+	assert.Equal(t, publicKey, decodedKey)
+	fingerprint, err := protocol.CredentialFingerprint(publicKey)
+	require.NoError(t, err)
+	assert.Equal(t, fingerprint, request.Fingerprint)
+	host.Hostname = strings.TrimSpace(host.Hostname)
+	assert.Equal(t, host, request.Host, "caller-specific host metadata must be preserved")
+	assert.Equal(t, protocol.Workspace{Path: "/work/project", Name: "project"}, request.Workspace)
+	assert.Equal(t, "project runner", request.DisplayName)
+	assert.Equal(t, "v-test", request.KodeletVersion)
+
+	for _, test := range []struct {
+		name, instanceID, hostname, workspace, version, errorText string
+		key                                                       ed25519.PublicKey
+	}{
+		{"missing key", "host-one", "hostname", "/work/project", "v-test", "Ed25519 public key", nil},
+		{"missing host identity", " ", "hostname", "/work/project", "v-test", "host.instanceId is required", publicKey},
+		{"missing hostname", "host-one", " ", "/work/project", "v-test", "runner hostname is required", publicKey},
+		{"missing workspace", "host-one", "hostname", " ", "v-test", "workspace.path is required", publicKey},
+		{"missing version", "host-one", "hostname", "/work/project", " ", "Kodelet version is required", publicKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := NewEnrollmentStartRequest(test.key, protocol.Host{InstanceID: test.instanceID, Hostname: test.hostname}, test.workspace, "runner", test.version)
+			require.ErrorContains(t, err, test.errorText)
+			assert.Zero(t, request)
+		})
+	}
+}
+
 func TestEnrollRunnerStartsPersistsAndApproves(t *testing.T) {
 	workspace := t.TempDir()
 	canonicalWorkspace, err := localstate.CanonicalWorkspace(workspace)

@@ -2572,14 +2572,12 @@ func rawMessagesForName(items []StoredInputItem) json.RawMessage {
 func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
 	t.operationMu.Lock()
 	defer t.operationMu.Unlock()
-	if !t.Persisted || t.Store == nil {
-		return errors.New("conversation persistence is unavailable")
-	}
-	snapshot := t.snapshotNoSaveState()
-	defer t.restoreNoSaveState(snapshot)
-	ctx = context.WithValue(ctx, responsesNoSaveOperationContextKey{}, snapshot.operation)
-	t.AddUserMessage(ctx, message, images...)
-	return t.SaveConversation(ctx)
+	return t.Thread.SavePendingUserMessage(ctx, t, func(ctx context.Context) (context.Context, func()) {
+		snapshot := t.snapshotNoSaveState()
+		return context.WithValue(ctx, responsesNoSaveOperationContextKey{}, snapshot.operation), func() {
+			t.restoreNoSaveState(snapshot)
+		}
+	}, message, images...)
 }
 
 // SaveConversation saves the current thread to the conversation store.
@@ -2613,19 +2611,7 @@ func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.Conver
 
 // ForkConversation snapshots the live thread into a new persisted conversation.
 func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
-	record, err := t.SnapshotConversationFork(ctx)
-	if err != nil {
-		return "", err
-	}
-	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
-	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
-		forkOptions.Initiator = &initiator
-	}
-	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
-	if err != nil {
-		return "", err
-	}
-	return forked.ID, nil
+	return t.Thread.ForkConversation(ctx, t.SnapshotConversationFork)
 }
 
 type conversationStateSnapshot struct {

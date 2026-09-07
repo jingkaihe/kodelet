@@ -20,12 +20,10 @@ func (r *Client) commitTargetQuery(target WorkspaceTarget) (url.Values, error) {
 	if target.RunnerID == "" && target.ConversationID == "" {
 		return nil, errors.New("commit requires a runner or conversation target")
 	}
-	query := url.Values{}
-	for key, value := range map[string]string{"runnerId": target.RunnerID, "conversationId": target.ConversationID, "cwd": target.CWD} {
-		if value != "" {
-			query.Set(key, value)
-		}
-	}
+	query := target.queryValues()
+	// Commit endpoints accept workspace affinity, not profile selections.
+	query.Del("profile")
+	query.Del("environmentProfile")
 	return query, nil
 }
 

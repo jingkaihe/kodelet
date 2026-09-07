@@ -14,8 +14,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -229,6 +231,43 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	if enabled && t.Store != nil && t.LoadConversation != nil {
 		t.LoadConversation(ctx)
 	}
+}
+
+// SavePendingUserMessage checkpoints admitted input using provider-specific state isolation.
+// snapshot must prepare isolated state and return the append context and a restore function.
+// The caller owns the thread and any provider-specific operation lock throughout the call.
+func (t *Thread) SavePendingUserMessage(
+	ctx context.Context,
+	provider llmtypes.Thread,
+	snapshot func(context.Context) (context.Context, func()),
+	message string,
+	images ...string,
+) error {
+	if !t.Persisted || t.Store == nil {
+		return errors.New("conversation persistence is unavailable")
+	}
+	ctx, restore := snapshot(ctx)
+	defer restore()
+	provider.AddUserMessage(ctx, message, images...)
+	return provider.SaveConversation(ctx)
+}
+
+// ForkConversation persists a provider's live snapshot with shared fork lineage options.
+// The provider snapshot retains responsibility for availability checks and locking.
+func (t *Thread) ForkConversation(ctx context.Context, snapshot func(context.Context) (convtypes.ConversationRecord, error)) (string, error) {
+	record, err := snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
+	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
+		forkOptions.Initiator = &initiator
+	}
+	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
+	if err != nil {
+		return "", err
+	}
+	return forked.ID, nil
 }
 
 // PrepareUtilityMode configures a thread for internal utility calls such as summary generation.

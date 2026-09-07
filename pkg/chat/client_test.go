@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,12 +49,41 @@ type failingControlPlaneChatSink struct {
 
 func (s failingControlPlaneChatSink) Send(ChatEvent) error { return s.err }
 
+func TestWorkspaceTargetQueryValues(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		target WorkspaceTarget
+		want   url.Values
+	}{
+		{"empty", WorkspaceTarget{}, url.Values{}},
+		{"options omitted", WorkspaceTarget{Options: &llmtypes.ExecutionOptions{}}, url.Values{}},
+		{"whitespace preserved", WorkspaceTarget{CWD: " "}, url.Values{"cwd": {" "}}},
+		{
+			"all identity fields",
+			WorkspaceTarget{RunnerID: "runner/+", ConversationID: "saved&1", CWD: "~/project with spaces", Profile: "model/+profile", EnvironmentProfile: "env & work", Options: &llmtypes.ExecutionOptions{}},
+			url.Values{"runnerId": {"runner/+"}, "conversationId": {"saved&1"}, "cwd": {"~/project with spaces"}, "profile": {"model/+profile"}, "environmentProfile": {"env & work"}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := tt.target.queryValues()
+			assert.Equal(t, tt.want, values)
+			decoded, err := url.ParseQuery(values.Encode())
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, decoded)
+			values.Set("runnerId", "changed")
+			assert.Equal(t, tt.want, tt.target.queryValues(), "query mutations must not change the target")
+		})
+	}
+}
+
 func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 	for _, endpoint := range []string{"slash-commands", "cwd-suggestions"} {
 		for _, target := range []WorkspaceTarget{
 			{RunnerID: "runner", CWD: "~/project with spaces", EnvironmentProfile: "environment"},
 			{RunnerID: "runner", Profile: "default", EnvironmentProfile: "environment"},
 			{RunnerID: "runner", Profile: "model/+profile", EnvironmentProfile: "environment"},
+			{RunnerID: "runner", Options: &llmtypes.ExecutionOptions{NoSkills: new(false), AllowedTools: new([]string{})}},
+			{CWD: "~/default runner"},
 			{ConversationID: "saved"},
 		} {
 			t.Run(endpoint+"/"+target.Profile+target.ConversationID, func(t *testing.T) {
@@ -65,19 +96,30 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 					query := r.URL.Query()
 					assert.Equal(t, target.Profile, query.Get("profile"))
 					assert.Equal(t, target.Profile != "", query.Has("profile"))
-					assert.Equal(t, target.RunnerID, query.Get("runnerId"))
+					runnerID := target.RunnerID
+					if runnerID == "" && target.ConversationID == "" {
+						runnerID = "default-runner"
+					}
+					assert.Equal(t, runnerID, query.Get("runnerId"))
 					assert.Equal(t, target.CWD, query.Get("cwd"))
 					assert.Equal(t, target.EnvironmentProfile, query.Get("environmentProfile"))
 					assert.Equal(t, target.ConversationID, query.Get("conversationId"))
+					assert.Equal(t, target.Options != nil, query.Has("options"))
+					if target.Options != nil {
+						data, err := json.Marshal(target.Options)
+						require.NoError(t, err)
+						assert.JSONEq(t, string(data), query.Get("options"))
+					}
 					if endpoint == "cwd-suggestions" {
 						assert.Equal(t, "../other", query.Get("q"))
 						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{}))
 					} else {
+						assert.False(t, query.Has("q"))
 						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{}))
 					}
 				}))
 				t.Cleanup(server.Close)
-				runner, err := NewClient(server.URL+"/base", "client-token", "")
+				runner, err := NewClient(server.URL+"/base", "client-token", "default-runner")
 				require.NoError(t, err)
 				if endpoint == "cwd-suggestions" {
 					_, err = runner.WorkspaceCWDSuggestions(t.Context(), target, "../other")
@@ -88,6 +130,45 @@ func TestControlPlaneWorkspaceDiscoveryEncodesModelProfile(t *testing.T) {
 				assert.Equal(t, 1, calls)
 			})
 		}
+	}
+}
+
+func TestControlPlaneWorkspaceInspectionTargetQuery(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		target WorkspaceTarget
+		want   url.Values
+	}{
+		{"explicit", WorkspaceTarget{RunnerID: "runner", CWD: "~/project with spaces", Profile: "model/+profile", EnvironmentProfile: "environment"}, url.Values{"runnerId": {"runner"}, "cwd": {"~/project with spaces"}, "profile": {"model/+profile"}, "environmentProfile": {"environment"}}},
+		{"no client runner fallback", WorkspaceTarget{}, url.Values{}},
+		{"conversation rejected", WorkspaceTarget{ConversationID: "saved"}, nil},
+		{"options rejected", WorkspaceTarget{RunnerID: "runner", Options: &llmtypes.ExecutionOptions{}}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			params := protocol.WorkspaceInspectParams{Operation: "recipe.list"}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/base/api/chat/workspace-inspection", r.URL.Path)
+				assert.Equal(t, tt.want, r.URL.Query())
+				var received protocol.WorkspaceInspectParams
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+				assert.Equal(t, params, received)
+				require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceInspectResult{}))
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewClient(server.URL+"/base", "", "default-runner")
+			require.NoError(t, err)
+			_, err = client.InspectWorkspace(t.Context(), tt.target, params)
+			if tt.want == nil {
+				require.ErrorContains(t, err, "not a conversation or execution options")
+				assert.Zero(t, calls)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, calls)
+		})
 	}
 }
 

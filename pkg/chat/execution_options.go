@@ -17,9 +17,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// UnmarshalJSON keeps the optional execution-options envelope strict too: the
-// standard JSON decoder otherwise bypasses ExecutionOptions.UnmarshalJSON when
-// assigning null to a pointer. Invalid requests leave the receiver untouched.
+// UnmarshalJSON validates the request and its execution-options envelope.
+// Invalid requests leave the receiver untouched.
 func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -28,20 +27,34 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 	if fields == nil {
 		return errors.New("chat request must be an object")
 	}
-	for name, raw := range fields {
-		if strings.EqualFold(name, "options") && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return errors.New("execution options must be an object, not null; omit options to inherit")
-		}
+	if hasNullExecutionOptions(fields) {
+		return errors.New("execution options must be an object, not null; omit options to inherit")
 	}
 	type wireRequest ChatRequest
 	var value wireRequest
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := decodeStrictRequestJSON(data, &value); err != nil {
 		return errors.Wrap(err, "invalid chat request")
 	}
 	*r = ChatRequest(value)
 	return nil
+}
+
+func decodeStrictRequestJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(value)
+}
+
+// hasNullExecutionOptions keeps optional execution-options envelopes strict:
+// encoding/json bypasses ExecutionOptions.UnmarshalJSON for null pointers and
+// matches field names case-insensitively. Omit options to inherit instead.
+func hasNullExecutionOptions(fields map[string]json.RawMessage) bool {
+	for name, raw := range fields {
+		if strings.EqualFold(name, "options") && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveExecutionOptions runs before runner opening, extension initialization,
