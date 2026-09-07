@@ -135,6 +135,7 @@ func buildWireManifest(
 			SystemInformation:   systemInformation.Clone(),
 		},
 		ExtensionGeneration: 1,
+		ExtensionCount:      new(runtime.ExtensionCount()),
 		Capabilities: runnerpayload.EnvironmentCapabilities{
 			ToolUpdates:        true,
 			InteractiveUI:      true,

@@ -30,8 +30,11 @@ type Config struct {
 	CWD                     string
 	DefaultCWD              string
 	Theme                   string
-	Runner                  chat.ChatRunner // Required; execution is owned by the caller's daemon adapter.
-	Remote                  bool            // Deprecated: exported Run always uses daemon-backed discovery and history.
+	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.
+	// Initialize optionally prepares the daemon connection after the TUI renders.
+	// Until it succeeds, typing and quitting remain available but submission is disabled.
+	Initialize func(context.Context) (Config, error)
+	Remote     bool // Deprecated: exported Run always uses daemon-backed discovery and history.
 }
 
 // ProfileSettings contains control-plane-owned reasoning policy for one model profile.
@@ -153,6 +156,11 @@ type conversationState struct {
 	slashDismissedDraft  string
 	extensionShortcuts   []extensions.Shortcut
 	shortcutDigest       string
+	extensionCount       *int
+	resourcesLoading     bool
+	discoveryID          uint64
+	readinessStartedAt   time.Time
+	readyDuration        time.Duration
 
 	messageHistoryScopeCWD                        string
 	initialHistoryPending                         bool
@@ -228,6 +236,12 @@ type transcriptElapsedClock struct {
 
 type model struct {
 	*conversationState
+
+	initialize             func(context.Context) (Config, error)
+	startupPending         bool
+	startupErr             error
+	startupStartedAt       time.Time
+	closeInitializedRunner func()
 
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -377,6 +391,12 @@ type extensionShortcutDoneMsg struct {
 
 type transcriptRefreshMsg struct{}
 
+type initializedMsg struct {
+	config      Config
+	err         error
+	closeRunner func()
+}
+
 type slashCommandsMsg struct {
 	conversationKey string
 	conversationID  string
@@ -385,8 +405,11 @@ type slashCommandsMsg struct {
 	commands        []slashcommands.Command
 	shortcuts       []extensions.Shortcut
 	shortcutDigest  string
+	extensionCount  *int
 	extensionsOnly  bool
 	remote          bool
+	discoveryID     uint64
+	readyDuration   time.Duration
 	err             error
 }
 

@@ -187,7 +187,7 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 				s.writeErrorResponse(w, http.StatusInternalServerError, "could not load the conversation's available commands and tools", err)
 				return
 			}
-			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts})
+			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts, ExtensionCount: manifest.ExtensionCount})
 			return
 		}
 	}

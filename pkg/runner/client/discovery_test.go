@@ -100,6 +100,7 @@ func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 	params := protocol.WorkspaceDiscoverParams{CWD: workspace, Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true)}}
 	result := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, params)
 	assert.NotEmpty(t, result.Digest)
+	assert.Equal(t, new(0), result.ExtensionCount)
 	_, err := os.Stat(marker)
 	require.ErrorIs(t, err, os.ErrNotExist, "no-extensions discovery must not start an extension process")
 	for _, command := range result.Commands {
@@ -110,8 +111,12 @@ func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 	restricted, err := service.ProbeManifestForCWDWithOptions(t.Context(), workspace, "", params.Options)
 	require.NoError(t, err)
 	assert.Empty(t, restricted.Skills)
+	assert.Equal(t, new(0), restricted.ExtensionCount)
 	unrestricted, err := service.ProbeManifestForCWD(t.Context(), workspace, "")
 	require.NoError(t, err)
+	assert.Equal(t, new(1), unrestricted.ExtensionCount)
+	result = callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
+	assert.Equal(t, new(1), result.ExtensionCount)
 	var skillNames []string
 	for _, skill := range unrestricted.Skills {
 		skillNames = append(skillNames, skill.Name)

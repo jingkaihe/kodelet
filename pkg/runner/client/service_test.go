@@ -975,6 +975,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 		SyspromptArgs:       map[string]string{"audience": "developer"},
 	}, nil, "runner-1", "run-1", 4, []string{"get_goal", " "})
 	require.NoError(t, err)
+	assert.Equal(t, new(0), manifest.ExtensionCount, "no runtime is an explicitly known zero")
 	require.Len(t, manifest.ContextFiles, 2)
 	assert.Equal(t, "a/AGENTS.md", manifest.ContextFiles[0].Path)
 	assert.Equal(t, "z/AGENTS.md", manifest.ContextFiles[1].Path)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -20,11 +21,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
+	"golang.org/x/term"
 )
 
 func Run(ctx context.Context, config Config) error {
-	if config.Runner == nil {
+	if config.Runner == nil && config.Initialize == nil {
 		return errors.New("chat requires a server connection; start 'kodelet serve' before opening chat")
+	}
+	// Bubble Tea otherwise opens the controlling TTY when stdin is redirected,
+	// which can suspend a background process instead of failing non-interactively.
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return errors.New("chat requires an interactive terminal on stdin and stdout; use 'kodelet run' for non-interactive input")
 	}
 	// A TUI owns presentation and input, never a local execution environment.
 	config.Remote = true
@@ -35,7 +42,7 @@ func Run(ctx context.Context, config Config) error {
 	applyTheme(theme)
 
 	initialModel := newModel(ctx, config)
-	if closer, ok := initialModel.runner.(interface{ Close() error }); ok {
+	if closer, ok := initialModel.runner.(interface{ Close() error }); ok && config.Initialize == nil {
 		defer func() {
 			_ = closer.Close()
 		}()
@@ -45,10 +52,16 @@ func Run(ctx context.Context, config Config) error {
 	finalModel, err := program.Run()
 	initialModel.cancel()
 	final, isModel := finalModel.(model)
+	if isModel && final.closeInitializedRunner != nil {
+		final.closeInitializedRunner()
+	}
 	if err != nil {
 		return err
 	}
 	if isModel {
+		if final.startupErr != nil {
+			return final.startupErr
+		}
 		if summary := renderExitSummary(final.conversationID, final.usage); summary != "" {
 			fmt.Fprintln(os.Stdout, summary)
 		}
@@ -57,6 +70,9 @@ func Run(ctx context.Context, config Config) error {
 }
 
 func newModel(ctx context.Context, config Config) model {
+	if config.Initialize != nil {
+		config.Remote = true
+	}
 	mctx, cancel := context.WithCancel(ctx)
 	runCh := make(chan tea.Msg, 256)
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
@@ -85,9 +101,44 @@ func newModel(ctx context.Context, config Config) model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	runner := config.Runner
-	conversationSource, _ := runner.(chat.ConversationSource)
-	conversationStream, _ := runner.(chat.ConversationStreamer)
+	m := model{
+		initialize:          config.Initialize,
+		startupPending:      config.Initialize != nil,
+		startupStartedAt:    time.Now(),
+		ctx:                 mctx,
+		cancel:              cancel,
+		extensionUI:         extensionUI,
+		extensionWidgets:    map[extensionUIKey]tuiExtensionWidget{},
+		widgetOrder:         []extensionUIKey{},
+		collapsedWidgets:    map[extensionUIKey]bool{},
+		widgetOffsets:       map[extensionWidgetOffsetKey]int{},
+		extensionSurfaces:   map[extensionUIKey]tuiExtensionSurface{},
+		nextConversationKey: 1,
+		theme:               theme,
+		themeSelection:      themeSelection,
+		viewport:            vp,
+		textarea:            ta,
+		spinner:             sp,
+		runs:                map[int]*conversationRun{},
+		runByState:          map[string]int{},
+		shortcutCalls:       map[int]*extensionShortcutCall{},
+		runCh:               runCh,
+		terminalTitleEpoch:  time.Now(),
+	}
+	m.configure(config)
+	return m
+}
+
+// configure installs connection and conversation settings without replacing the
+// live program's context, channels, composer, or presentation state.
+func (m *model) configure(config Config) {
+	m.runner = config.Runner
+	m.conversationSource, _ = config.Runner.(chat.ConversationSource)
+	m.conversationStream, _ = config.Runner.(chat.ConversationStreamer)
+	m.remote = config.Remote
+	m.remoteDefaultCWD = strings.TrimSpace(config.DefaultCWD)
+	m.environmentProfile = strings.TrimSpace(config.EnvironmentProfile)
+	m.profileSettings = cloneProfileSettings(config.ProfileSettings)
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD
 	if cwd == "" && config.Remote {
@@ -162,40 +213,16 @@ func newModel(ctx context.Context, config Config) model {
 	conversation.initialHistoryPending = initialHistoryPending
 	conversation.messageHistoryScopeCWD = messageHistoryScopeCWD
 	conversation.extensionDiscoveryBlocked = config.Remote
-
-	return model{
-		conversationState:     conversation,
-		ctx:                   mctx,
-		cancel:                cancel,
-		runner:                runner,
-		conversationSource:    conversationSource,
-		conversationStream:    conversationStream,
-		remote:                config.Remote,
-		remoteDefaultCWD:      strings.TrimSpace(config.DefaultCWD),
-		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),
-		profileSettings:       cloneProfileSettings(config.ProfileSettings),
-		extensionUI:           extensionUI,
-		extensionWidgets:      map[extensionUIKey]tuiExtensionWidget{},
-		widgetOrder:           []extensionUIKey{},
-		collapsedWidgets:      map[extensionUIKey]bool{},
-		widgetOffsets:         map[extensionWidgetOffsetKey]int{},
-		extensionSurfaces:     map[extensionUIKey]tuiExtensionSurface{},
-		conversations:         map[string]*conversationState{conversationKey: conversation},
-		activeConversationKey: conversationKey,
-		nextConversationKey:   1,
-		conversationDefaults:  defaults,
-		messageHistoryStore:   messageHistoryStore,
-		theme:                 theme,
-		themeSelection:        themeSelection,
-		viewport:              vp,
-		textarea:              ta,
-		spinner:               sp,
-		runs:                  map[int]*conversationRun{},
-		runByState:            map[string]int{},
-		shortcutCalls:         map[int]*extensionShortcutCall{},
-		runCh:                 runCh,
-		terminalTitleEpoch:    time.Now(),
+	conversation.draft = m.textarea.Value()
+	if conversation.conversationID == "" {
+		conversation.readinessStartedAt = m.startupStartedAt
+		conversation.resourcesLoading = config.Remote
 	}
+	m.conversationState = conversation
+	m.conversations = map[string]*conversationState{conversationKey: conversation}
+	m.activeConversationKey = conversationKey
+	m.conversationDefaults = defaults
+	m.messageHistoryStore = messageHistoryStore
 }
 
 func (m model) Init() tea.Cmd {
@@ -203,18 +230,49 @@ func (m model) Init() tea.Cmd {
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
-		loadConversationHistoryFromSource(m.ctx, m.activeConversationKey, m.conversationID, m.conversationSource),
 	}
+	if m.startupPending {
+		cmds = append(cmds, m.initializeCommand())
+	} else {
+		cmds = append(cmds, m.initialResourceCommands()...)
+	}
+	if m.themeSelection == AutoThemeName {
+		cmds = append(cmds, tea.RequestBackgroundColor)
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m model) initializeCommand() tea.Cmd {
+	return func() tea.Msg {
+		config, err := m.initialize(m.ctx)
+		var closeRunner func()
+		if closer, ok := config.Runner.(interface{ Close() error }); ok {
+			// Also owns late results discarded when the program has already quit.
+			closeRunner = sync.OnceFunc(func() { _ = closer.Close() })
+			context.AfterFunc(m.ctx, closeRunner)
+		}
+		if err == nil {
+			err = m.ctx.Err()
+		}
+		if err == nil && config.Runner == nil {
+			err = errors.New("chat initialization did not return a server connection")
+		}
+		if err != nil && closeRunner != nil {
+			closeRunner()
+		}
+		return initializedMsg{config: config, err: err, closeRunner: closeRunner}
+	}
+}
+
+func (m model) initialResourceCommands() []tea.Cmd {
+	cmds := []tea.Cmd{loadConversationHistoryFromSource(m.ctx, m.activeConversationKey, m.conversationID, m.conversationSource)}
 	if !m.remote {
 		cmds = append(cmds, loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD))
 	}
 	if !m.initialHistoryPending && !m.remote {
 		cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, m.activeConversationKey, m.slashCommandCWD()))
 	}
-	if m.themeSelection == AutoThemeName {
-		cmds = append(cmds, tea.RequestBackgroundColor)
-	}
-	return tea.Batch(cmds...)
+	return cmds
 }
 
 func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
@@ -225,9 +283,24 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 	discovery, ok := m.runner.(interface {
 		DiscoverWorkspace(context.Context, chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
 	})
-	if !ok || state == nil {
+	if state == nil {
 		return nil
 	}
+	if !ok {
+		state.resourcesLoading = false
+		if state.conversationID == "" && !state.readinessStartedAt.IsZero() {
+			state.readyDuration = time.Since(state.readinessStartedAt)
+			state.readinessStartedAt = time.Time{}
+		}
+		return nil
+	}
+	state.resourcesLoading = state.conversationID == ""
+	state.discoveryID++
+	discoveryID := state.discoveryID
+	if state.resourcesLoading && state.readinessStartedAt.IsZero() {
+		state.readinessStartedAt = time.Now()
+	}
+	startedAt := state.readinessStartedAt
 	key, cwd := state.key, slashCommandCWDForState(state)
 	target := chat.WorkspaceTarget{ConversationID: state.conversationID}
 	if target.ConversationID == "" {
@@ -241,7 +314,11 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 		for _, shortcut := range result.Shortcuts {
 			shortcuts = append(shortcuts, extensions.Shortcut{Key: shortcut.Key, Description: shortcut.Description, ExtensionID: shortcut.ExtensionID, Generation: shortcut.Generation})
 		}
-		return slashCommandsMsg{conversationKey: key, conversationID: target.ConversationID, profile: target.Profile, cwd: cwd, commands: withTUIBuiltInSlashCommands(result.Commands), shortcuts: shortcuts, shortcutDigest: result.Digest, remote: true, err: err}
+		var readyDuration time.Duration
+		if !startedAt.IsZero() {
+			readyDuration = time.Since(startedAt)
+		}
+		return slashCommandsMsg{conversationKey: key, conversationID: target.ConversationID, profile: target.Profile, cwd: cwd, commands: withTUIBuiltInSlashCommands(result.Commands), shortcuts: shortcuts, shortcutDigest: result.Digest, extensionCount: result.ExtensionCount, remote: true, discoveryID: discoveryID, readyDuration: readyDuration, err: err}
 	}
 }
 

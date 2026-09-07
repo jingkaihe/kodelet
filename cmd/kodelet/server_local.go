@@ -397,7 +397,12 @@ func prepareClientServer(ctx context.Context, cmd *cobra.Command) (string, strin
 		// use an explicit API credential instead of a saved sign-in.
 		return server, token, nil
 	}
-	connection, err := ensureLocalServer(ctx, cmd.ErrOrStderr())
+	output := cmd.ErrOrStderr()
+	if cmd.Name() == "chat" {
+		// The TUI renders startup status while the daemon starts in the background.
+		output = io.Discard
+	}
+	connection, err := ensureLocalServer(ctx, output)
 	if err != nil {
 		return "", "", err
 	}

@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -35,6 +36,52 @@ func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, first)
+}
+
+func TestExtensionCountWireCompatibilityAndDigestStability(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		wire  string
+		count *int
+	}{
+		{name: "legacy unknown", wire: `{}`},
+		{name: "known zero", wire: `{"extensionCount":0}`, count: new(0)},
+		{name: "initialized", wire: `{"extensionCount":3}`, count: new(3)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := Manifest{WorkingDirectory: "/workspace", Tools: []ToolDefinition{{Name: "file_read"}}}
+			fullDigest, err := ComputeManifestDigest(manifest)
+			require.NoError(t, err)
+			discoveryDigest, err := ComputeDiscoveryDigest(manifest)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal([]byte(test.wire), &manifest))
+			withCount, err := ComputeManifestDigest(manifest)
+			require.NoError(t, err)
+			assert.Equal(t, fullDigest, withCount)
+			withCount, err = ComputeDiscoveryDigest(manifest)
+			require.NoError(t, err)
+			assert.Equal(t, discoveryDigest, withCount)
+			assert.Equal(t, test.count, manifest.ExtensionCount, "hashing must not mutate advisory metadata")
+
+			var discovery protocol.WorkspaceDiscoverResult
+			require.NoError(t, json.Unmarshal([]byte(test.wire), &discovery))
+			assert.Equal(t, test.count, discovery.ExtensionCount)
+			for _, value := range []any{manifest, discovery} {
+				data, err := json.Marshal(value)
+				require.NoError(t, err)
+				var fields map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(data, &fields))
+				if test.count == nil {
+					assert.NotContains(t, fields, "extensionCount")
+				} else {
+					require.Contains(t, fields, "extensionCount", "known zero must survive the wire round trip")
+					var count int
+					require.NoError(t, json.Unmarshal(fields["extensionCount"], &count))
+					assert.Equal(t, *test.count, count)
+				}
+			}
+		})
+	}
 }
 
 func TestShortcutManifestDigestIgnoresGenerationWithoutMutatingSnapshot(t *testing.T) {

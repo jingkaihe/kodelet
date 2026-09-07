@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -64,6 +66,29 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	assert.Equal(t, "get_weather", metadata.ToolName)
 	assert.Equal(t, "Weather for London from conv-123", metadata.Output)
 	assert.Equal(t, "celsius", metadata.Data["unit"])
+}
+
+func TestRuntimeExtensionCountUsesInitializedProcessesNotRegistrations(t *testing.T) {
+	var runtime *Runtime
+	assert.Zero(t, runtime.ExtensionCount())
+	empty := EmptyRuntime()
+	t.Cleanup(func() { assert.NoError(t, empty.Close()) })
+	assert.Zero(t, empty.ExtensionCount())
+
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	writeExecutable(t, filepath.Join(rootDir, "weather", "kodelet-extension-weather"), helperExtensionScript(t))
+	config := DefaultConfig()
+	config.Tools = map[string]ToolConfig{"get_weather": {Enabled: new(false)}}
+	runtime, err := NewRuntime(t.Context(), WithConfig(config), WithWorkingDir(rootDir), WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	assert.Empty(t, runtime.Tools())
+	assert.Len(t, runtime.Commands(), 2)
+	assert.NotEmpty(t, runtime.Subscriptions())
+	assert.Equal(t, 1, runtime.ExtensionCount())
+	require.NoError(t, runtime.Close())
+	assert.Zero(t, runtime.ExtensionCount())
 }
 
 func TestRuntimePassesWorkingDirToExtensionProcessEnvironment(t *testing.T) {
@@ -584,6 +609,210 @@ func TestRuntimeInitializationReturnsCallerCancellationWithoutWarning(t *testing
 	assert.NotContains(t, logOutput.String(), "failed to initialize extension")
 }
 
+func TestRuntimeInitializesExtensionsWithBoundedConcurrencyAndDiscoveryOrder(t *testing.T) {
+	rootDir, ids := gatedRuntimeExtensions(t, maxConcurrentExtensionInitializations+2)
+	_, wait := startGatedRuntime(t.Context(), t, rootDir)
+
+	for _, id := range ids[:maxConcurrentExtensionInitializations] {
+		waitForExtensionInitialization(t, rootDir, id)
+	}
+	// Keep the first workers blocked and repeatedly free just the last slot.
+	// A queued helper starting proves the preceding initialization completed,
+	// while the first extension still cannot finish.
+	for i := maxConcurrentExtensionInitializations; i < len(ids); i++ {
+		require.Never(t, func() bool {
+			_, err := os.Stat(filepath.Join(rootDir, ids[i]+".spawned"))
+			return err == nil
+		}, 100*time.Millisecond, 5*time.Millisecond, "queued extension %s started before a slot was free", ids[i])
+		require.NoError(t, os.WriteFile(filepath.Join(rootDir, ids[i-1]+".release"), nil, 0o600))
+		waitForExtensionInitialization(t, rootDir, ids[i])
+	}
+	for i := len(ids) - 1; i >= 0; i-- {
+		require.NoError(t, os.WriteFile(filepath.Join(rootDir, ids[i]+".release"), nil, 0o600))
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(rootDir, ids[i]+".initialized"))
+			return err == nil
+		}, 5*time.Second, 5*time.Millisecond)
+	}
+
+	runtime, err := wait()
+	require.NoError(t, err)
+	require.Len(t, runtime.processes, len(ids))
+	require.Len(t, runtime.commands, len(ids))
+	require.Len(t, runtime.Tools(), len(ids))
+	handlers := runtime.eventHandlers(EventToolCall)
+	require.Len(t, handlers, len(ids))
+	for i, id := range ids {
+		assert.Equal(t, id, runtime.processes[i].Extension.ID)
+		assert.Equal(t, id, runtime.commands[i].ExtensionID)
+		assert.Equal(t, id, runtime.commands[i].Registration.Name)
+		require.Contains(t, runtime.tools, id)
+		assert.Same(t, runtime.processes[i], runtime.tools[id].process)
+		assert.Equal(t, id, handlers[i].process.Extension.ID)
+		assert.Equal(t, i, handlers[i].order)
+	}
+	shortcuts := runtime.Shortcuts()
+	require.Len(t, shortcuts, 1)
+	assert.Equal(t, "ctrl+alt+r", shortcuts[0].Key)
+	assert.Equal(t, ids[len(ids)-1], shortcuts[0].ExtensionID)
+}
+
+func TestRuntimeInitializationCancellationClosesStartedProcessesAndSkipsQueued(t *testing.T) {
+	rootDir, ids := gatedRuntimeExtensions(t, maxConcurrentExtensionInitializations+2)
+	cancel, wait := startGatedRuntime(t.Context(), t, rootDir)
+	pids := make([]int, 0, maxConcurrentExtensionInitializations+1)
+	for _, id := range ids[:maxConcurrentExtensionInitializations] {
+		pids = append(pids, waitForExtensionInitialization(t, rootDir, id))
+	}
+	// Leave one successful result, a full set of in-flight initializations,
+	// and one extension queued when cancellation arrives.
+	require.NoError(t, os.WriteFile(filepath.Join(rootDir, ids[0]+".release"), nil, 0o600))
+	pids = append(pids, waitForExtensionInitialization(t, rootDir, ids[maxConcurrentExtensionInitializations]))
+	cancel()
+
+	runtime, err := wait()
+	assert.Nil(t, runtime)
+	require.ErrorIs(t, err, context.Canceled)
+	for _, pid := range pids {
+		assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 5*time.Millisecond, "extension process %d leaked after cancellation", pid)
+	}
+	assert.NoFileExists(t, filepath.Join(rootDir, ids[len(ids)-1]+".spawned"))
+	assert.NoFileExists(t, filepath.Join(rootDir, ids[len(ids)-1]+".started"))
+}
+
+func TestRuntimeDuplicateRegistrationClosesAllInitializedProcesses(t *testing.T) {
+	rootDir, ids := gatedRuntimeExtensions(t, maxConcurrentExtensionInitializations+2)
+	_, wait := startGatedRuntime(t.Context(), t, rootDir)
+	pids := make([]int, len(ids))
+	// Hold the conflicting second extension until all later extensions have
+	// initialized, including extensions that originally had to wait for a slot.
+	for i, id := range ids {
+		pids[i] = waitForExtensionInitialization(t, rootDir, id)
+		if i == 1 {
+			continue
+		}
+		var toolName []byte
+		if i == 0 {
+			toolName = []byte("duplicate")
+		}
+		// Publish gate contents atomically so the helper never reads an empty
+		// tool name while the duplicate registration is still being written.
+		require.NoError(t, os.WriteFile(filepath.Join(rootDir, id+".release.tmp"), toolName, 0o600))
+		require.NoError(t, os.Rename(filepath.Join(rootDir, id+".release.tmp"), filepath.Join(rootDir, id+".release")))
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(rootDir, id+".initialized"))
+			return err == nil
+		}, 5*time.Second, 5*time.Millisecond)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(rootDir, ids[1]+".release.tmp"), []byte("duplicate"), 0o600))
+	require.NoError(t, os.Rename(filepath.Join(rootDir, ids[1]+".release.tmp"), filepath.Join(rootDir, ids[1]+".release")))
+
+	runtime, err := wait()
+	assert.Nil(t, runtime)
+	require.ErrorContains(t, err, "duplicate extension tool registration: duplicate")
+	for _, pid := range pids {
+		assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 5*time.Millisecond, "initialized extension process %d leaked after registration conflict", pid)
+	}
+}
+
+func TestRuntimeInitializationIsolatesUnavailableExtensions(t *testing.T) {
+	for _, failure := range []string{"start", "initialize"} {
+		t.Run(failure, func(t *testing.T) {
+			rootDir, ids := gatedRuntimeExtensions(t, 3)
+			if failure == "start" {
+				writeExecutable(t, filepath.Join(rootDir, ids[1], "kodelet-extension-"+ids[1]), "#!/nonexistent/kodelet-test-interpreter\n")
+			} else {
+				t.Setenv("KODELET_TEST_EXTENSION_INITIALIZATION_FAILURE", ids[1])
+			}
+			for _, id := range ids {
+				require.NoError(t, os.WriteFile(filepath.Join(rootDir, id+".release"), nil, 0o600))
+			}
+			_, wait := startGatedRuntime(t.Context(), t, rootDir)
+			runtime, err := wait()
+			require.NoError(t, err)
+			require.Len(t, runtime.processes, 2)
+			assert.Equal(t, 2, runtime.ExtensionCount(), "failed extensions must not contribute to the initialized count")
+			assert.Equal(t, ids[0], runtime.processes[0].Extension.ID)
+			assert.Equal(t, ids[2], runtime.processes[1].Extension.ID)
+			assert.Contains(t, runtime.tools, ids[0])
+			assert.Contains(t, runtime.tools, ids[2])
+			assert.NotContains(t, runtime.tools, ids[1])
+			if failure == "initialize" {
+				pid := waitForExtensionInitialization(t, rootDir, ids[1])
+				assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 5*time.Millisecond)
+			}
+		})
+	}
+}
+
+func gatedRuntimeExtensions(t *testing.T, count int) (string, []string) {
+	t.Helper()
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv("KODELET_TEST_EXTENSION_INITIALIZATION_DIR", rootDir)
+	ids := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("extension%02d", i)
+		writeExecutable(t, filepath.Join(rootDir, ids[i], "kodelet-extension-"+ids[i]), helperEnvExtensionScript(t))
+	}
+	// Run after runtime cleanup, and kill any helper a failing test exposed
+	// as unowned, including helpers that unexpectedly started from the queue.
+	t.Cleanup(func() {
+		for _, id := range ids {
+			data, err := os.ReadFile(filepath.Join(rootDir, id+".spawned"))
+			if err != nil {
+				continue
+			}
+			if pid, err := strconv.Atoi(string(data)); err == nil && pid > 0 {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	return rootDir, ids
+}
+
+func startGatedRuntime(ctx context.Context, t *testing.T, rootDir string) (context.CancelFunc, func() (*Runtime, error)) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	var runtime *Runtime
+	var err error
+	done := make(chan struct{})
+	go func() {
+		runtime, err = NewRuntime(ctx, WithConfig(DefaultConfig()), WithWorkingDir(rootDir), WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}))
+		close(done)
+	}()
+	wait := func() (*Runtime, error) {
+		t.Helper()
+		select {
+		case <-done:
+			return runtime, err
+		case <-time.After(10 * time.Second):
+			require.FailNow(t, "runtime initialization did not finish")
+			return nil, context.DeadlineExceeded
+		}
+	}
+	t.Cleanup(func() {
+		cancel()
+		runtime, _ := wait()
+		assert.NoError(t, runtime.Close())
+	})
+	return cancel, wait
+}
+
+func waitForExtensionInitialization(t *testing.T, rootDir, id string) int {
+	t.Helper()
+	var pid int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(rootDir, id+".started"))
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(string(data))
+		return err == nil && pid > 0
+	}, 5*time.Second, 5*time.Millisecond, "extension %s did not begin initialization", id)
+	return pid
+}
+
 func TestRuntimeOwnsProcessContextLifetime(t *testing.T) {
 	type contextKey string
 	const key contextKey = "runtime-value"
@@ -738,6 +967,16 @@ func runEnvExtensionHelperProcess() {
 	if diagnostic := os.Getenv("KODELET_TEST_EXTENSION_STDERR"); diagnostic != "" {
 		fmt.Fprintln(os.Stderr, diagnostic)
 	}
+	gateDir := os.Getenv("KODELET_TEST_EXTENSION_INITIALIZATION_DIR")
+	if gateDir != "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return
+		}
+		if err := os.WriteFile(filepath.Join(gateDir, filepath.Base(cwd)+".spawned"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			return
+		}
+	}
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		payload, err := readFrame(reader)
@@ -746,8 +985,9 @@ func runEnvExtensionHelperProcess() {
 		}
 
 		var request struct {
-			ID     int64  `json:"id"`
-			Method string `json:"method"`
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		if err := json.Unmarshal(payload, &request); err != nil {
 			writeHelperResponse(request.ID, nil, &rpcError{Code: -32700, Message: err.Error()})
@@ -756,6 +996,46 @@ func runEnvExtensionHelperProcess() {
 
 		switch request.Method {
 		case "extension.initialize":
+			if gateDir != "" {
+				var params initializeParams
+				if err := json.Unmarshal(request.Params, &params); err != nil {
+					return
+				}
+				id := params.Extension.ID
+				marker := filepath.Join(gateDir, id)
+				if err := os.WriteFile(marker+".started", []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+					return
+				}
+				var toolName []byte
+				for {
+					toolName, err = os.ReadFile(marker + ".release")
+					if err == nil {
+						break
+					}
+					if !os.IsNotExist(err) {
+						return
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+				if id == os.Getenv("KODELET_TEST_EXTENSION_INITIALIZATION_FAILURE") {
+					writeHelperResponse(request.ID, nil, &rpcError{Code: -32000, Message: "test initialization failure"})
+					continue
+				}
+				if len(toolName) == 0 {
+					toolName = []byte(id)
+				}
+				writeHelperResponse(request.ID, InitializeResult{
+					Name: id,
+					Tools: []ToolRegistration{{
+						Name: string(toolName), Description: "gated test tool", InputSchema: map[string]any{"type": "object"},
+					}},
+					Commands:      []CommandRegistration{{Name: id, Description: "gated test command"}},
+					Subscriptions: []Subscription{{Event: EventToolCall, Priority: 10}},
+					Shortcuts:     []ShortcutRegistration{{Key: "ctrl+alt+r", Description: id}},
+				}, nil)
+				_ = os.WriteFile(marker+".initialized", nil, 0o600)
+				continue
+			}
 			writeHelperResponse(request.ID, InitializeResult{
 				Name: fmt.Sprintf("env;stderr_tty=%t", readerIsTerminal(os.Stderr)),
 				Tools: []ToolRegistration{{

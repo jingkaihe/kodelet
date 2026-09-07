@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,7 +163,7 @@ func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
 				t.Logf("chat screen: %s", screen.String())
 			}
 		}()
-		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "Ask kodelet") }, 10*time.Second, 20*time.Millisecond)
+		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "extensions ready in ") }, 10*time.Second, 20*time.Millisecond)
 		_, err = io.WriteString(terminal, "cold chat query\r")
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return strings.Contains(screen.String(), "tool-free answer") }, 10*time.Second, 20*time.Millisecond)
@@ -201,6 +202,120 @@ func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
 		require.NoError(t, process.Wait(), "%s", diagnostics.String())
 		assert.Contains(t, diagnostics.String(), "Starting local Kodelet server")
 	})
+}
+
+func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	settingsGate, discoveryGate := make(chan struct{}), make(chan struct{})
+	var settingsCalls, discoveryCalls, modelCalls atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer client-secret", r.Header.Get("Authorization"))
+		var gate <-chan struct{}
+		var response any
+		switch r.URL.Path {
+		case "/api/chat/settings":
+			settingsCalls.Add(1)
+			gate = settingsGate
+			response = chat.ControlPlaneChatSettings{CurrentProfile: "default", DefaultRunnerID: "runner", DefaultRunnerReady: true}
+		case "/api/chat/cwd-suggestions":
+			response = map[string]any{"baseDir": root}
+		case "/api/chat/slash-commands":
+			discoveryCalls.Add(1)
+			gate = discoveryGate
+			response = map[string]any{"cwd": root, "commands": []any{}, "extensionCount": 9}
+		case "/api/chat", "/api/chat/model":
+			modelCalls.Add(1)
+			http.Error(w, "unexpected model run", http.StatusServiceUnavailable)
+			return
+		default:
+			assert.Fail(t, "unexpected daemon request", "%s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		assert.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	t.Cleanup(daemon.Close)
+	process := daemonCLIProcess(ctx, t, root, []string{
+		"HOME=" + root, "PATH=" + os.Getenv("PATH"), "SHELL=/bin/sh",
+		"KODELET_BASE_PATH=" + filepath.Join(root, "state"), "KODELET_TEST_CLI_PROCESS=1",
+		"TERM=xterm-256color", "COLORTERM=truecolor",
+	}, "chat", "--server="+daemon.URL, "--auth-token=client-secret", "--cwd="+root)
+	terminal, err := pty.StartWithSize(process, &pty.Winsize{Rows: 40, Cols: 120})
+	require.NoError(t, err)
+	var screen daemonChatPTYOutput
+	readDone, processDone := make(chan struct{}), make(chan error, 1)
+	go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
+	go func() { processDone <- process.Wait() }()
+	exited := false
+	t.Cleanup(func() {
+		if !exited {
+			_ = process.Process.Kill()
+			<-processDone
+		}
+		_ = terminal.Close()
+		<-readDone
+		if t.Failed() {
+			t.Logf("chat screen: %s", screen.String())
+		}
+	})
+	waitRendered := func(text string) {
+		t.Helper()
+		require.Eventually(t, func() bool { return strings.Contains(screen.String(), text) }, 5*time.Second, 10*time.Millisecond, "terminal did not render %q", text)
+	}
+	write := func(text string) {
+		t.Helper()
+		_, err := io.WriteString(terminal, text)
+		require.NoError(t, err)
+	}
+
+	require.Eventually(t, func() bool { return settingsCalls.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+	waitRendered("Ask kodelet")
+	waitRendered("Starting…")
+	// Bracketed paste makes each edit one input event, so terminal diff frames
+	// cannot split the asserted text between character-by-character repaints.
+	write("\x1b[200~startup draft\x1b[201~")
+	waitRendered("startup draft")
+	write("#")
+	waitRendered("#")
+	write("\r\x1b[200~ still typing\x1b[201~")
+	waitRendered("still typing")
+	assert.Zero(t, modelCalls.Load(), "Enter must not submit before daemon bootstrap completes")
+	assert.Zero(t, discoveryCalls.Load(), "settings are still blocked")
+
+	close(settingsGate)
+	require.Eventually(t, func() bool { return discoveryCalls.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+	waitRendered("Loading extensions…")
+	write("\x1b[200~ during discovery\x1b[201~")
+	waitRendered("during discovery")
+	write("@")
+	waitRendered("@")
+	assert.Zero(t, modelCalls.Load(), "loading resources must not start a model run")
+	assert.NotContains(t, screen.String(), "extensions ready in ")
+
+	close(discoveryGate)
+	readyLabel := regexp.MustCompile(`9 extensions ready in [0-9]+(?:\.[0-9]+)? (?:ms|s)`)
+	require.Eventually(t, func() bool { return readyLabel.MatchString(screen.String()) }, 5*time.Second, 10*time.Millisecond, "terminal did not render elapsed readiness")
+	assert.Zero(t, modelCalls.Load())
+	write("\x03")
+	select {
+	case err := <-processDone:
+		exited = true
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "chat did not exit")
+	}
 }
 
 // TestDaemonFirstCLIProcess executes the real CLI entry point in an isolated

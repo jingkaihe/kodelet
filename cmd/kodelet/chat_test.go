@@ -287,6 +287,12 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 		switch r.URL.Path {
 		case "/api/chat/settings":
 			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{CurrentProfile: "daemon", DefaultRunnerID: "runner", DefaultRunnerReady: true, ReasoningEffort: "medium", ReasoningEffortOptions: []string{"medium"}}))
+		case "/api/chat/cwd-suggestions":
+			assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+			assert.Equal(t, "daemon", r.URL.Query().Get("profile"))
+			assert.Equal(t, "environment", r.URL.Query().Get("environmentProfile"))
+			assert.False(t, r.URL.Query().Has("options"))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only/selected"}))
 		case "/api/chat/slash-commands":
 			discoveries.Add(1)
 			assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
@@ -311,7 +317,7 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	invalidStore := filepath.Join(t.TempDir(), "no-local-state")
 	require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
 	t.Setenv("KODELET_BASE_PATH", invalidStore)
-	cmd := daemonChatCommandForTest(t, "--server="+daemon.URL, "--cwd=~/selected", "--model=central", "--no-extensions", "--no-skills", "--allowed-tools=", "--no-tools=false", "--max-turns=0")
+	cmd := daemonChatCommandForTest(t, "--server="+daemon.URL, "--cwd=~/selected", "--runner-profile=environment", "--model=central", "--no-extensions", "--no-skills", "--allowed-tools=", "--no-tools=false", "--max-turns=0")
 	config, err := prepareDaemonChat(t.Context(), cmd)
 	require.NoError(t, err)
 	assert.True(t, config.Remote)
@@ -319,6 +325,7 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.Equal(t, "daemon", config.Profile)
 	assert.Equal(t, "environment", config.EnvironmentProfile)
 	assert.Empty(t, submissions, "preparing the TUI must not start a provider turn")
+	assert.Zero(t, discoveries.Load(), "preparing chat must not initialize extensions for command discovery")
 	_, err = config.Runner.Run(t.Context(), chatpkg.ChatRequest{ConversationID: "new", TurnID: "turn", Message: "work", CWD: config.CWD, Profile: config.Profile}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
 	require.NoError(t, err)
 	require.Len(t, submissions, 1)
@@ -328,22 +335,23 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.Equal(t, new(false), submissions[0].Options.NoTools)
 	assert.Equal(t, new(0), submissions[0].Options.MaxTurns)
 	assert.Equal(t, new([]string{}), submissions[0].Options.AllowedTools)
-	assert.EqualValues(t, 2, discoveries.Load())
+	assert.EqualValues(t, 1, discoveries.Load())
 	_, ok := config.Runner.(chatpkg.ConversationStreamer)
 	assert.True(t, ok, "wrapper promotes shared stream and UI transport methods")
 }
 
 func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T) {
-	var discoveries atomic.Int32
+	var resolutions atomic.Int32
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/conversations/saved":
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "saved", "cwd": "/runner-only/saved", "runnerId": "stored", "profile": "removed-profile", "environmentProfile": "stored-environment", "reasoningEffort": "high"}))
-		case "/api/chat/slash-commands":
-			discoveries.Add(1)
+		case "/api/chat/cwd-suggestions":
+			resolutions.Add(1)
 			assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
 			assert.False(t, r.URL.Query().Has("profile"), "saved discovery must use the server's pinned profile")
-			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/runner-only/saved", EnvironmentProfile: "stored-environment"}))
+			assert.False(t, r.URL.Query().Has("options"))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only/saved"}))
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)
 			http.Error(w, "current default unavailable", http.StatusServiceUnavailable)
@@ -359,7 +367,43 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 		_, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, append([]string{"--server=" + daemon.URL, "--resume=saved"}, flags...)...))
 		require.Error(t, err)
 	}
-	assert.EqualValues(t, 1, discoveries.Load(), "resume replacements fail before discovery")
+	assert.EqualValues(t, 1, resolutions.Load(), "resume replacements fail before directory resolution")
+}
+
+func TestPrepareDaemonChatFollowResolvesDirectoryWithoutLoadingExtensions(t *testing.T) {
+	var resolutions atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/chat/settings":
+			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{DefaultRunnerID: "runner", DefaultRunnerReady: true}))
+		case "/api/chat/cwd-suggestions":
+			resolutions.Add(1)
+			assert.False(t, r.URL.Query().Has("options"))
+			if r.URL.Query().Get("conversationId") == "" {
+				assert.Equal(t, "/runner-only/selected", r.URL.Query().Get("cwd"))
+				assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+			} else {
+				assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only/selected"}))
+		case "/api/conversations":
+			assert.Equal(t, "/runner-only/selected", r.URL.Query().Get("cwd"))
+			assert.Equal(t, "1", r.URL.Query().Get("limit"))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"conversations": []convtypes.ConversationSummary{{ID: "saved"}}}))
+		case "/api/conversations/saved":
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "saved", "cwd": "/runner-only/selected", "runnerId": "runner", "profile": "default", "reasoningEffort": "medium"}))
+		default:
+			assert.Fail(t, "unexpected endpoint during chat preparation", r.URL.Path)
+			http.Error(w, "must not load extensions", http.StatusInternalServerError)
+		}
+	}))
+	defer daemon.Close()
+
+	config, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, "--server="+daemon.URL, "--follow", "--cwd=/runner-only/selected", "--no-extensions"))
+	require.NoError(t, err)
+	assert.Equal(t, "saved", config.ConversationID)
+	assert.Equal(t, "/runner-only/selected", config.CWD)
+	assert.EqualValues(t, 2, resolutions.Load())
 }
 
 func TestPrepareDaemonChatRejectsUnsupportedFlagsBeforeHTTP(t *testing.T) {

@@ -233,6 +233,7 @@ func TestWorkspaceShortcutRejectsInvalidOrStaleBeforeExecution(t *testing.T) {
 
 func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T) {
 	f := newShortcutFixture(t)
+	f.manifest.ExtensionCount = new(2)
 	manifest, err := f.server.runnerRegistry.OpenRun(t.Context(), f.registration.RunnerID, protocol.RunOpenParams{RunID: "active-run", ConversationID: "conversation", CWD: f.request.Target.CWD, Agent: protocol.AgentDescriptor{Profile: "model-profile", EnvironmentProfile: "review"}, Options: f.request.Target.Options})
 	require.NoError(t, err)
 	f.server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
@@ -257,6 +258,7 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	assert.Equal(t, manifest.RunID, discovery.RunID)
 	assert.Equal(t, f.request.Digest, discovery.Digest)
 	assert.Equal(t, manifest.Shortcuts, discovery.Shortcuts)
+	assert.Equal(t, new(2), discovery.ExtensionCount)
 	assert.Empty(t, f.methods, "active discovery must not start another runtime")
 	recorder = httptest.NewRecorder()
 	f.server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/slash-commands?conversationId=conversation&profile=default", nil))

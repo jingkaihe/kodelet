@@ -46,13 +46,16 @@ var chatCmd = &cobra.Command{
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		config, err := prepareDaemonChat(cmd.Context(), cmd)
-		if err != nil {
-			return errors.Wrap(err, "could not start chat")
-		}
+		theme, _ := cmd.Flags().GetString("theme")
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
-		return tui.Run(cmd.Context(), config)
+		return errors.Wrap(tui.Run(cmd.Context(), tui.Config{
+			Remote: true,
+			Theme:  theme,
+			Initialize: func(ctx context.Context) (tui.Config, error) {
+				return prepareDaemonChat(ctx, cmd)
+			},
+		}), "could not start chat")
 	},
 }
 
@@ -133,6 +136,8 @@ func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, targ
 	if err != nil {
 		return protocol.WorkspaceCWDHintsResult{}, err
 	}
+	// Directory resolution does not execute extensions and accepts no run options.
+	target.Options = nil
 	return r.ControlPlaneChatRunner.WorkspaceCWDSuggestions(ctx, target, query)
 }
 
@@ -230,7 +235,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if cmd.Flags().Changed("profile") {
 			profile, _ = cmd.Flags().GetString("profile")
 		}
-		target, err := runner.DiscoverWorkspace(ctx, chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: profile})
+		target, err := runner.WorkspaceCWDSuggestions(ctx, chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: profile}, "")
 		if err != nil {
 			return result, err
 		}
@@ -238,7 +243,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if err != nil {
 			return result, err
 		}
-		history, err := source.ListConversationsInCWD(ctx, 1, target.CWD)
+		history, err := source.ListConversationsInCWD(ctx, 1, target.BaseDir)
 		if err != nil {
 			return result, err
 		}
@@ -288,20 +293,23 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 	if err != nil {
 		return result, err
 	}
-	discovery, err := client.DiscoverWorkspace(ctx, target)
+	// Resolve runner-owned paths without initializing extensions. The TUI loads
+	// commands asynchronously once the composer is available.
+	target.Options = nil
+	resolved, err := client.WorkspaceCWDSuggestions(ctx, target, "")
 	if err != nil {
 		return result, err
 	}
-	if discovery.CWD == "" {
+	if resolved.BaseDir == "" {
 		return result, errors.New("the runner did not return a working directory; check the directory and runner logs")
 	}
-	if config.ResumeConvID != "" && (discovery.CWD != result.CWD || chatpkg.NormalizeEnvironmentProfile(discovery.EnvironmentProfile) != chatpkg.NormalizeEnvironmentProfile(result.EnvironmentProfile)) {
-		return result, errors.New("the runner returned a different directory or environment profile than this conversation saved")
+	if config.ResumeConvID != "" && resolved.BaseDir != result.CWD {
+		return result, errors.New("the runner returned a different directory than this conversation saved")
 	}
-	result.CWD, result.DefaultCWD = discovery.CWD, discovery.CWD
-	result.EnvironmentProfile = discovery.EnvironmentProfile
-	runner.defaultCWD = discovery.CWD
+	result.CWD, result.DefaultCWD = resolved.BaseDir, resolved.BaseDir
+	runner.defaultCWD = resolved.BaseDir
 	if config.ResumeConvID == "" {
+		result.EnvironmentProfile = chatpkg.NormalizeEnvironmentProfile(target.EnvironmentProfile)
 		runner.runnerID = target.RunnerID
 	}
 	return result, nil

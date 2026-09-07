@@ -69,6 +69,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case initializedMsg:
+		if !m.startupPending || m.ctx.Err() != nil {
+			if msg.closeRunner != nil {
+				msg.closeRunner()
+			}
+			return m, nil
+		}
+		m.startupPending = false
+		m.initialize = nil
+		m.closeInitializedRunner = msg.closeRunner
+		if msg.err != nil {
+			m.startupErr = msg.err
+			m.err = msg.err
+			m.status = "startup failed"
+			m.resourcesLoading = false
+			m.entries = append(m.entries, chatEntry{kind: entryInfo, title: "Could not start chat", content: msg.err.Error()})
+			m.refreshViewport(false)
+			return m, nil
+		}
+		msg.config.Remote = true
+		m.configure(msg.config)
+		m.resize()
+		m.refreshViewport(false)
+		return m, tea.Batch(m.initialResourceCommands()...)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -503,12 +528,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.remote && (msg.conversationID != state.conversationID || (msg.conversationID == "" && msg.profile != state.profile)) {
 			break
 		}
+		if msg.remote && msg.discoveryID != 0 && msg.discoveryID != state.discoveryID {
+			break
+		}
 		active := state == m.conversationState
 		currentState := m.conversationState
 		m.conversationState = state
 		if strings.TrimSpace(msg.cwd) != strings.TrimSpace(m.slashCommandCWD()) {
 			m.conversationState = currentState
 			break
+		}
+		if msg.remote {
+			m.resourcesLoading = false
+			m.readinessStartedAt = time.Time{}
+			m.readyDuration = 0
+			m.extensionCount = nil
+			if msg.err == nil {
+				m.extensionCount = msg.extensionCount
+				if m.conversationID == "" {
+					m.readyDuration = msg.readyDuration
+				}
+			}
 		}
 		if msg.extensionsOnly {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
@@ -636,6 +676,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" && m.remote {
 			m.cancel()
 			return m, tea.Quit
+		}
+		if m.startupPending || m.startupErr != nil {
+			switch key {
+			case "ctrl+d":
+				m.cancel()
+				return m, tea.Quit
+			case "enter", "ctrl+l", "ctrl+t", "ctrl+y", "ctrl+g":
+				return m, nil
+			}
 		}
 		if m.shortcutsOpen {
 			switch key {
@@ -1471,6 +1520,9 @@ func (m *model) beginObservedConversationRun(state *conversationState, runID int
 	}
 	state.streamConnectedActive = true
 	state.streamTurnUncertain = false
+	state.resourcesLoading = false
+	state.readinessStartedAt = time.Time{}
+	state.readyDuration = 0
 	if state.running {
 		return
 	}
@@ -1584,6 +1636,9 @@ func (m *model) resize() {
 }
 
 func (m *model) submit() tea.Cmd {
+	if m.startupPending || m.startupErr != nil {
+		return nil
+	}
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" {
 		return nil
@@ -1663,7 +1718,7 @@ func (m *model) startConversationRunPreservingComposer(state *conversationState,
 
 func (m *model) startConversationRunWithComposer(state *conversationState, message string, clearComposer bool) tea.Cmd {
 	message = strings.TrimSpace(message)
-	if state == nil || message == "" || state.running {
+	if m.startupPending || m.startupErr != nil || m.runner == nil || state == nil || message == "" || state.running {
 		return nil
 	}
 	active := state == m.conversationState
@@ -1671,6 +1726,11 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	if conversationID == "" {
 		return nil
 	}
+	// Readiness ends at the first run, even if discovery is still pending.
+	// Later refreshes must not count model response time or restore its label.
+	state.resourcesLoading = false
+	state.readinessStartedAt = time.Time{}
+	state.readyDuration = 0
 	m.stopConversationStream(state)
 	conversationKey := state.key
 	if strings.TrimSpace(state.title) == "" {

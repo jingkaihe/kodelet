@@ -78,6 +78,7 @@ type Manifest struct {
 	Commands            []slashcommands.Command       `json:"commands"`
 	Config              EnvironmentConfig             `json:"config"`
 	ExtensionGeneration int64                         `json:"extensionGeneration"`
+	ExtensionCount      *int                          `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
 	Capabilities        EnvironmentCapabilities       `json:"capabilities"`
 }
 
@@ -88,6 +89,8 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.Generation = 0
 	manifest.Digest = ""
 	manifest.ExtensionGeneration = 0
+	// Display-only metadata must not change execution or discovery identity.
+	manifest.ExtensionCount = nil
 	manifest.Shortcuts = append([]protocol.ShortcutDescriptor(nil), manifest.Shortcuts...)
 	for i := range manifest.Shortcuts {
 		manifest.Shortcuts[i].Generation = 0

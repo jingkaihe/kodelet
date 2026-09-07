@@ -11,7 +11,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
+
+const maxConcurrentExtensionInitializations = 4
 
 // Runtime manages discovered extension processes and registrations.
 type Runtime struct {
@@ -114,36 +117,61 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 	if err != nil {
 		return err
 	}
-	for _, ext := range extensions {
+	initialized := make([]struct {
+		process *Process
+		result  *InitializeResult
+	}, len(extensions))
+	var group errgroup.Group
+	group.SetLimit(maxConcurrentExtensionInitializations)
+	for i, ext := range extensions {
+		group.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
+				return nil
+			}
+			initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
+			result, err := proc.Initialize(initCtx, r.workingDir)
+			cancel()
+			if err != nil {
+				_ = proc.Close()
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
+				return nil
+			}
+			initialized[i].process = proc
+			initialized[i].result = result
+			return ctx.Err()
+		})
+	}
+	err = group.Wait()
+	// Own every initialized process before registration, so Close also cleans up
+	// later results if cancellation or a registration conflict aborts startup.
+	for _, init := range initialized {
+		if init.process != nil {
+			r.processes = append(r.processes, init.process)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	// Completion order must not change shortcut precedence or event ordering.
+	for _, init := range initialized {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
+		if init.process != nil {
+			if err := r.register(ctx, init.process, init.result); err != nil {
+				return err
 			}
-			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
-			continue
-		}
-		initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
-		result, err := proc.Initialize(initCtx, r.workingDir)
-		cancel()
-		if err != nil {
-			_ = proc.Close()
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			_ = proc.Close()
-			return err
-		}
-		r.processes = append(r.processes, proc)
-		if err := r.register(ctx, proc, result); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -313,6 +341,16 @@ func (r *Runtime) toolTimeout(registration ToolRegistration) time.Duration {
 		return timeoutInSecDuration(registration.TimeoutInSec)
 	}
 	return 10 * time.Minute
+}
+
+// ExtensionCount returns the number of initialized extension processes.
+func (r *Runtime) ExtensionCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.processes)
 }
 
 // Tools returns registered extension tools sorted by name.

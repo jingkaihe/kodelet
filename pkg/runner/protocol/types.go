@@ -467,6 +467,7 @@ type WorkspaceDiscoverResult struct {
 	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
 	Digest             string                  `json:"digest"`
 	Commands           []slashcommands.Command `json:"commands"`
+	ExtensionCount     *int                    `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
 }
 
 // ShortcutDescriptor identifies one effective runner-owned registration.
