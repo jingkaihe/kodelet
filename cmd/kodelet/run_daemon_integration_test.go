@@ -30,6 +30,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
@@ -209,7 +210,7 @@ func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *te
 	defer cancel()
 	root := t.TempDir()
 	settingsGate, discoveryGate := make(chan struct{}), make(chan struct{})
-	var settingsCalls, discoveryCalls, modelCalls atomic.Int32
+	var settingsCalls, discoveryCalls, historyCalls, modelCalls atomic.Int32
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer client-secret", r.Header.Get("Authorization"))
 		var gate <-chan struct{}
@@ -220,7 +221,14 @@ func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *te
 			gate = settingsGate
 			response = chat.ControlPlaneChatSettings{CurrentProfile: "default", DefaultRunnerID: "runner", DefaultRunnerReady: true}
 		case "/api/chat/cwd-suggestions":
-			response = map[string]any{"baseDir": root}
+			response = protocol.WorkspaceCWDHintsResult{BaseDir: root}
+		case "/api/chat/message-history":
+			historyCalls.Add(1)
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+			assert.Equal(t, root, r.URL.Query().Get("cwd"))
+			assert.False(t, r.URL.Query().Has("options"))
+			response = protocol.WorkspaceMessageHistoryResult{CWD: root, ScopeCWD: root}
 		case "/api/chat/slash-commands":
 			discoveryCalls.Add(1)
 			gate = discoveryGate
@@ -293,9 +301,11 @@ func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *te
 	waitRendered("still typing")
 	assert.Zero(t, modelCalls.Load(), "Enter must not submit before daemon bootstrap completes")
 	assert.Zero(t, discoveryCalls.Load(), "settings are still blocked")
+	assert.Zero(t, historyCalls.Load(), "history requires the bootstrapped runner target")
 
 	close(settingsGate)
 	require.Eventually(t, func() bool { return discoveryCalls.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return historyCalls.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
 	waitRendered("Loading extensions…")
 	write("\x1b[200~ during discovery\x1b[201~")
 	waitRendered("during discovery")
@@ -316,6 +326,7 @@ func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *te
 	case <-time.After(5 * time.Second):
 		require.FailNow(t, "chat did not exit")
 	}
+	assert.NotContains(t, screen.String(), "Message history unavailable")
 }
 
 // TestDaemonFirstCLIProcess executes the real CLI entry point in an isolated
@@ -637,7 +648,9 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			assert.Equal(t, "https://github.example/fixture/pull/1\n", string(output))
 			invocations, err := os.ReadFile(filepath.Join(workspace, "gh-invocations"))
 			require.NoError(t, err)
-			assert.Equal(t, workspace+"\npr\ncreate\n--base\nfixture-target\n--draft\n--title\nRunner PR\n--body\nRUNNER_ONLY_PR_TEMPLATE\n", string(invocations), "one runner-host mutation with the requested target and template")
+			physicalWorkspace, err := filepath.EvalSymlinks(workspace)
+			require.NoError(t, err)
+			assert.Equal(t, physicalWorkspace+"\npr\ncreate\n--base\nfixture-target\n--draft\n--title\nRunner PR\n--body\nRUNNER_ONLY_PR_TEMPLATE\n", string(invocations), "one runner-host mutation with the requested target and template")
 			alternateCWD := filepath.Join(root, "alternate-workspace")
 			require.NoError(t, os.MkdirAll(alternateCWD, 0o700))
 			require.NoError(t, os.WriteFile(filepath.Join(alternateCWD, "marker.txt"), []byte("alternate-directory-evidence"), 0o600))

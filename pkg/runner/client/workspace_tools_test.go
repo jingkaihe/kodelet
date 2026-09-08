@@ -167,6 +167,7 @@ func TestWorkspaceTerminalsReclaimExitedDirectories(t *testing.T) {
 	assert.Contains(t, rpcErr.Message, "directory limit reached")
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: first.SessionID, Data: []byte("exit\n")})
 	require.Eventually(t, func() bool { return workspaceTerminalDone(session.done) }, 3*time.Second, 10*time.Millisecond)
+	require.NoError(t, session.cleanupError(), "normal shell exit must release its directory slot")
 	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: nextDirectory})
 	assert.Equal(t, nextDirectory, next.CWD)
 	assert.True(t, workspaceTerminalDone(manager.closedCh), "reclaim also releases the manager's context watcher")
@@ -605,14 +606,25 @@ func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) 
 	readyPath := filepath.Join(t.TempDir(), "ready")
 	interruptedPath := filepath.Join(t.TempDir(), "interrupted")
 	foreground := filepath.Join(t.TempDir(), "foreground.sh")
-	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf interrupted > \"$KODELET_TERMINAL_INTERRUPTED_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do sleep 60; done\n"), 0o700))
+	// Block in a shell builtin so Ctrl-C cannot race with a child starting sleep.
+	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf interrupted > \"$KODELET_TERMINAL_INTERRUPTED_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do read -r line; done\n"), 0o700))
 	t.Setenv("SHELL", "/bin/bash")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PS1", "terminal-test-ready> ")
 	t.Setenv("KODELET_TERMINAL_READY_FILE", readyPath)
 	t.Setenv("KODELET_TERMINAL_INTERRUPTED_FILE", interruptedPath)
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 24, Cols: 80})
+	var output strings.Builder
+	cursor := opened.ReplayCursor
+	require.Eventually(t, func() bool {
+		read := callService[protocol.WorkspaceTerminalReadResult](t, service, protocol.MethodWorkspaceTerminalRead, protocol.WorkspaceTerminalReadParams{SessionID: opened.SessionID, Cursor: cursor, WaitMS: 10})
+		cursor = read.NextCursor
+		output.Write(read.Data)
+		return strings.Contains(output.String(), "terminal-test-ready> ")
+	}, 3*time.Second, 10*time.Millisecond, "wait for shell startup before sending input")
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
 		SessionID: opened.SessionID,
 		Data:      []byte(strconv.Quote(foreground) + "\n"),

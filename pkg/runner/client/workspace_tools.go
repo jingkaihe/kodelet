@@ -583,7 +583,7 @@ func (s *workspaceTerminalSession) finishSupervision(ctx context.Context, proces
 	s.beginEnding()
 	s.cancel()
 	graceDeadline := time.Now().Add(workspaceTerminalGracefulWait)
-	cleanupErr := signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGHUP)
+	signalErr := signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGHUP)
 	s.closePTY()
 	ptyStopped := waitWorkspaceTerminalDone(s.ptyDone, time.Until(graceDeadline))
 
@@ -596,7 +596,7 @@ func (s *workspaceTerminalSession) finishSupervision(ctx context.Context, proces
 	}
 	processGroupsStopped := waitWorkspaceTerminalProcessGroups(processGroups, time.Until(graceDeadline))
 	if !processGroupsStopped {
-		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGKILL))
+		signalErr = combineWorkspaceTerminalErrors(signalErr, signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGKILL))
 	}
 	if !exited || !processGroupsStopped || !ptyStopped {
 		killDeadline := time.Now().Add(workspaceTerminalProcessKillWait)
@@ -610,10 +610,14 @@ func (s *workspaceTerminalSession) finishSupervision(ctx context.Context, proces
 			ptyStopped = waitWorkspaceTerminalDone(s.ptyDone, time.Until(killDeadline))
 		}
 	}
+	var cleanupErr error
 	if !exited {
 		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, errors.New("workspace terminal process did not stop before the cleanup deadline"))
 	}
 	if !processGroupsStopped {
+		// A signal can race with process exit (including EPERM for unreaped
+		// groups on macOS). It is a cleanup failure only if the group remains.
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, signalErr)
 		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, errors.New("workspace terminal process groups did not stop before the cleanup deadline"))
 	}
 	if !ptyStopped {

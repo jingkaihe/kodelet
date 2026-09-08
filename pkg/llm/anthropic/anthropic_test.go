@@ -1423,7 +1423,10 @@ func TestRequiresInterleavedThinkingBeta(t *testing.T) {
 }
 
 func TestCompactContextIntegration(t *testing.T) {
-	// Skip if no API key is available
+	// Live API tests require explicit opt-in, not just ambient credentials.
+	if os.Getenv("KODELET_ANTHROPIC_INTEGRATION_TESTS") != "1" {
+		t.Skip("set KODELET_ANTHROPIC_INTEGRATION_TESTS=1 to run live Anthropic API tests")
+	}
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
 	}
@@ -1493,11 +1496,6 @@ func TestCompactContextIntegration(t *testing.T) {
 	})
 
 	t.Run("compact context preserves thread functionality", func(t *testing.T) {
-		// Skip if no API key is available
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
-		}
-
 		thread, err := NewAnthropicThread(llmtypes.Config{
 			Model:     "claude-haiku-4-5-20251001",
 			MaxTokens: 500,

@@ -237,6 +237,11 @@ func TestOIDCClientsReuseSavedLoginWithoutLocalDiscovery(t *testing.T) {
 				switch r.URL.Path {
 				case "/api/chat/settings":
 					_ = json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: "default", DefaultRunnerID: "runner", DefaultRunnerReady: true})
+				case "/api/chat/cwd-suggestions":
+					assert.Equal(t, http.MethodGet, r.Method)
+					assert.Equal(t, "runner", r.URL.Query().Get("runnerId"))
+					assert.False(t, r.URL.Query().Has("options"))
+					_ = json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/oidc-workspace"})
 				case "/api/chat/slash-commands":
 					_ = json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/oidc-workspace"})
 				case "/api/chat":

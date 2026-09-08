@@ -52,6 +52,12 @@ mise run frontend-test           # Frontend tests
 
 **Use testify** for assertions (`assert.Equal`, `require.NotNil`) over `t.Errorf`/`t.Fatalf`.
 
+Live Anthropic API tests are skipped by default, even when credentials are present. To run them explicitly, set `ANTHROPIC_API_KEY` and use the following command (makes real API requests and may incur charges):
+
+```bash
+KODELET_ANTHROPIC_INTEGRATION_TESTS=1 mise exec -- go test -count=1 ./pkg/llm ./pkg/llm/anthropic
+```
+
 ## Key Commands
 ```bash
 # Core

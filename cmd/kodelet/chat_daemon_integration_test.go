@@ -313,7 +313,9 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 						break
 					}
 				}
-				assert.Contains(t, output.String(), "actual-panel-cwd:"+workspace)
+				physicalWorkspace, err := filepath.EvalSymlinks(workspace)
+				require.NoError(t, err)
+				assert.Contains(t, output.String(), "actual-panel-cwd:"+physicalWorkspace)
 				assert.Contains(t, output.String(), "actual-panel-parent:"+strconv.Itoa(runnerPID))
 				assert.Contains(t, output.String(), "runner-workspace-only-diff")
 				assert.Contains(t, output.String(), "37 111")

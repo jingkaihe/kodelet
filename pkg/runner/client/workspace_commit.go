@@ -113,7 +113,8 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	}
 	defer os.Remove(copyIndex.Name())
 	defer os.Remove(copyIndex.Name() + ".lock")
-	if info, err := index.Stat(); err != nil {
+	info, err := index.Stat()
+	if err != nil {
 		_ = copyIndex.Close()
 		return result, errors.Wrap(err, "cannot inspect staged Git index")
 	} else if err := copyIndex.Chmod(info.Mode().Perm()); err != nil {
@@ -127,6 +128,11 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	}
 	if closeErr != nil {
 		return result, errors.Wrap(closeErr, "cannot close staged Git index copy")
+	}
+	// Git uses the index mtime to detect same-size worktree edits with matching
+	// cached timestamps. A fresh copy timestamp would hide these racy entries.
+	if err := os.Chtimes(copyIndex.Name(), info.ModTime(), info.ModTime()); err != nil {
+		return result, errors.Wrap(err, "cannot preserve staged Git index timestamp")
 	}
 	tree, err := runCommitGit(ctx, root, copyIndex.Name(), "", "write-tree")
 	if err != nil {

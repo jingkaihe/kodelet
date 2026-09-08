@@ -1212,7 +1212,9 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	defer conn.Close()
 	ready := readTerminalReady(t, conn)
 	assert.Equal(t, runner.Workspace.Path, ready.CWD)
-	requireTerminalBinaryContains(t, conn, "runner-terminal:"+runner.Workspace.Path)
+	physicalWorkspace, err := filepath.EvalSymlinks(runner.Workspace.Path)
+	require.NoError(t, err)
+	requireTerminalBinaryContains(t, conn, "runner-terminal:"+physicalWorkspace)
 	require.NoError(t, conn.Close())
 
 	// Stopped defaults remain identified but cannot authorize workspace calls or

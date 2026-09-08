@@ -76,6 +76,32 @@ func TestWorkspaceCommitSnapshotAndApprovedMutation(t *testing.T) {
 	assert.Equal(t, "1", git("rev-list", "--count", "HEAD"))
 }
 
+func TestWorkspaceCommitPreservesRacyIndexEntries(t *testing.T) {
+	root, git := commitRepository(t)
+	git("config", "core.checkStat", "minimal")
+	git("config", "core.trustctime", "false")
+	file := filepath.Join(root, "file.txt")
+	stamp := time.Now().Add(-time.Minute).Truncate(time.Second)
+	require.NoError(t, os.Chtimes(file, stamp, stamp))
+	git("add", "file.txt")
+	service, err := NewService(t.Context(), root, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.generation = 1
+	snapshot, err := service.prepareWorkspaceCommit(t.Context(), root)
+	require.NoError(t, err)
+
+	// Reproduce a same-size edit within the index timestamp's resolution without
+	// relying on the test running quickly enough to hit that window naturally.
+	require.NoError(t, os.WriteFile(file, []byte("unstaged\n"), 0o600))
+	require.NoError(t, os.Chtimes(file, stamp, stamp))
+	require.NoError(t, os.Chtimes(filepath.Join(root, ".git", "index"), stamp, stamp))
+	_, err = service.commitWorkspace(t.Context(), commitParams(snapshot))
+	require.NoError(t, err)
+	assert.Equal(t, "approved", git("show", "HEAD:file.txt"))
+	assert.Contains(t, git("diff"), "+unstaged", "copying the index must not hide a racily clean worktree edit")
+}
+
 func TestWorkspaceCommitLargeDiffPreservesEntireStagedTree(t *testing.T) {
 	for _, initialCommit := range []bool{false, true} {
 		name := "unborn"
