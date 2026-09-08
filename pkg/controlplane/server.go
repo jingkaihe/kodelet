@@ -398,7 +398,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/fork", s.handleForkConversation).Methods("POST")
-	api.HandleFunc("/conversations/{id}/adopt", s.handleAdoptConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/move", s.handleMoveConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")

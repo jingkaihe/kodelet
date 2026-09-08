@@ -16,6 +16,7 @@ import (
 )
 
 func addRemoteConversationCommands(parent *cobra.Command) {
+	parent.Args = cobra.NoArgs
 	parent.PersistentFlags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
 	parent.PersistentFlags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 	for _, cmd := range parent.Commands() {
@@ -26,12 +27,12 @@ func addRemoteConversationCommands(parent *cobra.Command) {
 		cmd.Run = nil
 		cmd.RunE = runRemoteConversationCommand
 	}
-	parent.AddCommand(newConversationAdoptCommand())
+	parent.AddCommand(newConversationMoveCommand())
 }
 
 func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 	if cmd.Name() == "import" || cmd.Name() == "edit" {
-		return errors.Errorf("'kodelet conversation %s' is no longer supported; use 'kodelet conversation export' to save a copy, or 'kodelet conversation adopt' to continue an older conversation", cmd.Name())
+		return errors.Errorf("'kodelet conversation %s' is no longer supported; use 'kodelet conversation export' to save a copy, or 'kodelet conversation move <conversation-id> <runner-id>[:<cwd>]' to assign a runner", cmd.Name())
 	}
 	var query conversations.ListConversationsRequest
 	if cmd.Name() == "list" {
@@ -164,16 +165,28 @@ func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []s
 	}
 }
 
-func newConversationAdoptCommand() *cobra.Command {
+func newConversationMoveCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "adopt <conversation-id>",
-		Short: "Choose a runner for continuing an older conversation",
-		Args:  cobra.ExactArgs(1),
+		Use:   "move <conversation-id> <runner-id>[:<cwd>]",
+		Short: "Move a conversation to another runner or directory",
+		Long: "Update a conversation's saved runner and optionally its directory. Omit :<cwd> to keep the saved directory. " +
+			"The destination runner can be offline. No files are copied, and the destination directory and runner readiness are not checked. " +
+			"History, model settings, and the runner environment profile are preserved. The source and destination are displayed before confirmation.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.ExactArgs(2)(cmd, args); err != nil {
+				return err
+			}
+			if strings.TrimSpace(args[0]) == "" {
+				return errors.New("conversation ID is required")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runnerID, _ := cmd.Flags().GetString("runner")
-			profile, _ := cmd.Flags().GetString("runner-profile")
-			previewOnly, _ := cmd.Flags().GetBool("preview")
-			yes, _ := cmd.Flags().GetBool("yes")
+			runnerID, cwd, err := parseConversationMoveTarget(args[1])
+			if err != nil {
+				return err
+			}
+			noConfirm, _ := cmd.Flags().GetBool("no-confirm")
 			server, _ := serverFlagOrConfig(cmd)
 			token, _, err := resolveControlPlaneAuthToken(cmd, server)
 			if err != nil {
@@ -183,49 +196,60 @@ func newConversationAdoptCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			params := chat.ConversationAdoptionRequest{RunnerID: runnerID, EnvironmentProfile: profile}
+			params := chat.ConversationMoveRequest{RunnerID: runnerID, CWD: cwd}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-			preview, err := client.AdoptConversation(ctx, args[0], params)
+			preview, err := client.MoveConversation(ctx, args[0], params)
 			cancel()
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Conversation: %s\nRunner: %s (%s)\nHost: %s [%s]\nDirectory: %s\nRunner profile: %s\nModel: %s/%s (profile %s)\n", preview.ConversationID, preview.RunnerID, preview.RunnerName, preview.Hostname, preview.HostInstanceID, preview.CWD, adoptionProfileLabel(preview.EnvironmentProfile), preview.Provider, preview.Model, adoptionProfileLabel(preview.ModelProfile))
-			fmt.Fprintln(cmd.OutOrStdout(), "Check the host and directory above before continuing; the same path on another machine may contain a different workspace.")
-			if previewOnly {
-				fmt.Fprintln(cmd.OutOrStdout(), "Preview only; the conversation has not been changed.")
-				return nil
+			sourceRunner := preview.SourceRunnerID
+			if sourceRunner == "" {
+				sourceRunner = "unassigned"
 			}
-			if !yes && !strings.EqualFold(presenter.Prompt("Use this runner and directory to continue the conversation?", "y", "N"), "y") {
-				fmt.Fprintln(cmd.OutOrStdout(), "Adoption cancelled; history is unchanged.")
-				return nil
+			targetRunner := preview.RunnerID
+			if preview.RunnerName != "" {
+				targetRunner += " (" + preview.RunnerName + ")"
+			}
+			profile := preview.EnvironmentProfile
+			if profile == "" {
+				profile = "default"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Conversation: %s\nFrom runner: %s\nFrom directory: %s\nTo runner: %s\nTo directory: %s\nRunner profile: %s (unchanged)\n", preview.ConversationID, sourceRunner, preview.SourceCWD, targetRunner, preview.CWD, profile)
+			fmt.Fprintln(cmd.OutOrStdout(), "Only conversation metadata is changed. No files are copied; the destination directory and runner readiness are not checked.")
+			if !noConfirm {
+				answer := presenter.Prompt("Move this conversation?", "y", "N")
+				if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
+					fmt.Fprintln(cmd.OutOrStdout(), "Move cancelled; the conversation is unchanged.")
+					return nil
+				}
 			}
 			params.Confirmation = preview.Confirmation
 			ctx, cancel = context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
-			result, err := client.AdoptConversation(ctx, args[0], params)
+			result, err := client.MoveConversation(ctx, args[0], params)
 			if err != nil {
 				return err
 			}
-			if !result.Adopted {
+			if !result.Moved {
 				return errors.New("could not confirm the runner assignment; check 'kodelet conversation show' before trying again")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Conversation %s is ready to continue; its history and model settings are unchanged.\n", result.ConversationID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Conversation %s moved; its history and model settings are unchanged.\n", result.ConversationID)
 			return nil
 		},
 	}
-	cmd.Flags().String("runner", "", "ID of the runner to use for this conversation (required)")
-	cmd.Flags().String("runner-profile", "", "Runner environment profile (inherits stored profile, otherwise default)")
-	cmd.Flags().Bool("preview", false, "Preview the runner and directory without changing the conversation")
-	cmd.Flags().Bool("yes", false, "Confirm the displayed target without prompting")
-	_ = cmd.MarkFlagRequired("runner")
-	cmd.MarkFlagsMutuallyExclusive("preview", "yes")
+	cmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt")
 	return cmd
 }
 
-func adoptionProfileLabel(profile string) string {
-	if strings.TrimSpace(profile) == "" {
-		return "default"
+func parseConversationMoveTarget(target string) (string, string, error) {
+	runnerID, cwd, hasCWD := strings.Cut(target, ":")
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return "", "", errors.New("destination runner ID is required")
 	}
-	return profile
+	if hasCWD && strings.TrimSpace(cwd) == "" {
+		return "", "", errors.New("destination directory after ':' must not be empty; omit ':' to keep the saved directory")
+	}
+	return runnerID, cwd, nil
 }

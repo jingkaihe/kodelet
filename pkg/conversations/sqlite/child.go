@@ -16,13 +16,18 @@ func admitChild(ctx context.Context, tx *sqlx.Tx, record conversations.Conversat
 	if admission.ConversationID != record.ID || admission.RunID == "" || admission.RunnerID == "" {
 		return errors.New("child identity does not match its admission")
 	}
-	var updated time.Time
-	err := tx.GetContext(ctx, &updated, `SELECT updated_at FROM conversations WHERE id=?`, record.ID)
+	var current struct {
+		UpdatedAt time.Time `db:"updated_at"`
+		CWD       string    `db:"cwd"`
+	}
+	err := tx.GetContext(ctx, &current, `SELECT updated_at, COALESCE(cwd, '') AS cwd FROM conversations WHERE id=?`, record.ID)
 	if admission.ExpectedUpdatedAt.IsZero() {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return errors.New("child conversation already exists or cannot be checked")
 		}
-	} else if err != nil || !updated.Equal(admission.ExpectedUpdatedAt) {
+	} else if err != nil || !current.UpdatedAt.Equal(admission.ExpectedUpdatedAt) || current.CWD != record.CWD {
+		// A metadata-only move preserves history timestamps. Do not let a
+		// prepared child resume overwrite a newly selected directory.
 		return errors.New("child conversation changed during resume preparation")
 	}
 	var busy bool

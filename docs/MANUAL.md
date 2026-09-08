@@ -92,7 +92,7 @@ For running locally or building from source:
 
 `kodelet chat`, `kodelet run`, and `kodelet acp` automatically start or reuse a local background server. Provider credentials belong on the server. Select an existing server with `--server`, `KODELET_SERVER`, or the user configuration's `server` setting; explicit selections never fall back to a local server.
 
-Before upgrading, stop older Kodelet processes and back up `~/.kodelet`. Use matching client and server releases, and do not let older clients write to the upgraded database. Existing history is preserved; [adopt legacy conversations](#conversation-management) before continuing them.
+Before upgrading, stop older Kodelet processes and back up `~/.kodelet`. Use matching client and server releases, and do not let older clients write to the upgraded database. Existing history is preserved; [move legacy conversations to a runner](#conversation-management) before continuing them.
 
 ### Local background server
 
@@ -462,7 +462,7 @@ Offline registrations remain durable until explicitly removed. Stop the runner p
 kodelet runner remove kodelet-gpu --server https://kodelet.example
 ```
 
-Removing a stopped runner deletes its registration, credentials, and run history, and clears its conversation affinities. Conversations and transcripts are preserved; resume them by explicitly selecting a compatible runner. `--no-confirm` skips the prompt and is required with `--json`.
+Removing a stopped runner deletes its registration, credentials, and run history, and clears its conversation affinities. Conversations and transcripts are preserved; use `conversation move` to assign another runner before resuming. `--no-confirm` skips the removal prompt and is required with `--json`.
 
 Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. An idle compatible runner accepts a new run, and a busy runner also accepts one when it advertised concurrent-run support; legacy protocol-v1 runners that omit that capability remain capacity-one. A manifest-change flag means the connected runner detected changed context, skills, tools, commands, extensions, or relevant configuration; the changed manifest is pinned independently by the next run and never mutates an already active run.
 
@@ -608,11 +608,17 @@ kodelet conversation turn <conversation-id> <turn-id>
 
 History filters use the exact runner ID and its saved directory. Forking without a conversation ID requires `--runner` or `--cwd`. Exports are saved on your client. Remote `import` and `edit` are not supported.
 
-To continue a legacy conversation, preview its target runner and workspace, then repeat without `--preview` to confirm. Add `--runner-profile <name>` if needed. Adoption preserves history and model settings and rejects incompatible or already-bound conversations.
+Move a conversation to a registered runner, optionally changing its destination directory:
 
 ```bash
-kodelet conversation adopt <id> --runner <runner-id> --preview
+kodelet conversation move <conversation-id> <runner-id>[:<cwd>] [--no-confirm]
+kodelet conversation move conv-123 runner-b
+kodelet conversation move conv-123 'runner-b:/srv/my project' --no-confirm
 ```
+
+Omitting `:<cwd>` keeps the saved directory. Only the first colon separates runner and path; quote paths containing spaces. An empty directory after `:` is rejected. The command shows source and destination before confirmation; `--no-confirm` skips the prompt.
+
+Moves support legacy history and offline runners, preserving history, usage, model settings, and the environment profile. No files are copied and destination readiness is not checked. Finish or stop active work before moving; verify the destination before resuming.
 
 ### Database Management
 

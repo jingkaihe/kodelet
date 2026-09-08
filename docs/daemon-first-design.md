@@ -4,6 +4,8 @@
 
 All seven implementation workstreams and the agreed local acceptance gates are complete, September 6, 2026, including default cutover, validated adoption, local-runtime removal, and first-turn persistence before extension startup. Full Go tests pass at 81.1% coverage; frontend and both SDK gates pass. Actual CLI, native PTY, and browser checks cover both embedded and standalone runner placements, shared history, submitting-client UI ownership, shortcuts, and alternate-directory workspace panels. The verification record below distinguishes completed implementation from SDK publication and external-service release operations; no shipped-release claim is made.
 
+**September 8, 2026 update:** Metadata-only `conversation move` replaces the branch-only adoption command and its readiness checks. Earlier adoption discussions are historical.
+
 This design builds on the [runner design](runner-design.md) and [extension design](extension-design.md). It replaces the runner design's preservation of direct-local CLI execution with one daemon-owned execution path. It retains the existing runner protocol, control-plane ownership of the agent loop, and direct-host execution constraints. The [manual](MANUAL.md) is the concise user-facing reference.
 
 ## Summary
@@ -389,13 +391,9 @@ Global process configuration no longer merges startup-repository YAML. Trusted u
 
 Composer recall is separate from conversation transcripts: `GET`/`POST /api/chat/message-history` routes raw-message loading/appending to the selected runner's `workspace.messageHistory` capability. The runner resolves the Git-worktree/directory scope and reuses its existing JSONL history store; neither the daemon's HTTP handler nor the TUI resolves workspace paths or opens a fallback client store. Fresh conversations target the selected workspace even when their first ID has been allocated but not yet saved; resumed conversations use saved runner/CWD affinity. History errors warn without preventing chat submission.
 
-Legacy conversations without runner affinity need an explicit adoption path that validates CWD and environment compatibility before binding. Do not infer that a matching path string on another host means the same workspace. Histories that cannot be safely adopted remain readable with guidance for selecting a compatible environment or starting a new conversation.
+**Implemented conversation move:** `conversation move <conversation-id> <runner-id>[:<cwd>] [--no-confirm]` uses authenticated `POST /api/conversations/{id}/move` to plan and confirm metadata changes. It supports legacy and already-bound conversations, including offline destinations, without copying files or checking readiness. Omitted CWD preserves the saved directory; history, usage, model settings, environment profile, and timestamps remain unchanged. Affinity and conversation/summary metadata update atomically, rejecting active work and changed snapshots. Clients never retry uncertain writes automatically. See the [manual](MANUAL.md#conversation-management) for CLI details.
 
-**Implemented legacy adoption slice:** `conversation adopt <id> --runner <id> [--runner-profile <name>]` uses authenticated `POST /api/conversations/{id}/adopt`; `--preview` is read-only and `--yes` confirms the displayed explicit target without prompting. The first request returns a content digest; confirmation repeats validation and fences the saved history, effective model snapshot, canonical directory/profile, runner identity/host/generation, and discovery manifest. No default affinity, raw-record import, provider thread/request, editing tool, or credential refresh is used. Matching paths across host identities cannot reuse confirmation. Missing/noncanonical saved directories are rejected rather than relocated; unavailable profiles/providers/accounts and disallowed stored models remain readable without adoption. Credential checks establish local availability, not successful live provider authorization.
-
-The registry holds its affinity lock through an insert-only SQLite transaction, rejects pending/active/bound conversations and durable admitted turns, checks the saved record version/metadata, and adds only runner/environment provenance to conversation and summary metadata. IDs, transcript, tool results, existing metadata values, configuration snapshots, usage, and historical timestamps are retained. Any failure rolls back affinity and both metadata updates. Repeated confirmation conflicts rather than reassigning ownership; clients never retry uncertain writes automatically. Back up the shared database before migration, stop older direct-write clients, and require a matching daemon-first client/server build; no backwards-compatible concurrent legacy writer contract is offered.
-
-**Adoption verification:** focused HTTP tests exercise real standalone and embedded runner WebSocket transports, preview/confirm and actual subsequent `run.open`, same-path/different-host consent fences, wrong generation, active reservation/admitted turn, concurrent confirmation, missing directory/profile/credentials/model compatibility, unknown/raw input rejection, authentication, and transaction rollback injected at summary update. CLI subprocess tests use no client provider credential and an unusable local store, exercising preview, declined confirmation, `--yes`, required explicit runner, and already-bound rejection. Model/account tests preserve stored snapshots and verify credential checks do not refresh credentials. These gates do not claim live provider authentication, repository equivalence inferred from paths, automated batch migration, or the separate cross-client release matrix.
+**Move verification:** Tests cover parsing, confirmation, offline reassignment, history preservation, concurrency, rollback, and resume lifecycle behavior.
 
 The cutover removes direct-local CLI/provider setup, CLI ACP execution ownership, control-plane-local workspace services, and implicit public TUI fallbacks. Keep the explicitly requested library-local ACP API, central provider implementations and runner-local tool/environment implementation. Rename internal types only if it makes the boundary clearer; deleting `LocalEnvironment` is not itself a success criterion.
 
@@ -445,7 +443,7 @@ Use the same focused acceptance scenarios with an embedded runner and with a sta
 | Extension lifecycle | Two submissions, background work, failure cleanup, and unavailable UI follow the same contract on both runner placements. |
 | Workspace discovery/panels | Commands and suggestions come from the selected runner; conversation-scoped terminal and diff use the correct CWD. |
 | Daemon restart | Existing history remains valid; interrupted work is identified without claiming transparent execution recovery. |
-| Legacy conversation adoption | IDs and history survive; affinity is bound only after validating the target workspace. |
+| Conversation move | History survives atomic runner/directory reassignment, including offline destinations. |
 | Conversation-only operation | Listing, reading, and deleting history require no runner and no client-side database access. |
 | No daemon | Clients fail clearly and never create a local provider thread or execute workspace tools as fallback. |
 
@@ -475,7 +473,7 @@ Publication of matching SDK releases and migration of separately maintained exte
 | Extension compatibility expands into indefinite runtime retention | Run-isolated default, explicit leases/persistence, representative examples, documented compatibility decisions |
 | SDK inline execution quietly preserves a second runtime | Explicit disposition for inline profiles/extensions and no fallback when remote configuration is unsupported |
 | Embedded runner failure takes down local execution with the daemon | Document shared lifetime; retain standalone deployment without changing client semantics |
-| Migration binds history to the wrong host directory | Validated affinity adoption and read-only access when compatibility cannot be established |
+| Migration binds history to the wrong host directory | Confirm source/destination; copy no files; validate the workspace at execution time |
 
 The embedded runner is not a security boundary from the control plane: it shares the process, and the direct-host runner remains within the trusted host execution model. This design does not introduce token environment/argv scrubbing or claim that selectively hiding process credentials would isolate tools from their host.
 
@@ -609,6 +607,8 @@ Disconnect dismisses prompts and revokes input without cancelling execution. Rea
 **Owner and completion:** Workstreams 1, 3, 6, and 7. Migrate internal callers before removing the flag, update user-facing references, and test explicit rejection of the removed option.
 
 ### 9. How do existing local conversations become runner-backed?
+
+**Historical proposal:** Superseded by the metadata-only move implementation above.
 
 **Question:** What explicit adoption workflow binds legacy local conversations to a compatible runner while preserving history?
 

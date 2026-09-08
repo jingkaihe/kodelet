@@ -65,10 +65,23 @@ type checkpointDiscardSink struct{}
 
 func (*checkpointDiscardSink) Send(chat.ChatEvent) error { return nil }
 
+func checkpointTestModelPolicy(t *testing.T) {
+	t.Helper()
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "checkpoint-local-presence-only")
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "checkpoint-main")
+	viper.Set("weak_model", "checkpoint-weak")
+	viper.Set("anthropic_api_access", "api-key")
+}
+
 func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing.T) {
 	for _, placement := range []string{"embedded", "standalone"} {
 		t.Run(placement, func(t *testing.T) {
-			adoptionTestModelPolicy(t)
+			checkpointTestModelPolicy(t)
 			config := embeddedRunnerTestConfig(t)
 			t.Setenv("OPENAI_API_KEY", "central-checkpoint-key")
 			var calls atomic.Int32

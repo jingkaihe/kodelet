@@ -78,7 +78,7 @@ func TestChildAdmissionPreservesHistoryAndTransfersOnlyOwnedGuidance(t *testing.
 }
 
 func TestChildAdmissionRejectsChangedBusyCancelledAndRollsBack(t *testing.T) {
-	for _, scenario := range []string{"ordinary accepted", "ordinary running", "stale record", "same run cancelled", "wrong affinity", "summary failure", "insert exists", "cancelled context"} {
+	for _, scenario := range []string{"ordinary accepted", "ordinary running", "stale record", "moved directory", "same run cancelled", "wrong affinity", "summary failure", "insert exists", "cancelled context"} {
 		t.Run(scenario, func(t *testing.T) {
 			store, _ := childAdmissionStore(t)
 			record := convtypes.NewConversationRecord("child")
@@ -99,6 +99,9 @@ func TestChildAdmissionRejectsChangedBusyCancelledAndRollsBack(t *testing.T) {
 				_, err = store.db.Exec(`INSERT INTO chat_turns (conversation_id,turn_id,status,created_at,updated_at) VALUES ('child','ordinary',?,?,?)`, status, now, now)
 			case "stale record":
 				admission.ExpectedUpdatedAt = now.Add(-time.Hour)
+			case "moved directory":
+				// Moves retain updated_at, but a stale resume must not restore CWD.
+				_, err = store.db.Exec(`UPDATE conversations SET cwd='/new/workspace' WHERE id='child'`)
 			case "same run cancelled":
 				_, err = store.db.Exec(`INSERT INTO chat_turns (conversation_id,turn_id,status,cancel_requested,created_at,updated_at) VALUES ('child','new','cancelled',TRUE,?,?)`, now, now)
 			case "wrong affinity":
@@ -120,6 +123,9 @@ func TestChildAdmissionRejectsChangedBusyCancelledAndRollsBack(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, record.RawMessages, after.RawMessages)
 			assert.Equal(t, record.UpdatedAt, after.UpdatedAt)
+			if scenario == "moved directory" {
+				assert.Equal(t, "/new/workspace", after.CWD)
+			}
 			var count int
 			require.NoError(t, store.db.Get(&count, `SELECT COUNT(*) FROM chat_turns WHERE conversation_id='child' AND turn_id='new' AND status='running'`))
 			assert.Zero(t, count)

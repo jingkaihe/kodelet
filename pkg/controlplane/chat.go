@@ -69,7 +69,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 		_, err := r.server.conversationService.GetConversation(ctx, conversationID)
 		switch {
 		case err == nil:
-			return conversationID, errors.New("this older conversation needs a runner before it can continue; use 'kodelet conversation adopt'")
+			return conversationID, errors.New("this older conversation needs a runner before it can continue; use 'kodelet conversation move'")
 		case stdErrors.Is(err, convtypes.ErrConversationNotFound):
 			// A client may allocate the conversation ID before the first turn.
 		default:

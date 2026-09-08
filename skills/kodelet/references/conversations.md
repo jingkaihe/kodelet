@@ -19,12 +19,17 @@ kodelet conversation show <id> --no-header
 kodelet conversation delete <id>
 kodelet conversation fork [id]
 
+# Move runner/directory; omit :<cwd> to keep the saved directory
+kodelet conversation move <id> <runner-id>[:<cwd>] [--no-confirm]
+
 # Rename without invoking the model
 kodelet run --resume <id> "/rename New conversation name"
 kodelet run --follow "/rename New name for the latest conversation"
 ```
 
 `conversation list --search` matches conversation IDs, working directories, first messages, and summaries.
+
+`conversation move` supports legacy history and registered offline runners. It preserves history and settings, copies no files, and does not check destination readiness. Finish or stop active work first. The command displays the move before confirmation; `--no-confirm` skips the prompt.
 
 Persisted conversations are named deterministically from the first user message, with whitespace folded and generated names limited to 100 characters. The generated name remains stable across later saves and context compaction. Use `/rename <name>` in terminal chat, ACP, or the Web UI, or use the `kodelet run --resume/--follow` forms above; an explicit rename takes precedence and does not invoke an LLM.
 

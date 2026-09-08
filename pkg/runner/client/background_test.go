@@ -155,6 +155,114 @@ func TestBackgroundSessionStartLeaseActivatesAndReattaches(t *testing.T) {
 	assertBackgroundProcessStopped(t, fresh.PID)
 }
 
+func TestBackgroundSavedDirectoryMoveReplacesIdleResources(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "lease")
+	destination := t.TempDir()
+	extensionPath := filepath.Join(".kodelet", "extensions", "kodelet-extension-lifetime")
+	script, err := os.ReadFile(filepath.Join(workspace, extensionPath))
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(destination, extensionPath)), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(destination, extensionPath), script, 0o700))
+	provider := &recordingExecutionInstanceProvider{workspace: workspace}
+	service.instanceProvider = provider
+	peer := &backgroundLeasePeer{released: make(chan delegation.Params, 4)}
+	service.Attach(peer)
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "original", ConversationID: "conversation", CWD: workspace, ExpectedCWD: workspace,
+	})
+	require.NoError(t, err)
+	state := backgroundState(t, workspace, "conversation")
+	require.NoError(t, service.closeRun(t.Context(), "original"))
+	previousRunID := "original"
+	for i, cwd := range []string{destination, workspace} {
+		resources := service.backgrounds["conversation"]
+		require.NotNil(t, resources)
+		require.Empty(t, resources.attachedRunID)
+		instance := provider.instances[i]
+		assert.False(t, instance.closed)
+		require.NoError(t, syscall.Kill(state.PID, 0), "completed runs retain their background worker")
+		provider.workspace = cwd
+		runID := fmt.Sprintf("moved-%d", i)
+		manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
+			RunID: runID, ConversationID: "conversation", CWD: cwd, ExpectedCWD: cwd,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, cwd, manifest.WorkingDirectory)
+		assert.NotSame(t, resources, service.runs[runID].resources)
+		assert.True(t, instance.closed, "relocation closes the previous execution instance")
+		assert.ErrorIs(t, resources.runtimeLeaseCtx.Err(), context.Canceled)
+		assertBackgroundProcessStopped(t, state.PID)
+		service.mu.Lock()
+		assert.Empty(t, resources.leases)
+		assert.NotContains(t, service.backgroundLeases, state.LeaseID)
+		assert.NotContains(t, service.backgroundRunIDs, previousRunID)
+		assert.NotContains(t, service.backgroundCleanup, resources)
+		service.mu.Unlock()
+		select {
+		case released := <-peer.released:
+			assert.Equal(t, previousRunID, released.RunID)
+			assert.Equal(t, state.LeaseID, released.LeaseID)
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, "relocation did not release the old worker's child authority")
+		}
+		data, err := os.ReadFile(filepath.Join(state.DataDir, "conversation.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "persisted", string(data), "relocation must not delete extension storage")
+		state = backgroundState(t, cwd, "conversation")
+		require.NotEmpty(t, state.LeaseID)
+		require.NoError(t, service.closeRun(t.Context(), runID))
+		previousRunID = runID
+	}
+	require.NoError(t, service.Close())
+	assertBackgroundProcessStopped(t, state.PID)
+}
+
+func TestBackgroundDirectoryChangeRequiresMatchingSavedDirectoryAndIdleRun(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "lease")
+	destination := t.TempDir()
+	_, err := service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "original", ConversationID: "conversation", CWD: workspace, ExpectedCWD: workspace,
+	})
+	require.NoError(t, err)
+	state := backgroundState(t, workspace, "conversation")
+	resources := service.backgrounds["conversation"]
+	require.NotNil(t, resources)
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "active-move", ConversationID: "conversation", CWD: destination, ExpectedCWD: destination,
+	})
+	require.ErrorContains(t, err, "already has active run")
+	assert.Equal(t, "original", resources.attachedRunID)
+	require.NoError(t, service.closeRun(t.Context(), "original"))
+	for _, test := range []struct{ name, cwd, expected string }{
+		{"missing saved directory", destination, ""},
+		{"unchanged saved directory", destination, workspace},
+		{"different saved directory", destination, "/another/saved/directory"},
+		{"unchanged request", workspace, destination},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := service.openRun(t.Context(), protocol.RunOpenParams{
+				RunID: "rejected", ConversationID: "conversation", CWD: test.cwd, ExpectedCWD: test.expected,
+			})
+			require.ErrorContains(t, err, "bound to working directory")
+			service.mu.Lock()
+			assert.Same(t, resources, service.backgrounds["conversation"])
+			assert.Contains(t, service.backgroundLeases, state.LeaseID)
+			assert.Same(t, resources, service.backgroundRunIDs["original"])
+			assert.Empty(t, service.backgroundCleanup)
+			assert.Empty(t, service.runs)
+			service.mu.Unlock()
+			require.NoError(t, syscall.Kill(state.PID, 0), "rejected requests must not stop retained workers")
+		})
+	}
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "unchanged", ConversationID: "conversation", CWD: workspace, ExpectedCWD: workspace,
+	})
+	require.NoError(t, err)
+	assert.Same(t, resources, service.runs["unchanged"].resources, "ordinary resume still reuses retained resources")
+	require.NoError(t, service.Close())
+	assertBackgroundProcessStopped(t, state.PID)
+}
+
 func TestBackgroundFailedOpenRevokesProvisionalLeases(t *testing.T) {
 	service, workspace := newBackgroundTestService(t, "lease")
 	environment := &failingOpenEnvironment{}

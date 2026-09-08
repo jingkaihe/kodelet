@@ -51,6 +51,14 @@ kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 ```
 
+### Moving Conversations
+
+```bash
+kodelet conversation move <conversation-id> <runner-id>[:<cwd>] [--no-confirm]
+```
+
+Assign legacy history or move between registered runners, including offline runners. Omit `:<cwd>` to keep the saved directory; `--no-confirm` skips the prompt. Moves preserve history and settings without copying files or checking the destination. Active turns must finish first. See the [manual](MANUAL.md#conversation-management) for examples.
+
 ## Resuming Conversations
 
 You can resume a conversation in one-shot mode:
@@ -62,6 +70,6 @@ kodelet run --resume <conversation-id> "new message"
 
 ## Storage
 
-Conversation data is stored in the daemon's SQLite database. Clients use the daemon API and do not open a local conversation store. Existing history remains readable after upgrading; continuing legacy history requires `kodelet conversation adopt` with an explicitly selected runner.
+Conversation data is stored in the daemon's SQLite database. Clients use the daemon API and do not open a local conversation store. Existing history remains readable after upgrading; use `conversation move` to assign a runner before continuing legacy history.
 
 All user-facing runs save their conversations, including `--result-only`. The `--no-save` flag is removed and fails explicitly; there is no transient replacement mode.

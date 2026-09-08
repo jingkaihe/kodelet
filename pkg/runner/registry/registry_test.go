@@ -1575,6 +1575,83 @@ func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) 
 	assert.True(t, errors.Is(err, ErrRunnerNotFound))
 }
 
+func TestRemoveRunnerPreservesMovedConversationActiveRun(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+
+	conversation := conversationtypes.NewConversationRecord("conversation-one")
+	conversation.CWD = "/work/project"
+	require.NoError(t, conversationStore.Save(t.Context(), conversation))
+	firstLink, secondLink := newFakeLink(), newFakeLink()
+	first, err := registry.Register(testRegisterParams("host-one", conversation.CWD), firstLink)
+	require.NoError(t, err)
+	second, err := registry.Register(testRegisterParams("host-two", conversation.CWD), secondLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, first)
+	configureManifestLink(t, secondLink, second)
+	markRunnerReady(t, registry, first)
+	markRunnerReady(t, registry, second)
+
+	_, err = registry.OpenRun(t.Context(), first.RunnerID, testRunOpenParams("historical-run", conversation.ID))
+	require.NoError(t, err)
+	require.NoError(t, registry.CommitConversationAffinity(t.Context(), conversation.ID))
+	require.NoError(t, registry.CloseRun(t.Context(), "historical-run", RunStatusSucceeded, nil))
+	registry.Detach(first.RunnerID, first.ConnectionID, first.Generation, nil)
+
+	conversation, err = conversationStore.Load(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	source, found, err := registry.ResolveConversationAffinity(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NoError(t, registry.MoveConversation(t.Context(), conversation, source, second.RunnerID, conversation.CWD))
+	_, err = registry.OpenRun(t.Context(), second.RunnerID, testRunOpenParams("active-run", conversation.ID))
+	require.NoError(t, err)
+
+	result, err := registry.RemoveRunner(t.Context(), first.RunnerID, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.RemovedRuns)
+	assert.Zero(t, result.RemovedConversationAffinities)
+	_, found = registry.Run("historical-run")
+	assert.False(t, found)
+	registry.mu.RLock()
+	activeRunID := registry.affinities.activeRun(conversation.ID)
+	registry.mu.RUnlock()
+	assert.Equal(t, "active-run", activeRunID, "removing a historical runner must not release the moved conversation's active lease")
+	active, found := registry.Run("active-run")
+	require.True(t, found)
+	assert.Equal(t, second.RunnerID, active.RunnerID)
+	assert.Equal(t, RunStatusRunning, active.Status)
+	affinity, found, err := registry.ResolveConversationAffinity(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, second.RunnerID, affinity.RunnerID)
+
+	_, err = registry.OpenRun(t.Context(), second.RunnerID, testRunOpenParams("competing-run", conversation.ID))
+	require.ErrorContains(t, err, "conversation already has active run active-run")
+	_, found = registry.Run("competing-run")
+	assert.False(t, found)
+	runner, found := registry.Runner(second.RunnerID)
+	require.True(t, found)
+	assert.Equal(t, []string{"active-run"}, runner.ActiveRunIDs)
+	require.NoError(t, registry.CloseRun(t.Context(), "active-run", RunStatusSucceeded, nil))
+}
+
 func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
 	database, err := db.Open(t.Context(), dbPath)
@@ -1699,10 +1776,10 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	replacement, err := secondRegistry.Register(replacementParams, newFakeLink())
 	require.NoError(t, err)
 	markRunnerReady(t, secondRegistry, replacement)
-	require.NoError(t, secondRegistry.AdoptConversation(t.Context(), loadedConversation, replacement.RunnerID, replacement.Generation, "default"))
+	require.NoError(t, secondRegistry.MoveConversation(t.Context(), loadedConversation, ConversationAffinity{}, replacement.RunnerID, loadedConversation.CWD))
 	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
 	require.NoError(t, err)
-	assert.Equal(t, requiredIDs, ids, "adoption must not discard preserved callback identities")
+	assert.Equal(t, requiredIDs, ids, "move must not discard preserved callback identities")
 
 	// Ordinary manifest updates, including an explicitly callback-free manifest,
 	// remain authoritative rather than reviving stale fallback requirements.

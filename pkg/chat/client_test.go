@@ -49,6 +49,70 @@ type failingControlPlaneChatSink struct {
 
 func (s failingControlPlaneChatSink) Send(ChatEvent) error { return s.err }
 
+func TestMoveConversationClient(t *testing.T) {
+	for _, scenario := range []string{"plan", "confirm", "HTTP conflict", "invalid response", "transport failure", "missing conversation", "missing runner"} {
+		t.Run(scenario, func(t *testing.T) {
+			id := "conversation-one"
+			params := ConversationMoveRequest{RunnerID: "offline-runner", CWD: "/missing directory:with-colon"}
+			if scenario == "confirm" {
+				params.Confirmation = "confirmed-plan"
+			}
+			if scenario == "missing conversation" {
+				id = " "
+			}
+			if scenario == "missing runner" {
+				params.RunnerID = " "
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/base/api/conversations/conversation-one/move", r.URL.Path)
+				assert.Equal(t, "Bearer client-token", r.Header.Get("Authorization"))
+				var request ConversationMoveRequest
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+				assert.Equal(t, params, request)
+				switch scenario {
+				case "HTTP conflict":
+					http.Error(w, "conversation changed", http.StatusConflict)
+				case "invalid response":
+					_, _ = fmt.Fprint(w, "not JSON")
+				case "transport failure":
+					connection, _, err := w.(http.Hijacker).Hijack()
+					require.NoError(t, err)
+					require.NoError(t, connection.Close())
+				default:
+					require.NoError(t, json.NewEncoder(w).Encode(ConversationMoveResult{
+						ConversationID: id, SourceRunnerID: "source-runner", SourceCWD: "/source",
+						RunnerID: params.RunnerID, CWD: params.CWD,
+						Confirmation: "confirmed-plan", Moved: params.Confirmation != "",
+					}))
+				}
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewClient(server.URL+"/base", "client-token", "ignored-default-runner")
+			require.NoError(t, err)
+			result, err := client.MoveConversation(t.Context(), id, params)
+			switch scenario {
+			case "plan", "confirm":
+				require.NoError(t, err)
+				assert.Equal(t, "source-runner", result.SourceRunnerID)
+				assert.Equal(t, params.RunnerID, result.RunnerID)
+				assert.Equal(t, params.CWD, result.CWD)
+				assert.Equal(t, "confirmed-plan", result.Confirmation)
+				assert.Equal(t, scenario == "confirm", result.Moved)
+			default:
+				require.Error(t, err)
+			}
+			if strings.HasPrefix(scenario, "missing ") {
+				assert.Zero(t, calls)
+			} else {
+				assert.Equal(t, 1, calls, "moves must never retry an uncertain mutation")
+			}
+		})
+	}
+}
+
 func TestWorkspaceTargetQueryValues(t *testing.T) {
 	for _, tt := range []struct {
 		name   string

@@ -243,7 +243,7 @@ func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token
 			return nil, err
 		}
 		if history.RunnerID == "" {
-			return nil, errors.New("this older conversation has no saved runner; use 'kodelet conversation adopt' before continuing, or start a new conversation")
+			return nil, errors.New("this older conversation has no saved runner; use 'kodelet conversation move <conversation-id> <runner-id>[:<cwd>]' before continuing, or start a new conversation")
 		}
 		// Omitted CWD stays omitted: the server validates the stored affinity.
 		request.RunnerID = history.RunnerID

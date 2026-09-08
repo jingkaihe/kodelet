@@ -1651,7 +1651,9 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 		if r.persistence == nil {
 			result.RemovedRuns++
 		}
-		r.affinities.deactivate(run.ConversationID)
+		if r.affinities.activeRun(run.ConversationID) == runID {
+			r.affinities.deactivate(run.ConversationID)
+		}
 		r.clearRunTransientStateLocked(runID)
 		delete(r.runs, runID)
 	}

@@ -153,7 +153,7 @@ func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes
 		return chat.ConversationHistory{}, errors.New("the model profile cannot be changed when resuming; start a new session to use another profile")
 	}
 	if strings.TrimSpace(history.CWD) == "" {
-		return chat.ConversationHistory{}, errors.New("the conversation has no saved working directory on its runner; adopt it before resuming")
+		return chat.ConversationHistory{}, errors.New("the conversation has no saved working directory on its runner; use 'kodelet conversation move <conversation-id> <runner-id>:<cwd>' before resuming")
 	}
 	if strings.TrimSpace(request.CWD) != "" && strings.TrimSpace(request.CWD) != history.CWD {
 		return chat.ConversationHistory{}, errors.Errorf("this conversation uses %s and cannot resume in %s; start a new session to use another directory", history.CWD, request.CWD)

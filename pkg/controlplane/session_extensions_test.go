@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,52 @@ func TestSessionExtensionWebsocketAuthentication(t *testing.T) {
 			require.NoError(t, response.Body.Close())
 		})
 	}
+}
+
+func TestSessionExtensionsReattachAfterConversationMove(t *testing.T) {
+	f := newConversationMoveFixture(t)
+	var runners []string
+	for _, name := range []string{"source", "destination"} {
+		link := newRunnerAPITestLink()
+		link.call = func(_ context.Context, method string, _, _ any) error {
+			assert.Fail(t, "moving or attaching idle callbacks must not call runners", method)
+			return errors.New("unexpected runner RPC")
+		}
+		registration, err := f.server.runnerRegistry.Register(protocol.RegisterParams{
+			ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{SessionExtensions: true},
+			Host: protocol.Host{InstanceID: name}, Workspace: protocol.Workspace{Path: "/workspace", Name: name},
+		}, link)
+		require.NoError(t, err)
+		require.NoError(t, f.server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+			RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle,
+		}))
+		runners = append(runners, registration.RunnerID)
+	}
+	record := convtypes.NewConversationRecord("moving-callbacks")
+	record.CWD = "/workspace"
+	record.Metadata["session_extension_ids"] = []string{"inline-1"}
+	record = f.save(t, record)
+	f.move(t, record.ID, chat.ConversationMoveRequest{RunnerID: runners[0]})
+	callback := func(context.Context, protocol.ExtensionFrame) error { return nil }
+	oldRelay, err := f.client.AttachSessionExtensions(t.Context(), record.ID, runners[0], []string{"inline-1"}, callback)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = oldRelay.Close() })
+	f.server.sessionExtensionsMu.Lock()
+	oldAttachment := f.server.sessionExtensions[oldRelay.Attachment().ID]
+	f.server.sessionExtensionsMu.Unlock()
+	require.NotNil(t, oldAttachment)
+	f.move(t, record.ID, chat.ConversationMoveRequest{RunnerID: runners[1]})
+	require.NoError(t, oldAttachment.ctx.Err(), "the move itself does not contact or transfer live callbacks")
+	newRelay, err := f.client.AttachSessionExtensions(t.Context(), record.ID, runners[1], []string{"inline-1"}, callback)
+	require.NoError(t, err, "an attachment on the former runner must not block the new destination")
+	t.Cleanup(func() { _ = newRelay.Close() })
+	assert.ErrorIs(t, oldAttachment.ctx.Err(), context.Canceled)
+	assert.Error(t, f.server.validateSessionExtensionRequirements(record.ID, nil))
+	require.NoError(t, f.server.validateSessionExtensionRequirements(record.ID, []string{"inline-1"}))
+	_, err = f.client.AttachSessionExtensions(t.Context(), record.ID, runners[0], []string{"inline-1"}, callback)
+	require.ErrorContains(t, err, "bound to another runner")
+	_, err = f.client.AttachSessionExtensions(t.Context(), record.ID, runners[1], []string{"inline-1"}, callback)
+	require.ErrorContains(t, err, "already has a live")
 }
 
 func TestSessionExtensionRelayRoundTripOwnershipAndDisconnect(t *testing.T) {

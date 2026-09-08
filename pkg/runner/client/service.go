@@ -492,14 +492,27 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		}
 	}
 	resources := s.backgrounds[params.ConversationID]
+	var movedResources *runnerBackgroundResources
+	if resources != nil {
+		if resources.attachedRunID != "" {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("conversation already has attached background run %s", resources.attachedRunID)
+		}
+		// A metadata-only move can change the saved directory without contacting
+		// this runner. Only the server's matching ExpectedCWD authorizes replacing
+		// idle resources; an ordinary request cannot discard another workspace.
+		if resolvedRequestedCWD != resources.workingDirectory && strings.TrimSpace(params.ExpectedCWD) == resolvedRequestedCWD {
+			for leaseID := range resources.leases {
+				s.removeBackgroundLeaseLocked(resources, leaseID)
+			}
+			s.detachBackgroundResourcesIfUnusedLocked(resources)
+			movedResources, resources = resources, nil
+		}
+	}
 	if resources != nil {
 		if params.SessionExtensions != nil || resources.runtime.HasSessionExtensions() {
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.New("cannot reattach session extensions to retained background resources; release background leases first")
-		}
-		if resources.attachedRunID != "" {
-			s.mu.Unlock()
-			return runnerpayload.Manifest{}, errors.Errorf("conversation already has attached background run %s", resources.attachedRunID)
 		}
 		if resources.variant != variant {
 			s.mu.Unlock()
@@ -544,6 +557,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	operationCtx, finishOperation := runOperationContext(ctx, run)
 	defer finishOperation()
 	operationCtx = s.decorateRunContext(operationCtx, run.id, run.conversationID)
+	if movedResources != nil {
+		if err := s.closeBackgroundResources(context.WithoutCancel(operationCtx), movedResources); err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to close background resources from the previous working directory")
+		}
+	}
 	if err := s.lockSnapshot(operationCtx); err != nil {
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, err

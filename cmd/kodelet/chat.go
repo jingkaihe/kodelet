@@ -196,13 +196,13 @@ func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequ
 
 func validateDaemonChatAffinity(history chatpkg.ConversationHistory, request chatpkg.ChatRequest, explicitRunnerID string) error {
 	if history.ID != request.ConversationID || history.RunnerID == "" || history.CWD == "" {
-		return errors.New("this conversation has no saved runner or working directory; use 'kodelet conversation adopt' before resuming")
+		return errors.New("this conversation has no saved runner or working directory; use 'kodelet conversation move <conversation-id> <runner-id>[:<cwd>]' before resuming")
 	}
 	if explicitRunnerID != "" && explicitRunnerID != history.RunnerID {
-		return errors.New("this conversation uses a different runner; omit --runner to use its saved runner")
+		return errors.New("this conversation uses a different runner; omit --runner to use its saved runner, or use 'kodelet conversation move' to change it first")
 	}
 	if request.CWD != "" && request.CWD != history.CWD {
-		return errors.New("the working directory cannot be changed when resuming; start a new conversation to use another directory")
+		return errors.New("the working directory cannot be changed when resuming; use 'kodelet conversation move' to change it first, or start a new conversation")
 	}
 	if request.Profile != "" && chatpkg.NormalizeRequestedProfile(request.Profile) != chatpkg.NormalizeRequestedProfile(history.Profile) {
 		return errors.New("the model profile cannot be changed when resuming; start a new conversation to use another profile")

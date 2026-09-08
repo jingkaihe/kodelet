@@ -107,11 +107,6 @@ func (a *sessionExtensionAttachment) HandleRequest(ctx context.Context, method s
 		if !ok || !runner.Connected || !runner.SessionExtensions {
 			return nil, sessionExtensionRPCError(errors.New("the selected runner does not support session extensions or is offline; update and reconnect the runner"))
 		}
-		if affinity, exists, err := a.server.runnerRegistry.ResolveConversationAffinity(ctx, request.ConversationID); err != nil {
-			return nil, sessionExtensionRPCError(err)
-		} else if exists && affinity.RunnerID != runner.ID {
-			return nil, sessionExtensionRPCError(errors.New("conversation is bound to another runner"))
-		}
 		if err := a.server.validateSessionExtensionRequirements(request.ConversationID, descriptor.ExtensionIDs); err != nil {
 			return nil, sessionExtensionRPCError(err)
 		}
@@ -120,8 +115,22 @@ func (a *sessionExtensionAttachment) HandleRequest(ctx context.Context, method s
 		if a.closed || a.descriptor.ID != "" {
 			return nil, sessionExtensionRPCError(errors.New("this connection has already attached or closed"))
 		}
-		for _, existing := range a.server.sessionExtensions {
+		// Resolve under the attachment lock so an older attach request cannot
+		// replace an attachment that already follows a conversation move.
+		if affinity, exists, err := a.server.runnerRegistry.ResolveConversationAffinity(ctx, request.ConversationID); err != nil {
+			return nil, sessionExtensionRPCError(err)
+		} else if exists && affinity.RunnerID != runner.ID {
+			return nil, sessionExtensionRPCError(errors.New("conversation is bound to another runner"))
+		}
+		for id, existing := range a.server.sessionExtensions {
 			if existing.conversationID == request.ConversationID {
+				if existing.identity.RunnerID != runner.ID || existing.ctx.Err() != nil {
+					// A move does not contact runners or transfer live callbacks.
+					// Reattachment on the saved destination replaces the old owner.
+					existing.cancel()
+					delete(a.server.sessionExtensions, id)
+					continue
+				}
 				return nil, sessionExtensionRPCError(errors.New("conversation already has a live session extension attachment"))
 			}
 		}
