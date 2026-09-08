@@ -8,16 +8,10 @@ log_level: "info"
 # Log format for the application (json, text, fmt)
 log_format: "json"
 
-# Default Kodelet control-plane URL for run, conversation, chat, ACP, and runner commands.
-# Ordinary commands always use the daemon. Without an explicit server, chat/run/ACP
-# start a detached local server when needed (default port 8080) and discover its
-# endpoint/token under ~/.kodelet/server/ (or $KODELET_BASE_PATH/server/).
+# Default daemon URL. When unset, chat/run/ACP start or reuse a local server.
 # KODELET_SERVER overrides this setting; --server overrides both.
-# Explicit server selections are connect-only, with no automatic local fallback.
-# Saved OIDC sign-ins and serve.web_auth_mode: oidc also keep the selected endpoint
-# connect-only, including the default http://localhost:8080 without --server.
-# This security-sensitive option is honored only from ~/.kodelet/config.yaml or
-# a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
+# Explicit servers and existing OIDC setups are connect-only.
+# Set this in ~/.kodelet/config.yaml or KODELET_CONFIG_FILE, not repository config.
 # server: "https://kodelet.example"
 
 # `kodelet serve` settings may be stored under `serve` in ~/.kodelet/config.yaml
@@ -25,53 +19,19 @@ log_format: "json"
 # kodelet-config.yaml cannot set this namespace. Explicit CLI flags override the
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
-# modes: token, enrollment, none. Automatic local startup requires loopback binding,
-# token authentication, and embedded_runner: true. Use explicit serve/--server for
-# the public OIDC deployment example below. Use `kodelet server restart` to apply
-# changes to a managed daemon; `kodelet server stop` leaves history intact.
-# Managed runner_workspace defaults to the home directory for stable identity;
-# foreground serve defaults to its startup directory. Each new same-host chat/run
-# still uses the client's current directory. port: 0 publishes an available port.
-# The embedded runner inherits trusted daemon top-level environment settings:
-# tool_mode, sysprompt, sysprompt_args, enable_fs_search_tools, bash, context,
-# skills, extensions, allowed_tools, allowed_commands, allowed_domains_file,
-# and environment_profiles. Do not duplicate them under runner_settings unless
-# you want explicit overrides stronger than model-profile preferences.
-# Embedded environment preference precedence (lowest to highest):
-# daemon base/defaults -> selected model profile environment settings ->
-# explicit serve.runner_settings -> permitted per-CWD repository settings ->
-# selected trusted environment profile -> request narrowing.
-# Explicit runner settings override tool_mode, sysprompt/sysprompt_args,
-# enable_fs_search_tools, context, bash, etc., and may narrow permissions.
-# Selected daemon model/base allowed_tools, allowed_commands, skills.enabled:false,
-# and extensions.enabled:false are mandatory ceilings, as on normal remote runs:
-# intersect (deny wins), not last-write-wins. Runner settings and environment
-# profiles cannot relax them; the embedded loader enforces them before discovery.
-# Repository settings cannot widen effective trusted host restrictions, including
-# skills.allowed, extension allow/deny and per-tool settings, or allowed_domains_file;
-# they cannot define model or environment profiles.
-# Defaults and trusted profile definitions are pinned at startup: restart
-# kodelet serve after changing them. Per-run settings are isolated, including
-# concurrent runs with different profiles, CWDs, and request restrictions.
-# Standalone runners keep their own environment preferences, but still enforce
-# the daemon's mandatory restrictions sent with remote runs.
+# modes: token, enrollment, none.
+# Start this public OIDC example with `kodelet serve`. Automatic local startup
+# requires loopback binding, token authentication, and embedded_runner: true.
+# Restart the server after changing defaults (`kodelet server restart` locally).
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080
-#   # Embedded runner enabled by default; set false for external runners only.
-#   # Workspace operations always use runners. serve.cwd is no longer supported.
+#   # Set false to use only separately managed runners.
 #   embedded_runner: true
 #   # runner_workspace: "/srv/workspaces"
-#   # Optional environment overrides; model/provider settings and credentials
-#   # stay daemon-owned and are not passed in runner settings.
+#   # Optional workspace overrides; otherwise inherits daemon settings.
 #   # runner_settings:
-#   #   tool_mode: "full"
-#   #   allowed_tools: ["bash", "file_read", "file_write", "apply_patch"]
-#   #   environment_profiles:
-#   #     review:
-#   #       allowed_tools: ["file_read"]
-#   # Per-execution kodelet-config.yaml may narrow effective host permissions,
-#   # but cannot define profiles or enable host-disabled skills/extensions.
+#   #   allowed_tools: ["bash", "apply_patch"]
 #   web_auth_mode: "oidc"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.
@@ -151,16 +111,8 @@ aliases:
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "anthropic"
 
-# Daemon model profiles come only from trusted daemon configuration.
-# The embedded runner applies the selected profile's environment preferences below
-# explicit serve.runner_settings; inherited permission ceilings cannot be relaxed.
-# A model profile identifier selects a locally pinned environment projection,
-# not transported model/provider configuration or credentials.
-# --profile default uses the base; blank/omitted uses the daemon's active default;
-# a named --profile selects that profile. This does not select --runner-profile.
-# Saved conversations whose named model profile was removed retain snapshotted
-# model identity and fall back to base environment, not the active named default.
-# Unknown model profiles still fail for new conversations.
+# Model profiles belong in daemon configuration; select one with --profile.
+# Omitted fields inherit daemon defaults.
 profiles:
   anthropic:
     model: "claude-opus-5"
@@ -184,6 +136,8 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
+    tool_mode: "patch"
+    enable_fs_search_tools: false
     openai:
       platform: "copilot"
       api_mode: "responses"
@@ -212,6 +166,8 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
+    tool_mode: "patch"
+    enable_fs_search_tools: false
     openai:
       api_mode: "responses"
 
@@ -222,19 +178,15 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     allowed_reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+    tool_mode: "patch"
+    enable_fs_search_tools: false
     openai:
       platform: "codex"
       api_mode: "responses"
 
-# Trusted environment profiles are separate from daemon model/provider profiles.
-# Both the embedded runner in `kodelet serve` and standalone `kodelet runner start`
-# resolve them on the runner host before context, tools, skills, recipes, and
-# extensions are discovered. The embedded runner inherits these definitions;
-# standalone runners use their own trusted configuration. Repositories cannot
-# define profiles. Select one with --runner-profile workspace; blank/default
-# adds no named environment-profile overrides to the effective run settings.
-# Environment profiles cannot relax inherited daemon tool/command allowlists
-# or skill/extension disablements.
+# Runner environment profiles are separate from model profiles; select with --runner-profile.
+# Supported by both embedded and standalone runners. Define in user configuration,
+# not repository files; profiles cannot relax daemon permission restrictions.
 environment_profiles:
   workspace:
     allowed_tools:
@@ -338,12 +290,10 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from the main-agent
 #   toolset, and ensures apply_patch is available
-# Typed request/preset allowedTools selects tools independently within explicit policy.
 tool_mode: full
 
 # Enable built-in filesystem search tools (glob_tool and grep_tool).
 # Disabled by default; the agent is instructed to use fd/rg via the bash tool instead.
-# This is a default selection; typed enableFSSearchTools: false is an inherited restriction.
 # enable_fs_search_tools: true
 
 # Context-window utilization ratio that triggers automatic context compaction.

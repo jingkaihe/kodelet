@@ -90,9 +90,9 @@ For running locally or building from source:
 
 ## Usage Modes
 
-Run `kodelet chat`, `kodelet run`, or `kodelet acp` directly: when no server is explicitly selected, Kodelet starts a detached local server if needed and discovers its API credential automatically. Subsequent clients reuse it. Provider credentials belong on the daemon. Use `--server`, `KODELET_SERVER`, or the user configuration's `server` setting for a connect-only endpoint; an unavailable explicitly selected server never falls back to local execution.
+`kodelet chat`, `kodelet run`, and `kodelet acp` automatically start or reuse a local background server. Provider credentials belong on the server. Select an existing server with `--server`, `KODELET_SERVER`, or the user configuration's `server` setting; explicit selections never fall back to a local server.
 
-When upgrading, stop older Kodelet processes and back up `~/.kodelet` before starting the new daemon. Existing history is reused; use `conversation adopt` before continuing a legacy conversation. Do not run older direct-write clients against the upgraded database. One-shot runs always save; the removed `--no-save` flag fails explicitly.
+Before upgrading, stop older Kodelet processes and back up `~/.kodelet`. Use matching client and server releases, and do not let older clients write to the upgraded database. Existing history is preserved; [adopt legacy conversations](#conversation-management) before continuing them.
 
 ### Local background server
 
@@ -100,23 +100,19 @@ When upgrading, stop older Kodelet processes and back up `~/.kodelet` before sta
 kodelet chat                    # start or reuse the local server, then open chat
 kodelet run "inspect this repo" # use the same server from another terminal
 kodelet server start            # explicitly start or reuse the local server
-kodelet server status           # endpoint, PID, version, API/runner readiness
-kodelet server logs             # most recent 64 KiB of background logs
+kodelet server status           # check server readiness
+kodelet server logs             # show recent logs
 kodelet server stop             # refuse if agent runs are active
-kodelet server restart          # apply changed trusted defaults or a new version
+kodelet server restart          # apply configuration changes or a new version
 kodelet server stop --force     # cancel active runs and stop
 kodelet serve                   # foreground operation for debugging/supervision
 ```
 
-The managed server stays alive when chat exits or a query finishes. Its stdin is disconnected, its output goes to a private log, and it runs in a separate Unix session. It is not a login/reboot service or crash supervisor: the next chat/run/ACP command recovers a stopped server. Startup waits up to 30 seconds for the API and embedded runner; authentication failures, instance mismatches, unhealthy runners, and occupied ports are reported instead of starting a competing daemon. Stop/restart never signal an unverified PID and require `--force` when agent runs are active.
+The server keeps running after clients exit, but does not start at login or reboot. Stop and restart require `--force` while agent runs are active; stopping preserves conversation history. Stop a foreground `kodelet serve` with Ctrl+C or its supervisor instead.
 
-User-edited settings remain in `~/.kodelet/config.yaml`. Generated connection state is stored separately under `~/.kodelet/server/` (or `$KODELET_BASE_PATH/server/`): `connection.json` contains the actual endpoint and process identity, `client-token` contains the API credential, `startup.lock` coordinates client lifecycle requests, `server.lock` is held for the daemon lifetime, and `server.log` holds diagnostics. The directory is mode `0700`; generated files are mode `0600`. Do not edit or delete the lock files. Credentials are not printed into managed-server logs. Client `--auth-token` and `KODELET_AUTH_TOKEN` overrides still take precedence.
+Configure `serve` in `~/.kodelet/config.yaml`, then run `kodelet server restart` to apply changes. The server uses the environment it started with, not later shell changes. Stop it before switching `KODELET_CONFIG_FILE` or configuration mode. Independent deployments need separate `KODELET_BASE_PATH` directories.
 
-Managed startup uses trusted `serve` settings and requires loopback binding, token authentication, and an enabled embedded runner. The default port is 8080; `serve.port: 0` selects an available port, which clients discover from runtime state. For public/OIDC deployments or external-runner-only servers, start `kodelet serve` explicitly and select its endpoint with `--server`. A foreground loopback token server also publishes local connection state, but remains operator-owned: stop it with Ctrl+C or its supervisor, not `kodelet server stop`. Only one `serve` process may own a state directory, including during database migrations; independent deployments need separate `KODELET_BASE_PATH` values.
-
-Existing OIDC setups remain connect-only: when the selected endpoint has a saved sign-in, or trusted `serve.web_auth_mode` is `oidc`, chat/run/ACP connect normally instead of starting or waiting for a managed token server. This also preserves the default `http://localhost:8080` workflow without requiring `--server`. Saved credentials are resolved before automatic startup; an expired sign-in reports the login command rather than starting another server. OIDC servers do not need `server/connection.json` or `server/client-token`.
-
-The managed embedded runner defaults to the user's home directory, giving it a stable identity across restarts; `serve.runner_workspace` overrides this. Each new same-host chat/run still defaults to the invoking client's current directory, and resumed conversations preserve their saved runner and directory. The daemon inherits trusted configuration and environment from its launching process, not later client request flags. Trusted defaults remain pinned until restart. A different `KODELET_CONFIG_FILE` or configuration mode requires stopping the existing server first; repository configuration never becomes daemon-wide configuration.
+Automatic startup requires loopback binding, token authentication, and an enabled built-in runner. The default port is 8080; `serve.port: 0` chooses an available port. For public/OIDC or external-runner-only deployments, start `kodelet serve` explicitly and connect with `--server`. Saved OIDC sign-ins and OIDC-configured servers remain connect-only.
 
 ### One-shot Mode
 
@@ -151,7 +147,7 @@ kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
 
 #### Daemon-backed execution
 
-The local server starts automatically when needed, or use `--server` to connect to an existing Kodelet server without automatic startup. Conversations are saved automatically.
+Use `--server` to run against an existing server:
 
 ```bash
 # Select a connected runner by ID or name.
@@ -162,11 +158,11 @@ kodelet run --server https://kodelet.example --resume CONVERSATION_ID "continue"
 
 Authenticate with `kodelet auth login`, `KODELET_AUTH_TOKEN`, or `--auth-token`. Select `--runner` unless the daemon has a ready embedded runner.
 
-`--cwd` selects a directory on the runner host. New conversations on the recognized same-host default use your current directory; other targets use the runner's startup directory when omitted. Resuming keeps the original runner and directory. `--follow` requires `--runner` or `--cwd` and resolves the directory on the runner before looking up history, so relative paths, tilde paths, and symlinks match their canonical saved directory.
+`--cwd` selects a directory on the runner host. With the default local runner, new conversations use your current directory; other runners use their startup directory unless specified. Resuming keeps the original runner and directory. `--follow` requires `--runner` or `--cwd` to select the history to search.
 
-Stdin, images, recipes, model options, and tool restrictions are supported. Recipes and `--runner-profile` resolve on the runner. Unsupported options return an error. The runner uses its own environment, not virtual environments or shell changes made after it started.
+Recipes and `--runner-profile` use the runner's files and environment, not the client's. Restart the runner to apply environment changes, including virtual environments.
 
-All runs are saved, including `--result-only`; `--no-save` is rejected. Ctrl+C requests cancellation and reports if stopping cannot be confirmed. A network disconnect does not cancel work: inspect `kodelet conversation turn <conversation-id> <turn-id>` before submitting again.
+All runs are saved, including `--result-only`; `--no-save` is no longer supported. Ctrl+C requests cancellation, but a network disconnect does not cancel work. Check `kodelet conversation turn <conversation-id> <turn-id>` before retrying an interrupted request.
 
 ### Thread Goals
 
@@ -199,19 +195,19 @@ kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local e
 
 Set a default control plane with `server` in user configuration or `KODELET_SERVER`; `--server` takes precedence. Repository configuration cannot set this value.
 
-The server runs the AI model and saves your conversations. Its built-in runner provides file access and tools on the same machine; use `--runner` to work with another runner. Resuming keeps the saved runner, directory, and profiles. Use `--follow` with `--runner` or `--cwd` to choose which conversation history to search.
+Use `--runner` to work on another runner. Resuming preserves the runner, directory, and profiles; `--follow` requires `--runner` or `--cwd`.
 
 The TUI streams responses and persists conversations for later resume. Use `Ctrl+O` or click a detail header to show or hide thinking and tool details.
 
-Use `Ctrl+R` and type part of a previously sent message to search composer history; press `Ctrl+R` again to cycle matches, `Enter` to copy a match into the composer without submitting it, or `Esc` to restore your draft. History is stored on the selected runner and shared across conversations in the same Git worktree (or directory outside Git), including after restarting chat. The built-in runner reuses existing `message-history/by-cwd` files under its Kodelet base directory. The TUI never reads history from the client machine when connected to another runner. An extension can override this shortcut.
+Press `Ctrl+R` to search sent messages, then press it again to cycle matches. `Enter` copies a match into the composer; `Esc` restores your draft. History persists on the runner per Git worktree (or directory outside Git). Extensions can override this shortcut.
 
 The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
 
 Before the first message, use `Ctrl+T` to choose a profile and `Ctrl+Y` to choose a reasoning effort. These settings are fixed after the conversation starts.
 
-While a turn is running, `Enter` queues steering. `/sessions`, `/new`, and `/stop` run immediately; other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Only the capable submitting client handles interactive extension UI; disconnecting dismisses it, and reconnecting does not restore it mid-turn. Other clients can watch, steer, and stop.
+While a turn is running, `Enter` queues steering. `/sessions`, `/new`, and `/stop` run immediately; other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Extension prompts appear only in the submitting client and are dismissed on disconnect, not restored on reconnect. Other clients can watch, steer, and stop.
 
-Extension shortcuts run on the selected runner, including before the first message. During an active turn, only its current UI owner can invoke them. Shortcuts that submit messages use the same submission or queueing behavior as typed messages.
+Extension shortcuts use the selected runner. During a turn, only the client handling its extension prompts can invoke them; submitted messages queue like typed input.
 
 Use `/sessions` or `Ctrl+L` to switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
 
@@ -253,11 +249,11 @@ toad acp 'kodelet acp'
 kodelet acp --server https://kodelet.example --runner workstation
 ```
 
-ACP starts the managed local server automatically when no server is explicitly selected; startup diagnostics go to stderr so stdout remains JSON-RPC only. The server saves conversations and runs the AI model; its built-in runner provides workspace tools and commands. Use `--runner` to select another runner. Set `server` or `KODELET_SERVER` to choose a connect-only server, and sign in with `kodelet auth login --server ...` or supply an API token with `--auth-token`.
+ACP uses the local server by default. For a remote server, authenticate with `kodelet auth login --server ...` or `--auth-token`, and use `--runner` to select its workspace.
 
-Session directories belong to the selected runner, not the ACP client. Resuming preserves the stored runner, directory, and profiles. `--runner-profile` selects the environment for new sessions; `--profile` selects daemon model settings.
+Session directories belong to the runner. Resuming preserves the runner, directory, and profiles. For new sessions, `--runner-profile` selects environment settings and `--profile` selects model settings.
 
-Closing the ACP client detaches without stopping daemon work. Use the client's cancel action to stop its active prompt. Streaming responses, tool visualization, images, and multi-turn history are supported.
+Closing the ACP client leaves work running; use its cancel action to stop the active prompt. ACP supports streaming, tool visualization, images, and multi-turn history.
 
 ### Web UI Server
 
@@ -388,30 +384,15 @@ kodelet serve --runner-workspace=/path/to/workspaces
 kodelet run --server=http://localhost:8080 --auth-token=WEB_TOKEN --cwd=/path/to/project "inspect this project"
 ```
 
-The embedded runner starts and stops with the daemon. `--runner-workspace` defaults to the daemon's startup directory. An explicit `--runner` takes precedence. `serve --cwd` is no longer supported.
+The embedded runner starts and stops with the server. Its workspace defaults to your home directory for the managed background server, or the startup directory for foreground `serve`. `serve --cwd` is no longer supported; use `--runner-workspace` instead.
 
-Configure `serve.embedded_runner`, `serve.runner_workspace`, and optional `serve.runner_settings` in your trusted user configuration or `KODELET_CONFIG_FILE`. The embedded runner inherits trusted daemon top-level environment settings: `tool_mode`, `sysprompt`, `sysprompt_args`, `enable_fs_search_tools`, `bash`, `context`, `skills`, `extensions`, `allowed_tools`, `allowed_commands`, `allowed_domains_file`, and `environment_profiles`. You do not need to duplicate these settings under `serve.runner_settings`.
+Configure `serve.embedded_runner`, `serve.runner_workspace`, and optional `serve.runner_settings` in `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`. The built-in runner inherits environment settings from the daemon and selected model profile; use `runner_settings` only for overrides. Restart the server after changing these defaults.
 
-The deprecated `--disable-control-plane-workspace` flag and `serve.disable_control_plane_workspace` configuration key are accepted but ignored, regardless of their value. Use `--embedded-runner=false` or `serve.embedded_runner: false` to disable the built-in runner; neither legacy setting can restore control-plane-local execution.
+Runner settings and environment profiles cannot relax daemon tool/command restrictions or re-enable daemon-disabled skills/extensions. Standalone runners use their own environment configuration, subject to the same daemon restrictions. See [Configuration Profiles](#configuration-profiles) for `--profile` and `--runner-profile`.
 
-For each embedded-runner execution, environment preferences use this order, from lowest to highest precedence; mandatory permission ceilings described below are not last-write-wins settings:
+The old `--disable-control-plane-workspace` flag and `serve.disable_control_plane_workspace` setting are ignored. Replace them with `--embedded-runner=false` or `serve.embedded_runner: false`.
 
-1. Trusted daemon base settings and defaults
-2. The selected daemon model profile's environment settings
-3. Explicit `serve.runner_settings`
-4. Permitted repository settings from `kodelet-config.yaml` at the execution CWD
-5. The selected trusted environment profile (`--runner-profile`)
-6. Request restrictions, which may only narrow permissions
-
-Explicit `serve.runner_settings` override model-profile preferences such as `tool_mode`, `sysprompt`/`sysprompt_args`, `enable_fs_search_tools`, `context`, and `bash`, and may narrow permissions. However, the selected daemon model/base configuration's `allowed_tools`, `allowed_commands`, `skills.enabled: false`, and `extensions.enabled: false` remain mandatory ceilings, just as on normal remote runs. These four inherited restrictions intersect with runner policy (deny wins), rather than following last-write-wins precedence; runner settings and trusted environment profiles cannot relax them. The embedded loader applies these ceilings before discovery so advertised resources match actual execution even when runner overrides attempt widening.
-
-Repository settings may configure workspace resources and narrow permissions, but cannot widen effective trusted host restrictions, including `skills.allowed`, extension allow/deny and per-tool settings, and `allowed_domains_file`. They cannot define model or environment profiles or change daemon models, provider credentials, or endpoints.
-
-The model profile identifier selects only the environment subset of a locally pinned trusted profile for the embedded runner; model/provider settings and credentials are not passed in runner settings. `--profile default` uses the daemon base, a blank or omitted model profile uses the daemon's active default, and a named model profile selects that profile. This does not select the separate `--runner-profile` namespace. Standalone runners retain their own environment preferences, while still enforcing the daemon's mandatory restrictions sent with remote runs.
-
-Trusted defaults and profile definitions are pinned at daemon startup; restart `kodelet serve` after changing them, including `serve.runner_settings`. Each run resolves its own settings without mutating the pinned defaults or another run's configuration, so different model profiles, CWDs, environment profiles, and request restrictions remain isolated across sequential and concurrent runs. Repository changes affect later runs, not active ones.
-
-Use `kodelet runner list` to check connected runners and `/api/status` to check the built-in runner. If the default runner is unavailable, check the server logs for the cause or select another runner with `--runner`. If a runner already uses the workspace, stop it or start the server with `--embedded-runner=false` and select that runner. Use a fixed port to keep runner enrollment valid across restarts. Stop the server with Ctrl+C or SIGTERM; an error is reported if active work does not finish stopping before the shutdown timeout.
+Check `kodelet runner list` and the server logs if a runner is unavailable. If another runner already uses the workspace, stop it or disable the built-in runner and select the existing one with `--runner`. Enrolled runners need a stable server endpoint across restarts.
 
 The runner modes are:
 
@@ -456,7 +437,7 @@ kodelet runner start \
   --name kodelet-gpu
 ```
 
-Runner commands use the user-level `server` setting or `KODELET_SERVER` when `--server` is omitted; otherwise they discover a published local endpoint, falling back to `http://localhost:8080`. They do not automatically start a server.
+Runner commands use `--server`, `KODELET_SERVER`, or the user-level `server` setting, then the discovered local endpoint or `http://localhost:8080`. They do not automatically start a server.
 
 `--name` is optional mutable display metadata. The control plane assigns the stable opaque runner ID. Reconnecting from the same authenticated owner, stable local host instance, and canonical workspace path reuses that ID even if the local ID cache was removed. Hostname, process ID, workspace basename, and display name are diagnostic metadata rather than identity.
 
@@ -487,9 +468,7 @@ Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompa
 
 In the Web UI, choose a runner from **Environment**. **Runner profile** and **Working directory** are optional. Relative paths and `~` resolve on the runner host; a blank directory uses its startup workspace. Suggestions and slash commands follow the selected runner, profile, and directory.
 
-The terminal and Git diff follow a saved conversation's directory. Panels remain hidden until a custom directory is saved, or if the runner needs upgrading. Terminals survive closing the browser panel but stop with the runner. If the terminal limit is reached, exit an existing shell before opening another directory.
-
-Workspace operations always use a runner.
+The terminal and Git diff use the saved conversation's directory; save a custom directory or upgrade an older runner if panels are hidden. Closing a terminal panel leaves its shell running until you exit it or stop the runner. Exit unused shells if the terminal limit is reached.
 
 The terminal UI can start a new remote conversation with:
 
@@ -502,7 +481,7 @@ kodelet chat \
   --server https://kodelet.example
 ```
 
-The TUI always uses daemon history and execution. `--runner` selects new conversations and scopes the picker; resumed conversations retain their affinity. `--profile` selects daemon model settings, while `--runner-profile` selects a runner environment. `--no-tools`, `--no-extensions`, and `--no-skills` restrict the selected environment.
+`--runner` selects the workspace for new conversations and filters the picker; resuming keeps the saved runner. `--no-tools`, `--no-extensions`, and `--no-skills` restrict the selected environment.
 
 TUI and Web UI clients can follow the same conversation live. Open it with `--resume`, scoped `--follow`, or `/sessions`.
 
@@ -528,7 +507,7 @@ Options:
 - `--prefix`: Prefix the generated commit message, such as `TICKET-123`
 - `--no-confirm`: Skip confirmation prompt
 
-Staged changes and commit creation stay on the selected runner; confirmation and message editing stay in your terminal. The conversation is always saved. Patches larger than 512 KiB use a truncated preview plus a diffstat (up to 200 file entries and overall totals) for message generation, with an explicit warning; the commit still includes the entire prepared staged tree, not just the preview. If staging or HEAD changes during review, prepare again; if acknowledgement is lost, inspect the runner's Git history before retrying.
+Commits use the runner's staged changes; review and edit the message in your terminal. Large diffs may be summarized, but all staged changes are committed. If staging or HEAD changes during review, start again. After a connection failure, check Git history before retrying. The conversation is saved automatically.
 
 Create pull requests:
 
@@ -537,7 +516,7 @@ kodelet pr
 kodelet pr --server https://kodelet.example --runner workstation --target main
 ```
 
-The PR workflow runs in the runner repository; GitHub authentication and template files must be available there. The conversation is always saved. `--provider` means the Git host (`github`); use `--profile` for daemon model settings.
+PRs run in the runner's repository, which needs GitHub authentication and any template files. The conversation is saved automatically. `--provider` selects the Git host (`github`); `--profile` selects model settings.
 
 ### Image Input Support
 
@@ -572,15 +551,15 @@ Steering uses the daemon and uploads client image attachments. `--follow` requir
 Continue previous conversations seamlessly:
 
 ```bash
-# Continue the most recent conversation
-kodelet run --follow "continue working on the feature"
-kodelet run -f "what's the status?"
+# Continue the most recent conversation in this directory
+kodelet run --cwd "$PWD" --follow "continue working on the feature"
+kodelet run --cwd "$PWD" -f "what's the status?"
 
 # Continue a specific conversation by ID
 kodelet run --resume CONVERSATION_ID "more questions"
 ```
 
-**Note**: The `--follow` and `--resume` flags cannot be used together. `--follow` requires a runner or CWD scope and fails if no matching history exists.
+**Note**: `--follow` and `--resume` cannot be combined. `--follow` requires `--runner` or `--cwd` and fails if no matching history exists.
 
 ### Context Compaction
 
@@ -619,19 +598,21 @@ kodelet run --resume <conversation-id> "/rename New conversation name"
 
 `conversation list --search` matches conversation IDs, working directories, first messages, and summaries. `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage and does not inherit the source conversation's active thread goal.
 
-Conversation commands manage daemon history, even when its runner is offline. Authentication is the same as for `run`.
+Conversation commands use the server's history, even when the runner is offline, and authenticate like `run`.
 
 ```bash
-export KODELET_SERVER=http://localhost:8080
 kodelet conversation list --runner <runner-id> --cwd /srv/workspace
-kodelet conversation show <conversation-id> --format raw
 kodelet conversation export <conversation-id> ./conversation.json
 kodelet conversation turn <conversation-id> <turn-id>
 ```
 
 History filters use the exact runner ID and its saved directory. Forking without a conversation ID requires `--runner` or `--cwd`. Exports are saved on your client. Remote `import` and `edit` are not supported.
 
-To continue legacy history, run `kodelet conversation adopt <id> --runner <runner-id> --preview`, then repeat without `--preview` to confirm the displayed host and workspace. Use `--runner-profile <name>` when needed or `--yes` for a known, explicitly selected target. Adoption preserves history and model settings; incompatible or already-bound conversations remain unchanged. Back up the database and stop old direct-write clients before upgrading; use matching daemon-first client and server releases.
+To continue a legacy conversation, preview its target runner and workspace, then repeat without `--preview` to confirm. Add `--runner-profile <name>` if needed. Adoption preserves history and model settings and rejects incompatible or already-bound conversations.
+
+```bash
+kodelet conversation adopt <id> --runner <runner-id> --preview
+```
 
 ### Database Management
 
@@ -764,7 +745,7 @@ After setting up completion, you will need to start a new shell session for the 
 
 ## Configuration
 
-Configure each setting on its owner: provider/model settings on the daemon, workspace/tool settings on the runner, and endpoint/display settings on the client. Explicit supported execution flags are sent to the daemon; client model environment variables and configuration files are not uploaded. Owner configuration uses this precedence (highest to lowest):
+Configure models and credentials on the daemon, workspace tools on the runner, and connection/display settings on the client. Client configuration does not change server defaults. Each process uses this precedence (highest to lowest):
 
 1. Command line flags
 2. Environment variables
@@ -773,7 +754,7 @@ Configure each setting on its owner: provider/model settings on the daemon, work
 
 ### Environment Variables
 
-Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set model credentials and defaults before starting the daemon. Set workspace defaults before starting `kodelet serve` for its embedded runner, or before starting a standalone runner on its own host:
+Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set environment variables before starting the daemon or runner that uses them:
 
 ```bash
 # Logging configuration
@@ -797,7 +778,7 @@ export KODELET_OPENAI_TEXT_VERBOSITY="low"  # Responses API only: low|medium|hig
 # Profile configuration
 export KODELET_PROFILE="anthropic"  # Use a specific profile
 
-# Default Kodelet control plane for chat, ACP, and runner commands
+# Default Kodelet server
 export KODELET_SERVER="https://kodelet.example"
 
 # Command restriction configuration
@@ -806,13 +787,13 @@ export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated 
 
 ### Configuration File
 
-Trusted process configuration is loaded in this order:
+Configuration files are loaded in this order:
 
 1. **Defaults**: Built-in default values
 2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
 3. **Explicit Config**: `KODELET_CONFIG_FILE`, when supplied
 
-`KODELET_CONFIG_FILE_MODE=isolated` skips the global file; it does not disable runner workspace policy. Restart the owning daemon or runner after changing its defaults.
+`KODELET_CONFIG_FILE_MODE=isolated` skips the global file, but runners still apply repository settings. Restart the daemon or runner after changing its defaults.
 
 ```yaml
 # Global config (~/.kodelet/config.yaml)
@@ -823,13 +804,13 @@ max_tokens: 8192
 log_level: "info"
 ```
 
-The user-level `server` setting selects the daemon for ordinary commands; `KODELET_SERVER` and `--server` override it. Explicit selections are connect-only. Without an override, clients discover the local endpoint from `server/connection.json`; chat/run/ACP start the managed server when needed, while other commands connect without starting it. The managed server defaults to port 8080. Repository configuration cannot select the server or change daemon credentials/models.
+`--server` overrides `KODELET_SERVER`, which overrides the user-level `server` setting. Without an explicit server, clients use the local endpoint; only `chat`, `run`, and `acp` start it automatically. See [Local background server](#local-background-server).
 
 Configure `kodelet serve` with flags or the trusted user-level `serve` namespace. Repository configuration cannot set `serve`; command-line flags take precedence, and static token or OIDC secret files must be owner-only. See [Web UI Server](#web-ui-server) and [`config.sample.yaml`](../config.sample.yaml).
 
 **Repository-level Configuration**
 
-Both embedded and standalone runners read `kodelet-config.yaml` from each conversation's execution directory. Workspace settings may narrow the effective trusted host permissions and configure resources; they cannot widen host restrictions, replace daemon model/provider/credential settings, or define model or environment profiles. For an embedded runner, trusted daemon base settings, the selected model profile's environment subset, and explicit `serve.runner_settings` establish defaults before workspace settings; standalone runners use their own defaults. Workspace settings are followed by the selected trusted environment profile and request narrowing, as detailed in [Workspace-bound Runners](#workspace-bound-runners). Repository changes affect later runs, not active ones.
+Runners read `kodelet-config.yaml` from the conversation's working directory. It can configure workspace resources and narrow permissions, but cannot relax host restrictions, change daemon models, credentials, or endpoints, or define profiles. Changes apply to later runs, not active ones.
 
 ```yaml
 # Repository config (kodelet-config.yaml)
@@ -923,7 +904,7 @@ Kodelet includes a comprehensive profile system that allows you to define and sw
 
 ### Profile Definition
 
-Daemon model profiles are defined in trusted daemon configuration using the `profiles` section, not in repository configuration. Profile fields inherit from the daemon base when omitted. For an embedded runner, a selected model profile also supplies environment preferences beneath explicit `serve.runner_settings`, but its inherited tool/command allowlists and skill/extension disablements remain mandatory ceilings. Model/provider settings and credentials stay daemon-owned; standalone runner preferences remain independent.
+Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Omitted fields inherit the daemon's base settings.
 
 ```yaml
 
@@ -980,7 +961,7 @@ aliases:
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 
-Trusted runner environment profiles use a separate `environment_profiles` namespace. Both the embedded runner in `kodelet serve` and standalone `kodelet runner start` resolve them on the runner host before resource discovery. The embedded runner inherits these definitions from trusted daemon environment configuration, with explicit `serve.runner_settings` taking precedence over model-profile preferences; standalone runners use their own trusted configuration. Neither runner settings nor environment profiles may relax inherited daemon tool/command allowlists or skill/extension disablements. Repository files cannot define profiles. Selecting an environment profile does not select or override the daemon's model profile:
+Define workspace presets under `environment_profiles` in the daemon configuration for its built-in runner, or in a standalone runner's configuration. They select tools and resources independently of model profiles and cannot relax daemon restrictions:
 
 ```yaml
 environment_profiles:
@@ -991,11 +972,11 @@ environment_profiles:
       allow: [acp-subagent]
 ```
 
-Select one with `kodelet chat --runner-profile workspace` for the embedded default, add `--runner RUNNER` for a specific runner, or use the Web UI's **Runner profile** field. A blank or `default` environment profile adds no named environment-profile overrides; embedded model-profile inheritance and per-CWD repository settings still apply.
+Select one with `--runner-profile workspace` or the Web UI's **Runner profile** field; add `--runner RUNNER` to choose another runner. Omit `--runner-profile` or use `default` for no named workspace preset.
 
 ### Profile Management Commands
 
-Inspect the selected daemon's profiles with `--server` or `KODELET_SERVER`. `show` displays advertised reasoning settings, not credential-bearing configuration.
+Inspect the selected server's profiles:
 
 ```bash
 kodelet profile current
@@ -1004,7 +985,7 @@ kodelet profile show anthropic
 kodelet run --profile anthropic "explain this architecture"
 ```
 
-To change defaults, run these operator commands **on the daemon host**, then restart `kodelet serve`. Top-level `profile use` does not modify a remote daemon.
+To change the default, run these commands **on the daemon host**, then restart the server:
 
 ```bash
 kodelet profile --local show anthropic
@@ -1012,7 +993,7 @@ kodelet profile --local use anthropic -g
 kodelet profile --local use default -g
 ```
 
-`profile --local` commands inspect or modify configuration files on the current machine. Use `-g` for daemon defaults; repository files do not configure daemon model profiles. Edit an authoritative `KODELET_CONFIG_FILE` directly instead.
+`--local` works with configuration files on the current machine, not a remote server; `-g` selects the user configuration. If using `KODELET_CONFIG_FILE`, edit that file directly.
 
 ### Profile Usage
 
@@ -1035,22 +1016,12 @@ kodelet serve
 
 ### Profile Precedence and Merging
 
-Profile definitions and defaults are resolved and pinned on the daemon host at startup. Client-local profile files and repository `kodelet-config.yaml` do not configure daemon model profiles; select an advertised profile with `--profile`.
+- `--profile NAME` selects a model profile available on the daemon; unknown names fail for new conversations.
+- `--profile default` uses the daemon's base settings without a named profile.
+- Omitting `--profile` uses the daemon's active default.
+- Profile settings override base settings; omitted fields inherit them. Restart the server after changing profile definitions or defaults.
 
-**Model profile selection:**
-- An explicit named `--profile` selects that daemon profile; unknown names fail for new conversations.
-- `--profile default` selects the trusted daemon base without a named profile.
-- A blank or omitted profile uses the daemon's active default, selected at startup from trusted process configuration, including daemon-host `KODELET_PROFILE`; client shell changes do not reconfigure a running daemon.
-- Resuming a saved conversation whose named model profile has been removed retains its snapshotted model identity and falls back to the daemon base environment, not the active named default. This preserves the existing daemon fallback; it does not permit selecting unknown profiles for new conversations.
-
-**Profile definitions and merging:**
-- Trusted daemon configuration loads defaults, then the global user file, then `KODELET_CONFIG_FILE` when supplied; isolated mode omits the global file.
-- Selected profile settings override base settings, and omitted fields inherit from the base.
-- For embedded execution, only the selected profile's environment subset is projected into runner configuration; explicit `serve.runner_settings` override preferences before per-CWD repository settings, the selected trusted environment profile, and request narrowing. Inherited tool/command allowlists and skill/extension disablements remain mandatory ceilings throughout (intersection, deny wins).
-- Repository configuration cannot define model or environment profiles or widen the effective trusted host permissions. Standalone runners keep their own environment configuration.
-- Restart `kodelet serve` to apply changed trusted defaults or profile definitions. Each run uses isolated settings, including concurrent runs with different selections.
-
-See [Workspace-bound Runners](#workspace-bound-runners) for the complete embedded environment precedence. Model-profile selection does not upload broad configuration or credentials and does not select a runner environment profile.
+Resuming a conversation whose profile was removed keeps its saved model settings and uses the base environment, not the active default profile.
 
 ### Special "Default" Profile
 
@@ -1181,7 +1152,7 @@ openai:
 
 ## OpenAI Codex Authentication
 
-Kodelet supports ChatGPT-backed Codex authentication for `openai.platform: codex`. Login and status target the selected daemon and require administrator access (`--server`/`KODELET_SERVER`, `--auth-token`/`KODELET_AUTH_TOKEN`).
+Use ChatGPT-backed authentication with `openai.platform: codex`. Login and status require administrator access to the selected server (`--server` or `KODELET_SERVER`); authenticate with `kodelet auth login`, `--auth-token`, or `KODELET_AUTH_TOKEN`.
 
 ### Login
 
@@ -1193,7 +1164,7 @@ kodelet codex login
 kodelet codex login --device-auth --no-browser
 ```
 
-Device authentication is always used; no client callback server is started. For GitHub Copilot, use `kodelet copilot-login` with the same daemon flags.
+Login uses device authentication and saves credentials on the server. For GitHub Copilot, use `kodelet copilot-login` with the same server options.
 
 ### Check Status
 
@@ -1201,7 +1172,9 @@ Device authentication is always used; no client callback server is started. For 
 kodelet codex status
 ```
 
-This reports the selected server's connection, masked account ID, sign-in expiry, plan, live usage limits, and credits. Provider credentials stay on the server. If live usage cannot be loaded, connection details remain available with a recovery hint. Remote Codex/Copilot logout is not available: stop the server, run `kodelet codex logout --local` or `kodelet copilot-logout --local` on that machine, then restart it. Explicit `--server` and `--auth-token` flags cannot be combined with `--local`; environment defaults are ignored in local mode.
+Shows connection status, account, expiry, plan, and available usage limits and credits.
+
+To log out of Codex or Copilot, stop the server, run `kodelet codex logout --local` or `kodelet copilot-logout --local` on its host, then restart it. `--local` cannot be combined with `--server` or `--auth-token`.
 
 ### Configure Codex
 
@@ -1276,7 +1249,7 @@ Kodelet only enables this built-in tool when all of the following are true:
 
 ## Anthropic Multi-Account Authentication
 
-Manage multiple Anthropic subscription accounts on the selected daemon. These commands require daemon administrator access and accept `--server`/`KODELET_SERVER` and `--auth-token`/`KODELET_AUTH_TOKEN`. They do not read or write client provider credentials.
+Manage Anthropic subscription accounts on the selected server. These commands require administrator access and accept `--server`/`KODELET_SERVER` and `--auth-token`/`KODELET_AUTH_TOKEN`.
 
 ### Logging In with Multiple Accounts
 
@@ -1288,7 +1261,7 @@ kodelet anthropic login --alias work
 kodelet anthropic login
 ```
 
-The daemon exchanges the authorization code and stores the credentials. The first account becomes the default; omit browser launch with `--no-browser`.
+Credentials are saved on the server; the first account becomes the default. Use `--no-browser` to skip browser launch.
 
 ### Managing Accounts
 
@@ -1323,11 +1296,11 @@ kodelet anthropic accounts usage home --json
 kodelet anthropic logout  # Confirm removal of all daemon Anthropic accounts
 ```
 
-Removing the default selects another account when available. Finish or cancel pending sign-in before changing accounts. Logout removes saved accounts, not provider-issued tokens or already-running conversations.
+Removing the default selects another available account. Finish or cancel sign-in before changing accounts. Logout removes saved accounts but does not revoke provider tokens or stop running conversations.
 
 ### Using Accounts at Runtime
 
-Select accounts through daemon model profiles; client `--account` overrides are not supported by daemon-backed execution.
+Use a daemon model profile configured with the desired `account`; client `--account` overrides are not supported.
 
 ```bash
 # Use a specific account for one-shot queries
@@ -1335,7 +1308,7 @@ kodelet run --profile work "analyze this code"
 kodelet run --profile personal "help with my side project"
 ```
 
-Profiles must already exist on the daemon and configure the desired account. Otherwise the daemon's provider configuration selects its default account.
+Omitted account settings inherit the daemon configuration.
 
 ### Account Status
 
@@ -1601,7 +1574,7 @@ Within each extension root, Kodelet loads either direct or nested executables:
 
 The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
 
-Inspect installed extension files in the selected runner's workspace. These commands do not start extension processes or inspect live registrations:
+Inspect installed extensions on the selected runner without starting them:
 
 ```bash
 kodelet extension list
@@ -1610,7 +1583,7 @@ kodelet extension inspect weather
 kodelet extension inspect org@repo/weather --json
 ```
 
-Use `--runner`, `--cwd`, `--profile`, and `--runner-profile` to select a workspace and its settings. Paths in the output belong to the runner. Without an explicit runner, the same-machine built-in runner uses your current directory; remote runners use their default directory unless you pass `--cwd`. Inspection respects the selected environment's extension settings and reports installed files, not live registrations.
+Use `--runner` and `--cwd` to select the workspace, and `--profile`/`--runner-profile` for its settings. Output describes installed files on the runner, not live registrations. Directory defaults follow [one-shot execution](#daemon-backed-execution).
 
 ### Extension Commands and Dynamic Recipes
 
@@ -1673,7 +1646,7 @@ kodelet recipe list --show-path
 kodelet recipe show review --arg target=main
 ```
 
-`recipe list` starts extensions on the runner to discover dynamic recipes. `recipe show` renders file-backed templates, including command substitutions, in the selected directory; it does not render dynamic extension recipes. Both accept `--server`, `--auth-token`, `--runner`, `--cwd`, `--profile`, and `--runner-profile`. For a same-machine built-in runner, the default directory is your current directory. Explicit or remote runners use their default directory unless you pass `--cwd`. These commands require a running server and a runner that supports workspace inspection; they do not inspect files on the client.
+These commands require a running server and compatible runner, with the same server, workspace, and profile flags as `run`. `recipe list` starts extensions to discover dynamic recipes; `recipe show` renders only file-backed templates and executes their command substitutions on the runner.
 
 `runAgent` commands may set `display` to control the persisted user-facing text while `prompt` remains the model input.
 

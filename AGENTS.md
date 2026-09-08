@@ -52,7 +52,7 @@ mise run frontend-test           # Frontend tests
 
 **Use testify** for assertions (`assert.Equal`, `require.NotNil`) over `t.Errorf`/`t.Fatalf`.
 
-Live Anthropic API tests are skipped by default, even when credentials are present. To run them explicitly, set `ANTHROPIC_API_KEY` and use the following command (makes real API requests and may incur charges):
+Live Anthropic tests are opt-in and incur API charges. Set `ANTHROPIC_API_KEY`, then run:
 
 ```bash
 KODELET_ANTHROPIC_INTEGRATION_TESTS=1 mise exec -- go test -count=1 ./pkg/llm ./pkg/llm/anthropic
@@ -80,11 +80,7 @@ mise run build-dev               # Fast build (skip frontend)
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.
 
 ## Configuration
-Trusted process defaults come from the user configuration (`~/.kodelet/config.yaml`), an explicit configuration file, environment and flags. Repository `kodelet-config.yaml` is loaded only by the runner for the execution CWD and only for permitted workspace settings; it cannot configure daemon models, credentials or endpoints. Daemon model profiles and runner environment profiles are separate namespaces. Ordinary CLI/TUI/ACP commands use the daemon and never initialize a local provider or conversation database; explicitly retained library-local ACP APIs are not a client fallback.
-
-Embedded runner environment preference precedence (lowest to highest) is daemon base/defaults → selected daemon model profile's environment subset → explicit `serve.runner_settings` → permitted per-CWD repository settings → selected trusted environment profile → request narrowing. Explicit runner settings override preferences such as tool mode, prompt, filesystem search, context, and bash, and may narrow permissions. Selected daemon model/base `allowed_tools`, `allowed_commands`, `skills.enabled: false`, and `extensions.enabled: false` remain mandatory ceilings as on normal remote runs: intersect, deny wins, never last-write-wins. Runner settings and environment profiles cannot relax these ceilings; the embedded loader applies `inherited.EnvironmentOptions` before discovery to match actual runs. Repository settings cannot widen other effective trusted constraints (`skills.allowed`, extension allow/deny and per-tool settings, `allowed_domains_file`) or define either kind of profile.
-
-`ProfileConfigLoader` resolves model profile identifiers against locally pinned environment projections (`default` uses base, blank uses the daemon's active default, named selects it). Saved conversations whose named model profile was removed retain their snapshotted model identity and fall back to base environment, not the active named default; unknown names still fail for new conversations. Model/provider configuration and credentials are not passed in runner settings. Both embedded and standalone runners resolve trusted `environment_profiles`; standalone preferences remain runner-owned while daemon restrictions still apply. Trusted embedded defaults/profile definitions are pinned at startup, require a `kodelet serve` restart to change, and are isolated from per-run and concurrent settings mutations. See [Workspace-bound Runners](docs/MANUAL.md#workspace-bound-runners) for the inherited fields and full contract.
+CLI/TUI/ACP commands use the daemon. Configure models and credentials in `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`; restart the daemon after changing defaults. Repository `kodelet-config.yaml` configures runner workspace settings only and cannot widen host permissions. Model `profiles` and runner `environment_profiles` are separate. See [Configuration](docs/MANUAL.md#configuration).
 
 ```bash
 # Provider API keys belong to the daemon environment
