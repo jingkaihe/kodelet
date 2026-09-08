@@ -11,6 +11,8 @@ on:
       - go.mod
       - go.sum
       - pkg/**
+      - scripts/prepare-packaging-binaries.sh
+      - scripts/package-binary-metadata/**
   push:
     branches: [main]
     tags:

@@ -609,8 +609,10 @@ func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) 
 	// Block in a shell builtin so Ctrl-C cannot race with a child starting sleep.
 	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf interrupted > \"$KODELET_TERMINAL_INTERRUPTED_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do read -r line; done\n"), 0o700))
 	t.Setenv("SHELL", "/bin/bash")
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PS1", "terminal-test-ready> ")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// System bashrc files can replace an inherited PS1; set it afterward.
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".bashrc"), []byte("PS1='terminal-test-ready> '\n"), 0o600))
 	t.Setenv("KODELET_TERMINAL_READY_FILE", readyPath)
 	t.Setenv("KODELET_TERMINAL_INTERRUPTED_FILE", interruptedPath)
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
