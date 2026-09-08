@@ -849,6 +849,40 @@ test("Inline extensions negotiate deterministic IDs for new and resumed sessions
   } finally { await client.close(); }
 });
 
+test("Inline agent.init hooks customize prompts alongside typed ACP execution options", async (t) => {
+  const relay = new InlineRelay();
+  let args: string[] = [];
+  const client = new Client({ spawn: (_command, flags) => {
+    args = flags;
+    return relay.process;
+  } });
+  t.after(() => client.close());
+  const prompt = "Search the repository without modifying files.";
+  await client.createSession({
+    profile: "search-model",
+    maxTurns: 3,
+    options: {
+      allowedTools: ["file_read", "grep_tool", "glob_tool"],
+      noSkills: true,
+      enableFSSearchTools: true,
+    },
+    extensions: [defineExtension((ext) => {
+      ext.on("agent.init", () => ({ systemPrompt: { replace: prompt } }));
+    })],
+  });
+  assert.deepEqual(args, [
+    "acp", "--max-turns=3", "--no-skills=true",
+    '--allowed-tools="file_read","grep_tool","glob_tool"',
+    "--enable-fs-search-tools=true", "--profile=search-model",
+  ]);
+  const initialized = await relay.initialize();
+  assert.deepEqual(initialized.tools, []);
+  assert.deepEqual(initialized.subscriptions, [{ event: "agent.init", priority: 0 }]);
+  assert.deepEqual(await relay.call("extension.event.handle", {
+    id: "init-search", event: "agent.init", payload: { systemPrompt: "base" },
+  }), { systemPrompt: { replace: prompt } });
+});
+
 test("Inline callbacks ACK before dispatch, preserve nested RPC parent IDs, updates, local UI, and errors", { timeout: 5000 }, async (t) => {
   const relay = new InlineRelay();
   let calls = 0, confirms = 0, toolContext: ToolContext | undefined;

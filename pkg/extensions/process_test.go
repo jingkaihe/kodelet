@@ -664,7 +664,7 @@ func TestProcessRetainedHostContextSurvivesReinitializationButNotGenerationClose
 	cancel()
 	require.NoError(t, retained.Err())
 	source.setHostContext(context.WithValue(t.Context(), rpcCallContextKey{}, "new-run"))
-	require.NoError(t, retained.Err(), "reattachment must not cancel in-flight retained child operations")
+	require.NoError(t, retained.Err(), "reattachment must not cancel in-flight background lease releases")
 	assert.ErrorIs(t, initialUI.Err(), context.Canceled)
 	assert.Equal(t, "first-run", retained.Value(rpcCallContextKey{}))
 	assert.Equal(t, "new-run", source.hostContext().Value(rpcCallContextKey{}))

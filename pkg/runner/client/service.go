@@ -639,11 +639,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	config.WorkingDirectory = workingDirectory
 	config.Provider = params.Agent.Provider
-	if params.ChildPrompt != nil {
-		config.Sysprompt = ""
-		config.SyspromptInline = true
-		config.SyspromptContent = *params.ChildPrompt
-	}
 	config.Model = params.Agent.Model
 	config.Profile = params.Agent.Profile
 	config.RecipeName = params.Agent.RecipeName
@@ -1247,7 +1242,6 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 
 	peer := s.currentPeer()
 	operationCtx = contextWithRunnerModelHelper(operationCtx, peer, run.id, params.ToolCallID)
-	operationCtx = context.WithValue(operationCtx, childToolKey{}, params.ToolCallID)
 	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
 	if peer != nil {
 		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID}
@@ -1407,7 +1401,6 @@ func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID 
 		BackgroundTasks: true,
 	})
 	ctx = extensions.ContextWithBackgroundTaskHost(ctx, s)
-	ctx = extensions.ContextWithChildHost(ctx, s)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)
 	ctx = extensions.ContextWithExtensionUIHost(ctx, s)
 	ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
@@ -1578,7 +1571,7 @@ func (s *Service) Close() error {
 			cleanupCtx = context.WithoutCancel(s.ctx)
 		}
 		// Graceful shutdown keeps reverse RPC available while extensions release
-		// UI and child authority; connection-loss aborts detach the dead peer.
+		// UI routing; connection-loss aborts detach the dead peer.
 		activeErr := s.abortActiveRuns(cleanupCtx, false)
 		activeErr = combineCleanupErrors(activeErr, s.closeAllBackgroundResources(cleanupCtx))
 		if s.ownedRuntime != nil {

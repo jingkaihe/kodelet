@@ -11,7 +11,6 @@ pkg/             # Core packages
   ├── binaries/  # External binary management (ripgrep, fd)
   ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
   ├── conversations/  # Conversation storage (SQLite)
-  ├── delegation/ # Scoped child execution authority and presets
   ├── fragments/ # Fragment/recipe templates
   ├── llm/       # LLM clients (anthropic/, openai/)
   ├── plugins/   # Unified plugin system

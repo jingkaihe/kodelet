@@ -43,11 +43,6 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
-	if admission, ok := conversations.ChildAdmissionFromContext(ctx); ok {
-		if err := admitChild(ctx, tx, record, admission); err != nil {
-			return err
-		}
-	}
 	if err := saveConversationRecord(ctx, tx, record); err != nil {
 		return err
 	}

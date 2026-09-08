@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,12 +25,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
-	"github.com/jingkaihe/kodelet/pkg/delegation"
-	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -357,7 +352,7 @@ func TestDaemonFirstCLIProcess(t *testing.T) {
 func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 	for _, placement := range []string{"standalone", "embedded"} {
 		t.Run(placement, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
 			defer cancel()
 			root := t.TempDir()
 			t.Setenv("HOME", root)
@@ -370,33 +365,37 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			require.NoError(t, os.MkdirAll(extensionDir, 0o700))
 			executable, err := os.Executable()
 			require.NoError(t, err)
-			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_CHILD_EXTENSION=1 exec %q -test.run '^TestDaemonChildExtensionProcess$'\n", executable)
+			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionProcess$'\n", executable)
 			if sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK"); sdk != "" {
 				script = daemonSDKSearchExtension(t, extensionDir, sdk)
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "kodelet-extension-search"), []byte(script), 0o700))
-			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "search-prompt.txt"), []byte("RUNNER_OWNED_CODE_SEARCH_PROMPT"), 0o600))
 			webPage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/html")
 				_, _ = fmt.Fprint(w, "<p>runner-page-evidence</p>")
 			}))
 			defer webPage.Close()
 			var toolResults, helperCalls atomic.Int32
-			background := os.Getenv("KODELET_TEST_CHILD_BACKGROUND") == "1"
-			childStarted, releaseChild := make(chan struct{}), make(chan struct{})
+			childStarted, releaseChild, finishChild := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(releaseChild) })
+			finish := sync.OnceFunc(func() { close(finishChild) })
 			var started sync.Once
-			provider := daemonTestProvider(t, filePath, webPage.URL, &toolResults, &helperCalls, func(ctx context.Context) {
-				if !background {
-					return
+			provider := daemonTestProvider(t, filePath, webPage.URL, &toolResults, &helperCalls, func(ctx context.Context, streaming bool) {
+				gate := releaseChild
+				if streaming {
+					gate = finishChild
+				} else {
+					started.Do(func() { close(childStarted) })
 				}
-				started.Do(func() { close(childStarted) })
 				select {
-				case <-releaseChild:
+				case <-gate:
 				case <-ctx.Done():
-					assert.Fail(t, "retained child's provider request was cancelled before release")
+					assert.Fail(t, "ACP provider request was cancelled before release")
 				}
 			})
 			defer provider.Close()
+			defer release()
+			defer finish()
 			oldSettings := viper.AllSettings()
 			viper.Reset()
 			t.Cleanup(func() {
@@ -415,6 +414,11 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			viper.Set("skills.enabled", false)
 			viper.Set("allowed_tools", []string{"file_read", "web_fetch", "grep_tool", "glob_tool", "code_search", "bash"})
 			t.Setenv("KODELET_TEST_PROVIDER_KEY", "daemon-only-key")
+			// This fixture explicitly grants normal client credentials to extensions.
+			// Runner authentication remains separate and cannot authorize ACP calls.
+			t.Setenv("KODELET_AUTH_TOKEN", "client-secret")
+			wrapper := filepath.Join(root, "sdk-kodelet")
+			t.Setenv("KODELET_BIN", wrapper)
 			t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-store"))
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
 			config := &controlplane.ServerConfig{Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, AuthToken: "client-secret", RunnerAuthToken: "runner-secret"}
@@ -445,7 +449,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 
 			// The child environment is deliberately independent, not a runtime
 			// scrubbing feature: no provider secret is passed to these test processes.
-			childEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1"}
+			childEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1", "KODELET_AUTH_TOKEN=client-secret", "KODELET_BIN=" + wrapper}
 			if placement == "standalone" {
 				data, err := json.Marshal(settings)
 				require.NoError(t, err)
@@ -470,13 +474,16 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 					return false
 				}
 				for _, runner := range runners {
-					if runner.Connected && runner.Status == runnerregistry.RunnerStatusIdle {
+					if runner.Connected && runner.Status == runnerregistry.RunnerStatusIdle && runner.SessionExtensions {
 						runnerID = runner.ID
 						return true
 					}
 				}
 				return false
 			}, 15*time.Second, 50*time.Millisecond)
+			require.NoError(t, os.WriteFile(wrapper, []byte(fmt.Sprintf("#!/bin/sh\nKODELET_SERVER=%q KODELET_RUNNER=%q KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- \"$@\"\n", serverURL, runnerID, executable)), 0o700))
+			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
+			require.NoError(t, err)
 			invalidStore := filepath.Join(root, "client-store-is-a-file")
 			require.NoError(t, os.WriteFile(invalidStore, []byte("no client database"), 0o600))
 			clientEnv := append(childEnv, "KODELET_BASE_PATH="+invalidStore)
@@ -494,12 +501,38 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				}
 				if scenario == "delegation" {
 					message = "delegate code search"
+					// Use patch-mode settings and hide read/search tools in the parent's
+					// agent.init hook. Explicit ACP options must select them independently.
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, "kodelet-config.yaml"), []byte("tool_mode: patch\n"), 0o600))
 				}
 				args = append(args, message)
 				process := daemonCLIProcess(ctx, t, root, clientEnv, args...)
 				var stdout, stderr bytes.Buffer
 				process.Stdout, process.Stderr = &stdout, &stderr
-				err := process.Run()
+				var err error
+				if scenario == "delegation" {
+					require.NoError(t, process.Start())
+					done := make(chan error, 1)
+					go func() { done <- process.Wait() }()
+					select {
+					case <-childStarted:
+					case err := <-done:
+						require.FailNow(t, "ACP search did not start", "error: %v; stderr: %s; stdout: %s", err, stderr.String(), stdout.String())
+					case <-ctx.Done():
+						require.FailNow(t, "ACP search did not reach the provider")
+					}
+					assertDaemonACPSearchBroadcast(ctx, t, client, serverURL, workspace, release, finish)
+					select {
+					case err = <-done:
+					case <-ctx.Done():
+						require.FailNow(t, "parent did not finish after ACP search")
+					}
+					settingsJSON, marshalErr := json.Marshal(settings)
+					require.NoError(t, marshalErr)
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, "kodelet-config.yaml"), settingsJSON, 0o600))
+				} else {
+					err = process.Run()
+				}
 				require.NoError(t, err, "client stderr: %s", stderr.String())
 				switch scenario {
 				case "no-tools":
@@ -509,51 +542,14 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				default:
 					assert.Equal(t, "runner-file-evidence\n", stdout.String())
 				}
-				if background && scenario == "delegation" {
-					select {
-					case <-childStarted:
-					case <-ctx.Done():
-						t.Fatal("retained child did not start")
-					}
-					// The parent CLI has exited, while the child provider call is
-					// still blocked. Only the explicit active lease keeps it alive.
-					close(releaseChild)
-					require.Eventually(t, func() bool { return toolResults.Load() == 4 }, 5*time.Second, 10*time.Millisecond)
-				}
 			}
 			assert.EqualValues(t, 4, toolResults.Load())
 			assert.EqualValues(t, 1, helperCalls.Load(), "the active runner tool delegates exactly one provider call to the daemon")
-			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
-			require.NoError(t, err)
-			if background {
-				require.Eventually(t, func() bool {
-					summaries, err := client.ListConversationsInCWD(ctx, 10, workspace)
-					if err != nil {
-						return false
-					}
-					for _, summary := range summaries {
-						if summary.FirstMessage != "child code search" {
-							continue
-						}
-						stored, err := client.LoadConversation(ctx, summary.ID)
-						if err != nil {
-							return false
-						}
-						for _, message := range stored.Messages {
-							if message.Role == "assistant" && message.Kind == "text" && message.Content == "runner-file-evidence" {
-								return true
-							}
-						}
-					}
-					return false
-				}, 5*time.Second, 10*time.Millisecond, "wait for durable child completion, not just the provider receiving its last request")
-			}
 			history, err := client.ListConversationsInCWD(ctx, 10, workspace)
 			require.NoError(t, err)
 			require.Len(t, history, 5, "four parent runs and one durable child; no extraction helper conversation")
 			extractionFound := false
 			childFound := false
-			var childID string
 			for _, summary := range history {
 				stored, err := client.LoadConversation(ctx, summary.ID)
 				require.NoError(t, err)
@@ -568,41 +564,24 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 						assert.NotContains(t, message.Content, "Extraction request:", "temporary helper input must not enter parent history")
 					}
 				}
-				if summary.FirstMessage == "child code search" {
+				if summary.Summary == daemonACPSearchName {
 					childFound = true
-					childID = summary.ID
-					identity, ok := summary.Metadata["delegation"].(map[string]any)
-					require.True(t, ok)
-					assert.Equal(t, summary.ID, identity["conversationId"])
-					assert.NotEmpty(t, identity["runId"])
-					assert.NotEqual(t, identity["parentConversationId"], identity["conversationId"])
-					assert.NotEqual(t, identity["parentRunId"], identity["runId"])
-					assert.Equal(t, 10, stored.Usage.OutputTokens)
+					record, err := client.LoadConversationRecord(ctx, summary.ID)
+					require.NoError(t, err)
+					assert.Equal(t, daemonACPSearchName, record.Summary, "normal persistence must retain the explicit worker name")
+					assert.Contains(t, string(record.RawMessages), "delegate code search", "live fork retains parent history")
+					assert.Contains(t, string(record.RawMessages), "child code search")
+					assert.Contains(t, string(record.RawMessages), "runner-file-evidence")
 				}
-				if summary.FirstMessage == "delegate code search" {
-					if background {
-						assert.Equal(t, 10, stored.Usage.OutputTokens, "retained child usage belongs to its own conversation")
-					} else {
-						assert.Equal(t, 20, stored.Usage.OutputTokens, "parent aggregates foreground child's two exchanges")
-					}
+				if summary.FirstMessage == "delegate code search" && summary.Summary != daemonACPSearchName {
+					assert.Equal(t, 10, stored.Usage.OutputTokens, "ordinary ACP session usage is not charged to the parent again")
 					for _, message := range stored.Messages {
-						assert.NotContains(t, message.Content, "RUNNER_OWNED_CODE_SEARCH_PROMPT")
+						assert.NotContains(t, message.Content, daemonACPSearchPrompt)
 					}
 				}
 			}
 			assert.True(t, extractionFound, "extraction history and usage assertions must run")
 			assert.True(t, childFound, "child has its own persisted conversation")
-			// The child's persisted preset, not the currently installed extension,
-			// controls a later independent user turn on this durable conversation.
-			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "search-prompt.txt"), []byte("CHANGED_PROMPT_MUST_NOT_REPLACE_SNAPSHOT"), 0o600))
-			resume := daemonCLIProcess(ctx, t, root, clientEnv, "run", "--server="+serverURL, "--auth-token=client-secret", "--runner="+runnerID, "--resume="+childID, "--result-only", "continue child code search")
-			output, err := resume.CombinedOutput()
-			require.NoError(t, err, "%s", output)
-			assert.Equal(t, "runner-file-evidence\n", string(output))
-			denied := daemonCLIProcess(ctx, t, root, clientEnv, "run", "--server="+serverURL, "--auth-token=client-secret", "--runner="+runnerID, "--resume="+childID, "--no-extensions=false", "must not run")
-			output, err = denied.CombinedOutput()
-			require.Error(t, err)
-			assert.Contains(t, string(output), "cannot relax parent noExtensions")
 			if sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK"); sdk != "" {
 				daemonSDKClient(ctx, t, root, workspace, sdk, serverURL, runnerID, clientEnv)
 			}
@@ -626,7 +605,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				commitArgs = append(commitArgs, "--runner="+runnerID)
 			}
 			commit := daemonCLIProcess(ctx, t, root, append(clientEnv, "PATH="+root), commitArgs...)
-			output, err = commit.CombinedOutput()
+			output, err := commit.CombinedOutput()
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "Commit created:")
 			assert.Contains(t, git("log", "-1", "--format=%B"), "feat: commit runner snapshot")
@@ -685,10 +664,9 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 
 // Opt-in cross-repository SDK gate: build sdk/dist first, or set
 // KODELET_PYTHON_SDK_PATH to a uv-synced Python SDK checkout. The ordinary Go
-// suite always runs the credential-free protocol fixture above.
+// suite always runs the ordinary ACP protocol fixture without an external SDK.
 func daemonSDKSearchExtension(t *testing.T, dir, sdk string) string {
 	t.Helper()
-	background := os.Getenv("KODELET_TEST_CHILD_BACKGROUND") == "1"
 	var executable, source, name string
 	switch sdk {
 	case "typescript":
@@ -698,61 +676,67 @@ func daemonSDKSearchExtension(t *testing.T, dir, sdk string) string {
 		dist, err := filepath.Abs("../../sdk/dist")
 		require.NoError(t, err)
 		name = "search.mjs"
-		source = fmt.Sprintf(`import { defineExtension, z } from %q;
+		source = fmt.Sprintf(`import { Client, defineExtension, z } from %q;
 import { runExtension } from %q;
 await runExtension(defineExtension(ext => {
-  ext.registerProfile({ name: "code_search", systemPromptPath: "search-prompt.txt", options: {
-    model: "gpt-4o-mini", allowedTools: ["file_read", "grep_tool", "glob_tool"],
-    noExtensions: true, noSkills: true, enableFSSearchTools: true, maxTurns: 3,
-  }});
+  let parentSearch = false;
+  ext.on("user.message", event => { parentSearch = event.message === "delegate code search"; });
+  ext.on("agent.init", () => parentSearch ? { tools: { disable: ["file_read", "grep_tool", "glob_tool"] } } : undefined);
   ext.registerTool({ name: "code_search", description: "Run restricted code search", inputSchema: z.object({}),
     async execute(_input, ctx) {
-      const lease = %t ? await ctx.acquireBackgroundTask("retained search") : undefined;
-      const child = await ctx.children.start({ profile: "code_search", message: "child code search", requestId: "search-once", lease });
-      if (lease) {
-        void child.wait().finally(() => lease.close());
-        return "runner-file-evidence";
+      const resume = await ctx.forkConversation({ name: %q });
+      const client = new Client({ command: process.env.KODELET_BIN, cwd: ctx.cwd });
+      try {
+        const session = await client.createSession({ resume, options: {
+          allowedTools: ["file_read", "grep_tool", "glob_tool"],
+          noSkills: true, enableFSSearchTools: true, maxTurns: 3,
+        }, extensions: [api => api.on("agent.init", () => ({ systemPrompt: { replace: %q } }))] });
+        return (await session.runAndWait({ message: "child code search", signal: ctx.signal })).content;
+      } finally {
+        await client.close();
       }
-      const result = await child.wait({ signal: ctx.signal, onEvent: event => ctx.update(event.text ?? event.kind) });
-      return result.output;
     }
   });
 }));
-`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), background)
+`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), daemonACPSearchName, daemonACPSearchPrompt)
 	case "python":
 		root := os.Getenv("KODELET_PYTHON_SDK_PATH")
 		require.NotEmpty(t, root, "set KODELET_PYTHON_SDK_PATH to a uv-synced SDK checkout")
 		executable = filepath.Join(root, ".venv", "bin", "python")
 		name = "search.py"
-		source = fmt.Sprintf(`import asyncio
-from kodelet_sdk import BaseModel, Extension
+		source = fmt.Sprintf(`import asyncio, os
+from kodelet_sdk import BaseModel, Client, ExecutionOptions, Extension
 from kodelet_sdk.runtime import run_extension
 ext = Extension(name="code_search")
-tasks = set()
-ext.register_profile({"name": "code_search", "systemPromptPath": "search-prompt.txt", "options": {
-    "model": "gpt-4o-mini", "allowedTools": ["file_read", "grep_tool", "glob_tool"],
-    "noExtensions": True, "noSkills": True, "enableFSSearchTools": True, "maxTurns": 3,
-}})
+parent_search = False
+@ext.on("user.message")
+def user_message(event, _ctx):
+    global parent_search
+    parent_search = event.message == "delegate code search"
+@ext.on("agent.init")
+def filter_parent(_event, _ctx):
+    if parent_search:
+        return {"tools": {"disable": ["file_read", "grep_tool", "glob_tool"]}}
+prompt = Extension(name="search-prompt")
+@prompt.on("agent.init")
+def search_prompt(_event, _ctx):
+    return {"systemPrompt": {"replace": %q}}
 class Input(BaseModel):
     pass
 @ext.tool("code_search", description="Run restricted code search", input_schema=Input)
 async def search(_input, ctx):
-    lease = await ctx.acquire_background_task("retained search") if %s else None
-    child = await ctx.children.start(profile="code_search", message="child code search", request_id="search-once", lease=lease)
-    if lease:
-        async def finish():
-            try:
-                await child.wait()
-            finally:
-                await lease.close()
-        task = asyncio.create_task(finish())
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-        return "runner-file-evidence"
-    result = await child.wait(on_event=lambda event: ctx.update(event.get("text") or event["kind"]))
-    return result["output"]
+    resume = await ctx.fork_conversation(%q)
+    client = Client(command=os.environ["KODELET_BIN"], cwd=ctx.cwd)
+    try:
+        session = await client.create_session(resume=resume, options=ExecutionOptions(
+            allowed_tools=["file_read", "grep_tool", "glob_tool"],
+            no_skills=True, enable_fs_search_tools=True, max_turns=3,
+        ), extensions=[prompt])
+        return (await session.run_and_wait(message="child code search")).content
+    finally:
+        await client.close()
 asyncio.run(run_extension(ext))
-`, map[bool]string{true: "True", false: "False"}[background])
+`, daemonACPSearchPrompt, daemonACPSearchName)
 	default:
 		t.Fatalf("unknown extension SDK %q", sdk)
 	}
@@ -822,7 +806,7 @@ func daemonCLIProcess(ctx context.Context, t *testing.T, cwd string, environment
 	return command
 }
 
-func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, helperCalls *atomic.Int32, childGate func(context.Context)) *httptest.Server {
+func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, helperCalls *atomic.Int32, childGate func(context.Context, bool)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer daemon-only-key", r.Header.Get("Authorization"))
@@ -831,8 +815,12 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 			Stream   bool             `json:"stream"`
 			Tools    []map[string]any `json:"tools"`
 			Messages []struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
+				Role       string          `json:"role"`
+				Content    json.RawMessage `json:"content"`
+				ToolCallID string          `json:"tool_call_id"`
+				ToolCalls  []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
 			} `json:"messages"`
 		}
 		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&request)) {
@@ -843,7 +831,19 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 		var delta map[string]any
 		finish := "stop"
 		var helper, extraction, delegated, child, pullRequest, alternate bool
-		for _, message := range request.Messages {
+		lastUser := 0
+		pending := map[string]bool{}
+		for index, message := range request.Messages {
+			for _, call := range message.ToolCalls {
+				pending[call.ID] = true
+			}
+			if message.Role == "tool" {
+				assert.True(t, pending[message.ToolCallID], "tool results must retain their calls in live forks")
+				delete(pending, message.ToolCallID)
+			}
+			if message.Role == "user" {
+				lastUser = index
+			}
 			helper = helper || strings.Contains(string(message.Content), "Extraction request:")
 			extraction = extraction || (message.Role == "user" && strings.Contains(string(message.Content), "extract the webpage"))
 			delegated = delegated || (message.Role == "user" && strings.Contains(string(message.Content), "delegate code search"))
@@ -864,6 +864,14 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 				text = "feat: commit runner snapshot"
 			}
 		}
+		assert.Empty(t, pending, "live forks must not submit incomplete tool-call history")
+		delegated = delegated && !child
+		if delegated {
+			for _, tool := range request.Tools {
+				name := tool["function"].(map[string]any)["name"]
+				assert.NotContains(t, []string{"file_read", "grep_tool", "glob_tool"}, name, "parent patch-mode and agent.init presentation filters must be active")
+			}
+		}
 		if alternate {
 			assert.Equal(t, "gpt-4o", request.Model, "repository model settings must not reach the daemon")
 			require.Len(t, request.Tools, 1, "the new CWD restricts tools and disables startup-directory extensions")
@@ -872,8 +880,8 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 			assert.NotContains(t, string(request.Messages[0].Content), "WORKSPACE_CONTEXT_MUST_NOT_REACH_HELPER")
 		}
 		if child {
-			childGate(r.Context())
-			assert.Equal(t, "gpt-4o-mini", request.Model)
+			childGate(r.Context(), false)
+			assert.Equal(t, "gpt-4o", request.Model, "ordinary forks retain the parent's model snapshot")
 			var names []string
 			for _, tool := range request.Tools {
 				if fn, ok := tool["function"].(map[string]any); ok {
@@ -882,7 +890,7 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 				}
 			}
 			assert.ElementsMatch(t, []string{"file_read", "grep_tool", "glob_tool"}, names)
-			assert.Contains(t, string(request.Messages[0].Content), "RUNNER_OWNED_CODE_SEARCH_PROMPT")
+			assert.Contains(t, string(request.Messages[0].Content), daemonACPSearchPrompt)
 		}
 		if helper {
 			helperCalls.Add(1)
@@ -895,7 +903,7 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 		}
 		if len(request.Tools) > 0 {
 			found := false
-			for _, message := range request.Messages {
+			for _, message := range request.Messages[lastUser:] {
 				if message.Role == "tool" {
 					expected := "runner-file-evidence"
 					if extraction {
@@ -955,95 +963,18 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 			delta = map[string]any{"role": "assistant", "content": text}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		if child && finish == "stop" {
+			// Send live content, then hold the provider open until observers receive
+			// it. A test relying only on durable history cannot pass this gate.
+			chunk := map[string]any{"id": "completion", "object": "chat.completion.chunk", "model": request.Model, "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": nil}}}
+			encoded, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
+			w.(http.Flusher).Flush()
+			childGate(r.Context(), true)
+			delta = map[string]any{}
+		}
 		chunk := map[string]any{"id": "completion", "object": "chat.completion.chunk", "model": "gpt-4o", "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
 		encoded, _ := json.Marshal(chunk)
 		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", encoded)
 	}))
-}
-
-// The fixture is a runner-installed stdio extension. It intentionally has no
-// access to the client's token and never launches kodelet or a local provider.
-func TestDaemonChildExtensionProcess(_ *testing.T) {
-	if os.Getenv("KODELET_TEST_CHILD_EXTENSION") != "1" {
-		return
-	}
-	reader := bufio.NewReader(os.Stdin)
-	read := func() (map[string]json.RawMessage, error) {
-		length := 0
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return nil, err
-			}
-			if strings.TrimSpace(line) == "" {
-				break
-			}
-			if value, ok := strings.CutPrefix(line, "Content-Length:"); ok {
-				length, err = strconv.Atoi(strings.TrimSpace(value))
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		data := make([]byte, length)
-		if _, err := io.ReadFull(reader, data); err != nil {
-			return nil, err
-		}
-		var message map[string]json.RawMessage
-		err := json.Unmarshal(data, &message)
-		return message, err
-	}
-	write := func(value any) {
-		data, _ := json.Marshal(value)
-		_, _ = fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(data), data)
-	}
-	next := 1000
-	for {
-		message, err := read()
-		if err != nil {
-			break
-		}
-		var method string
-		_ = json.Unmarshal(message["method"], &method)
-		var result any = map[string]any{}
-		switch method {
-		case "extension.initialize":
-			result = extensions.InitializeResult{
-				Name: "code_search", Tools: []extensions.ToolRegistration{{Name: "code_search", Description: "Run restricted code search", InputSchema: map[string]any{"type": "object"}}},
-				Profiles: []delegation.Profile{{Name: "code_search", SystemPromptPath: "search-prompt.txt", Options: &llmtypes.ExecutionOptions{Model: new("gpt-4o-mini"), AllowedTools: new([]string{"file_read", "grep_tool", "glob_tool"}), NoExtensions: new(true), NoSkills: new(true), EnableFSSearchTools: new(true), MaxTurns: new(3)}}},
-			}
-		case "extension.tool.execute":
-			call := func(method string, params any) (delegation.Result, error) {
-				next++
-				write(map[string]any{"jsonrpc": "2.0", "id": next, "parentId": message["id"], "method": "kodelet." + method, "params": params})
-				response, err := read()
-				if err != nil {
-					return delegation.Result{}, err
-				}
-				if raw := response["error"]; len(raw) > 0 && string(raw) != "null" {
-					return delegation.Result{}, fmt.Errorf("host: %s", raw)
-				}
-				var child delegation.Result
-				err = json.Unmarshal(response["result"], &child)
-				return child, err
-			}
-			child, err := call(delegation.StartMethod, delegation.Request{RequestID: "search-once", Profile: "code_search", Message: "child code search"})
-			deadline := time.Now().Add(15 * time.Second)
-			for err == nil && !child.Done && time.Now().Before(deadline) {
-				time.Sleep(10 * time.Millisecond)
-				child, err = call(delegation.ReadMethod, map[string]any{"childId": child.ConversationID})
-			}
-			if err != nil {
-				result = map[string]any{"error": err.Error()}
-			} else if child.Error != "" {
-				result = map[string]any{"error": child.Error}
-			} else if !child.Done {
-				result = map[string]any{"error": "child timed out"}
-			} else {
-				result = map[string]any{"content": child.Output}
-			}
-		}
-		write(map[string]any{"jsonrpc": "2.0", "id": message["id"], "result": result})
-	}
-	os.Exit(0)
 }

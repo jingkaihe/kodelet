@@ -11,7 +11,7 @@ import (
 )
 
 // ExecutionOptions is the credential-free request contract shared by clients,
-// execution presets, and the runner protocol. Pointers distinguish omission
+// ACP sessions, and the runner protocol. Pointers distinguish omission
 // from explicit false, zero, and empty allowlists. These are not Config values.
 type ExecutionOptions struct {
 	Provider             *string   `json:"provider,omitempty"`

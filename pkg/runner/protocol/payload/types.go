@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -66,7 +65,6 @@ type EnvironmentCapabilities struct {
 type Manifest struct {
 	SessionExtensionIDs []string                      `json:"sessionExtensionIds,omitempty"`
 	Shortcuts           []protocol.ShortcutDescriptor `json:"shortcuts,omitempty"`
-	Profiles            []delegation.Preset           `json:"profiles,omitempty"`
 	ProtocolVersion     int                           `json:"protocolVersion"`
 	RunnerID            string                        `json:"runnerId"`
 	RunID               string                        `json:"runId"`
@@ -95,10 +93,6 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.Shortcuts = append([]protocol.ShortcutDescriptor(nil), manifest.Shortcuts...)
 	for i := range manifest.Shortcuts {
 		manifest.Shortcuts[i].Generation = 0
-	}
-	manifest.Profiles = append([]delegation.Preset(nil), manifest.Profiles...)
-	for i := range manifest.Profiles {
-		manifest.Profiles[i].Generation = 0
 	}
 	// System information is pinned in each run.open response but excluded from
 	// the protocol-v1 resource digest for additive wire compatibility and to

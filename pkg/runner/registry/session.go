@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -88,13 +87,6 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
 		}
 		return s.registry.executeModelHelper(ctx, runnerID, connectionID, generation, value)
-	}
-	if method == delegation.StartMethod || method == delegation.ReadMethod || method == delegation.CancelMethod || method == delegation.SteerMethod || method == delegation.ReleaseMethod {
-		var value delegation.Params
-		if err := delegation.Decode(params, &value); err != nil {
-			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
-		}
-		return s.registry.childRequest(ctx, runnerID, connectionID, generation, method, value)
 	}
 	if method == protocol.MethodConversationFork {
 		value, err := decodeParams[runnerpayload.ConversationForkParams](params)

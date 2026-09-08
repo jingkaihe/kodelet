@@ -375,7 +375,6 @@ type ClientCapabilities struct {
 type RunOpenParams struct {
 	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`
 	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
-	ChildPrompt        *string                    `json:"childPrompt,omitempty"`
 	RunID              string                     `json:"runId"`
 	ConversationID     string                     `json:"conversationId"`
 	CWD                string                     `json:"cwd,omitempty"`
@@ -391,9 +390,6 @@ func (p RunOpenParams) Validate() error {
 		if err := p.SessionExtensions.Validate(); err != nil {
 			return err
 		}
-	}
-	if p.ChildPrompt != nil && len(*p.ChildPrompt) > 256*1024 {
-		return errors.New("child prompt exceeds limit")
 	}
 	if strings.TrimSpace(p.RunID) == "" {
 		return errors.New("runId is required")

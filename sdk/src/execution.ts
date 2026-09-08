@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Credential-free options shared by daemon requests and extension presets. */
+/** Credential-free options for daemon-backed ACP sessions. */
 export const executionOptionsSchema = z.strictObject({
   provider: z.enum(["openai", "anthropic"]).optional(),
   model: z.string().min(1).optional(),
@@ -29,16 +29,6 @@ export function executionArgs(options: ExecutionOptions): string[] {
     return `--${flag}=${encoded}`;
   });
 }
-
-export const executionProfileSchema = z.strictObject({
-  name: z.string().min(1).max(128).regex(/^[^/\\\0]+$/),
-  options: executionOptionsSchema.optional(),
-  /** Resolved relative to the owning extension's directory on the runner. */
-  systemPromptPath: z.string().max(8192).optional(),
-  systemPrompt: z.string().max(256 * 1024).optional(),
-}).refine((p) => !(p.systemPrompt && p.systemPromptPath), "Use prompt content or a prompt path, not both");
-
-export type ExecutionProfile = z.infer<typeof executionProfileSchema>;
 
 /** @internal Convert supported legacy inline settings; never write a config file. */
 export function remoteExecutionOptions(input: Record<string, unknown>): ExecutionOptions {

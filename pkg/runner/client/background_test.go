@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -56,7 +55,6 @@ type backgroundHelperState struct {
 	DataDir      string `json:"dataDir"`
 	Previous     string `json:"previous"`
 	Error        string `json:"error"`
-	ChildError   string `json:"childError"`
 }
 
 func backgroundState(t *testing.T, workspace, conversation string) backgroundHelperState {
@@ -90,7 +88,6 @@ func TestBackgroundSessionStartLeaseIsProvisional(t *testing.T) {
 	}
 	state := backgroundState(t, workspace, "opening")
 	require.NotEmpty(t, state.LeaseID, "session.start must be able to acquire a provisional lease")
-	assert.Contains(t, state.ChildError, "provisional until run.open succeeds")
 	service.mu.Lock()
 	resources := service.backgroundLeases[state.LeaseID]
 	assert.NotNil(t, resources)
@@ -165,8 +162,7 @@ func TestBackgroundSavedDirectoryMoveReplacesIdleResources(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(destination, extensionPath), script, 0o700))
 	provider := &recordingExecutionInstanceProvider{workspace: workspace}
 	service.instanceProvider = provider
-	peer := &backgroundLeasePeer{released: make(chan delegation.Params, 4)}
-	service.Attach(peer)
+	service.Attach(&recordingPeer{})
 	_, err = service.openRun(t.Context(), protocol.RunOpenParams{
 		RunID: "original", ConversationID: "conversation", CWD: workspace, ExpectedCWD: workspace,
 	})
@@ -198,13 +194,6 @@ func TestBackgroundSavedDirectoryMoveReplacesIdleResources(t *testing.T) {
 		assert.NotContains(t, service.backgroundRunIDs, previousRunID)
 		assert.NotContains(t, service.backgroundCleanup, resources)
 		service.mu.Unlock()
-		select {
-		case released := <-peer.released:
-			assert.Equal(t, previousRunID, released.RunID)
-			assert.Equal(t, state.LeaseID, released.LeaseID)
-		case <-time.After(5 * time.Second):
-			require.FailNow(t, "relocation did not release the old worker's child authority")
-		}
 		data, err := os.ReadFile(filepath.Join(state.DataDir, "conversation.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "persisted", string(data), "relocation must not delete extension storage")
@@ -345,23 +334,7 @@ func TestBackgroundExplicitCancellationReleasesRetainedWorkers(t *testing.T) {
 	assert.Empty(t, service.backgrounds)
 }
 
-type backgroundLeasePeer struct {
-	recordingPeer
-	released chan delegation.Params
-}
-
-func (p *backgroundLeasePeer) Call(ctx context.Context, method string, params, result any) error {
-	if method == delegation.ReleaseMethod {
-		p.released <- params.(delegation.Params)
-		if result != nil {
-			*result.(*delegation.Result) = delegation.Result{Done: true}
-		}
-		return nil
-	}
-	return p.recordingPeer.Call(ctx, method, params, result)
-}
-
-func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *testing.T) {
+func TestBackgroundLeaseRevocationAcrossReattachment(t *testing.T) {
 	for _, mode := range []string{"release", "cancel", "crash", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
 			service, workspace := newBackgroundTestService(t, "lease")
@@ -372,15 +345,9 @@ func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *te
 			require.NoError(t, service.closeRun(t.Context(), "one"))
 			_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "two", ConversationID: "conversation"})
 			require.NoError(t, err)
-			peer := &backgroundLeasePeer{released: make(chan delegation.Params, 4)}
-			service.Attach(peer)
+			service.Attach(&recordingPeer{})
 			switch mode {
 			case "release":
-				service.mu.Lock()
-				lease := service.backgroundLeases[state.LeaseID].leases[state.LeaseID]
-				lease.childAuthority = true
-				service.backgroundLeases[state.LeaseID].leases[state.LeaseID] = lease
-				service.mu.Unlock()
 				_, err = service.ReleaseBackgroundTask(t.Context(), &recordingUIExtensionSource{owner: owner}, extensions.BackgroundTaskReleaseRequest{LeaseID: state.LeaseID})
 				require.NoError(t, err)
 			case "cancel":
@@ -390,25 +357,11 @@ func TestBackgroundLeaseRevocationReleasesChildAuthorityAcrossReattachment(t *te
 			case "shutdown":
 				require.NoError(t, service.Close())
 			}
-			runs := make([]string, 0, 2)
-			wantRuns := []string{"one", "two"}
-			if mode == "release" {
-				wantRuns = []string{""}
-			} // synchronous owner-scoped revocation covers all reattachments
-			for range len(wantRuns) {
-				select {
-				case release := <-peer.released:
-					runs = append(runs, release.RunID)
-					assert.Equal(t, state.LeaseID, release.LeaseID)
-					assert.Equal(t, owner.ExtensionID, release.ExtensionID)
-					assert.Equal(t, owner.Generation, release.Generation)
-				case <-time.After(5 * time.Second):
-					require.FailNow(t, "child authority was not revoked for each attached run")
-				}
-			}
-			assert.ElementsMatch(t, wantRuns, runs)
 			require.NoError(t, service.Close())
 			assertBackgroundProcessStopped(t, state.PID)
+			service.mu.Lock()
+			assert.Empty(t, service.backgroundLeases)
+			service.mu.Unlock()
 		})
 	}
 }
@@ -724,8 +677,6 @@ func runBackgroundExtensionHelper() {
 				state.Conversation = params.Context.ConversationID
 				if mode == "lease" || mode == "hang-start" {
 					acquire(request.ID)
-					response := requestHost(request.ID, "kodelet."+delegation.ReadMethod, map[string]any{"leaseId": state.LeaseID, "childId": "not-open-yet"})
-					state.ChildError = string(response.Error)
 				}
 				path := filepath.Join(state.DataDir, state.Conversation+".txt")
 				previous, _ := os.ReadFile(path)

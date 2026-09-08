@@ -68,6 +68,31 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 	assert.False(t, hasPending)
 }
 
+func TestLegacyRunScopedGuidanceDoesNotReachOrdinaryTurns(t *testing.T) {
+	store, _ := newTestStore(t)
+	_, err := store.db.ExecContext(t.Context(), `INSERT INTO steering_messages
+		(conversation_id, content, images_json, created_at, run_id) VALUES (?, ?, '[]', ?, ?)`,
+		"conversation", "old scoped guidance", time.Now().UTC(), "old-run")
+	require.NoError(t, err)
+
+	pending, err := store.Peek(t.Context(), "conversation")
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	hasPending, err := store.HasPending(t.Context(), "conversation")
+	require.NoError(t, err)
+	assert.False(t, hasPending)
+	alreadyPending, err := store.Enqueue(t.Context(), "conversation", "ordinary guidance", nil)
+	require.NoError(t, err)
+	assert.False(t, alreadyPending)
+	consumed, err := store.Consume(t.Context(), "conversation")
+	require.NoError(t, err)
+	require.Len(t, consumed, 1)
+	assert.Equal(t, "ordinary guidance", consumed[0].Content)
+	var remaining int
+	require.NoError(t, store.db.Get(&remaining, `SELECT COUNT(*) FROM steering_messages WHERE run_id='old-run'`))
+	assert.Equal(t, 1, remaining, "historical data is preserved without replay")
+}
+
 func TestEnqueuePersistsNormalizedImages(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newTestStore(t)

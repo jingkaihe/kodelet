@@ -18,25 +18,6 @@ import (
 
 const MaxMessageLength = 10000
 
-type childRunKey struct{}
-
-// WithChildRun confines delegated guidance to its exact current execution.
-func WithChildRun(ctx context.Context, runID string) context.Context {
-	return context.WithValue(ctx, childRunKey{}, runID)
-}
-
-// EnqueueChild only accepts guidance while the exact durable child turn runs.
-func (s *Store) EnqueueChild(ctx context.Context, conversationID, runID, content string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO steering_messages (conversation_id,content,images_json,created_at,run_id)
-		SELECT ?,?,'[]',?,? WHERE EXISTS(SELECT 1 FROM chat_turns WHERE conversation_id=? AND run_id=? AND status='running' AND NOT cancel_requested)`,
-		conversationID, content, time.Now().UTC(), runID, conversationID, runID)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
-}
-
 // FormatPendingNotice renders the user-facing notice shown when queued steering is injected.
 func FormatPendingNotice(content string, imageCount int) string {
 	if imageCount > 0 {
@@ -141,7 +122,7 @@ func (s *Store) Enqueue(ctx context.Context, conversationID, content string, ima
 
 	var count int
 	if err := tx.GetContext(ctx, &count, `
-		SELECT COUNT(*) FROM steering_messages WHERE conversation_id = ?
+		SELECT COUNT(*) FROM steering_messages WHERE conversation_id = ? AND run_id=''
 	`, conversationID); err != nil {
 		return false, errors.Wrap(err, "failed to count queued steering messages")
 	}
@@ -158,7 +139,7 @@ func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, err
 	rows, err := s.db.QueryxContext(ctx, `
 		SELECT id, content, images_json, created_at
 		FROM steering_messages
-		WHERE conversation_id = ?
+		WHERE conversation_id = ? AND run_id=''
 		ORDER BY id ASC
 	`, conversationID)
 	if err != nil {
@@ -173,9 +154,9 @@ func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, err
 	return messages, nil
 }
 
-// Consume atomically removes and returns all pending steering messages for a conversation.
+// Consume atomically removes and returns pending ordinary steering messages.
+// Legacy run-scoped rows remain stored but must never reach an unrelated turn.
 func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, error) {
-	runID, _ := ctx.Value(childRunKey{}).(string)
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to begin steering consume transaction")
@@ -184,9 +165,9 @@ func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, 
 
 	rows, err := tx.QueryxContext(ctx, `
 		DELETE FROM steering_messages
-		WHERE conversation_id = ? AND (run_id='' OR run_id=?)
+		WHERE conversation_id = ? AND run_id=''
 		RETURNING id, content, images_json, created_at
-	`, conversationID, runID)
+	`, conversationID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to consume pending steering messages")
 	}
@@ -209,13 +190,12 @@ func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, 
 
 // HasPending reports whether a conversation has queued steering messages.
 func (s *Store) HasPending(ctx context.Context, conversationID string) (bool, error) {
-	runID, _ := ctx.Value(childRunKey{}).(string)
 	var pending bool
 	if err := s.db.GetContext(ctx, &pending, `
 		SELECT EXISTS(
-			SELECT 1 FROM steering_messages WHERE conversation_id = ? AND (run_id='' OR run_id=?)
+			SELECT 1 FROM steering_messages WHERE conversation_id = ? AND run_id=''
 		)
-	`, conversationID, runID); err != nil {
+	`, conversationID); err != nil {
 		return false, errors.Wrap(err, "failed to check pending steering messages")
 	}
 	return pending, nil

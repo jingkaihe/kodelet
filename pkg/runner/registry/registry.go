@@ -274,9 +274,6 @@ type Registry struct {
 	toolUpdates       *toolUpdateRouter
 	toolForkers       map[toolForkKey]*toolForkRegistration
 	modelHelpers      map[modelHelperKey]*modelHelperRegistration
-	childTools        map[toolForkKey]*childGrant
-	childLeases       map[childLeaseKey]*childGrant
-	childExecutions   map[string]*childExecution
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -676,7 +673,6 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		r.clearRunTransientStateLocked(lostRun.ID)
 		lostConversationIDs = append(lostConversationIDs, lostRun.ConversationID)
 	}
-	r.clearRunnerChildrenLocked(entry.ID)
 	result := protocol.RegisterResult{
 		RunnerID:            entry.ID,
 		ProtocolVersion:     protocol.Version,
@@ -805,7 +801,6 @@ func (r *Registry) DisconnectRunnerExceptCredential(runnerID, allowedCredentialI
 	entry.ready = false
 	entry.ConnectionID = ""
 	entry.UpdatedAt = now
-	r.clearRunnerChildrenLocked(entry.ID)
 	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
 	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
 	for _, runID := range runnerActiveRunIDs(entry) {
@@ -848,7 +843,6 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 	entry.ready = false
 	entry.ConnectionID = ""
 	entry.UpdatedAt = now
-	r.clearRunnerChildrenLocked(entry.ID)
 	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
 	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
 	for _, runID := range runnerActiveRunIDs(entry) {
@@ -1331,11 +1325,6 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 		return runnerpayload.ToolExecuteResult{}, err
 	}
 	defer cleanupHelper()
-	cleanupChildren, err := r.registerToolChildren(ctx, params)
-	if err != nil {
-		return runnerpayload.ToolExecuteResult{}, err
-	}
-	defer cleanupChildren()
 	toolContext := tools.ToolContextFromContext(ctx)
 	if forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker); ok {
 		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, params.Name, forker)
@@ -1424,7 +1413,6 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 	}
 	r.mu.Lock()
 	r.clearRunModelHelpersLocked(runID)
-	r.clearRunChildrenLocked(runID, false)
 	r.mu.Unlock()
 	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
 		return err
@@ -1894,8 +1882,6 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 func (r *Registry) clearRunTransientStateLocked(runID string) {
 	r.toolUpdates.clearRun(runID)
 	r.clearRunModelHelpersLocked(runID)
-	run := r.runs[runID]
-	r.clearRunChildrenLocked(runID, run != nil && run.Status == RunStatusSucceeded)
 }
 
 func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {

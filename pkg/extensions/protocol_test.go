@@ -203,20 +203,20 @@ func TestRPCClientUsesPersistentHostContextForParentlessRequests(t *testing.T) {
 	assert.Equal(t, map[string]any{"accepted": true, "conversation": "conversation-host"}, result)
 }
 
-type childContextHostHandler struct{ ctx context.Context }
+type backgroundContextHostHandler struct{ ctx context.Context }
 
-func (h childContextHostHandler) hostContext() context.Context { return h.ctx }
+func (h backgroundContextHostHandler) hostContext() context.Context { return h.ctx }
 
-func (h childContextHostHandler) HandleRPCRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+func (h backgroundContextHostHandler) HandleRPCRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
 	return map[string]any{"scope": ctx.Value(rpcCallContextKey{}), "cancelled": ctx.Err() != nil}, nil
 }
 
-func TestRPCClientRetainedChildNeverBorrowsPendingForegroundContext(t *testing.T) {
-	for _, method := range []string{"kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer", BackgroundTaskReleaseMethod} {
+func TestRPCClientBackgroundReleaseNeverBorrowsPendingForegroundContext(t *testing.T) {
+	for _, method := range []string{BackgroundTaskReleaseMethod} {
 		t.Run(method, func(t *testing.T) {
 			var outbound bytes.Buffer
 			client := newRPCClient(strings.NewReader(""), &outbound)
-			host := childContextHostHandler{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "retained")}
+			host := backgroundContextHostHandler{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "retained")}
 			client.setHostRequestHandler(host)
 			pending, cancel := context.WithCancel(context.WithValue(t.Context(), rpcCallContextKey{}, "unrelated new turn"))
 			cancel()
@@ -230,14 +230,13 @@ func TestRPCClientRetainedChildNeverBorrowsPendingForegroundContext(t *testing.T
 			assert.JSONEq(t, `{"scope":"retained","cancelled":false}`, string(response.Result))
 		})
 	}
-	// The first start still uses explicit active parentId, never an inferred
-	// oldest pending request. Parentless start receives no tool-scoped context.
+	// An explicitly parented lease acquisition still uses the active request.
 	var outbound bytes.Buffer
 	client := newRPCClient(strings.NewReader(""), &outbound)
-	host := childContextHostHandler{ctx: t.Context()}
+	host := backgroundContextHostHandler{ctx: t.Context()}
 	client.setHostRequestHandler(host)
 	client.pending[7] = &rpcPendingCall{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "active tool"), handler: host}
-	client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), ParentID: json.RawMessage(`7`), Method: "kodelet.child.start"})
+	client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), ParentID: json.RawMessage(`7`), Method: BackgroundTaskAcquireMethod})
 	frames := readAllTestFrames(t, outbound.Bytes())
 	require.Len(t, frames, 1)
 	var response rpcResponse

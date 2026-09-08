@@ -14,7 +14,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -394,19 +393,7 @@ func runDefaultChat(
 	var resolvedCWD string
 	var expectedCWD string
 	var environmentProfile string
-	child, isChild := ctx.Value(childContextKey{}).(*childContext)
-	var resumedChildPrompt *string
-	if isChild {
-		llmConfig = child.config.Clone()
-		resolvedCWD, environmentProfile = req.CWD, req.EnvironmentProfile
-		invokedBy = "subagent"
-		if err := persistChildIdentity(ctx, child, req.RunnerID, environmentProfile); err != nil {
-			return sessionID, err
-		}
-		if err := delegation.Admit(ctx); err != nil {
-			return sessionID, err
-		}
-	} else if strings.TrimSpace(req.RunnerID) != "" {
+	if strings.TrimSpace(req.RunnerID) != "" {
 		llmConfig, environmentProfile, err = ResolveRemoteConfigWithReasoningAndEnvironmentProfile(
 			ctx,
 			sessionID,
@@ -426,15 +413,9 @@ func runDefaultChat(
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
-	if !isChild {
-		llmConfig, err = resolveExecutionOptions(ctx, req, llmConfig)
-		if err != nil {
-			return sessionID, err
-		}
-		llmConfig, resumedChildPrompt, err = restoreChildPreset(ctx, req, llmConfig)
-		if err != nil {
-			return sessionID, err
-		}
+	llmConfig, err = resolveExecutionOptions(ctx, req, llmConfig)
+	if err != nil {
+		return sessionID, err
 	}
 	llmConfig.WorkingDirectory = resolvedCWD
 
@@ -447,20 +428,6 @@ func runDefaultChat(
 		environment, err = environmentResolver.ResolveEnvironment(ctx, req, sessionID, llmConfig, resolvedCWD)
 		if err != nil {
 			return sessionID, err
-		}
-		if isChild {
-			remote, ok := environment.(*agentenv.RemoteEnvironment)
-			if !ok {
-				return sessionID, errors.New("delegated tasks require a runner connected to the server")
-			}
-			remote.SetChildRunID(child.identity.RunID)
-			remote.SetChildPrompt(child.prompt)
-		} else if resumedChildPrompt != nil {
-			remote, ok := environment.(*agentenv.RemoteEnvironment)
-			if !ok {
-				return sessionID, errors.New("delegated tasks require a runner connected to the server")
-			}
-			remote.SetChildPrompt(*resumedChildPrompt)
 		}
 	}
 	extensionsDisabled := llmConfig.EnvironmentOptions().NoExtensions
@@ -539,11 +506,7 @@ func runDefaultChat(
 			_ = threadOwner.CloseConversation(sessionID)
 		}
 	}()
-	if isChild {
-		// Delegated children have their own durable admission and must never
-		// reuse an inherited ordinary parent turn's checkpoint authority.
-		ctx = agentenv.ContextWithRunCheckpoint(ctx, nil)
-	} else if strings.TrimSpace(req.RunnerID) != "" {
+	if strings.TrimSpace(req.RunnerID) != "" {
 		ctx = agentenv.ContextWithRunCheckpoint(ctx, func(saveCtx context.Context, cwd string) error {
 			llmConfig.WorkingDirectory = cwd
 			if err := prepareThread(saveCtx); err != nil {
@@ -651,10 +614,6 @@ func runDefaultChat(
 		}
 		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools, llmConfig.AllowedCommands)
 	}
-	if isChild && child.aggregate != nil {
-		initialUsage := thread.GetUsage()
-		defer func() { child.aggregate(childTurnUsage(thread.GetUsage(), initialUsage)) }()
-	}
 	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
 		extensionSetter.SetExtensions(extensionRuntime)
 	}
@@ -706,9 +665,6 @@ func runDefaultChat(
 	messageOpt := executionMessageOpt(req.Options)
 	if strings.TrimSpace(req.RunnerID) != "" {
 		ctx = contextWithCentralModelHelper(ctx, thread)
-		parentRequest := req
-		parentRequest.EnvironmentProfile = environmentProfile
-		ctx = contextWithCentralChildren(ctx, thread, environment, parentRequest, environmentResolver)
 	}
 	messageOpt.Images = imageInputs
 	result, err := thread.SendMessage(ctx, message, handler, messageOpt)

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
@@ -43,7 +42,6 @@ type Process struct {
 	failures     int
 	uiHost       ExtensionUIHost
 	uiSource     *processExtensionUISource
-	profiles     map[string]delegation.Preset
 }
 
 // RuntimeCapabilities describes execution-lifetime guarantees available to an extension process.
@@ -388,9 +386,6 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 	if err := client.callWithHostHandler(ctx, "extension.initialize", params, &result, source); err != nil {
 		return nil, err
 	}
-	if err := p.setProfiles(source, result.Profiles); err != nil {
-		return nil, err
-	}
 	return &result, nil
 }
 
@@ -643,16 +638,6 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		ctx = ContextWithExtensionUIImplicitScope(ctx)
 	}
 	switch method {
-	case "kodelet.child.start", "kodelet.child.read", "kodelet.child.cancel", "kodelet.child.steer":
-		host, ok := ctx.Value(childHostKey{}).(ChildHost)
-		if !ok {
-			return nil, &rpcError{Code: -32004, Message: "delegated tasks require a runner connected to the server"}
-		}
-		result, err := host.ChildRequest(ctx, source, strings.TrimPrefix(method, "kodelet."), params)
-		if err != nil {
-			return nil, &rpcError{Code: -32000, Message: err.Error()}
-		}
-		return result, nil
 	case BackgroundTaskAcquireMethod:
 		if !RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
 			return nil, &rpcError{Code: -32000, Message: "extension background tasks are not available"}
@@ -904,7 +889,7 @@ func (s *processExtensionUISource) setHostContext(ctx context.Context) {
 	}
 }
 
-// Retained child RPCs outlive individual run contexts and reinitialization,
+// Background lease releases outlive individual run contexts and reinitialization,
 // but never the authenticated extension process generation.
 func (s *processExtensionUISource) backgroundHostContext() context.Context {
 	s.hostCtxMu.RLock()

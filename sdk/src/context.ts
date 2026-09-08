@@ -6,8 +6,6 @@ import path from "node:path";
 import nodeProcess from "node:process";
 import { promisify } from "node:util";
 
-import { createChildClient } from "./child.js";
-
 import type {
   BaseCallContext,
   BackgroundTaskLease,
@@ -224,7 +222,6 @@ function createSharedContext(
 
   return {
     signal,
-    children: createChildClient(client),
     sessionId: context.sessionId,
     conversationId: context.conversationId,
     uiScopeId: uiScopeId || undefined,

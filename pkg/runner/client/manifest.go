@@ -114,7 +114,6 @@ func buildWireManifest(
 	systemInformation := sysprompt.CollectSystemInformation(local.WorkingDirectory)
 	manifest := runnerpayload.Manifest{
 		Shortcuts:        wireShortcuts(runtime),
-		Profiles:         runtime.Profiles(),
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         runnerID,
 		RunID:            runID,

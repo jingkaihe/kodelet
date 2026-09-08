@@ -1,7 +1,5 @@
 export { z } from "zod";
-export { ChildExecution } from "./child.js";
-export type { ChildClient, ChildEvent, ChildRequest, ChildResult, ChildSteerResult } from "./child.js";
-export type { ExecutionOptions, ExecutionProfile } from "./execution.js";
+export type { ExecutionOptions } from "./execution.js";
 export { AgentRunError, Client, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";

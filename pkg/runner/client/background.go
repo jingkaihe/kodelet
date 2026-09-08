@@ -6,9 +6,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/delegation"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -43,12 +41,9 @@ type runnerBackgroundResources struct {
 }
 
 type runnerBackgroundLease struct {
-	owner               extensions.UIExtensionOwner
-	description         string
-	openingRunID        string
-	childAuthority      bool
-	childAuthorityRunID string
-	releasing           bool
+	owner        extensions.UIExtensionOwner
+	description  string
+	openingRunID string
 }
 
 func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskAcquireRequest) (extensions.BackgroundTaskAcquireResponse, error) {
@@ -140,16 +135,8 @@ func (s *Service) revokeBackgroundTasksLocked(run *activeRun, provisionalOnly bo
 }
 
 func (s *Service) removeBackgroundLeaseLocked(resources *runnerBackgroundResources, leaseID string) {
-	lease := resources.leases[leaseID]
 	delete(resources.leases, leaseID)
 	delete(s.backgroundLeases, leaseID)
-	if lease.openingRunID == "" {
-		// A retained worker can submit children during multiple foreground runs.
-		// releaseChildLease queues bounded reverse RPCs without taking s.mu.
-		for runID := range resources.runIDs {
-			s.releaseChildLease(runID, leaseID, lease.owner)
-		}
-	}
 }
 
 func (s *Service) ReleaseBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskReleaseRequest) (extensions.BackgroundTaskReleaseResponse, error) {
@@ -173,27 +160,6 @@ func (s *Service) ReleaseBackgroundTask(ctx context.Context, source extensions.U
 		s.mu.Unlock()
 		return extensions.BackgroundTaskReleaseResponse{}, errors.New("background task lease is owned by another extension process")
 	}
-	// Fence new local submissions before the reverse RPC. Keep the lease on
-	// errors so explicit close can reconcile instead of claiming cleanup.
-	lease.releasing = true
-	resources.leases[leaseID] = lease
-	s.mu.Unlock()
-	if lease.childAuthority {
-		peer := s.currentPeer()
-		if peer == nil {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.New("could not confirm child task cleanup because the server connection is unavailable")
-		}
-		releaseCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
-		defer cancel()
-		var result delegation.Result
-		if err := peer.Call(releaseCtx, delegation.ReleaseMethod, delegation.Params{LeaseID: leaseID, ExtensionID: owner.ExtensionID, Generation: owner.Generation}, &result); err != nil {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.Wrap(err, "could not confirm child task cleanup; try closing it again")
-		}
-		if !result.Done {
-			return extensions.BackgroundTaskReleaseResponse{}, errors.New("the child task has not confirmed that cleanup finished")
-		}
-	}
-	s.mu.Lock()
 	delete(resources.leases, leaseID)
 	if s.backgroundLeases[leaseID] == resources {
 		delete(s.backgroundLeases, leaseID)

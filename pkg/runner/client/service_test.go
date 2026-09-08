@@ -343,7 +343,7 @@ func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
 				},
 			})
 			params := protocol.RunOpenParams{
-				RunID: "child-run", ConversationID: "child-conversation", ChildPrompt: new("read-only search"),
+				RunID: "search-run", ConversationID: "search-conversation",
 				Agent:   protocol.AgentDescriptor{Provider: "openai", Model: "gpt-4o"},
 				Options: &llmtypes.ExecutionOptions{AllowedTools: &readTools, EnableFSSearchTools: new(true), NoExtensions: new(true), NoSkills: new(true)},
 			}
@@ -361,7 +361,7 @@ func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
 			assert.True(t, *manifest.Config.Options.NoExtensions)
 			assert.True(t, *manifest.Config.Options.NoSkills)
 			result := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
-				RunID: "child-run", ToolCallID: "read", Name: "file_read", Input: mustJSON(t, map[string]any{"file_path": filePath, "offset": 1, "line_limit": 10}),
+				RunID: "search-run", ToolCallID: "read", Name: "file_read", Input: mustJSON(t, map[string]any{"file_path": filePath, "offset": 1, "line_limit": 10}),
 			})
 			if slices.Contains(tt.want, "file_read") {
 				assert.True(t, result.Result.Structured.Success)
@@ -371,7 +371,7 @@ func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
 				assert.Contains(t, result.Result.Error, "not allowed")
 			}
 			blocked := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
-				RunID: "child-run", ToolCallID: "write", Name: "file_write", Input: mustJSON(t, map[string]any{"file_path": filePath, "content": "must not write"}),
+				RunID: "search-run", ToolCallID: "write", Name: "file_write", Input: mustJSON(t, map[string]any{"file_path": filePath, "content": "must not write"}),
 			})
 			assert.False(t, blocked.Result.Structured.Success)
 			assert.Contains(t, blocked.Result.Error, "not allowed")

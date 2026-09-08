@@ -58,7 +58,7 @@ Listeners receive every `tool.update`. To keep completed responses bounded, `res
 
 `options` accepts the typed `ExecutionOptions` contract: provider/model/weak model, token and turn limits, reasoning effort, weak-model selection, tool/skill/extension restrictions, command allowlists, and filesystem-search enablement. Explicit `false`, `0` where permitted, and empty lists are preserved. Inline `Profile` values accept the same options (legacy snake_case aliases are converted); an inline `name` is only a label, not a required daemon profile. Arbitrary provider configuration, endpoints, credentials, and client-local prompt paths are rejected. Model settings are locked when resuming a persisted conversation.
 
-Temporary SDK config files and `createSession({ extensions, extensionTransport, ui })` no longer configure remote execution; unsupported inline callbacks fail before spawning. Install executable extensions on the runner instead. Use `ctx.children` for delegated model work, not another `Client` with inherited credentials. `session.close()` detaches; explicit `session.cancel()` cancels the active turn.
+Temporary SDK config files and the legacy `extensionTransport` selector no longer configure remote execution. `createSession({ extensions, ui })` uses negotiated inline ACP session extensions, while installed executable extensions run on the runner. Use ordinary `Client` sessions with client authentication for delegated model work. `session.close()` detaches; explicit `session.cancel()` cancels the active turn.
 
 ### Steering an active session
 
@@ -162,51 +162,13 @@ const conversationId = await ctx.forkConversation({ name: "Investigate authentic
 
 Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
 
-### Extension-owned execution presets and children
+### ACP subagents and code search
 
-Register the preset in the parent extension before invoking it. The name belongs to that extension and environment, not daemon YAML; another extension can register the same name without replacing it. Prompt paths are resolved relative to the extension directory on the runner and snapshotted before child execution.
+Use ordinary `Client` sessions with normal client credentials and the intended server/runner. Pass typed `options` directly; `profile` selects an existing daemon profile, and `options.provider` must match it. Scoped `ctx.children` and extension profile registration/lookup are removed.
 
-```typescript
-ext.registerProfile({
-  name: "code_search",
-  systemPromptPath: "search-prompt.md",
-  options: {
-    model: "gpt-4o-mini",
-    allowedTools: ["file_read", "grep_tool", "glob_tool"],
-    noExtensions: true,
-    noSkills: true,
-    enableFSSearchTools: true,
-    maxTurns: 3,
-  },
-});
+Use inline `agent.init` hooks for instructions, keeping extensions enabled. Explicitly allowlist search tools and disable skills; runner policy still applies, but the caller's presentation-only tool list is not inherited.
 
-// Inside the owning extension's active tool handler:
-const child = await ctx.children.start({
-  profile: "code_search",
-  message: "Find the parser and explain its callers",
-  requestId: "this-tool-call-search-1", // Keep stable if reconciling an uncertain response.
-});
-const result = await child.wait({
-  signal: ctx.signal,
-  onEvent: event => ctx.update(event.text ?? event.kind),
-});
-return result.output;
-```
-
-Children have separate durable `conversationId`/`runId` values and parent metadata. `child.read()` reads status/progress; `child.cancel()` targets that child only. `wait()` rejects cancellation/failure and accepts an event callback. No client/admin token is injected and there is no subprocess/provider fallback. Model choices use daemon validation; tool/command permissions and resource limits cannot exceed the parent's effective policy. Optional per-invocation `options`, `systemPrompt` content, and descendant `cwd` remain subject to that ceiling. The saved child preset and prompt survive ordinary conversation resume.
-
-With a matching daemon/runner, `contextMode: "fork"` snapshots the active parent's history; omitted context is fresh. Forking must begin inside the originating tool handler, even with a retained lease. `resume: child.conversationId` submits a follow-up to that owned conversation with new run/request IDs; it cannot be combined with fork or loosen the saved policy. Old handles remain bound to their original run and cannot cancel or steer the follow-up.
-
-```typescript
-const child = await ctx.children.start({ profile: "review", message: "Review changes", contextMode: "fork" });
-const steered = await child.steer("Also check cancellation", { requestId: "guidance-1" });
-await child.wait({ signal: ctx.signal });
-const followup = await ctx.children.start({ profile: "review", message: "Check the fix", resume: child.conversationId });
-```
-
-`steer(message, { requestId? })` returns `{ outcome: "injected" }` when guidance is queued, or `{ outcome: "promptRequired", reason: "noRunningTurn" }` when no turn is active. It never starts a turn automatically. Optional stable steering IDs deduplicate repeated guidance; omitted IDs are generated. Start/steer failures are never retried automatically. A disconnected start may already be admitted: retain its request ID and background lease until exact child cancellation or acknowledged lease cleanup. After restart, resuming requires fresh tool authority; saved IDs alone are not credentials.
-
-Foreground children are cancelled when the parent tool returns. To retain a child, acquire a real runner lease in the active tool, pass it as `lease` on the first `start`, and keep it until the child reaches a terminal state. Subsequent reads/cancels/submissions use that explicitly retained authority. Provisional `session.start` leases do not authorize children. Authority expires after one hour and ends on lease release, cancellation, runner/extension loss, or shutdown; request/result caches are bounded and not restart-replay credentials. Foreground child usage aggregates into the parent; retained children account to their own durable conversations. Live `forkConversation` only snapshots history; it does not grant permission to execute another session.
+For inherited context, create a named fork inside the tool handler, then load it with `createSession({ resume: conversationId })`. ACP preserves normal history and streaming; `TaskProgress.attach(session)` tracks activity. Steering never starts a new turn. Own cancellation and client cleanup before releasing any background lease. Runner-targeted credentials remain phase two.
 
 ### Background extension work
 
@@ -365,4 +327,3 @@ Runnable TypeScript SDK examples live in `skills/kodelet/examples/sdk/`:
 
 - `basic-agent-session.ts` runs one prompt and prints the final response.
 - `streaming-agent-session.ts` streams assistant deltas as they arrive.
-- `delegated-code-search.ts` defines a runner-installed preset and scoped, read-only child execution.

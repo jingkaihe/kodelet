@@ -85,7 +85,6 @@ type RemoteEnvironment struct {
 	opened             bool
 	opening            bool
 	closing            bool
-	childPrompt        *string
 }
 
 // NewRemoteEnvironment creates an unopened environment bound to one stable runner ID.
@@ -140,7 +139,6 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		profile = e.modelProfile
 	}
 	params := protocol.RunOpenParams{
-		ChildPrompt:    e.childPrompt,
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
 		CWD:            strings.TrimSpace(spec.Config.WorkingDirectory),
