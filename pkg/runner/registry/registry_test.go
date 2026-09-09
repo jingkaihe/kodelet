@@ -1318,9 +1318,11 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 }
 
 func TestHeartbeatTimeoutMarksRunnerOffline(t *testing.T) {
+	now := time.Now().UTC()
 	registry, err := New(t.Context(), Options{
-		HeartbeatInterval: 5 * time.Millisecond,
-		HeartbeatTimeout:  15 * time.Millisecond,
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Now:               func() time.Time { return now },
 		NewID:             sequentialIDs(),
 	})
 	require.NoError(t, err)
@@ -1329,10 +1331,23 @@ func TestHeartbeatTimeoutMarksRunnerOffline(t *testing.T) {
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		runner, ok := registry.Runner(registration.RunnerID)
-		return ok && !runner.Connected && runner.Status == RunnerStatusOffline
-	}, time.Second, 5*time.Millisecond)
+	now = now.Add(3 * time.Hour)
+	registry.expireStaleConnections()
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.Connected)
+	assert.Equal(t, RunnerStatusConnecting, runner.Status)
+	assert.False(t, link.isClosed())
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "initial heartbeat")
+
+	markRunnerReady(t, registry, registration)
+	now = now.Add(3 * time.Hour)
+	registry.expireStaleConnections()
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, runner.Connected)
+	assert.Equal(t, RunnerStatusOffline, runner.Status)
 	assert.True(t, link.isClosed())
 }
 

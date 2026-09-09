@@ -1997,7 +1997,8 @@ func (r *Registry) expireStaleConnections() {
 	var stale []staleConnection
 	r.mu.RLock()
 	for _, entry := range r.runners {
-		if entry.Connected && entry.link != nil && now.Sub(entry.LastHeartbeatAt) > r.heartbeatTimeout {
+		// Before the first heartbeat, cold discovery is guarded by transport liveness.
+		if entry.Connected && entry.ready && entry.link != nil && now.Sub(entry.LastHeartbeatAt) > r.heartbeatTimeout {
 			stale = append(stale, staleConnection{entry.ID, entry.ConnectionID, entry.Generation, entry.link})
 		}
 	}

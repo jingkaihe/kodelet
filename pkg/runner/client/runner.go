@@ -213,24 +213,12 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
-	// The first snapshot may need to cold-start extensions. It is bounded by the
-	// runner lifetime rather than the short periodic-refresh timeout.
-	initialDigest, err := r.service.ProbeManifestDigest(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
-	}
-	logger.G(ctx).WithField("manifest_digest", initialDigest).Debug("discovered initial runner manifest")
-
 	backoff := r.config.ReconnectMin
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		connected, connectionErr := r.runConnection(ctx, initialDigest)
-		err = connectionErr
+		connected, err := r.runConnection(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -260,9 +248,6 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		case <-timer.C:
 		}
 		backoff = min(backoff*2, r.config.ReconnectMax)
-		if digest, probeErr := r.probeManifestDigest(ctx); probeErr == nil {
-			initialDigest = digest
-		}
 	}
 }
 
@@ -291,7 +276,7 @@ func (r *Runner) Close() error {
 	return lockErr
 }
 
-func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
+func (r *Runner) runConnection(ctx context.Context) (bool, error) {
 	ctx = r.loggingContext(ctx)
 	logger.G(ctx).Debug("connecting runner to server")
 	if _, err := r.refreshStoredCredential(); err != nil {
@@ -380,7 +365,6 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 			Name: filepath.Base(r.workspace),
 		},
 		KodeletVersion: version.Get().Version,
-		ManifestDigest: initialDigest,
 	}
 	if found {
 		params.RunnerID = cached.RunnerID
@@ -412,6 +396,25 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 		heartbeatInterval = 15 * time.Second
 	}
 	ctx = withRunnerRegistrationLogFields(ctx, registration)
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
+	go func() {
+		select {
+		case <-peer.TransportDone():
+			cancelConnection()
+		case <-connectionCtx.Done():
+		}
+	}()
+
+	// Cold discovery needs negotiated capabilities and may exceed the refresh timeout.
+	initialDigest, err := r.service.ProbeManifestDigest(connectionCtx)
+	if err != nil {
+		err = pkgerrors.Wrap(err, "failed to discover initial runner manifest")
+		if connectionCtx.Err() == nil && peer.Err() == nil {
+			return connected, &permanentConnectionError{err: err}
+		}
+		return connected, err
+	}
 	logger.G(ctx).WithFields(map[string]any{
 		"heartbeat_interval": heartbeatInterval,
 		"manifest_digest":    initialDigest,
@@ -427,8 +430,6 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	defer heartbeatTicker.Stop()
 	defer manifestTicker.Stop()
 	lastAdvertisedDigest := initialDigest
-	connectionCtx, cancelConnection := context.WithCancel(ctx)
-	defer cancelConnection()
 	type manifestProbeResult struct {
 		digest string
 		err    error

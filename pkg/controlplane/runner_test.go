@@ -373,7 +373,9 @@ func TestEmbeddedRunnerWaitsForEnvironmentReadiness(t *testing.T) {
 				require.FailNow(t, "environment probe did not start")
 			}
 			assert.False(t, server.EmbeddedRunnerStatus().Ready)
-			assert.Empty(t, server.runnerRegistry.Runners(), "environment probe must complete before registration")
+			runners := server.runnerRegistry.Runners()
+			require.Len(t, runners, 1)
+			assert.Equal(t, runnerregistry.RunnerStatusConnecting, runners[0].Status, "environment probe must complete before readiness")
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 			request.Header.Set("Authorization", "Bearer web-secret")
@@ -414,7 +416,10 @@ func TestEmbeddedRunnerStartupFailureReleasesLock(t *testing.T) {
 	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Error != "" }, 5*time.Second, 10*time.Millisecond)
 	assert.Contains(t, server.EmbeddedRunnerStatus().Error, "environment initialization failed")
 	assert.False(t, server.EmbeddedRunnerStatus().Ready)
-	assert.Empty(t, server.runnerRegistry.Runners())
+	require.Eventually(t, func() bool {
+		runners := server.runnerRegistry.Runners()
+		return len(runners) == 1 && !runners[0].Connected && runners[0].Status == runnerregistry.RunnerStatusOffline
+	}, time.Second, time.Millisecond)
 	assert.True(t, closed.Load())
 	held, err := config.EmbeddedRunner.Store.WorkspaceLockHeld(config.EmbeddedRunner.Workspace)
 	require.NoError(t, err)
