@@ -1,14 +1,16 @@
 # Kodelet
 
-## 0.6.2-alpha
+## 0.6.3-beta
 
-Alpha preview of the daemon-first architecture for testing, not production use.
+Made CLI, TUI, and ACP workflows daemon-backed, with automatic local server startup and `kodelet server` lifecycle commands.
 
-- Made CLI, TUI, and ACP workflows daemon-backed, with automatic local server startup and `kodelet server` lifecycle commands.
-- Added durable turn tracking, execution checkpoints, scoped cancellation, and conversation moves between runners.
-- Separated daemon model profiles from runner environments, enforcing permission limits and per-conversation working directories.
-- Added SDK child agents, execution presets, and authenticated inline extension callbacks with local UI handlers.
-- Improved TUI startup, extension shortcuts and surfaces, runner-backed `Ctrl+R` history, and disconnect cleanup.
+Added durable turn tracking, execution checkpoints, scoped cancellation, and conversation moves between runners.
+
+Separated daemon model profiles from runner environments, enforcing permission limits and per-conversation working directories.
+
+Added SDK child agents, execution presets, and authenticated inline extension callbacks with local UI handlers.
+
+Improved TUI startup, extension shortcuts and surfaces, runner-backed `Ctrl+R` history, and disconnect cleanup.
 
 **Breaking changes:** All runs persist; `--no-save` is removed and `--follow` requires runner or directory scope. Replace `serve --cwd` with `--runner-workspace` and `--disable-control-plane-workspace` with `--embedded-runner=false`. SDK sessions use typed execution options instead of temporary configuration files.
 
