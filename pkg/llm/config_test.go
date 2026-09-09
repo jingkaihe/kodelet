@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -43,173 +44,96 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
 }
 
-func TestGetConfigForExtensionProviderSelectsOpenAITransport(t *testing.T) {
+func TestGetConfigFromProfileIsolatedConfiguration(t *testing.T) {
 	previous := viper.AllSettings()
+	viper.Reset()
 	t.Cleanup(func() {
 		viper.Reset()
 		require.NoError(t, viper.MergeConfigMap(previous))
 	})
-	for _, test := range []struct {
-		name            string
-		basePlatform    string
-		defaultPlatform string
-		platform        string
-		selected        string
-		otherProvider   bool
-	}{
-		{name: "inherit default", basePlatform: "openai", defaultPlatform: "codex", selected: "default"},
-		{name: "explicit default", basePlatform: "openai", defaultPlatform: "codex", platform: "codex", selected: "default"},
-		{name: "explicit base", basePlatform: "openai", defaultPlatform: "codex", platform: "openai", selected: "base"},
-		{name: "same platform prefers default", basePlatform: "openai", defaultPlatform: "openai", platform: "openai", selected: "default"},
-		{name: "other provider uses base", basePlatform: "openai", defaultPlatform: "codex", selected: "base", otherProvider: true},
-		{name: "fresh copilot", basePlatform: "openai", defaultPlatform: "codex", platform: "copilot", selected: "fresh"},
-		{name: "fresh codex", basePlatform: "openai", defaultPlatform: "copilot", platform: "codex", selected: "fresh"},
-		{name: "fresh openai", basePlatform: "codex", defaultPlatform: "copilot", platform: "openai", selected: "fresh"},
-		{name: "configured custom base", basePlatform: "custom", defaultPlatform: "codex", platform: "custom", selected: "base"},
-		{name: "inherited custom default", basePlatform: "openai", defaultPlatform: "custom", selected: "default"},
-		{name: "explicit custom default", basePlatform: "openai", defaultPlatform: "custom", platform: "custom", selected: "default"},
-		{name: "fresh custom", basePlatform: "openai", defaultPlatform: "codex", platform: "custom", selected: "fresh"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			viper.Reset()
-			viper.Set("provider", "openai")
-			viper.Set("model", "base-model")
-			viper.Set("weak_model", "base-weak")
-			viper.Set("thinking_budget_tokens", 100)
-			viper.Set("max_tokens", 4096)
-			viper.Set("reasoning_effort", "medium")
-			viper.Set("allowed_reasoning_efforts", []string{"medium"})
-			viper.Set("allowed_tools", []string{"file_read"})
-			viper.Set("openai", map[string]any{
-				"platform":        test.basePlatform,
-				"base_url":        "https://base.invalid",
-				"api_key_env_var": "BASE_KEY",
-				"api_mode":        "chat_completions",
-				"service_tier":    "default",
-				"models":          map[string]any{"reasoning": []string{"base-only"}},
-				"pricing":         map[string]any{"shared": map[string]any{"input": 1.0}},
-			})
-			defaultProvider := "openai"
-			if test.otherProvider {
-				defaultProvider = "anthropic"
-			}
-			viper.Set("profile", "active")
-			viper.Set("profiles", map[string]any{"active": map[string]any{
-				"provider":                  defaultProvider,
-				"model":                     "default-model",
-				"weak_model":                "default-weak",
-				"max_tokens":                2048,
-				"reasoning_effort":          "high",
-				"allowed_reasoning_efforts": []string{"high"},
-				"allowed_tools":             []string{"bash"},
-				"openai": map[string]any{
-					"platform":        test.defaultPlatform,
-					"base_url":        "https://default.invalid",
-					"api_key_env_var": "DEFAULT_KEY",
-					"api_mode":        "responses",
-					"service_tier":    "fast",
-					"models":          map[string]any{"reasoning": []string{"default-only"}},
-					"pricing":         map[string]any{"shared": map[string]any{"input": 2.0}},
-				},
-			}})
-			before := viper.AllSettings()
-			want, err := GetConfigFromViperWithoutProfile()
-			require.NoError(t, err)
-			switch test.selected {
-			case "default":
-				active, err := GetConfigFromViper()
-				require.NoError(t, err)
-				want.OpenAI = active.OpenAI
-			case "fresh":
-				want.OpenAI = &llmtypes.OpenAIConfig{Platform: test.platform}
-			}
-			if want.OpenAI.Platform != test.basePlatform {
-				want.Model = ""
-				want.WeakModel = ""
-				want.ThinkingBudgetTokens = 0
-			}
-			config, err := GetConfigForExtensionProvider("openai", test.platform)
-			require.NoError(t, err)
-			require.Equal(t, want, config)
-			config.OpenAI.BaseURL = "mutated"
-			if config.OpenAI.Models != nil {
-				config.OpenAI.Models.Reasoning[0] = "mutated"
-				config.OpenAI.Pricing["shared"] = llmtypes.ModelPricing{Input: 99}
-			}
-			assert.Equal(t, before, viper.AllSettings())
-		})
-	}
+	viper.Set("provider", "anthropic")
+	viper.Set("thinking_budget_tokens", 100)
+	viper.Set("aliases", map[string]any{"gpt-5.6": "daemon-only"})
+	viper.Set("openai", map[string]any{"platform": "codex", "api_key_env_var": "BASE_KEY"})
+	viper.Set("profile", "active")
+	viper.Set("profiles", map[string]any{"active": map[string]any{
+		"model": "active-model", "reasoning_effort": "max",
+		"openai": map[string]any{"platform": "openai", "api_key_env_var": "ACTIVE_KEY"},
+	}})
+	t.Setenv("KODELET_THINKING_BUDGET_TOKENS", "200")
+	before := viper.AllSettings()
+	var profile llmtypes.ProfileConfig
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"provider": "openai", "model": " gpt-6 ", "weak_model": "gpt-5.6",
+		"aliases": {"gpt-6": "private-model"}, "max_tokens": 4096, "weak_model_max_tokens": 1024,
+		"reasoning_effort": " LOW ", "allowed_reasoning_efforts": ["low", "high"],
+		"compact_ratio": 0.65, "bash": {"timeout": "45s"},
+		"retry": {"attempts": 2, "initial_delay": 100, "max_delay": 500, "backoff_type": "fixed"},
+		"openai": {"platform": "custom", "base_url": "https://profile.invalid", "websocket_mode": false,
+			"models": {"reasoning": ["private-model"]},
+			"pricing": {"private-model": {"input": 1.5, "context_window": 32000}}},
+		"future_setting": {"values": [false, null, 1.5]}
+	}`), &profile))
+	input := cloneSettings(profile)
+	config, err := GetConfigFromProfile(profile)
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "private-model", config.Model)
+	assert.Equal(t, defaultModelAliases["gpt-5.6"], config.WeakModel)
+	assert.True(t, config.ModelAliasesResolved)
+	assert.Equal(t, 4096, config.MaxTokens)
+	assert.Equal(t, 1024, config.WeakModelMaxTokens)
+	assert.Zero(t, config.ThinkingBudgetTokens)
+	assert.Empty(t, config.Profile)
+	assert.Nil(t, config.Profiles)
+	assert.Equal(t, "low", config.ReasoningEffort)
+	assert.Equal(t, []string{"low", "high"}, config.AllowedReasoningEfforts)
+	assert.Equal(t, 0.65, config.CompactRatio)
+	assert.Equal(t, &llmtypes.BashConfig{Timeout: 45 * time.Second}, config.Bash)
+	assert.Equal(t, llmtypes.RetryConfig{Attempts: 2, InitialDelay: 100, MaxDelay: 500, BackoffType: "fixed"}, config.Retry)
+	require.Equal(t, &llmtypes.OpenAIConfig{
+		Platform: "custom", BaseURL: "https://profile.invalid", WebSocketMode: new(false),
+		Models:  &llmtypes.CustomModels{Reasoning: []string{"private-model"}},
+		Pricing: map[string]llmtypes.ModelPricing{"private-model": {Input: 1.5, ContextWindow: 32000}},
+	}, config.OpenAI)
+	config.Aliases["gpt-6"] = "changed"
+	config.OpenAI.Models.Reasoning[0] = "changed"
+	config.OpenAI.Pricing["private-model"] = llmtypes.ModelPricing{Input: 99}
+	assert.Equal(t, llmtypes.ProfileConfig(input), profile, "resolved settings must not share mutable input")
+	assert.Equal(t, before, viper.AllSettings())
+	assert.Equal(t, "gpt-6-astra", defaultModelAliases["gpt-6"])
 }
 
-func TestGetConfigForExtensionProviderSelectsAnthropicAccess(t *testing.T) {
-	previous := viper.AllSettings()
-	t.Cleanup(func() {
-		viper.Reset()
-		require.NoError(t, viper.MergeConfigMap(previous))
+func TestGetConfigFromProfileDefaultsAndValidation(t *testing.T) {
+	config, err := GetConfigFromProfile(llmtypes.ProfileConfig{"provider": "anthropic", "model": "private-model"})
+	require.NoError(t, err)
+	assert.Equal(t, llmtypes.DefaultReasoningEffort, config.ReasoningEffort)
+	assert.Equal(t, llmtypes.DefaultCompactRatio, config.CompactRatio)
+	assert.Equal(t, llmtypes.DefaultRetryConfig, config.Retry)
+	assert.Equal(t, &llmtypes.BashConfig{Timeout: llmtypes.DefaultBashTimeout}, config.Bash)
+	assert.Equal(t, llmtypes.AnthropicAPIAccessAuto, config.AnthropicAPIAccess)
+	assert.Empty(t, config.WeakModel)
+	assert.Zero(t, config.MaxTokens)
+
+	config, err = GetConfigFromProfile(llmtypes.ProfileConfig{
+		"provider": "anthropic", "model": "private-model", "anthropic_api_access": "subscription",
+		"anthropic_account": "work", "thinking_budget_tokens": 1024,
+		"anthropic": map[string]any{"platform": "anthropic", "adaptive_thinking": true},
 	})
-	for _, test := range []struct {
-		name            string
-		basePlatform    string
-		defaultPlatform string
-		platform        string
-		defaultProvider string
-		wantURL         string
-		wantAccount     string
-		wantAccess      llmtypes.AnthropicAPIAccess
-	}{
-		{name: "inherit subscription", basePlatform: "anthropic", defaultPlatform: "anthropic", defaultProvider: "anthropic", wantURL: "https://default.invalid", wantAccount: "default-account", wantAccess: llmtypes.AnthropicAPIAccessSubscription},
-		{name: "explicit matching default", basePlatform: "anthropic", defaultPlatform: "anthropic", platform: "anthropic", defaultProvider: "anthropic", wantURL: "https://default.invalid", wantAccount: "default-account", wantAccess: llmtypes.AnthropicAPIAccessSubscription},
-		{name: "explicit base", basePlatform: "anthropic", defaultPlatform: "copilot", platform: "anthropic", defaultProvider: "anthropic", wantURL: "https://base.invalid", wantAccount: "base-account", wantAccess: llmtypes.AnthropicAPIAccessAPIKey},
-		{name: "other provider uses base", basePlatform: "anthropic", defaultPlatform: "copilot", defaultProvider: "openai", wantURL: "https://base.invalid", wantAccount: "base-account", wantAccess: llmtypes.AnthropicAPIAccessAPIKey},
-		{name: "fresh native transport", basePlatform: "copilot", defaultPlatform: "copilot", platform: "anthropic", defaultProvider: "anthropic", wantAccount: "base-account", wantAccess: llmtypes.AnthropicAPIAccessAuto},
-		{name: "fresh copilot transport", basePlatform: "anthropic", defaultPlatform: "anthropic", platform: "copilot", defaultProvider: "anthropic", wantAccount: "base-account", wantAccess: llmtypes.AnthropicAPIAccessAuto},
-		{name: "fresh custom transport", basePlatform: "anthropic", defaultPlatform: "anthropic", platform: "custom", defaultProvider: "anthropic", wantAccount: "base-account", wantAccess: llmtypes.AnthropicAPIAccessAuto},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			viper.Reset()
-			viper.Set("provider", "openai")
-			viper.Set("model", "openai-only")
-			viper.Set("weak_model", "openai-weak")
-			viper.Set("thinking_budget_tokens", 100)
-			viper.Set("allowed_tools", []string{"file_read"})
-			viper.Set("anthropic_api_access", "api-key")
-			viper.Set("anthropic_account", "base-account")
-			viper.Set("anthropic", map[string]any{
-				"platform": test.basePlatform,
-				"base_url": "https://base.invalid",
-			})
-			viper.Set("profile", "active")
-			viper.Set("profiles", map[string]any{"active": map[string]any{
-				"provider":             test.defaultProvider,
-				"model":                "default-model",
-				"allowed_tools":        []string{"bash"},
-				"anthropic_api_access": "subscription",
-				"anthropic_account":    "default-account",
-				"anthropic": map[string]any{
-					"platform": test.defaultPlatform,
-					"base_url": "https://default.invalid",
-				},
-			}})
-			before := viper.AllSettings()
-			config, err := GetConfigForExtensionProvider("anthropic", test.platform)
-			require.NoError(t, err)
-			platform := test.platform
-			if platform == "" {
-				platform = test.basePlatform
-			}
-			require.Equal(t, &llmtypes.AnthropicConfig{Platform: platform, BaseURL: test.wantURL}, config.Anthropic)
-			assert.Equal(t, test.wantAccess, config.AnthropicAPIAccess)
-			assert.Equal(t, test.wantAccount, config.AnthropicAccount)
-			assert.Equal(t, "anthropic", config.Provider)
-			assert.Empty(t, config.Profile)
-			assert.Empty(t, config.Model)
-			assert.Empty(t, config.WeakModel)
-			assert.Zero(t, config.ThinkingBudgetTokens)
-			assert.Equal(t, []string{"file_read"}, config.AllowedTools)
-			config.Anthropic.BaseURL = "mutated"
-			assert.Equal(t, before, viper.AllSettings())
-		})
-	}
+	require.NoError(t, err)
+	assert.Equal(t, llmtypes.AnthropicAPIAccessSubscription, config.AnthropicAPIAccess)
+	assert.Equal(t, "work", config.AnthropicAccount)
+	assert.Equal(t, 1024, config.ThinkingBudgetTokens)
+	assert.Equal(t, &llmtypes.AnthropicConfig{Platform: "anthropic", AdaptiveThinking: true}, config.Anthropic)
+
+	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"max_tokens": "not-a-number"})
+	require.ErrorContains(t, err, "failed to unmarshal configuration")
+	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"bash": map[string]any{"timeout": "5s"}})
+	require.ErrorContains(t, err, "bash.timeout must be at least")
+	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"compact_ratio": 1.1})
+	require.ErrorContains(t, err, "compact_ratio must be greater than")
+	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"reasoning_effort": "unknown"})
+	require.ErrorContains(t, err, "invalid reasoning_effort")
 }
 
 func TestGetConfigFromViperPlatformModelDefaults(t *testing.T) {

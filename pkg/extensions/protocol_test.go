@@ -18,7 +18,7 @@ import (
 )
 
 func TestProfileNamesRequireBoundedASCIISlugs(t *testing.T) {
-	options := &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("search")}
+	options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
 	for _, name := range []string{"A", "0", "Search.v1_fast-2", strings.Repeat("x", 128)} {
 		t.Run("valid/"+name, func(t *testing.T) {
 			assert.NoError(t, (ProfileRegistration{Name: name, Options: options}).Validate())
@@ -29,29 +29,45 @@ func TestProfileNamesRequireBoundedASCIISlugs(t *testing.T) {
 			assert.Error(t, (ProfileRegistration{Name: name, Options: options}).Validate())
 		})
 	}
-	assert.ErrorContains(t, (ProfileRegistration{Name: "search"}).Validate(), "require provider and model")
+	assert.ErrorContains(t, (ProfileRegistration{Name: "search"}).Validate(), "provider must be a nonempty string")
 	assert.Error(t, (Profile{Name: "default", ExtensionID: "source", Options: options}).Validate())
 	assert.Error(t, (Profile{Name: "search", Options: options}).Validate())
 	assert.Error(t, (Profile{Name: "search", ExtensionID: "bad\x00source", Options: options}).Validate())
 }
 
 func TestProfileWireShapeAndIndependentClone(t *testing.T) {
+	optionsJSON := `{"provider":"openai","model":"copilot-custom","weak_model":"weak","max_tokens":4096,"reasoning_effort":"low","allowed_tools":["file_read"],"openai":{"platform":"copilot","websocket_mode":false},"future":{"values":[1.5,null,{"enabled":false}]}}`
 	var result InitializeResult
-	require.NoError(t, json.Unmarshal([]byte(`{"profiles":[{"name":"search","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex"}},"hidden":true}]}`), &result))
+	require.NoError(t, json.Unmarshal([]byte(`{"profiles":[{"name":"search","options":`+optionsJSON+`,"hidden":true}]}`), &result))
 	require.Len(t, result.Profiles, 1)
 	registration := result.Profiles[0]
 	profile := Profile{Name: registration.Name, ExtensionID: "org@plugin/code-search", Options: registration.Options, Hidden: registration.Hidden}
 	require.NoError(t, profile.Validate())
 	data, err := json.Marshal(profile)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"name":"search","extensionId":"org@plugin/code-search","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex"}},"hidden":true}`, string(data))
+	assert.JSONEq(t, `{"name":"search","extensionId":"org@plugin/code-search","options":`+optionsJSON+`,"hidden":true}`, string(data))
 	clone := profile.Clone()
-	*clone.Options.Model = "another-model"
-	clone.Options.OpenAI["platform"] = "openai"
-	assert.Equal(t, "gpt-5.6-luna", *profile.Options.Model)
-	assert.Equal(t, "codex", profile.Options.OpenAI["platform"])
+	clone.Options["model"] = "another-model"
+	clone.Options["openai"].(map[string]any)["platform"] = "openai"
+	clone.Options["allowed_tools"].([]any)[0] = "bash"
+	clone.Options["future"].(map[string]any)["values"].([]any)[2].(map[string]any)["enabled"] = true
+	data, err = json.Marshal(profile.Options)
+	require.NoError(t, err)
+	assert.JSONEq(t, optionsJSON, string(data), "cloning must isolate arbitrary nested JSON")
 	assert.Nil(t, (Profile{}).Clone().Options)
-	require.ErrorContains(t, json.Unmarshal([]byte(`{"name":"search","options":{"provider":"openai","model":"search","noTools":true}}`), &ProfileRegistration{}), "unknown field")
+}
+
+func TestProfileOptionsRequireOnlyProviderAndModel(t *testing.T) {
+	for _, field := range []string{"provider", "model"} {
+		for _, value := range []any{nil, " \n", "bad\x00value", 42} {
+			options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
+			options[field] = value
+			assert.ErrorContains(t, (ProfileRegistration{Name: "search", Options: options}).Validate(), field)
+		}
+	}
+	assert.ErrorContains(t, (ProfileRegistration{Name: "search", Options: llmtypes.ProfileConfig{
+		"provider": "unknown", "model": "search",
+	}}).Validate(), "unsupported")
 }
 
 func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {

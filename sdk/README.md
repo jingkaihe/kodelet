@@ -4,7 +4,7 @@ The SDK starts `kodelet acp` as a client of the Kodelet daemon. The daemon owns 
 
 ## Extension model profiles
 
-`ext.registerProfile({ name, provider, model, ...options })` declares a daemon-resolved profile for ACP sessions. See the [registration example](../skills/kodelet/references/sdk.md#registered-model-profiles) for provider settings and subscriptions. These settings do not belong in session `ExecutionOptions`.
+`ext.registerProfile({ name, provider, model, ...configuration })` declares a self-contained profile using ordinary snake_case configuration keys and built-in defaults. See the [registration example](../skills/kodelet/references/sdk.md#registered-model-profiles). Session `ExecutionOptions` remains a separate camelCase API.
 
 ## Inline extensions
 

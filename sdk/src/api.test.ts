@@ -23,7 +23,7 @@ import {
   type ToolPresentation,
 } from "./index.js";
 
-test("remote profiles preserve provider JSON and isolate input and manifest snapshots", () => {
+test("remote profiles preserve ordinary configuration JSON and isolate input and manifest snapshots", () => {
   const params: InitializeParams = {
     protocolVersion: "test",
     extension: { id: "installed-id" },
@@ -45,13 +45,19 @@ test("remote profiles preserve provider JSON and isolate input and manifest snap
       name: "search",
       provider,
       model: "gpt-5.6-luna",
-      weakModel: "weak-model",
-      reasoningEffort: "none",
-      maxTokens: 4096,
-      weakModelMaxTokens: 1024,
-      thinkingBudgetTokens: 0,
+      weak_model: "weak-model",
+      reasoning_effort: "none",
+      max_tokens: 4096,
+      weak_model_max_tokens: 1024,
+      thinking_budget_tokens: 0,
+      allowed_reasoning_efforts: ["none", "low"],
+      compact_ratio: 0.7,
+      retry: { attempts: 2 },
+      aliases: { fast: "weak-model" },
+      allowed_tools: ["file_read"],
+      future_profile_setting: { values: [null, false, { value: 1.5 }] },
       [provider]: settings,
-      ...(provider === "anthropic" ? { anthropicAPIAccess: "subscription" } : { hidden: true }),
+      ...(provider === "anthropic" ? { anthropic_api_access: "subscription", anthropic_account: "work" } : { hidden: true }),
     };
     const { name, hidden = false, ...options } = structuredClone(registration);
     const expected = [{ name, options, hidden }];
@@ -79,33 +85,22 @@ test("remote profiles preserve provider JSON and isolate input and manifest snap
   }
 });
 
-test("remote profiles reject invalid model options, provider blocks and session controls", () => {
-  const invalidBlocks = [null, [], "codex", true, 3, { callback: () => {} }, { value: undefined }];
-  for (const options of [
-    ...invalidBlocks.map((openai) => ({ provider: "openai", openai })),
-    ...invalidBlocks.map((anthropic) => ({ provider: "anthropic", anthropic })),
-    { provider: "openai", anthropic: {} },
-    { provider: "openai", anthropicAPIAccess: "subscription" },
-    { provider: "anthropic", openai: {} },
-    { provider: "anthropic", anthropicAPIAccess: null },
-    { provider: "anthropic", anthropicAPIAccess: "oauth" },
-    { provider: "anthropic", anthropicAccount: "work" },
+test("remote profiles reject invalid required fields, metadata and non-JSON configuration", () => {
+  const nonJSON = [undefined, () => {}, Symbol("setting"), 1n, NaN, Infinity, new Date()];
+  for (const [index, options] of [
     { provider: undefined }, { model: undefined }, { provider: "unknown" }, { provider: null },
-    { model: "" }, { model: null }, { weakModel: "" }, { reasoningEffort: null }, { reasoningEffort: "" },
-    { maxTokens: 0 }, { maxTokens: true }, { weakModelMaxTokens: -1 }, { thinkingBudgetTokens: -1 },
-    { maxTokens: "100" }, { hidden: "false" }, { hidden: 0 }, { hidden: null },
-    { maxTurns: 0 }, { useWeakModel: false }, { noTools: false }, { noExtensions: false },
-    { noSkills: false }, { allowedTools: [] }, { allowedCommands: [] }, { enableFSSearchTools: false },
-    { apiKey: "secret" }, { baseURL: "https://example.invalid" },
-    { allowedReasoningEfforts: ["none"] },
-  ]) {
+    { model: "" }, { model: " \n" }, { model: "a\0b" }, { model: null }, { model: 3 },
+    { hidden: "false" }, { hidden: 0 }, { hidden: null },
+    ...nonJSON.map((value) => ({ future_profile_setting: value })),
+    ...nonJSON.map((value) => ({ openai: { future_setting: [value] } })),
+  ].entries()) {
     const ext = new ExtensionHost();
     assert.throws(() => ext.registerProfile({
       name: "search",
       provider: "openai",
       model: "test-model",
       ...options,
-    } as ExtensionProfileRegistration), JSON.stringify(options));
+    } as unknown as ExtensionProfileRegistration), `invalid configuration case ${index}`);
     assert.equal("profiles" in ext.initialize({
       protocolVersion: "test",
       extension: { id: "test" },

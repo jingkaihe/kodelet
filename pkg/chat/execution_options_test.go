@@ -8,10 +8,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
-	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
@@ -50,67 +46,81 @@ func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 	assert.Equal(t, &llmtypes.ExecutionOptions{}, request.Options)
 }
 
-func TestResolveExtensionProfileUsesBasePolicy(t *testing.T) {
+func TestResolveExtensionProfileIsolatedFromDaemonDefaults(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "parent-only")
 	viper.Set("reasoning_effort", "high")
+	viper.Set("allowed_reasoning_efforts", []string{"high"})
+	viper.Set("aliases", map[string]string{"custom-model": "daemon-model"})
 	viper.Set("allowed_tools", []string{"file_read"})
 	viper.Set("openai", map[string]any{"platform": "openai", "base_url": "https://daemon.invalid", "api_key_env_var": "DAEMON_KEY"})
-	profile := extensions.Profile{Name: "code-search", ExtensionID: "search", Options: &llmtypes.ExtensionProfileOptions{
-		Provider: new("openai"), Model: new("gpt-5.6-luna"), ReasoningEffort: new("none"),
+	viper.Set("profile", "deep")
+	viper.Set("profiles.deep", map[string]any{"provider": "openai", "openai": map[string]any{"platform": "codex"}})
+	profile := extensions.Profile{Name: "code-search", ExtensionID: "search", Options: llmtypes.ProfileConfig{
+		"provider": "openai", "model": "custom-model", "reasoning_effort": "none",
+		"openai": map[string]any{"platform": "copilot"},
 	}}
 	config, err := ResolveExtensionProfile(profile, "")
 	require.NoError(t, err)
 	assert.Equal(t, "code-search", config.Profile)
 	assert.True(t, config.ExtensionProfile)
 	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "custom-model", config.Model)
 	assert.Equal(t, "none", config.ReasoningEffort)
-	assert.Equal(t, "https://daemon.invalid", config.OpenAI.BaseURL)
-	assert.Equal(t, "DAEMON_KEY", config.OpenAI.APIKeyEnvVar)
-	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
+	assert.Equal(t, "copilot", config.OpenAI.Platform)
+	assert.Empty(t, config.OpenAI.BaseURL)
+	assert.Empty(t, config.OpenAI.APIKeyEnvVar)
+	assert.Empty(t, config.OpenAI.Models, "no duplicate model catalog is required")
+	assert.Empty(t, config.AllowedReasoningEfforts)
+	assert.Equal(t, &[]string{"file_read"}, config.EnvironmentOptions().AllowedTools)
 	assert.Empty(t, config.WeakModel)
-	viper.Set("allowed_reasoning_efforts", []string{"high"})
-	_, err = ResolveExtensionProfile(profile, "")
+	profile.Options["allowed_reasoning_efforts"] = []string{"none", "low"}
+	config, err = ResolveExtensionProfile(profile, "low")
+	require.NoError(t, err)
+	assert.Equal(t, "low", config.ReasoningEffort)
+	_, err = ResolveExtensionProfile(profile, "high")
 	require.ErrorContains(t, err, "not included")
-	viper.Set("allowed_reasoning_efforts", []string{})
-	profile.Options.Model = new("unconfigured-private")
+	assert.Equal(t, "none", profile.Options["reasoning_effort"])
+	profile.Options["openai"] = map[string]any{"websocket_mode": "not-a-boolean"}
 	_, err = ResolveExtensionProfile(profile, "")
-	require.ErrorContains(t, err, "not an available model")
+	require.ErrorContains(t, err, "failed to unmarshal configuration")
 }
 
-func TestExtensionSnapshotKeepsProviderPlatform(t *testing.T) {
+func TestIsolatedProfileCannotWidenHostPermissions(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
-	for _, provider := range []string{"openai", "anthropic"} {
-		t.Run(provider, func(t *testing.T) {
-			viper.Set("provider", provider)
-			viper.Set("model", "saved-model")
-			viper.Set(provider, map[string]any{"platform": "copilot"})
-			config, err := llm.GetConfigForExtensionProvider(provider, "")
-			require.NoError(t, err)
-			config.Profile = "code-search"
-			config.ExtensionProfile = true
-			metadata, err := conversationservice.AddConfigSnapshot(nil, config)
-			require.NoError(t, err)
-			record := &conversationservice.GetConversationResponse{Metadata: metadata}
-			_, err = ResolveConfigForExistingConversation(record)
-			require.NoError(t, err)
-			viper.Set(provider, map[string]any{"platform": provider, "base_url": "https://other.invalid"})
-			resumed, err := ResolveConfigForExistingConversation(record)
-			require.NoError(t, err)
-			if provider == "openai" {
-				assert.Equal(t, "copilot", resumed.OpenAI.Platform)
-				assert.Empty(t, resumed.OpenAI.BaseURL)
-			} else {
-				assert.Equal(t, "copilot", resumed.Anthropic.Platform)
-				assert.Empty(t, resumed.Anthropic.BaseURL)
-			}
-		})
-	}
+	viper.Set("allowed_tools", []string{"file_read", "bash"})
+	viper.Set("allowed_commands", []string{"go test"})
+	viper.Set("skills.enabled", false)
+	require.NoError(t, viper.MergeConfigMap(map[string]any{"extensions": map[string]any{"enabled": false}}))
+	viper.Set("extensions.local_dir", "/runner/extensions")
+	profile := extensions.Profile{Name: "search", ExtensionID: "extension", Options: llmtypes.ProfileConfig{
+		"provider": "openai", "model": "custom-model",
+		"allowed_tools":    []string{"file_read", "bash", "file_write"},
+		"allowed_commands": []string{"rm -rf"},
+		"skills":           map[string]any{"enabled": true}, "extensions": map[string]any{"enabled": true},
+	}}
+	config, err := ResolveExtensionProfile(profile, "")
+	require.NoError(t, err)
+	assert.True(t, config.EnvironmentOptions().ToolAllowed("file_read"))
+	assert.False(t, config.EnvironmentOptions().ToolAllowed("file_write"))
+	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"), "disjoint commands must deny all, not inherit")
+	assert.True(t, *config.EnvironmentOptions().NoSkills)
+	assert.True(t, *config.EnvironmentOptions().NoExtensions)
+	config, err = resolveExecutionOptions(t.Context(), ChatRequest{Options: &llmtypes.ExecutionOptions{
+		AllowedTools: &[]string{"file_read", "file_write", "bash"}, AllowedCommands: &[]string{"go test"},
+		NoSkills: new(false), NoExtensions: new(false), MaxTurns: new(2),
+	}}, config)
+	require.NoError(t, err)
+	assert.True(t, config.EnvironmentOptions().ToolAllowed("file_read"))
+	assert.False(t, config.EnvironmentOptions().ToolAllowed("file_write"))
+	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"))
+	assert.True(t, *config.EnvironmentOptions().NoSkills)
+	assert.True(t, *config.EnvironmentOptions().NoExtensions)
 }
 
 func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
@@ -130,11 +140,11 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 	original, err := ResolveExtensionProfile(extensions.Profile{
 		Name:        "code-search",
 		ExtensionID: "search-extension",
-		Options: &llmtypes.ExtensionProfileOptions{
-			Provider:        new("openai"),
-			Model:           new("gpt-5.6-luna"),
-			ReasoningEffort: new("none"),
-			OpenAI: map[string]any{
+		Options: llmtypes.ProfileConfig{
+			"provider":         "openai",
+			"model":            "gpt-5.6-luna",
+			"reasoning_effort": "none",
+			"openai": map[string]any{
 				"base_url":        "https://original.invalid",
 				"api_key_env_var": "ORIGINAL_KEY",
 				"api_mode":        "responses",
@@ -202,6 +212,10 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 				})
 			}
 			resumed, err := resolveConfigForExistingConversation(ctx, record)
+			if !test.wantLive && !test.ordinary {
+				require.ErrorContains(t, err, "initialize its extension on this runner before resuming")
+				return
+			}
 			require.NoError(t, err)
 			if test.noResolver || test.ordinary {
 				assert.Zero(t, lookups)
@@ -216,7 +230,7 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 			assert.Equal(t, saved.OpenAI.ServiceTier, resumed.OpenAI.ServiceTier)
 			assert.Equal(t, saved.OpenAI.Platform, resumed.OpenAI.Platform)
 			assert.Equal(t, saved.OpenAI.APIMode, resumed.OpenAI.APIMode)
-			assert.Equal(t, []string{"file_read"}, resumed.AllowedTools)
+			assert.Equal(t, &[]string{"file_read"}, resumed.EnvironmentOptions().AllowedTools)
 			if test.wantLive {
 				assert.Equal(t, "https://live.invalid", resumed.OpenAI.BaseURL)
 				assert.Equal(t, "LIVE_KEY", resumed.OpenAI.APIKeyEnvVar)
@@ -250,11 +264,11 @@ func TestRegisteredProfileProviderSettings(t *testing.T) {
 	profile := extensions.Profile{
 		Name:        "code-search",
 		ExtensionID: "search-extension",
-		Options: &llmtypes.ExtensionProfileOptions{
-			Provider:        new("openai"),
-			Model:           new("gpt-5.6-luna"),
-			ReasoningEffort: new("none"),
-			OpenAI: map[string]any{
+		Options: llmtypes.ProfileConfig{
+			"provider":         "openai",
+			"model":            "gpt-5.6-luna",
+			"reasoning_effort": "none",
+			"openai": map[string]any{
 				"platform":               "codex",
 				"api_mode":               "responses",
 				"service_tier":           "fast",
@@ -275,31 +289,30 @@ func TestRegisteredProfileProviderSettings(t *testing.T) {
 	assert.Equal(t, new(false), config.OpenAI.WebSocketMode)
 	assert.Empty(t, config.OpenAI.BaseURL)
 	assert.Empty(t, config.OpenAI.APIKeyEnvVar)
-	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
+	assert.Equal(t, &[]string{"file_read"}, config.EnvironmentOptions().AllowedTools)
 
-	profile.Options.OpenAI = map[string]any{"enable_search": false, "service_tier": "default"}
+	profile.Options["openai"] = map[string]any{"enable_search": false, "service_tier": "default"}
 	config, err = ResolveExtensionProfile(profile, "")
 	require.NoError(t, err)
-	assert.Equal(t, "https://api-default.invalid", config.OpenAI.BaseURL)
-	assert.Equal(t, "DAEMON_API_KEY", config.OpenAI.APIKeyEnvVar)
+	assert.Empty(t, config.OpenAI.BaseURL)
+	assert.Empty(t, config.OpenAI.APIKeyEnvVar)
 	assert.Equal(t, new(false), config.OpenAI.EnableSearch)
 	assert.True(t, viper.GetBool("openai.enable_search"))
-	profile.Options.OpenAI = map[string]any{
+	profile.Options["openai"] = map[string]any{
 		"platform":        "custom",
 		"base_url":        "https://custom.invalid",
 		"api_key_env_var": "CUSTOM_KEY",
-		"models":          map[string]any{"reasoning": []string{"custom-model"}},
 	}
-	profile.Options.Model = new("custom-model")
+	profile.Options["model"] = "custom-model"
 	config, err = ResolveExtensionProfile(profile, "")
 	require.NoError(t, err)
 	assert.Equal(t, "custom", config.OpenAI.Platform)
 	assert.Equal(t, "https://custom.invalid", config.OpenAI.BaseURL)
 	assert.Equal(t, "CUSTOM_KEY", config.OpenAI.APIKeyEnvVar)
 	assert.Equal(t, "custom-model", config.Model)
-	profile.Options.OpenAI["websocket_mode"] = "not-a-boolean"
+	profile.Options["openai"].(map[string]any)["websocket_mode"] = "not-a-boolean"
 	_, err = ResolveExtensionProfile(profile, "")
-	require.ErrorContains(t, err, "invalid profile provider settings")
+	require.ErrorContains(t, err, "failed to unmarshal configuration")
 }
 
 func TestRegisteredClaudeSubscriptionProfile(t *testing.T) {
@@ -314,55 +327,20 @@ func TestRegisteredClaudeSubscriptionProfile(t *testing.T) {
 	config, err := ResolveExtensionProfile(extensions.Profile{
 		Name:        "review",
 		ExtensionID: "review-extension",
-		Options: &llmtypes.ExtensionProfileOptions{
-			Provider:           new("anthropic"),
-			Model:              new("claude-sonnet-4-6"),
-			AnthropicAPIAccess: new(llmtypes.AnthropicAPIAccessSubscription),
-			Anthropic:          map[string]any{"adaptive_thinking": true},
+		Options: llmtypes.ProfileConfig{
+			"provider":             "anthropic",
+			"model":                "claude-sonnet-4-6",
+			"anthropic_api_access": "subscription",
+			"anthropic_account":    "extension-account",
+			"anthropic":            map[string]any{"adaptive_thinking": true},
 		},
 	}, "")
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", config.Anthropic.Platform)
+	assert.Empty(t, config.Anthropic.Platform)
 	assert.Empty(t, config.Anthropic.BaseURL)
 	assert.True(t, config.Anthropic.AdaptiveThinking)
 	assert.Equal(t, llmtypes.AnthropicAPIAccessSubscription, config.AnthropicAPIAccess)
-	assert.Equal(t, "daemon-account", config.AnthropicAccount)
-}
-
-func TestExecutionModelAllowed(t *testing.T) {
-	var anthropicModel string
-	for model := range anthropic.ModelPricingMap {
-		anthropicModel = model
-		break
-	}
-	require.NotEmpty(t, anthropicModel)
-	openAIModel := openaipreset.Models.Reasoning[0]
-	codexModel := codexpreset.Models.Reasoning[0]
-	for _, tt := range []struct {
-		name    string
-		config  llmtypes.Config
-		model   string
-		allowed bool
-	}{
-		{"configured main", llmtypes.Config{Provider: "openai", Model: "private-main"}, "private-main", true},
-		{"configured weak", llmtypes.Config{Provider: "anthropic", WeakModel: "private-weak"}, "private-weak", true},
-		{"trusted alias", llmtypes.Config{Provider: "openai", Aliases: map[string]string{"short": "private"}}, "private", true},
-		{"OpenAI catalog", llmtypes.Config{Provider: "openai"}, openAIModel, true},
-		{"Codex catalog", llmtypes.Config{Provider: "openai", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}}, codexModel, true},
-		{"Anthropic catalog", llmtypes.Config{Provider: "anthropic"}, anthropicModel, true},
-		{"wrong provider catalog", llmtypes.Config{Provider: "anthropic"}, openAIModel, false},
-		{"custom platform has no implicit OpenAI catalog", llmtypes.Config{Provider: "openai", OpenAI: &llmtypes.OpenAIConfig{Platform: "custom"}}, openAIModel, false},
-		{"custom reasoning model", llmtypes.Config{Provider: "openai", OpenAI: &llmtypes.OpenAIConfig{Platform: "custom", Models: &llmtypes.CustomModels{Reasoning: []string{"private"}}}}, "private", true},
-		{"custom nonreasoning model", llmtypes.Config{Provider: "openai", OpenAI: &llmtypes.OpenAIConfig{Platform: "custom", Models: &llmtypes.CustomModels{NonReasoning: []string{"private"}}}}, "private", true},
-		{"custom pricing", llmtypes.Config{Provider: "openai", OpenAI: &llmtypes.OpenAIConfig{Platform: "custom", Pricing: map[string]llmtypes.ModelPricing{"private": {}}}}, "private", true},
-		{"unknown model", llmtypes.Config{Provider: "openai"}, "unconfigured-private-model", false},
-		{"unknown provider", llmtypes.Config{Provider: "unsupported"}, openAIModel, false},
-		{"unknown configured provider", llmtypes.Config{Provider: "unsupported", Model: "private"}, "private", false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.allowed, executionModelAllowed(tt.config, tt.model))
-		})
-	}
+	assert.Equal(t, "extension-account", config.AnthropicAccount)
 }
 
 func TestApplyExecutionOptionsModelPolicy(t *testing.T) {
@@ -384,8 +362,8 @@ func TestApplyExecutionOptionsModelPolicy(t *testing.T) {
 		{"unknown provider", &llmtypes.ExecutionOptions{Provider: new("unknown")}, "", "unsupported execution provider"},
 		{"alias", &llmtypes.ExecutionOptions{Model: new(" short ")}, "private-main", ""},
 		{"swap configured models", &llmtypes.ExecutionOptions{Model: new("private-weak"), WeakModel: new("private-main")}, "private-weak", ""},
-		{"unknown model", &llmtypes.ExecutionOptions{Model: new("unconfigured")}, "", "not an available model"},
-		{"unknown weak model", &llmtypes.ExecutionOptions{WeakModel: new("unconfigured")}, "", "not an available model"},
+		{"custom model", &llmtypes.ExecutionOptions{Model: new("unconfigured")}, "unconfigured", ""},
+		{"custom weak model", &llmtypes.ExecutionOptions{WeakModel: new("unconfigured")}, "private-main", ""},
 		{"zero output tokens", &llmtypes.ExecutionOptions{MaxTokens: new(0)}, "", "must be positive"},
 		{"negative turns", &llmtypes.ExecutionOptions{MaxTurns: new(-1)}, "", "must not be negative"},
 		{"OpenAI thinking budget", &llmtypes.ExecutionOptions{ThinkingBudgetTokens: new(0)}, "", "requires the anthropic provider"},
@@ -400,6 +378,9 @@ func TestApplyExecutionOptionsModelPolicy(t *testing.T) {
 			assert.Equal(t, tt.want, config.Model)
 			if tt.name == "swap configured models" {
 				assert.Equal(t, "private-main", config.WeakModel)
+			}
+			if tt.name == "custom weak model" {
+				assert.Equal(t, "unconfigured", config.WeakModel)
 			}
 			assert.Equal(t, "private-main", base.Model)
 		})
@@ -535,7 +516,6 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 	}{
 		{"invalid tokens", ChatRequest{Options: &llmtypes.ExecutionOptions{MaxTokens: new(0)}}, "must be positive"},
 		{"provider policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Provider: new("openai")}}, "must match the selected model profile"},
-		{"model policy", ChatRequest{Options: &llmtypes.ExecutionOptions{Model: new("unconfigured")}}, "not an available model"},
 		{"thinking budget", ChatRequest{Options: &llmtypes.ExecutionOptions{ThinkingBudgetTokens: new(4096)}}, "must be less than maxTokens"},
 		{"provider reasoning", ChatRequest{Options: &llmtypes.ExecutionOptions{ReasoningEffort: new("minimal")}}, "not supported by provider"},
 		{"conflicting reasoning", ChatRequest{ReasoningEffort: "low", Options: &llmtypes.ExecutionOptions{ReasoningEffort: new("high")}}, "conflicts"},

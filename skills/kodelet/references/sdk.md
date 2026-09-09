@@ -179,12 +179,17 @@ const searchProfile = ext.registerProfile({
   name: "code-search",
   provider: "openai",
   model: "gpt-5.6-luna",
-  reasoningEffort: "none",
+  reasoning_effort: "none",
+  max_tokens: 4096,
+  openai: {
+    platform: "copilot",
+    api_mode: "responses",
+  },
   hidden: true,
 });
 ```
 
-For Claude subscriptions, use `provider: "anthropic"` and `anthropicAPIAccess: "subscription"` (Python: `anthropic_api_access`). Provider credentials stay on the daemon.
+Profiles use ordinary snake_case configuration and built-in defaults, not daemon or parent model settings. Replace older `reasoningEffort` with `reasoning_effort`; session `ExecutionOptions` stays camelCase. For Claude subscriptions, use `provider: "anthropic"` and `anthropic_api_access: "subscription"`. Credentials stay on the daemon; host/runner restrictions still apply.
 
 ### Background extension work
 

@@ -24,17 +24,18 @@ func TestManifestProfilesWireCompatibilityAndDigest(t *testing.T) {
 	manifest := Manifest{Profiles: []extensions.Profile{
 		{
 			Name: "code-search", ExtensionID: "search-extension", Hidden: true,
-			Options: &llmtypes.ExtensionProfileOptions{
-				Provider: new("openai"), Model: new("gpt-5.6-luna"),
-				OpenAI: map[string]any{"future": []any{false, nil}},
+			Options: llmtypes.ProfileConfig{
+				"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none",
+				"openai": map[string]any{"future": []any{false, nil}},
+				"future": map[string]any{"enabled": false},
 			},
 		},
 		{
 			Name: "review", ExtensionID: "review-extension",
-			Options: &llmtypes.ExtensionProfileOptions{
-				Provider: new("anthropic"), Model: new("claude-sonnet-4-6"),
-				Anthropic:          map[string]any{"platform": "anthropic"},
-				AnthropicAPIAccess: new(llmtypes.AnthropicAPIAccessSubscription),
+			Options: llmtypes.ProfileConfig{
+				"provider": "anthropic", "model": "claude-sonnet-4-6",
+				"anthropic":            map[string]any{"platform": "anthropic"},
+				"anthropic_api_access": "subscription",
 			},
 		},
 	}}
@@ -48,11 +49,13 @@ func TestManifestProfilesWireCompatibilityAndDigest(t *testing.T) {
 		"name":       func(m *Manifest) { m.Profiles[0].Name = "other" },
 		"source":     func(m *Manifest) { m.Profiles[0].ExtensionID = "other-source" },
 		"visibility": func(m *Manifest) { m.Profiles[0].Hidden = false },
-		"model":      func(m *Manifest) { m.Profiles[0].Options.Model = new("other") },
-		"openai":     func(m *Manifest) { m.Profiles[0].Options.OpenAI["future"].([]any)[0] = true },
-		"anthropic":  func(m *Manifest) { m.Profiles[1].Options.Anthropic["platform"] = "copilot" },
+		"model":      func(m *Manifest) { m.Profiles[0].Options["model"] = "other" },
+		"reasoning":  func(m *Manifest) { m.Profiles[0].Options["reasoning_effort"] = "high" },
+		"openai":     func(m *Manifest) { m.Profiles[0].Options["openai"].(map[string]any)["future"].([]any)[0] = true },
+		"anthropic":  func(m *Manifest) { m.Profiles[1].Options["anthropic"].(map[string]any)["platform"] = "copilot" },
+		"future":     func(m *Manifest) { m.Profiles[0].Options["future"].(map[string]any)["enabled"] = true },
 		"subscription": func(m *Manifest) {
-			m.Profiles[1].Options.AnthropicAPIAccess = new(llmtypes.AnthropicAPIAccessAPIKey)
+			m.Profiles[1].Options["anthropic_api_access"] = "api-key"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

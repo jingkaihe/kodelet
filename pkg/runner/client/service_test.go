@@ -1044,9 +1044,10 @@ func TestBuildWireManifestProfilesAreSourceBoundAndIndependent(t *testing.T) {
 	service, peer := newSessionTestService(t, llmtypes.Config{})
 	peer.registration = extensions.InitializeResult{
 		Profiles: []extensions.ProfileRegistration{
-			{Name: "search", Options: &llmtypes.ExtensionProfileOptions{
-				Provider: new("openai"), Model: new("gpt-5.6-luna"),
-				OpenAI: map[string]any{"platform": "codex"},
+			{Name: "search", Options: llmtypes.ProfileConfig{
+				"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none",
+				"openai": map[string]any{"platform": "codex"},
+				"future": map[string]any{"values": []any{false, nil}},
 			}, Hidden: true},
 		},
 	}
@@ -1062,15 +1063,19 @@ func TestBuildWireManifestProfilesAreSourceBoundAndIndependent(t *testing.T) {
 	digest, err := runnerpayload.ComputeManifestDigest(manifest)
 	require.NoError(t, err)
 	assert.Equal(t, digest, manifest.Digest)
-	*manifest.Profiles[0].Options.Model = "mutated-output"
-	manifest.Profiles[0].Options.OpenAI["platform"] = "openai"
+	manifest.Profiles[0].Options["model"] = "mutated-output"
+	manifest.Profiles[0].Options["openai"].(map[string]any)["platform"] = "openai"
+	manifest.Profiles[0].Options["future"].(map[string]any)["values"].([]any)[0] = true
 	peer.registration.Profiles[0].Name = "mutated-input"
-	peer.registration.Profiles[0].Options.OpenAI["platform"] = "copilot"
+	peer.registration.Profiles[0].Options["openai"].(map[string]any)["platform"] = "copilot"
+	peer.registration.Profiles[0].Options["future"].(map[string]any)["values"].([]any)[1] = "mutated-input"
 	profiles := service.runs[params.RunID].runtime.Profiles()
 	require.Len(t, profiles, 1)
 	assert.Equal(t, "search", profiles[0].Name)
-	assert.Equal(t, "gpt-5.6-luna", *profiles[0].Options.Model)
-	assert.Equal(t, "codex", profiles[0].Options.OpenAI["platform"])
+	assert.Equal(t, "gpt-5.6-luna", profiles[0].Options["model"])
+	assert.Equal(t, "none", profiles[0].Options["reasoning_effort"])
+	assert.Equal(t, "codex", profiles[0].Options["openai"].(map[string]any)["platform"])
+	assert.Equal(t, map[string]any{"values": []any{false, nil}}, profiles[0].Options["future"])
 	require.NoError(t, service.closeRun(t.Context(), params.RunID))
 }
 

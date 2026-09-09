@@ -488,7 +488,7 @@ export type EventHandler<Name extends EventName = EventName> = (
   ctx: EventContext,
 ) => Awaitable<EventResult | void>;
 
-/** A daemon-resolved model profile declared by an extension. */
+/** A self-contained profile using ordinary configuration keys and built-in defaults. */
 export type ExtensionProfileRegistration = ExtensionProfileOptions & {
   name: string;
   /** Hide from ordinary profile pickers; this is not access control. Defaults to false. */
@@ -497,7 +497,7 @@ export type ExtensionProfileRegistration = ExtensionProfileOptions & {
 
 export interface ExtensionAPI {
   setMetadata(metadata: ExtensionMetadata): void;
-  /** Declare a remote model profile and return its name unchanged for an ordinary ACP session. */
+  /** Declare a self-contained profile with native snake_case configuration and return its name unchanged. */
   registerProfile(registration: ExtensionProfileRegistration): string;
   registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void;
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(

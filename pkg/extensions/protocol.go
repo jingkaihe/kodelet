@@ -112,23 +112,23 @@ type Subscription struct {
 	TimeoutInSec *float64 `json:"timeoutInSec,omitempty"`
 }
 
-// ProfileRegistration declares model defaults for remote daemon resolution.
+// ProfileRegistration declares ordinary profile configuration for daemon resolution.
 type ProfileRegistration struct {
-	Name    string                            `json:"name"`
-	Options *llmtypes.ExtensionProfileOptions `json:"options"`
-	Hidden  bool                              `json:"hidden"`
+	Name    string                 `json:"name"`
+	Options llmtypes.ProfileConfig `json:"options"`
+	Hidden  bool                   `json:"hidden"`
 }
 
 // Profile is a declaration bound to its runner-discovered source.
 // Registration does not grant credentials or permission to execute a model.
 type Profile struct {
-	Name        string                            `json:"name"`
-	ExtensionID string                            `json:"extensionId"`
-	Options     *llmtypes.ExtensionProfileOptions `json:"options"`
-	Hidden      bool                              `json:"hidden"`
+	Name        string                 `json:"name"`
+	ExtensionID string                 `json:"extensionId"`
+	Options     llmtypes.ProfileConfig `json:"options"`
+	Hidden      bool                   `json:"hidden"`
 }
 
-// Validate checks the profile name and options contract.
+// Validate checks identity and required fields; the daemon decodes the configuration.
 func (p ProfileRegistration) Validate() error {
 	if !profileNamePattern.MatchString(p.Name) {
 		return errors.New("invalid extension profile name: must contain 1 to 128 ASCII characters matching [A-Za-z0-9][A-Za-z0-9._-]*")
@@ -136,8 +136,14 @@ func (p ProfileRegistration) Validate() error {
 	if strings.EqualFold(p.Name, "default") {
 		return errors.New("extension profile name default is reserved")
 	}
-	if err := p.Options.Validate(); err != nil {
-		return errors.Wrap(err, "invalid extension profile options")
+	for _, name := range []string{"provider", "model"} {
+		value, ok := p.Options[name].(string)
+		if !ok || strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
+			return errors.Errorf("extension profile option %s must be a nonempty string containing no NUL", name)
+		}
+	}
+	if provider := p.Options["provider"].(string); provider != "openai" && provider != "anthropic" {
+		return errors.Errorf("unsupported extension profile provider %q", provider)
 	}
 	return nil
 }

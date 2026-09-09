@@ -368,11 +368,6 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			require.NoError(t, os.MkdirAll(extensionDir, 0o700))
 			executable, err := os.Executable()
 			require.NoError(t, err)
-			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionProcess$'\n", executable)
-			if sdk != "" {
-				script = daemonSDKSearchExtension(t, extensionDir, sdk)
-			}
-			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "kodelet-extension-search"), []byte(script), 0o700))
 			webPage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/html")
 				_, _ = fmt.Fprint(w, "<p>runner-page-evidence</p>")
@@ -399,6 +394,11 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			defer provider.Close()
 			defer release()
 			defer finish()
+			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionProcess$'\n", executable)
+			if sdk != "" {
+				script = daemonSDKSearchExtension(t, extensionDir, sdk, provider.URL)
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "kodelet-extension-search"), []byte(script), 0o700))
 			oldSettings := viper.AllSettings()
 			viper.Reset()
 			t.Cleanup(func() {
@@ -592,6 +592,8 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 					assert.Equal(t, "code-search", snapshot.Profile)
 					assert.True(t, snapshot.ExtensionProfile)
 					assert.Equal(t, "gpt-5.6-luna", snapshot.Model)
+					assert.Empty(t, snapshot.WeakModel, "registered profiles must not inherit the daemon weak model")
+					assert.Equal(t, 512, snapshot.MaxTokens)
 					assert.Equal(t, "none", snapshot.ReasoningEffort)
 					assert.Equal(t, llmtypes.OpenAIAPIModeResponses, snapshot.OpenAI.APIMode)
 					assert.Equal(t, llmtypes.OpenAIServiceTierFast, snapshot.OpenAI.ServiceTier)
@@ -720,7 +722,8 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 // Opt-in cross-repository SDK gate: build sdk/dist first, or set
 // KODELET_PYTHON_SDK_PATH to a uv-synced Python SDK checkout. The ordinary Go
 // suite always runs the ordinary ACP protocol fixture without an external SDK.
-func daemonSDKSearchExtension(t *testing.T, dir, sdk string) string {
+// The Python SDK must emit native snake_case profile configuration on the wire.
+func daemonSDKSearchExtension(t *testing.T, dir, sdk, providerURL string) string {
 	t.Helper()
 	var executable, source, name string
 	switch sdk {
@@ -738,8 +741,12 @@ await runExtension(defineExtension(ext => {
     name: "code-search",
     provider: "openai",
     model: "gpt-5.6-luna",
-    reasoningEffort: "none",
+    max_tokens: 512,
+    reasoning_effort: "none",
     openai: {
+      platform: "openai",
+      base_url: %q,
+      api_key_env_var: "KODELET_TEST_PROVIDER_KEY",
       api_mode: "responses",
       service_tier: "fast",
       websocket_mode: false,
@@ -766,7 +773,7 @@ await runExtension(defineExtension(ext => {
     }
   });
 }));
-`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), daemonACPSearchPrompt)
+`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), providerURL, daemonACPSearchPrompt)
 	case "python":
 		root := os.Getenv("KODELET_PYTHON_SDK_PATH")
 		require.NotEmpty(t, root, "set KODELET_PYTHON_SDK_PATH to a uv-synced SDK checkout")
@@ -780,8 +787,12 @@ profile = ext.register_profile(
     "code-search",
     provider="openai",
     model="gpt-5.6-luna",
+    max_tokens=512,
     reasoning_effort="none",
     openai={
+        "platform": "openai",
+        "base_url": %q,
+        "api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
         "api_mode": "responses",
         "service_tier": "fast",
         "websocket_mode": False,
@@ -818,7 +829,7 @@ async def search(_input, ctx):
     finally:
         await client.close()
 asyncio.run(run_extension(ext))
-`, daemonACPSearchPrompt)
+`, providerURL, daemonACPSearchPrompt)
 	default:
 		t.Fatalf("unknown extension SDK %q", sdk)
 	}

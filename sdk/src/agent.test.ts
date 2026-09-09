@@ -755,7 +755,7 @@ test("Registered profile names reach ACP without expanding model options", async
       name: "code-search",
       provider: "openai",
       model: "gpt-5.6-luna",
-      reasoningEffort: "none",
+      reasoning_effort: "none",
       openai: {
         platform: "codex",
         api_mode: "responses",

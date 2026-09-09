@@ -30,7 +30,7 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	viper.Set("profiles", map[string]any{
 		"deep": map[string]any{
 			"reasoning_effort": "xhigh", "allowed_reasoning_efforts": []string{"medium", "high", "xhigh"},
-			"openai": map[string]any{"platform": "codex"},
+			"openai": map[string]any{"platform": "codex", "base_url": "https://active.invalid"},
 		},
 		"internal": map[string]any{"hidden": true, "model": "gpt-4o"},
 	})
@@ -50,19 +50,24 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	second := register("two")
 	profile := extensions.Profile{
 		Name: "code-search", ExtensionID: "skills/code-search", Hidden: true,
-		Options: &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("gpt-5.6-luna"), ReasoningEffort: new("none")},
+		Options: llmtypes.ProfileConfig{
+			"provider": "openai", "model": "copilot-private-model", "reasoning_effort": "none",
+			"openai": map[string]any{"platform": "copilot"},
+		},
 	}
 	manifest := runnerpayload.Manifest{RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{profile}}
 	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
 	config, err := server.resolveModelProfile(ctx, runner.RunnerID, profile.Name, "")
 	require.NoError(t, err)
 	assert.Equal(t, "none", config.ReasoningEffort)
-	assert.Equal(t, "gpt-5.6-luna", config.Model)
-	assert.Equal(t, "codex", config.OpenAI.Platform)
+	assert.Equal(t, "copilot-private-model", config.Model)
+	require.NotNil(t, config.OpenAI)
+	assert.Equal(t, "copilot", config.OpenAI.Platform)
+	assert.Nil(t, config.OpenAI.Models, "Copilot registration must not require an explicit model catalog")
 	assert.Empty(t, config.AllowedReasoningEfforts)
 	assert.Equal(t, profile.Name, config.Profile)
 	assert.True(t, config.ExtensionProfile)
-	assert.Nil(t, config.ExecutionOptions)
+	assert.False(t, config.ExecutionOptions.HasModelOptions())
 	assert.Equal(t, "deep", viper.GetString("profile"))
 	_, err = server.resolveModelProfile(other, runner.RunnerID, profile.Name, "")
 	require.ErrorContains(t, err, "not registered")
@@ -109,23 +114,20 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 
 	metadata, err := conversations.AddConfigSnapshot(nil, config)
 	require.NoError(t, err)
-	profile.Options.ReasoningEffort = new("high")
+	profile.Options["reasoning_effort"] = "high"
 	manifest.Profiles = []extensions.Profile{profile}
 	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
 	config, err = server.resolveModelProfile(ctx, runner.RunnerID, profile.Name, "")
 	require.NoError(t, err)
 	assert.Equal(t, "high", config.ReasoningEffort)
-	resumed, err := chat.ResolveConfigForExistingConversation(&conversations.GetConversationResponse{Metadata: metadata})
-	require.NoError(t, err)
-	assert.Equal(t, "none", resumed.ReasoningEffort)
-	assert.Equal(t, "codex", resumed.OpenAI.Platform)
-	assert.Equal(t, profile.Name, resumed.Profile)
+	_, err = chat.ResolveConfigForExistingConversation(&conversations.GetConversationResponse{Metadata: metadata})
+	require.ErrorContains(t, err, "initialize its extension", "resume must resolve the caller's live registration")
 
 	manifest.Profiles[0].ExtensionID = "other-extension"
 	require.ErrorContains(t, server.registerExtensionProfiles(ctx, manifest), "already registered")
 	manifest.Profiles[0].Name = "other"
-	manifest.Profiles[0].Options.AnthropicAPIAccess = new(llmtypes.AnthropicAPIAccessSubscription)
-	require.ErrorContains(t, server.registerExtensionProfiles(ctx, manifest), "require provider anthropic")
+	manifest.Profiles[0].Options["max_tokens"] = map[string]any{"invalid": true}
+	require.ErrorContains(t, server.registerExtensionProfiles(ctx, manifest), "invalid extension profile")
 	_, err = server.resolveModelProfile(ctx, runner.RunnerID, "other", "")
 	require.ErrorContains(t, err, "not registered")
 
@@ -158,7 +160,7 @@ func TestExtensionProfilesRejectLateOldGenerationPublication(t *testing.T) {
 	runner := register()
 	profile := extensions.Profile{
 		Name: "code-search", ExtensionID: "skills/code-search",
-		Options: &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("gpt-5.6-luna"), ReasoningEffort: new("none")},
+		Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none"},
 	}
 	manifest := runnerpayload.Manifest{RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{profile}}
 	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
@@ -174,7 +176,7 @@ func TestExtensionProfilesRejectLateOldGenerationPublication(t *testing.T) {
 	server.extensionProfilesMu.RUnlock()
 
 	manifest.Generation = reconnected.Generation
-	profile.Options.ReasoningEffort = new("high")
+	profile.Options["reasoning_effort"] = "high"
 	require.NoError(t, server.registerExtensionProfiles(ctx, manifest))
 	other := contextWithPrincipal(t.Context(), administrativePrincipal("bob"))
 	require.NoError(t, server.registerExtensionProfiles(other, manifest))
@@ -184,7 +186,7 @@ func TestExtensionProfilesRejectLateOldGenerationPublication(t *testing.T) {
 	require.Len(t, current, 2)
 	for _, registered := range current {
 		assert.Equal(t, reconnected.Generation, registered.generation)
-		assert.Equal(t, "high", *registered.profile.Options.ReasoningEffort)
+		assert.Equal(t, "high", registered.profile.Options["reasoning_effort"])
 	}
 
 	require.ErrorContains(t, server.publishExtensionProfiles("alice", runner.RunnerID, runner.Generation, validated), "inactive runner generation")

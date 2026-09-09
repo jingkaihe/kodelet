@@ -11,12 +11,10 @@ import (
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
-	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
 
 // UnmarshalJSON validates the request and its execution-options envelope.
@@ -77,7 +75,15 @@ func resolveExecutionOptions(ctx context.Context, req ChatRequest, config llmtyp
 			return llmtypes.Config{}, errors.New("the model profile cannot be changed for this conversation; start a new conversation to change it")
 		}
 	}
-	return applyExecutionOptions(config, req.Options, record)
+	policy := config.EnvironmentOptions()
+	config, err := applyExecutionOptions(config, req.Options, record)
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	if config.ExtensionProfile {
+		return llmtypes.ApplyEnvironmentOptions(config, policy)
+	}
+	return config, nil
 }
 
 func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOptions, record *conversationservice.GetConversationResponse) (llmtypes.Config, error) {
@@ -114,21 +120,16 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 			return llmtypes.Config{}, err
 		}
 	}
-	modelPolicy := config
 	for _, option := range []struct {
-		name   string
 		value  *string
 		target *string
-	}{{"model", options.Model, &config.Model}, {"weakModel", options.WeakModel, &config.WeakModel}} {
+	}{{options.Model, &config.Model}, {options.WeakModel, &config.WeakModel}} {
 		if option.value == nil {
 			continue
 		}
 		model := strings.TrimSpace(*option.value)
 		if alias, ok := config.Aliases[model]; ok {
 			model = alias
-		}
-		if record == nil && !executionModelAllowed(modelPolicy, model) {
-			return llmtypes.Config{}, errors.Errorf("options.%s %q is not an available model; choose a supported model or add it to the server's model profiles or aliases", option.name, model)
 		}
 		*option.target = model
 	}
@@ -171,62 +172,40 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 	return config, nil
 }
 
-// ResolveExtensionProfile validates model declarations against daemon-owned
-// provider configuration. It never modifies the daemon's configured profiles.
+// ResolveExtensionProfile decodes a self-contained profile, not a session override.
+// Provider credentials are resolved at execution time, not during registration.
 func ResolveExtensionProfile(profile extensions.Profile, reasoningEffort string) (llmtypes.Config, error) {
 	if err := profile.Validate(); err != nil {
 		return llmtypes.Config{}, err
 	}
-	options := profile.Options
-	blocks := make(map[string]any)
-	if options.OpenAI != nil {
-		blocks["openai"] = options.OpenAI
-	}
-	if options.Anthropic != nil {
-		blocks["anthropic"] = options.Anthropic
-	}
-	data, err := json.Marshal(blocks)
-	if err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
-	}
-	var overrides llmtypes.Config
-	if err := json.Unmarshal(data, &overrides); err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
-	}
-	platform := ""
-	if overrides.OpenAI != nil {
-		platform = overrides.OpenAI.Platform
-	}
-	if overrides.Anthropic != nil {
-		platform = overrides.Anthropic.Platform
-	}
-	if options.AnthropicAPIAccess != nil && platform == "" {
-		platform = "anthropic"
-	}
-	config, err := llm.GetConfigForExtensionProvider(*options.Provider, strings.ToLower(strings.TrimSpace(platform)))
+	config, err := llm.GetConfigFromProfile(profile.Options)
 	if err != nil {
 		return llmtypes.Config{}, err
-	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
-	}
-	if options.AnthropicAPIAccess != nil {
-		config.AnthropicAPIAccess = *options.AnthropicAPIAccess
 	}
 	config.Profile = profile.Name
 	config.ExtensionProfile = true
-	config, err = applyExecutionOptions(config, options.ModelOptions(), nil)
-	if err != nil {
-		return llmtypes.Config{}, err
-	}
 	if strings.TrimSpace(reasoningEffort) != "" {
-		config, err = applyExecutionOptions(config, &llmtypes.ExecutionOptions{ReasoningEffort: &reasoningEffort}, nil)
-		if err != nil {
+		config.ReasoningEffort = reasoningEffort
+		if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 			return llmtypes.Config{}, err
 		}
 	}
-	config.ExecutionOptions = nil
-	return config, nil
+	return restrictExtensionProfile(config)
+}
+
+// Host permissions remain independent of isolated model/provider defaults.
+func restrictExtensionProfile(config llmtypes.Config) (llmtypes.Config, error) {
+	host := llmtypes.Config{
+		AllowedTools:    viper.GetStringSlice("allowed_tools"),
+		AllowedCommands: viper.GetStringSlice("allowed_commands"),
+	}
+	if viper.IsSet("skills.enabled") {
+		host.Skills = &llmtypes.SkillsConfig{Enabled: viper.GetBool("skills.enabled")}
+	}
+	if viper.IsSet("extensions.enabled") {
+		host.ExtensionSettings = map[string]any{"enabled": viper.GetBool("extensions.enabled")}
+	}
+	return llmtypes.ApplyEnvironmentOptions(config, host.EnvironmentOptions())
 }
 
 func extensionSnapshotBase(ctx context.Context, snapshot *llmtypes.ConversationConfigSnapshot) (llmtypes.Config, error) {
@@ -248,47 +227,7 @@ func extensionSnapshotBase(ctx context.Context, snapshot *llmtypes.ConversationC
 			return live.Clone(), nil
 		}
 	}
-	return llm.GetConfigForExtensionProvider(snapshot.Provider, platform)
-}
-
-// The provider namespace is selected by trusted daemon configuration. Requests
-// may choose shipped models or models explicitly configured by that daemon,
-// but cannot supply endpoints, credentials, pricing, or a new provider policy.
-func executionModelAllowed(config llmtypes.Config, model string) bool {
-	if config.Provider != "anthropic" && config.Provider != "openai" {
-		return false
-	}
-	if model == config.Model || model == config.WeakModel {
-		return true
-	}
-	for _, configured := range config.Aliases {
-		if model == configured {
-			return true
-		}
-	}
-	if config.Provider == "anthropic" {
-		for configured := range anthropic.ModelPricingMap {
-			if configured == model {
-				return true
-			}
-		}
-		return false
-	}
-	if config.OpenAI != nil {
-		if _, ok := config.OpenAI.Pricing[model]; ok {
-			return true
-		}
-		if models := config.OpenAI.Models; models != nil && (slices.Contains(models.Reasoning, model) || slices.Contains(models.NonReasoning, model)) {
-			return true
-		}
-	}
-	models := openaipreset.Models
-	if config.OpenAI != nil && config.OpenAI.Platform == "codex" {
-		models = codexpreset.Models
-	} else if config.OpenAI != nil && config.OpenAI.Platform != "" && config.OpenAI.Platform != "openai" {
-		return false
-	}
-	return slices.Contains(models.Reasoning, model) || slices.Contains(models.NonReasoning, model)
+	return llmtypes.Config{}, errors.Errorf("extension profile %q is unavailable or its provider changed; initialize its extension on this runner before resuming", snapshot.Profile)
 }
 
 func executionMessageOpt(options *llmtypes.ExecutionOptions) llmtypes.MessageOpt {

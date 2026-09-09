@@ -927,8 +927,8 @@ func TestRuntimeProfilesBindSourceSortAndClone(t *testing.T) {
 			assert.Empty(t, runtime.Profiles())
 			var result InitializeResult
 			require.NoError(t, json.Unmarshal([]byte(`{"profiles":[
-				{"name":"z","extensionId":"spoofed","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex","service_tier":"fast"}},"hidden":true},
-				{"name":"a","options":{"provider":"anthropic","model":"daemon-custom"}}
+				{"name":"z","extensionId":"spoofed","options":{"provider":"openai","model":"gpt-5.6-luna","reasoning_effort":"none","openai":{"platform":"codex","service_tier":"fast"},"future":{"values":[false,null]}},"hidden":true},
+				{"name":"a","options":{"provider":"anthropic","model":"daemon-custom","anthropic_api_access":"subscription"}}
 			]}`), &result))
 			for _, registration := range result.Profiles {
 				require.NoError(t, runtime.register(t.Context(), &Process{Extension: Extension{ID: "org@plugin/" + registration.Name}}, &InitializeResult{
@@ -944,23 +944,28 @@ func TestRuntimeProfilesBindSourceSortAndClone(t *testing.T) {
 			for _, profile := range profiles {
 				assert.Equal(t, "org@plugin/"+profile.Name, profile.ExtensionID)
 			}
-			*result.Profiles[0].Options.Model = "mutated-input"
-			result.Profiles[0].Options.OpenAI["platform"] = "openai"
-			profiles[1].Options.OpenAI["service_tier"] = "default"
-			*profiles[0].Options.Model = "mutated-output"
+			result.Profiles[0].Options["model"] = "mutated-input"
+			result.Profiles[0].Options["openai"].(map[string]any)["platform"] = "openai"
+			result.Profiles[0].Options["future"].(map[string]any)["values"].([]any)[0] = true
+			profiles[1].Options["openai"].(map[string]any)["service_tier"] = "default"
+			profiles[1].Options["future"].(map[string]any)["values"].([]any)[1] = "mutated-output"
+			profiles[0].Options["model"] = "mutated-output"
 			profiles[0].Name = "mutated-output"
 			profiles = runtime.Profiles()
 			assert.Equal(t, "a", profiles[0].Name)
-			assert.Equal(t, "daemon-custom", *profiles[0].Options.Model)
-			assert.Equal(t, "gpt-5.6-luna", *profiles[1].Options.Model)
-			assert.Equal(t, "codex", profiles[1].Options.OpenAI["platform"])
-			assert.Equal(t, "fast", profiles[1].Options.OpenAI["service_tier"])
+			assert.Equal(t, "daemon-custom", profiles[0].Options["model"])
+			assert.Equal(t, "subscription", profiles[0].Options["anthropic_api_access"])
+			assert.Equal(t, "gpt-5.6-luna", profiles[1].Options["model"])
+			assert.Equal(t, "none", profiles[1].Options["reasoning_effort"])
+			assert.Equal(t, "codex", profiles[1].Options["openai"].(map[string]any)["platform"])
+			assert.Equal(t, "fast", profiles[1].Options["openai"].(map[string]any)["service_tier"])
+			assert.Equal(t, map[string]any{"values": []any{false, nil}}, profiles[1].Options["future"])
 		})
 	}
 }
 
 func TestRuntimeRejectsProfileCollisionsWithoutPublishingPartialProfiles(t *testing.T) {
-	options := &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("search")}
+	options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
 	for _, source := range []string{"source", "other"} {
 		t.Run(source, func(t *testing.T) {
 			runtime := EmptyRuntime()

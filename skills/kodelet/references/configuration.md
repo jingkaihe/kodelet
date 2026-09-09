@@ -120,7 +120,7 @@ Profiles are useful for switching model/provider/tool-mode combinations. Note th
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 
-Profile definitions support `hidden: true` to omit them from normal pickers without preventing explicit selection. Extensions can [register separate model profiles](sdk.md#registered-model-profiles) without editing daemon configuration.
+Profile definitions support `hidden: true` to omit them from normal pickers without preventing explicit selection. Extensions can [register self-contained profiles](sdk.md#registered-model-profiles) using ordinary configuration keys and built-in defaults, without editing daemon configuration.
 
 ## Skills config
 

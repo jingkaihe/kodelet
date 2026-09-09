@@ -441,6 +441,11 @@ type CustomPricing map[string]ModelPricing
 // ProfileConfig holds the configuration values for a named profile
 type ProfileConfig map[string]any
 
+// Clone returns an independent profile, including nested configuration values.
+func (p ProfileConfig) Clone() ProfileConfig {
+	return cloneConfigMap(p)
+}
+
 // RetryConfig holds the retry configuration for API calls
 // Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields
 type RetryConfig struct {

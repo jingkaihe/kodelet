@@ -130,45 +130,20 @@ func IsProfileHidden(profileName string) bool {
 	return hidden
 }
 
-// GetConfigForExtensionProvider keeps base policy and selects daemon-owned transport settings.
-func GetConfigForExtensionProvider(provider, platform string) (llmtypes.Config, error) {
-	if provider != "openai" && provider != "anthropic" {
-		return llmtypes.Config{}, errors.Errorf("unsupported extension profile provider %q", provider)
-	}
-	config, err := GetConfigFromViperWithoutProfile()
+// GetConfigFromProfile decodes an isolated profile using ordinary configuration
+// keys and built-in defaults, without consulting daemon or workspace settings.
+func GetConfigFromProfile(profile llmtypes.ProfileConfig) (llmtypes.Config, error) {
+	config, err := loadConfigFromSettings(cloneSettings(profile))
 	if err != nil {
 		return llmtypes.Config{}, err
 	}
-	defaults, err := GetConfigFromViper()
-	if err != nil {
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return llmtypes.Config{}, err
 	}
-	selected := config
-	if defaults.Provider == provider && (platform == "" || ProviderPlatform(defaults, provider) == platform) {
-		selected = defaults
-	}
-	if platform != "" && ProviderPlatform(selected, provider) != platform {
-		switch provider {
-		case "openai":
-			selected.OpenAI = &llmtypes.OpenAIConfig{Platform: platform}
-		case "anthropic":
-			selected.Anthropic = &llmtypes.AnthropicConfig{Platform: platform}
-			selected.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto
-		}
-	}
-	if config.Provider != provider || ProviderPlatform(config, provider) != ProviderPlatform(selected, provider) {
-		config.Model, config.WeakModel = "", ""
-		config.ThinkingBudgetTokens = 0
-	}
-	switch provider {
-	case "openai":
-		config.OpenAI = selected.OpenAI
-	case "anthropic":
-		config.Anthropic = selected.Anthropic
-		config.AnthropicAPIAccess = selected.AnthropicAPIAccess
-		config.AnthropicAccount = selected.AnthropicAccount
-	}
-	config.Provider, config.Profile = provider, ""
+	config.Aliases = withDefaultModelAliases(config.Aliases)
+	config.Model = resolveModelAlias(strings.TrimSpace(config.Model), config.Aliases)
+	config.WeakModel = resolveModelAlias(strings.TrimSpace(config.WeakModel), config.Aliases)
+	config.ModelAliasesResolved = true
 	return config, nil
 }
 

@@ -561,7 +561,7 @@ Scoped child RPCs, `ctx.children`, and `get_profile` remain removed. Existing hi
 
 TypeScript `ext.registerProfile(...)` and Python `ext.register_profile(...)` require `provider` and `model` and return the flat name unchanged. Names are 1–128-character ASCII slugs; `default` is reserved and conflicting configured or registered names are rejected. Profiles are scoped to the authenticated caller and runner; ACP clients must use the same owner's credentials and target `ctx.runnerId` (Python: `ctx.runner_id`).
 
-`openai` and `anthropic` accept ordinary daemon configuration keys without an extra field allowlist. Profiles use daemon base defaults, not the parent's profile, and retain daemon/runner restrictions. `hidden: true` omits profiles from pickers without preventing explicit selection. See the [SDK example](../skills/kodelet/references/sdk.md#registered-model-profiles).
+Registration accepts ordinary profile JSON with native snake_case keys and built-in defaults, without inheriting model settings or requiring catalog entries. Credentials stay on the daemon; host/runner restrictions still apply. Resuming requires a matching live registration. `hidden: true` hides profiles from pickers without preventing selection. See the [SDK example](../skills/kodelet/references/sdk.md#registered-model-profiles).
 
 ### Live conversation forks
 

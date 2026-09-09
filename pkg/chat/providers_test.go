@@ -62,7 +62,7 @@ func TestExtensionProfileSubscriptionRequests(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "unused-api-key")
 	t.Setenv("ANTHROPIC_API_KEY", "unused-api-key")
 	viper.Set("provider", "openai")
-	viper.Set("anthropic_account", "work")
+	viper.Set("anthropic_account", "daemon-only-account")
 	viper.Set("anthropic_api_access", "api-key")
 	viper.Set("allowed_tools", []string{tools.NoToolsMarker})
 	viper.Set("skills.enabled", false)
@@ -85,18 +85,19 @@ func TestExtensionProfileSubscriptionRequests(t *testing.T) {
 		name    string
 		path    string
 		token   string
-		options *llmtypes.ExtensionProfileOptions
+		options llmtypes.ProfileConfig
 		stream  string
 	}{
 		{
 			name:  "codex",
 			path:  "/responses",
 			token: "fake-codex-token",
-			options: &llmtypes.ExtensionProfileOptions{
-				Provider:        new("openai"),
-				Model:           new("gpt-5.6-luna"),
-				ReasoningEffort: new("none"),
-				OpenAI: map[string]any{
+			options: llmtypes.ProfileConfig{
+				"provider":         "openai",
+				"model":            "gpt-5.6-luna",
+				"reasoning_effort": "none",
+				"retry":            map[string]any{"attempts": 1},
+				"openai": map[string]any{
 					"platform":       "codex",
 					"api_mode":       "responses",
 					"service_tier":   "fast",
@@ -115,12 +116,14 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
 			name:  "claude",
 			path:  "/v1/messages",
 			token: "fake-claude-token",
-			options: &llmtypes.ExtensionProfileOptions{
-				Provider:           new("anthropic"),
-				Model:              new("claude-sonnet-4-6"),
-				ReasoningEffort:    new("medium"),
-				AnthropicAPIAccess: new(llmtypes.AnthropicAPIAccessSubscription),
-				Anthropic:          map[string]any{"platform": "anthropic"},
+			options: llmtypes.ProfileConfig{
+				"provider":             "anthropic",
+				"model":                "claude-sonnet-4-6",
+				"reasoning_effort":     "medium",
+				"anthropic_api_access": "subscription",
+				"anthropic_account":    "work",
+				"anthropic":            map[string]any{"platform": "anthropic"},
+				"retry":                map[string]any{"attempts": 1},
 			},
 			stream: `event: message_start
 data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}
@@ -156,7 +159,7 @@ data: {"type":"message_stop"}
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-				assert.Equal(t, *test.options.Model, body["model"])
+				assert.Equal(t, test.options["model"], body["model"])
 				assert.Equal(t, true, body["stream"])
 				assert.Empty(t, body["tools"])
 				if test.name == "codex" {
@@ -171,16 +174,10 @@ data: {"type":"message_stop"}
 				assert.NoError(t, err)
 			}))
 			defer server.Close()
-			viper.Set(*test.options.Provider+".base_url", server.URL+"/daemon")
-			if test.options.OpenAI != nil {
-				viper.Set("openai.platform", "codex")
-				viper.Set("openai.websocket_mode", false)
-			}
-			if test.options.OpenAI != nil {
-				test.options.OpenAI["base_url"] = server.URL
-			} else {
-				test.options.Anthropic["base_url"] = server.URL
-			}
+			provider := test.options["provider"].(string)
+			viper.Set(provider+".base_url", server.URL+"/daemon")
+			viper.Set(provider+".platform", "copilot")
+			test.options[provider].(map[string]any)["base_url"] = server.URL
 			profile := extensions.Profile{
 				Name:        "subscription-test",
 				ExtensionID: "test-extension",
@@ -199,6 +196,11 @@ data: {"type":"message_stop"}
 			for turn := range 2 {
 				config, err := ResolveRemoteConfigWithReasoning(ctx, conversationID, profile.Name, "")
 				require.NoError(t, err)
+				assert.Equal(t, new(true), config.EnvironmentOptions().NoSkills)
+				assert.Equal(t, new(true), config.EnvironmentOptions().NoExtensions)
+				if test.name == "claude" {
+					assert.Equal(t, "work", config.AnthropicAccount)
+				}
 				thread, err := llm.NewThread(config)
 				require.NoError(t, err)
 				t.Cleanup(func() { assert.NoError(t, llm.CloseThread(thread)) })
@@ -218,13 +220,13 @@ data: {"type":"message_stop"}
 					require.NoError(t, err)
 					require.NoError(t, store.Save(ctx, record))
 					conversationID = record.ID
-					profile.Options.ReasoningEffort = new("high")
+					profile.Options["reasoning_effort"] = "high"
 					if test.name == "codex" {
-						profile.Options.Model = new("gpt-5.5")
-						profile.Options.OpenAI["service_tier"] = "default"
+						profile.Options["model"] = "gpt-5.5"
+						profile.Options["openai"].(map[string]any)["service_tier"] = "default"
 					} else {
-						profile.Options.Model = new("claude-opus-4-6")
-						profile.Options.AnthropicAPIAccess = new(llmtypes.AnthropicAPIAccessAPIKey)
+						profile.Options["model"] = "claude-opus-4-6"
+						profile.Options["anthropic_api_access"] = "api-key"
 					}
 				}
 			}

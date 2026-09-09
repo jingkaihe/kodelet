@@ -21,35 +21,15 @@ export const executionOptionsSchema = z.strictObject({
 
 export type ExecutionOptions = z.infer<typeof executionOptionsSchema>;
 
-/** @internal Model and provider settings for remote profile registration only. */
-export const extensionProfileOptionsSchema = executionOptionsSchema.pick({
-  provider: true,
-  model: true,
-  weakModel: true,
-  maxTokens: true,
-  weakModelMaxTokens: true,
-  thinkingBudgetTokens: true,
-  reasoningEffort: true,
-}).required({ provider: true, model: true }).extend({
-  openai: z.record(z.string(), z.json()).optional(),
-  anthropic: z.record(z.string(), z.json()).optional(),
-  anthropicAPIAccess: z.enum(["auto", "subscription", "api-key"]).optional(),
-}).superRefine((options, ctx) => {
-  if (options.provider !== "openai" && options.openai !== undefined) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["openai"],
-      message: "openai settings require the openai provider",
-    });
-  }
-  if (options.provider !== "anthropic" && (options.anthropic !== undefined || options.anthropicAPIAccess !== undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      message: "anthropic settings require the anthropic provider",
-    });
-  }
-});
+/** @internal Ordinary profile JSON; the daemon owns configuration decoding and validation. */
+export const extensionProfileOptionsSchema = z.object({
+  provider: z.enum(["openai", "anthropic"]),
+  model: z.string().refine((value) => value.trim().length > 0 && !value.includes("\0"), {
+    message: "Profile model must be nonempty and contain no NUL",
+  }),
+}).catchall(z.json());
 
+/** Self-contained profile configuration using native snake_case keys, not ExecutionOptions. */
 export type ExtensionProfileOptions = z.infer<typeof extensionProfileOptionsSchema>;
 
 /** @internal ACP is a thin daemon client; flags preserve explicit false/empty values. */
