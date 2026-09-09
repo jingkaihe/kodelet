@@ -88,7 +88,6 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if snapshot.Truncated {
 		diagnostics.Warning("Staged changes are too large to preview in full. The commit message will use a summary and part of the diff; the commit will include all staged changes.")
 	}
-	diagnostics.Info("Analyzing staged changes and generating commit message...")
 	request.RunnerID, request.CWD = snapshot.RunnerID, snapshot.CWD
 	request.Message = remoteCommitPrompt(snapshot, config)
 	sink := &remoteRunSink{output: io.Discard, diagnostics: cmd.ErrOrStderr(), resultOnly: true}
@@ -100,14 +99,9 @@ func runRemoteCommit(cmd *cobra.Command) error {
 		return errors.New("the generated commit message was empty; no commit was created")
 	}
 	message = prefixCommitMessage(message, config.Prefix)
-	presentation.Info("")
-	presentation.Section("Generated Commit Message")
 	if _, err := fmt.Fprintln(cmd.OutOrStdout(), message); err != nil {
 		return err
 	}
-	diagnostics.Info("")
-	diagnostics.Stats(presenter.ConvertUsageStats(sink.usage))
-	diagnostics.Info("")
 	if !config.NoConfirm {
 		var confirmed bool
 		confirmed, message, err = confirmRemoteCommit(ctx, broker, message)
@@ -124,8 +118,8 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	if result.Output != "" {
-		presentation.Info(result.Output)
+	if result.Stats != nil {
+		presentation.Info(formatCommitStats(*result.Stats))
 	}
 	presentation.Success("Commit created successfully!")
 	// Only discard this command's temporary history after Git acknowledges the
@@ -136,6 +130,29 @@ func runRemoteCommit(cmd *cobra.Command) error {
 		diagnostics.Warning("The commit was created, but its temporary conversation could not be deleted.")
 	}
 	return nil
+}
+
+func formatCommitStats(stats protocol.WorkspaceGitCommitStats) string {
+	files := "files"
+	if stats.FilesChanged == 1 {
+		files = "file"
+	}
+	summary := fmt.Sprintf(" %d %s changed", stats.FilesChanged, files)
+	if stats.Insertions > 0 {
+		label := "insertions"
+		if stats.Insertions == 1 {
+			label = "insertion"
+		}
+		summary += fmt.Sprintf(", %d %s(+)", stats.Insertions, label)
+	}
+	if stats.Deletions > 0 {
+		label := "deletions"
+		if stats.Deletions == 1 {
+			label = "deletion"
+		}
+		summary += fmt.Sprintf(", %d %s(-)", stats.Deletions, label)
+	}
+	return summary
 }
 
 func remoteCommitPrompt(snapshot protocol.WorkspaceGitCommitSnapshot, config *CommitConfig) string {

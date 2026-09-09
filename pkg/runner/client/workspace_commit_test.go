@@ -61,6 +61,7 @@ func TestWorkspaceCommitSnapshotAndApprovedMutation(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte("#!/bin/sh\nprintf '\nHook checked\n' >> \"$1\"\n"), 0o700))
 	result := callService[protocol.WorkspaceGitCommitResult](t, service, protocol.MethodWorkspaceGitCommit, commitParams(snapshot))
 	assert.Equal(t, git("rev-parse", "HEAD"), result.Commit)
+	assert.Equal(t, &protocol.WorkspaceGitCommitStats{FilesChanged: 1, Insertions: 1}, result.Stats)
 	assert.Equal(t, snapshot.Tree, git("rev-parse", "HEAD^{tree}"))
 	assert.Equal(t, "approved", git("show", "HEAD:file.txt"))
 	assert.Contains(t, git("log", "-1", "--format=%B"), "Signed-off-by: Runner User <runner@example.com>")
@@ -74,6 +75,34 @@ func TestWorkspaceCommitSnapshotAndApprovedMutation(t *testing.T) {
 	_, err = service.commitWorkspace(t.Context(), commitParams(snapshot))
 	require.ErrorContains(t, err, "changed after preparation")
 	assert.Equal(t, "1", git("rev-list", "--count", "HEAD"))
+}
+
+func TestWorkspaceCommitStatsReflectCommittedTree(t *testing.T) {
+	root, git := commitRepository(t)
+	oldName, newName := "old\tname\n.txt", "new\tname\n.txt"
+	require.NoError(t, os.WriteFile(filepath.Join(root, oldName), []byte("unchanged\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "delete.txt"), []byte("remove\n"), 0o600))
+	git("add", ".")
+	git("commit", "-m", "initial")
+	git("config", "diff.renames", "true")
+	git("mv", oldName, newName)
+	git("rm", "delete.txt")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "file.txt"), []byte("replacement\nextra\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "binary.dat"), []byte("\x00binary"), 0o600))
+	git("add", ".")
+	// Hooks may update the index after approval. Statistics must describe the
+	// resulting commit, not the preview or the working tree.
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-commit"), []byte("#!/bin/sh\nprintf 'hook\\n' >> file.txt\ngit add file.txt\n"), 0o700))
+	service, err := NewService(t.Context(), root, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.generation = 1
+	snapshot, err := service.prepareWorkspaceCommit(t.Context(), root)
+	require.NoError(t, err)
+	result, err := service.commitWorkspace(t.Context(), commitParams(snapshot))
+	require.NoError(t, err)
+	assert.Equal(t, &protocol.WorkspaceGitCommitStats{FilesChanged: 4, Insertions: 3, Deletions: 2}, result.Stats)
+	assert.Equal(t, "replacement\nextra\nhook", git("show", "HEAD:file.txt"))
 }
 
 func TestWorkspaceCommitPreservesRacyIndexEntries(t *testing.T) {
@@ -134,6 +163,11 @@ func TestWorkspaceCommitLargeDiffPreservesEntireStagedTree(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(root, "file.txt"), []byte("unstaged\n"), 0o600))
 			result, err := service.commitWorkspace(t.Context(), commitParams(snapshot))
 			require.NoError(t, err)
+			stats := &protocol.WorkspaceGitCommitStats{FilesChanged: 2, Insertions: strings.Count(largeChange, "\n") + 1}
+			if initialCommit {
+				stats.Deletions = 1
+			}
+			assert.Equal(t, stats, result.Stats)
 			assert.Equal(t, git("rev-parse", "HEAD"), result.Commit)
 			assert.Equal(t, snapshot.Tree, git("rev-parse", "HEAD^{tree}"))
 			assert.Equal(t, strings.TrimSpace(largeChange), git("show", "HEAD:file.txt"))

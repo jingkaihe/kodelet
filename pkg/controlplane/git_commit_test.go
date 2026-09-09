@@ -22,6 +22,7 @@ func TestWorkspaceCommitRoutesPreparedApprovalWithoutLocalGit(t *testing.T) {
 	link := newRunnerAPITestLink()
 	calls := 0
 	approval := protocol.WorkspaceGitCommitParams{CWD: "/runner/selected", Head: strings.Repeat("a", 40), HeadRef: "refs/heads/main", Tree: strings.Repeat("b", 40), Message: "feat: approved", SignOff: true}
+	commitResult := protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40), Stats: &protocol.WorkspaceGitCommitStats{FilesChanged: 3, Insertions: 52, Deletions: 13}}
 	link.call = func(ctx context.Context, method string, params, result any) error {
 		calls++
 		_, bounded := ctx.Deadline()
@@ -32,7 +33,7 @@ func TestWorkspaceCommitRoutesPreparedApprovalWithoutLocalGit(t *testing.T) {
 			*result.(*protocol.WorkspaceGitCommitSnapshot) = protocol.WorkspaceGitCommitSnapshot{CWD: "/runner/selected", GitRoot: "/runner/selected", Head: approval.Head, HeadRef: approval.HeadRef, Tree: approval.Tree, Diff: "staged diff"}
 		case protocol.MethodWorkspaceGitCommit:
 			assert.Equal(t, approval, params)
-			*result.(*protocol.WorkspaceGitCommitResult) = protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40)}
+			*result.(*protocol.WorkspaceGitCommitResult) = commitResult
 		default:
 			t.Errorf("unexpected RPC: %s", method)
 		}
@@ -61,6 +62,9 @@ func TestWorkspaceCommitRoutesPreparedApprovalWithoutLocalGit(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		server.handleWorkspaceCommit(recorder, httptest.NewRequest(http.MethodPost, "/api/git/commit?"+query, strings.NewReader(string(data))))
 		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		var result protocol.WorkspaceGitCommitResult
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+		assert.Equal(t, commitResult, result)
 	}
 	assert.Equal(t, 4, calls)
 	for _, scenario := range []string{"generation", "directory", "unknown", "null", "multiple", "empty-message"} {

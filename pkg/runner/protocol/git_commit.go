@@ -62,6 +62,14 @@ func (p WorkspaceGitCommitParams) Validate() error {
 
 // WorkspaceGitCommitResult confirms a runner-side Git mutation.
 type WorkspaceGitCommitResult struct {
-	Commit string `json:"commit"`
-	Output string `json:"output"`
+	Commit string                   `json:"commit"`
+	Stats  *WorkspaceGitCommitStats `json:"stats,omitempty"`
+}
+
+// WorkspaceGitCommitStats describes changes in the committed tree. Binary files
+// count toward FilesChanged but not Insertions or Deletions.
+type WorkspaceGitCommitStats struct {
+	FilesChanged int `json:"filesChanged"`
+	Insertions   int `json:"insertions"`
+	Deletions    int `json:"deletions"`
 }

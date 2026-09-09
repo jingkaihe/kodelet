@@ -118,7 +118,7 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, failure string, color
 				require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"error": "runner commit was not acknowledged; inspect Git history before retrying"}))
 				return
 			}
-			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40), Output: "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)"}))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40), Stats: &protocol.WorkspaceGitCommitStats{FilesChanged: 1, Insertions: 1}}))
 		case "/api/chat":
 			submissions.Add(1)
 			var request chat.ChatRequest
@@ -138,11 +138,7 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, failure string, color
 			conversationID = request.ConversationID
 			w.Header().Set("Content-Type", "application/x-ndjson")
 			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "result", Result: new("feat: runner change")}))
-			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "usage", Usage: &llmtypes.Usage{
-				InputTokens: 10, OutputTokens: 5, CacheCreationInputTokens: 2, CacheReadInputTokens: 3,
-				InputCost: 0.001, OutputCost: 0.002, CacheCreationCost: 0.003, CacheReadCost: 0.004,
-				CurrentContextWindow: 20, MaxContextWindow: 100,
-			}}))
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "usage", Usage: &llmtypes.Usage{InputTokens: 10, OutputTokens: 5}}))
 			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"}))
 		case "/api/conversations/" + conversationID:
 			deletions.Add(1)
@@ -187,20 +183,28 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, failure string, color
 		assert.NotContains(t, string(output), "\x1b[", "pipes and NO_COLOR should use plain text")
 	}
 	text := ansi.Strip(string(output))
-	assert.Contains(t, text, "Analyzing staged changes and generating commit message...\n")
-	assert.Contains(t, text, "Generated Commit Message\n------------------------\nTICKET feat: runner change\n")
-	assert.Contains(t, text, "[Usage Stats] Input tokens: 10 | Output tokens: 5 | Cache write: 2 | Cache read: 3 | Total: 20")
-	assert.Contains(t, text, "[Context Window] Current: 20 | Max: 100 | Usage: 20.0%")
-	assert.Contains(t, text, "[Cost Stats] Input: $0.0010 | Output: $0.0020 | Cache write: $0.0030 | Cache read: $0.0040 | Total: $0.0100")
-	assert.Contains(t, text, "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)\n")
-	assert.Contains(t, text, "✓ Commit created successfully!\n")
+	want := "TICKET feat: runner change\n 1 file changed, 1 insertion(+)\n✓ Commit created successfully!\n"
 	if truncated {
 		assert.Contains(t, text, "⚠ Staged changes are too large to preview in full")
 		assert.Contains(t, text, "commit will include all staged changes")
+		assert.True(t, strings.HasSuffix(text, want))
 	} else if failure == "cleanup" {
-		assert.Contains(t, text, "⚠ The commit was created, but its temporary conversation could not be deleted.")
+		assert.Equal(t, want+"⚠ The commit was created, but its temporary conversation could not be deleted.\n", text)
 	} else {
-		assert.NotContains(t, text, "⚠")
+		assert.Equal(t, want, text)
+	}
+}
+
+func TestFormatCommitStats(t *testing.T) {
+	for _, test := range []struct {
+		stats protocol.WorkspaceGitCommitStats
+		want  string
+	}{
+		{protocol.WorkspaceGitCommitStats{FilesChanged: 3, Insertions: 52, Deletions: 13}, " 3 files changed, 52 insertions(+), 13 deletions(-)"},
+		{protocol.WorkspaceGitCommitStats{FilesChanged: 1, Deletions: 1}, " 1 file changed, 1 deletion(-)"},
+		{protocol.WorkspaceGitCommitStats{FilesChanged: 1}, " 1 file changed"},
+	} {
+		assert.Equal(t, test.want, formatCommitStats(test.stats))
 	}
 }
 

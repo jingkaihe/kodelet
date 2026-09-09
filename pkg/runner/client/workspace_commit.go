@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/pkg/errors"
@@ -151,7 +153,7 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	}
 	// Keep ordinary Git hooks, signing configuration and identity. They receive
 	// the private index; publish it only after Git successfully commits it.
-	result.Output, err = runCommitGit(ctx, root, copyIndex.Name(), params.Message, args...)
+	_, err = runCommitGit(ctx, root, copyIndex.Name(), params.Message, args...)
 	if err != nil {
 		return result, errors.Wrap(err, "could not confirm whether the commit was created; check 'git log' in the repository before trying again")
 	}
@@ -162,7 +164,55 @@ func (s *Service) commitWorkspace(ctx context.Context, params protocol.Workspace
 	if err != nil {
 		return result, errors.Wrap(err, "the commit was created, but its ID could not be read; check 'git log' in the repository")
 	}
+	result.Stats, err = workspaceCommitStats(ctx, root, params.Head, result.Commit)
+	if err != nil {
+		// Statistics are presentation data, not part of the Git mutation. Do not
+		// report a successful commit as failed if its summary cannot be read.
+		logger.G(ctx).WithError(err).WithField("commit", result.Commit).Warn("could not read committed change statistics")
+	}
 	return result, nil
+}
+
+func workspaceCommitStats(ctx context.Context, root, base, commit string) (*protocol.WorkspaceGitCommitStats, error) {
+	if base == "" {
+		var err error
+		base, err = runCommitGit(ctx, root, "", "", "mktree")
+		if err != nil {
+			return nil, err
+		}
+	}
+	output, err := runCommitGit(ctx, root, "", "", "diff", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", base, commit, "--")
+	if err != nil {
+		return nil, err
+	}
+	stats := &protocol.WorkspaceGitCommitStats{}
+	if output == "" {
+		return stats, nil
+	}
+	// Numstat is machine-readable: two tab-separated counts followed by a path.
+	// Without -z, Git quotes unusual paths, so even renamed files with newlines
+	// occupy one record. The path itself does not need to be parsed.
+	for line := range strings.SplitSeq(output, "\n") {
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) != 3 {
+			return nil, errors.New("invalid Git numstat record")
+		}
+		stats.FilesChanged++
+		if fields[0] == "-" && fields[1] == "-" {
+			continue // Binary file.
+		}
+		insertions, err := strconv.Atoi(fields[0])
+		if err != nil || insertions < 0 {
+			return nil, errors.New("invalid Git numstat insertion count")
+		}
+		deletions, err := strconv.Atoi(fields[1])
+		if err != nil || deletions < 0 {
+			return nil, errors.New("invalid Git numstat deletion count")
+		}
+		stats.Insertions += insertions
+		stats.Deletions += deletions
+	}
+	return stats, nil
 }
 
 func workspaceCommitHead(ctx context.Context, root string) (head, ref string, err error) {

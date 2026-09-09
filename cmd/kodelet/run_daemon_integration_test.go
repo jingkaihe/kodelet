@@ -659,7 +659,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			commit := daemonCLIProcess(ctx, t, root, append(clientEnv, "PATH="+root), commitArgs...)
 			output, err := commit.CombinedOutput()
 			require.NoError(t, err, "%s", output)
-			assert.Contains(t, string(output), "Commit created successfully!")
+			assert.Equal(t, "feat: commit runner snapshot\n 1 file changed, 1 insertion(+)\n✓ Commit created successfully!\n", string(output))
 			historyAfterCommit, err := client.ListConversationsInCWD(ctx, 100, workspace)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, historyBeforeCommit, historyAfterCommit, "successful commits should remove only their temporary conversation")
