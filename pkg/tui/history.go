@@ -7,19 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/pkg/errors"
 )
 
-func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string) tea.Cmd {
-	return loadConversationHistory(ctx, "", conversationID, requestedCWD)
-}
-
-func loadConversationHistory(ctx context.Context, conversationKey, conversationID, requestedCWD string) tea.Cmd {
-	return loadConversationHistoryFromSource(ctx, conversationKey, conversationID, requestedCWD, nil)
-}
-
-func loadConversationHistoryFromSource(ctx context.Context, conversationKey, conversationID, requestedCWD string, source chat.ConversationSource) tea.Cmd {
+func loadConversationHistoryFromSource(ctx context.Context, conversationKey, conversationID string, source chat.ConversationSource) tea.Cmd {
 	return func() tea.Msg {
 		result := initialHistoryMsg{
 			conversationKey: strings.TrimSpace(conversationKey),
@@ -28,108 +19,24 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 		if strings.TrimSpace(conversationID) == "" {
 			return result
 		}
-		if source != nil {
-			history, err := source.LoadConversation(ctx, conversationID)
-			if err != nil {
-				result.err = errors.Wrap(err, "failed to load control-plane conversation")
-				return result
-			}
-			result.loaded = true
-			result.entries = entriesFromHistory(history.Messages)
-			result.usage = history.Usage
-			result.cwd = strings.TrimSpace(history.CWD)
-			result.title = strings.TrimSpace(history.Title)
-			result.updatedAt = history.UpdatedAt
-			result.profile = strings.TrimSpace(history.Profile)
-			result.provider = strings.TrimSpace(history.Provider)
-			result.reasoningEffort = strings.TrimSpace(history.ReasoningEffort)
+		if source == nil {
+			result.err = errors.New("conversation history is unavailable")
 			return result
 		}
-
-		service, err := conversations.GetDefaultConversationService(ctx)
-		if err != nil {
-			result.err = errors.Wrap(err, "failed to open conversation store")
-			return result
-		}
-		defer service.Close()
-
-		response, err := service.GetConversation(ctx, conversationID)
+		history, err := source.LoadConversation(ctx, conversationID)
 		if err != nil {
 			result.err = errors.Wrap(err, "failed to load conversation")
 			return result
 		}
-		if strings.TrimSpace(requestedCWD) != "" && strings.TrimSpace(response.CWD) != "" {
-			defaultCWD, err := chat.ResolveConfiguredDefaultCWD("")
-			if err != nil {
-				result.err = errors.Wrap(err, "failed to resolve requested cwd")
-				return result
-			}
-			expandedCWD, err := chat.ExpandCWDInput(requestedCWD, defaultCWD)
-			if err != nil {
-				result.err = errors.Wrap(err, "failed to resolve requested cwd")
-				return result
-			}
-			resolvedRequested, err := conversations.NormalizeCWD(expandedCWD)
-			if err != nil {
-				result.err = errors.Wrap(err, "failed to resolve requested cwd")
-				return result
-			}
-			resolvedStored, err := conversations.NormalizeCWD(response.CWD)
-			if err != nil {
-				result.err = errors.Wrap(err, "failed to resolve conversation cwd")
-				return result
-			}
-			if resolvedRequested != resolvedStored {
-				result.err = errors.Wrapf(
-					conversations.ErrCWDConflict,
-					"conversation %s is bound to %s, not %s",
-					conversationID,
-					resolvedStored,
-					resolvedRequested,
-				)
-				return result
-			}
-		}
-
-		messages, err := llm.ExtractConversationEntries(response.Provider, response.RawMessages, response.Metadata, response.ToolResults)
-		if err != nil {
-			result.err = errors.Wrap(err, "failed to parse conversation")
-			return result
-		}
-
-		provider := strings.TrimSpace(response.Provider)
-		model := ""
-		profile := profileFromMetadata(response.Metadata)
-		reasoningEffort := ""
-		if snapshot, ok, snapshotErr := conversations.ConfigSnapshotFromMetadata(response.Metadata); snapshotErr != nil {
-			result.err = errors.Wrap(snapshotErr, "failed to load conversation config snapshot")
-			return result
-		} else if ok {
-			provider = strings.TrimSpace(snapshot.Provider)
-			model = strings.TrimSpace(snapshot.Model)
-			profile = displayProfile(snapshot.Profile)
-			reasoningEffort = snapshot.ReasoningEffort
-		} else if config, configErr := chat.ResolveConfigForExistingConversation(response, ""); configErr == nil {
-			provider = strings.TrimSpace(config.Provider)
-			model = strings.TrimSpace(config.Model)
-			profile = displayProfile(config.Profile)
-			reasoningEffort = config.ReasoningEffort
-		}
-
-		fallbackTitle := strings.TrimSpace(response.Summary)
-		if fallbackTitle == "" {
-			fallbackTitle = shortID(response.ID)
-		}
 		result.loaded = true
-		result.entries = entriesFromHistory(messages)
-		result.usage = response.Usage
-		result.cwd = strings.TrimSpace(response.CWD)
-		result.title = conversations.ResolveConversationName(response.Metadata, fallbackTitle)
-		result.updatedAt = response.UpdatedAt
-		result.profile = profile
-		result.provider = provider
-		result.model = model
-		result.reasoningEffort = reasoningEffort
+		result.entries = entriesFromHistory(history.Messages)
+		result.usage = history.Usage
+		result.cwd = strings.TrimSpace(history.CWD)
+		result.title = strings.TrimSpace(history.Title)
+		result.updatedAt = history.UpdatedAt
+		result.profile = strings.TrimSpace(history.Profile)
+		result.provider = strings.TrimSpace(history.Provider)
+		result.reasoningEffort = strings.TrimSpace(history.ReasoningEffort)
 		return result
 	}
 }
@@ -145,7 +52,7 @@ func refreshConversationHistoryFromSourceAttempt(ctx context.Context, conversati
 	return func() tea.Msg {
 		attemptCtx, cancel := context.WithTimeout(ctx, conversationHistoryRefreshTimeout)
 		defer cancel()
-		load := loadConversationHistoryFromSource(attemptCtx, conversationKey, conversationID, "", source)
+		load := loadConversationHistoryFromSource(attemptCtx, conversationKey, conversationID, source)
 		history, _ := load().(initialHistoryMsg)
 		return conversationHistoryRefreshMsg{runID: runID, turn: turn, attempt: attempt, history: history}
 	}

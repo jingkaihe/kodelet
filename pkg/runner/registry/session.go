@@ -64,6 +64,30 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 	if !registered {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidRequest, Message: "runner.register must be the first request"}
 	}
+	if method == protocol.MethodSessionExtensionFrame {
+		if router, ok := s.ui.(interface {
+			HandleRunnerExtensionFrame(context.Context, UIRequestIdentity, json.RawMessage) (any, *protocol.RPCError)
+		}); ok {
+			return router.HandleRunnerExtensionFrame(ctx, UIRequestIdentity{
+				RunnerID: runnerID, ConnectionID: connectionID, Generation: generation,
+			}, params)
+		}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "session extension routing is unavailable"}
+	}
+	if method == protocol.MethodRunCheckpoint {
+		value, err := decodeParams[protocol.RunCheckpointParams](params)
+		if err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		return s.registry.checkpointRun(ctx, runnerID, connectionID, generation, value)
+	}
+	if method == runnerpayload.MethodModelHelperExecute {
+		value, err := decodeParams[runnerpayload.ModelHelperParams](params)
+		if err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		return s.registry.executeModelHelper(ctx, runnerID, connectionID, generation, value)
+	}
 	if method == protocol.MethodConversationFork {
 		value, err := decodeParams[runnerpayload.ConversationForkParams](params)
 		if err != nil {
@@ -116,7 +140,7 @@ func (s *Session) HandleNotification(ctx context.Context, method string, params 
 			_ = s.registry.ManifestChanged(runnerID, connectionID, generation, value)
 		}
 	case protocol.MethodRunnerGoodbye:
-		s.registry.Detach(runnerID, connectionID, generation, nil)
+		s.Detach(nil)
 	case protocol.MethodRunEnvironmentError:
 		if value, err := decodeParams[protocol.EnvironmentErrorParams](params); err == nil {
 			_ = s.registry.EnvironmentError(runnerID, connectionID, generation, value)
@@ -133,6 +157,12 @@ func (s *Session) Detach(cause error) {
 	runnerID, connectionID, generation, registered := s.connectionIdentity()
 	if registered && s.registry != nil {
 		s.registry.Detach(runnerID, connectionID, generation, cause)
+		if ui, ok := s.ui.(interface{ RunnerUIDetached(UIRequestIdentity) }); ok {
+			ui.RunnerUIDetached(UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation})
+		}
+		if router, ok := s.ui.(interface{ RunnerExtensionsDetached(UIRequestIdentity) }); ok {
+			router.RunnerExtensionsDetached(UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation})
+		}
 	}
 }
 
@@ -178,7 +208,8 @@ func isUIRequest(method string) bool {
 		protocol.MethodUITranscriptAppend,
 		protocol.MethodUISurfaceOpen,
 		protocol.MethodUISurfaceFrame,
-		protocol.MethodUISurfaceClose:
+		protocol.MethodUISurfaceClose,
+		protocol.MethodUIExtensionCleanup:
 		return true
 	default:
 		return false

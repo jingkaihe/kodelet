@@ -215,7 +215,7 @@ func (c *loginClient) start(ctx context.Context) (PendingLogin, error) {
 		return PendingLogin{}, errors.Wrap(err, "failed to decode user login start response")
 	}
 	if err := started.ValidateAt(c.now()); err != nil {
-		return PendingLogin{}, errors.Wrap(err, "control plane returned an invalid user login start response")
+		return PendingLogin{}, errors.Wrap(err, "server returned an invalid user login start response")
 	}
 	pending, err := preparePendingLogin(PendingLogin{
 		Server:                  c.server,
@@ -277,7 +277,7 @@ func (c *loginClient) poll(ctx context.Context, pending PendingLogin) (Credentia
 			return Credential{}, errors.Wrap(err, "failed to decode user login poll response")
 		}
 		if err := polled.ValidateAt(c.now()); err != nil {
-			return Credential{}, errors.Wrap(err, "control plane returned an invalid user login poll response")
+			return Credential{}, errors.Wrap(err, "server returned an invalid user login poll response")
 		}
 		switch polled.Status {
 		case DeviceStatusPending:
@@ -401,7 +401,7 @@ func ValidateCredential(ctx context.Context, server, bearer string, client *http
 		return PrincipalSnapshot{}, errors.Wrap(err, "failed to decode credential validation response")
 	}
 	if err := principal.Validate(); err != nil {
-		return PrincipalSnapshot{}, errors.Wrap(err, "control plane returned an invalid principal")
+		return PrincipalSnapshot{}, errors.Wrap(err, "server returned an invalid principal")
 	}
 	return principal, nil
 }

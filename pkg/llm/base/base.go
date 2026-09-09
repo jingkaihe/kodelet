@@ -14,8 +14,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -158,8 +160,19 @@ func (t *Thread) GetConfig() llmtypes.Config {
 	return t.Config
 }
 
+// SetCommandConfig applies command routing results without replacing provider
+// clients or changing the admitted model policy.
+func (t *Thread) SetCommandConfig(recipe string, allowedTools, allowedCommands []string) {
+	t.Config.RecipeName = recipe
+	t.Config.AllowedTools = append([]string(nil), allowedTools...)
+	t.Config.AllowedCommands = append([]string(nil), allowedCommands...)
+}
+
 // ApplyEnvironmentConfig applies runner-owned, non-secret configuration pinned at run.open.
 func (t *Thread) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
+	if config.Options != nil {
+		t.Config.ExecutionOptions = config.Options.Clone()
+	}
 	t.Config.WorkingDirectory = t.Environment.Manifest().WorkingDirectory
 	t.Config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
 	t.Config.ToolMode = config.ToolMode
@@ -220,14 +233,51 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	}
 }
 
+// SavePendingUserMessage checkpoints admitted input using provider-specific state isolation.
+// snapshot must prepare isolated state and return the append context and a restore function.
+// The caller owns the thread and any provider-specific operation lock throughout the call.
+func (t *Thread) SavePendingUserMessage(
+	ctx context.Context,
+	provider llmtypes.Thread,
+	snapshot func(context.Context) (context.Context, func()),
+	message string,
+	images ...string,
+) error {
+	if !t.Persisted || t.Store == nil {
+		return errors.New("conversation persistence is unavailable")
+	}
+	ctx, restore := snapshot(ctx)
+	defer restore()
+	provider.AddUserMessage(ctx, message, images...)
+	return provider.SaveConversation(ctx)
+}
+
+// ForkConversation persists a provider's live snapshot with shared fork lineage options.
+// The provider snapshot retains responsibility for availability checks and locking.
+func (t *Thread) ForkConversation(ctx context.Context, snapshot func(context.Context) (convtypes.ConversationRecord, error)) (string, error) {
+	record, err := snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
+	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
+		forkOptions.Initiator = &initiator
+	}
+	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
+	if err != nil {
+		return "", err
+	}
+	return forked.ID, nil
+}
+
 // PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
-// Utility mode disables persistence and extensions to avoid side effects.
+// Utility mode disables persistence and uses an explicit workspace-free environment.
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.EnablePersistence(ctx, false)
 	t.Config.Extensions = nil
-	if setter, ok := t.Environment.(agentenv.ExtensionSetter); ok {
-		setter.SetExtensions(nil)
-	}
+	// A seeded helper may reference its parent's environment or state. Neither
+	// mutate nor close those resources: only the parent owns their lifetime.
+	t.SetEnvironment(&agentenv.UtilityEnvironment{})
 }
 
 // SetExtensions updates the turn-scoped extension runtime used by tool execution.

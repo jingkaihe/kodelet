@@ -3,6 +3,7 @@ package extensions
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -11,7 +12,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
+
+const maxConcurrentExtensionInitializations = 4
+
+// Attachment supplies one run-scoped callback channel. ID is the wire identity;
+// registration and policy use the logical identity "session:" + ID.
+type Attachment struct {
+	ID        string
+	Transport io.ReadWriteCloser
+}
 
 // Runtime manages discovered extension processes and registrations.
 type Runtime struct {
@@ -22,6 +33,7 @@ type Runtime struct {
 	mu                  sync.RWMutex
 	processes           []*Process
 	tools               map[string]*Tool
+	profiles            map[string]Profile
 	commands            []Command
 	shortcuts           map[string]registeredShortcut
 	subs                []Subscription
@@ -29,6 +41,7 @@ type Runtime struct {
 	lifecycleStarted    bool
 	lifecycleCtx        context.Context
 	lifecycleCallCtx    ExtensionCallContext
+	sessionExtensions   bool
 }
 
 // Command is an extension command registration bound to its process.
@@ -43,6 +56,7 @@ type Shortcut struct {
 	Key         string
 	Description string
 	ExtensionID string
+	Generation  uint64
 }
 
 type registeredShortcut struct {
@@ -67,6 +81,7 @@ func emptyRuntimeWithContext(ctx context.Context) *Runtime {
 		runtimeCtx:          runtimeCtx,
 		cancelRuntime:       cancelRuntime,
 		tools:               map[string]*Tool{},
+		profiles:            map[string]Profile{},
 		shortcuts:           map[string]registeredShortcut{},
 		eventHandlersByName: map[string][]eventHandler{},
 	}
@@ -113,39 +128,135 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 	if err != nil {
 		return err
 	}
-	for _, ext := range extensions {
+	initialized := make([]struct {
+		process *Process
+		result  *InitializeResult
+	}, len(extensions))
+	var group errgroup.Group
+	group.SetLimit(maxConcurrentExtensionInitializations)
+	for i, ext := range extensions {
+		group.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
+				return nil
+			}
+			initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
+			result, err := proc.Initialize(initCtx, r.workingDir)
+			cancel()
+			if err != nil {
+				_ = proc.Close()
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
+				return nil
+			}
+			initialized[i].process = proc
+			initialized[i].result = result
+			return ctx.Err()
+		})
+	}
+	err = group.Wait()
+	// Own every initialized process before registration, so Close also cleans up
+	// later results if cancellation or a registration conflict aborts startup.
+	for _, init := range initialized {
+		if init.process != nil {
+			r.processes = append(r.processes, init.process)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	// Completion order must not change shortcut precedence or event ordering.
+	for _, init := range initialized {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
+		if init.process != nil {
+			if err := r.register(ctx, init.process, init.result); err != nil {
+				return err
 			}
-			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
-			continue
 		}
+	}
+	return nil
+}
+
+// attach runs only during isolated runtime construction, before lifecycle events.
+func (r *Runtime) attach(ctx context.Context, attachments []Attachment) error {
+	r.sessionExtensions = len(attachments) > 0
+	// Explicit session callbacks bypass the installed-extension allowlist.
+	deny := newMatcher(r.config.Deny, r.workingDir)
+	seen := make(map[string]bool, len(attachments))
+	for _, attachment := range attachments {
+		ext := Extension{ID: "session:" + attachment.ID, Name: attachment.ID, Kind: SourceKindSession}
+		if attachment.ID == "" || strings.ContainsAny(attachment.ID, "/\\:\x00\r\n\t ") || seen[ext.ID] {
+			return errors.Errorf("invalid or duplicate session extension id %q", attachment.ID)
+		}
+		seen[ext.ID] = true
+		if !r.config.Enabled || deny.matches(ext) {
+			return errors.Errorf("session extension %s is not allowed by extension policy", ext.ID)
+		}
+	}
+	for _, attachment := range attachments {
+		ext := Extension{ID: "session:" + attachment.ID, Name: attachment.ID, Kind: SourceKindSession}
+		proc, err := AttachProcess(r.runtimeCtx, ext, r.config, r.workingDir, attachment.Transport)
+		if err != nil {
+			return err
+		}
+		r.processes = append(r.processes, proc)
 		initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
 		result, err := proc.Initialize(initCtx, r.workingDir)
 		cancel()
 		if err != nil {
-			_ = proc.Close()
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
-			continue
+			return errors.Wrapf(err, "failed to initialize session extension %s", ext.ID)
 		}
-		if err := ctx.Err(); err != nil {
-			_ = proc.Close()
-			return err
-		}
-		r.processes = append(r.processes, proc)
 		if err := r.register(ctx, proc, result); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// HasSessionExtensions reports whether this runtime is pinned to callback channels.
+func (r *Runtime) HasSessionExtensions() bool {
+	return r != nil && r.sessionExtensions
+}
+
+// CloseSessionExtensions ends run-scoped channels even if installed extensions
+// retain background leases. Closed callback registrations cannot be reused.
+func (r *Runtime) CloseSessionExtensions(ctx context.Context) error {
+	if !r.HasSessionExtensions() {
+		return nil
+	}
+	r.mu.RLock()
+	started, callContext := r.lifecycleStarted, r.lifecycleCallCtx
+	processes := append([]*Process(nil), r.processes...)
+	r.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if started {
+		for _, handler := range r.eventHandlers(EventSessionEnd) {
+			if handler.process.transport != nil {
+				_, _ = r.dispatchEventToHandler(ctx, handler, EventSessionEnd, sessionEndPayload{}, callContext)
+			}
+		}
+	}
+	var firstErr error
+	for _, proc := range processes {
+		if proc.transport != nil {
+			if err := proc.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallContext) {
@@ -174,6 +285,25 @@ func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallC
 func (r *Runtime) register(ctx context.Context, proc *Process, result *InitializeResult) error {
 	if result == nil {
 		return nil
+	}
+	profiles := make(map[string]Profile, len(result.Profiles))
+	for _, registration := range result.Profiles {
+		profile := Profile{
+			Name:        registration.Name,
+			ExtensionID: proc.Extension.ID,
+			Options:     registration.Options.Clone(),
+			Hidden:      registration.Hidden,
+		}
+		if err := profile.Validate(); err != nil {
+			return errors.Wrapf(err, "failed to register extension profile %q", profile.Name)
+		}
+		if _, exists := r.profiles[profile.Name]; exists {
+			return errors.Errorf("duplicate extension profile registration: %s", profile.Name)
+		}
+		if _, exists := profiles[profile.Name]; exists {
+			return errors.Errorf("duplicate extension profile registration: %s", profile.Name)
+		}
+		profiles[profile.Name] = profile
 	}
 	for _, registration := range result.Tools {
 		if !r.toolEnabled(registration.Name) {
@@ -226,11 +356,16 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 				proc.Extension.ID,
 			))
 		}
+		var generation uint64
+		if _, source := proc.rpcSession(); source != nil {
+			generation = source.owner.Generation
+		}
 		r.shortcuts[key] = registeredShortcut{
 			Shortcut: Shortcut{
 				Key:         key,
 				Description: strings.TrimSpace(registration.Description),
 				ExtensionID: proc.Extension.ID,
+				Generation:  generation,
 			},
 			process: proc,
 		}
@@ -242,6 +377,9 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 			sub:     subscription,
 			order:   len(r.subs) - 1,
 		})
+	}
+	for name, profile := range profiles {
+		r.profiles[name] = profile
 	}
 	return nil
 }
@@ -309,6 +447,16 @@ func (r *Runtime) toolTimeout(registration ToolRegistration) time.Duration {
 	return 10 * time.Minute
 }
 
+// ExtensionCount returns the number of initialized extension processes.
+func (r *Runtime) ExtensionCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.processes)
+}
+
 // Tools returns registered extension tools sorted by name.
 func (r *Runtime) Tools() []tooltypes.Tool {
 	r.mu.RLock()
@@ -325,6 +473,23 @@ func (r *Runtime) Tools() []tooltypes.Tool {
 	return tools
 }
 
+// Profiles returns sorted, independent declarations for daemon acceptance.
+// They become remotely selectable only after the daemon accepts the manifest,
+// not during extension.initialize, session.start, or resources.discover.
+func (r *Runtime) Profiles() []Profile {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	profiles := make([]Profile, 0, len(r.profiles))
+	for _, profile := range r.profiles {
+		profiles = append(profiles, profile.Clone())
+	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	return profiles
+}
+
 // Commands returns registered extension commands.
 func (r *Runtime) Commands() []Command {
 	r.mu.RLock()
@@ -338,6 +503,9 @@ func (r *Runtime) Commands() []Command {
 
 // Shortcuts returns effective extension shortcuts sorted by key.
 func (r *Runtime) Shortcuts() []Shortcut {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	shortcuts := make([]Shortcut, 0, len(r.shortcuts))
@@ -384,6 +552,40 @@ func (r *Runtime) notifySurfaceEvent(ctx context.Context, owner UIExtensionOwner
 	return errors.New("extension UI owner is no longer active")
 }
 
+// UpdateUICapabilities informs current processes of client availability changes.
+// It never initializes or restarts a process, including after a failed generation.
+func (r *Runtime) UpdateUICapabilities(ctx context.Context, capabilities ExtensionUIHostCapabilities) error {
+	if r == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.RLock()
+	processes := append([]*Process(nil), r.processes...)
+	r.mu.RUnlock()
+	done := make(chan error, 1)
+	go func() {
+		for _, process := range processes {
+			_, source := process.rpcSession()
+			if source == nil || !source.current() {
+				continue
+			}
+			if err := source.NotifyExtensionUI(ctx, "kodelet.ui.capabilities", map[string]bool{"widgets": capabilities.Widgets, "surfaces": capabilities.Surfaces, "transcript": capabilities.Transcript}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Close terminates all extension processes.
 func (r *Runtime) Close() error {
 	if r == nil {
@@ -401,7 +603,11 @@ func (r *Runtime) Close() error {
 		if lifecycleCtx == nil {
 			lifecycleCtx = context.Background()
 		}
+		// Shutdown is bounded even when an extension opts out of event timeouts.
+		// Keep processes alive for session.end, then reap their process groups.
+		lifecycleCtx, cancel := context.WithTimeout(lifecycleCtx, 5*time.Second)
 		r.DispatchSessionEnd(lifecycleCtx, lifecycleCallCtx)
+		cancel()
 	}
 	r.mu.Lock()
 	var firstErr error

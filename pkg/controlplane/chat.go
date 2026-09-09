@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -21,18 +23,21 @@ import (
 )
 
 type serverChatRunner struct {
-	runner *chat.DefaultChatRunner
+	runner *chat.Executor
 	server *Server
 }
 
 func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
-	if r != nil && r.server != nil && r.server.extensionUI != nil && conversationID != "" {
+	if r == nil || r.server == nil || r.runner == nil {
+		return conversationID, errors.New("cannot start work because no runner is configured")
+	}
+	if r.server.extensionUI != nil && conversationID != "" {
 		ctx = extensions.ContextWithExtensionUIHost(ctx, r.server.extensionUI)
 		ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
 	}
 	hasRunnerAffinity := false
-	if r != nil && r.server != nil && r.server.runnerRegistry != nil && conversationID != "" {
+	if r.server.runnerRegistry != nil && conversationID != "" {
 		affinity, ok, err := r.server.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
 		if err != nil {
 			return conversationID, err
@@ -47,41 +52,44 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			}
 		}
 	}
-	if r != nil && r.server != nil && !r.server.controlPlaneWorkspaceEnabled() {
-		if strings.TrimSpace(req.RunnerID) == "" {
-			return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; select a workspace runner")
+	if strings.TrimSpace(req.RunnerID) == "" && r.server.config != nil && r.server.config.EmbeddedRunner != nil {
+		status := r.server.EmbeddedRunnerStatus()
+		if !status.Ready {
+			return conversationID, errors.New("the default runner is unavailable; check /api/status and the server logs, or select another runner")
 		}
-		if conversationID != "" && !hasRunnerAffinity {
-			if r.server.conversationService == nil {
-				return conversationID, errors.New("conversation service is unavailable")
-			}
-			_, err := r.server.conversationService.GetConversation(ctx, conversationID)
-			switch {
-			case err == nil:
-				return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; existing local conversations are read-only")
-			case stdErrors.Is(err, convtypes.ErrConversationNotFound):
-				// A client may allocate the conversation ID before the first turn.
-			default:
-				return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
-			}
+		req.RunnerID = status.RunnerID
+	}
+	if strings.TrimSpace(req.RunnerID) == "" {
+		return conversationID, errors.New("no runner is selected; use --runner or start the server with 'kodelet serve --embedded-runner'")
+	}
+	if conversationID != "" && !hasRunnerAffinity {
+		if r.server.conversationService == nil {
+			return conversationID, errors.New("conversation service is unavailable")
+		}
+		_, err := r.server.conversationService.GetConversation(ctx, conversationID)
+		switch {
+		case err == nil:
+			return conversationID, errors.New("this older conversation needs a runner before it can continue; use 'kodelet conversation move'")
+		case stdErrors.Is(err, convtypes.ErrConversationNotFound):
+			// A client may allocate the conversation ID before the first turn.
+		default:
+			return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
 		}
 	}
-	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
+	if conversationID != "" && chatSupportsInteractiveUI(req) {
 		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
 	}
-	var resultConversationID string
-	var runErr error
-	if r == nil || r.runner == nil {
-		resultConversationID, runErr = chat.RunDefaultChat(ctx, req, sink, "", nil)
-	} else {
-		resultConversationID, runErr = r.runner.Run(ctx, req, sink)
-	}
+	profileCtx := ctx
+	ctx = chat.ContextWithProfileResolver(ctx, func(profile, effort string) (llmtypes.Config, error) {
+		return r.server.resolveModelProfile(profileCtx, req.RunnerID, profile, effort)
+	})
+	resultConversationID, runErr := r.runner.Run(ctx, req, sink)
 	if strings.TrimSpace(resultConversationID) == "" {
 		resultConversationID = conversationID
 	}
-	if strings.TrimSpace(req.RunnerID) != "" && r != nil && r.server != nil {
+	if strings.TrimSpace(req.RunnerID) != "" {
 		if err := r.server.commitRunnerAffinity(context.WithoutCancel(ctx), resultConversationID); err != nil && runErr == nil {
 			runErr = err
 		}
@@ -89,7 +97,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	return resultConversationID, runErr
 }
 
-func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.ChatRequest, conversationID string, config llmtypes.Config, _ string) (agentenv.Environment, error) {
 	runnerID := strings.TrimSpace(req.RunnerID)
 	if runnerID == "" {
 		return nil, errors.New("runner id is required")
@@ -105,10 +113,36 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		if runner.CompatibilityError != "" {
 			return nil, errors.New(runner.CompatibilityError)
 		}
-		return nil, errors.New("runner is incompatible with this control plane")
+		return nil, errors.New("runner is incompatible with this server")
 	}
 	if !runner.Connected {
 		return nil, errors.New("runner is offline")
+	}
+	attachmentOption, err := r.server.sessionExtensionEnvironmentOption(ctx, req, conversationID, runnerID)
+	if err != nil {
+		return nil, err
+	}
+	var profileOption agentenv.RemoteEnvironmentOption
+	if config.ExtensionProfile {
+		// Registered profiles carry model settings only, never runner preferences.
+		profileOption = agentenv.WithRemoteModelProfile("default")
+	} else if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
+		if r.server.conversationService == nil {
+			return nil, errors.New("conversation service is unavailable")
+		}
+		record, err := r.server.conversationService.GetConversation(ctx, conversationID)
+		if err != nil && !errors.Is(err, convtypes.ErrConversationNotFound) {
+			return nil, errors.Wrap(err, "failed to load the conversation after its model profile was removed")
+		}
+		if err == nil {
+			snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to load the conversation's saved settings")
+			}
+			if hasSnapshot && strings.TrimSpace(snapshot.Profile) == strings.TrimSpace(config.Profile) {
+				profileOption = agentenv.WithRemoteModelProfile("default")
+			}
+		}
 	}
 	capabilities := protocol.ClientCapabilities{}
 	if req.ClientCapabilities != nil {
@@ -116,10 +150,33 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		capabilities.PersistentWidgets = req.ClientCapabilities.PersistentWidgets
 		capabilities.PersistentSurfaces = req.ClientCapabilities.PersistentSurfaces
 	}
+	if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
+		broker.mu.Lock()
+		capabilities.InteractiveUI, capabilities.PersistentSurfaces = false, false
+		if broker.owner != nil && broker.owner.ctx.Err() == nil {
+			caps := nativeCapabilities(broker.owner.ctx)
+			capabilities.InteractiveUI, capabilities.PersistentSurfaces = true, caps.PersistentSurfaces
+		}
+		broker.mu.Unlock()
+	}
+	var controller agentenv.RemoteController = r.server.runnerRegistry
+	admitted := ctx.Value(turnConversationIDKey{}) == conversationID
+	if admitted {
+		controller = admittedTurnController{Registry: r.server.runnerRegistry}
+	}
+	controller = profileRegisteringController{RemoteController: controller, server: r.server}
 	return agentenv.NewRemoteEnvironment(
-		r.server.runnerRegistry,
+		controller,
 		runnerID,
+		profileOption,
+		attachmentOption,
 		agentenv.WithRemoteClientCapabilities(capabilities),
+		agentenv.WithRemoteRunIDGenerator(func() (string, error) {
+			if id, ok := ctx.Value(turnRunIDKey{}).(string); ok && admitted {
+				return id, nil
+			}
+			return convtypes.GenerateID(), nil
+		}),
 	), nil
 }
 
@@ -158,6 +215,7 @@ type ndjsonEventSink struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	mu      sync.Mutex
+	closed  bool
 }
 
 type subscriberEventSink struct {
@@ -181,6 +239,13 @@ func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
 func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return io.ErrClosedPipe
+	}
+	// A slow or vanished UI must not indefinitely hold the provider or UI broker.
+	controller := http.NewResponseController(s.w)
+	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -197,11 +262,24 @@ func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 func (s *ndjsonEventSink) KeepAlive() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return io.ErrClosedPipe
+	}
+	controller := http.NewResponseController(s.w)
+	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	if _, err := s.w.Write([]byte("\n")); err != nil {
 		return errors.Wrap(err, "failed to write chat stream keepalive")
 	}
 	s.flusher.Flush()
 	return nil
+}
+
+// Close drains in-flight writes and fences late UI cleanup before the HTTP handler returns.
+func (s *ndjsonEventSink) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
 }
 
 func newSubscriberEventSink() *subscriberEventSink {
@@ -242,6 +320,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid chat request", err)
 		return
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		s.writeErrorResponse(w, http.StatusBadRequest, "chat request must contain one JSON object", err)
+		return
+	}
+	clientID := strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	attachment, err := s.sessionExtensionsForRequest(r, req)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusForbidden, err.Error(), nil)
+		return
+	}
+	if chatSupportsInteractiveUI(req) && !validUIClientID(clientID) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "interactive requests require a valid X-Kodelet-Client-ID header; upgrade the client", nil)
+		return
+	}
 
 	message, imageInputs, err := chat.NormalizeRequest(req)
 	if err != nil {
@@ -259,6 +351,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
 		return
 	}
+	defer sink.Close()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -271,25 +364,98 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		req.ConversationID = conversationID
 	}
 	registeredConversationID := conversationID
+	req.TurnID = strings.TrimSpace(req.TurnID)
+	if req.TurnID == "" {
+		req.TurnID = convtypes.GenerateID()
+	}
+	if !validReceiptID(conversationID) || !validReceiptID(req.TurnID) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid conversation or turn ID", nil)
+		return
+	}
+	req.ConversationID = conversationID
+	var receipt chat.TurnReceipt
+	if s.turns != nil {
+		var admitted bool
+		receipt, admitted, err = s.turns.admit(requestCtx, req)
+		if err != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(err, errTurnConflict) || errors.Is(err, errConversationBusy) {
+				code = http.StatusConflict
+			}
+			s.writeErrorResponse(w, code, err.Error(), nil)
+			return
+		}
+		if !admitted {
+			s.replyTurnReceipt(w, sink, receipt)
+			return
+		}
+		w.Header().Set("X-Kodelet-Conversation-ID", conversationID)
+		w.Header().Set("X-Kodelet-Turn-ID", req.TurnID)
+	}
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
+	if attachment != nil {
+		ctx = context.WithValue(ctx, sessionExtensionContextKey{}, attachment)
+		stop := context.AfterFunc(attachment.ctx, cancel)
+		defer stop()
+	}
+	if receipt.RunID != "" {
+		ctx = context.WithValue(ctx, turnRunIDKey{}, receipt.RunID)
+		ctx = context.WithValue(ctx, turnConversationIDKey{}, conversationID)
+	}
 	run := newActiveChatRun(cancel)
 	run.turnID = strings.TrimSpace(req.TurnID)
 	run.eventSink = sink
+	run.uiInput = newWebUIInputBroker(conversationID, sink)
+	if chatSupportsInteractiveUI(req) {
+		detach := run.uiInput.setOwner(withNativeCapabilities(requestCtx, req.ClientCapabilities), clientID, sink)
+		defer detach()
+	}
+	defer run.uiInput.close()
 	if !s.registerActiveChat(conversationID, run) {
+		if s.turns != nil {
+			if err := s.turns.finish(context.WithoutCancel(requestCtx), conversationID, req.TurnID, "failed", nil, errConversationBusy); err != nil {
+				cancel()
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save the rejected turn's status", err)
+				return
+			}
+			if receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID); err == nil && receipt.Status == "cancelled" {
+				cancel()
+				s.replyTurnReceipt(w, sink, receipt)
+				return
+			}
+		}
 		cancel()
 		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)
 		return
 	}
 	defer s.unregisterActiveChat(registeredConversationID, run)
 	defer cancel()
+	if s.turns != nil {
+		started, startErr := s.turns.start(ctx, conversationID, req.TurnID)
+		if startErr != nil {
+			if err := s.turns.finish(context.WithoutCancel(ctx), conversationID, req.TurnID, "failed", nil, startErr); err != nil {
+				startErr = err
+			}
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save and start the turn", startErr)
+			return
+		}
+		if !started {
+			receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID)
+			if err != nil {
+				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to update the turn status", err)
+				return
+			}
+			s.replyTurnReceipt(w, sink, receipt)
+			return
+		}
+	}
 
 	broadcastingSink := &broadcastingEventSink{
 		primary:        sink,
 		broadcast:      s.broadcastChatEvent,
 		conversationID: conversationID,
 	}
-	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
 	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "conversation",
@@ -307,7 +473,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Content:        userContent,
 	})
 
-	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
+	recordingSink := &turnEventSink{ChatEventSink: broadcastingSink}
+	conversationID, runErr := s.chatRunner.Run(ctx, req, recordingSink)
+	runErr = s.finishTurn(ctx, registeredConversationID, req.TurnID, recordingSink, runErr)
 	if strings.TrimSpace(conversationID) == "" {
 		conversationID = registeredConversationID
 	}

@@ -1,8 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,18 +167,78 @@ func TestSteerConfigParsesImages(t *testing.T) {
 	assert.Equal(t, []string{"one.png", "two.jpg"}, config.Images)
 }
 
-func TestGetSteerConfigFromFlags(t *testing.T) {
-	cmd := &cobra.Command{Use: "test"}
-	defaults := NewSteerConfig()
-	cmd.Flags().String("conversation-id", defaults.ConversationID, "")
-	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
-	cmd.Flags().StringSliceP("image", "I", defaults.Images, "")
-	require.NoError(t, cmd.Flags().Set("conversation-id", "conversation-12345"))
-	require.NoError(t, cmd.Flags().Set("image", "one.png,two.png"))
+func TestRemoteSteerProcessUsesDaemonWithoutClientStore(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				assert.Equal(t, "/api/conversations/conversation-12345/steer", r.URL.Path)
+				assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+				var request struct {
+					Message string                  `json:"message"`
+					Content []chat.ChatContentBlock `json:"content"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+				assert.Equal(t, "new direction", request.Message)
+				require.Len(t, request.Content, 2)
+				require.NotNil(t, request.Content[1].ImageURL)
+				assert.Equal(t, "https://images.example/context.png", request.Content[1].ImageURL.URL)
+				w.WriteHeader(status)
+				if status == http.StatusOK {
+					_, _ = w.Write([]byte(`{"success":true,"conversation_id":"conversation-12345","queued":true}`))
+				} else {
+					_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				}
+			}))
+			defer daemon.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			root := t.TempDir()
+			invalidStore := filepath.Join(root, "no-client-store")
+			require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "KODELET_BASE_PATH=" + invalidStore, "KODELET_TEST_CLI_PROCESS=1"}
+			process := daemonCLIProcess(ctx, t, root, env, "steer", "--server="+daemon.URL, "--auth-token=client", "--conversation-id=conversation-12345", "--image=https://images.example/context.png", "new direction")
+			output, err := process.CombinedOutput()
+			if status == http.StatusOK {
+				require.NoError(t, err, "%s", output)
+				assert.Contains(t, string(output), "Steering sent to conversation conversation-12345")
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, string(output), "could not confirm that the steering message was received")
+				assert.Contains(t, string(output), "before sending it again")
+			}
+			assert.EqualValues(t, 1, calls.Load())
+		})
+	}
+}
 
-	config := getSteerConfigFromFlags(cmd.Context(), cmd)
+func TestRemoteSteerRejectsUnscopedFollowBeforeHTTP(t *testing.T) {
+	cmd := remoteRunCommandForTest()
+	cmd.Flags().String("conversation-id", "", "")
+	require.NoError(t, cmd.ParseFlags([]string{"--follow", "--server=http://127.0.0.1:1", "--auth-token=client"}))
+	require.ErrorContains(t, sendRemoteSteer(cmd, "work"), "requires --runner or --cwd")
+}
 
-	assert.Equal(t, "conversation-12345", config.ConversationID)
-	assert.False(t, config.Follow)
-	assert.Equal(t, []string{"one.png", "two.png"}, config.Images)
+func TestRemoteSteerFollowUsesDaemonDirectoryScope(t *testing.T) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations":
+			assert.Equal(t, "/runner-only/repo", r.URL.Query().Get("cwd"))
+			_, _ = w.Write([]byte(`{"conversations":[{"id":"scoped-conversation"}]}`))
+		case "/api/conversations/scoped-conversation/steer":
+			_, _ = w.Write([]byte(`{"success":true,"conversation_id":"scoped-conversation","queued":false}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer daemon.Close()
+	cmd := remoteRunCommandForTest()
+	cmd.SetContext(t.Context())
+	cmd.Flags().String("conversation-id", "", "")
+	require.NoError(t, cmd.ParseFlags([]string{"--follow", "--cwd=/runner-only/repo", "--server=" + daemon.URL, "--auth-token=client"}))
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	require.NoError(t, sendRemoteSteer(cmd, "work"))
+	assert.Contains(t, output.String(), "scoped-conversation")
 }

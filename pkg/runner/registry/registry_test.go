@@ -206,12 +206,14 @@ func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T)
 	first, err := registry.Register(params, firstLink)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), first.Generation)
+	assert.True(t, first.RemoteProfiles)
 
 	secondLink := newFakeLink()
 	params.RunnerID = first.RunnerID
 	params.DisplayName = "renamed"
 	second, err := registry.Register(params, secondLink)
 	require.NoError(t, err)
+	assert.True(t, second.RemoteProfiles)
 	assert.Equal(t, first.RunnerID, second.RunnerID)
 	assert.Equal(t, int64(2), second.Generation)
 	assert.True(t, firstLink.isClosed())
@@ -328,6 +330,41 @@ func TestCallRunnerRejectsUnsupportedWorkspaceCapabilityBeforeRPC(t *testing.T) 
 	assert.False(t, capableCalled)
 }
 
+func TestCallRunnerMessageHistoryCapability(t *testing.T) {
+	registry := newTestRegistry(t)
+	params := testRegisterParams("history-host", "/runner/workspace")
+	params.Capabilities.WorkspaceInspection = true
+	for _, supported := range []bool{false, true, false} {
+		params.Capabilities.WorkspaceMessageHistory = supported
+		link := newFakeLink()
+		calls := 0
+		link.call = func(_ context.Context, method string, params, result any) error {
+			calls++
+			assert.Equal(t, protocol.MethodWorkspaceMessageHistory, method)
+			assert.Equal(t, protocol.WorkspaceMessageHistoryParams{CWD: "/runner/selected"}, params)
+			*result.(*protocol.WorkspaceMessageHistoryResult) = protocol.WorkspaceMessageHistoryResult{CWD: "/runner/selected", ScopeCWD: "/runner/selected", Messages: []string{"stored message"}}
+			return nil
+		}
+		registration, err := registry.Register(params, link)
+		require.NoError(t, err)
+		params.RunnerID = registration.RunnerID
+		markRunnerReady(t, registry, registration)
+		runner, found := registry.Runner(registration.RunnerID)
+		require.True(t, found)
+		assert.Equal(t, supported, runner.WorkspaceMessageHistory, "reconnection must refresh the capability")
+		var result protocol.WorkspaceMessageHistoryResult
+		err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory, protocol.WorkspaceMessageHistoryParams{CWD: "/runner/selected"}, &result)
+		if supported {
+			require.NoError(t, err)
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, []string{"stored message"}, result.Messages)
+		} else {
+			require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
+			assert.Zero(t, calls, "inspection support alone must not authorize history RPCs")
+		}
+	}
+}
+
 func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing.T) {
 	registry := newTestRegistry(t)
 	enrollment := testEnrollmentStartRequest(t, "host-enrolled", "/work/enrolled")
@@ -344,6 +381,7 @@ func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing
 	})
 	require.NoError(t, err)
 	assert.Equal(t, offline.ID, registration.RunnerID)
+	assert.True(t, registration.RemoteProfiles)
 
 	params.RunnerID = "runner-other"
 	_, err = registry.RegisterAuthenticated(params, newFakeLink(), RegistrationPrincipal{
@@ -1280,9 +1318,11 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 }
 
 func TestHeartbeatTimeoutMarksRunnerOffline(t *testing.T) {
+	now := time.Now().UTC()
 	registry, err := New(t.Context(), Options{
-		HeartbeatInterval: 5 * time.Millisecond,
-		HeartbeatTimeout:  15 * time.Millisecond,
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Now:               func() time.Time { return now },
 		NewID:             sequentialIDs(),
 	})
 	require.NoError(t, err)
@@ -1291,10 +1331,23 @@ func TestHeartbeatTimeoutMarksRunnerOffline(t *testing.T) {
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		runner, ok := registry.Runner(registration.RunnerID)
-		return ok && !runner.Connected && runner.Status == RunnerStatusOffline
-	}, time.Second, 5*time.Millisecond)
+	now = now.Add(3 * time.Hour)
+	registry.expireStaleConnections()
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.Connected)
+	assert.Equal(t, RunnerStatusConnecting, runner.Status)
+	assert.False(t, link.isClosed())
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "initial heartbeat")
+
+	markRunnerReady(t, registry, registration)
+	now = now.Add(3 * time.Hour)
+	registry.expireStaleConnections()
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, runner.Connected)
+	assert.Equal(t, RunnerStatusOffline, runner.Status)
 	assert.True(t, link.isClosed())
 }
 
@@ -1398,7 +1451,7 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	restoredRun, ok := secondRegistry.Run("run-one")
 	require.True(t, ok)
 	assert.Equal(t, RunStatusLost, restoredRun.Status)
-	assert.Contains(t, restoredRun.Error, "control plane restarted")
+	assert.Contains(t, restoredRun.Error, "server restarted")
 	var restoredManifest runnerpayload.Manifest
 	require.NoError(t, json.Unmarshal([]byte(restoredRun.ManifestJSON), &restoredManifest))
 	assert.Equal(t, "run-one", restoredManifest.RunID)
@@ -1480,12 +1533,28 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 		loaded[run.ID] = struct{}{}
 	}
 	assert.NotContains(t, loaded, "run-0000")
+	// A callback requirement from a non-cached conversation must still be read
+	// from the durable manifest instead of silently disappearing after restart.
+	_, err = persistence.db.ExecContext(t.Context(), `UPDATE runner_runs SET manifest_json = ? WHERE id = ?`,
+		`{"sessionExtensionIds":["inline-1"]}`, "run-0000")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{Persistence: persistence})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	ids, err := registry.RequiredSessionExtensions("conversation-one")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inline-1"}, ids)
 	assert.Contains(t, loaded, fmt.Sprintf("run-%04d", defaultLoadedRunHistory+4))
 	assert.NotContains(t, loaded, "orphan-terminal")
 	assert.Contains(t, loaded, "orphan-active")
 	var orphanCount int
 	require.NoError(t, persistence.db.GetContext(t.Context(), &orphanCount, "SELECT COUNT(*) FROM runner_runs WHERE id = ?", "orphan-terminal"))
 	assert.Zero(t, orphanCount)
+	_, err = registry.RemoveRunner(t.Context(), "runner-one", false)
+	require.NoError(t, err)
+	ids, err = registry.RequiredSessionExtensions("conversation-one")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inline-1"}, ids, "removal must preserve requirements outside the restored history cache")
 }
 
 func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) {
@@ -1524,6 +1593,83 @@ func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) 
 	assert.True(t, errors.Is(err, ErrRunnerNotFound))
 }
 
+func TestRemoveRunnerPreservesMovedConversationActiveRun(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+
+	conversation := conversationtypes.NewConversationRecord("conversation-one")
+	conversation.CWD = "/work/project"
+	require.NoError(t, conversationStore.Save(t.Context(), conversation))
+	firstLink, secondLink := newFakeLink(), newFakeLink()
+	first, err := registry.Register(testRegisterParams("host-one", conversation.CWD), firstLink)
+	require.NoError(t, err)
+	second, err := registry.Register(testRegisterParams("host-two", conversation.CWD), secondLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, first)
+	configureManifestLink(t, secondLink, second)
+	markRunnerReady(t, registry, first)
+	markRunnerReady(t, registry, second)
+
+	_, err = registry.OpenRun(t.Context(), first.RunnerID, testRunOpenParams("historical-run", conversation.ID))
+	require.NoError(t, err)
+	require.NoError(t, registry.CommitConversationAffinity(t.Context(), conversation.ID))
+	require.NoError(t, registry.CloseRun(t.Context(), "historical-run", RunStatusSucceeded, nil))
+	registry.Detach(first.RunnerID, first.ConnectionID, first.Generation, nil)
+
+	conversation, err = conversationStore.Load(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	source, found, err := registry.ResolveConversationAffinity(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NoError(t, registry.MoveConversation(t.Context(), conversation, source, second.RunnerID, conversation.CWD))
+	_, err = registry.OpenRun(t.Context(), second.RunnerID, testRunOpenParams("active-run", conversation.ID))
+	require.NoError(t, err)
+
+	result, err := registry.RemoveRunner(t.Context(), first.RunnerID, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.RemovedRuns)
+	assert.Zero(t, result.RemovedConversationAffinities)
+	_, found = registry.Run("historical-run")
+	assert.False(t, found)
+	registry.mu.RLock()
+	activeRunID := registry.affinities.activeRun(conversation.ID)
+	registry.mu.RUnlock()
+	assert.Equal(t, "active-run", activeRunID, "removing a historical runner must not release the moved conversation's active lease")
+	active, found := registry.Run("active-run")
+	require.True(t, found)
+	assert.Equal(t, second.RunnerID, active.RunnerID)
+	assert.Equal(t, RunStatusRunning, active.Status)
+	affinity, found, err := registry.ResolveConversationAffinity(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, second.RunnerID, affinity.RunnerID)
+
+	_, err = registry.OpenRun(t.Context(), second.RunnerID, testRunOpenParams("competing-run", conversation.ID))
+	require.ErrorContains(t, err, "conversation already has active run active-run")
+	_, found = registry.Run("competing-run")
+	assert.False(t, found)
+	runner, found := registry.Runner(second.RunnerID)
+	require.True(t, found)
+	assert.Equal(t, []string{"active-run"}, runner.ActiveRunIDs)
+	require.NoError(t, registry.CloseRun(t.Context(), "active-run", RunStatusSucceeded, nil))
+}
+
 func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
 	database, err := db.Open(t.Context(), dbPath)
@@ -1542,7 +1688,8 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 		Metadata: map[string]any{
 			conversationtypes.RunnerIDMetadataKey:                 "runner-stale",
 			conversationtypes.RunnerEnvironmentProfileMetadataKey: "gpu",
-			"preserve": "metadata",
+			sessionExtensionIDsMetadataKey:                        []string{"obsolete"},
+			"preserve":                                            "metadata",
 		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -1570,9 +1717,39 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	require.NoError(t, firstRegistry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	firstRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
+	// Later pinned callback requirements override both older manifests and
+	// previously preserved metadata; a subsequent failed open has no manifest.
+	requiredIDs := []string{"inline-1", "inline-2"}
+	for i, snapshot := range []string{string(mustRegistryJSON(t, runnerpayload.Manifest{SessionExtensionIDs: requiredIDs})), ""} {
+		require.NoError(t, firstPersistence.SaveRun(t.Context(), Run{
+			ID: fmt.Sprintf("later-%d", i), ConversationID: conversation.ID, RunnerID: registration.RunnerID,
+			Status: RunStatusFailed, ManifestJSON: snapshot,
+			CreatedAt: time.Now().Add(time.Duration(i+1) * time.Second), UpdatedAt: time.Now(),
+		}))
+	}
+	ids, err := firstRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids)
+
+	// Failure after metadata preservation must roll back both metadata and
+	// deletion, leaving the registry and durable state safe to retry.
+	_, err = firstPersistence.db.ExecContext(t.Context(), `CREATE TRIGGER fail_runner_removal
+		BEFORE DELETE ON runner_registrations BEGIN SELECT RAISE(ABORT, 'test removal failure'); END`)
+	require.NoError(t, err)
+	_, err = firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
+	require.ErrorContains(t, err, "test removal failure")
+	unchanged, err := conversationStore.Load(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []any{"obsolete"}, unchanged.Metadata[sessionExtensionIDsMetadataKey])
+	ids, err = firstRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids)
+	_, err = firstPersistence.db.ExecContext(t.Context(), `DROP TRIGGER fail_runner_removal`)
+	require.NoError(t, err)
+
 	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
 	require.NoError(t, err)
-	assert.Equal(t, 1, result.RemovedRuns)
+	assert.Equal(t, 3, result.RemovedRuns)
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
 	require.NoError(t, firstRegistry.Close())
 
@@ -1598,6 +1775,10 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerIDMetadataKey)
 	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, "metadata", loadedConversation.Metadata["preserve"])
+	assert.Equal(t, []any{"inline-1", "inline-2"}, loadedConversation.Metadata[sessionExtensionIDsMetadataKey])
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids, "callback identities survive removal and restart without run history")
 	queryResult, err := conversationStore.Query(t.Context(), conversationtypes.QueryOptions{})
 	require.NoError(t, err)
 	require.Len(t, queryResult.ConversationSummaries, 1)
@@ -1606,6 +1787,36 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerIDMetadataKey)
 	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, "metadata", queryResult.ConversationSummaries[0].Metadata["preserve"])
+	assert.Equal(t, []any{"inline-1", "inline-2"}, queryResult.ConversationSummaries[0].Metadata[sessionExtensionIDsMetadataKey])
+
+	replacementParams := testRegisterParams("replacement-host", "/work/project")
+	replacementParams.Capabilities.WorkspaceDiscovery = true
+	replacement, err := secondRegistry.Register(replacementParams, newFakeLink())
+	require.NoError(t, err)
+	markRunnerReady(t, secondRegistry, replacement)
+	require.NoError(t, secondRegistry.MoveConversation(t.Context(), loadedConversation, ConversationAffinity{}, replacement.RunnerID, loadedConversation.CWD))
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, requiredIDs, ids, "move must not discard preserved callback identities")
+
+	// Ordinary manifest updates, including an explicitly callback-free manifest,
+	// remain authoritative rather than reviving stale fallback requirements.
+	for i, updatedIDs := range [][]string{{"inline-3"}, {}} {
+		require.NoError(t, secondPersistence.SaveRun(t.Context(), Run{
+			ID: fmt.Sprintf("replacement-%d", i), ConversationID: conversation.ID, RunnerID: replacement.RunnerID,
+			Status: RunStatusSucceeded, ManifestJSON: string(mustRegistryJSON(t, runnerpayload.Manifest{SessionExtensionIDs: updatedIDs})),
+			CreatedAt: time.Now().Add(time.Duration(i+1) * time.Second), UpdatedAt: time.Now(),
+		}))
+		ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, updatedIDs, ids)
+	}
+	secondRegistry.Detach(replacement.RunnerID, replacement.ConnectionID, replacement.Generation, nil)
+	_, err = secondRegistry.RemoveRunner(t.Context(), replacement.RunnerID, false)
+	require.NoError(t, err)
+	ids, err = secondRegistry.RequiredSessionExtensions(conversation.ID)
+	require.NoError(t, err)
+	assert.Empty(t, ids, "removal must replace obsolete fallback requirements with the latest empty list")
 }
 
 func TestRemoveRunnerClearsPersistedMetadataWithoutDurableAffinity(t *testing.T) {
@@ -1698,6 +1909,7 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	registry := newTestRegistry(t)
 	params := testRegisterParams("host-one", "/work/project")
 	params.ProtocolVersions = []int{protocol.Version + 1}
+	params.Capabilities.WorkspaceMessageHistory = true
 
 	_, err := registry.Register(params, newFakeLink())
 	require.ErrorContains(t, err, "does not support protocol version")
@@ -1706,6 +1918,7 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	require.Len(t, runners, 1)
 	assert.Equal(t, RunnerStatusIncompatible, runners[0].Status)
 	assert.False(t, runners[0].Connected)
+	assert.True(t, runners[0].WorkspaceMessageHistory)
 	assert.Contains(t, runners[0].CompatibilityError, "does not support protocol version")
 }
 
@@ -1723,7 +1936,7 @@ func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	second, err := registry.Register(testRegisterParams("host-two", "/work/two"), newFakeLink())
 	require.NoError(t, err)
 
-	require.ErrorContains(t, registry.BindConversation(t.Context(), "", first.RunnerID), "conversation id")
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "", first.RunnerID), "conversation ID")
 	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", ""), "runner id")
 	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", "missing"), "runner not found")
 	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", first.RunnerID))

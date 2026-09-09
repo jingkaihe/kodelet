@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
+	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -40,11 +38,7 @@ Example:
   kodelet steer -f "Please focus on error handling"
   kodelet steer --follow "That approach looks good, continue"`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getSteerConfigFromFlags(ctx, cmd)
-		sendSteerCmd(ctx, config.ConversationID, args[0], config.Follow, config.Images)
-	},
+	RunE: func(cmd *cobra.Command, args []string) error { return sendRemoteSteer(cmd, args[0]) },
 }
 
 func init() {
@@ -52,100 +46,91 @@ func init() {
 	steerCmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
 	steerCmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
 	steerCmd.Flags().StringSliceP("image", "I", steerDefaults.Images, "Add image input (can be used multiple times)")
+	addRemoteRunFlags(steerCmd)
+	steerCmd.Flags().String("cwd", "", "Find the most recent conversation in this directory with --follow")
 }
 
-func getSteerConfigFromFlags(ctx context.Context, cmd *cobra.Command) *SteerConfig {
-	config := NewSteerConfig()
-
-	if conversationID, err := cmd.Flags().GetString("conversation-id"); err == nil {
-		config.ConversationID = conversationID
+func sendRemoteSteer(cmd *cobra.Command, message string) error {
+	ctx := cmd.Context()
+	id, _ := cmd.Flags().GetString("conversation-id")
+	id = strings.TrimSpace(id)
+	follow, _ := cmd.Flags().GetBool("follow")
+	if follow && id != "" {
+		return errors.New("--follow and --conversation-id cannot be used together")
 	}
-	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
-		config.Follow = follow
+	if !follow && id == "" {
+		return errors.New("provide --conversation-id, or use --follow with --runner or --cwd")
 	}
-	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
-		config.Images = images
+	if strings.TrimSpace(message) == "" || len(message) > steer.MaxMessageLength {
+		return errors.New("steering message must be nonempty and at most 10,000 characters")
 	}
-
-	if config.Follow {
-		if config.ConversationID != "" {
-			presenter.Error(errors.New("conflicting flags"), "--follow and --conversation-id cannot be used together")
-			os.Exit(1)
-		}
-		var err error
-		config.ConversationID, err = conversations.GetMostRecentConversationID(ctx)
+	if cmd.Flags().Changed("runner-profile") {
+		return errors.New("--runner-profile cannot replace the stored profile of a running conversation")
+	}
+	selector, _ := cmd.Flags().GetString("runner")
+	cwd, _ := cmd.Flags().GetString("cwd")
+	if follow && strings.TrimSpace(selector) == "" && strings.TrimSpace(cwd) == "" {
+		return errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
+	}
+	server, _ := serverFlagOrConfig(cmd)
+	token, _, err := resolveControlPlaneAuthToken(cmd, server)
+	if err != nil {
+		return err
+	}
+	var runnerID string
+	if selector != "" {
+		runners, _, err := fetchRunners(ctx, server, token)
 		if err != nil {
-			presenter.Error(err, "Failed to get most recent conversation")
-			presenter.Info("Use 'kodelet conversation list' to see available conversations")
-			os.Exit(1)
+			return err
+		}
+		runner, err := selectRunner(runners, selector)
+		if err != nil {
+			return err
+		}
+		runnerID = runner.ID
+		if cwd == "" {
+			cwd = runner.Workspace.Path
 		}
 	}
-
-	return config
-}
-
-func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow bool, images []string) {
-	if conversationID == "" {
-		presenter.Error(errors.New("conversation ID is required"), "Please provide a conversation ID using --conversation-id or use -f to target the most recent conversation")
-		os.Exit(1)
-	}
-
-	if message == "" {
-		presenter.Error(errors.New("message is required"), "Please provide a steering message")
-		os.Exit(1)
-	}
-
-	if len(message) > steer.MaxMessageLength {
-		presenter.Error(errors.New("message too long"), "Steering message must be less than 10,000 characters")
-		os.Exit(1)
-	}
-
-	if len(conversationID) < 10 {
-		presenter.Error(errors.New("invalid conversation ID format"), "Conversation ID appears to be invalid (too short)")
-		os.Exit(1)
-	}
-
-	store, err := conversations.GetConversationStore(ctx)
+	client, err := chat.NewClient(server, token, runnerID)
 	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
+		return err
 	}
-	defer store.Close()
-
-	_, err = store.Load(ctx, conversationID)
-	if err != nil {
-		presenter.Error(err, fmt.Sprintf("Failed to find conversation with ID: %s", conversationID))
-		presenter.Info("Use 'kodelet conversation list' to see available conversations")
-		os.Exit(1)
+	if follow {
+		history, err := client.ListConversationsInCWD(ctx, 1, cwd)
+		if err != nil {
+			return err
+		}
+		if len(history) == 0 {
+			return errors.New("no conversation found for the selected runner or directory")
+		}
+		id = history[0].ID
 	}
-
-	steerStore, err := steer.NewSteerStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize steer store")
-		os.Exit(1)
+	if runnerID != "" {
+		history, err := client.LoadConversation(ctx, id)
+		if err != nil {
+			return err
+		}
+		if history.RunnerID != runnerID {
+			return errors.New("this conversation uses a different runner; omit --runner to use its saved runner")
+		}
 	}
-	defer steerStore.Close()
-
-	queued, err := steerStore.Enqueue(ctx, conversationID, message, images)
+	paths, _ := cmd.Flags().GetStringSlice("image")
+	images := make([]string, 0, len(paths))
+	for _, path := range paths {
+		image, err := remoteRunImage(path)
+		if err != nil {
+			return err
+		}
+		images = append(images, image.ImageURL.URL)
+	}
+	queued, err := client.SteerConversation(ctx, id, message, images)
 	if err != nil {
-		presenter.Error(err, "Failed to write steering message")
-		os.Exit(1)
+		return errors.Wrap(err, "could not confirm that the steering message was received; check the conversation before sending it again")
 	}
 	if queued {
-		presenter.Warning("There is already pending steering for this conversation. The new message will be queued.")
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Your steering message is queued behind an earlier message.")
 	}
-
-	if isFollow {
-		presenter.Success(fmt.Sprintf("Steering sent to most recent conversation: %s", conversationID))
-	} else {
-		presenter.Success(fmt.Sprintf("Steering sent to conversation %s", conversationID))
-	}
-	presenter.Info(fmt.Sprintf("Message: %s", message))
-	if len(images) > 0 {
-		presenter.Info(fmt.Sprintf("Images: %d", len(images)))
-	}
-
-	presenter.Info("The steering will be processed when the conversation makes its next API call.")
-	presenter.Info("If the conversation is not currently running, start it with:")
-	presenter.Info(fmt.Sprintf("  kodelet run --resume %s \"continue\"", conversationID))
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Steering sent to conversation %s\n", id)
+	return err
 }

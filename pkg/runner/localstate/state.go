@@ -121,6 +121,29 @@ func NewStore() (*Store, error) {
 	return NewStoreAt(filepath.Join(basePath, "runners"))
 }
 
+// LoadDefaultHostIdentity reads an existing installation identity without creating
+// runner state or acquiring workspace locks. Thin clients use it only to compare
+// the daemon's advertised embedded host, never to infer locality from a URL.
+func LoadDefaultHostIdentity() (HostIdentity, error) {
+	// GetDefaultBasePath creates the directory; this read-only lookup must not.
+	basePath := os.Getenv("KODELET_BASE_PATH")
+	if basePath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return HostIdentity{}, err
+		}
+		basePath = filepath.Join(home, ".kodelet")
+	}
+	identity, err := readJSONFile[HostIdentity](filepath.Join(basePath, "runners", "host.json"))
+	if err != nil {
+		return HostIdentity{}, err
+	}
+	if identity.Version != stateVersion || strings.TrimSpace(identity.InstanceID) == "" {
+		return HostIdentity{}, errors.New("runner host identity is invalid")
+	}
+	return identity, nil
+}
+
 // NewStoreAt opens a runner-local state directory at an explicit path.
 func NewStoreAt(root string) (*Store, error) {
 	root = strings.TrimSpace(root)

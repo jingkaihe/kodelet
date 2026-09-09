@@ -117,6 +117,8 @@ Usage:
 kodelet run -r greeting --arg name="Alice" --arg occupation="Engineer" --arg project="Kodelet"
 ```
 
+Recipe `--arg` values are preserved when sent to the runner, including embedded quotes, backslashes, and control characters. In slash commands, double-quoted argument values support Go-style escapes: for example, `/greeting name="say \"hello\""` passes `say "hello"`, and `name="Alice\nBob"` passes a value containing a newline. Use `\\` inside a quoted value for a literal backslash.
+
 ### Bash Command Execution
 
 Use `{{bash "command" "arg1" "arg2" ...}}` to execute commands and embed their output:

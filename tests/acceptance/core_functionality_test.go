@@ -1,18 +1,23 @@
 package acceptance
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCoreFunctionality(t *testing.T) {
-	// Create a temporary test directory for file operations
-	testDir := t.TempDir()
+	// Missing credentials skip only before startup. A configured provider failure
+	// is a test failure, never evidence that the scenario should be skipped.
+	daemon := startCoreDaemon(t, coreProviderEnv(t))
 
 	testCases := []struct {
 		name     string
@@ -23,17 +28,9 @@ func TestCoreFunctionality(t *testing.T) {
 			name:  "create hello.txt file",
 			query: `create a hello.txt with "hello world" as the content`,
 			validate: func(t *testing.T, _ string, testDir string) {
-				// Check if hello.txt was created in the current directory
 				helloFile := filepath.Join(testDir, "hello.txt")
 				content, err := os.ReadFile(helloFile)
-				if err != nil {
-					// Also check current working directory as fallback
-					content, err = os.ReadFile("hello.txt")
-					if err != nil {
-						assert.Fail(t, "hello.txt file was not created", err.Error())
-						return
-					}
-				}
+				require.NoError(t, err, "hello.txt must be created in the runner workspace")
 
 				contentStr := strings.TrimSpace(string(content))
 				assert.Equal(t, "hello world", contentStr)
@@ -41,26 +38,18 @@ func TestCoreFunctionality(t *testing.T) {
 		},
 		{
 			name:  "detect operating system",
-			query: "is the operating system linux or windows",
+			query: "identify the operating system by running a command",
 			validate: func(t *testing.T, output string, _ string) {
 				outputLower := strings.ToLower(output)
-				assert.Contains(t, outputLower, "linux", "Expected output to contain 'linux' (case insensitive)")
+				assert.Contains(t, outputLower, runtime.GOOS)
 			},
 		},
 		{
 			name:  "create fibonacci program",
 			query: "write a fibonacci program in $TESTDIR/fib.py the fib.py should take a zero-based index as an argument and return the fibonacci number of the index",
-			validate: func(t *testing.T, output string, testDir string) {
-				// Check if fib.py was created
+			validate: func(t *testing.T, _ string, testDir string) {
 				fibFile := filepath.Join(testDir, "fib.py")
-				if _, err := os.Stat(fibFile); os.IsNotExist(err) {
-					// Also check if it was created in current directory
-					if _, err := os.Stat("fib.py"); os.IsNotExist(err) {
-						assert.Fail(t, "fib.py file was not created")
-						return
-					}
-					fibFile = "fib.py"
-				}
+				require.FileExists(t, fibFile, "fib.py must be created in the runner workspace")
 
 				cases := []struct {
 					input  string
@@ -82,12 +71,11 @@ func TestCoreFunctionality(t *testing.T) {
 
 				for _, tc := range cases {
 					t.Run(tc.input, func(t *testing.T) {
-						cmd := exec.Command("python3", fibFile, tc.input)
+						ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+						defer cancel()
+						cmd := exec.CommandContext(ctx, "python3", fibFile, tc.input)
 						output, err := cmd.CombinedOutput()
-						assert.NoError(t, err, "Python execution failed")
-						if err != nil {
-							return
-						}
+						require.NoError(t, err, "Python execution failed: %s", output)
 						assert.Equal(t, tc.output, strings.TrimSpace(string(output)))
 					})
 				}
@@ -97,37 +85,49 @@ func TestCoreFunctionality(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set up test directory environment variable
-			query := strings.ReplaceAll(tc.query, "$TESTDIR", testDir)
-
-			// Change to test directory for file operations
-			originalDir, _ := os.Getwd()
-			os.Chdir(testDir)
-			defer os.Chdir(originalDir)
-
-			// Execute kodelet run command
-			cmd := exec.Command("kodelet", "run", "--no-save", query)
-			cmd.Dir = testDir
-
+			query := strings.ReplaceAll(tc.query, "$TESTDIR", daemon.workspace)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "kodelet", "run",
+				"--server="+daemon.serverURL, "--auth-token="+daemon.authToken,
+				"--cwd="+daemon.workspace, "--no-extensions", "--no-skills", query)
+			cmd.Dir = daemon.clientDir
+			cmd.Env = daemon.clientEnv
 			output, err := cmd.CombinedOutput()
 			outputStr := strings.TrimSpace(string(output))
-			t.Logf("output: %s", outputStr)
-
-			// For these tests, we mainly care that the command doesn't crash
-			// and produces reasonable output
-			if strings.Contains(outputStr, "panic") || strings.Contains(outputStr, "fatal") {
-				assert.Fail(t, "Command should not panic or crash", outputStr)
-				return
-			}
-
-			// Skip validation if command failed due to missing API keys
-			if err != nil && (strings.Contains(outputStr, "API key") || strings.Contains(outputStr, "api key")) {
-				t.Skipf("Skipping test due to missing API key: %v", err)
-				return
-			}
-
-			// Run custom validation
-			tc.validate(t, outputStr, testDir)
+			require.NoError(t, err, "daemon-backed run failed: %s", outputStr)
+			tc.validate(t, outputStr, daemon.workspace)
+			assert.NoFileExists(t, filepath.Join(daemon.clientDir, "hello.txt"))
+			assert.NoFileExists(t, filepath.Join(daemon.clientDir, "fib.py"))
 		})
 	}
+}
+
+func coreProviderEnv(t *testing.T) []string {
+	t.Helper()
+	provider := os.Getenv("KODELET_PROVIDER")
+	if provider == "" {
+		provider = "anthropic"
+		if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("OPENAI_API_KEY") != "" {
+			provider = "openai"
+		}
+	}
+	keyName := ""
+	switch provider {
+	case "anthropic":
+		keyName = "ANTHROPIC_API_KEY"
+	case "openai":
+		keyName = "OPENAI_API_KEY"
+	default:
+		t.Fatalf("live core acceptance requires KODELET_PROVIDER=anthropic or openai, got %q", provider)
+	}
+	key := os.Getenv(keyName)
+	if strings.TrimSpace(key) == "" {
+		t.Skipf("live core acceptance requires configured %s for the isolated daemon", keyName)
+	}
+	env := []string{"KODELET_PROVIDER=" + provider, keyName + "=" + key}
+	if model := os.Getenv("KODELET_MODEL"); model != "" {
+		env = append(env, "KODELET_MODEL="+model)
+	}
+	return env
 }

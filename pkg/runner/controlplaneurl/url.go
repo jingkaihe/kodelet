@@ -14,29 +14,29 @@ import (
 func NormalizeBase(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", errors.New("control-plane URL is required")
+		return "", errors.New("server URL is required")
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse control-plane URL")
+		return "", errors.Wrap(err, "failed to parse server URL")
 	}
 	parsed.Scheme = strings.ToLower(strings.TrimSpace(parsed.Scheme))
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("control-plane URL must use http or https")
+		return "", errors.New("server URL must use http or https")
 	}
 	if parsed.Host == "" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", errors.New("control-plane URL must contain only scheme, host, and an optional base path")
+		return "", errors.New("server URL must contain only scheme, host, and an optional base path")
 	}
 
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
 	if hostname == "" {
-		return "", errors.New("control-plane URL must contain only scheme, host, and an optional base path")
+		return "", errors.New("server URL must contain only scheme, host, and an optional base path")
 	}
 	port := parsed.Port()
 	if port != "" {
 		portNumber, err := strconv.Atoi(port)
 		if err != nil || portNumber < 1 || portNumber > 65535 {
-			return "", errors.New("control-plane URL contains an invalid port")
+			return "", errors.New("server URL contains an invalid port")
 		}
 		port = strconv.Itoa(portNumber)
 		if (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443") {
@@ -44,7 +44,7 @@ func NormalizeBase(raw string) (string, error) {
 		}
 	}
 	if parsed.Scheme == "http" && !IsLoopbackHostname(hostname) {
-		return "", errors.New("remote control-plane connections require https; http is allowed only for loopback servers")
+		return "", errors.New("remote server connections require https; http is allowed only for loopback servers")
 	}
 	if ip := net.ParseIP(hostname); ip != nil {
 		hostname = ip.String()
@@ -74,7 +74,7 @@ func Endpoint(base string, segments ...string) (string, error) {
 	}
 	parsed, err := url.Parse(normalized)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse normalized control-plane URL")
+		return "", errors.Wrap(err, "failed to parse normalized server URL")
 	}
 	escapedPath := strings.TrimSuffix(parsed.EscapedPath(), "/")
 	for _, segment := range segments {
@@ -86,7 +86,7 @@ func Endpoint(base string, segments ...string) (string, error) {
 	}
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to build control-plane endpoint path")
+		return "", errors.Wrap(err, "failed to build server endpoint path")
 	}
 	parsed.Path = decodedPath
 	parsed.RawPath = escapedPath
@@ -101,7 +101,7 @@ func WebSocketEndpoint(base string, segments ...string) (string, error) {
 	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse control-plane WebSocket endpoint")
+		return "", errors.Wrap(err, "failed to parse server WebSocket endpoint")
 	}
 	if parsed.Scheme == "https" {
 		parsed.Scheme = "wss"
@@ -127,7 +127,7 @@ func canonicalPath(escaped string) (string, string, error) {
 	}
 	normalized, err := normalizeEscapes(escaped)
 	if err != nil {
-		return "", "", errors.Wrap(err, "control-plane URL contains an invalid path escape")
+		return "", "", errors.Wrap(err, "server URL contains an invalid path escape")
 	}
 	stack := make([]string, 0)
 	for _, segment := range strings.Split(normalized, "/") {
@@ -148,7 +148,7 @@ func canonicalPath(escaped string) (string, string, error) {
 	escapedPath := "/" + strings.Join(stack, "/")
 	decodedPath, err := url.PathUnescape(escapedPath)
 	if err != nil {
-		return "", "", errors.Wrap(err, "failed to decode canonical control-plane path")
+		return "", "", errors.Wrap(err, "failed to decode canonical server path")
 	}
 	return decodedPath, escapedPath, nil
 }

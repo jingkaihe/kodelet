@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 )
 
@@ -29,7 +30,9 @@ func loadProfileOptions() []string {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		appendOption(name)
+		if !llm.IsProfileHidden(name) {
+			appendOption(name)
+		}
 	}
 	return options
 }
@@ -49,12 +52,12 @@ func (m *model) setProfile(profile string) {
 	m.profilePickerIndex = m.profileIndex
 }
 
-func (m *model) toggleProfilePickerFromKeyboard() {
+func (m *model) toggleProfilePickerFromKeyboard() tea.Cmd {
 	if m.profilePickerOpen {
-		m.selectProfilePickerOption(m.profilePickerIndex)
-		return
+		return m.selectProfilePickerOption(m.profilePickerIndex)
 	}
 	m.openProfilePicker()
+	return nil
 }
 
 func (m *model) toggleProfilePickerFromClick() {
@@ -89,11 +92,22 @@ func (m *model) moveProfilePicker(delta int) {
 	}
 }
 
-func (m *model) selectProfilePickerOption(index int) {
+func (m *model) selectProfilePickerOption(index int) tea.Cmd {
 	if !m.profilePickerOpen || index < 0 || index >= len(m.profileOptions) {
-		return
+		return nil
 	}
+	previousProfile := m.profile
 	m.setProfile(m.profileOptions[index])
 	m.refreshReasoningSettingsForProfile()
 	m.profilePickerOpen = false
+	if m.remote && m.profile != previousProfile {
+		m.slashCommands = withTUIBuiltInSlashCommands(nil)
+		m.extensionShortcuts = nil
+		m.shortcutDigest = ""
+		m.slashCommandErr = nil
+		m.slashCommandIndex = -1
+		m.slashDismissedDraft = ""
+		return m.loadRemoteSlashCommands(m.conversationState)
+	}
+	return nil
 }

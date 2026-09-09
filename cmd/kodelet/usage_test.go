@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	convstore "github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/usage"
@@ -839,114 +840,126 @@ func TestDateRangeFilteringWithSummaries(t *testing.T) {
 	}
 }
 
-func TestRunUsageCmdWithTempSQLiteStore(t *testing.T) {
-	ctx := context.Background()
-	basePath := setupUsageTempStore(ctx, t)
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
-
-	store, err := convstore.NewConversationStore(ctx, &convstore.Config{StoreType: "sqlite", BasePath: basePath})
-	require.NoError(t, err)
-	defer func() { _ = store.Close() }()
-
-	now := time.Now().UTC()
-	saveUsageRecord(ctx, t, store, "usage-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{
-		InputTokens:  100,
-		OutputTokens: 50,
-		InputCost:    0.01,
-		OutputCost:   0.02,
-	})
-	saveUsageRecord(ctx, t, store, "usage-anthropic", "anthropic", now.Add(-2*24*time.Hour), llmtypes.Usage{
-		InputTokens:              200,
-		OutputTokens:             75,
-		CacheCreationInputTokens: 10,
-		CacheReadInputTokens:     5,
-		InputCost:                0.02,
-	})
-
-	output := captureAllStdout(t, func() {
-		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "json", Provider: "openai"})
-	})
-
-	var parsed UsageJSONOutput
-	require.NoError(t, json.Unmarshal([]byte(output), &parsed))
-	require.Len(t, parsed.Daily, 1)
-	assert.Equal(t, 1, parsed.Total.Conversations)
-	assert.Equal(t, 100, parsed.Total.InputTokens)
-	assert.Equal(t, 50, parsed.Total.OutputTokens)
-	assert.Equal(t, 0.03, parsed.Total.TotalCost)
-}
-
-func TestRunUsageCmdBreakdownWithTempSQLiteStore(t *testing.T) {
-	ctx := context.Background()
-	basePath := setupUsageTempStore(ctx, t)
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
-
-	store, err := convstore.NewConversationStore(ctx, &convstore.Config{StoreType: "sqlite", BasePath: basePath})
-	require.NoError(t, err)
-	defer func() { _ = store.Close() }()
-
-	now := time.Now().UTC()
-	saveUsageRecord(ctx, t, store, "breakdown-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01})
-	saveUsageRecord(ctx, t, store, "breakdown-anthropic", "anthropic", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 20, OutputTokens: 6, InputCost: 0.02})
-
-	output := captureAllStdout(t, func() {
-		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "json", Breakdown: true})
-	})
-
-	var parsed DailyProviderBreakdownJSONOutput
-	require.NoError(t, json.Unmarshal([]byte(output), &parsed))
-	require.Len(t, parsed.Daily, 1)
-	assert.Equal(t, 2, parsed.Total.Conversations)
-	assert.Equal(t, 30, parsed.Total.InputTokens)
-	assert.Equal(t, 1, parsed.Daily[0].Providers["OpenAI"].Conversations)
-	assert.Equal(t, 1, parsed.Daily[0].Providers["Anthropic"].Conversations)
-	assert.Equal(t, 2, parsed.Daily[0].Total.Conversations)
-}
-
-func TestRunUsageCmdNoConversationsWithTempSQLiteStore(t *testing.T) {
-	ctx := context.Background()
-	basePath := setupUsageTempStore(ctx, t)
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
-
-	output := captureAllStdout(t, func() {
-		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "table"})
-	})
-
-	assert.Contains(t, output, "No conversations found")
-}
-
-func setupUsageTempStore(ctx context.Context, t *testing.T) string {
-	t.Helper()
-
-	basePath := t.TempDir()
-	sqlDB, err := db.Open(ctx, filepath.Join(basePath, "storage.db"))
-	require.NoError(t, err)
-	runner := db.NewMigrationRunner(sqlDB)
-	require.NoError(t, runner.Run(ctx, migrations.All()))
-	require.NoError(t, sqlDB.Close())
-	return basePath
-}
-
-func saveUsageRecord(ctx context.Context, t *testing.T, store convstore.ConversationStore, id, provider string, when time.Time, usage llmtypes.Usage) {
-	t.Helper()
-
-	record := conversations.ConversationRecord{
-		ID:        id,
-		Provider:  provider,
-		Usage:     usage,
-		CreatedAt: when,
-		UpdatedAt: when,
-		RawMessages: []byte(`[
-        {"role":"user","content":[{"type":"text","text":"hello"}]},
-        {"role":"assistant","content":[{"type":"text","text":"world"}]}
-      ]`),
-		Metadata: map[string]any{"provider": provider},
+func TestRemoteUsageProcessPaginatesDaemonWithoutClientStore(t *testing.T) {
+	for _, mode := range []string{"json", "breakdown", "empty", "empty-breakdown", "empty-table"} {
+		t.Run(mode, func(t *testing.T) {
+			var calls atomic.Int32
+			when := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				page := calls.Add(1)
+				assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+				assert.Equal(t, "/api/conversations", r.URL.Path)
+				query := r.URL.Query()
+				assert.Equal(t, "200", query.Get("limit"))
+				assert.Equal(t, "createdAt", query.Get("sortBy"))
+				assert.Equal(t, "2026-08-01T00:00:00Z", query.Get("startDate"))
+				assert.Equal(t, "2026-08-31T23:59:59Z", query.Get("endDate"))
+				if strings.HasPrefix(mode, "empty") {
+					require.NoError(t, json.NewEncoder(w).Encode(convstore.ListConversationsResponse{}))
+					return
+				}
+				provider := "openai"
+				if mode == "json" {
+					assert.Equal(t, "openai", query.Get("provider"))
+				} else {
+					assert.Empty(t, query.Get("provider"))
+					if page == 2 {
+						provider = "anthropic"
+					}
+				}
+				id := "first"
+				if page == 1 {
+					assert.Equal(t, "0", query.Get("offset"))
+				} else {
+					assert.EqualValues(t, 2, page)
+					assert.Equal(t, "1", query.Get("offset"))
+					id = "second"
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(convstore.ListConversationsResponse{Conversations: []conversations.ConversationSummary{{ID: id, Provider: provider, CreatedAt: when, UpdatedAt: when, Usage: llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01}}}, HasMore: page == 1, Total: 2}))
+			}))
+			defer daemon.Close()
+			home := t.TempDir()
+			invalid := filepath.Join(home, "no-local-store")
+			require.NoError(t, os.WriteFile(invalid, []byte("not a directory"), 0o600))
+			env := []string{"HOME=" + home, "PATH=" + home, "KODELET_BASE_PATH=" + invalid, "KODELET_TEST_CLI_PROCESS=1"}
+			args := []string{"usage", "--server=" + daemon.URL, "--auth-token=client", "--since=2026-08-01", "--until=2026-08-31", "--format=json"}
+			if mode == "json" {
+				args = append(args, "--provider=openai")
+			}
+			if mode == "breakdown" || mode == "empty-breakdown" {
+				args = append(args, "--breakdown")
+			}
+			if mode == "empty-table" {
+				args = append(args, "--format=table")
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			output, err := daemonCLIProcess(ctx, t, home, env, args...).CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			if strings.HasPrefix(mode, "empty") {
+				if mode == "empty-table" {
+					assert.Equal(t, "No conversations found in the specified time range.\n", string(output))
+				} else {
+					var parsed UsageJSONOutput
+					require.NoError(t, json.Unmarshal(output, &parsed))
+					assert.Empty(t, parsed.Daily)
+					assert.Zero(t, parsed.Total)
+				}
+				assert.EqualValues(t, 1, calls.Load())
+				assert.NoDirExists(t, filepath.Join(home, ".kodelet"))
+				return
+			}
+			assert.EqualValues(t, 2, calls.Load())
+			if mode == "json" {
+				var parsed UsageJSONOutput
+				require.NoError(t, json.Unmarshal(output, &parsed))
+				assert.Equal(t, 2, parsed.Total.Conversations)
+				assert.Equal(t, 20, parsed.Total.InputTokens)
+				assert.Equal(t, 0.02, parsed.Total.TotalCost)
+			} else {
+				var parsed DailyProviderBreakdownJSONOutput
+				require.NoError(t, json.Unmarshal(output, &parsed))
+				require.Len(t, parsed.Daily, 1)
+				assert.Equal(t, 2, parsed.Total.Conversations)
+				assert.Equal(t, 1, parsed.Daily[0].Providers["OpenAI"].Conversations)
+				assert.Equal(t, 1, parsed.Daily[0].Providers["Anthropic"].Conversations)
+			}
+			assert.NoDirExists(t, filepath.Join(home, ".kodelet"))
+		})
 	}
-	require.NoError(t, store.Save(ctx, record))
+}
 
-	_, err := os.Stat(filepath.Join(os.Getenv("KODELET_BASE_PATH"), "storage.db"))
-	require.NoError(t, err)
+func TestRemoteUsageRejectsInvalidAndIncompleteQueries(t *testing.T) {
+	var calls atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Query().Get("offset") == "0" {
+			require.NoError(t, json.NewEncoder(w).Encode(convstore.ListConversationsResponse{Conversations: []conversations.ConversationSummary{{ID: "first"}}, HasMore: true}))
+			return
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer daemon.Close()
+	for _, flags := range [][]string{{"--since=bad"}, {"--until=bad"}, {"--since=2026-09-01", "--until=2026-08-01"}, {"--provider=bogus"}, {"--format=xml"}, {}} {
+		cmd := &cobra.Command{Use: "usage"}
+		cmd.SetContext(t.Context())
+		addRemoteAdministrationFlags(cmd)
+		cmd.Flags().String("since", "30d", "")
+		cmd.Flags().String("until", "", "")
+		cmd.Flags().String("provider", "", "")
+		cmd.Flags().String("format", "json", "")
+		cmd.Flags().Bool("breakdown", false, "")
+		require.NoError(t, cmd.ParseFlags(append([]string{"--server=" + daemon.URL, "--auth-token=client"}, flags...)))
+		var output bytes.Buffer
+		cmd.SetOut(&output)
+		err := runRemoteUsage(cmd, nil)
+		require.Error(t, err)
+		assert.Empty(t, output.String(), "never print partial usage totals")
+		if len(flags) > 0 {
+			assert.Zero(t, calls.Load())
+		} else {
+			assert.EqualValues(t, 2, calls.Load())
+			assert.ErrorContains(t, err, "could not load complete usage data")
+		}
+	}
 }

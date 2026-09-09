@@ -14,9 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
+func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *testing.T) {
 	var config struct {
 		Model                   string                    `yaml:"model"`
+		ToolMode                string                    `yaml:"tool_mode"`
 		ReasoningEffort         string                    `yaml:"reasoning_effort"`
 		Aliases                 map[string]string         `yaml:"aliases"`
 		AllowedReasoningEfforts []string                  `yaml:"allowed_reasoning_efforts"`
@@ -26,6 +27,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	err := yaml.Unmarshal([]byte(recommendedSetupConfigYAML()), &config)
 	require.NoError(t, err)
 	assert.Equal(t, "gpt-6-astra", config.Model)
+	assert.Equal(t, "patch", config.ToolMode)
 	assert.Equal(t, "claude-fable-5", config.Aliases["fable-5"])
 	assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
 	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
@@ -36,8 +38,8 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 
 	openAIProfile, ok := config.Profiles["openai"]
 	require.True(t, ok)
-	assert.Equal(t, "patch", openAIProfile["tool_mode"])
-	assert.Equal(t, false, openAIProfile["enable_fs_search_tools"])
+	assert.NotContains(t, openAIProfile, "tool_mode")
+	assert.NotContains(t, openAIProfile, "enable_fs_search_tools")
 	assert.Equal(t, "openai", openAIProfile["provider"])
 	assert.Equal(t, "gpt-6-astra", openAIProfile["model"])
 	assert.Equal(t, 128000, openAIProfile["max_tokens"])
@@ -47,8 +49,8 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	anthropicProfile, ok := config.Profiles["anthropic"]
 	require.True(t, ok)
 	assert.Equal(t, "anthropic", anthropicProfile["provider"])
-	assert.Equal(t, "full", anthropicProfile["tool_mode"])
-	assert.Equal(t, true, anthropicProfile["enable_fs_search_tools"])
+	assert.NotContains(t, anthropicProfile, "tool_mode")
+	assert.NotContains(t, anthropicProfile, "enable_fs_search_tools")
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
 	assert.Equal(t, "opus-5", anthropicProfile["model"])
 	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])

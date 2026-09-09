@@ -1,13 +1,18 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +67,12 @@ func TestNDJSONEventSinkRequiresFlusherAndWritesLines(t *testing.T) {
 	assert.Equal(t, "text", event.Kind)
 	assert.Equal(t, "hello", event.Content)
 	assert.Equal(t, "assistant", event.Role)
+	body := recorder.Body.String()
+	sink.Close()
+	sink.Close()
+	assert.ErrorIs(t, sink.Send(ChatEvent{Kind: "late"}), io.ErrClosedPipe)
+	assert.ErrorIs(t, sink.KeepAlive(), io.ErrClosedPipe)
+	assert.Equal(t, body, recorder.Body.String())
 }
 
 func TestNDJSONEventSinkReportsMarshalErrors(t *testing.T) {
@@ -70,6 +81,106 @@ func TestNDJSONEventSinkReportsMarshalErrors(t *testing.T) {
 
 	err = sink.Send(ChatEvent{Kind: "bad", Content: func() {}})
 	require.ErrorContains(t, err, "failed to marshal chat event")
+}
+
+type blockingFlushResponseWriter struct {
+	*httptest.ResponseRecorder
+	started   chan struct{}
+	release   chan struct{}
+	deadlines []time.Time
+}
+
+func (w *blockingFlushResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+func (w *blockingFlushResponseWriter) Flush() {
+	close(w.started)
+	<-w.release
+	w.ResponseRecorder.Flush()
+}
+
+func TestNDJSONEventSinkCloseWaitsForFlush(t *testing.T) {
+	writer := &blockingFlushResponseWriter{ResponseRecorder: httptest.NewRecorder(), started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() {
+		select {
+		case <-writer.release:
+		default:
+			close(writer.release)
+		}
+	})
+	sink, err := newNDJSONEventSink(&responseWriter{ResponseWriter: writer})
+	require.NoError(t, err)
+	sent := make(chan error, 1)
+	go func() { sent <- sink.Send(ChatEvent{Kind: "text"}) }()
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		require.FailNow(t, "write did not reach Flush")
+	}
+	closed := make(chan struct{})
+	go func() { sink.Close(); close(closed) }()
+	select {
+	case <-closed:
+		require.FailNow(t, "Close returned before the in-flight Flush finished")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(writer.release)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		require.FailNow(t, "Close did not finish after Flush")
+	}
+	require.NoError(t, <-sent)
+	assert.ErrorIs(t, sink.Send(ChatEvent{Kind: "late"}), io.ErrClosedPipe)
+	require.Len(t, writer.deadlines, 2, "the HTTP middleware must forward write deadlines so draining is bounded")
+	assert.False(t, writer.deadlines[0].IsZero())
+	assert.True(t, writer.deadlines[1].IsZero())
+}
+
+type delayedChatSink struct {
+	ChatEventSink
+	release <-chan struct{}
+	result  chan error
+}
+
+func (s *delayedChatSink) Send(event ChatEvent) error {
+	<-s.release
+	err := s.ChatEventSink.Send(event)
+	s.result <- err
+	return err
+}
+
+func TestChatHandlerRejectsNativeCleanupAfterReturning(t *testing.T) {
+	for _, runErr := range []error{nil, context.Canceled, errors.New("run failed")} {
+		t.Run(fmt.Sprint(runErr), func(t *testing.T) {
+			release := make(chan struct{})
+			result := make(chan error, 1)
+			server := &Server{}
+			server.chatRunner = &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+				broker := server.uiInputBrokerForRun(req.ConversationID)
+				broker.mu.Lock()
+				broker.native = &nativeUIState{epoch: "old-ui"}
+				broker.owner.sink = &delayedChatSink{ChatEventSink: broker.owner.sink, release: release, result: result}
+				broker.mu.Unlock()
+				return req.ConversationID, runErr
+			}}
+			request := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"hello","clientCapabilities":{"interactiveUI":true,"persistentSurfaces":true}}`))
+			request.Header.Set(chat.ClientIDHeader, "native-client")
+			writer := httptest.NewRecorder()
+			server.handleChat(writer, request)
+			body := writer.Body.String()
+			close(release)
+			select {
+			case err := <-result:
+				assert.ErrorIs(t, err, io.ErrClosedPipe)
+			case <-time.After(time.Second):
+				require.FailNow(t, "native cleanup did not finish")
+			}
+			assert.Equal(t, body, writer.Body.String(), "cleanup must not access the ResponseWriter after the handler returns")
+		})
+	}
 }
 
 func TestSubscriberEventSinkBufferFullAndCloseIdempotent(t *testing.T) {

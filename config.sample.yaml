@@ -8,11 +8,10 @@ log_level: "info"
 # Log format for the application (json, text, fmt)
 log_format: "json"
 
-# Default Kodelet control-plane URL for chat, ACP, and runner commands.
-# When configured, `kodelet chat` and `kodelet acp` use server-backed mode
-# without requiring an explicit --server flag. KODELET_SERVER overrides this.
-# This security-sensitive option is honored only from ~/.kodelet/config.yaml or
-# a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
+# Default daemon URL. When unset, chat/run/ACP start or reuse a local server.
+# KODELET_SERVER overrides this setting; --server overrides both.
+# Explicit servers and existing OIDC setups are connect-only.
+# Set this in ~/.kodelet/config.yaml or KODELET_CONFIG_FILE, not repository config.
 # server: "https://kodelet.example"
 
 # `kodelet serve` settings may be stored under `serve` in ~/.kodelet/config.yaml
@@ -21,14 +20,18 @@ log_format: "json"
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
 # modes: token, enrollment, none.
+# Start this public OIDC example with `kodelet serve`. Automatic local startup
+# requires loopback binding, token authentication, and embedded_runner: true.
+# Restart the server after changing defaults (`kodelet server restart` locally).
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080
-#   cwd: "/srv/kodelet"
-#   # Disable control-plane-local chat execution, terminal, Git diff, CWD
-#   # discovery, and local slash-command discovery. Requires workspace runners
-#   # for executable conversations and cannot be combined with cwd.
-#   disable_control_plane_workspace: false
+#   # Set false to use only separately managed runners.
+#   embedded_runner: true
+#   # runner_workspace: "/srv/workspaces"
+#   # Optional workspace overrides; otherwise inherits daemon settings.
+#   # runner_settings:
+#   #   allowed_tools: ["bash", "apply_patch"]
 #   web_auth_mode: "oidc"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.
@@ -108,8 +111,8 @@ aliases:
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "anthropic"
 
-# Profile definitions for different use cases
-# Each profile can override any configuration setting
+# Model profiles belong in daemon configuration; select one with --profile.
+# Omitted fields inherit daemon defaults.
 profiles:
   anthropic:
     model: "claude-opus-5"
@@ -181,9 +184,9 @@ profiles:
       platform: "codex"
       api_mode: "responses"
 
-# Runner-local profiles are a separate namespace from model/provider profiles.
-# They are resolved by `kodelet runner start` on the runner host before context,
-# tools, skills, recipes, and extensions are discovered for a remote run.
+# Runner environment profiles are separate from model profiles; select with --runner-profile.
+# Supported by both embedded and standalone runners. Define in user configuration,
+# not repository files; profiles cannot relax daemon permission restrictions.
 environment_profiles:
   workspace:
     allowed_tools:
@@ -411,6 +414,7 @@ extensions:
 
   # Optional allow/deny rules. Plugin extensions use org@repo/extension.
   # Standalone extensions use their directory path or executable path.
+  # Inline callbacks bypass allow; deny can match exact IDs such as session:inline-1.
   # allow:
   #   - org@repo/weather
   #   - ./.kodelet/extensions/weather

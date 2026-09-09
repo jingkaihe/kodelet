@@ -1,72 +1,29 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunExtensionListAndInspect(t *testing.T) {
-	home := t.TempDir()
-	cwd := t.TempDir()
-	withTempHomeAndCWD(t, home, cwd)
-	restoreExtensionCommandViper(t, filepath.Join(home, ".kodelet", "extensions"))
-
-	extensionPath := filepath.Join(cwd, ".kodelet", "extensions", "weather", "kodelet-extension-weather")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extensionPath), 0o755))
-	require.NoError(t, os.WriteFile(extensionPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
-
-	listOutput := captureAllStdout(t, func() {
-		require.NoError(t, runExtensionList(context.Background(), ExtensionListConfig{}))
-	})
-	assert.Contains(t, listOutput, "weather")
-	assert.Contains(t, listOutput, extensionPath)
-
-	inspectOutput := captureAllStdout(t, func() {
-		require.NoError(t, runExtensionInspect(context.Background(), "weather", ExtensionInspectConfig{JSONOutput: true}))
-	})
-	var inspected ExtensionOutput
-	require.NoError(t, json.Unmarshal([]byte(inspectOutput), &inspected))
-	assert.Equal(t, "weather", inspected.ID)
-	assert.Equal(t, extensionPath, inspected.Path)
-}
-
-func TestRunExtensionListJSONEmpty(t *testing.T) {
-	home := t.TempDir()
-	cwd := t.TempDir()
-	withTempHomeAndCWD(t, home, cwd)
-	restoreExtensionCommandViper(t, filepath.Join(home, ".kodelet", "extensions"))
-
-	listOutput := captureAllStdout(t, func() {
-		require.NoError(t, runExtensionList(context.Background(), ExtensionListConfig{JSONOutput: true}))
-	})
-
-	var payload struct {
-		Extensions []ExtensionOutput `json:"extensions"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(listOutput), &payload))
-	assert.Empty(t, payload.Extensions)
-	assert.NotContains(t, listOutput, "No extensions found")
-}
-
-func restoreExtensionCommandViper(t *testing.T, globalDir string) {
-	t.Helper()
-	originalSettings := viper.AllSettings()
-	t.Cleanup(func() {
-		viper.Reset()
-		for key, value := range originalSettings {
-			viper.Set(key, value)
-		}
-	})
-	viper.Reset()
-	viper.Set("extensions.enabled", true)
-	viper.Set("extensions.local_dir", "./.kodelet/extensions")
-	viper.Set("extensions.global_dir", globalDir)
-	viper.Set("extensions.max_output_size", 102400)
+func TestExtensionOutputFormats(t *testing.T) {
+	var output bytes.Buffer
+	ext := ExtensionOutput{ID: "weather", Name: "Weather", Source: "local_standalone", Path: "/runner/weather", Directory: "/runner", PluginRef: "org@repo"}
+	require.NoError(t, renderExtensionInspectJSON(&output, ext))
+	var decoded ExtensionOutput
+	require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
+	assert.Equal(t, ext, decoded)
+	output.Reset()
+	require.NoError(t, renderExtensionInspectTable(&output, ext))
+	assert.Contains(t, output.String(), "/runner/weather")
+	assert.Contains(t, output.String(), "org@repo")
+	output.Reset()
+	require.NoError(t, (&ExtensionListOutput{Extensions: []ExtensionOutput{}, Format: JSONFormat}).Render(&output))
+	assert.JSONEq(t, `{"extensions":[]}`, output.String())
+	output.Reset()
+	require.NoError(t, (&ExtensionListOutput{Extensions: []ExtensionOutput{ext}, Format: TableFormat}).Render(&output))
+	assert.Contains(t, output.String(), "weather")
 }

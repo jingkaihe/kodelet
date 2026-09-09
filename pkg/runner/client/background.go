@@ -23,6 +23,7 @@ type runnerBackgroundResources struct {
 	variant            string
 	workingDirectory   string
 	runtime            *extensions.Runtime
+	runtimeConfig      extensions.Config
 	runtimeRelease     func() error
 	runtimeReleaseOnce sync.Once
 	runtimeReleaseErr  error
@@ -40,11 +41,15 @@ type runnerBackgroundResources struct {
 }
 
 type runnerBackgroundLease struct {
-	owner       extensions.UIExtensionOwner
-	description string
+	owner        extensions.UIExtensionOwner
+	description  string
+	openingRunID string
 }
 
 func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskAcquireRequest) (extensions.BackgroundTaskAcquireResponse, error) {
+	if !extensions.RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
+		return extensions.BackgroundTaskAcquireResponse{}, errors.New("background tasks are not available during runner discovery")
+	}
 	owner, err := runnerBackgroundTaskOwner(source)
 	if err != nil {
 		return extensions.BackgroundTaskAcquireResponse{}, err
@@ -64,9 +69,9 @@ func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.U
 		return extensions.BackgroundTaskAcquireResponse{}, errors.New("runner service is closed")
 	}
 	run := s.runs[runID]
-	if run == nil || run.opening || run.closing || run.resources == nil {
+	if run == nil || run.stopping || run.closing || run.ctx.Err() != nil || run.resources == nil {
 		s.mu.Unlock()
-		return extensions.BackgroundTaskAcquireResponse{}, errors.New("background task lease requires a ready runner run")
+		return extensions.BackgroundTaskAcquireResponse{}, errors.New("background task lease requires an opening or ready runner run")
 	}
 	if len(s.backgroundLeases) >= maxRunnerBackgroundTasks {
 		s.mu.Unlock()
@@ -81,19 +86,60 @@ func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.U
 	if resources.leases == nil {
 		resources.leases = make(map[string]runnerBackgroundLease)
 	}
-	resources.leases[leaseID] = runnerBackgroundLease{owner: owner, description: description}
-	resources.runIDs[run.id] = struct{}{}
-	resources.lastRunID = run.id
-	resources.clientCaps = mergePersistentClientCapabilities(resources.clientCaps, run.clientCaps)
-	s.backgrounds[resources.conversationID] = resources
-	s.backgroundRunIDs[run.id] = resources
+	lease := runnerBackgroundLease{owner: owner, description: description}
+	if run.opening {
+		lease.openingRunID = run.id
+	}
+	resources.leases[leaseID] = lease
 	s.backgroundLeases[leaseID] = resources
+	if !run.opening {
+		s.activateBackgroundTasksLocked(run)
+	}
 	s.mu.Unlock()
 
 	return extensions.BackgroundTaskAcquireResponse{LeaseID: leaseID}, nil
 }
 
-func (s *Service) ReleaseBackgroundTask(_ context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskReleaseRequest) (extensions.BackgroundTaskReleaseResponse, error) {
+// Provisional leases reserve capacity and can be released by their process, but
+// do not publish a retained conversation/UI route until run.open succeeds.
+func (s *Service) activateBackgroundTasksLocked(run *activeRun) {
+	resources := run.resources
+	if resources == nil || len(resources.leases) == 0 {
+		return
+	}
+	for id, lease := range resources.leases {
+		if lease.openingRunID == run.id {
+			lease.openingRunID = ""
+			resources.leases[id] = lease
+		}
+	}
+	resources.runIDs[run.id] = struct{}{}
+	resources.lastRunID = run.id
+	resources.clientCaps = mergePersistentClientCapabilities(resources.clientCaps, run.clientCaps)
+	s.backgrounds[resources.conversationID] = resources
+	s.backgroundRunIDs[run.id] = resources
+}
+
+// A failed reattachment only revokes that open's provisional leases; explicitly
+// canceling a conversation revokes all its workers, including retained leases.
+func (s *Service) revokeBackgroundTasksLocked(run *activeRun, provisionalOnly bool) {
+	if run.resources == nil {
+		return
+	}
+	for id, lease := range run.resources.leases {
+		if provisionalOnly && lease.openingRunID != run.id {
+			continue
+		}
+		s.removeBackgroundLeaseLocked(run.resources, id)
+	}
+}
+
+func (s *Service) removeBackgroundLeaseLocked(resources *runnerBackgroundResources, leaseID string) {
+	delete(resources.leases, leaseID)
+	delete(s.backgroundLeases, leaseID)
+}
+
+func (s *Service) ReleaseBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskReleaseRequest) (extensions.BackgroundTaskReleaseResponse, error) {
 	owner, err := runnerBackgroundTaskOwner(source)
 	if err != nil {
 		return extensions.BackgroundTaskReleaseResponse{}, err
@@ -115,7 +161,9 @@ func (s *Service) ReleaseBackgroundTask(_ context.Context, source extensions.UIE
 		return extensions.BackgroundTaskReleaseResponse{}, errors.New("background task lease is owned by another extension process")
 	}
 	delete(resources.leases, leaseID)
-	delete(s.backgroundLeases, leaseID)
+	if s.backgroundLeases[leaseID] == resources {
+		delete(s.backgroundLeases, leaseID)
+	}
 	cleanup := s.detachBackgroundResourcesIfUnusedLocked(resources)
 	s.mu.Unlock()
 	response := extensions.BackgroundTaskReleaseResponse{Released: true}
@@ -139,8 +187,7 @@ func (s *Service) CleanupBackgroundTasks(owner extensions.UIExtensionOwner) {
 		if !ok || lease.owner != owner {
 			continue
 		}
-		delete(resources.leases, leaseID)
-		delete(s.backgroundLeases, leaseID)
+		s.removeBackgroundLeaseLocked(resources, leaseID)
 		if s.detachBackgroundResourcesIfUnusedLocked(resources) {
 			if _, exists := seen[resources]; !exists {
 				seen[resources] = struct{}{}
@@ -231,6 +278,9 @@ func (s *Service) closeAllBackgroundResources(ctx context.Context) error {
 		}
 		seen[candidate] = struct{}{}
 		resources = append(resources, candidate)
+	}
+	for leaseID, candidate := range s.backgroundLeases {
+		s.removeBackgroundLeaseLocked(candidate, leaseID)
 	}
 	s.backgrounds = make(map[string]*runnerBackgroundResources)
 	s.backgroundRunIDs = make(map[string]*runnerBackgroundResources)

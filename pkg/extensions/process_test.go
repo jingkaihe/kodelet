@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,157 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1", Kind: SourceKindSession}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	reader := bufio.NewReader(sdk)
+	read := func() rpcIncomingMessage {
+		message, err := readIncomingMessage(reader)
+		require.NoError(t, err)
+		return message
+	}
+	send := func(value any) {
+		payload, err := json.Marshal(value)
+		require.NoError(t, err)
+		require.NoError(t, writeFrame(sdk, payload))
+	}
+	ctx := ContextWithUIInputBroker(t.Context(), staticUIInputBroker{value: "runner-owned"})
+	ctx = ContextWithRunnerID(ctx, "worker-one")
+	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true})
+	initialized := make(chan error, 1)
+	go func() {
+		_, err := process.Initialize(ctx, "/workspace")
+		initialized <- err
+	}()
+	init := read()
+	assert.Equal(t, "extension.initialize", init.Method)
+	var params initializeParams
+	require.NoError(t, json.Unmarshal(init.Params, &params))
+	assert.Equal(t, "session:inline-1", params.Extension.ID)
+	assert.Equal(t, "worker-one", params.Extension.RunnerID)
+	assert.False(t, params.Capabilities["runtime"].(map[string]any)["backgroundTasks"].(bool))
+	assert.True(t, params.Capabilities["profiles"].(map[string]any)["remote"].(bool))
+	send(map[string]any{"jsonrpc": "2.0", "id": 100, "parentId": init.ID, "method": "kodelet.ui.input", "params": map[string]any{"title": "initialize"}})
+	assert.Contains(t, string(read().Result), "runner-owned")
+	send(map[string]any{"jsonrpc": "2.0", "id": init.ID, "result": InitializeResult{Name: "inline"}})
+	require.NoError(t, <-initialized)
+
+	updates := make(chan ToolExecutionResult, 1)
+	completed := make(chan error, 1)
+	store := &forkableMetadataStore{conversationID: "forked"}
+	ctx = kodelettools.ContextWithToolContext(ctx, kodelettools.ToolContext{MetadataStore: store})
+	go func() {
+		result, err := process.ExecuteToolStreaming(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{}, func(update ToolExecutionResult) { updates <- update })
+		if err == nil {
+			assert.Equal(t, "finished", result.Content)
+		}
+		completed <- err
+	}()
+	tool := read()
+	assert.Equal(t, "extension.tool.execute", tool.Method)
+	for _, method := range []string{"kodelet.tool.update", ConversationForkMethod, BackgroundTaskAcquireMethod} {
+		send(map[string]any{"jsonrpc": "2.0", "id": 101, "parentId": tool.ID, "method": method, "params": map[string]any{"content": "working"}})
+		response := read()
+		switch method {
+		case "kodelet.tool.update":
+			assert.Nil(t, response.Error)
+			assert.Equal(t, "working", (<-updates).Content)
+		case ConversationForkMethod:
+			assert.Contains(t, string(response.Result), "forked")
+		case BackgroundTaskAcquireMethod:
+			require.NotNil(t, response.Error)
+			assert.Contains(t, response.Error.Message, "not available")
+		}
+	}
+	send(map[string]any{"jsonrpc": "2.0", "id": 102, "parentId": 999999, "method": "kodelet.tool.update", "params": map[string]any{}})
+	require.NotNil(t, read().Error, "stale parents must not acquire another tool's update sink")
+	send(map[string]any{"jsonrpc": "2.0", "id": tool.ID, "result": ToolExecutionResult{Content: "finished"}})
+	require.NoError(t, <-completed)
+	assert.Nil(t, process.cmd)
+	assert.True(t, RuntimeCapabilitiesFromContext(ctx).BackgroundTasks, "attached capability narrowing must not mutate the host context")
+}
+
+func TestAttachedProcessCancellationAndDisconnectDoNotReplay(t *testing.T) {
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1"}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	reader := bufio.NewReader(sdk)
+	ctx, cancel := context.WithCancel(t.Context())
+	completed := make(chan error, 1)
+	go func() {
+		_, err := process.ExecuteTool(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	request, err := readIncomingMessage(reader)
+	require.NoError(t, err)
+	cancel()
+	notification, err := readIncomingMessage(reader)
+	require.NoError(t, err)
+	assert.Equal(t, "$/cancelRequest", notification.Method)
+	assert.JSONEq(t, `{"id":`+string(request.ID)+`}`, string(notification.Params))
+	require.ErrorIs(t, <-completed, context.Canceled)
+	go func() {
+		_, err := process.ExecuteTool(t.Context(), "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	_, err = readIncomingMessage(reader)
+	require.NoError(t, err)
+	require.NoError(t, sdk.Close())
+	select {
+	case err := <-completed:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not fail pending execution")
+	}
+	_, err = process.ExecuteTool(t.Context(), "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+	require.ErrorContains(t, err, "reattachment")
+	assert.Nil(t, process.cmd)
+}
+
+func TestAttachedProcessDisconnectCancelsParentBoundReverseRequest(t *testing.T) {
+	local, sdk := net.Pipe()
+	t.Cleanup(func() { _ = sdk.Close() })
+	require.NoError(t, sdk.SetDeadline(time.Now().Add(5*time.Second)))
+	process, err := AttachProcess(t.Context(), Extension{ID: "session:inline-1"}, DefaultConfig(), t.TempDir(), local)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, process.Close()) })
+	broker := &cancelAwareUIInputBroker{started: make(chan struct{}), canceled: make(chan struct{})}
+	ctx := ContextWithUIInputBroker(t.Context(), broker)
+	completed := make(chan error, 1)
+	go func() {
+		_, err := process.ExecuteTool(ctx, "inline_tool", json.RawMessage(`{}`), ExtensionCallContext{})
+		completed <- err
+	}()
+	request, err := readIncomingMessage(bufio.NewReader(sdk))
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(sdk, []byte(`{"jsonrpc":"2.0","id":100,"parentId":`+string(request.ID)+`,"method":"kodelet.ui.input","params":{"title":"waiting"}}`)))
+	select {
+	case <-broker.started:
+	case <-time.After(time.Second):
+		t.Fatal("reverse request did not start")
+	}
+	require.NoError(t, sdk.Close())
+	select {
+	case <-broker.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not cancel the parent-bound reverse request")
+	}
+	select {
+	case err := <-completed:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("generation cleanup deadlocked waiting for reverse request")
+	}
+}
 
 func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 	basePath := t.TempDir()
@@ -31,9 +183,11 @@ func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 
 func TestRuntimeCapabilitiesDefaultAndOverride(t *testing.T) {
 	assert.True(t, RuntimeCapabilitiesFromContext(context.Background()).BackgroundTasks)
+	assert.False(t, RuntimeCapabilitiesFromContext(context.Background()).RemoteProfiles)
 
-	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false})
+	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false, RemoteProfiles: true})
 	assert.False(t, RuntimeCapabilitiesFromContext(ctx).BackgroundTasks)
+	assert.True(t, RuntimeCapabilitiesFromContext(ctx).RemoteProfiles)
 }
 
 type capabilityRecordingExtensionUIHost struct {
@@ -73,12 +227,14 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 		name           string
 		ctx            context.Context
 		expected       bool
+		remoteProfiles bool
 		uiCapabilities *ExtensionUIHostCapabilities
 	}{
 		{name: "local default", ctx: context.Background(), expected: true},
 		{name: "explicitly unavailable", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false}), expected: false},
 		{name: "widget-only UI host", ctx: context.Background(), expected: true, uiCapabilities: &ExtensionUIHostCapabilities{Widgets: true}},
 		{name: "runner host", ctx: ContextWithBackgroundTaskHost(ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true}), &recordingBackgroundTaskHost{}), expected: true},
+		{name: "profile-capable runner", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true}), expected: true, remoteProfiles: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			clientReader, serverWriter := io.Pipe()
@@ -125,6 +281,9 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 			runtimeCapabilities, ok := request.Params.Capabilities["runtime"].(map[string]any)
 			require.True(t, ok)
 			assert.Equal(t, test.expected, runtimeCapabilities["backgroundTasks"])
+			profileCapabilities, ok := request.Params.Capabilities["profiles"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, test.remoteProfiles, profileCapabilities["remote"])
 			uiCapabilities, ok := request.Params.Capabilities["ui"].(map[string]any)
 			require.True(t, ok)
 			if test.uiCapabilities == nil {
@@ -505,6 +664,23 @@ func TestProcessCloseCleansBackgroundTasks(t *testing.T) {
 
 	require.NoError(t, process.Close())
 	assert.Equal(t, []UIExtensionOwner{source.owner}, host.cleanups)
+}
+
+func TestProcessRetainedHostContextSurvivesReinitializationButNotGenerationClose(t *testing.T) {
+	source := &processExtensionUISource{}
+	first, cancel := context.WithCancel(context.WithValue(t.Context(), rpcCallContextKey{}, "first-run"))
+	source.setHostContext(first)
+	retained := source.backgroundHostContext()
+	initialUI := source.hostContext()
+	cancel()
+	require.NoError(t, retained.Err())
+	source.setHostContext(context.WithValue(t.Context(), rpcCallContextKey{}, "new-run"))
+	require.NoError(t, retained.Err(), "reattachment must not cancel in-flight background lease releases")
+	assert.ErrorIs(t, initialUI.Err(), context.Canceled)
+	assert.Equal(t, "first-run", retained.Value(rpcCallContextKey{}))
+	assert.Equal(t, "new-run", source.hostContext().Value(rpcCallContextKey{}))
+	source.cancelHostContext()
+	assert.ErrorIs(t, retained.Err(), context.Canceled)
 }
 
 func TestProcessCloseCancelsAndWaitsForParentlessHostRequests(t *testing.T) {

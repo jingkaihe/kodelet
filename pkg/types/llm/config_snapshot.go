@@ -15,6 +15,7 @@ const ConversationConfigSnapshotVersion = 1
 type ConversationConfigSnapshot struct {
 	Version              int                            `json:"version" yaml:"version"`
 	Profile              string                         `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ExtensionProfile     bool                           `json:"extension_profile,omitempty" yaml:"extension_profile,omitempty"`
 	Provider             string                         `json:"provider" yaml:"provider"`
 	Model                string                         `json:"model" yaml:"model"`
 	WeakModel            string                         `json:"weak_model,omitempty" yaml:"weak_model,omitempty"`
@@ -42,8 +43,9 @@ type ConversationOpenAISnapshot struct {
 // ConversationAnthropicSnapshot captures Anthropic request semantics that must
 // remain stable for custom/adaptive-thinking models.
 type ConversationAnthropicSnapshot struct {
-	Platform         string `json:"platform,omitempty" yaml:"platform,omitempty"`
-	AdaptiveThinking bool   `json:"adaptive_thinking,omitempty" yaml:"adaptive_thinking,omitempty"`
+	Platform         string             `json:"platform,omitempty" yaml:"platform,omitempty"`
+	APIAccess        AnthropicAPIAccess `json:"api_access,omitempty" yaml:"api_access,omitempty"`
+	AdaptiveThinking bool               `json:"adaptive_thinking,omitempty" yaml:"adaptive_thinking,omitempty"`
 }
 
 // NewConversationConfigSnapshot creates a safe, versioned snapshot from the
@@ -59,6 +61,7 @@ func NewConversationConfigSnapshot(config Config) (*ConversationConfigSnapshot, 
 	snapshot := &ConversationConfigSnapshot{
 		Version:              ConversationConfigSnapshotVersion,
 		Profile:              strings.TrimSpace(config.Profile),
+		ExtensionProfile:     config.ExtensionProfile,
 		Provider:             strings.ToLower(strings.TrimSpace(config.Provider)),
 		Model:                strings.TrimSpace(config.Model),
 		WeakModel:            strings.TrimSpace(config.WeakModel),
@@ -85,6 +88,9 @@ func NewConversationConfigSnapshot(config Config) (*ConversationConfigSnapshot, 
 		}
 	case "anthropic":
 		snapshot.Anthropic = &ConversationAnthropicSnapshot{}
+		if config.ExtensionProfile {
+			snapshot.Anthropic.APIAccess = config.AnthropicAPIAccess
+		}
 		if config.Anthropic != nil {
 			snapshot.Anthropic.Platform = strings.TrimSpace(config.Anthropic.Platform)
 			snapshot.Anthropic.AdaptiveThinking = config.Anthropic.AdaptiveThinking
@@ -140,6 +146,13 @@ func (s *ConversationConfigSnapshot) Validate() error {
 			}
 		}
 	}
+	if s.Anthropic != nil {
+		switch s.Anthropic.APIAccess {
+		case "", AnthropicAPIAccessAuto, AnthropicAPIAccessAPIKey, AnthropicAPIAccessSubscription:
+		default:
+			return errors.Errorf("invalid conversation config snapshot Anthropic api_access %q", s.Anthropic.APIAccess)
+		}
+	}
 	return nil
 }
 
@@ -156,6 +169,7 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 	effort, _ := NormalizeReasoningEffort(s.ReasoningEffort)
 
 	config.Profile = strings.TrimSpace(s.Profile)
+	config.ExtensionProfile = s.ExtensionProfile
 	config.Provider = strings.ToLower(strings.TrimSpace(s.Provider))
 	config.Model = strings.TrimSpace(s.Model)
 	config.WeakModel = strings.TrimSpace(s.WeakModel)
@@ -201,6 +215,9 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 			config.Anthropic = &AnthropicConfig{}
 		}
 		config.Anthropic.Platform = strings.TrimSpace(anthropic.Platform)
+		if anthropic.APIAccess != "" {
+			config.AnthropicAPIAccess = anthropic.APIAccess
+		}
 		config.Anthropic.AdaptiveThinking = anthropic.AdaptiveThinking
 	}
 	return config, nil

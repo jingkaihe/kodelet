@@ -74,7 +74,7 @@ func executeEnvironmentTool(
 		return executeControlPlaneTool(ctx, thread, environment, rendererRegistry, toolName, toolInput, toolCallID, handler)
 	}
 	if tools.IsControlPlaneTool(toolName) {
-		result := tooltypes.BaseToolResult{Error: "control-plane tool is not available in the active run: " + toolName}
+		result := tooltypes.BaseToolResult{Error: "tool is not available in the current run: " + toolName}
 		structured := normalizeStructuredToolResult(toolName, result.StructuredData())
 		return ToolExecution{
 			Input:            toolInput,
@@ -158,7 +158,7 @@ func executeControlPlaneTool(
 ) ToolExecution {
 	tool, ok := tools.ControlPlaneTool(toolName)
 	if !ok {
-		result := tooltypes.BaseToolResult{Error: "control-plane tool is not registered: " + toolName}
+		result := tooltypes.BaseToolResult{Error: "tool is not registered: " + toolName}
 		structured := normalizeStructuredToolResult(toolName, result.StructuredData())
 		return ToolExecution{
 			Input:            toolInput,

@@ -142,6 +142,11 @@ func TestPeerQueuesRequestsWithoutStarvingControlCalls(t *testing.T) {
 	}
 
 	require.NoError(t, clientPeer.Call(t.Context(), MethodRunClose, RunCloseParams{RunID: "run-one"}, nil))
+	frameCtx, cancelFrame := context.WithTimeout(t.Context(), time.Second)
+	defer cancelFrame()
+	require.NoError(t, clientPeer.Call(frameCtx, MethodSessionExtensionFrame, ExtensionFrame{
+		AttachmentID: "attachment", RunID: "run-one", ExtensionID: "inline-1", Message: json.RawMessage(`{"id":1,"result":{}}`),
+	}, nil), "callback replies must make progress while ordinary request slots are occupied")
 	close(releaseSlow)
 	require.NoError(t, <-slowDone)
 	require.NoError(t, <-secondDone)

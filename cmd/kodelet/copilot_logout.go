@@ -14,30 +14,28 @@ import (
 )
 
 var copilotLogoutCmd = &cobra.Command{
-	Use:   "copilot-logout",
-	Short: "Logout from GitHub Copilot and remove stored credentials",
-	Long: `Logout from GitHub Copilot and remove stored credentials.
-
-This command will:
-1. Remove the stored authentication credentials from ~/.kodelet/copilot-subscription.json
-2. You will need to run 'kodelet copilot-login' again to access subscription-based models
-
-After running this command, you will no longer have access to GitHub Copilot
-subscription-based models until you authenticate again.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-
-		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
-
-		if err := runCopilotLogout(ctx, noConfirm); err != nil {
-			presenter.Error(err, "Failed to complete GitHub Copilot logout")
-			os.Exit(1)
+	Use:               "copilot-logout",
+	Short:             "Disconnect GitHub Copilot",
+	Long:              "Remove saved sign-in details with --local on the server machine while the server is stopped. Restart the server afterward to apply the change.",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		local, _ := cmd.Flags().GetBool("local")
+		if !local {
+			return errors.New("to disconnect GitHub Copilot, stop the server, run 'kodelet copilot-logout --local' on that machine, then restart 'kodelet serve'")
 		}
+		if err := validateLocalAdministrationFlags(cmd); err != nil {
+			return err
+		}
+		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
+		return runCopilotLogout(cmd.Context(), noConfirm)
 	},
 }
 
 func init() {
-	copilotLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
+	addRemoteAdministrationFlags(copilotLogoutCmd)
+	copilotLogoutCmd.Flags().Bool("local", false, "Remove sign-in details stored on this machine (stop the server first)")
+	copilotLogoutCmd.Flags().Bool("no-confirm", false, "Skip the confirmation prompt")
 }
 
 func runCopilotLogout(_ context.Context, noConfirm bool) error {

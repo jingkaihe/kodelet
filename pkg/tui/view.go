@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1282,10 +1283,50 @@ func (m model) reasoningEffortStyle(index int) lipgloss.Style {
 }
 
 func (m model) inputBottomLeftLabel() string {
-	if !m.running {
+	if m.startupPending {
+		return m.spinnerGlyph() + " Starting…"
+	}
+	if m.startupErr != nil {
+		return "Startup failed"
+	}
+	if m.running {
+		return m.flowingWaterFrame() + " " + m.workingStatusText()
+	}
+	if m.err != nil {
+		return "Error"
+	}
+	if m.initialHistoryPending {
+		return "Loading conversation…"
+	}
+	if m.extensionLifecyclePending {
+		return "Restoring extensions…"
+	}
+	if m.status == "editing" {
+		return "Editing…"
+	}
+	if m.slashCommandErr != nil {
+		return "Could not load commands"
+	}
+	if m.conversationID != "" {
 		return ""
 	}
-	return m.flowingWaterFrame() + " " + m.workingStatusText()
+	if m.resourcesLoading {
+		return m.spinnerGlyph() + " Loading extensions…"
+	}
+	if m.readyDuration > 0 {
+		label := "Ready"
+		if m.extensionCount != nil {
+			label = fmt.Sprintf("%d extensions", *m.extensionCount)
+			if *m.extensionCount == 1 {
+				label = "1 extension"
+			}
+		}
+		if m.readyDuration < time.Second {
+			return fmt.Sprintf("%s · %d ms", label, max(1, m.readyDuration.Milliseconds()))
+		}
+		return fmt.Sprintf("%s · %.1f s", label, m.readyDuration.Seconds())
+	}
+	return ""
 }
 
 func (m model) flowingWaterFrame() string {

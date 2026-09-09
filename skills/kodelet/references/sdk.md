@@ -4,7 +4,7 @@ The TypeScript SDK package is imported as `kodelet`. It provides both an agent c
 
 ## Agent sessions
 
-Use `Client` to launch Kodelet from Node/TypeScript and run prompts programmatically. By default the client uses the normal `kodelet` executable and the user's default profile/configuration.
+Use `Client` to launch the thin `kodelet acp` daemon client from Node/TypeScript. Set `server` and `runner` on `Client`, or use the normal daemon selection configuration. Standalone clients authenticate with client credentials (for example `KODELET_AUTH_TOKEN`); provider credentials stay on the daemon. `cwd` is interpreted by the selected runner, not used as the local subprocess directory.
 
 ```typescript
 import { Client } from "kodelet";
@@ -20,60 +20,19 @@ console.log(response.content);
 await client.close();
 ```
 
+ACP accepts individual stdout messages up to 64 MiB, including large saved-conversation replays and live tool results, and preserves UTF-8 across subprocess chunks. This is not a limit on total conversation history. A message above that bound, a pipe error, or unexpected stdout closure rejects pending requests and stops the child. Always await `session.close()` or `client.close()`: closing rejects pending work immediately, waits for process closure, and escalates from SIGTERM to SIGKILL after one second. If closure is still unconfirmed after another second, cleanup rejects instead of claiming success; keep any background lease until cleanup succeeds. Concurrent closes share the same cleanup attempt, and a failed close can be retried.
+
 Streaming sessions emit typed SDK events derived from ACP `session/update` JSON-RPC notifications:
 
 ```typescript
-import { Client, Profile, defineExtension, z } from "kodelet";
-
-const askQuestionExtension = defineExtension((ext) => {
-  ext.setMetadata({ name: "workspace", version: "0.1.0" });
-
-  ext.registerTool({
-    name: "ask_user_question",
-    description: "Ask the user to choose one option.",
-    inputSchema: z.object({
-      question: z.string(),
-      options: z.array(z.string()).min(2).max(5),
-    }),
-    async execute(input, ctx) {
-      const choice = await ctx.ui.select({
-        title: input.question,
-        options: input.options,
-        submitButtonText: "Select",
-      });
-      return choice ? `User selected: ${choice}` : "User dismissed the question.";
-    },
-  });
-});
-
-const profile = new Profile({
-  name: "openai",
-  provider: "openai",
-  model: "gpt-5.5",
-  max_tokens: 128000,
-  reasoning_effort: "xhigh",
-  tool_mode: "patch",
-  weak_model: "gpt-5.4-mini",
-  weak_model_max_tokens: 8192,
-  enable_fs_search_tools: false,
-  openai: {
-    api_mode: "responses",
-    platform: "codex",
-    service_tier: "fast",
-  },
-});
+import { Client } from "kodelet";
 
 const client = new Client();
 const session = await client.createSession({
-  profile,
-  extensions: [askQuestionExtension],
+  profile: "work", // Daemon-owned model profile; optional.
+  environmentProfile: "workspace", // Runner-owned environment profile; optional.
+  options: { maxTokens: 8192, maxTurns: 4, noSkills: true },
   streaming: true,
-  ui: {
-    async select(request) {
-      console.error(request.title, request.options);
-      return request.options[0];
-    },
-  },
 });
 
 session.on("assistant.message_delta", (event) => {
@@ -97,7 +56,9 @@ await client.close();
 
 Listeners receive every `tool.update`. To keep completed responses bounded, `response.events` retains only the latest transient snapshot for each `toolCallId`, followed by the authoritative `tool.result`.
 
-Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
+`options` accepts the typed `ExecutionOptions` contract: provider/model/weak model, token and turn limits, reasoning effort, weak-model selection, tool/skill/extension restrictions, command allowlists, and filesystem-search enablement. Explicit `false`, `0` where permitted, and empty lists are preserved. Inline `Profile` values accept the same options (legacy snake_case aliases are converted); an inline `name` is only a label, not a required daemon profile. Arbitrary provider configuration, endpoints, credentials, and client-local prompt paths are rejected. Model settings are locked when resuming a persisted conversation.
+
+Temporary SDK config files and the legacy `extensionTransport` selector no longer configure remote execution. `createSession({ extensions, ui })` uses negotiated inline ACP session extensions, while installed executable extensions run on the runner. Use ordinary `Client` sessions with client authentication for delegated model work. `session.close()` detaches; explicit `session.cancel()` cancels the active turn.
 
 ### Steering an active session
 
@@ -201,6 +162,35 @@ const conversationId = await ctx.forkConversation({ name: "Investigate authentic
 
 Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
 
+### ACP subagents and code search
+
+Use ordinary `Client` sessions with normal client credentials and the intended server/runner. Pass typed `options` directly; `profile` selects a configured or registered daemon profile, and `options.provider` must match it. Scoped `ctx.children` and `get_profile` remain removed.
+
+Use inline `agent.init` hooks for instructions, keeping extensions enabled. Explicitly allowlist search tools and disable skills; runner policy still applies, but the caller's presentation-only tool list is not inherited.
+
+For inherited context, create a named fork inside the tool handler, then load it with `createSession({ resume: conversationId })`. ACP preserves normal history and streaming; `TaskProgress.attach(session)` tracks activity. Steering never starts a new turn. Own cancellation and client cleanup before releasing any background lease. Runner-targeted credentials remain phase two.
+
+### Registered model profiles
+
+Declare a profile, then use its returned name in a later tool handler's `client.createSession({ profile: searchProfile })`:
+
+```typescript
+const searchProfile = ext.registerProfile({
+  name: "code-search",
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  reasoning_effort: "none",
+  max_tokens: 4096,
+  openai: {
+    platform: "copilot",
+    api_mode: "responses",
+  },
+  hidden: true,
+});
+```
+
+Profiles use ordinary snake_case configuration and built-in defaults, not daemon or parent model settings. Replace older `reasoningEffort` with `reasoning_effort`; session `ExecutionOptions` stays camelCase. For Claude subscriptions, use `provider: "anthropic"` and `anthropic_api_access: "subscription"`. Credentials stay on the daemon; host/runner restrictions still apply.
+
 ### Background extension work
 
 Acquire a host lifetime lease before starting work that can continue after the current handler returns, and release it only after the worker and its final state or UI updates finish:
@@ -281,6 +271,8 @@ surface.onInput((event) => {
 
 `surface.update(...)` is intentionally synchronous and replace-in-place. Persistent UI is scoped to the originating conversation, so one extension can use the same widget or surface ID independently in multiple conversations. The SDK keeps one frame in flight and one replaceable latest pending frame per surface, waiting for transport writes before sending the next snapshot; the Bubble Tea host independently keeps only the newest pending sequence per scoped surface. Input, focus, blur, and resize events use a separate ordered sequence, and stale events are discarded. A failed `surface.close()` keeps the handle owned and retryable; successful close releases the ID. If the extension process fails, Kodelet removes its widgets/surfaces and restores focus automatically.
 
+Use `surface.onClose(handler)` to clean up recording, timers, or input waits when the host closes the UI or `surface.close()` succeeds. It returns an unsubscribe function and calls the handler once, immediately if already closed. Surface closure does not cancel the daemon execution.
+
 ## Commands and dynamic recipes
 
 Prompt commands are checked before the LLM receives user input.
@@ -310,7 +302,7 @@ Command result actions:
 - `respond`: display a direct terminal/Web UI response; it is not fed into the LLM.
 - `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input. Set optional `display` to replace the slash command with different visible and persisted user text.
 
-Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`.
+Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list` for the selected workspace, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`. Recipe listing starts discovery extensions on the runner; recipe rendering can execute template commands in the selected directory.
 
 ## Native TUI shortcuts
 
@@ -356,4 +348,3 @@ Runnable TypeScript SDK examples live in `skills/kodelet/examples/sdk/`:
 
 - `basic-agent-session.ts` runs one prompt and prints the final response.
 - `streaming-agent-session.ts` streams assistant deltas as they arrive.
-- `inline-extension-session.ts` exposes an in-process TypeScript extension with an `sdk_echo` tool for the session.

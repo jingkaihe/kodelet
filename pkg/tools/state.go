@@ -63,18 +63,19 @@ func allowedToolNameSet(config llmtypes.Config) map[string]struct{} {
 }
 
 func filterDiscoveredToolsByAllowed(config llmtypes.Config, tools []tooltypes.Tool) []tooltypes.Tool {
-	if len(tools) == 0 || !hasExplicitAllowedTools(config) {
+	if len(tools) == 0 || (!hasExplicitAllowedTools(config) && config.ExecutionOptions == nil) {
 		return tools
 	}
 
 	allowed := allowedToolNameSet(config)
-	if len(allowed) == 0 {
+	if len(allowed) == 0 && hasExplicitAllowedTools(config) {
 		return nil
 	}
 
 	filtered := make([]tooltypes.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if _, ok := allowed[tool.Name()]; ok {
+		_, ok := allowed[tool.Name()]
+		if (ok || !hasExplicitAllowedTools(config)) && config.ExecutionOptions.ToolAllowed(tool.Name()) {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -99,6 +100,9 @@ func filterDuplicateTools(tools []tooltypes.Tool, reserved map[string]struct{}) 
 }
 
 func skillsEnabledForConfig(config llmtypes.Config) bool {
+	if !config.ExecutionOptions.ToolAllowed("skill") {
+		return false
+	}
 	if config.Skills != nil && !config.Skills.Enabled {
 		return false
 	}
@@ -168,13 +172,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	}
 
 	if len(state.tools) == 0 {
-		var allowedTools []string
-		if state.llmConfig.AllowedTools != nil {
-			allowedTools = state.llmConfig.AllowedTools
-		}
-		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
-		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableFSSearchTools)
-		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
+		state.tools = mainToolsForConfig(ctx, state.llmConfig)
 	}
 	state.configureTools()
 
@@ -184,19 +182,35 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 // WithMainTools returns an option that configures main tools
 func WithMainTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		var allowedTools []string
-		if s.llmConfig.AllowedTools != nil {
-			allowedTools = s.llmConfig.AllowedTools
-		}
-		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
-		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
-		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
+		s.tools = mainToolsForConfig(ctx, s.llmConfig)
 		if !skillsEnabledForConfig(s.llmConfig) {
 			s.tools = filterOutSkill(s.tools)
 		}
 		s.configureTools()
 		return nil
 	}
+}
+
+func mainToolsForConfig(ctx context.Context, config llmtypes.Config) []tooltypes.Tool {
+	if config.ExecutionOptions != nil && config.ExecutionOptions.AllowedTools != nil {
+		// Explicit selection resolves from the catalog, not from a parent's
+		// presentation defaults. Mandatory policy still wins, including deny-all.
+		policy := config.EnvironmentOptions()
+		if policy.ToolsDisabled() {
+			return nil
+		}
+		selected := GetMainToolsWithOptions(ctx, *policy.AllowedTools, config.EnableFSSearchTools)
+		filtered := selected[:0]
+		for _, tool := range selected {
+			if policy.ToolAllowed(tool.Name()) {
+				filtered = append(filtered, tool)
+			}
+		}
+		return filtered
+	}
+	allowedTools := enforceToolMode(config.AllowedTools, config.ToolMode, defaultMainTools)
+	selected := GetMainToolsWithOptions(ctx, allowedTools, config.EnableFSSearchTools)
+	return enforceToolModeOnResolvedTools(selected, allowedTools, config.ToolMode)
 }
 
 // WithExtensionTools returns an option that configures extension-provided tools.
@@ -287,7 +301,7 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 		return nil
 	}
 
-	discovery, err := skills.NewDiscovery()
+	discovery, err := skills.NewDiscovery(skills.WithDefaultDirsForCWD(llmConfig.WorkingDirectory))
 	if err != nil {
 		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
 		return nil
@@ -378,7 +392,7 @@ func enforceToolModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []strin
 }
 
 func noToolsConfigured(config llmtypes.Config) bool {
-	return len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker
+	return config.ExecutionOptions.ToolsDisabled() || (len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker)
 }
 
 // LockFile acquires an exclusive lock for the given file path.
@@ -428,7 +442,13 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	reserved := map[string]struct{}{}
 	tools = append(tools, filterDuplicateTools(s.tools, reserved)...)
 	tools = append(tools, filterDuplicateTools(s.extensionTools, reserved)...)
-	return tools
+	filtered := tools[:0]
+	for _, tool := range tools {
+		if s.llmConfig.ExecutionOptions.ToolAllowed(tool.Name()) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // GetLLMConfig returns the LLM configuration

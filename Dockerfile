@@ -44,19 +44,19 @@ RUN mkdir -p /out/home/nonroot/.kodelet && \
     chown -R 65532:65532 /out/home/nonroot && \
     chmod 0700 /out/home/nonroot /out/home/nonroot/.kodelet
 
-# Exercise Kodelet's normal startup path once for each target platform. This
-# downloads and checksum-verifies rg and fd without carrying the temporary
-# SQLite database into the final image.
-FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS runtime-dependencies
+# Download and checksum-verify target binaries using the release packaging path.
+# This runs on the build platform and does not depend on CLI startup side effects.
+FROM build AS runtime-dependencies
 
-ENV HOME=/home/nonroot \
-    KODELET_BASE_PATH=/home/nonroot/.kodelet
-
-COPY --from=build --chown=65532:65532 /out/kodelet /kodelet
-RUN ["/kodelet", "version"]
+COPY scripts/prepare-packaging-binaries.sh ./scripts/
+COPY scripts/package-binary-metadata/ ./scripts/package-binary-metadata/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    bash ./scripts/prepare-packaging-binaries.sh
 
 FROM ${RUNTIME_IMAGE}
 
+ARG TARGETARCH
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 
@@ -72,7 +72,7 @@ ENV HOME=/home/nonroot \
 
 COPY --from=build --chown=65532:65532 /out/home/nonroot/ /home/nonroot/
 COPY --from=build --chown=65532:65532 /out/kodelet /kodelet
-COPY --from=runtime-dependencies --chown=65532:65532 /home/nonroot/.kodelet/bin/ /usr/libexec/kodelet/
+COPY --from=runtime-dependencies --chown=65532:65532 /src/.build/package-binaries/linux-${TARGETARCH}/ /usr/libexec/kodelet/
 
 WORKDIR /home/nonroot
 USER 65532:65532
@@ -80,4 +80,4 @@ USER 65532:65532
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/kodelet", "serve", "--host=0.0.0.0", "--disable-control-plane-workspace"]
+ENTRYPOINT ["/kodelet", "serve", "--host=0.0.0.0", "--embedded-runner=false"]

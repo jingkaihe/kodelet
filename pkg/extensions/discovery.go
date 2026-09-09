@@ -21,6 +21,7 @@ const (
 	SourceKindLocalPlugin      SourceKind = "local_plugin"
 	SourceKindGlobalStandalone SourceKind = "global_standalone"
 	SourceKindGlobalPlugin     SourceKind = "global_plugin"
+	SourceKindSession          SourceKind = "session"
 )
 
 // Root describes a directory that should be scanned for extension executables.
@@ -268,14 +269,19 @@ func (d fileInfoDirEntry) Info() (os.FileInfo, error) { return d.info, nil }
 type matcher struct {
 	pluginRefs map[string]struct{}
 	paths      map[string]struct{}
+	identities map[string]struct{}
 	empty      bool
 }
 
 func newMatcher(patterns []string, workingDir string) matcher {
-	m := matcher{pluginRefs: map[string]struct{}{}, paths: map[string]struct{}{}, empty: len(patterns) == 0}
+	m := matcher{pluginRefs: map[string]struct{}{}, paths: map[string]struct{}{}, identities: map[string]struct{}{}, empty: len(patterns) == 0}
 	for _, pattern := range patterns {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
+			continue
+		}
+		if strings.HasPrefix(pattern, "session:") {
+			m.identities[pattern] = struct{}{}
 			continue
 		}
 		if looksLikePluginRef(pattern) {
@@ -284,7 +290,7 @@ func newMatcher(patterns []string, workingDir string) matcher {
 		}
 		m.paths[normalizePath(pattern, workingDir)] = struct{}{}
 	}
-	m.empty = len(m.pluginRefs) == 0 && len(m.paths) == 0
+	m.empty = len(m.pluginRefs) == 0 && len(m.paths) == 0 && len(m.identities) == 0
 	return m
 }
 
@@ -295,6 +301,10 @@ func (m matcher) allows(ext Extension) bool {
 func (m matcher) matches(ext Extension) bool {
 	if m.empty {
 		return false
+	}
+	if ext.Kind == SourceKindSession {
+		_, ok := m.identities[ext.ID]
+		return ok
 	}
 	if ext.PluginRef != "" {
 		if _, ok := m.pluginRefs[ext.PluginRef]; ok {

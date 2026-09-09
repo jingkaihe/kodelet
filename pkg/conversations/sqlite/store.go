@@ -46,6 +46,31 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	if err := saveConversationRecord(ctx, tx, record); err != nil {
 		return err
 	}
+	if admission, ok := conversations.TurnAdmissionFromContext(ctx); ok {
+		if admission.ConversationID != record.ID || admission.RunID == "" || admission.RunnerID == "" {
+			return errors.New("conversation checkpoint does not match its admission")
+		}
+		now := time.Now().UTC()
+		result, err := tx.ExecContext(ctx, `INSERT INTO conversation_runner_affinity
+			(conversation_id, runner_id, environment_profile, created_at, updated_at)
+			SELECT ?, ?, ?, ?, ? WHERE EXISTS (
+				SELECT 1 FROM chat_turns ct JOIN runner_runs rr ON rr.id = ct.run_id
+				WHERE ct.conversation_id = ? AND ct.run_id = ? AND ct.status = 'running'
+				AND NOT ct.cancel_requested AND rr.conversation_id = ct.conversation_id
+				AND rr.runner_id = ? AND rr.status = 'opening'
+			) ON CONFLICT(conversation_id) DO UPDATE SET updated_at = excluded.updated_at
+			WHERE conversation_runner_affinity.runner_id = excluded.runner_id
+			AND conversation_runner_affinity.environment_profile = excluded.environment_profile`,
+			admission.ConversationID, admission.RunnerID, admission.EnvironmentProfile, now, now,
+			admission.ConversationID, admission.RunID, admission.RunnerID)
+		if err != nil {
+			return errors.Wrap(err, "failed to checkpoint conversation affinity")
+		}
+		count, err := result.RowsAffected()
+		if err != nil || count != 1 {
+			return errors.New("conversation checkpoint admission was cancelled, changed or is unavailable")
+		}
+	}
 	return tx.Commit()
 }
 

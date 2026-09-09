@@ -83,6 +83,13 @@ type ConversationForker interface {
 	ForkConversation(ctx context.Context) (string, error)
 }
 
+// PendingUserMessageSaver checkpoints admitted input without appending it to the
+// live model context. Command/user-message transformations and pre-turn
+// compaction still run before SendMessage appends the input exactly once.
+type PendingUserMessageSaver interface {
+	SavePendingUserMessage(context.Context, string, ...string) error
+}
+
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread

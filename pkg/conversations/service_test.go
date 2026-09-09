@@ -206,6 +206,7 @@ func TestConversationService_ListConversationsPassesFilters(t *testing.T) {
 		SearchCWDTerm: "/home/test/workspace/kodelet",
 		CWD:           "/workspace/kodelet",
 		RunnerID:      "runner-1",
+		Provider:      "anthropic",
 		Limit:         1,
 	})
 	require.NoError(t, err)
@@ -213,6 +214,7 @@ func TestConversationService_ListConversationsPassesFilters(t *testing.T) {
 	assert.Equal(t, "/home/test/workspace/kodelet", received.SearchCWDTerm)
 	assert.Equal(t, "/workspace/kodelet", received.CWD)
 	assert.Equal(t, "runner-1", received.RunnerID)
+	assert.Equal(t, "anthropic", received.Provider)
 	assert.Equal(t, 1, received.Limit)
 	assert.Equal(t, []string{"/workspace/kodelet", "/workspace/other"}, response.CWDs)
 }

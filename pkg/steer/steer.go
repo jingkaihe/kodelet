@@ -122,7 +122,7 @@ func (s *Store) Enqueue(ctx context.Context, conversationID, content string, ima
 
 	var count int
 	if err := tx.GetContext(ctx, &count, `
-		SELECT COUNT(*) FROM steering_messages WHERE conversation_id = ?
+		SELECT COUNT(*) FROM steering_messages WHERE conversation_id = ? AND run_id=''
 	`, conversationID); err != nil {
 		return false, errors.Wrap(err, "failed to count queued steering messages")
 	}
@@ -139,7 +139,7 @@ func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, err
 	rows, err := s.db.QueryxContext(ctx, `
 		SELECT id, content, images_json, created_at
 		FROM steering_messages
-		WHERE conversation_id = ?
+		WHERE conversation_id = ? AND run_id=''
 		ORDER BY id ASC
 	`, conversationID)
 	if err != nil {
@@ -154,7 +154,8 @@ func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, err
 	return messages, nil
 }
 
-// Consume atomically removes and returns all pending steering messages for a conversation.
+// Consume atomically removes and returns pending ordinary steering messages.
+// Legacy run-scoped rows remain stored but must never reach an unrelated turn.
 func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -164,7 +165,7 @@ func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, 
 
 	rows, err := tx.QueryxContext(ctx, `
 		DELETE FROM steering_messages
-		WHERE conversation_id = ?
+		WHERE conversation_id = ? AND run_id=''
 		RETURNING id, content, images_json, created_at
 	`, conversationID)
 	if err != nil {
@@ -192,7 +193,7 @@ func (s *Store) HasPending(ctx context.Context, conversationID string) (bool, er
 	var pending bool
 	if err := s.db.GetContext(ctx, &pending, `
 		SELECT EXISTS(
-			SELECT 1 FROM steering_messages WHERE conversation_id = ?
+			SELECT 1 FROM steering_messages WHERE conversation_id = ? AND run_id=''
 		)
 	`, conversationID); err != nil {
 		return false, errors.Wrap(err, "failed to check pending steering messages")

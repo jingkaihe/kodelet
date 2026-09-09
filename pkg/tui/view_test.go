@@ -450,6 +450,44 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
 }
 
+func TestReadinessLabelPreservesActivityPriority(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.readyDuration = 1200 * time.Millisecond
+	assert.Equal(t, "Ready · 1.2 s", m.inputBottomLeftLabel())
+	m.status = "editing"
+	assert.Equal(t, "Editing…", m.inputBottomLeftLabel())
+	m.status = "ready"
+	m.resourcesLoading = true
+	assert.Equal(t, m.spinnerGlyph()+" Loading extensions…", m.inputBottomLeftLabel())
+	m.err = assert.AnError
+	assert.Equal(t, "Error", m.inputBottomLeftLabel())
+	m.running = true
+	assert.Contains(t, m.inputBottomLeftLabel(), "Following the thread…")
+}
+
+func TestStartupLabelsUseExistingSpinner(t *testing.T) {
+	for _, label := range []string{"Starting…", "Loading extensions…"} {
+		t.Run(label, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width, m.height = 80, 12
+			m.resize()
+			m.startupPending = label == "Starting…"
+			m.resourcesLoading = label == "Loading extensions…"
+			firstGlyph := m.spinnerGlyph()
+			assert.Equal(t, firstGlyph+" "+label, m.inputBottomLeftLabel())
+			assert.Contains(t, xansi.Strip(m.View().Content), firstGlyph+" "+label)
+			updated, command := m.Update(spinner.TickMsg{})
+			m = updated.(model)
+			assert.NotNil(t, command)
+			assert.NotEqual(t, firstGlyph, m.spinnerGlyph())
+			assert.Equal(t, m.spinnerGlyph()+" "+label, m.inputBottomLeftLabel())
+			assert.Contains(t, xansi.Strip(m.View().Content), m.spinnerGlyph()+" "+label)
+		})
+	}
+}
+
 func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -639,12 +677,21 @@ func TestElapsedPlaceholdersResetWhenSwitchingConversations(t *testing.T) {
 }
 
 func TestComposerLabelThemeColors(t *testing.T) {
+	t.Cleanup(func() { applyTheme(themes[DefaultThemeName]) })
 	for _, theme := range themes {
 		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
 		assert.NotEmpty(t, theme.ComposerFlow)
 		assert.NotEmpty(t, theme.SlashCommand.Selected)
 		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Description)
 		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Hint)
+		applyTheme(theme)
+		label := renderComposerBottomLeftLabel("9 extensions · 627 ms")
+		assert.Equal(t, themeColor(theme.ComposerFlow), composerFlowStyle.GetForeground())
+		assert.Equal(t, themeColor(theme.ComposerLabel), composerLabelStyle.GetForeground())
+		accent, _ := styleSequences(composerFlowStyle)
+		muted, _ := styleSequences(composerLabelStyle)
+		assert.Contains(t, label, accent+"9", theme.Name)
+		assert.Contains(t, label, muted+" extensions · 627 ms", theme.Name)
 	}
 	assert.Equal(t, themes[DefaultThemeName].Markdown.Code, themes[DefaultThemeName].SlashCommand.Command)
 }

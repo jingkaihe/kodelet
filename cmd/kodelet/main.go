@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/binaries"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -59,6 +57,11 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 	}
 	if configured := strings.TrimSpace(viper.GetString("server")); configured != "" {
 		return configured, true
+	}
+	if directory, err := localServerDirectory(); err == nil {
+		if connection, err := readLocalServerConnection(directory); err == nil {
+			return connection.URL, false
+		}
 	}
 	return strings.TrimSpace(value), false
 }
@@ -121,7 +124,8 @@ func loadConfigFiles() error {
 		return readConfigFile(overrideConfigFile, "isolated override")
 	}
 
-	// Layered config: global first, then repo-level override
+	// Process settings belong to the daemon/client/runner operator. Repository
+	// environment settings are loaded separately by each runner execution CWD.
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME/.kodelet")
@@ -131,11 +135,6 @@ func loadConfigFiles() error {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
-	}
-
-	// Then, try to merge repo-level config which will override global settings
-	if _, err := os.Stat("kodelet-config.yaml"); err == nil {
-		mergeRepositoryConfigFile("kodelet-config.yaml")
 	}
 
 	if overrideConfigFile != "" {
@@ -201,13 +200,13 @@ func validateTrustedConfigPermissions(configFile string) error {
 		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.Errorf("trusted control-plane config file %q must be a regular file", configFile)
+		return errors.Errorf("trusted server config file %q must be a regular file", configFile)
 	}
 	if containsStaticTokens && info.Mode().Perm()&0o077 != 0 {
 		return errors.Errorf("trusted config file %q containing static authentication tokens must not be accessible by group or other users", configFile)
 	}
 	if info.Mode().Perm()&0o022 != 0 {
-		return errors.Errorf("trusted control-plane config file %q must not be writable by group or other users", configFile)
+		return errors.Errorf("trusted server config file %q must not be writable by group or other users", configFile)
 	}
 	return nil
 }
@@ -252,44 +251,18 @@ func configSecretPresent(value any) bool {
 	return ok && strings.TrimSpace(secret) != ""
 }
 
-func mergeRepositoryConfigFile(configFile string) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to read repo-level config file")
-		return
-	}
-
-	var settings map[string]any
-	if err := yaml.Unmarshal(data, &settings); err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to parse repo-level config file")
-		return
-	}
-	for key := range settings {
-		normalizedKey := strings.ToLower(strings.TrimSpace(key))
-		if normalizedKey == "server" || normalizedKey == "serve" || strings.HasPrefix(normalizedKey, "serve.") {
-			delete(settings, key)
-		}
-	}
-	if err := viper.MergeConfigMap(settings); err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to merge repo-level config file")
-		return
-	}
-	logger.G(context.TODO()).WithField("config_file", configFile).Debug("Merged repo-level config file")
-}
-
 var rootCmd = &cobra.Command{
 	Use:   "kodelet",
 	Short: "Kodelet is a CLI tool for software engineering and production operations tasks",
 	Long:  `Kodelet is a lightweight CLI tool that helps with software engineering and production operations tasks.`,
+	Args:  cobra.ArbitraryArgs,
 	// Default behavior is to show help if no arguments are provided
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			// If arguments are provided but no subcommand, forward to run command
-			runCmd.Run(cmd, args)
-		} else {
-			cmd.Help()
-			os.Exit(1)
+			return runControlPlaneCommand(cmd, args)
 		}
+		return cmd.Help()
 	},
 }
 
@@ -365,6 +338,7 @@ func main() {
 		}
 	})
 
+	addRunFlags(rootCmd)
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides config; defaults to gpt-6-astra for OpenAI and Codex)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
@@ -382,7 +356,7 @@ func main() {
 	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
 	rootCmd.PersistentFlags().String("tool-mode", "full", "Tool interaction mode (full, patch)")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
-	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
+	rootCmd.PersistentFlags().String("profile", "", "Model profile to use")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
 	rootCmd.PersistentFlags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools (glob_tool and grep_tool)")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
@@ -426,7 +400,7 @@ func main() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
-	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(remoteProfileCmd)
 	rootCmd.AddCommand(dbCmd)
 
 	// Initialize telemetry with tracing
@@ -446,16 +420,9 @@ func main() {
 		}()
 	}
 
-	// Ensure required external binaries are installed
-	binaries.EnsureDepsInstalled(ctx)
-
-	// Run database migrations once at startup (skip for db commands to allow manual control)
-	skipMigrations := len(os.Args) > 1 && os.Args[1] == "db"
-	if !skipMigrations {
-		if err := db.RunMigrations(ctx, migrations.All()); err != nil {
-			logger.G(ctx).WithError(err).Fatal("Failed to run database migrations")
-		}
-	}
+	// Resolve the command and its flags before touching local execution resources.
+	// Thin clients must work even when no local conversation database is writable.
+	rootCmd.PersistentPreRunE = initializeCommandResources
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
@@ -478,6 +445,21 @@ func main() {
 
 	// Execute
 	if err := executeCLICommand(ctx, rootCmd); err != nil {
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130)
+		}
 		os.Exit(1)
 	}
+}
+
+func initializeCommandResources(cmd *cobra.Command, _ []string) error {
+	switch cmd.Name() {
+	case "start":
+		if parent := cmd.Parent(); parent != nil && parent.Name() == "runner" {
+			binaries.EnsureDepsInstalled(cmd.Context())
+		}
+	}
+	// Clients and installation/inspection commands do not own the conversation
+	// database. Explicit db administration initializes only what its command needs.
+	return nil
 }

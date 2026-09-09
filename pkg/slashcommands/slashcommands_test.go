@@ -47,6 +47,11 @@ func TestParseArgs(t *testing.T) {
 		{name: "kv only", args: "target=main draft=false", wantKV: map[string]string{"target": "main", "draft": "false"}, wantAdditional: ""},
 		{name: "kv and text", args: "target=main fix the bug", wantKV: map[string]string{"target": "main"}, wantAdditional: "fix the bug"},
 		{name: "quoted value", args: `title="my feature" draft=true`, wantKV: map[string]string{"title": "my feature", "draft": "true"}, wantAdditional: ""},
+		{name: "escaped quotes", args: `title="say \"hello\"" draft=true more text`, wantKV: map[string]string{"title": `say "hello"`, "draft": "true"}, wantAdditional: "more text"},
+		{name: "escaped controls", args: `text="a\nb\t\x00"`, wantKV: map[string]string{"text": "a\nb\t\x00"}},
+		{name: "literal backslashes", args: `text="\\n\\t\\"`, wantKV: map[string]string{"text": `\n\t\`}},
+		{name: "unknown escape remains literal", args: `text="a\q b"`, wantKV: map[string]string{"text": `a\q b`}},
+		{name: "unterminated quote", args: `text="hello`, wantKV: map[string]string{"text": "hello"}},
 	}
 
 	for _, tt := range tests {

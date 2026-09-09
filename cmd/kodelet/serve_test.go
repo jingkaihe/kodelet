@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -71,9 +72,9 @@ func TestValidateServeConfig(t *testing.T) {
 			name: "port too low",
 			config: &ServeConfig{
 				Host: "localhost",
-				Port: 0,
+				Port: -1,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "port too high",
@@ -81,7 +82,7 @@ func TestValidateServeConfig(t *testing.T) {
 				Host: "localhost",
 				Port: 65536,
 			},
-			expectedError: "port must be between 1 and 65535",
+			expectedError: "port must be between 0 and 65535",
 		},
 		{
 			name: "privileged port warning",
@@ -184,15 +185,14 @@ func TestValidateServeConfig(t *testing.T) {
 			expectedError: "invalid cors-origin",
 		},
 		{
-			name: "control-plane workspace disabled with cwd",
+			name: "removed control-plane cwd",
 			config: &ServeConfig{
-				Host:                         "localhost",
-				Port:                         8080,
-				CompactRatio:                 0.8,
-				CWD:                          "/srv/kodelet",
-				DisableControlPlaneWorkspace: true,
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				CWD:          "/srv/kodelet",
 			},
-			expectedError: "cwd cannot be set when the control-plane workspace is disabled",
+			expectedError: "serve --cwd is no longer supported",
 		},
 	}
 
@@ -481,16 +481,6 @@ func TestBuildControlPlaneServerConfigAuthResolution(t *testing.T) {
 		assert.Empty(t, serverConfig.AuthToken)
 		assert.Empty(t, serverConfig.RunnerAuthToken)
 	})
-
-	t.Run("control-plane workspace setting is preserved", func(t *testing.T) {
-		config := NewServeConfig()
-		config.DisableControlPlaneWorkspace = true
-
-		serverConfig, err := buildControlPlaneServerConfig(config)
-		require.NoError(t, err)
-
-		assert.True(t, serverConfig.DisableControlPlaneWorkspace)
-	})
 }
 
 func TestLoadOIDCClientSecret(t *testing.T) {
@@ -565,6 +555,107 @@ func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://app.example.com", "http://localhost:3000"}, config.CORSOrigins)
 }
 
+func TestServeEmbeddedRunnerConfiguration(t *testing.T) {
+	workspace := t.TempDir()
+	setTrustedServeConfigForTest(t, map[string]any{
+		"embedded_runner":  true,
+		"runner_workspace": workspace,
+		"port":             0,
+		"runner_settings":  map[string]any{"allowed_tools": []string{"file_read"}},
+	})
+	config := getServeConfigFromFlags(newServeCommandForTest())
+	require.NoError(t, config.ConfigError)
+	server, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	require.NotNil(t, server.EmbeddedRunner)
+	assert.Equal(t, workspace, server.EmbeddedRunner.Workspace)
+	assert.Equal(t, 0, server.Port)
+	assert.Equal(t, config.RunnerSettings, server.EmbeddedRunner.Settings)
+
+	cmd := newServeCommandForTest()
+	otherWorkspace := t.TempDir()
+	require.NoError(t, cmd.Flags().Set("runner-workspace", otherWorkspace))
+	server, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	require.NoError(t, err)
+	assert.Equal(t, otherWorkspace, server.EmbeddedRunner.Workspace)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("runner-workspace", ""))
+	server, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	require.NoError(t, err)
+	startupCWD, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, startupCWD, server.EmbeddedRunner.Workspace)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("embedded-runner", "false"))
+	config = getServeConfigFromFlags(cmd)
+	server, err = buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.Nil(t, server.EmbeddedRunner)
+
+	cmd = newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("cwd", workspace))
+	_, err = buildControlPlaneServerConfig(getServeConfigFromFlags(cmd))
+	assert.ErrorContains(t, err, "--runner-workspace")
+}
+
+func TestServeDefaultsToEmbeddedWithoutLocalFallback(t *testing.T) {
+	config := NewServeConfig()
+	require.True(t, config.EmbeddedRunner)
+	server, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	require.NotNil(t, server.EmbeddedRunner)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, cwd, server.EmbeddedRunner.Workspace)
+
+	config.EmbeddedRunner = false
+	server, err = buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.Nil(t, server.EmbeddedRunner)
+	config.CWD = cwd
+	_, err = buildControlPlaneServerConfig(config)
+	require.ErrorContains(t, err, "--runner-workspace")
+}
+
+func TestServeIgnoresDeprecatedWorkspaceSetting(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		for _, legacyValue := range []bool{true, false} {
+			for _, flag := range []string{"", "--disable-control-plane-workspace", "--disable-control-plane-workspace=true", "--disable-control-plane-workspace=false"} {
+				name := "embedded=" + strconv.FormatBool(enabled) + "/yaml=" + strconv.FormatBool(legacyValue) + "/" + flag
+				t.Run(name, func(t *testing.T) {
+					workspace := t.TempDir()
+					setTrustedServeConfigForTest(t, map[string]any{
+						"disable_control_plane_workspace": legacyValue,
+						"runner_workspace":                workspace,
+					})
+					cmd := newServeCommandForTest()
+					if !enabled {
+						require.NoError(t, cmd.Flags().Set("embedded-runner", "false"))
+					}
+					if flag != "" {
+						require.NoError(t, cmd.ParseFlags([]string{flag}))
+					}
+
+					config := getServeConfigFromFlags(cmd)
+					require.NoError(t, config.ConfigError)
+					assert.Equal(t, enabled, config.EmbeddedRunner)
+					assert.Equal(t, legacyValue, viper.Get("serve.disable_control_plane_workspace"))
+					server, err := buildControlPlaneServerConfig(config)
+					require.NoError(t, err)
+					if enabled {
+						require.NotNil(t, server.EmbeddedRunner)
+						assert.Equal(t, workspace, server.EmbeddedRunner.Workspace)
+					} else {
+						assert.Nil(t, server.EmbeddedRunner)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
 		"host":                            "127.0.0.1",
@@ -600,7 +691,6 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
 	assert.Empty(t, config.RunnerAuthToken)
-	assert.False(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, []string{"https://app.example.com"}, config.CORSOrigins)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 	assert.Equal(t, "kodelet", config.OIDC.ClientID)
@@ -629,6 +719,8 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	t.Setenv("KODELET_SERVE_RUNNER_AUTH_MODE", "none")
 	t.Setenv("KODELET_SERVE_SKIP_AUTH", "true")
 	t.Setenv("KODELET_SERVE_OIDC_ISSUER", "https://environment.example.com")
+	t.Setenv("KODELET_SERVE_EMBEDDED_RUNNER", "false")
+	t.Setenv("KODELET_SERVE_RUNNER_WORKSPACE", "/untrusted/workspace")
 
 	config := getServeConfigFromFlags(newServeCommandForTest())
 
@@ -637,6 +729,8 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	assert.Equal(t, controlplane.RunnerAuthModeToken, config.RunnerAuthMode)
 	assert.False(t, config.SkipAuth)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
+	assert.True(t, config.EmbeddedRunner)
+	assert.Empty(t, config.RunnerWorkspace)
 }
 
 func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) {
@@ -668,7 +762,6 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
 	assert.Equal(t, controlplane.RunnerAuthModeNone, config.RunnerAuthMode)
 	assert.Equal(t, "flag-token", config.AuthToken)
-	assert.False(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, "https://flag-issuer.example.com", config.OIDC.IssuerURL)
 	assert.False(t, config.OIDC.AllowAnyUser)
 }
@@ -784,7 +877,6 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 	assert.Equal(t, []string{"runners@example.com"}, config.OIDC.RunnerAdminEmails)
 	assert.True(t, config.OIDC.AllowAnyUser)
 	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
-	assert.True(t, config.DisableControlPlaneWorkspace)
 	assert.Nil(t, cmd.Flags().Lookup("oidc-client-secret"))
 }
 

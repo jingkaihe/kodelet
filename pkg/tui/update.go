@@ -69,6 +69,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case initializedMsg:
+		if !m.startupPending || m.ctx.Err() != nil {
+			if msg.closeRunner != nil {
+				msg.closeRunner()
+			}
+			return m, nil
+		}
+		m.startupPending = false
+		m.initialize = nil
+		m.closeInitializedRunner = msg.closeRunner
+		if msg.err != nil {
+			m.startupErr = msg.err
+			m.err = msg.err
+			m.status = "startup failed"
+			m.resourcesLoading = false
+			m.entries = append(m.entries, chatEntry{kind: entryInfo, title: "Could not start chat", content: msg.err.Error()})
+			m.refreshViewport(false)
+			return m, nil
+		}
+		msg.config.Remote = true
+		m.configure(msg.config)
+		m.resize()
+		m.refreshViewport(false)
+		return m, tea.Batch(m.initialResourceCommands()...)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -102,6 +127,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case extensionUITranscriptMsg:
 		state := m.stateForKey(msg.conversationKey)
 		if state == nil {
+			for _, candidate := range m.conversations {
+				if candidate.conversationID == msg.conversationKey {
+					state = candidate
+					break
+				}
+			}
+		}
+		if state == nil {
 			return m, waitForMsg(m.runCh)
 		}
 		active := state == m.conversationState
@@ -114,6 +147,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForMsg(m.runCh)
 
 	case uiPromptRequestMsg:
+		if msg.prompt.ctx != nil && msg.prompt.ctx.Err() != nil {
+			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+			return m, waitForMsg(m.runCh)
+		}
 		state := m.uiBrokerState(msg.runID, msg.conversationKey)
 		if state == nil {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui input request is no longer active"})
@@ -126,6 +163,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg.prompt.runID = msg.runID
 		cmd := m.openUIPromptForState(state, msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
+	case uiPromptDismissMsg:
+		state := m.uiBrokerState(msg.runID, msg.conversationKey)
+		if state != nil && state.activeUIPrompt != nil && state.activeUIPrompt.response == msg.response {
+			cmd := m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+			return m, tea.Batch(waitForMsg(m.runCh), cmd)
+		}
+		return m, waitForMsg(m.runCh)
 
 	case uiNotificationMsg:
 		state := m.uiBrokerState(msg.runID, msg.conversationKey)
@@ -266,6 +311,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if reloadSlashCommands {
 			cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD()))
 		}
+		if m.remote && msg.err == nil {
+			cmds = append(cmds, m.loadRemoteSlashCommands(state), m.loadRemoteMessageHistory(state))
+		}
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
 		}
@@ -378,7 +426,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			historyErr := history.err
 			if historyErr == nil {
-				historyErr = errors.New("control-plane conversation history is unavailable")
+				historyErr = errors.New("conversation history is unavailable")
 			}
 			m.finishUncertainObservedConversationRun(state, msg.runID)
 			state.err = errors.Wrap(historyErr, "failed to synchronize conversation history")
@@ -475,6 +523,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil {
 			break
 		}
+		// Saved discovery uses server-pinned settings rather than the displayed
+		// profile. A new-conversation probe cannot populate a saved environment.
+		if msg.remote && (msg.conversationID != state.conversationID || (msg.conversationID == "" && msg.profile != state.profile)) {
+			break
+		}
+		if msg.remote && msg.discoveryID != 0 && msg.discoveryID != state.discoveryID {
+			break
+		}
 		active := state == m.conversationState
 		currentState := m.conversationState
 		m.conversationState = state
@@ -482,13 +538,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.conversationState = currentState
 			break
 		}
+		if msg.remote {
+			m.resourcesLoading = false
+			m.readinessStartedAt = time.Time{}
+			m.readyDuration = 0
+			m.extensionCount = nil
+			if msg.err == nil {
+				m.extensionCount = msg.extensionCount
+				if m.conversationID == "" {
+					m.readyDuration = msg.readyDuration
+				}
+			}
+		}
 		if msg.extensionsOnly {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
 			m.extensionShortcuts = effectiveExtensionShortcuts(m.ctx, msg.shortcuts)
 		} else {
 			m.slashCommands = msg.commands
 			m.extensionShortcuts = nil
-			if !m.extensionDiscoveryBlocked {
+			m.shortcutDigest = ""
+			if msg.remote && msg.err == nil {
+				m.extensionShortcuts = effectiveExtensionShortcuts(m.ctx, msg.shortcuts)
+				m.shortcutDigest = msg.shortcutDigest
+			}
+			if !msg.remote && !m.extensionDiscoveryBlocked {
 				cmds = append(cmds, loadExtensionSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD(), m.extensionRuntimes))
 			}
 		}
@@ -513,6 +586,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var promptFocusCmd tea.Cmd
 		if state.activeUIPrompt != nil && state.activeUIPrompt.runID == msg.callID {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		}
+		if m.remote {
+			promptFocusCmd = tea.Batch(promptFocusCmd, m.loadRemoteSlashCommands(state))
 		}
 		if msg.err == nil && msg.result != nil {
 			switch msg.result.Action {
@@ -553,6 +629,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state == nil {
 			break
 		}
+		if msg.remote {
+			if msg.cwd != slashCommandCWDForState(state) {
+				break
+			}
+			if msg.err != nil {
+				return m, m.addUINotification(uiNotification{conversationKey: state.key, level: uiNotificationWarning, title: "Message history unavailable", message: msg.err.Error()})
+			}
+			currentState := m.conversationState
+			m.conversationState = state
+			m.messageHistoryScopeCWD = msg.scopeCWD
+			// Loading is asynchronous: prompts submitted in the meantime must
+			// remain newer than the saved history, not be reordered behind it.
+			m.prependMessageHistoryTexts(msg.messages)
+			if state == currentState && m.historySearch != nil {
+				m.applyHistorySearchQuery()
+				m.resize()
+				m.refreshViewport(false)
+			}
+			m.conversationState = currentState
+			break
+		}
 		currentState := m.conversationState
 		m.conversationState = state
 		if strings.TrimSpace(msg.scopeCWD) != strings.TrimSpace(m.messageHistoryScopeCWD) {
@@ -567,6 +664,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.appendMessageHistoryTexts(msg.messages)
 		m.conversationState = currentState
+
+	case messageHistorySavedMsg:
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && m.stateForKey(msg.conversationKey) != nil {
+			return m, tea.Batch(waitForMsg(m.runCh), m.addUINotification(uiNotification{conversationKey: msg.conversationKey, level: uiNotificationWarning, title: "Message history was not saved", message: msg.err.Error()}))
+		}
+		return m, waitForMsg(m.runCh)
 
 	case conversationListMsg:
 		m.applyConversationList(msg)
@@ -600,6 +703,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" && m.remote {
 			m.cancel()
 			return m, tea.Quit
+		}
+		if m.startupPending || m.startupErr != nil {
+			switch key {
+			case "ctrl+d":
+				m.cancel()
+				return m, tea.Quit
+			case "enter", "ctrl+l", "ctrl+t", "ctrl+y", "ctrl+g":
+				return m, nil
+			}
 		}
 		if m.shortcutsOpen {
 			switch key {
@@ -690,9 +802,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+t":
 			if m.canChangeProfile() {
-				m.toggleProfilePickerFromKeyboard()
+				cmd := m.toggleProfilePickerFromKeyboard()
 				m.resize()
 				m.refreshViewport(false)
+				return m, cmd
 			}
 			return m, nil
 		case "ctrl+y":
@@ -770,10 +883,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.profilePickerOpen {
-				m.selectProfilePickerOption(m.profilePickerIndex)
+				cmd := m.selectProfilePickerOption(m.profilePickerIndex)
 				m.resize()
 				m.refreshViewport(false)
-				return m, nil
+				return m, cmd
 			}
 			if m.reasoningPickerOpen {
 				m.selectReasoningPickerOption(m.reasoningPickerIndex)
@@ -823,10 +936,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
 			if optionIndex, ok := m.profilePickerOptionAt(mouse.X, mouse.Y); ok {
-				m.selectProfilePickerOption(optionIndex)
+				cmd := m.selectProfilePickerOption(optionIndex)
 				m.resize()
 				m.refreshViewport(false)
-				return m, nil
+				return m, cmd
 			}
 			if m.profileComposerRegionContains(mouse.X, mouse.Y) {
 				m.toggleProfilePickerFromClick()
@@ -971,7 +1084,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !streamCancelled {
 				streamErr := msg.err
 				if streamErr == nil {
-					streamErr = errors.New("control-plane conversation stream ended")
+					streamErr = errors.New("the connection to the conversation ended")
 				}
 				state.err = streamErr
 				if shouldReconnect {
@@ -986,7 +1099,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !streamCancelled {
 			streamErr := msg.err
 			if streamErr == nil {
-				streamErr = errors.New("control-plane conversation stream ended")
+				streamErr = errors.New("the connection to the conversation ended")
 			}
 			state.err = streamErr
 			if shouldReconnect {
@@ -1434,6 +1547,9 @@ func (m *model) beginObservedConversationRun(state *conversationState, runID int
 	}
 	state.streamConnectedActive = true
 	state.streamTurnUncertain = false
+	state.resourcesLoading = false
+	state.readinessStartedAt = time.Time{}
+	state.readyDuration = 0
 	if state.running {
 		return
 	}
@@ -1547,6 +1663,9 @@ func (m *model) resize() {
 }
 
 func (m *model) submit() tea.Cmd {
+	if m.startupPending || m.startupErr != nil {
+		return nil
+	}
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" {
 		return nil
@@ -1626,7 +1745,7 @@ func (m *model) startConversationRunPreservingComposer(state *conversationState,
 
 func (m *model) startConversationRunWithComposer(state *conversationState, message string, clearComposer bool) tea.Cmd {
 	message = strings.TrimSpace(message)
-	if state == nil || message == "" || state.running {
+	if m.startupPending || m.startupErr != nil || m.runner == nil || state == nil || message == "" || state.running {
 		return nil
 	}
 	active := state == m.conversationState
@@ -1634,6 +1753,11 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	if conversationID == "" {
 		return nil
 	}
+	// Readiness ends at the first run, even if discovery is still pending.
+	// Later refreshes must not count model response time or restore its label.
+	state.resourcesLoading = false
+	state.readinessStartedAt = time.Time{}
+	state.readyDuration = 0
 	m.stopConversationStream(state)
 	conversationKey := state.key
 	if strings.TrimSpace(state.title) == "" {
@@ -1707,7 +1831,12 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 
 	return func() tea.Msg {
 		if persistMessageHistory != nil {
-			_ = persistMessageHistory()
+			if msg := persistMessageHistory(); msg != nil {
+				select {
+				case runCh <- msg:
+				case <-uiDone:
+				}
+			}
 		}
 		go func() {
 			defer uiBroker.close()

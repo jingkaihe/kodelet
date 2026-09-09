@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	pkglogger "github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -276,6 +277,7 @@ func TestRunnerCloseReleasesWorkspaceLockAfterBoundedTerminalCleanup(t *testing.
 
 func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	workspace := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	store, err := localstate.NewStoreAt(t.TempDir())
 	require.NoError(t, err)
 
@@ -344,7 +346,8 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	assert.Nil(t, runner.credential)
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
-	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	provider := &recordingRuntimeProvider{runtime: runtime}
+	runner.service.runtimeProvider = provider
 	runner.service.configLoader = func(string) (llmtypes.Config, error) {
 		return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
 	}
@@ -361,10 +364,25 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		t.Fatal("runner did not register")
 	}
 	assert.NotEqual(t, "runner-stale", registration.RunnerID)
+	assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: true}, provider.capabilities, "initial discovery must follow server capability negotiation")
 	require.Eventually(t, func() bool {
 		entry, ok := registry.Runner(registration.RunnerID)
 		return ok && entry.Status == runnerregistry.RunnerStatusIdle && entry.ManifestDigest != ""
 	}, 5*time.Second, 10*time.Millisecond)
+
+	t.Run("composer-history", func(t *testing.T) {
+		entry, found := registry.Runner(registration.RunnerID)
+		require.True(t, found)
+		assert.True(t, entry.WorkspaceMessageHistory, "the runner must advertise history support on registration")
+		var appended protocol.WorkspaceMessageHistoryResult
+		require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory,
+			protocol.WorkspaceMessageHistoryParams{Entry: &messagehistory.Entry{Text: "/goal raw message over the wire"}}, &appended))
+		assert.Equal(t, protocol.WorkspaceMessageHistoryResult{CWD: workspace, ScopeCWD: workspace}, appended)
+		var listed protocol.WorkspaceMessageHistoryResult
+		require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceMessageHistory,
+			protocol.WorkspaceMessageHistoryParams{}, &listed))
+		assert.Equal(t, []string{"/goal raw message over the wire"}, listed.Messages)
+	})
 
 	metadata, found, err := store.ReadWorkspaceLockMetadata(workspace)
 	require.NoError(t, err)
@@ -394,42 +412,83 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 }
 
 func TestRunnerStopsCleanlyWhenInitialManifestProbeIsCanceled(t *testing.T) {
-	workspace := t.TempDir()
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	runner, err := NewRunner(t.Context(), RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: workspace,
-		Store:     store,
-	})
-	require.NoError(t, err)
-	runtime := extensions.EmptyRuntime()
-	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
-	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
-	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
-	provider := &blockingInitialProbeInstanceProvider{workspace: workspace, started: make(chan struct{})}
-	runner.service.instanceProvider = provider
+	for _, stop := range []string{"cancel", "disconnect"} {
+		t.Run(stop, func(t *testing.T) {
+			workspace := t.TempDir()
+			store, err := localstate.NewStoreAt(t.TempDir())
+			require.NoError(t, err)
+			registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, registry.Close()) })
 
-	runCtx, cancel := context.WithCancel(t.Context())
-	runDone := make(chan error, 1)
-	go func() { runDone <- runner.Run(runCtx) }()
-	select {
-	case <-provider.started:
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("initial manifest probe did not start")
-	}
-	cancel()
+			peers := make(chan *protocol.Peer, 1)
+			upgrader := websocket.Upgrader{Subprotocols: []string{protocol.Subprotocol}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				conn, upgradeErr := upgrader.Upgrade(w, request, nil)
+				if upgradeErr != nil {
+					return
+				}
+				session := runnerregistry.NewSession(registry, nil)
+				peer, peerErr := protocol.NewPeer(conn, protocol.PeerConfig{Handler: session, Notifications: session})
+				if peerErr != nil {
+					_ = conn.Close()
+					return
+				}
+				session.Attach(peer)
+				if peerErr = peer.Start(request.Context()); peerErr != nil {
+					_ = peer.Close()
+					return
+				}
+				peers <- peer
+				<-peer.TransportDone()
+				session.Detach(peer.Err())
+			}))
+			t.Cleanup(server.Close)
 
-	select {
-	case err = <-runDone:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("runner did not stop after initial manifest cancellation")
+			runCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			runner, err := NewRunner(t.Context(), RunnerConfig{
+				Server:    server.URL,
+				Workspace: workspace,
+				Store:     store,
+				OnRetry:   func(error, time.Duration) { cancel() },
+			})
+			require.NoError(t, err)
+			runtime := extensions.EmptyRuntime()
+			t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+			runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+			runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+			provider := &blockingInitialProbeInstanceProvider{workspace: workspace, started: make(chan struct{})}
+			runner.service.instanceProvider = provider
+
+			runDone := make(chan error, 1)
+			go func() { runDone <- runner.Run(runCtx) }()
+			select {
+			case <-provider.started:
+			case <-time.After(time.Second):
+				t.Fatal("initial manifest probe did not start")
+			}
+			entries := registry.Runners()
+			require.Len(t, entries, 1)
+			assert.Equal(t, runnerregistry.RunnerStatusConnecting, entries[0].Status)
+			assert.Empty(t, entries[0].ManifestDigest)
+			if stop == "disconnect" {
+				require.NoError(t, (<-peers).Close())
+			} else {
+				cancel()
+			}
+
+			select {
+			case err = <-runDone:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("runner did not stop after initial manifest cancellation")
+			}
+			held, err := store.WorkspaceLockHeld(workspace)
+			require.NoError(t, err)
+			assert.False(t, held)
+		})
 	}
-	held, err := store.WorkspaceLockHeld(workspace)
-	require.NoError(t, err)
-	assert.False(t, held)
 }
 
 func TestManifestRefreshDoesNotBlockRunnerHeartbeats(t *testing.T) {
@@ -610,7 +669,7 @@ func TestRunnerReloadsCredentialReplacedDuringAuthenticationFailure(t *testing.T
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runner.service.Close()) })
 
-	connected, err := runner.runConnection(t.Context(), "manifest-digest")
+	connected, err := runner.runConnection(t.Context())
 
 	assert.False(t, connected)
 	require.ErrorContains(t, err, "credential was replaced")
@@ -687,7 +746,7 @@ func TestKeyAuthenticatedRunnerDoesNotDiscardStaleRunnerID(t *testing.T) {
 	runner, err := NewRunner(t.Context(), RunnerConfig{Server: server.URL, Workspace: workspace, Store: store})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runner.service.Close()) })
-	connected, err := runner.runConnection(t.Context(), "manifest-digest")
+	connected, err := runner.runConnection(t.Context())
 	require.ErrorContains(t, err, "runner not found")
 	assert.False(t, connected)
 	assert.Equal(t, int32(1), registerCalls.Load())

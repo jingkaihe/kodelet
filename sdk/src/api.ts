@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { createCommandContext, createEventContext, createShortcutContext, createToolContext } from "./context.js";
+import { extensionProfileOptionsSchema } from "./execution.js";
 import type {
   AnyZodSchema,
   BaseCallContext,
@@ -17,6 +18,7 @@ import type {
   ExtensionEntrypoint,
   ExtensionEvent,
   ExtensionMetadata,
+  ExtensionProfileRegistration,
   HandleEventParams,
   InitializeParams,
   InitializeResult,
@@ -53,6 +55,7 @@ interface RegisteredEventHandler {
 
 export class ExtensionHost implements ExtensionAPI {
   private metadata: ExtensionMetadata = {};
+  private profiles = new Map<string, NonNullable<InitializeResult["profiles"]>[number]>();
   private tools = new Map<string, RegisteredTool>();
   private commands = new Map<string, RegisteredCommand>();
   private shortcuts = new Map<string, RegisteredShortcut>();
@@ -62,6 +65,23 @@ export class ExtensionHost implements ExtensionAPI {
 
   setMetadata(metadata: ExtensionMetadata): void {
     this.metadata = { ...this.metadata, ...metadata };
+  }
+
+  registerProfile(registration: ExtensionProfileRegistration): string {
+    const { name, hidden = false, ...options } = registration;
+    validateProfileSlug(name);
+    if (name.toLowerCase() === "default") {
+      throw new Error('Extension profile name "default" is reserved');
+    }
+    if (this.profiles.has(name)) {
+      throw new Error(`Duplicate extension profile registration: ${name}`);
+    }
+    this.profiles.set(name, {
+      name,
+      options: clonePayload(extensionProfileOptionsSchema.parse(options)),
+      hidden: z.boolean().parse(hidden),
+    });
+    return name;
   }
 
   registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void {
@@ -125,10 +145,15 @@ export class ExtensionHost implements ExtensionAPI {
   }
 
   initialize(params: InitializeParams): InitializeResult {
+    const profilesCapability = params.capabilities?.profiles;
+    if (this.profiles.size && (!isRecord(profilesCapability) || profilesCapability.remote !== true)) {
+      throw new Error("Remote extension profiles are not supported by this host; update the Kodelet daemon and runner (capabilities.profiles.remote is required)");
+    }
     this.initParams = params;
     return {
       name: this.metadata.name ?? params.extension.id,
       version: this.metadata.version,
+      ...(this.profiles.size ? { profiles: structuredClone([...this.profiles.values()]) } : {}),
       tools: [...this.tools.values()].map(({ registration, inputSchema }) => ({
         name: registration.name,
         description: registration.description,
@@ -339,6 +364,12 @@ function mergeToolPatch(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateProfileSlug(name: unknown): asserts name is string {
+  if (typeof name !== "string" || name.length > 128 || !/^[A-Za-z0-9]/.test(name) || /[^A-Za-z0-9._-]/.test(name)) {
+    throw new Error("Extension profile names must be ASCII slugs matching [A-Za-z0-9][A-Za-z0-9._-]* (1–128 characters)");
+  }
 }
 
 function shortcutSubmitSupported(init: InitializeParams | undefined): boolean {

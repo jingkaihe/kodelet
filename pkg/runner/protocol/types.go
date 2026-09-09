@@ -3,11 +3,15 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -20,6 +24,9 @@ const (
 	Subprotocol = "kodelet.runner.v1.jsonrpc"
 	// Endpoint is the control-plane WebSocket endpoint used by runners.
 	Endpoint = "/api/runner/v1/connect"
+	// SessionExtensionsEndpoint carries authenticated session callback channels.
+	SessionExtensionsEndpoint    = "/api/session/extensions"
+	SessionExtensionsSubprotocol = "kodelet.session.extensions.v1.jsonrpc"
 )
 
 const (
@@ -28,15 +35,23 @@ const (
 	MethodRunnerManifestChanged   = "runner.manifestChanged"
 	MethodRunnerGoodbye           = "runner.goodbye"
 	MethodRunOpen                 = "run.open"
+	MethodRunCheckpoint           = "run.checkpoint"
 	MethodRunClose                = "run.close"
 	MethodRunCancel               = "run.cancel"
 	MethodRunEnvironmentError     = "run.environmentError"
 	MethodCommandExecute          = "command.execute"
+	MethodShortcutExecute         = "shortcut.execute"
 	MethodLifecycleDispatch       = "lifecycle.dispatch"
 	MethodToolExecute             = "tool.execute"
 	MethodToolUpdate              = "tool.update"
 	MethodConversationFork        = "conversation.fork"
 	MethodWorkspaceGitDiff        = "workspace.git.diff"
+	MethodWorkspaceGitPrepare     = "workspace.git.prepareCommit"
+	MethodWorkspaceGitCommit      = "workspace.git.commit"
+	MethodWorkspaceDiscover       = "workspace.discover"
+	MethodWorkspaceInspect        = "workspace.inspect"
+	MethodWorkspaceMessageHistory = "workspace.messageHistory"
+	MethodWorkspaceCWDHints       = "workspace.cwdHints"
 	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
 	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
@@ -54,7 +69,11 @@ const (
 	MethodUISurfaceClose          = "ui.surface.close"
 	MethodUISurfaceInput          = "ui.surface.input"
 	MethodUISurfaceResize         = "ui.surface.resize"
+	MethodUISurfaceInvalidate     = "ui.surface.invalidate"
+	MethodUIExtensionCleanup      = "ui.extension.cleanup"
 	MethodOperationCancel         = "operation.cancel"
+	MethodSessionExtensionsAttach = "session.extensions.attach"
+	MethodSessionExtensionFrame   = "session.extension.frame"
 )
 
 const (
@@ -184,9 +203,16 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	ConcurrentRuns    bool `json:"concurrentRuns,omitempty"`
-	WorkspaceGitDiff  bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceTerminal bool `json:"workspaceTerminal,omitempty"`
+	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
+	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
+	ConcurrentRuns          bool `json:"concurrentRuns,omitempty"`
+	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceDiscovery      bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
+	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
+	WorkspaceCWD            bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.
@@ -235,6 +261,7 @@ type RegisterResult struct {
 	ConnectionID        string `json:"connectionId"`
 	Generation          int64  `json:"generation"`
 	HeartbeatIntervalMS int64  `json:"heartbeatIntervalMs"`
+	RemoteProfiles      bool   `json:"remoteProfiles,omitempty"`
 }
 
 // RunnerState is the application-level availability reported by heartbeats.
@@ -347,23 +374,99 @@ type ClientCapabilities struct {
 
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
-	RunID              string             `json:"runId"`
-	ConversationID     string             `json:"conversationId"`
-	CWD                string             `json:"cwd,omitempty"`
-	ExpectedCWD        string             `json:"expectedCwd,omitempty"`
-	Agent              AgentDescriptor    `json:"agent"`
-	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
-	ReservedToolNames  []string           `json:"reservedToolNames"`
+	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`
+	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
+	RunID              string                     `json:"runId"`
+	ConversationID     string                     `json:"conversationId"`
+	CWD                string                     `json:"cwd,omitempty"`
+	ExpectedCWD        string                     `json:"expectedCwd,omitempty"`
+	Agent              AgentDescriptor            `json:"agent"`
+	ClientCapabilities ClientCapabilities         `json:"clientCapabilities"`
+	ReservedToolNames  []string                   `json:"reservedToolNames"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
 }
 
 func (p RunOpenParams) Validate() error {
+	if p.SessionExtensions != nil {
+		if err := p.SessionExtensions.Validate(); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(p.RunID) == "" {
 		return errors.New("runId is required")
 	}
 	if strings.TrimSpace(p.ConversationID) == "" {
 		return errors.New("conversationId is required")
 	}
+	if p.Options.HasModelOptions() || (p.Options != nil && (p.Options.MaxTurns != nil || p.Options.UseWeakModel != nil)) {
+		return errors.New("run.open options may contain only environment restrictions")
+	}
+	return p.Options.Validate()
+}
+
+// SessionExtensions identifies a live session attachment, never executable paths.
+type SessionExtensions struct {
+	ID           string   `json:"id"`
+	ExtensionIDs []string `json:"extensionIds"`
+}
+
+// Validate rejects ambiguous attachment identities and duplicate channels.
+func (s SessionExtensions) Validate() error {
+	if strings.TrimSpace(s.ID) == "" || s.ID != strings.TrimSpace(s.ID) || strings.ContainsAny(s.ID, "\x00\r\n\t") {
+		return errors.New("session extensions id is required and must not contain surrounding whitespace")
+	}
+	if len(s.ExtensionIDs) == 0 {
+		return errors.New("session extensions extensionIds must not be empty")
+	}
+	seen := make(map[string]bool, len(s.ExtensionIDs))
+	for _, id := range s.ExtensionIDs {
+		if id == "" || strings.ContainsAny(id, "/\\:\x00\r\n\t ") {
+			return errors.New("session extension id must be a nonempty logical name")
+		}
+		if seen[id] {
+			return errors.Errorf("duplicate session extension id %q", id)
+		}
+		seen[id] = true
+	}
 	return nil
+}
+
+// ExtensionFrame relays one opaque inner JSON-RPC message or closes one channel.
+type ExtensionFrame struct {
+	AttachmentID string          `json:"attachmentId"`
+	RunID        string          `json:"runId"`
+	ExtensionID  string          `json:"extensionId"`
+	Message      json.RawMessage `json:"message,omitempty"`
+	Close        bool            `json:"close,omitempty"`
+}
+
+// Validate checks only the relay envelope. Inner RPC ids, parentId and payload
+// fields remain opaque and are never decoded into lossy generic numbers.
+func (f ExtensionFrame) Validate() error {
+	if err := (SessionExtensions{ID: f.AttachmentID, ExtensionIDs: []string{f.ExtensionID}}).Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.RunID) == "" || f.RunID != strings.TrimSpace(f.RunID) || strings.ContainsAny(f.RunID, "\x00\r\n\t") {
+		return errors.New("session extension frame runId is required and must be a valid identity")
+	}
+	if f.Close {
+		if len(f.Message) != 0 {
+			return errors.New("session extension frame cannot contain both message and close")
+		}
+		return nil
+	}
+	message := bytes.TrimSpace(f.Message)
+	if len(message) == 0 || message[0] != '{' || !json.Valid(message) {
+		return errors.New("session extension frame message must be a JSON-RPC object")
+	}
+	return nil
+}
+
+// RunCheckpointParams acknowledges validated CWD/policy before extension startup.
+// The control plane supplies the user input and model policy; neither comes from the runner.
+type RunCheckpointParams struct {
+	RunID string `json:"runId"`
+	CWD   string `json:"cwd"`
 }
 
 // RunCloseParams releases a pinned run environment.
@@ -388,8 +491,105 @@ type OperationCancelParams struct {
 	RequestID string `json:"requestId"`
 }
 
-// WorkspaceGitDiffParams asks a runner to inspect its registered workspace.
-type WorkspaceGitDiffParams struct{}
+// WorkspaceDiscoverParams selects runner-owned resources without opening a model turn.
+type WorkspaceDiscoverParams struct {
+	// Profile selects an embedded runner's trusted daemon environment projection.
+	// Standalone runners ignore it and retain their own environment policy.
+	Profile            string                     `json:"profile,omitempty"`
+	CWD                string                     `json:"cwd,omitempty"`
+	EnvironmentProfile string                     `json:"environmentProfile,omitempty"`
+	Options            *llmtypes.ExecutionOptions `json:"options,omitempty"`
+}
+
+// Validate rejects model choices before a discovery probe can start resources.
+func (p WorkspaceDiscoverParams) Validate() error {
+	if err := p.Options.Validate(); err != nil {
+		return err
+	}
+	if p.Options.HasModelOptions() || (p.Options != nil && (p.Options.MaxTurns != nil || p.Options.UseWeakModel != nil)) {
+		return errors.New("discovery options may contain only environment restrictions")
+	}
+	return nil
+}
+
+// UnmarshalJSON keeps explicit null restrictions distinct from omission.
+func (p *WorkspaceDiscoverParams) UnmarshalJSON(data []byte) error {
+	type plain WorkspaceDiscoverParams
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["options"]; ok && string(raw) == "null" {
+		return errors.New("discovery options must not be null; omit options to inherit")
+	}
+	*p = WorkspaceDiscoverParams(value)
+	return p.Validate()
+}
+
+// WorkspaceDiscoverResult identifies the exact runner environment used for discovery.
+type WorkspaceDiscoverResult struct {
+	RunID              string                  `json:"runId,omitempty"`
+	Shortcuts          []ShortcutDescriptor    `json:"shortcuts,omitempty"`
+	CWD                string                  `json:"cwd"`
+	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
+	Digest             string                  `json:"digest"`
+	Commands           []slashcommands.Command `json:"commands"`
+	ExtensionCount     *int                    `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
+}
+
+// ShortcutDescriptor identifies one effective runner-owned registration.
+type ShortcutDescriptor struct {
+	Key         string `json:"key"`
+	Description string `json:"description,omitempty"`
+	ExtensionID string `json:"extensionId"`
+	Generation  uint64 `json:"generation"`
+}
+
+// WorkspaceCWDHintsParams resolves path suggestions on the runner host.
+type WorkspaceCWDHintsParams struct {
+	Profile            string `json:"profile,omitempty"`
+	CWD                string `json:"cwd,omitempty"`
+	EnvironmentProfile string `json:"environmentProfile,omitempty"`
+	Query              string `json:"query,omitempty"`
+}
+
+// DirectoryHint is one accessible runner directory.
+type DirectoryHint struct {
+	Path string `json:"path"`
+}
+
+// WorkspaceCWDHintsResult contains runner-host paths, never daemon-home abbreviations.
+type WorkspaceCWDHintsResult struct {
+	BaseDir string          `json:"baseDir"`
+	Query   string          `json:"query,omitempty"`
+	Hints   []DirectoryHint `json:"hints"`
+}
+
+// WorkspaceMessageHistoryParams lists composer history when Entry is nil, or
+// appends one raw message otherwise. The runner resolves CWD and replaces the
+// entry's scope and source with its own workspace scope and "tui".
+type WorkspaceMessageHistoryParams struct {
+	CWD   string                `json:"cwd,omitempty"`
+	Entry *messagehistory.Entry `json:"entry,omitempty"`
+}
+
+// WorkspaceMessageHistoryResult returns runner-resolved paths. List responses
+// contain a bounded selection of newest complete messages in chronological order;
+// append responses omit Messages.
+type WorkspaceMessageHistoryResult struct {
+	CWD      string   `json:"cwd"`
+	ScopeCWD string   `json:"scopeCwd"`
+	Messages []string `json:"messages,omitempty"`
+}
+
+// WorkspaceGitDiffParams asks a runner to inspect the selected directory.
+type WorkspaceGitDiffParams struct {
+	CWD string `json:"cwd,omitempty"`
+}
 
 // WorkspaceGitDiffResult is a bounded git diff snapshot from a runner workspace.
 type WorkspaceGitDiffResult struct {
@@ -403,8 +603,9 @@ type WorkspaceGitDiffResult struct {
 
 // WorkspaceTerminalOpenParams opens or reattaches to the runner workspace terminal.
 type WorkspaceTerminalOpenParams struct {
-	Rows int `json:"rows,omitempty"`
-	Cols int `json:"cols,omitempty"`
+	CWD  string `json:"cwd,omitempty"`
+	Rows int    `json:"rows,omitempty"`
+	Cols int    `json:"cols,omitempty"`
 }
 
 // WorkspaceTerminalOpenResult describes one persistent runner terminal session.

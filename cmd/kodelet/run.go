@@ -1,179 +1,48 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
-	"syscall"
-	"time"
+	"unicode"
 
-	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/goals"
-	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/jingkaihe/kodelet/pkg/slashcommands"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
-type RunConfig struct {
-	ResumeConvID           string
-	CWD                    string
-	Follow                 bool
-	NoSave                 bool
-	Images                 []string          // Image paths or URLs to include with the message
-	MaxTurns               int               // Maximum number of turns within a single SendMessage call
-	FragmentName           string            // Name of fragment to use
-	FragmentArgs           map[string]string // Arguments to pass to fragment
-	FragmentDirs           []string          // Additional fragment directories
-	NoSkills               bool              // Disable agentic skills
-	NoExtensions           bool              // Disable extension runtime
-	NoTools                bool              // Disable all tools (for simple query-response usage)
-	EnableFSSearchTools    bool              // Enable filesystem search tools (glob_tool and grep_tool)
-	MessageDisplay         string            // User-facing compact text for persisted display
-	MessageDisplayOverride bool              // Display is explicit user text rather than a slash command
-	Sysprompt              string            // Path to custom system prompt template file
-	SyspromptArgs          map[string]string // Arguments passed to custom system prompt template
-	ResultOnly             bool              // Only print the final agent message, no intermediate output or usage stats
-	UseWeakModel           bool              // Use weak model for SendMessage
-	Account                string            // Anthropic subscription account alias to use
+var runCmd = &cobra.Command{
+	Use:   "run [query]",
+	Short: "Execute a one-shot query with Kodelet",
+	Long:  `Run a query and save the conversation. A local server starts automatically in the background when needed and keeps running after the query. Use --server to connect to an explicitly managed server.`,
+	Args:  cobra.MinimumNArgs(0),
+	RunE:  runControlPlaneCommand,
 }
 
-func NewRunConfig() *RunConfig {
-	return &RunConfig{
-		ResumeConvID:        "",
-		CWD:                 "",
-		Follow:              false,
-		NoSave:              false,
-		Images:              []string{},
-		MaxTurns:            0,
-		FragmentName:        "",
-		FragmentArgs:        make(map[string]string),
-		FragmentDirs:        []string{},
-		NoSkills:            false,
-		NoExtensions:        false,
-		NoTools:             false,
-		EnableFSSearchTools: false,
-		Sysprompt:           "",
-		SyspromptArgs:       make(map[string]string),
-		ResultOnly:          false,
-		UseWeakModel:        false,
-		Account:             "",
-	}
+func init() {
+	addRunFlags(runCmd)
 }
 
-type processedFragment struct {
-	Query           string
-	Display         string
-	DisplayOverride bool
-	Metadata        *fragments.Metadata
-	Response        string
-	Responded       bool
-}
-
-func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime, callContext extensions.ExtensionCallContext) (*processedFragment, error) {
-	var validDirs []string
-	for _, dir := range config.FragmentDirs {
-		trimmed := strings.TrimSpace(dir)
-		if trimmed != "" {
-			validDirs = append(validDirs, trimmed)
-		}
-	}
-
-	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create fragment processor")
-	}
-
-	fragmentConfig := &fragments.Config{
-		FragmentName: config.FragmentName,
-		Arguments:    config.FragmentArgs,
-	}
-
-	display := strings.TrimSpace(config.MessageDisplay)
-	if display == "" {
-		display = "/" + strings.TrimSpace(config.FragmentName)
-		if argDisplay := formatFragmentDisplayArgs(config.FragmentArgs); argDisplay != "" {
-			display += " " + argDisplay
-		}
-		if argsContent := strings.TrimSpace(strings.Join(args, " ")); argsContent != "" {
-			display += " " + argsContent
-		}
-	}
-
-	commandArgs := strings.Join(args, " ")
-	if argDisplay := formatFragmentDisplayArgs(config.FragmentArgs); argDisplay != "" {
-		parts := []string{argDisplay}
-		if argsContent := strings.TrimSpace(commandArgs); argsContent != "" {
-			parts = append(parts, argsContent)
-		}
-		commandArgs = strings.Join(parts, " ")
-	}
-
-	if extensionRuntime != nil {
-		if callContext.InvokedBy == "" {
-			callContext.InvokedBy = "main"
-		}
-		callContext.RecipeName = config.FragmentName
-		if commandResult, err := extensionRuntime.TryCommand(
-			ctx,
-			display,
-			config.FragmentName,
-			commandArgs,
-			callContext,
-		); err != nil {
-			return nil, errors.Wrapf(err, "failed to execute extension recipe %s", config.FragmentName)
-		} else if commandResult != nil && commandResult.Matched {
-			switch commandResult.Action {
-			case extensions.CommandActionRunAgent:
-				metadata := &fragments.Metadata{
-					Name:        commandResult.Registration.Name,
-					Description: commandResult.Registration.Description,
-				}
-				return &processedFragment{Query: commandResult.Prompt, Display: commandResult.Display, DisplayOverride: commandResult.DisplayOverride, Metadata: metadata}, nil
-			case extensions.CommandActionRespond:
-				metadata := &fragments.Metadata{
-					Name:        commandResult.Registration.Name,
-					Description: commandResult.Registration.Description,
-				}
-				return &processedFragment{Display: display, Metadata: metadata, Response: commandResult.Response, Responded: true}, nil
-			}
-		}
-	}
-
-	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load fragment")
-	}
-
-	var query string
-	if len(args) > 0 {
-		argsContent := strings.Join(args, " ")
-		query = fragment.Content + "\n" + argsContent
-	} else {
-		query = fragment.Content
-	}
-
-	return &processedFragment{Query: query, Display: display, Metadata: &fragment.Metadata}, nil
+func addRunFlags(cmd *cobra.Command) {
+	addRemoteRunFlags(cmd)
+	cmd.Flags().String("resume", "", "Resume a specific conversation")
+	cmd.Flags().String("cwd", "", "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
+	cmd.Flags().BoolP("follow", "f", false, "Follow the most recent conversation in the selected workspace")
+	cmd.Flags().StringSliceP("image", "I", nil, "Attach an image from this machine or an HTTPS URL (can be repeated)")
+	cmd.Flags().Int("max-turns", 0, "Maximum AI turns (0 for no limit)")
+	cmd.Flags().StringP("recipe", "r", "", "Use a recipe installed on the runner")
+	cmd.Flags().StringToString("arg", nil, "Recipe arguments (e.g. --arg name=John)")
+	cmd.Flags().StringSlice("fragment-dirs", nil, "No longer supported here; configure recipe directories on the runner")
+	cmd.Flags().Bool("no-extensions", false, "Disable extensions for this environment")
+	cmd.Flags().Bool("no-tools", false, "Disable all tools")
+	cmd.Flags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools")
+	cmd.Flags().Bool("result-only", false, "Print only the final agent message")
+	cmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
+	cmd.Flags().String("account", "", "No longer supported here; select an account through --profile")
 }
 
 func formatFragmentDisplayArgs(args map[string]string) string {
-	if len(args) == 0 {
-		return ""
-	}
-
 	keys := make([]string, 0, len(args))
 	for key := range args {
 		if strings.TrimSpace(key) != "" {
@@ -181,11 +50,10 @@ func formatFragmentDisplayArgs(args map[string]string) string {
 		}
 	}
 	sort.Strings(keys)
-
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		value := args[key]
-		if strings.ContainsAny(value, " \t\n\r\"") {
+		if strings.ContainsAny(value, "\"\\") || strings.ContainsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
 			value = fmt.Sprintf("%q", value)
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", key, value))
@@ -193,589 +61,23 @@ func formatFragmentDisplayArgs(args map[string]string) string {
 	return strings.Join(parts, " ")
 }
 
-func addRunMessageDisplay(thread llmtypes.Thread, query string, config *RunConfig) {
-	display := strings.TrimSpace(config.MessageDisplay)
-	if display == "" || strings.TrimSpace(query) == "" {
-		return
-	}
-
-	metadata := conversations.AddSlashCommandDisplay(thread.GetMetadata(), query, display, config.FragmentName)
-	if config.MessageDisplayOverride {
-		metadata = conversations.AddMessageDisplay(thread.GetMetadata(), query, display, "", "")
-	}
-	for key, value := range metadata {
-		thread.SetMetadataValue(key, value)
-	}
-}
-
-func addRunGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {
-	if thread == nil || update == nil {
-		return
-	}
-
-	thread.SetMetadataValue(goals.MetadataKey, update.Goal)
-	metadata := conversations.AddMessageDisplay(thread.GetMetadata(), update.ModelPrompt, update.Display, conversations.MessageDisplayKindGoal, goals.SlashCommandName)
-	for key, value := range metadata {
-		thread.SetMetadataValue(key, value)
-	}
-}
-
 func getQueryFromStdinOrArgs(args []string) (string, error) {
-	stat, _ := os.Stdin.Stat()
-	isPipe := (stat.Mode() & os.ModeCharDevice) == 0
-
-	if isPipe {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to inspect stdin")
+	}
+	if stat.Mode()&os.ModeCharDevice == 0 {
 		stdinBytes, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", errors.Wrap(err, "failed to read from stdin")
 		}
-
-		stdinContent := string(stdinBytes)
-
 		if len(args) > 0 {
-			argsContent := strings.Join(args, " ")
-			return argsContent + "\n" + stdinContent, nil
+			return strings.Join(args, " ") + "\n" + string(stdinBytes), nil
 		}
-		return stdinContent, nil
+		return string(stdinBytes), nil
 	}
-
 	if len(args) == 0 {
 		return "", errors.New("no query provided")
 	}
 	return strings.Join(args, " "), nil
-}
-
-func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata) {
-	if fragmentMetadata == nil {
-		return
-	}
-
-	if len(fragmentMetadata.AllowedTools) > 0 {
-		if err := tools.ValidateTools(fragmentMetadata.AllowedTools); err != nil {
-			presenter.Warning(fmt.Sprintf("Invalid tools in fragment metadata, ignoring: %v", err))
-		} else {
-			llmConfig.AllowedTools = fragmentMetadata.AllowedTools
-		}
-	}
-
-	if len(fragmentMetadata.AllowedCommands) > 0 {
-		llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
-	}
-}
-
-func applyRunToolRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata, noTools bool) {
-	applyFragmentRestrictions(llmConfig, fragmentMetadata)
-	if noTools {
-		llmConfig.AllowedTools = []string{tools.NoToolsMarker}
-	}
-}
-
-func createRunToolManagers(ctx context.Context, config *RunConfig, workingDir string) (*extensions.Runtime, error) {
-	var extensionRuntime *extensions.Runtime
-	if !config.NoTools && !config.NoExtensions {
-		var err error
-		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, workingDir)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return extensionRuntime, nil
-}
-
-func normalizeConversationProfile(profile string) string {
-	profile = strings.TrimSpace(profile)
-	if profile == "" || strings.EqualFold(profile, "default") {
-		return ""
-	}
-	return profile
-}
-
-func loadRunConfigForStoredProfile(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
-	if profileName == "" || !llm.HasConfiguredProfile(profileName) {
-		return llm.GetConfigFromViperWithoutProfileAndCmdIgnoringFlags(cmd, "reasoning-effort")
-	}
-	return llm.GetConfigFromViperWithProfileAndCmdIgnoringFlags(profileName, cmd, "reasoning-effort")
-}
-
-func validateRunReasoningEffortSnapshot(cmd *cobra.Command, snapshot *llmtypes.ConversationConfigSnapshot) error {
-	if cmd == nil || snapshot == nil || !cmd.Flags().Changed("reasoning-effort") {
-		return nil
-	}
-	requested, err := cmd.Flags().GetString("reasoning-effort")
-	if err != nil {
-		return errors.Wrap(err, "failed to read reasoning-effort override")
-	}
-	requested, err = llmtypes.NormalizeReasoningEffort(requested)
-	if err != nil {
-		return err
-	}
-	stored, err := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
-	if err != nil {
-		return err
-	}
-	if requested != stored {
-		return errors.Errorf("conversation reasoning_effort is locked to %q; cannot resume with %q", stored, requested)
-	}
-	return nil
-}
-
-func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conversationID string, requestedCWD string) (llmtypes.Config, string, error) {
-	defaultCWD, err := conversations.CurrentWorkingDirectory()
-	if err != nil {
-		return llmtypes.Config{}, "", err
-	}
-
-	if strings.TrimSpace(conversationID) == "" {
-		config, err := llm.GetConfigFromViperWithCmd(cmd)
-		if err != nil {
-			return llmtypes.Config{}, "", err
-		}
-
-		resolution, err := conversations.ResolveCWD(ctx, nil, "", requestedCWD, defaultCWD, false)
-		if err != nil {
-			return llmtypes.Config{}, "", err
-		}
-		config.WorkingDirectory = resolution.CWD
-		return config, resolution.CWD, nil
-	}
-
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation store")
-	}
-	defer func() {
-		_ = store.Close()
-	}()
-
-	record, err := store.Load(ctx, conversationID)
-	if err != nil {
-		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation")
-	}
-	if runnerID, _ := record.Metadata[convtypes.RunnerIDMetadataKey].(string); strings.TrimSpace(runnerID) != "" {
-		return llmtypes.Config{}, "", errors.Errorf("conversation is bound to runner %s and cannot be resumed as a local run", strings.TrimSpace(runnerID))
-	}
-
-	resolution, err := conversations.ResolveCWD(ctx, store, conversationID, requestedCWD, defaultCWD, true)
-	if err != nil {
-		return llmtypes.Config{}, "", errors.Wrap(err, "failed to resolve conversation cwd")
-	}
-
-	snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
-	if err != nil {
-		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation config snapshot")
-	}
-	if !hasSnapshot && cmd != nil && cmd.Flags().Changed("reasoning-effort") {
-		return llmtypes.Config{}, "", errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")
-	}
-
-	profileName := ""
-	hasStoredProfile := false
-	if hasSnapshot {
-		profileName = normalizeConversationProfile(snapshot.Profile)
-		hasStoredProfile = true
-	} else if record.Metadata != nil {
-		if rawProfile, ok := record.Metadata["profile"].(string); ok {
-			hasStoredProfile = true
-			profileName = normalizeConversationProfile(rawProfile)
-		}
-	}
-
-	var config llmtypes.Config
-	if hasSnapshot {
-		if err := validateRunReasoningEffortSnapshot(cmd, snapshot); err != nil {
-			return llmtypes.Config{}, "", err
-		}
-		config, err = loadRunConfigForStoredProfile(profileName, cmd)
-		if err == nil {
-			config, err = snapshot.Apply(config)
-		}
-	} else {
-		if hasStoredProfile {
-			config, err = llm.GetConfigFromViperWithProfileAndCmd(profileName, cmd)
-		} else {
-			config, err = llm.GetConfigFromViperWithCmd(cmd)
-		}
-		if err == nil {
-			if strings.TrimSpace(record.Provider) != "" {
-				config.Provider = strings.TrimSpace(record.Provider)
-			}
-			if record.Metadata != nil {
-				if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
-					config.Model = strings.TrimSpace(model)
-				}
-
-				if strings.EqualFold(config.Provider, "openai") {
-					if config.OpenAI == nil {
-						config.OpenAI = &llmtypes.OpenAIConfig{}
-					}
-					if platform, ok := record.Metadata["platform"].(string); ok && strings.TrimSpace(platform) != "" {
-						config.OpenAI.Platform = strings.TrimSpace(platform)
-					}
-					if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
-						config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
-					}
-					if serviceTier, ok := record.Metadata["service_tier"].(string); ok && strings.TrimSpace(serviceTier) != "" {
-						config.OpenAI.ServiceTier = llmtypes.OpenAIServiceTier(strings.TrimSpace(serviceTier))
-					}
-				}
-			}
-			if hasStoredProfile && profileName == "" {
-				config.Profile = "default"
-			} else {
-				config.Profile = profileName
-			}
-		}
-	}
-	if err != nil {
-		return llmtypes.Config{}, "", err
-	}
-	config.WorkingDirectory = resolution.CWD
-	return config, resolution.CWD, nil
-}
-
-func renameStoredConversation(ctx context.Context, conversationID, name string) error {
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return errors.New("/rename requires --resume <conversation-id> or --follow")
-	}
-
-	service, err := conversations.GetDefaultConversationService(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to open conversation store")
-	}
-	defer func() {
-		_ = service.Close()
-	}()
-
-	return service.RenameConversation(ctx, conversationID, name)
-}
-
-var runCmd = &cobra.Command{
-	Use:   "run [query]",
-	Short: "Execute a one-shot query with Kodelet",
-	Long:  `Execute a one-shot query with Kodelet and return the result.`,
-	Args:  cobra.MinimumNArgs(0),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
-
-		config := getRunConfigFromFlags(ctx, cmd)
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			presenter.Warning("Cancellation requested, shutting down...")
-			cancel()
-		}()
-
-		var query string
-		var fragmentMetadata *fragments.Metadata
-		var goalUpdate *goals.CommandUpdate
-		var renameName string
-		var renameRequested bool
-		var llmConfig llmtypes.Config
-		var resolvedCWD string
-		var err error
-
-		if config.FragmentName == "" {
-			query, err = getQueryFromStdinOrArgs(args)
-			if err != nil {
-				presenter.Error(err, "Please provide a query to execute")
-				return
-			}
-
-			if command, commandArgs, found := slashcommands.Parse(query); found {
-				renameName, renameRequested, err = slashcommands.ParseRenameCommand(command, commandArgs)
-				if renameRequested {
-					if err != nil {
-						presenter.Error(err, "Failed to rename conversation")
-						return
-					}
-				} else {
-					update, handled, err := goals.ParseSlashCommand(command, commandArgs, time.Now())
-					if handled {
-						if err != nil {
-							presenter.Error(err, "Failed to process goal")
-							return
-						}
-						query = update.ModelPrompt
-						goalUpdate = &update
-					}
-				}
-			}
-		}
-
-		if renameRequested {
-			if err := renameStoredConversation(ctx, config.ResumeConvID, renameName); err != nil {
-				presenter.Error(err, "Failed to rename conversation")
-				return
-			}
-			presenter.Success(fmt.Sprintf("Conversation renamed to %q", conversations.NormalizeConversationName(renameName)))
-			return
-		}
-
-		llmConfig, resolvedCWD, err = loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
-		if err != nil {
-			presenter.Error(err, "Failed to load configuration")
-			os.Exit(1)
-		}
-		llmConfig.WorkingDirectory = resolvedCWD
-
-		if !config.ResultOnly {
-			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
-		}
-
-		extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
-		if err != nil {
-			presenter.Error(err, "Failed to initialize tools")
-			return
-		}
-		if extensionRuntime != nil {
-			defer func() {
-				_ = extensionRuntime.Close()
-			}()
-		}
-
-		if config.FragmentName != "" {
-			processed, err := processFragment(ctx, config, args, extensionRuntime, extensions.ExtensionCallContext{
-				ConversationID: config.ResumeConvID,
-				CWD:            resolvedCWD,
-				Provider:       llmConfig.Provider,
-				Model:          llmConfig.Model,
-				Profile:        llmConfig.Profile,
-				InvokedBy:      "main",
-			})
-			if err != nil {
-				presenter.Error(err, "Failed to process fragment")
-				return
-			}
-			if processed.Responded {
-				presenter.Info(processed.Response)
-				return
-			}
-			query = processed.Query
-			config.MessageDisplay = processed.Display
-			config.MessageDisplayOverride = processed.DisplayOverride
-			fragmentMetadata = processed.Metadata
-		}
-
-		if config.FragmentName == "" && goalUpdate == nil && extensionRuntime != nil {
-			if command, commandArgs, found := slashcommands.Parse(query); found {
-				commandResult, err := extensionRuntime.TryCommand(ctx, query, command, commandArgs, extensions.ExtensionCallContext{
-					ConversationID: config.ResumeConvID,
-					CWD:            resolvedCWD,
-					Provider:       llmConfig.Provider,
-					Model:          llmConfig.Model,
-					Profile:        llmConfig.Profile,
-					InvokedBy:      "main",
-				})
-				if err != nil {
-					presenter.Error(err, "Failed to execute extension command")
-					return
-				}
-				if commandResult != nil && commandResult.Matched {
-					switch commandResult.Action {
-					case extensions.CommandActionRespond:
-						presenter.Info(commandResult.Response)
-						return
-					case extensions.CommandActionRunAgent:
-						query = commandResult.Prompt
-						config.MessageDisplay = commandResult.Display
-						config.MessageDisplayOverride = commandResult.DisplayOverride
-						if commandResult.RecipeName != "" {
-							config.FragmentName = commandResult.RecipeName
-						}
-					default:
-						presenter.Warning(fmt.Sprintf("Extension command %s returned unknown action %q", commandResult.CommandName, commandResult.Action))
-					}
-				}
-			}
-		}
-
-		if cmd.Flags().Changed("enable-fs-search-tools") {
-			llmConfig.EnableFSSearchTools = config.EnableFSSearchTools
-		}
-		if strings.TrimSpace(config.Sysprompt) != "" {
-			llmConfig.Sysprompt = strings.TrimSpace(config.Sysprompt)
-		}
-		if len(config.SyspromptArgs) > 0 {
-			llmConfig.SyspromptArgs = config.SyspromptArgs
-		}
-		llmConfig.RecipeName = config.FragmentName
-		llmConfig.Extensions = extensionRuntime
-
-		// Set Anthropic account if specified
-		if config.Account != "" {
-			// Validate the account exists
-			if _, err := auth.GetAnthropicCredentialsByAlias(config.Account); err != nil {
-				presenter.Error(err, fmt.Sprintf("Account '%s' not found. Run 'kodelet accounts list' to see available accounts", config.Account))
-				return
-			}
-			llmConfig.AnthropicAccount = config.Account
-		}
-
-		applyRunToolRestrictions(&llmConfig, fragmentMetadata, config.NoTools)
-
-		// Generate session ID (use resume ID if available, otherwise new ID)
-		sessionID := config.ResumeConvID
-		if sessionID == "" {
-			sessionID = convtypes.GenerateID()
-		}
-
-		if config.ResultOnly {
-			presenter.SetQuiet(true)
-			logger.SetLogLevel("error")
-		}
-
-		handler := &llmtypes.ConsoleMessageHandler{Silent: config.ResultOnly}
-		thread, err := llm.NewThread(llmConfig)
-		if err != nil {
-			presenter.Error(err, "Failed to create LLM thread")
-			return
-		}
-		defer func() { _ = llm.CloseThread(thread) }()
-		if err := llm.SetEnvironment(thread, agentenv.NewLocalEnvironment(llmConfig.WorkingDirectory, extensionRuntime)); err != nil {
-			presenter.Error(err, "Failed to configure agent environment")
-			return
-		}
-		thread.SetConversationID(sessionID)
-
-		if config.ResumeConvID != "" && !config.ResultOnly {
-			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-		}
-
-		thread.EnablePersistence(ctx, !config.NoSave)
-		if goalUpdate != nil {
-			addRunGoalDisplay(thread, goalUpdate)
-		} else {
-			addRunMessageDisplay(thread, query, config)
-		}
-
-		finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-			PromptCache:  true,
-			Images:       config.Images,
-			MaxTurns:     config.MaxTurns,
-			CompactRatio: llmConfig.CompactRatio,
-			UseWeakModel: config.UseWeakModel,
-		})
-		if err != nil {
-			presenter.Error(err, "Failed to process query")
-			return
-		}
-
-		if config.ResultOnly {
-			fmt.Println(finalOutput)
-			return
-		}
-
-		usage := thread.GetUsage()
-		usageStats := presenter.ConvertUsageStats(&usage)
-		presenter.Stats(usageStats)
-
-		if thread.IsPersisted() {
-			presenter.Section("Conversation Information")
-			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
-		}
-	},
-}
-
-func init() {
-	defaults := NewRunConfig()
-	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
-	runCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new runs)")
-	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
-	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
-	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
-	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
-	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
-	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
-	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
-	runCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
-	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
-	runCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
-	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
-	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
-	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
-}
-
-func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
-	config := NewRunConfig()
-
-	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
-		config.ResumeConvID = resumeConvID
-	}
-	if cwd, err := cmd.Flags().GetString("cwd"); err == nil {
-		config.CWD = strings.TrimSpace(cwd)
-	}
-	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
-		config.Follow = follow
-	}
-	if config.Follow {
-		if config.ResumeConvID != "" {
-			presenter.Error(errors.New("conflicting flags"), "--follow and --resume cannot be used together")
-			os.Exit(1)
-		}
-		var err error
-		config.ResumeConvID, err = conversations.GetMostRecentConversationID(ctx)
-		if err != nil {
-			presenter.Warning("No conversations found, starting a new conversation")
-		}
-	}
-
-	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
-		config.NoSave = noSave
-	}
-	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
-		config.Images = images
-	}
-	if maxTurns, err := cmd.Flags().GetInt("max-turns"); err == nil {
-		config.MaxTurns = max(maxTurns, 0)
-	}
-	if fragmentName, err := cmd.Flags().GetString("recipe"); err == nil {
-		config.FragmentName = fragmentName
-	}
-	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {
-		config.FragmentArgs = fragmentArgs
-	}
-	if fragmentDirs, err := cmd.Flags().GetStringSlice("fragment-dirs"); err == nil {
-		config.FragmentDirs = fragmentDirs
-	}
-
-	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {
-		config.NoExtensions = noExtensions
-	}
-
-	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
-		config.NoTools = noTools
-	}
-
-	if enableFSSearchTools, err := cmd.Flags().GetBool("enable-fs-search-tools"); err == nil {
-		config.EnableFSSearchTools = enableFSSearchTools
-	}
-
-	if sysprompt, err := cmd.Flags().GetString("sysprompt"); err == nil {
-		config.Sysprompt = sysprompt
-	}
-
-	if syspromptArgs, err := cmd.Flags().GetStringToString("sysprompt-arg"); err == nil {
-		config.SyspromptArgs = syspromptArgs
-	}
-
-	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
-		config.ResultOnly = resultOnly
-	}
-
-	if useWeakModel, err := cmd.Flags().GetBool("use-weak-model"); err == nil {
-		config.UseWeakModel = useWeakModel
-	}
-
-	if account, err := cmd.Flags().GetString("account"); err == nil {
-		config.Account = account
-	}
-
-	return config
 }

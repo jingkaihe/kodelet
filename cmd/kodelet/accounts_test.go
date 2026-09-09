@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -13,7 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/spf13/cobra"
 )
 
 func TestAccountTokenStatus(t *testing.T) {
@@ -25,24 +28,18 @@ func TestAccountTokenStatus(t *testing.T) {
 
 func TestListAccountsCmd(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
-		setupAnthropicAccountsTestHome(t)
-
-		output := captureAllStdout(t, func() {
-			listAccountsCmd()
-		})
-
-		assert.Contains(t, output, "No Anthropic accounts found")
+		command, output := remoteAccountsCommandForTest(t, "list", nil)
+		require.NoError(t, runRemoteAnthropicAccounts(command, nil))
+		assert.Contains(t, output.String(), "No Anthropic accounts found")
 	})
 
 	t.Run("populated sorted with default marker", func(t *testing.T) {
-		setupAnthropicAccountsTestHome(t)
-		saveTestAnthropicAccount(t, "zeta", "zeta@example.com", time.Now().Add(-time.Hour))
-		saveTestAnthropicAccount(t, "alpha", "alpha@example.com", time.Now().Add(5*time.Minute))
-		require.NoError(t, auth.SetDefaultAnthropicAccount("zeta"))
-
-		output := captureStdout(t, func() {
-			listAccountsCmd()
+		command, buffer := remoteAccountsCommandForTest(t, "list", []chat.AnthropicAccountSummary{
+			{Alias: "zeta", Email: "zeta@example.com", ExpiresAt: time.Now().Add(-time.Hour).Unix(), IsDefault: true},
+			{Alias: "alpha", Email: "alpha@example.com", ExpiresAt: time.Now().Add(5 * time.Minute).Unix()},
 		})
+		require.NoError(t, runRemoteAnthropicAccounts(command, nil))
+		output := buffer.String()
 
 		assert.Contains(t, output, "ALIAS")
 		assert.Contains(t, output, "alpha@example.com")
@@ -53,51 +50,10 @@ func TestListAccountsCmd(t *testing.T) {
 	})
 }
 
-func TestAccountDefaultRenameAndRemoveCommands(t *testing.T) {
-	setupAnthropicAccountsTestHome(t)
-	saveTestAnthropicAccount(t, "work", "work@example.com", time.Now().Add(time.Hour))
-	saveTestAnthropicAccount(t, "personal", "personal@example.com", time.Now().Add(time.Hour))
-
-	showOutput := captureAllStdout(t, func() {
-		showDefaultAccountCmd()
-	})
-	assert.Contains(t, showOutput, "Default account: work (work@example.com)")
-
-	setOutput := captureAllStdout(t, func() {
-		setDefaultAccountCmd("personal")
-	})
-	assert.Contains(t, setOutput, "Default account set to 'personal'")
-	defaultAlias, err := auth.GetDefaultAnthropicAccount()
-	require.NoError(t, err)
-	assert.Equal(t, "personal", defaultAlias)
-
-	renameOutput := captureAllStdout(t, func() {
-		renameAccountCmd("personal", "home")
-	})
-	assert.Contains(t, renameOutput, "Account 'personal' renamed to 'home'")
-	defaultAlias, err = auth.GetDefaultAnthropicAccount()
-	require.NoError(t, err)
-	assert.Equal(t, "home", defaultAlias)
-
-	removeOutput := captureAllStdout(t, func() {
-		removeAccountCmd("home")
-	})
-	assert.Contains(t, removeOutput, "Account 'home' removed successfully")
-	assert.Contains(t, removeOutput, "Default account changed to 'work'")
-	accounts, err := auth.ListAnthropicAccounts()
-	require.NoError(t, err)
-	require.Len(t, accounts, 1)
-	assert.Equal(t, "work", accounts[0].Alias)
-}
-
 func TestShowDefaultAccountCmdWithoutDefault(t *testing.T) {
-	setupAnthropicAccountsTestHome(t)
-
-	output := captureAllStdout(t, func() {
-		showDefaultAccountCmd()
-	})
-
-	assert.Contains(t, output, "No default account set")
+	command, output := remoteAccountsCommandForTest(t, "default", nil)
+	require.NoError(t, runRemoteAnthropicAccounts(command, nil))
+	assert.Contains(t, output.String(), "No default account is set")
 }
 
 func TestAccountsUsageFormatting(t *testing.T) {
@@ -109,31 +65,23 @@ func TestAccountsUsageFormatting(t *testing.T) {
 	assert.Contains(t, formatResetTime(time.Now().Add(-time.Minute)), "(passed)")
 	future := formatResetTime(time.Now().Add(25*time.Hour + 2*time.Minute))
 	assert.Contains(t, future, "(in 1d 1h")
-
-	output := captureStdout(t, func() {
-		outputJSONError("failed")
-	})
-	var payload map[string]string
-	require.NoError(t, json.Unmarshal([]byte(output), &payload))
-	assert.Equal(t, "failed", payload["error"])
 }
 
-func setupAnthropicAccountsTestHome(t *testing.T) {
+func remoteAccountsCommandForTest(t *testing.T, name string, accounts []chat.AnthropicAccountSummary) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-}
-
-func saveTestAnthropicAccount(t *testing.T, alias, email string, expiresAt time.Time) {
-	t.Helper()
-
-	_, err := auth.SaveAnthropicCredentialsWithAlias(alias, &auth.AnthropicCredentials{
-		Email:        email,
-		Scope:        "user",
-		AccessToken:  "access-" + alias,
-		RefreshToken: "refresh-" + alias,
-		ExpiresAt:    expiresAt.Unix(),
-	})
-	require.NoError(t, err)
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+		assert.Equal(t, "/api/providers/anthropic/accounts", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(chat.AnthropicAccounts{Accounts: accounts}))
+	}))
+	t.Cleanup(daemon.Close)
+	command := &cobra.Command{Use: name}
+	command.SetContext(t.Context())
+	addRemoteAdministrationFlags(command)
+	require.NoError(t, command.ParseFlags([]string{"--server=" + daemon.URL, "--auth-token=client"}))
+	output := &bytes.Buffer{}
+	command.SetOut(output)
+	return command, output
 }
 
 func captureAllStdout(t *testing.T, f func()) string {

@@ -3,19 +3,22 @@ package registry
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 )
 
 const (
-	defaultOwnerID          = "local"
-	defaultLoadedRunHistory = 1000
+	defaultOwnerID                 = "local"
+	defaultLoadedRunHistory        = 1000
+	sessionExtensionIDsMetadataKey = "session_extension_ids"
 )
 
 // PersistedState is the durable registry state restored when the control plane starts.
@@ -132,7 +135,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 		JOIN runner_registrations r ON r.id = a.runner_id
 		WHERE r.owner_id = ?
 	`, s.ownerID); err != nil {
-		return PersistedState{}, errors.Wrap(err, "failed to load runner conversation affinity")
+		return PersistedState{}, errors.Wrap(err, "failed to load saved conversation runner assignments")
 	}
 	for _, affinity := range affinities {
 		state.Affinities[affinity.ConversationID] = ConversationAffinity{
@@ -141,6 +144,45 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 		}
 	}
 	return state, nil
+}
+
+// SessionExtensionRequirements reads durable callback requirements independently
+// of the bounded run-history cache restored at startup.
+func (s *SQLitePersistence) SessionExtensionRequirements(ctx context.Context, conversationID string) ([]string, error) {
+	var snapshot string
+	err := s.db.GetContext(ctx, &snapshot, `
+		SELECT rr.manifest_json FROM runner_runs rr
+		JOIN runner_registrations r ON r.id = rr.runner_id
+		WHERE r.owner_id = ? AND rr.conversation_id = ? AND COALESCE(rr.manifest_json, '') != ''
+		ORDER BY rr.created_at DESC, rr.id DESC LIMIT 1
+	`, s.ownerID, conversationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Runner removal preserves only callback identities in conversation-owned
+		// metadata. A newer pinned manifest always takes precedence over it.
+		err = s.db.GetContext(ctx, &snapshot, `
+			SELECT COALESCE(json_extract(metadata, ?), '[]')
+			FROM conversations WHERE id = ?
+		`, "$."+sessionExtensionIDsMetadataKey, conversationID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load preserved session extension requirements")
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(snapshot), &ids); err != nil {
+			return nil, errors.Wrap(err, "failed to decode preserved session extension requirements")
+		}
+		return ids, nil
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load session extension requirements")
+	}
+	var manifest runnerpayload.Manifest
+	if err := json.Unmarshal([]byte(snapshot), &manifest); err != nil {
+		return nil, errors.Wrap(err, "failed to decode session extension requirements")
+	}
+	return manifest.SessionExtensionIDs, nil
 }
 
 // SaveRunner inserts or updates one stable runner registration.
@@ -302,7 +344,7 @@ func (s *SQLitePersistence) ConversationAffinity(ctx context.Context, conversati
 		return ConversationAffinity{}, false, nil
 	}
 	if err != nil {
-		return ConversationAffinity{}, false, errors.Wrap(err, "failed to load conversation runner affinity")
+		return ConversationAffinity{}, false, errors.Wrap(err, "failed to load the conversation's saved runner assignment")
 	}
 	return ConversationAffinity{RunnerID: row.RunnerID, EnvironmentProfile: row.EnvironmentProfile}, true, nil
 }
@@ -346,6 +388,27 @@ func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, f
 
 	result := RemovalResult{RunnerID: runnerID}
 	for _, table := range []string{"conversations", "conversation_summaries"} {
+		// Transfer the latest pinned requirements before deleting run history.
+		// Runs that never pinned a manifest must not erase a prior fallback, and
+		// a pinned manifest without callbacks must replace it with an empty list.
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE `+table+`
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' THEN '{}' ELSE metadata END,
+				?, json(COALESCE((
+					SELECT json_extract(rr.manifest_json, '$.sessionExtensionIds')
+					FROM runner_runs rr
+					WHERE rr.runner_id = ? AND rr.conversation_id = `+table+`.id
+						AND COALESCE(rr.manifest_json, '') != ''
+					ORDER BY rr.created_at DESC, rr.id DESC LIMIT 1
+				), '[]')))
+			WHERE id IN (
+				SELECT conversation_id FROM runner_runs
+				WHERE runner_id = ? AND COALESCE(manifest_json, '') != ''
+			)
+		`, "$."+sessionExtensionIDsMetadataKey, runnerID, runnerID); err != nil {
+			return RemovalResult{}, errors.Wrapf(err, "failed to preserve session extension requirements in %s", table)
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE `+table+`
 			SET metadata = json_remove(metadata, ?, ?)

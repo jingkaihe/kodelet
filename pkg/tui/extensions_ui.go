@@ -715,7 +715,10 @@ func (m model) focusedExtensionSurfaceKey() (extensionUIKey, bool) {
 }
 
 func (m model) extensionUIKeyVisible(key extensionUIKey) bool {
-	return key.conversationKey == "" || key.conversationKey == m.activeConversationKey
+	// Fresh tabs retain their local key after receiving a saved conversation ID.
+	// Runner UI uses the saved ID, including on input and resize messages.
+	return key.conversationKey == "" || key.conversationKey == m.activeConversationKey ||
+		(m.conversationState != nil && key.conversationKey == m.conversationID)
 }
 
 func (m *model) routeExtensionSurfaceKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {

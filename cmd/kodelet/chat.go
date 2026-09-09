@@ -4,18 +4,20 @@ import (
 	"context"
 	"io"
 	stdlog "log"
+	"net/http"
 	"os"
 	"strings"
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 type ChatConfig struct {
@@ -31,6 +33,7 @@ type ChatConfig struct {
 	ServerConfigured bool
 	AuthToken        string
 	ConfigError      error
+	Options          *llmtypes.ExecutionOptions
 }
 
 func NewChatConfig() *ChatConfig {
@@ -38,150 +41,313 @@ func NewChatConfig() *ChatConfig {
 }
 
 var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start an interactive Kodelet chat TUI",
-	Long:  `Start an interactive terminal UI for chatting with Kodelet.`,
-	Args:  cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getChatConfigFromFlags(cmd)
-		if config.ConfigError != nil {
-			presenter.Error(config.ConfigError, "Failed to resolve control-plane authentication")
-			os.Exit(1)
-		}
-		var chatRunner chatpkg.ChatRunner
-		var remoteRunner *chatpkg.ControlPlaneChatRunner
-		var remoteDefaultCWD string
-		remote := usesControlPlaneChat(config)
-		if strings.TrimSpace(config.Runner) != "" {
-			selectedRunner, workspace, remoteErr := prepareRemoteChatRunner(ctx, config)
-			if remoteErr != nil {
-				presenter.Error(remoteErr, "Failed to select remote runner")
-				os.Exit(1)
-			}
-			remoteRunner = selectedRunner
-			chatRunner = remoteRunner
-			remoteDefaultCWD = workspace
-		} else if remote {
-			selectedRunner, remoteErr := prepareServerChatRunner(config)
-			if remoteErr != nil {
-				presenter.Error(remoteErr, "Failed to connect to control plane")
-				os.Exit(1)
-			}
-			remoteRunner = selectedRunner
-			chatRunner = remoteRunner
-		} else if strings.TrimSpace(config.RunnerProfile) != "" {
-			presenter.Error(errors.New("--runner-profile requires --runner"), "Invalid remote runner configuration")
-			os.Exit(1)
-		}
-		if config.Follow {
-			conversationID, followErr := resolveFollowConversation(ctx, remoteRunner)
-			if followErr != nil {
-				presenter.Warning("No conversations found, starting a new conversation")
-			} else {
-				config.ResumeConvID = conversationID
-			}
-		}
-
-		if !remote {
-			applyChatRuntimeRestrictions(config)
-		}
-		if err := tui.ValidateThemeName(config.Theme); err != nil {
-			presenter.Error(err, "Invalid TUI theme")
-			os.Exit(1)
-		}
-		reasoningEffort := ""
-		reasoningEffortExplicit := cmd.Flags().Changed("reasoning-effort")
-		if reasoningEffortExplicit {
-			reasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
-		}
-		if !remote {
-			if err := validateChatResumeConversation(ctx, config.ResumeConvID, reasoningEffort); err != nil {
-				presenter.Error(err, "Failed to resume conversation")
-				os.Exit(1)
-			}
-		}
+	Use:               "chat",
+	Short:             "Start an interactive chat in your terminal",
+	Long:              `Chat with Kodelet in your terminal. A local server starts automatically in the background when needed. Use --server to connect to an explicitly managed server. Conversations are saved automatically; exiting chat leaves the server running.`,
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		theme, _ := cmd.Flags().GetString("theme")
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
-
-		profile, _ := cmd.Flags().GetString("profile")
-		var profileOptions []string
-		var profileSettings map[string]tui.ProfileSettings
-		var reasoningEffortOptions []string
-		if remote {
-			requestedProfile := ""
-			if cmd.Flags().Changed("profile") {
-				requestedProfile = profile
-			}
-			remoteProfile, options, settings, defaultCWD, settingsErr := prepareRemoteChatSettings(ctx, remoteRunner, requestedProfile)
-			if settingsErr != nil {
-				presenter.Error(settingsErr, "Failed to load control-plane chat settings")
-				os.Exit(1)
-			}
-			profile = remoteProfile
-			profileOptions = options
-			profileSettings = settings
-			if strings.TrimSpace(remoteDefaultCWD) == "" {
-				remoteDefaultCWD = defaultCWD
-			}
-			if selected, ok := remoteProfileSettings(settings, profile); ok {
-				reasoningEffortOptions = selected.ReasoningEffortOptions
-				if !reasoningEffortExplicit {
-					reasoningEffort = selected.ReasoningEffort
-				}
-			}
-			if reasoningEffortExplicit {
-				if err := validateRemoteReasoningEffort(reasoningEffort, reasoningEffortOptions); err != nil {
-					presenter.Error(err, "Invalid control-plane reasoning effort")
-					os.Exit(1)
-				}
-			}
-		} else if strings.TrimSpace(profile) == "" {
-			profile = viper.GetString("profile")
-		}
-
-		if err := tui.Run(ctx, tui.Config{
-			ConversationID:          config.ResumeConvID,
-			Profile:                 profile,
-			ProfileOptions:          profileOptions,
-			ProfileSettings:         profileSettings,
-			EnvironmentProfile:      config.RunnerProfile,
-			ReasoningEffort:         reasoningEffort,
-			ReasoningEffortOptions:  reasoningEffortOptions,
-			ReasoningEffortExplicit: reasoningEffortExplicit,
-			CWD:                     config.CWD,
-			DefaultCWD:              remoteDefaultCWD,
-			Theme:                   config.Theme,
-			Runner:                  chatRunner,
-			Remote:                  remote,
-		}); err != nil {
-			presenter.Error(err, "Chat failed")
-			os.Exit(1)
-		}
+		return errors.Wrap(tui.Run(cmd.Context(), tui.Config{
+			Remote: true,
+			Theme:  theme,
+			Initialize: func(ctx context.Context) (tui.Config, error) {
+				return prepareDaemonChat(ctx, cmd)
+			},
+		}), "could not start chat")
 	},
 }
 
-func applyChatRuntimeRestrictions(config *ChatConfig) {
-	if config.NoExtensions || config.NoTools {
-		viper.Set("extensions.enabled", false)
+func validateRemoteChatFlags(cmd *cobra.Command) error {
+	if cmd.Flags().Changed("no-save") {
+		return errors.New("--no-save is no longer supported; all conversations are saved automatically")
 	}
-	if config.NoTools {
-		viper.Set("allowed_tools", []string{"none"})
+	for _, flag := range []string{"sysprompt", "sysprompt-arg", "allowed-domains-file", "anthropic-api-access", "account", "tool-mode", "context-patterns", "compact-ratio", "enable-openai-search"} {
+		if cmd.Flags().Changed(flag) {
+			return errors.Errorf("--%s cannot be set with 'kodelet %s'; set it in the server or runner configuration", flag, cmd.Name())
+		}
 	}
+	return nil
+}
+
+// configuredChatRunner keeps command-scoped options out of the TUI and promotes
+// the shared transport's history, streams, cancellation and UI response APIs.
+type configuredChatRunner struct {
+	*chatpkg.Client
+	options            *llmtypes.ExecutionOptions
+	runnerID           string
+	explicitRunnerID   string
+	defaultCWD         string
+	environmentProfile string
+}
+
+func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatpkg.WorkspaceTarget) (chatpkg.WorkspaceTarget, error) {
+	target.Options = r.options.Restrictions()
+	if target.ConversationID == "" {
+		if target.RunnerID == "" {
+			target.RunnerID = r.runnerID
+			if target.RunnerID == "" {
+				settings, err := r.ChatSettings(ctx, "")
+				if err != nil {
+					return target, err
+				}
+				if !settings.DefaultRunnerReady || settings.DefaultRunnerID == "" {
+					return target, errors.New("the default runner is unavailable; check 'kodelet runner list' and the server logs, or select another runner with --runner")
+				}
+				target.RunnerID = settings.DefaultRunnerID
+				if target.CWD == "" && r.defaultCWD == "" {
+					target.CWD, err = sameHostDefaultCWD(settings)
+					if err != nil {
+						return target, err
+					}
+				}
+			}
+		}
+		if target.CWD == "" {
+			target.CWD = r.defaultCWD
+		}
+		if target.EnvironmentProfile == "" {
+			target.EnvironmentProfile = r.environmentProfile
+		}
+	}
+	return target, nil
+}
+
+func (r *configuredChatRunner) DiscoverWorkspace(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return protocol.WorkspaceDiscoverResult{}, err
+	}
+	return r.Client.DiscoverWorkspace(ctx, target)
+}
+
+func (r *configuredChatRunner) ExecuteWorkspaceShortcut(ctx context.Context, request chatpkg.WorkspaceShortcutRequest) (runnerpayload.ShortcutExecuteResult, error) {
+	target, err := r.discoveryTarget(ctx, request.Target)
+	if err != nil {
+		return runnerpayload.ShortcutExecuteResult{}, err
+	}
+	request.Target = target
+	return r.Client.ExecuteWorkspaceShortcut(ctx, request)
+}
+
+func (r *configuredChatRunner) WorkspaceCWDSuggestions(ctx context.Context, target chatpkg.WorkspaceTarget, query string) (protocol.WorkspaceCWDHintsResult, error) {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return protocol.WorkspaceCWDHintsResult{}, err
+	}
+	// Directory resolution does not execute extensions and accepts no run options.
+	target.Options = nil
+	return r.Client.WorkspaceCWDSuggestions(ctx, target, query)
+}
+
+func (r *configuredChatRunner) LoadMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return protocol.WorkspaceMessageHistoryResult{}, err
+	}
+	target.Options = nil
+	return r.Client.LoadMessageHistory(ctx, target)
+}
+
+func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target chatpkg.WorkspaceTarget, entry messagehistory.Entry) error {
+	target, err := r.discoveryTarget(ctx, target)
+	if err != nil {
+		return err
+	}
+	target.Options = nil
+	return r.Client.AppendMessageHistory(ctx, target, entry)
+}
+
+func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+	request.Options = r.options.Clone()
+	var history chatpkg.ConversationHistory
+	var err error
+	if request.ConversationID != "" {
+		history, err = r.LoadConversation(ctx, request.ConversationID)
+		var responseErr *chatpkg.ControlPlaneHTTPError
+		if err != nil && (!errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusNotFound) {
+			return request.ConversationID, err
+		}
+	}
+	if history.ID != "" {
+		if err := validateDaemonChatAffinity(history, request, r.explicitRunnerID); err != nil {
+			return request.ConversationID, err
+		}
+		request.RunnerID, request.CWD, request.EnvironmentProfile = history.RunnerID, history.CWD, history.EnvironmentProfile
+	} else {
+		target, err := r.discoveryTarget(ctx, chatpkg.WorkspaceTarget{CWD: request.CWD, Profile: request.Profile, EnvironmentProfile: request.EnvironmentProfile})
+		if err != nil {
+			return request.ConversationID, err
+		}
+		discovery, err := r.Client.DiscoverWorkspace(ctx, target)
+		if err != nil {
+			return request.ConversationID, err
+		}
+		request.RunnerID, request.CWD, request.EnvironmentProfile = target.RunnerID, discovery.CWD, discovery.EnvironmentProfile
+	}
+	id, err := r.Client.Run(ctx, request, sink)
+	if err != nil {
+		return id, errors.Wrapf(err, "chat failed or the connection was interrupted; before sending the message again, check 'kodelet conversation turn %s %s'", request.ConversationID, request.TurnID)
+	}
+	return id, nil
+}
+
+func validateDaemonChatAffinity(history chatpkg.ConversationHistory, request chatpkg.ChatRequest, explicitRunnerID string) error {
+	if history.ID != request.ConversationID || history.RunnerID == "" || history.CWD == "" {
+		return errors.New("this conversation has no saved runner or working directory; use 'kodelet conversation move <conversation-id> <runner-id>[:<cwd>]' before resuming")
+	}
+	if explicitRunnerID != "" && explicitRunnerID != history.RunnerID {
+		return errors.New("this conversation uses a different runner; omit --runner to use its saved runner, or use 'kodelet conversation move' to change it first")
+	}
+	if request.CWD != "" && request.CWD != history.CWD {
+		return errors.New("the working directory cannot be changed when resuming; use 'kodelet conversation move' to change it first, or start a new conversation")
+	}
+	if request.Profile != "" && chatpkg.NormalizeRequestedProfile(request.Profile) != chatpkg.NormalizeRequestedProfile(history.Profile) {
+		return errors.New("the model profile cannot be changed when resuming; start a new conversation to use another profile")
+	}
+	if request.EnvironmentProfile != "" && chatpkg.NormalizeEnvironmentProfile(request.EnvironmentProfile) != chatpkg.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
+		return errors.New("the runner profile cannot be changed when resuming; start a new conversation to use another profile")
+	}
+	return nil
+}
+
+func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, error) {
+	var result tui.Config
+	if err := validateRemoteChatFlags(cmd); err != nil {
+		return result, err
+	}
+	config := getChatConfigFromFlags(cmd)
+	if config.ConfigError != nil {
+		return result, config.ConfigError
+	}
+	if err := tui.ValidateThemeName(config.Theme); err != nil {
+		return result, err
+	}
+	if config.Follow && config.Runner == "" && config.CWD == "" {
+		return result, errors.New("--follow requires --runner or --cwd to choose which conversation history to search")
+	}
+	server, token, err := prepareClientServer(ctx, cmd)
+	if err != nil {
+		return result, err
+	}
+	config.Server, config.AuthToken = server, token
+	client, err := prepareServerChatRunner(config)
+	if err != nil {
+		return result, err
+	}
+	runner := &configuredChatRunner{Client: client, options: config.Options.Clone(), environmentProfile: config.RunnerProfile}
+	if config.Runner != "" {
+		runners, _, err := fetchRunners(ctx, config.Server, config.AuthToken)
+		if err != nil {
+			return result, err
+		}
+		selected, err := selectRunner(runners, config.Runner)
+		if err != nil {
+			return result, err
+		}
+		runner.runnerID, runner.explicitRunnerID = selected.ID, selected.ID
+	}
+	if config.Follow {
+		var profile string
+		if cmd.Flags().Changed("profile") {
+			profile, _ = cmd.Flags().GetString("profile")
+		}
+		target, err := runner.WorkspaceCWDSuggestions(ctx, chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: profile}, "")
+		if err != nil {
+			return result, err
+		}
+		source, err := chatpkg.NewClient(config.Server, config.AuthToken, runner.explicitRunnerID)
+		if err != nil {
+			return result, err
+		}
+		history, err := source.ListConversationsInCWD(ctx, 1, target.BaseDir)
+		if err != nil {
+			return result, err
+		}
+		if len(history) == 0 {
+			return result, errors.New("no conversation found for the selected runner or directory; omit --follow to start one")
+		}
+		config.ResumeConvID = history[0].ID
+	}
+	result = tui.Config{Remote: true, Runner: runner, Theme: config.Theme, ConversationID: config.ResumeConvID, CWD: config.CWD, EnvironmentProfile: config.RunnerProfile, ReasoningEffortExplicit: cmd.Flags().Changed("reasoning-effort")}
+	if cmd.Flags().Changed("profile") {
+		result.Profile, _ = cmd.Flags().GetString("profile")
+	}
+	var target chatpkg.WorkspaceTarget
+	if config.ResumeConvID != "" {
+		history, err := client.LoadConversation(ctx, config.ResumeConvID)
+		if err != nil {
+			return result, err
+		}
+		if err := validateDaemonChatAffinity(history, chatpkg.ChatRequest{ConversationID: config.ResumeConvID, CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile}, runner.explicitRunnerID); err != nil {
+			return result, err
+		}
+		if cmd.Flags().Changed("runner-profile") && chatpkg.NormalizeEnvironmentProfile(config.RunnerProfile) != chatpkg.NormalizeEnvironmentProfile(history.EnvironmentProfile) {
+			return result, errors.New("the runner profile cannot be changed when resuming; start a new conversation to use another profile")
+		}
+		result.Profile, result.EnvironmentProfile, result.ReasoningEffort = history.Profile, history.EnvironmentProfile, history.ReasoningEffort
+		result.CWD = history.CWD
+		runner.runnerID = history.RunnerID
+		result.ProfileOptions = []string{history.Profile}
+		result.ReasoningEffortOptions = []string{history.ReasoningEffort}
+		target.ConversationID = history.ID
+	} else {
+		result.Profile, result.ProfileOptions, result.ProfileSettings, _, err = prepareRemoteChatSettings(ctx, client, result.Profile)
+		if err != nil {
+			return result, err
+		}
+		settings, _ := remoteProfileSettings(result.ProfileSettings, result.Profile)
+		result.ReasoningEffort, result.ReasoningEffortOptions = settings.ReasoningEffort, settings.ReasoningEffortOptions
+		target = chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile}
+	}
+	if result.ReasoningEffortExplicit {
+		result.ReasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
+		if err := validateRemoteReasoningEffort(result.ReasoningEffort, result.ReasoningEffortOptions); err != nil {
+			return result, err
+		}
+	}
+	target, err = runner.discoveryTarget(ctx, target)
+	if err != nil {
+		return result, err
+	}
+	// Resolve runner-owned paths without initializing extensions. The TUI loads
+	// commands asynchronously once the composer is available.
+	target.Options = nil
+	resolved, err := client.WorkspaceCWDSuggestions(ctx, target, "")
+	if err != nil {
+		return result, err
+	}
+	if resolved.BaseDir == "" {
+		return result, errors.New("the runner did not return a working directory; check the directory and runner logs")
+	}
+	if config.ResumeConvID != "" && resolved.BaseDir != result.CWD {
+		return result, errors.New("the runner returned a different directory than this conversation saved")
+	}
+	result.CWD, result.DefaultCWD = resolved.BaseDir, resolved.BaseDir
+	runner.defaultCWD = resolved.BaseDir
+	if config.ResumeConvID == "" {
+		result.EnvironmentProfile = chatpkg.NormalizeEnvironmentProfile(target.EnvironmentProfile)
+		runner.runnerID = target.RunnerID
+	}
+	return result, nil
 }
 
 func init() {
 	defaults := NewChatConfig()
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
-	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new chats)")
+	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
 	chatCmd.Flags().String("theme", tui.AutoThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
-	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
+	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
-	chatCmd.Flags().String("runner", defaults.Runner, "Use a remote runner by ID, ID prefix, or display name")
-	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner-local environment profile used with --runner (blank uses the runner base configuration)")
-	chatCmd.Flags().String("server", defaultRunnerServer, "Run the TUI against a control plane; use with --runner to select a runner for new conversations")
-	chatCmd.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
+	chatCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")
+	chatCmd.Flags().Int("max-turns", 0, "Maximum AI turns per prompt (0 for no limit)")
+	chatCmd.Flags().String("runner", defaults.Runner, "Workspace runner ID, ID prefix, or display name")
+	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner environment profile for new conversations")
+	chatCmd.Flags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
+	chatCmd.Flags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 }
 
 func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
@@ -201,8 +367,8 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	}
 	if config.Follow {
 		if config.ResumeConvID != "" {
-			presenter.Error(errors.New("conflicting flags"), "--follow and --resume cannot be used together")
-			os.Exit(1)
+			config.ConfigError = errors.New("--follow and --resume cannot be used together")
+			return config
 		}
 	}
 	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {
@@ -218,19 +384,17 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 		config.RunnerProfile = strings.TrimSpace(runnerProfile)
 	}
 	config.Server, config.ServerConfigured = serverFlagOrConfig(cmd)
-	if usesControlPlaneChat(config) || cmd.Flags().Changed("auth-token") || strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)) != "" {
+	config.Options, config.ConfigError = remoteRunExecutionOptions(cmd)
+	if config.ConfigError == nil && (config.ServerConfigured || cmd.Flags().Changed("auth-token") || strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)) != "") {
 		config.AuthToken, _, config.ConfigError = resolveControlPlaneAuthToken(cmd, config.Server)
 	}
 
 	return config
 }
 
-func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, string, error) {
+func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.Client, string, error) {
 	if config == nil || strings.TrimSpace(config.Runner) == "" {
 		return nil, "", errors.New("runner selector is required")
-	}
-	if config.NoExtensions || config.NoTools {
-		return nil, "", errors.New("--no-extensions and --no-tools are local-only options and cannot be used with --runner")
 	}
 	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
 	if err != nil {
@@ -244,7 +408,7 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 		if selected.CompatibilityError != "" {
 			return nil, "", errors.New(selected.CompatibilityError)
 		}
-		return nil, "", errors.New("runner is incompatible with this control plane")
+		return nil, "", errors.New("runner is incompatible with this server")
 	}
 	if !selected.Connected {
 		return nil, "", errors.New("runner is offline")
@@ -255,50 +419,23 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if selected.Status == runnerregistry.RunnerStatusBusy && !selected.ConcurrentRuns {
 		return nil, "", errors.New("runner does not support concurrent runs")
 	}
-	runner, err := chatpkg.NewControlPlaneChatRunner(server, config.AuthToken, selected.ID)
+	runner, err := chatpkg.NewClient(server, config.AuthToken, selected.ID)
 	if err != nil {
 		return nil, "", err
 	}
 	return runner, selected.Workspace.Path, nil
 }
 
-func prepareServerChatRunner(config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, error) {
+func prepareServerChatRunner(config *ChatConfig) (*chatpkg.Client, error) {
 	if config == nil {
 		return nil, errors.New("chat configuration is required")
 	}
-	if config.NoExtensions || config.NoTools {
-		return nil, errors.New("--no-extensions and --no-tools are local-only options and cannot be used with --server")
-	}
-	if strings.TrimSpace(config.RunnerProfile) != "" {
-		return nil, errors.New("--runner-profile requires --runner")
-	}
-	return chatpkg.NewControlPlaneChatRunner(config.Server, config.AuthToken, "")
+	return chatpkg.NewClient(config.Server, config.AuthToken, "")
 }
 
-func usesControlPlaneChat(config *ChatConfig) bool {
-	return config != nil && (strings.TrimSpace(config.Runner) != "" || config.ServerConfigured)
-}
-
-func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationSource) (string, error) {
-	if source == nil {
-		return conversations.GetMostRecentConversationID(ctx)
-	}
-	if runner, ok := source.(*chatpkg.ControlPlaneChatRunner); ok && runner == nil {
-		return conversations.GetMostRecentConversationID(ctx)
-	}
-	summaries, err := source.ListConversations(ctx, 1)
-	if err != nil {
-		return "", err
-	}
-	if len(summaries) == 0 || strings.TrimSpace(summaries[0].ID) == "" {
-		return "", errors.New("no conversations found")
-	}
-	return strings.TrimSpace(summaries[0].ID), nil
-}
-
-func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlaneChatRunner, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
+func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
-		return "", nil, nil, "", errors.New("control-plane chat runner is required")
+		return "", nil, nil, "", errors.New("chat runner is required")
 	}
 	selected, err := runner.ChatSettings(ctx, requestedProfile)
 	if err != nil {
@@ -354,31 +491,5 @@ func validateRemoteReasoningEffort(requested string, options []string) error {
 			return nil
 		}
 	}
-	return errors.Errorf("reasoning effort %q is not allowed by the selected control-plane profile", requested)
-}
-
-func validateChatResumeConversation(ctx context.Context, conversationID string, requestedReasoningEfforts ...string) error {
-	requestedReasoningEffort := ""
-	if len(requestedReasoningEfforts) > 0 {
-		requestedReasoningEffort = requestedReasoningEfforts[0]
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return nil
-	}
-
-	service, err := conversations.GetDefaultConversationService(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to open conversation store")
-	}
-	defer func() {
-		_ = service.Close()
-	}()
-
-	record, err := service.GetConversation(ctx, conversationID)
-	if err != nil {
-		return errors.Wrapf(err, "conversation not found: %s", conversationID)
-	}
-	_, err = chatpkg.ResolveConfigForExistingConversation(record, requestedReasoningEffort)
-	return err
+	return errors.Errorf("reasoning effort %q is not allowed by the selected model profile", requested)
 }

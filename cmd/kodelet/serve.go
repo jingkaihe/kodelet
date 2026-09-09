@@ -4,19 +4,27 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/pkg/errors"
@@ -31,34 +39,39 @@ const (
 var defaultOIDCScopes = []string{"openid", "profile", "email"}
 
 type ServeConfig struct {
-	Host                         string
-	Port                         int
-	CWD                          string
-	CompactRatio                 float64
-	AuthToken                    string
-	RunnerAuthToken              string
-	WebAuthMode                  controlplane.WebAuthMode
-	RunnerAuthMode               controlplane.RunnerAuthMode
-	OIDC                         controlplane.OIDCConfig
-	OIDCClientSecretFile         string
-	SkipAuth                     bool
-	DisableControlPlaneWorkspace bool
-	CORSOrigins                  []string
-	ConfigError                  error
+	Managed              bool
+	Host                 string
+	Port                 int
+	CWD                  string
+	CompactRatio         float64
+	AuthToken            string
+	RunnerAuthToken      string
+	WebAuthMode          controlplane.WebAuthMode
+	RunnerAuthMode       controlplane.RunnerAuthMode
+	OIDC                 controlplane.OIDCConfig
+	OIDCClientSecretFile string
+	SkipAuth             bool
+	EmbeddedRunner       bool
+	RunnerWorkspace      string
+	RunnerSettings       map[string]any
+	CORSOrigins          []string
+	ConfigError          error
 }
 
 type trustedServeConfig struct {
-	Host                         *string                 `mapstructure:"host"`
-	Port                         *int                    `mapstructure:"port"`
-	CWD                          *string                 `mapstructure:"cwd"`
-	AuthToken                    *string                 `mapstructure:"auth_token"`
-	RunnerAuthToken              *string                 `mapstructure:"runner_auth_token"`
-	WebAuthMode                  *string                 `mapstructure:"web_auth_mode"`
-	RunnerAuthMode               *string                 `mapstructure:"runner_auth_mode"`
-	SkipAuth                     *bool                   `mapstructure:"skip_auth"`
-	DisableControlPlaneWorkspace *bool                   `mapstructure:"disable_control_plane_workspace"`
-	CORSOrigins                  []string                `mapstructure:"cors_origins"`
-	OIDC                         *trustedServeOIDCConfig `mapstructure:"oidc"`
+	Host            *string                 `mapstructure:"host"`
+	Port            *int                    `mapstructure:"port"`
+	CWD             *string                 `mapstructure:"cwd"`
+	AuthToken       *string                 `mapstructure:"auth_token"`
+	RunnerAuthToken *string                 `mapstructure:"runner_auth_token"`
+	WebAuthMode     *string                 `mapstructure:"web_auth_mode"`
+	RunnerAuthMode  *string                 `mapstructure:"runner_auth_mode"`
+	SkipAuth        *bool                   `mapstructure:"skip_auth"`
+	EmbeddedRunner  *bool                   `mapstructure:"embedded_runner"`
+	RunnerWorkspace *string                 `mapstructure:"runner_workspace"`
+	RunnerSettings  map[string]any          `mapstructure:"runner_settings"`
+	CORSOrigins     []string                `mapstructure:"cors_origins"`
+	OIDC            *trustedServeOIDCConfig `mapstructure:"oidc"`
 }
 
 type trustedServeOIDCConfig struct {
@@ -78,10 +91,11 @@ type trustedServeOIDCConfig struct {
 
 func NewServeConfig() *ServeConfig {
 	return &ServeConfig{
-		Host:         "localhost",
-		Port:         8080,
-		CWD:          "",
-		CompactRatio: llmtypes.DefaultCompactRatio,
+		Host:           "localhost",
+		Port:           8080,
+		CWD:            "",
+		CompactRatio:   llmtypes.DefaultCompactRatio,
+		EmbeddedRunner: true,
 		OIDC: controlplane.OIDCConfig{
 			Scopes:          append([]string(nil), defaultOIDCScopes...),
 			SessionDuration: defaultOIDCSessionDuration,
@@ -91,17 +105,14 @@ func NewServeConfig() *ServeConfig {
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the web UI server for chatting with kodelet",
-	Long: `Start a local web server that provides an interactive chat interface for kodelet.
-The web UI lets you continue conversations, inspect tool activity, and browse recent
-chat history from the browser while still using the same embedded assets in the binary.
+	Short: "Start the Kodelet server",
+	Long: `Start the Kodelet server and Web UI at http://localhost:8080. CLI commands and editor integrations connect to this server.
 
-The server will be available at http://localhost:8080 by default. A random
-web authentication token and a separate runner authentication token are generated
-unless explicit authentication modes are configured or --skip-auth is set.`,
+A built-in runner provides file access and tools on this machine. Its default workspace is the startup directory; use --runner-workspace to choose another directory. Use --embedded-runner=false if you manage runners separately.
+
+Separate client and runner tokens are generated unless authentication is configured.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		runServeCommand(cmd.Context(), getServeConfigFromFlags(cmd))
-		return nil
+		return runServeCommand(cmd.Context(), getServeConfigFromFlags(cmd))
 	},
 }
 
@@ -110,15 +121,19 @@ func init() {
 }
 
 func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
+	cmd.Flags().Bool("managed", false, "Internal: run the managed local server")
+	_ = cmd.Flags().MarkHidden("managed")
 	cmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
-	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to")
-	cmd.Flags().String("cwd", defaults.CWD, "Default working directory for new web conversations")
+	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (0 selects an available port)")
+	cmd.Flags().String("cwd", defaults.CWD, "Removed; use --runner-workspace for the embedded runner")
 	cmd.Flags().String("web-auth-mode", string(defaults.WebAuthMode), "Web authentication mode: token, oidc, or none (default: token)")
 	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, or none (default: token)")
 	cmd.Flags().String("auth-token", defaults.AuthToken, "Web UI token; generated in token mode, or used as an admin compatibility credential in OIDC mode")
 	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "Runner registration token; generated in token mode")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "Compatibility shorthand for --web-auth-mode=none --runner-auth-mode=none")
-	cmd.Flags().Bool("disable-control-plane-workspace", defaults.DisableControlPlaneWorkspace, "Disable control-plane-local workspace execution and require workspace runners")
+	cmd.Flags().Bool("disable-control-plane-workspace", true, "Deprecated and ignored; use --embedded-runner=false to run without a built-in runner")
+	cmd.Flags().Bool("embedded-runner", defaults.EmbeddedRunner, "Run tools and access files on this machine using a built-in runner")
+	cmd.Flags().String("runner-workspace", defaults.RunnerWorkspace, "Default working directory for the built-in runner (default: startup directory)")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
 	cmd.Flags().String("oidc-client-secret-file", defaults.OIDCClientSecretFile, "Path to a file containing the OIDC client secret")
@@ -136,6 +151,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 
 func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	config := NewServeConfig()
+	config.Managed, _ = cmd.Flags().GetBool("managed")
 	if err := applyTrustedServeConfig(config); err != nil {
 		config.ConfigError = err
 	}
@@ -164,8 +180,11 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	if skipAuth, err := cmd.Flags().GetBool("skip-auth"); err == nil && cmd.Flags().Changed("skip-auth") {
 		config.SkipAuth = skipAuth
 	}
-	if disableControlPlaneWorkspace, err := cmd.Flags().GetBool("disable-control-plane-workspace"); err == nil && cmd.Flags().Changed("disable-control-plane-workspace") {
-		config.DisableControlPlaneWorkspace = disableControlPlaneWorkspace
+	if embeddedRunner, err := cmd.Flags().GetBool("embedded-runner"); err == nil && cmd.Flags().Changed("embedded-runner") {
+		config.EmbeddedRunner = embeddedRunner
+	}
+	if runnerWorkspace, err := cmd.Flags().GetString("runner-workspace"); err == nil && cmd.Flags().Changed("runner-workspace") {
+		config.RunnerWorkspace = strings.TrimSpace(runnerWorkspace)
 	}
 	if oidcIssuer, err := cmd.Flags().GetString("oidc-issuer"); err == nil && cmd.Flags().Changed("oidc-issuer") {
 		config.OIDC.IssuerURL = oidcIssuer
@@ -230,7 +249,14 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to initialize trusted serve configuration decoder")
 	}
-	if err := decoder.Decode(viper.Get("serve")); err != nil {
+	settings := viper.Get("serve")
+	if values, ok := settings.(map[string]any); ok {
+		// Accept the deprecated no-op key without mutating trusted settings.
+		values = maps.Clone(values)
+		delete(values, "disable_control_plane_workspace")
+		settings = values
+	}
+	if err := decoder.Decode(settings); err != nil {
 		return errors.Wrap(err, "failed to decode trusted serve configuration")
 	}
 	if trusted.Host != nil {
@@ -257,9 +283,13 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	if trusted.SkipAuth != nil {
 		config.SkipAuth = *trusted.SkipAuth
 	}
-	if trusted.DisableControlPlaneWorkspace != nil {
-		config.DisableControlPlaneWorkspace = *trusted.DisableControlPlaneWorkspace
+	if trusted.EmbeddedRunner != nil {
+		config.EmbeddedRunner = *trusted.EmbeddedRunner
 	}
+	if trusted.RunnerWorkspace != nil {
+		config.RunnerWorkspace = strings.TrimSpace(*trusted.RunnerWorkspace)
+	}
+	config.RunnerSettings = trusted.RunnerSettings
 	if trusted.CORSOrigins != nil {
 		config.CORSOrigins = trusted.CORSOrigins
 	}
@@ -325,19 +355,19 @@ func validateServeConfig(config *ServeConfig) error {
 		}
 	}
 
-	if config.Port < 1 || config.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", config.Port)
+	if config.Port < 0 || config.Port > 65535 {
+		return errors.Errorf("port must be between 0 and 65535, got %d", config.Port)
 	}
 
-	if config.Port < 1024 {
+	if config.Port > 0 && config.Port < 1024 {
 		logger.G(context.Background()).WithField("port", config.Port).Warn("using privileged port (< 1024) may require elevated permissions")
 	}
 
 	if config.CompactRatio <= 0.0 || config.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
-	if config.DisableControlPlaneWorkspace && strings.TrimSpace(config.CWD) != "" {
-		return errors.New("cwd cannot be set when the control-plane workspace is disabled")
+	if strings.TrimSpace(config.CWD) != "" {
+		return errors.New("serve --cwd is no longer supported; use --runner-workspace to set the default working directory")
 	}
 
 	webAuthMode, runnerAuthMode, err := resolveServeAuthModes(config)
@@ -505,17 +535,34 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 	}
 
 	serverConfig := &controlplane.ServerConfig{
-		Host:                         config.Host,
-		Port:                         config.Port,
-		CWD:                          config.CWD,
-		CompactRatio:                 config.CompactRatio,
-		AuthToken:                    authToken,
-		RunnerAuthToken:              runnerAuthToken,
-		WebAuthMode:                  webAuthMode,
-		RunnerAuthMode:               runnerAuthMode,
-		OIDC:                         oidcConfig,
-		DisableControlPlaneWorkspace: config.DisableControlPlaneWorkspace,
-		CORSOrigins:                  config.CORSOrigins,
+		Host:            config.Host,
+		Port:            config.Port,
+		CWD:             config.CWD,
+		CompactRatio:    config.CompactRatio,
+		AuthToken:       authToken,
+		RunnerAuthToken: runnerAuthToken,
+		WebAuthMode:     webAuthMode,
+		RunnerAuthMode:  runnerAuthMode,
+		OIDC:            oidcConfig,
+		CORSOrigins:     config.CORSOrigins,
+	}
+	if config.EmbeddedRunner {
+		workspace := config.RunnerWorkspace
+		if workspace == "" {
+			workspace, err = os.Getwd()
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to determine the built-in runner's working directory")
+			}
+		}
+		loader, err := runnerclient.NewEmbeddedConfigLoader(viper.AllSettings(), config.RunnerSettings)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load the built-in runner's settings")
+		}
+		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
+			Workspace:      workspace,
+			Settings:       config.RunnerSettings,
+			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader},
+		}
 	}
 	if err := serverConfig.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid resolved server configuration")
@@ -523,44 +570,90 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 	return serverConfig, nil
 }
 
-func runServeCommand(ctx context.Context, config *ServeConfig) {
+func runServeCommand(ctx context.Context, config *ServeConfig) error {
+	if config != nil && config.Managed {
+		if err := prepareLocalServeConfig(config); err != nil {
+			return err
+		}
+	}
 	serverConfig, err := buildControlPlaneServerConfig(config)
 	if err != nil {
-		presenter.Error(err, "invalid server configuration")
-		os.Exit(1)
+		return errors.Wrap(err, "invalid server configuration")
+	}
+	directory, err := localServerDirectory()
+	if err != nil {
+		return err
+	}
+	lock, err := tryLocalServerLock(directory, "server.lock")
+	if err != nil {
+		return err
+	}
+	if lock == nil {
+		return errors.New("a Kodelet server already owns this state directory; use 'kodelet server status' or select a separate KODELET_BASE_PATH")
+	}
+	defer lock.Close()
+	// A crashed process may have left discovery state. Only the new lock owner
+	// may clear it; non-local deployments must not advertise a stale endpoint.
+	for _, name := range []string{"connection.json", "client-token"} {
+		if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "failed to clear stale local server state")
+		}
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(serverConfig.Host, fmt.Sprint(serverConfig.Port)))
+	if err != nil {
+		return errors.Wrap(err, "could not listen on the configured server address; check --host and --port")
+	}
+	defer listener.Close()
+	// Acquire ownership before migrations or any daemon/runner resources.
+	binaries.EnsureDepsInstalled(ctx)
+	if err := db.RunMigrations(ctx, migrations.All()); err != nil {
+		return errors.Wrap(err, "failed to run database migrations")
+	}
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	serverConfig.InstanceID = convtypes.GenerateID()
+	if config.Managed {
+		serverConfig.LocalShutdown = cancel
 	}
 
 	logger.G(ctx).WithFields(map[string]any{
-		"host":                             serverConfig.Host,
-		"port":                             serverConfig.Port,
-		"web_auth_mode":                    serverConfig.WebAuthMode,
-		"runner_auth_mode":                 serverConfig.RunnerAuthMode,
-		"control_plane_workspace_disabled": serverConfig.DisableControlPlaneWorkspace,
-	}).Info("Starting control-plane server")
+		"host":             serverConfig.Host,
+		"port":             serverConfig.Port,
+		"web_auth_mode":    serverConfig.WebAuthMode,
+		"runner_auth_mode": serverConfig.RunnerAuthMode,
+	}).Info("Starting Kodelet server")
 
 	frontend, err := webui.NewHandler()
 	if err != nil {
-		presenter.Error(err, "failed to create Web UI handler")
-		os.Exit(1)
+		return errors.Wrap(err, "failed to load the Web UI")
 	}
 	server, err := controlplane.NewServer(ctx, serverConfig, frontend)
 	if err != nil {
-		presenter.Error(err, "failed to create web server")
-		os.Exit(1)
+		return errors.Wrap(err, "failed to initialize the server")
 	}
 	defer func() {
 		if closeErr := server.Close(); closeErr != nil {
-			logger.G(ctx).WithError(closeErr).Error("failed to close web server")
+			logger.G(ctx).WithError(closeErr).Error("failed to shut down the server")
 		}
 	}()
 
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	baseURL := serveBaseURL(serverConfig.Host, serverConfig.Port)
+	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
+	// Foreground loopback token servers are discoverable too, but remain
+	// operator-owned: local lifecycle commands may not stop/restart them.
+	if controlplaneurl.IsLoopbackHostname(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken {
+		if err := publishLocalServer(directory, baseURL, serverConfig.AuthToken, serverConfig.InstanceID, config.Managed); err != nil {
+			return errors.Wrap(err, "failed to publish local server connection")
+		}
+		defer os.Remove(filepath.Join(directory, "connection.json"))
+		defer os.Remove(filepath.Join(directory, "client-token"))
+	}
 	webTokenConfigured := strings.TrimSpace(config.AuthToken) != ""
 	runnerTokenConfigured := strings.TrimSpace(config.RunnerAuthToken) != ""
-	presenter.Success(fmt.Sprintf("Web UI server starting on %s", baseURL))
+	if config.Managed {
+		// Credentials are discovered through private state, never startup logs.
+		webTokenConfigured, runnerTokenConfigured = true, true
+	}
+	presenter.Success(fmt.Sprintf("Kodelet server starting on %s", baseURL))
 	switch serverConfig.WebAuthMode {
 	case controlplane.WebAuthModeToken:
 		presenter.Info("Web UI authentication mode: token")
@@ -601,15 +694,18 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 			presenter.Warning("Runner authentication disabled (--runner-auth-mode=none)")
 		}
 	}
-	presenter.Info("Press Ctrl+C to stop the server")
-
-	if err := server.Start(ctx); err != nil {
-		logger.G(ctx).WithError(err).Error("web server error")
-		presenter.Error(err, "web server failed")
-		os.Exit(1)
+	if config.Managed {
+		presenter.Info("Use 'kodelet server stop' to stop the background server")
+	} else {
+		presenter.Info("Press Ctrl+C to stop the server")
 	}
 
-	presenter.Info("Web server stopped")
+	if err := server.Serve(ctx, listener); err != nil {
+		return errors.Wrap(err, "Kodelet server failed")
+	}
+
+	presenter.Info("Kodelet server stopped")
+	return nil
 }
 
 func serveBaseURL(host string, port int) string {

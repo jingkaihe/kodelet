@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -110,6 +112,58 @@ type Subscription struct {
 	TimeoutInSec *float64 `json:"timeoutInSec,omitempty"`
 }
 
+// ProfileRegistration declares ordinary profile configuration for daemon resolution.
+type ProfileRegistration struct {
+	Name    string                 `json:"name"`
+	Options llmtypes.ProfileConfig `json:"options"`
+	Hidden  bool                   `json:"hidden"`
+}
+
+// Profile is a declaration bound to its runner-discovered source.
+// Registration does not grant credentials or permission to execute a model.
+type Profile struct {
+	Name        string                 `json:"name"`
+	ExtensionID string                 `json:"extensionId"`
+	Options     llmtypes.ProfileConfig `json:"options"`
+	Hidden      bool                   `json:"hidden"`
+}
+
+// Validate checks identity and required fields; the daemon decodes the configuration.
+func (p ProfileRegistration) Validate() error {
+	if !profileNamePattern.MatchString(p.Name) {
+		return errors.New("invalid extension profile name: must contain 1 to 128 ASCII characters matching [A-Za-z0-9][A-Za-z0-9._-]*")
+	}
+	if strings.EqualFold(p.Name, "default") {
+		return errors.New("extension profile name default is reserved")
+	}
+	for _, name := range []string{"provider", "model"} {
+		value, ok := p.Options[name].(string)
+		if !ok || strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
+			return errors.Errorf("extension profile option %s must be a nonempty string containing no NUL", name)
+		}
+	}
+	if provider := p.Options["provider"].(string); provider != "openai" && provider != "anthropic" {
+		return errors.Errorf("unsupported extension profile provider %q", provider)
+	}
+	return nil
+}
+
+// Validate checks a source-bound profile without resolving it.
+func (p Profile) Validate() error {
+	if strings.TrimSpace(p.ExtensionID) == "" || strings.ContainsRune(p.ExtensionID, '\x00') {
+		return errors.New("extension profile source id is required and must contain no NUL")
+	}
+	return (ProfileRegistration{Name: p.Name, Options: p.Options, Hidden: p.Hidden}).Validate()
+}
+
+// Clone returns a declaration with independent options.
+func (p Profile) Clone() Profile {
+	p.Options = p.Options.Clone()
+	return p
+}
+
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
 type initializeParams struct {
 	ProtocolVersion string                  `json:"protocolVersion"`
 	Kodelet         map[string]any          `json:"kodelet"`
@@ -118,16 +172,18 @@ type initializeParams struct {
 }
 
 type initializeExtensionInfo struct {
-	ID      string         `json:"id"`
-	Config  map[string]any `json:"config"`
-	CWD     string         `json:"cwd"`
-	DataDir string         `json:"dataDir"`
+	ID       string         `json:"id"`
+	RunnerID string         `json:"runnerId,omitempty"`
+	Config   map[string]any `json:"config"`
+	CWD      string         `json:"cwd"`
+	DataDir  string         `json:"dataDir"`
 }
 
 // InitializeResult is returned by extension.initialize.
 type InitializeResult struct {
 	Name          string                 `json:"name"`
 	Version       string                 `json:"version,omitempty"`
+	Profiles      []ProfileRegistration  `json:"profiles,omitempty"`
 	Tools         []ToolRegistration     `json:"tools,omitempty"`
 	Commands      []CommandRegistration  `json:"commands,omitempty"`
 	Shortcuts     []ShortcutRegistration `json:"shortcuts,omitempty"`
@@ -426,6 +482,17 @@ func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
 
 func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	ctx, handler, parentMatched, ambiguousParentless := c.hostRequestTarget(msg.ParentID)
+	if !hasRPCParentID(msg.ParentID) && msg.Method == BackgroundTaskReleaseMethod {
+		// A retained lease release must not borrow an unrelated foreground
+		// request's cancellation or run identity.
+		c.stateMu.Lock()
+		handler = c.host
+		c.stateMu.Unlock()
+		ctx = hostRequestContext(handler)
+		if source, ok := handler.(interface{ backgroundHostContext() context.Context }); ok {
+			ctx = source.backgroundHostContext()
+		}
+	}
 	if isPersistentExtensionUIRequest(msg.Method) && !hasRPCParentID(msg.ParentID) {
 		if hasExplicitExtensionUIScope(msg.Params) || ambiguousParentless {
 			c.stateMu.Lock()

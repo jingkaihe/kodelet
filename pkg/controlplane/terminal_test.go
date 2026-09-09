@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -60,13 +58,6 @@ func TestTerminalExitMessageIncludesZeroCode(t *testing.T) {
 	assert.JSONEq(t, `{"type":"exit","code":0}`, string(payload))
 }
 
-func TestTerminalAttachmentErrorClosesIgnoresSlowClients(t *testing.T) {
-	assert.False(t, terminalAttachmentErrorCloses(errTerminalClientSlow))
-	assert.True(t, terminalAttachmentErrorCloses(nil))
-	assert.True(t, terminalAttachmentErrorCloses(errTerminalSessionClosed))
-	assert.True(t, terminalAttachmentErrorCloses(assert.AnError))
-}
-
 func TestReadTerminalWebsocketForwardsMessagesAndReadErrors(t *testing.T) {
 	serverReadCh := make(chan terminalSocketRead, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,59 +105,6 @@ func TestParseTerminalDimension(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, parseTerminalDimension(tt.raw))
-		})
-	}
-}
-
-func TestResolveTerminalShell(t *testing.T) {
-	t.Setenv("SHELL", "/usr/local/bin/fish")
-	shell, name := resolveTerminalShell()
-	assert.Equal(t, "/usr/local/bin/fish", shell)
-	assert.Equal(t, "fish", name)
-
-	t.Setenv("SHELL", "   ")
-	shell, name = resolveTerminalShell()
-	assert.Equal(t, "/bin/bash", shell)
-	assert.Equal(t, "bash", name)
-}
-
-func TestTerminalEnvAddsMissingTermAndShell(t *testing.T) {
-	unsetEnvForTest(t, "TERM")
-	unsetEnvForTest(t, "SHELL")
-
-	env := terminalEnv("/bin/zsh")
-	assert.Contains(t, env, "TERM=xterm-256color")
-	assert.Contains(t, env, "SHELL=/bin/zsh")
-}
-
-func TestTerminalEnvPreservesExistingTermAndShell(t *testing.T) {
-	t.Setenv("TERM", "screen-256color")
-	t.Setenv("SHELL", "/bin/fish")
-
-	env := terminalEnv("/bin/zsh")
-	assert.Contains(t, env, "TERM=screen-256color")
-	assert.Contains(t, env, "SHELL=/bin/fish")
-	assert.NotContains(t, env, "TERM=xterm-256color")
-	assert.NotContains(t, env, "SHELL=/bin/zsh")
-}
-
-func TestParseTerminalSignalVariants(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want syscall.Signal
-	}{
-		{name: "int", raw: "INT", want: syscall.SIGINT},
-		{name: "term", raw: "sigterm", want: syscall.SIGTERM},
-		{name: "hup", raw: " HUP ", want: syscall.SIGHUP},
-		{name: "quit", raw: "SIGQUIT", want: syscall.SIGQUIT},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			signal, ok := parseTerminalSignal(tt.raw)
-			require.True(t, ok)
-			assert.Equal(t, tt.want, signal)
 		})
 	}
 }
@@ -247,20 +185,6 @@ func TestNormalizedHostPort(t *testing.T) {
 	assert.Equal(t, "[::1]:8080", normalizedHostPort("[::1]:8080"))
 	assert.Equal(t, "example.com", normalizedHostPort("Example.COM"))
 	assert.Equal(t, "::1", normalizedHostPort("[::1"))
-}
-
-func unsetEnvForTest(t *testing.T, key string) {
-	t.Helper()
-
-	oldValue, hadValue := os.LookupEnv(key)
-	require.NoError(t, os.Unsetenv(key))
-	t.Cleanup(func() {
-		if hadValue {
-			_ = os.Setenv(key, oldValue)
-			return
-		}
-		_ = os.Unsetenv(key)
-	})
 }
 
 func receiveTerminalSocketRead(t *testing.T, ch <-chan terminalSocketRead) terminalSocketRead {

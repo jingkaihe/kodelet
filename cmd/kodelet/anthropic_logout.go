@@ -1,83 +1,50 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strings"
+	"syscall"
 
-	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/pkg/errors"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/spf13/cobra"
 )
 
 var anthropicLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Logout from Anthropic and remove stored credentials",
-	Long: `Logout from Anthropic and remove stored credentials.
-
-This command will:
-1. Remove the stored authentication credentials from ~/.kodelet/anthropic-credentials.json
-2. You will need to run 'kodelet anthropic login' again to access subscription-based models
-
-After running this command, you will no longer have access to subscription-based
-Anthropic models until you authenticate again.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-
-		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
-
-		if err := runAnthropicLogout(ctx, noConfirm); err != nil {
-			presenter.Error(err, "Failed to complete Anthropic logout")
-			os.Exit(1)
-		}
-	},
+	Short: "Remove all Anthropic accounts stored on the server",
+	Long:  "Remove the server's saved Anthropic subscription accounts. This does not revoke provider-issued tokens or interrupt already-running conversations.",
+	Args:  cobra.NoArgs,
+	RunE:  runRemoteAnthropicLogout,
 }
 
 func init() {
-	anthropicLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
+	anthropicLogoutCmd.Flags().Bool("no-confirm", false, "Remove all Anthropic accounts without prompting")
 }
 
-func runAnthropicLogout(_ context.Context, noConfirm bool) error {
-	home, err := os.UserHomeDir()
+func runRemoteAnthropicLogout(cmd *cobra.Command, _ []string) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	client, err := remoteAdministrationClient(cmd)
 	if err != nil {
-		return errors.Wrap(err, "failed to get user home directory")
+		return err
 	}
-
-	credentialsPath := filepath.Join(home, ".kodelet", "anthropic-credentials.json")
-
-	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
-		presenter.Info("No Anthropic credentials found. You are already logged out.")
-		return nil
-	} else if err != nil {
-		return errors.Wrap(err, "failed to check credentials file")
+	noConfirm, _ := cmd.Flags().GetBool("no-confirm")
+	if !noConfirm {
+		fmt.Fprint(cmd.OutOrStdout(), "Remove all Anthropic accounts on the selected server? (y/N): ")
+		answer, err := readProviderInput(ctx, cmd.InOrStdin())
+		if err != nil {
+			return err
+		}
+		if answer = strings.ToLower(answer); answer != "y" && answer != "yes" {
+			fmt.Fprintln(cmd.OutOrStdout(), "Logout canceled.")
+			return nil
+		}
 	}
-
-	if !noConfirm && !confirmLogout() {
-		presenter.Info("Logout cancelled.")
-		return nil
+	if err := client.MutateAnthropicAccount(ctx, chat.AnthropicAccountMutation{Action: "logout"}); err != nil {
+		return err
 	}
-
-	if err := os.Remove(credentialsPath); err != nil {
-		return errors.Wrap(err, "failed to remove credentials file")
-	}
-
-	presenter.Section("Anthropic Logout")
-	presenter.Success("Successfully logged out from Anthropic.")
-	presenter.Info("Removed credentials file: " + credentialsPath)
-	presenter.Info("You no longer have access to subscription-based Anthropic models.")
-	presenter.Info("Run 'kodelet anthropic login' to authenticate again.")
-
-	return nil
-}
-
-func confirmLogout() bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Are you sure you want to logout from Anthropic? This will remove your stored credentials. (y/N): ")
-	response, _ := reader.ReadString('\n')
-	response = strings.ToLower(strings.TrimSpace(response))
-
-	return response == "y" || response == "yes"
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Anthropic accounts removed.")
+	return err
 }

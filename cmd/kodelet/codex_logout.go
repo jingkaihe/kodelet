@@ -9,33 +9,32 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
 var codexLogoutCmd = &cobra.Command{
-	Use:   "logout",
-	Short: "Logout from OpenAI Codex and remove stored credentials",
-	Long: `Logout from OpenAI Codex and remove stored credentials.
-
-This command will:
-1. Remove the stored authentication credentials from ~/.kodelet/codex-credentials.json
-2. You will need to run 'kodelet codex login' again to access ChatGPT-backed models
-
-After running this command, you will no longer have access to ChatGPT-backed
-Codex models until you authenticate again.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
-
-		if err := runCodexLogout(ctx, noConfirm); err != nil {
-			presenter.Error(err, "Failed to complete Codex logout")
-			os.Exit(1)
+	Use:               "logout",
+	Short:             "Disconnect ChatGPT subscription",
+	Long:              "Remove saved sign-in details with --local on the server machine while the server is stopped. Restart the server afterward to apply the change.",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		local, _ := cmd.Flags().GetBool("local")
+		if !local {
+			return errors.New("to disconnect ChatGPT subscription, stop the server, run 'kodelet codex logout --local' on that machine, then restart 'kodelet serve'")
 		}
+		if err := validateLocalAdministrationFlags(cmd); err != nil {
+			return err
+		}
+		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
+		return runCodexLogout(cmd.Context(), noConfirm)
 	},
 }
 
 func init() {
-	codexLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
+	codexLogoutCmd.Flags().Bool("local", false, "Remove sign-in details stored on this machine (stop the server first)")
+	codexLogoutCmd.Flags().Bool("no-confirm", false, "Skip the confirmation prompt")
 }
 
 func runCodexLogout(_ context.Context, noConfirm bool) error {

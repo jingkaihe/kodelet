@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -54,12 +55,23 @@ type isolatedRuntimeLeaseProvider interface {
 	RuntimeWithConfigAndCallContextForIsolatedLease(ctx, leaseCtx context.Context, cwd, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, func() error, error)
 }
 
+type attachedRuntimeLeaseProvider interface {
+	RuntimeWithAttachmentsForIsolatedLease(ctx, leaseCtx context.Context, cwd string, config extensions.Config, callContext extensions.ExtensionCallContext, attachments []extensions.Attachment) (*extensions.Runtime, func() error, error)
+}
+
 type runtimeDiscoveryProvider interface {
 	RuntimeForCommandDiscoveryWithConfig(ctx context.Context, cwd, variant string, config extensions.Config) (*extensions.Runtime, error)
 }
 
+type isolatedRuntimeDiscoveryProvider interface {
+	RuntimeForCommandDiscoveryWithIsolatedLease(ctx context.Context, cwd, variant string, config extensions.Config) (*extensions.Runtime, func() error, error)
+}
+
 // ConfigLoader loads runner-owned configuration for an optional conversation profile.
 type ConfigLoader func(profile string) (llmtypes.Config, error)
+
+// WorkspaceConfigLoader resolves settings for the canonical execution directory.
+type WorkspaceConfigLoader func(cwd, profile string) (llmtypes.Config, error)
 
 // EnvironmentFactory creates one agent environment inside a provisioned execution instance.
 type EnvironmentFactory func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment
@@ -68,6 +80,8 @@ type EnvironmentFactory func(workingDirectory string, runtime *extensions.Runtim
 type ServiceOptions struct {
 	RuntimeProvider           RuntimeProvider
 	ConfigLoader              ConfigLoader
+	WorkspaceConfigLoader     WorkspaceConfigLoader
+	ProfileConfigLoader       ProfileConfigLoader
 	EnvironmentFactory        EnvironmentFactory
 	ExecutionInstanceProvider ExecutionInstanceProvider
 	CleanupTimeout            time.Duration
@@ -78,34 +92,42 @@ type ServiceOptions struct {
 
 // Service handles control-plane requests for one workspace-bound runner process.
 type Service struct {
-	ctx                 context.Context
-	mu                  sync.Mutex
-	snapshotGate        *semaphore.Weighted
-	workspace           string
-	runtimeProvider     RuntimeProvider
-	ownedRuntime        *extensions.RuntimeManager
-	configLoader        ConfigLoader
-	environmentFactory  EnvironmentFactory
-	instanceProvider    ExecutionInstanceProvider
-	workspaceTerminals  *workspaceTerminalManager
-	cleanupTimeout      time.Duration
-	snapshotWaitTimeout time.Duration
-	peer                Peer
-	runnerID            string
-	generation          int64
-	runs                map[string]*activeRun
-	backgrounds         map[string]*runnerBackgroundResources
-	backgroundRunIDs    map[string]*runnerBackgroundResources
-	backgroundLeases    map[string]*runnerBackgroundResources
-	backgroundCleanup   map[*runnerBackgroundResources]struct{}
-	lastManifestDigest  string
-	closed              bool
-	closeMu             sync.Mutex
-	closeOnce           sync.Once
-	closeErr            error
+	ctx                   context.Context
+	mu                    sync.Mutex
+	snapshotGate          *semaphore.Weighted
+	workspace             string
+	runtimeProvider       RuntimeProvider
+	ownedRuntime          *extensions.RuntimeManager
+	configLoader          ConfigLoader
+	workspaceConfigLoader WorkspaceConfigLoader
+	profileConfigLoader   ProfileConfigLoader
+	environmentFactory    EnvironmentFactory
+	instanceProvider      ExecutionInstanceProvider
+	workspaceTerminals    *workspaceTerminalManager
+	directoryTerminals    map[string]*workspaceTerminalManager
+	cleanupTimeout        time.Duration
+	snapshotWaitTimeout   time.Duration
+	peer                  Peer
+	runnerID              string
+	generation            int64
+	remoteProfiles        bool
+	runs                  map[string]*activeRun
+	backgrounds           map[string]*runnerBackgroundResources
+	backgroundRunIDs      map[string]*runnerBackgroundResources
+	backgroundLeases      map[string]*runnerBackgroundResources
+	backgroundCleanup     map[*runnerBackgroundResources]struct{}
+	uiSurfaceLifecycle    atomic.Uint64
+	uiSurfaces            map[runnerSurfaceKey]runnerSurfaceSource
+	uiCapabilitiesMu      sync.Mutex
+	lastManifestDigest    string
+	closed                bool
+	closeMu               sync.Mutex
+	closeOnce             sync.Once
+	closeErr              error
 }
 
 type activeRun struct {
+	attachments          map[string]*sessionExtensionTransport
 	id                   string
 	conversationID       string
 	invokedBy            string
@@ -140,20 +162,22 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		parent = context.Background()
 	}
 	service := &Service{
-		ctx:                 parent,
-		snapshotGate:        semaphore.NewWeighted(1),
-		workspace:           workspace,
-		runtimeProvider:     options.RuntimeProvider,
-		configLoader:        options.ConfigLoader,
-		environmentFactory:  options.EnvironmentFactory,
-		instanceProvider:    options.ExecutionInstanceProvider,
-		cleanupTimeout:      options.CleanupTimeout,
-		snapshotWaitTimeout: options.SnapshotWaitTimeout,
-		runs:                make(map[string]*activeRun),
-		backgrounds:         make(map[string]*runnerBackgroundResources),
-		backgroundRunIDs:    make(map[string]*runnerBackgroundResources),
-		backgroundLeases:    make(map[string]*runnerBackgroundResources),
-		backgroundCleanup:   make(map[*runnerBackgroundResources]struct{}),
+		ctx:                   parent,
+		snapshotGate:          semaphore.NewWeighted(1),
+		workspace:             workspace,
+		runtimeProvider:       options.RuntimeProvider,
+		configLoader:          options.ConfigLoader,
+		workspaceConfigLoader: options.WorkspaceConfigLoader,
+		profileConfigLoader:   options.ProfileConfigLoader,
+		environmentFactory:    options.EnvironmentFactory,
+		instanceProvider:      options.ExecutionInstanceProvider,
+		cleanupTimeout:        options.CleanupTimeout,
+		snapshotWaitTimeout:   options.SnapshotWaitTimeout,
+		runs:                  make(map[string]*activeRun),
+		backgrounds:           make(map[string]*runnerBackgroundResources),
+		backgroundRunIDs:      make(map[string]*runnerBackgroundResources),
+		backgroundLeases:      make(map[string]*runnerBackgroundResources),
+		backgroundCleanup:     make(map[*runnerBackgroundResources]struct{}),
 	}
 	if service.cleanupTimeout <= 0 {
 		service.cleanupTimeout = defaultCleanupTimeout
@@ -178,11 +202,22 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		service.instanceProvider = provider
 	}
 	service.workspaceTerminals = newWorkspaceTerminalManager(service.ctx, service.workspace)
+	service.directoryTerminals = map[string]*workspaceTerminalManager{service.workspace: service.workspaceTerminals}
 	return service, nil
 }
 
 func loadRunnerConfig(profile string) (llmtypes.Config, error) {
 	return llm.GetConfigFromViperWithEnvironmentProfile(profile)
+}
+
+func (s *Service) loadConfig(cwd, modelProfile, environmentProfile string) (llmtypes.Config, error) {
+	if s.profileConfigLoader != nil {
+		return s.profileConfigLoader(cwd, modelProfile, environmentProfile)
+	}
+	if s.workspaceConfigLoader != nil {
+		return s.workspaceConfigLoader(cwd, environmentProfile)
+	}
+	return s.configLoader(environmentProfile)
 }
 
 // Attach installs the current symmetric connection used by runner-originated calls.
@@ -210,6 +245,7 @@ func (s *Service) SetRegistration(result protocol.RegisterResult) error {
 	}
 	s.runnerID = strings.TrimSpace(result.RunnerID)
 	s.generation = result.Generation
+	s.remoteProfiles = result.RemoteProfiles
 	return nil
 }
 
@@ -219,6 +255,12 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner service is unavailable"}
 	}
 	switch method {
+	case protocol.MethodSessionExtensionFrame:
+		value, rpcErr := decodeParams[protocol.ExtensionFrame](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(struct{}{}, s.receiveExtensionFrame(value))
 	case protocol.MethodRunOpen:
 		value, rpcErr := decodeParams[protocol.RunOpenParams](params)
 		if rpcErr != nil {
@@ -238,12 +280,38 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		return rpcResult(nil, s.cancelRun(ctx, value.RunID))
+	case protocol.MethodUISurfaceInvalidate:
+		value, rpcErr := decodeParams[runnerpayload.UISurfaceInvalidateParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		s.invalidateUISurface(value)
+		return nil, nil
+	case protocol.MethodUISurfaceInput:
+		value, rpcErr := decodeParams[runnerpayload.UISurfaceInputParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.notifySurfaceInput(ctx, value))
+	case protocol.MethodUISurfaceResize:
+		value, rpcErr := decodeParams[runnerpayload.UISurfaceResizeParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.notifySurfaceResize(ctx, value))
 	case protocol.MethodCommandExecute:
 		value, rpcErr := decodeParams[runnerpayload.CommandExecuteParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		result, err := s.executeCommand(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodShortcutExecute:
+		value, rpcErr := decodeParams[runnerpayload.ShortcutExecuteParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.executeShortcut(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodLifecycleDispatch:
 		value, rpcErr := decodeParams[runnerpayload.LifecycleDispatchParams](params)
@@ -260,10 +328,63 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		result, err := s.executeTool(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodWorkspaceGitDiff:
-		if _, rpcErr := decodeParams[protocol.WorkspaceGitDiffParams](params); rpcErr != nil {
+		value, rpcErr := decodeParams[protocol.WorkspaceGitDiffParams](params)
+		if rpcErr != nil {
 			return nil, rpcErr
 		}
-		result, err := s.workspaceGitDiff(ctx)
+		result, err := s.workspaceGitDiff(ctx, value.CWD)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceGitPrepare:
+		value, rpcErr := decodeParams[protocol.WorkspaceGitDiffParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.prepareWorkspaceCommit(ctx, value.CWD)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceGitCommit:
+		value, rpcErr := decodeParams[protocol.WorkspaceGitCommitParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		if err := value.Validate(); err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		result, err := s.commitWorkspace(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceInspect:
+		value, rpcErr := decodeParams[protocol.WorkspaceInspectParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		if err := value.Validate(); err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		result, err := s.inspectWorkspace(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceMessageHistory:
+		value, rpcErr := decodeParams[protocol.WorkspaceMessageHistoryParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.workspaceMessageHistory(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceDiscover:
+		value, rpcErr := decodeParams[protocol.WorkspaceDiscoverParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		manifest, err := s.ProbeManifestForProfile(ctx, value.CWD, value.Profile, value.EnvironmentProfile, value.Options)
+		if err != nil {
+			return rpcResult(nil, err)
+		}
+		digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
+		return rpcResult(protocol.WorkspaceDiscoverResult{CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile), Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts, ExtensionCount: manifest.ExtensionCount}, err)
+	case protocol.MethodWorkspaceCWDHints:
+		value, rpcErr := decodeParams[protocol.WorkspaceCWDHintsParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.workspaceCWDHints(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodWorkspaceTerminalOpen:
 		value, rpcErr := decodeParams[protocol.WorkspaceTerminalOpenParams](params)
@@ -373,10 +494,27 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		}
 	}
 	resources := s.backgrounds[params.ConversationID]
+	var movedResources *runnerBackgroundResources
 	if resources != nil {
 		if resources.attachedRunID != "" {
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.Errorf("conversation already has attached background run %s", resources.attachedRunID)
+		}
+		// A metadata-only move can change the saved directory without contacting
+		// this runner. Only the server's matching ExpectedCWD authorizes replacing
+		// idle resources; an ordinary request cannot discard another workspace.
+		if resolvedRequestedCWD != resources.workingDirectory && strings.TrimSpace(params.ExpectedCWD) == resolvedRequestedCWD {
+			for leaseID := range resources.leases {
+				s.removeBackgroundLeaseLocked(resources, leaseID)
+			}
+			s.detachBackgroundResourcesIfUnusedLocked(resources)
+			movedResources, resources = resources, nil
+		}
+	}
+	if resources != nil {
+		if params.SessionExtensions != nil || resources.runtime.HasSessionExtensions() {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.New("cannot reattach session extensions to retained background resources; release background leases first")
 		}
 		if resources.variant != variant {
 			s.mu.Unlock()
@@ -421,6 +559,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	operationCtx, finishOperation := runOperationContext(ctx, run)
 	defer finishOperation()
 	operationCtx = s.decorateRunContext(operationCtx, run.id, run.conversationID)
+	if movedResources != nil {
+		if err := s.closeBackgroundResources(context.WithoutCancel(operationCtx), movedResources); err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to close background resources from the previous working directory")
+		}
+	}
 	if err := s.lockSnapshot(operationCtx); err != nil {
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, err
@@ -485,10 +629,15 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	workingDirectory := resources.workingDirectory
 
-	config, err := s.configLoader(params.Agent.EnvironmentProfile)
+	config, err := s.loadConfig(workingDirectory, params.Agent.Profile, params.Agent.EnvironmentProfile)
 	if err != nil {
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
+	}
+	config, err = llmtypes.ApplyEnvironmentOptions(config, params.Options)
+	if err != nil {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.Wrap(err, "invalid runner execution options")
 	}
 	config.WorkingDirectory = workingDirectory
 	config.Provider = params.Agent.Provider
@@ -499,6 +648,25 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	if err != nil {
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
+	}
+	if params.SessionExtensions != nil && !extensionConfig.Enabled {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.New("session extensions are disabled by runner extension policy")
+	}
+	if params.RequireCheckpoint {
+		peer := s.currentPeer()
+		if peer == nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("saving the conversation before starting work requires an authenticated server connection")
+		}
+		if err := peer.Call(operationCtx, protocol.MethodRunCheckpoint, protocol.RunCheckpointParams{RunID: run.id, CWD: workingDirectory}, new(struct{})); err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to save the conversation before starting extensions")
+		}
+		if err := operationCtx.Err(); err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, err
+		}
 	}
 
 	callContext := extensions.ExtensionCallContext{
@@ -512,13 +680,33 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		InvokedBy:      run.invokedBy,
 	}
 	runtime := resources.runtime
-	if runtime == nil {
+	if runtime != nil && !extensionConfig.Enabled {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.New("cannot disable extensions while conversation background resources are retained; release background leases first")
+	}
+	if runtime != nil && !reflect.DeepEqual(resources.runtimeConfig, extensionConfig) {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.New("cannot change extension settings while conversation background resources are retained; release background leases first")
+	}
+	if runtime == nil && extensionConfig.Enabled {
 		var runtimeRelease func() error
 		runtimeLeaseCtx := resources.runtimeLeaseCtx
 		if runtimeLeaseCtx == nil {
 			runtimeLeaseCtx = s.ctx
 		}
-		if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
+		if params.SessionExtensions != nil {
+			provider, ok := s.runtimeProvider.(attachedRuntimeLeaseProvider)
+			if !ok {
+				s.failOpen(run)
+				return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support isolated session extensions")
+			}
+			attachments, attachErr := s.attachSessionExtensions(run, *params.SessionExtensions)
+			if attachErr != nil {
+				s.failOpen(run)
+				return runnerpayload.Manifest{}, attachErr
+			}
+			runtime, runtimeRelease, err = provider.RuntimeWithAttachmentsForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, extensionConfig, callContext, attachments)
+		} else if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
 			runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
 		} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
 			runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
@@ -530,6 +718,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
 		}
 		resources.runtime = runtime
+		resources.runtimeConfig = extensionConfig
 		resources.runtimeRelease = runtimeRelease
 	}
 	config.Extensions = runtime
@@ -550,6 +739,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
 	wireManifest, err := buildWireManifest(localManifest, config, runtime, runnerID, params.RunID, generation, params.ReservedToolNames)
+	if err == nil && params.SessionExtensions != nil {
+		wireManifest.SessionExtensionIDs = append([]string(nil), params.SessionExtensions.ExtensionIDs...)
+		wireManifest.Digest, err = runnerpayload.ComputeManifestDigest(wireManifest)
+	}
 	if err == nil {
 		err = operationCtx.Err()
 	}
@@ -568,8 +761,20 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	run.runtime = runtime
 	run.environment = environment
 	run.manifest = wireManifest
+	s.mu.Unlock()
+	if err := s.syncRunUICapabilities(operationCtx, run.id); err != nil {
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to update extension UI capabilities")
+	}
+	s.mu.Lock()
+	if s.runs[run.id] != run || run.closing || run.ctx.Err() != nil {
+		s.mu.Unlock()
+		s.failOpen(run)
+		return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
+	}
 	run.opening = false
-	if workingDirectory == s.workspace {
+	s.activateBackgroundTasksLocked(run)
+	if workingDirectory == s.workspace && params.Agent.Profile == "" && variant == "" && params.Options == nil {
 		s.lastManifestDigest = wireManifest.Digest
 	}
 	s.mu.Unlock()
@@ -595,14 +800,15 @@ func (s *Service) failOpen(run *activeRun) {
 		return
 	}
 	logCtx := s.decorateRunLogContext(s.ctx, run.id, run.conversationID)
+	defer s.closeRunAttachments(run)
 	run.cancel()
 	if err := s.closeRunEnvironment(context.Background(), run); err != nil {
 		logger.G(logCtx).WithError(err).Warn("failed to close runner environment after open failure")
 	}
 	s.mu.Lock()
-	if s.runs[run.id] == run {
-		delete(s.runs, run.id)
-	}
+	run.closing = true
+	s.clearRunSurfacesLocked(run.id)
+	s.revokeBackgroundTasksLocked(run, true)
 	resources := run.resources
 	cleanup := false
 	if resources != nil && resources.attachedRunID == run.id {
@@ -615,6 +821,11 @@ func (s *Service) failOpen(run *activeRun) {
 			logger.G(logCtx).WithError(err).Warn("failed to close runner background resources after open failure")
 		}
 	}
+	s.mu.Lock()
+	if s.runs[run.id] == run {
+		delete(s.runs, run.id)
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) closeRunEnvironment(ctx context.Context, run *activeRun) error {
@@ -635,6 +846,8 @@ func (s *Service) cancelRun(ctx context.Context, runID string) error {
 		conversationID = run.conversationID
 		run.stopping = true
 		run.cancel()
+		s.clearRunSurfacesLocked(run.id)
+		s.revokeBackgroundTasksLocked(run, false)
 	}
 	s.mu.Unlock()
 	if err == nil {
@@ -659,6 +872,7 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		return nil
 	}
 	run.cleanupOnce.Do(func() {
+		defer s.closeRunAttachments(run)
 		logCtx := s.decorateRunLogContext(ctx, run.id, run.conversationID)
 		startedAt := time.Now()
 		logger.G(logCtx).Info("closing runner run")
@@ -672,6 +886,8 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		}()
 
 		s.mu.Lock()
+		s.revokeBackgroundTasksLocked(run, true)
+		s.clearRunSurfacesLocked(run.id)
 		run.closing = true
 		run.stopping = true
 		run.cancel()
@@ -680,10 +896,11 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
 		closeErr := s.closeRunEnvironment(ctx, run)
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)
-		s.mu.Lock()
-		if s.runs[run.id] == run {
-			delete(s.runs, run.id)
+		if run.runtime.HasSessionExtensions() {
+			attachmentErr := run.runtime.CloseSessionExtensions(context.WithoutCancel(ctx))
+			run.cleanupErr = combineCleanupErrors(run.cleanupErr, attachmentErr)
 		}
+		s.mu.Lock()
 		resources := run.resources
 		cleanup := false
 		if resources != nil && resources.attachedRunID == run.id {
@@ -694,6 +911,11 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		if cleanup {
 			run.cleanupErr = combineCleanupErrors(run.cleanupErr, s.closeBackgroundResources(ctx, resources))
 		}
+		s.mu.Lock()
+		if s.runs[run.id] == run {
+			delete(s.runs, run.id)
+		}
+		s.mu.Unlock()
 	})
 	return run.cleanupErr
 }
@@ -705,7 +927,7 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 	}
 	if s.snapshotGate.TryAcquire(1) {
 		defer s.unlockSnapshot()
-		manifest, err := s.probeManifestLocked(ctx, "")
+		manifest, err := s.probeManifestLocked(ctx, "", "")
 		if err != nil {
 			return "", err
 		}
@@ -721,7 +943,7 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer s.unlockSnapshot()
-	manifest, err := s.probeManifestLocked(ctx, "")
+	manifest, err := s.probeManifestLocked(ctx, "", "")
 	if err != nil {
 		return "", err
 	}
@@ -730,17 +952,40 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 
 // ProbeManifest snapshots runner resources for command and capability discovery without reserving a control-plane run.
 func (s *Service) ProbeManifest(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
+	return s.ProbeManifestForCWD(ctx, "", environmentProfile)
+}
+
+// ProbeManifestForCWD discovers resources in a validated runner-host directory.
+func (s *Service) ProbeManifestForCWD(ctx context.Context, cwd, environmentProfile string) (runnerpayload.Manifest, error) {
+	return s.ProbeManifestForCWDWithOptions(ctx, cwd, environmentProfile, nil)
+}
+
+// ProbeManifestForCWDWithOptions scopes discovery restrictions to this request.
+func (s *Service) ProbeManifestForCWDWithOptions(ctx context.Context, cwd, environmentProfile string, options *llmtypes.ExecutionOptions) (runnerpayload.Manifest, error) {
+	return s.ProbeManifestForProfile(ctx, cwd, "", environmentProfile, options)
+}
+
+// ProbeManifestForProfile selects the same embedded environment preferences as
+// run.open. Standalone loaders ignore modelProfile and retain runner ownership.
+func (s *Service) ProbeManifestForProfile(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (runnerpayload.Manifest, error) {
 	if s == nil {
 		return runnerpayload.Manifest{}, errors.New("runner service is required")
+	}
+	if err := (protocol.WorkspaceDiscoverParams{Options: options}).Validate(); err != nil {
+		return runnerpayload.Manifest{}, err
 	}
 	if err := s.lockSnapshot(ctx); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
 	defer s.unlockSnapshot()
-	return s.probeManifestLocked(ctx, environmentProfile)
+	return s.probeManifestWithOptionsLocked(ctx, cwd, modelProfile, environmentProfile, options)
 }
 
-func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
+func (s *Service) probeManifestLocked(ctx context.Context, cwd, environmentProfile string) (runnerpayload.Manifest, error) {
+	return s.probeManifestWithOptionsLocked(ctx, cwd, "", environmentProfile, nil)
+}
+
+func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, modelProfile, environmentProfile string, options *llmtypes.ExecutionOptions) (result runnerpayload.Manifest, probeErr error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -749,7 +994,7 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 	runnerID := s.runnerID
 	generation := s.generation
 	s.mu.Unlock()
-	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, "")
+	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
 	if err != nil {
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve runner manifest probe working directory")
 	}
@@ -777,9 +1022,13 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Errorf("runner manifest probe instance returned working directory %q, expected %q", workingDirectory, resolvedCWD))
 	}
 
-	config, err := s.configLoader(environmentProfile)
+	config, err := s.loadConfig(workingDirectory, modelProfile, environmentProfile)
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
+	}
+	config, err = llmtypes.ApplyEnvironmentOptions(config, options)
+	if err != nil {
+		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to apply runner discovery options"))
 	}
 	config.WorkingDirectory = workingDirectory
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
@@ -787,21 +1036,16 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
 	}
 	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe", "runner-manifest-probe")
-	variant := normalizeEnvironmentProfile(environmentProfile)
-	var runtime *extensions.Runtime
-	if provider, ok := s.runtimeProvider.(runtimeDiscoveryProvider); ok {
-		runtime, err = provider.RuntimeForCommandDiscoveryWithConfig(probeCtx, workingDirectory, variant, extensionConfig)
-	} else {
-		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(probeCtx, workingDirectory, variant, extensionConfig, extensions.ExtensionCallContext{
-			ConversationID: "runner-manifest-probe",
-			UIScopeID:      "runner-manifest-probe",
-			CWD:            workingDirectory,
-			Provider:       config.Provider,
-			Model:          config.Model,
-			Profile:        config.Profile,
-			RecipeName:     config.RecipeName,
-			InvokedBy:      "runner.manifest",
-		})
+	capabilities := extensions.RuntimeCapabilitiesFromContext(probeCtx)
+	capabilities.BackgroundTasks = false
+	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
+	probeCtx, cancelProbe := context.WithCancel(probeCtx)
+	defer cancelProbe()
+	runtime, release, err := s.inspectionRuntime(probeCtx, workingDirectory, environmentProfile, config, extensionConfig)
+	if release != nil {
+		defer func() {
+			probeErr = combineCleanupErrors(probeErr, runBoundedCleanup(context.WithoutCancel(probeCtx), s.cleanupTimeout, "runner discovery runtime", func(context.Context) error { return release() }))
+		}()
 	}
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
@@ -826,9 +1070,11 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 	if err := s.closeProbeResources(probeCtx, environment, instance, nil); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
-	s.mu.Lock()
-	s.lastManifestDigest = wire.Digest
-	s.mu.Unlock()
+	if options == nil && cwd == "" && modelProfile == "" && normalizeEnvironmentProfile(environmentProfile) == "" {
+		s.mu.Lock()
+		s.lastManifestDigest = wire.Digest
+		s.mu.Unlock()
+	}
 	return wire, nil
 }
 
@@ -999,6 +1245,7 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	defer finish()
 
 	peer := s.currentPeer()
+	operationCtx = contextWithRunnerModelHelper(operationCtx, peer, run.id, params.ToolCallID)
 	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
 	if peer != nil {
 		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID}
@@ -1072,7 +1319,7 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 	}
 	result.ConversationID = strings.TrimSpace(result.ConversationID)
 	if result.ConversationID == "" {
-		return "", errors.New("control plane returned an empty conversation fork ID")
+		return "", errors.New("server returned an empty conversation fork ID")
 	}
 	return result.ConversationID, nil
 }
@@ -1154,8 +1401,14 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 
 func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID string) context.Context {
 	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
+	s.mu.Lock()
+	remoteProfiles := s.remoteProfiles
+	runnerID := s.runnerID
+	s.mu.Unlock()
+	ctx = extensions.ContextWithRunnerID(ctx, runnerID)
 	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{
 		BackgroundTasks: true,
+		RemoteProfiles:  remoteProfiles,
 	})
 	ctx = extensions.ContextWithBackgroundTaskHost(ctx, s)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)
@@ -1231,7 +1484,7 @@ func (s *Service) reportEnvironmentError(ctx context.Context, runID string, err 
 		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(logCtx), 10*time.Second)
 		defer cancel()
 		if notifyErr := peer.Notify(notifyCtx, protocol.MethodRunEnvironmentError, protocol.EnvironmentErrorParams{RunID: run.id, Message: err.Error()}); notifyErr != nil {
-			logger.G(logCtx).WithError(notifyErr).Warn("failed to report runner environment error to control plane")
+			logger.G(logCtx).WithError(notifyErr).Warn("failed to report runner environment error to server")
 		}
 	}
 }
@@ -1241,9 +1494,21 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	activeErr := s.abortActiveRuns(ctx, true)
+	// A lost connection also invalidates retained workers' connection-scoped
+	// authority, even when their foreground run already completed.
+	return combineCleanupErrors(activeErr, s.closeAllBackgroundResources(ctx))
+}
+
+func (s *Service) abortActiveRuns(ctx context.Context, detachPeer bool) error {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
-	if len(s.runs) == 0 {
+	if detachPeer {
 		s.peer = nil
+	}
+	if len(s.runs) == 0 {
 		s.mu.Unlock()
 		return nil
 	}
@@ -1251,7 +1516,6 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 	for _, run := range s.runs {
 		runs = append(runs, run)
 	}
-	s.peer = nil
 	s.mu.Unlock()
 
 	errorsByRun := make(chan error, len(runs))
@@ -1316,15 +1580,21 @@ func (s *Service) Close() error {
 		if s.ctx != nil {
 			cleanupCtx = context.WithoutCancel(s.ctx)
 		}
-		activeErr := s.AbortActiveRun(cleanupCtx)
+		// Graceful shutdown keeps reverse RPC available while extensions release
+		// UI routing; connection-loss aborts detach the dead peer.
+		activeErr := s.abortActiveRuns(cleanupCtx, false)
 		activeErr = combineCleanupErrors(activeErr, s.closeAllBackgroundResources(cleanupCtx))
 		if s.ownedRuntime != nil {
-			if err := s.ownedRuntime.Close(); activeErr == nil {
-				activeErr = err
-			}
+			activeErr = combineCleanupErrors(activeErr, runBoundedCleanup(cleanupCtx, s.cleanupTimeout, "runner runtime manager", func(context.Context) error {
+				return s.ownedRuntime.Close()
+			}))
 		}
-		if s.workspaceTerminals != nil {
-			activeErr = combineCleanupErrors(activeErr, s.workspaceTerminals.Close())
+		terminalErrors := make(chan error, len(s.directoryTerminals))
+		for _, manager := range s.directoryTerminals {
+			go func() { terminalErrors <- manager.Close() }()
+		}
+		for range s.directoryTerminals {
+			activeErr = combineCleanupErrors(activeErr, <-terminalErrors)
 		}
 		s.mu.Lock()
 		s.closeErr = activeErr

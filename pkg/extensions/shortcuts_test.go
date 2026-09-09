@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,4 +103,43 @@ func TestRuntimeSkipsInvalidShortcutRegistration(t *testing.T) {
 	assert.Empty(t, runtime.Shortcuts())
 	diagnostic := receiveDiagnostic(t, sink.ch)
 	assert.Contains(t, diagnostic.Message, "terminals report ctrl+i as tab")
+}
+
+func TestPinnedShortcutRejectsIdentityAndRestartWithoutExecutingReplacement(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	writeExecutable(t, filepath.Join(root, "shortcut", "kodelet-extension-shortcut"), helperExtensionScript(t))
+	runtime, err := NewRuntime(t.Context(), WithConfig(DefaultConfig()), WithWorkingDir(root), WithRoots(Root{Dir: root, Kind: SourceKindLocalStandalone}))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	require.Len(t, runtime.Shortcuts(), 1)
+	descriptor := runtime.Shortcuts()[0]
+	matched, result, err := runtime.ExecutePinnedShortcut(t.Context(), descriptor, ExtensionCallContext{CWD: root, ConversationID: "conv-shortcut", UIScopeID: "conversation-scope"})
+	require.NoError(t, err)
+	assert.True(t, matched)
+	require.NotNil(t, result)
+	assert.Equal(t, "/refresh", result.Message)
+	wrong := descriptor
+	wrong.ExtensionID = "different-extension"
+	matched, _, err = runtime.ExecutePinnedShortcut(t.Context(), wrong, ExtensionCallContext{})
+	assert.ErrorContains(t, err, "shortcut changed")
+	assert.False(t, matched)
+	process := runtime.shortcuts[descriptor.Key].process
+	client, _ := process.rpcSession()
+	process.failClientGeneration(client)
+	matched, _, err = runtime.ExecutePinnedShortcut(t.Context(), descriptor, ExtensionCallContext{})
+	assert.ErrorContains(t, err, "extension restarted")
+	assert.False(t, matched)
+	current, _ := process.rpcSession()
+	assert.Nil(t, current, "a pinned call must not restart a dead extension")
+	require.NoError(t, process.ensureRunning(t.Context()))
+	_, source := process.rpcSession()
+	require.NotNil(t, source)
+	assert.NotEqual(t, descriptor.Generation, source.owner.Generation)
+	_, _, err = runtime.ExecutePinnedShortcut(t.Context(), descriptor, ExtensionCallContext{})
+	assert.ErrorContains(t, err, "extension restarted")
+	wrong = descriptor
+	wrong.Generation = source.owner.Generation
+	_, _, err = runtime.ExecutePinnedShortcut(t.Context(), wrong, ExtensionCallContext{})
+	assert.ErrorContains(t, err, "shortcut changed", "new process must not inherit old shortcut registrations")
 }

@@ -41,6 +41,26 @@ func WithRemoteClientCapabilities(capabilities protocol.ClientCapabilities) Remo
 	}
 }
 
+// WithRemoteSessionExtensions attaches client callbacks to this environment only.
+func WithRemoteSessionExtensions(attachment *protocol.SessionExtensions) RemoteEnvironmentOption {
+	return func(environment *RemoteEnvironment) {
+		if attachment != nil {
+			environment.sessionExtensions = &protocol.SessionExtensions{
+				ID: attachment.ID, ExtensionIDs: append([]string(nil), attachment.ExtensionIDs...),
+			}
+		}
+	}
+}
+
+// WithRemoteModelProfile overrides only the runner's environment selector. The
+// trusted server uses this for embedded snapshot fallback without changing the
+// resolved model configuration or its immutable saved profile identity.
+func WithRemoteModelProfile(profile string) RemoteEnvironmentOption {
+	return func(environment *RemoteEnvironment) {
+		environment.modelProfile = strings.TrimSpace(profile)
+	}
+}
+
 // WithRemoteRunIDGenerator overrides opaque run ID generation, primarily for tests.
 func WithRemoteRunIDGenerator(generate func() (string, error)) RemoteEnvironmentOption {
 	return func(environment *RemoteEnvironment) {
@@ -55,7 +75,9 @@ type RemoteEnvironment struct {
 	mu                 sync.RWMutex
 	controller         RemoteController
 	runnerID           string
+	modelProfile       string
 	clientCapabilities protocol.ClientCapabilities
+	sessionExtensions  *protocol.SessionExtensions
 	newRunID           func() (string, error)
 	runID              string
 	manifest           Manifest
@@ -82,6 +104,7 @@ func NewRemoteEnvironment(controller RemoteController, runnerID string, options 
 
 // Open reserves runner capacity and pins the returned environment manifest.
 func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, error) {
+	spec = spec.Clone()
 	if e == nil || e.controller == nil {
 		return Manifest{}, errors.New("remote environment controller is required")
 	}
@@ -105,6 +128,16 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		e.finishOpenFailure()
 		return Manifest{}, errors.Wrap(err, "failed to generate remote run id")
 	}
+	// RunSpec contains an already resolved model configuration. An empty
+	// profile here means the base, not the embedded runner's active default
+	// (which may have changed since this conversation's snapshot was saved).
+	profile := strings.TrimSpace(spec.Config.Profile)
+	if profile == "" {
+		profile = "default"
+	}
+	if e.modelProfile != "" {
+		profile = e.modelProfile
+	}
 	params := protocol.RunOpenParams{
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
@@ -113,13 +146,15 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		Agent: protocol.AgentDescriptor{
 			Provider:           spec.Config.Provider,
 			Model:              spec.Config.Model,
-			Profile:            spec.Config.Profile,
+			Profile:            profile,
 			EnvironmentProfile: spec.EnvironmentProfile,
 			RecipeName:         spec.Config.RecipeName,
 			InvokedBy:          firstNonEmpty(spec.InvokedBy, "main"),
 		},
 		ClientCapabilities: e.clientCapabilities,
+		SessionExtensions:  e.sessionExtensions,
 		ReservedToolNames:  tools.ControlPlaneToolNames(),
+		Options:            spec.Config.EnvironmentOptions(),
 	}
 	wireManifest, err := e.controller.OpenRun(ctx, e.runnerID, params)
 	if err != nil {
@@ -492,6 +527,9 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		})
 	}
 	for _, definition := range wire.Tools {
+		if !config.EnvironmentOptions().ToolAllowed(definition.Name) {
+			continue
+		}
 		proxy := newRemoteToolProxy(definition)
 		definitions = append(definitions, ToolDefinition{
 			Name:        definition.Name,
@@ -508,6 +546,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		Tools:            definitions,
 		Commands:         slices.Clone(wire.Commands),
 		Config: (&EnvironmentConfig{
+			Options:             wire.Config.Options.Clone(),
 			AllowedCommands:     slices.Clone(wire.Config.AllowedCommands),
 			ToolMode:            wire.Config.ToolMode,
 			EnableFSSearchTools: wire.Config.EnableFSSearchTools,
@@ -521,7 +560,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 
 func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
 	available := tools.ControlPlaneTools()
-	if len(config.AllowedTools) == 0 {
+	if len(config.AllowedTools) == 0 && config.ExecutionOptions == nil {
 		return available
 	}
 
@@ -537,7 +576,8 @@ func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
 		if tool == nil {
 			continue
 		}
-		if _, ok := allowed[tool.Name()]; ok {
+		_, explicitlyAllowed := allowed[tool.Name()]
+		if (len(config.AllowedTools) == 0 || explicitlyAllowed) && config.ExecutionOptions.ToolAllowed(tool.Name()) {
 			filtered = append(filtered, tool)
 		}
 	}

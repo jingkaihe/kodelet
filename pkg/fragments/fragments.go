@@ -65,6 +65,7 @@ type Processor struct {
 	fragmentDirs     []string
 	pluginDirs       []plugins.PluginDirConfig
 	builtinRecipesFS fs.FS
+	workingDirectory string
 }
 
 // Option is a function that configures a FragmentProcessor
@@ -110,6 +111,7 @@ func WithDefaultDirs() Option {
 		if err != nil {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
+		fp.workingDirectory = ""
 		fp.fragmentDirs = []string{
 			"./.kodelet/recipes",                          // Repo-local standalone (highest precedence)
 			filepath.Join(homeDir, ".kodelet", "recipes"), // User-global standalone
@@ -124,7 +126,7 @@ func WithDefaultDirs() Option {
 }
 
 // WithDefaultDirsForCWD uses the default fragment lookup order rooted at the
-// provided working directory for repo-local recipes and plugins.
+// provided working directory for repo-local recipes, plugins and template commands.
 func WithDefaultDirsForCWD(cwd string) Option {
 	return func(fp *Processor) error {
 		homeDir, err := os.UserHomeDir()
@@ -136,6 +138,7 @@ func WithDefaultDirsForCWD(cwd string) Option {
 		if repoDir == "" {
 			repoDir = "."
 		}
+		fp.workingDirectory = repoDir
 
 		fp.fragmentDirs = []string{
 			filepath.Join(repoDir, ".kodelet", "recipes"),
@@ -486,6 +489,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		defer cancel()
 
 		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
+		cmd.Dir = fp.workingDirectory
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			logger.G(ctx).WithFields(map[string]any{

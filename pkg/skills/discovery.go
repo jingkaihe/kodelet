@@ -34,18 +34,24 @@ func WithSkillDirs(dirs ...string) Option {
 
 // WithDefaultDirs initializes with default skill directories
 func WithDefaultDirs() Option {
+	return WithDefaultDirsForCWD("")
+}
+
+// WithDefaultDirsForCWD discovers repository skills on the selected workspace,
+// without changing the process directory used by other conversations.
+func WithDefaultDirsForCWD(cwd string) Option {
 	return func(d *Discovery) error {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		d.skillDirs = []string{
-			"./.kodelet/skills",                          // Repo-local standalone (highest precedence)
+			filepath.Join(cwd, ".kodelet", "skills"),     // Repo-local standalone (highest precedence)
 			filepath.Join(homeDir, ".kodelet", "skills"), // User-global standalone
 		}
 
 		d.pluginDirs = []plugins.PluginDirConfig{}
-		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs("./.kodelet/plugins", "skills")...)
+		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(cwd, ".kodelet", "plugins"), "skills")...)
 		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "skills")...)
 
 		return nil

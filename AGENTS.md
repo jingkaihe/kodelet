@@ -51,13 +51,21 @@ mise run frontend-test           # Frontend tests
 
 **Use testify** for assertions (`assert.Equal`, `require.NotNil`) over `t.Errorf`/`t.Fatalf`.
 
+Live Anthropic tests are opt-in and incur API charges. Set `ANTHROPIC_API_KEY`, then run:
+
+```bash
+KODELET_ANTHROPIC_INTEGRATION_TESTS=1 mise exec -- go test -count=1 ./pkg/llm ./pkg/llm/anthropic
+```
+
 ## Key Commands
 ```bash
 # Core
 kodelet run "query"              # One-shot execution
-kodelet serve                    # Web UI server (localhost:8080)
+kodelet chat                     # Auto-start/reuse a detached local daemon
+kodelet serve                    # Foreground daemon plus embedded runner (localhost:8080)
+kodelet server status|stop|restart  # Manage the local background daemon
 kodelet run -r recipe-name       # Use recipe template
-kodelet run --follow "continue"  # Continue recent conversation
+kodelet run --follow --cwd "$PWD" "continue"  # Continue scoped daemon history
 
 # Git integration
 kodelet commit                   # AI commit messages
@@ -71,10 +79,10 @@ mise run build-dev               # Fast build (skip frontend)
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.
 
 ## Configuration
-Layered: env vars → global (`~/.kodelet/config.yaml`) → repo (`kodelet-config.yaml`)
+CLI/TUI/ACP commands use the daemon. Configure models and credentials in `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`; restart the daemon after changing defaults. Repository `kodelet-config.yaml` configures runner workspace settings only and cannot widen host permissions. Model `profiles` and runner `environment_profiles` are separate. See [Configuration](docs/MANUAL.md#configuration).
 
 ```bash
-# Required API keys
+# Provider API keys belong to the daemon environment
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export OPENAI_API_KEY="sk-..."
 

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -102,27 +103,34 @@ const (
 
 // Runner is a safe snapshot of one stable runner registration.
 type Runner struct {
-	ID                 string             `json:"id"`
-	DisplayName        string             `json:"displayName,omitempty"`
-	Host               protocol.Host      `json:"host"`
-	Workspace          protocol.Workspace `json:"workspace"`
-	KodeletVersion     string             `json:"kodeletVersion"`
-	ManifestDigest     string             `json:"manifestDigest,omitempty"`
-	ManifestChanged    bool               `json:"manifestChanged"`
-	CompatibilityError string             `json:"compatibilityError,omitempty"`
-	Status             RunnerStatus       `json:"status"`
-	Connected          bool               `json:"connected"`
-	ConcurrentRuns     bool               `json:"concurrentRuns"`
-	WorkspaceGitDiff   bool               `json:"workspaceGitDiff"`
-	WorkspaceTerminal  bool               `json:"workspaceTerminal"`
-	ActiveRunID        string             `json:"activeRunId,omitempty"`
-	ActiveRunIDs       []string           `json:"activeRunIds,omitempty"`
-	ConnectionID       string             `json:"connectionId,omitempty"`
-	Generation         int64              `json:"generation"`
-	ConnectedAt        time.Time          `json:"connectedAt,omitempty"`
-	LastHeartbeatAt    time.Time          `json:"lastHeartbeatAt,omitempty"`
-	CreatedAt          time.Time          `json:"createdAt"`
-	UpdatedAt          time.Time          `json:"updatedAt"`
+	ID                      string             `json:"id"`
+	DisplayName             string             `json:"displayName,omitempty"`
+	Host                    protocol.Host      `json:"host"`
+	Workspace               protocol.Workspace `json:"workspace"`
+	KodeletVersion          string             `json:"kodeletVersion"`
+	ManifestDigest          string             `json:"manifestDigest,omitempty"`
+	ManifestChanged         bool               `json:"manifestChanged"`
+	CompatibilityError      string             `json:"compatibilityError,omitempty"`
+	Status                  RunnerStatus       `json:"status"`
+	Connected               bool               `json:"connected"`
+	ConcurrentRuns          bool               `json:"concurrentRuns"`
+	WorkspaceGitDiff        bool               `json:"workspaceGitDiff"`
+	WorkspaceGitCommit      bool               `json:"workspaceGitCommit"`
+	WorkspaceTerminal       bool               `json:"workspaceTerminal"`
+	WorkspaceDiscovery      bool               `json:"workspaceDiscovery"`
+	WorkspaceInspection     bool               `json:"workspaceInspection"`
+	WorkspaceMessageHistory bool               `json:"workspaceMessageHistory"`
+	WorkspaceCWD            bool               `json:"workspaceCwd"`
+	RunCheckpoint           bool               `json:"runCheckpoint"`
+	SessionExtensions       bool               `json:"sessionExtensions"`
+	ActiveRunID             string             `json:"activeRunId,omitempty"`
+	ActiveRunIDs            []string           `json:"activeRunIds,omitempty"`
+	ConnectionID            string             `json:"connectionId,omitempty"`
+	Generation              int64              `json:"generation"`
+	ConnectedAt             time.Time          `json:"connectedAt,omitempty"`
+	LastHeartbeatAt         time.Time          `json:"lastHeartbeatAt,omitempty"`
+	CreatedAt               time.Time          `json:"createdAt"`
+	UpdatedAt               time.Time          `json:"updatedAt"`
 }
 
 // Run is a snapshot of one top-level runner environment lease.
@@ -229,6 +237,8 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
+	sessionExtensions *protocol.SessionExtensions
+	checkpoint        *runCheckpoint
 	connectionID      string
 	generation        int64
 	leaseCancel       context.CancelFunc
@@ -263,6 +273,7 @@ type Registry struct {
 	affinities        *affinityIndex
 	toolUpdates       *toolUpdateRouter
 	toolForkers       map[toolForkKey]*toolForkRegistration
+	modelHelpers      map[modelHelperKey]*modelHelperRegistration
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -376,7 +387,7 @@ func (r *Registry) restore(state PersistedState) error {
 		}
 		if run.Status == RunStatusOpening || run.Status == RunStatusRunning {
 			run.Status = RunStatusLost
-			run.Error = "control plane restarted while run was active"
+			run.Error = "server restarted while run was active"
 			run.UpdatedAt = now
 			if err := r.persistence.SaveRun(r.ctx, run); err != nil {
 				return errors.Wrap(err, "failed to mark restored runner run lost")
@@ -387,7 +398,7 @@ func (r *Registry) restore(state PersistedState) error {
 
 	for conversationID, affinity := range state.Affinities {
 		if strings.TrimSpace(conversationID) == "" || r.runners[affinity.RunnerID] == nil {
-			return errors.New("persisted conversation runner affinity is invalid")
+			return errors.New("the conversation's saved runner assignment is invalid")
 		}
 		affinity.EnvironmentProfile = normalizeEnvironmentProfile(affinity.EnvironmentProfile)
 		r.affinities.put(conversationID, affinity, true)
@@ -611,7 +622,14 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
+	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
+	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
+	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
@@ -661,6 +679,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		ConnectionID:        entry.ConnectionID,
 		Generation:          entry.Generation,
 		HeartbeatIntervalMS: r.heartbeatInterval.Milliseconds(),
+		RemoteProfiles:      true,
 	}
 	r.mu.Unlock()
 
@@ -703,7 +722,7 @@ func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, i
 			return nil, false, errors.New("host workspace is registered under another runner id")
 		}
 		if existingID == "" && r.runners[requestedID] == nil {
-			return nil, false, errors.Wrap(ErrRunnerNotFound, "runner id is not known to this control plane")
+			return nil, false, errors.Wrap(ErrRunnerNotFound, "runner id is not known to this server")
 		}
 	}
 
@@ -737,7 +756,14 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
+	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
+	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
+	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
+	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
+	entry.SessionExtensions = params.Capabilities.SessionExtensions
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -916,7 +942,7 @@ func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, pa
 			WithField("generation", generation).
 			WithField("expected_run_ids", mismatchExpectedRunIDs).
 			WithField("reported_run_ids", activeRunIDs).
-			Warn("runner heartbeat active runs differ from control-plane leases")
+			Warn("runner reported a different set of active runs than the server; see expected_run_ids and reported_run_ids")
 	}
 	if runSetErr != nil {
 		return runSetErr
@@ -1013,6 +1039,15 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner not found")
 	}
+	checkpoint, _ := ctx.Value(runCheckpointKey{}).(*runCheckpoint)
+	if params.RequireCheckpoint && (checkpoint == nil || !entry.RunCheckpoint) {
+		r.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("this runner cannot save conversations before starting work; update the runner")
+	}
+	if params.SessionExtensions != nil && !entry.SessionExtensions {
+		r.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("this runner does not support session extensions; update the runner")
+	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	reservedAffinity := false
 	if affinity, exists := r.affinities.get(params.ConversationID); exists && affinity.RunnerID != runnerID {
@@ -1082,6 +1117,16 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		connectionID: connectionID,
 		generation:   generation,
 		leaseCancel:  leaseCancel,
+		checkpoint:   checkpoint,
+	}
+	if params.SessionExtensions != nil {
+		run.sessionExtensions = &protocol.SessionExtensions{
+			ID: params.SessionExtensions.ID, ExtensionIDs: append([]string(nil), params.SessionExtensions.ExtensionIDs...),
+		}
+	}
+	if checkpoint != nil {
+		stop := context.AfterFunc(leaseCtx, checkpoint.cancel)
+		defer stop()
 	}
 	if err := r.persistRunnerAndRunLocked(runnerCandidate, run); err != nil {
 		leaseCancel()
@@ -1101,6 +1146,14 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	if err := link.Call(ctx, protocol.MethodRunOpen, params, &manifest); err != nil {
 		var rpcErr *protocol.RPCError
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, errors.As(err, &rpcErr))
+	}
+	if checkpoint != nil {
+		r.mu.RLock()
+		complete := checkpoint.complete && checkpoint.cwd == manifest.WorkingDirectory
+		r.mu.RUnlock()
+		if !complete {
+			return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, errors.New("the runner did not confirm that the conversation was saved before starting work"), false)
+		}
 	}
 	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
@@ -1231,8 +1284,16 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return false
 	}
 	switch method {
+	case protocol.MethodWorkspaceInspect:
+		return entry.WorkspaceInspection
+	case protocol.MethodWorkspaceMessageHistory:
+		return entry.WorkspaceMessageHistory
+	case protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints:
+		return entry.WorkspaceDiscovery
 	case protocol.MethodWorkspaceGitDiff:
 		return entry.WorkspaceGitDiff
+	case protocol.MethodWorkspaceGitPrepare, protocol.MethodWorkspaceGitCommit:
+		return entry.WorkspaceGitCommit
 	case protocol.MethodWorkspaceTerminalOpen,
 		protocol.MethodWorkspaceTerminalRead,
 		protocol.MethodWorkspaceTerminalInput,
@@ -1260,6 +1321,11 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
+	cleanupHelper, err := r.registerToolModelHelper(ctx, params)
+	if err != nil {
+		return runnerpayload.ToolExecuteResult{}, err
+	}
+	defer cleanupHelper()
 	toolContext := tools.ToolContextFromContext(ctx)
 	if forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker); ok {
 		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, params.Name, forker)
@@ -1346,6 +1412,9 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 	if err != nil {
 		return err
 	}
+	r.mu.Lock()
+	r.clearRunModelHelpersLocked(runID)
+	r.mu.Unlock()
 	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
 		return err
 	}
@@ -1571,7 +1640,9 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 		if r.persistence == nil {
 			result.RemovedRuns++
 		}
-		r.affinities.deactivate(run.ConversationID)
+		if r.affinities.activeRun(run.ConversationID) == runID {
+			r.affinities.deactivate(run.ConversationID)
+		}
 		r.clearRunTransientStateLocked(runID)
 		delete(r.runs, runID)
 	}
@@ -1605,7 +1676,7 @@ func (r *Registry) Close() error {
 		}
 		entry.credentialID = ""
 		for _, runID := range runnerActiveRunIDs(entry) {
-			r.finishRunLocked(runID, RunStatusLost, "control plane stopped while run was active", now)
+			r.finishRunLocked(runID, RunStatusLost, "server stopped while run was active", now)
 		}
 		entry.Connected = false
 		if entry.Status != RunnerStatusIncompatible {
@@ -1701,7 +1772,7 @@ func (r *Registry) watchRunLease(owner context.Context, leaseDone <-chan struct{
 }
 
 func (r *Registry) expireRunLease(fence runFence, cause error) {
-	message := "control-plane run context ended without run.close"
+	message := "the run ended before the runner received a close request; canceling work and cleaning up"
 	if cause != nil {
 		message += ": " + cause.Error()
 	}
@@ -1726,7 +1797,7 @@ func (r *Registry) expireRunLease(fence runFence, cause error) {
 
 	r.notifyRunFailure(conversationID)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), openingCleanupTimeout)
-	_ = fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: fence.runID, Reason: "control-plane run lease expired"}, nil)
+	_ = fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: fence.runID, Reason: "server run lease expired"}, nil)
 	cleanupErr := fence.link.Call(cleanupCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: fence.runID}, nil)
 	cancel()
 	if cleanupErr == nil || remoteRunAlreadyClosed(cleanupErr) {
@@ -1811,6 +1882,7 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 
 func (r *Registry) clearRunTransientStateLocked(runID string) {
 	r.toolUpdates.clearRun(runID)
+	r.clearRunModelHelpersLocked(runID)
 }
 
 func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {
@@ -1925,7 +1997,8 @@ func (r *Registry) expireStaleConnections() {
 	var stale []staleConnection
 	r.mu.RLock()
 	for _, entry := range r.runners {
-		if entry.Connected && entry.link != nil && now.Sub(entry.LastHeartbeatAt) > r.heartbeatTimeout {
+		// Before the first heartbeat, cold discovery is guarded by transport liveness.
+		if entry.Connected && entry.ready && entry.link != nil && now.Sub(entry.LastHeartbeatAt) > r.heartbeatTimeout {
 			stale = append(stale, staleConnection{entry.ID, entry.ConnectionID, entry.Generation, entry.link})
 		}
 	}
@@ -1937,6 +2010,13 @@ func (r *Registry) expireStaleConnections() {
 }
 
 func validateManifest(manifest runnerpayload.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
+	var sessionExtensionIDs []string
+	if params.SessionExtensions != nil {
+		sessionExtensionIDs = params.SessionExtensions.ExtensionIDs
+	}
+	if !slices.Equal(manifest.SessionExtensionIDs, sessionExtensionIDs) {
+		return errors.New("runner manifest session extensions do not match the opened run")
+	}
 	if manifest.ProtocolVersion != protocol.Version {
 		return errors.Errorf("runner manifest uses protocol version %d", manifest.ProtocolVersion)
 	}
@@ -1960,7 +2040,7 @@ func validateManifest(manifest runnerpayload.Manifest, runnerID string, params p
 			return errors.New("runner manifest contains a tool without a name")
 		}
 		if _, exists := reserved[name]; exists {
-			return errors.Errorf("runner tool %s collides with a reserved control-plane tool", name)
+			return errors.Errorf("runner tool %s collides with a reserved server tool", name)
 		}
 		if definition.Placement != "environment" {
 			return errors.Errorf("runner tool %s has invalid placement %q", name, definition.Placement)

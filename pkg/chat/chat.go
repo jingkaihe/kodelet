@@ -33,20 +33,26 @@ const (
 	chatToolOutputTruncationMarker = "\n\n[output truncated for remote display]"
 	// ConversationStreamActiveHeader reports whether a conversation was active when a live stream attached.
 	ConversationStreamActiveHeader = "X-Kodelet-Conversation-Active"
+	// ClientIDHeader identifies one attached UI client, independently of its user login.
+	ClientIDHeader = "X-Kodelet-Client-ID"
+	// UICapabilitiesHeader declares UI features supported by a watching client.
+	UICapabilitiesHeader = "X-Kodelet-UI-Capabilities"
 )
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message            string                  `json:"message"`
-	Content            []ChatContentBlock      `json:"content,omitempty"`
-	ConversationID     string                  `json:"conversationId,omitempty"`
-	TurnID             string                  `json:"turnId,omitempty"`
-	RunnerID           string                  `json:"runnerId,omitempty"`
-	Profile            string                  `json:"profile,omitempty"`
-	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
-	ReasoningEffort    string                  `json:"reasoningEffort,omitempty"`
-	CWD                string                  `json:"cwd,omitempty"`
-	ClientCapabilities *ChatClientCapabilities `json:"clientCapabilities,omitempty"`
+	Message             string                     `json:"message"`
+	Content             []ChatContentBlock         `json:"content,omitempty"`
+	ConversationID      string                     `json:"conversationId,omitempty"`
+	TurnID              string                     `json:"turnId,omitempty"`
+	RunnerID            string                     `json:"runnerId,omitempty"`
+	SessionExtensionsID string                     `json:"sessionExtensionsId,omitempty"`
+	Profile             string                     `json:"profile,omitempty"`
+	EnvironmentProfile  string                     `json:"environmentProfile,omitempty"`
+	ReasoningEffort     string                     `json:"reasoningEffort,omitempty"`
+	CWD                 string                     `json:"cwd,omitempty"`
+	Options             *llmtypes.ExecutionOptions `json:"options,omitempty"`
+	ClientCapabilities  *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
 }
 
 const (
@@ -102,11 +108,14 @@ type ChatEvent struct {
 	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
 	UISelect         *UISelectEvent                  `json:"ui_select,omitempty"`
 	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
+	UIRequestID      string                          `json:"ui_request_id,omitempty"`
 	UIWidget         *UIWidgetEvent                  `json:"ui_widget,omitempty"`
 	UIWidgets        []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
 	UIWidgetRevision string                          `json:"ui_widget_revision,omitempty"`
+	UIPersistent     *UIPersistentEvent              `json:"ui_persistent,omitempty"`
 	Cancelled        bool                            `json:"cancelled,omitempty"`
 	Error            string                          `json:"error,omitempty"`
+	Result           *string                         `json:"result,omitempty"`
 }
 
 // UIInputEvent describes an extension-requested input prompt.
@@ -214,8 +223,8 @@ type EnvironmentResolver interface {
 	ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, config llmtypes.Config, resolvedCWD string) (agentenv.Environment, error)
 }
 
-// DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
-type DefaultChatRunner struct {
+// Executor orchestrates persisted chat turns, LLM threads, and execution environments.
+type Executor struct {
 	defaultCWD          string
 	extensionRuntimes   ExtensionRuntimeProvider
 	environmentResolver EnvironmentResolver
@@ -237,13 +246,13 @@ const (
 	defaultChatSessionIdleTTL = 30 * time.Minute
 )
 
-// NewDefaultChatRunner creates a default chat runner.
-func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *DefaultChatRunner {
+// NewExecutor creates a chat executor with cached conversation threads.
+func NewExecutor(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *Executor {
 	var provider ExtensionRuntimeProvider
 	if len(extensionRuntimes) > 0 {
 		provider = extensionRuntimes[0]
 	}
-	return &DefaultChatRunner{
+	return &Executor{
 		defaultCWD:        defaultCWD,
 		extensionRuntimes: provider,
 		sessions:          make(map[string]*defaultChatSession),
@@ -251,7 +260,7 @@ func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRunti
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
-func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+func (r *Executor) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	if r == nil {
 		return runDefaultChat(ctx, req, sink, "", nil, nil, nil)
 	}
@@ -262,7 +271,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 }
 
 // SetEnvironmentResolver configures remote environment selection for subsequent requests.
-func (r *DefaultChatRunner) SetEnvironmentResolver(resolver EnvironmentResolver) {
+func (r *Executor) SetEnvironmentResolver(resolver EnvironmentResolver) {
 	if r == nil {
 		return
 	}
@@ -272,7 +281,7 @@ func (r *DefaultChatRunner) SetEnvironmentResolver(resolver EnvironmentResolver)
 }
 
 // Close releases cached conversation threads and their persistent transports.
-func (r *DefaultChatRunner) Close() error {
+func (r *Executor) Close() error {
 	if r == nil {
 		return nil
 	}
@@ -300,7 +309,7 @@ func (r *DefaultChatRunner) Close() error {
 }
 
 // CloseConversation releases a cached thread when its conversation is removed.
-func (r *DefaultChatRunner) CloseConversation(conversationID string) error {
+func (r *Executor) CloseConversation(conversationID string) error {
 	if r == nil {
 		return nil
 	}
@@ -315,16 +324,16 @@ func (r *DefaultChatRunner) CloseConversation(conversationID string) error {
 	return closeDefaultChatSession(session)
 }
 
-// DefaultCWD returns the runner's configured default working directory.
-func (r *DefaultChatRunner) DefaultCWD() string {
+// DefaultCWD returns the executor's configured default working directory.
+func (r *Executor) DefaultCWD() string {
 	if r == nil {
 		return ""
 	}
 	return r.defaultCWD
 }
 
-// ExtensionRuntimeProvider returns the runner's configured extension runtime provider.
-func (r *DefaultChatRunner) ExtensionRuntimeProvider() ExtensionRuntimeProvider {
+// ExtensionRuntimeProvider returns the executor's configured extension runtime provider.
+func (r *Executor) ExtensionRuntimeProvider() ExtensionRuntimeProvider {
 	if r == nil {
 		return nil
 	}
@@ -342,9 +351,23 @@ func runDefaultChat(
 	sink ChatEventSink,
 	defaultCWD string,
 	extensionRuntimes ExtensionRuntimeProvider,
-	threadOwner *DefaultChatRunner,
+	threadOwner *Executor,
 	environmentResolver EnvironmentResolver,
 ) (resultSessionID string, resultErr error) {
+	req.Options = req.Options.Clone()
+	if err := req.Options.Validate(); err != nil {
+		return "", err
+	}
+	if req.Options != nil && req.Options.ReasoningEffort != nil {
+		effort, _ := llmtypes.NormalizeReasoningEffort(*req.Options.ReasoningEffort)
+		if req.ReasoningEffort != "" {
+			legacy, err := llmtypes.NormalizeReasoningEffort(req.ReasoningEffort)
+			if err != nil || legacy != effort {
+				return "", errors.New("reasoningEffort conflicts with options.reasoningEffort")
+			}
+		}
+		req.ReasoningEffort = effort
+	}
 	message, imageInputs, err := NormalizeRequest(req)
 	if err != nil {
 		return "", err
@@ -390,6 +413,10 @@ func runDefaultChat(
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
+	llmConfig, err = resolveExecutionOptions(ctx, req, llmConfig)
+	if err != nil {
+		return sessionID, err
+	}
 	llmConfig.WorkingDirectory = resolvedCWD
 
 	var extensionRuntime *extensions.Runtime
@@ -403,7 +430,10 @@ func runDefaultChat(
 			return sessionID, err
 		}
 	}
-	if environment == nil && extensionRuntimes != nil {
+	extensionsDisabled := llmConfig.EnvironmentOptions().NoExtensions
+	if environment == nil && extensionsDisabled != nil && *extensionsDisabled {
+		// Do not initialize disabled extensions, including session.start hooks.
+	} else if environment == nil && extensionRuntimes != nil {
 		if contextualProvider, ok := extensionRuntimes.(contextualExtensionRuntimeProvider); ok {
 			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensionCallContext(sessionID, resolvedCWD, llmConfig, invokedBy))
 		} else {
@@ -446,6 +476,53 @@ func runDefaultChat(
 		Config:                   llmConfig,
 		InvokedBy:                invokedBy,
 	}
+	var thread llmtypes.Thread
+	releaseThread := func() {}
+	checkpointSaved := false
+	prepareThread := func(ctx context.Context) error {
+		if thread != nil {
+			return nil
+		}
+		var newThread bool
+		thread, newThread, releaseThread, err = acquireChatThread(threadOwner, sessionID, llmConfig)
+		if err != nil {
+			return errors.Wrap(err, "failed to create LLM thread")
+		}
+		thread.SetConversationID(sessionID)
+		if newThread {
+			thread.EnablePersistence(ctx, true)
+		}
+		if strings.TrimSpace(req.RunnerID) != "" {
+			thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))
+			thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
+		}
+		return nil
+	}
+	defer func() {
+		releaseThread()
+		// A failed opening/user-message hook can leave admitted input only in the
+		// durable checkpoint. Reload it rather than reuse the pre-input live cache.
+		if checkpointSaved && (resultErr != nil || ctx.Err() != nil) && threadOwner != nil {
+			_ = threadOwner.CloseConversation(sessionID)
+		}
+	}()
+	if strings.TrimSpace(req.RunnerID) != "" {
+		ctx = agentenv.ContextWithRunCheckpoint(ctx, func(saveCtx context.Context, cwd string) error {
+			llmConfig.WorkingDirectory = cwd
+			if err := prepareThread(saveCtx); err != nil {
+				return err
+			}
+			saver, ok := thread.(llmtypes.PendingUserMessageSaver)
+			if !ok || !thread.IsPersisted() {
+				return errors.New("cannot save the conversation before starting work")
+			}
+			if err := saver.SavePendingUserMessage(saveCtx, message, imageInputs...); err != nil {
+				return errors.Wrap(err, "failed to save the user message before starting work")
+			}
+			checkpointSaved = true
+			return nil
+		})
+	}
 	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
 	if err != nil {
 		return sessionID, err
@@ -458,7 +535,10 @@ func runDefaultChat(
 	if commandResult.Matched {
 		switch commandResult.Action {
 		case agentenv.CommandActionRespond:
-			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, strings.TrimSpace(req.RunnerID), environmentProfile, message, commandResult.Response, imageInputs); err != nil {
+			if err := prepareThread(ctx); err != nil {
+				return sessionID, err
+			}
+			if err := saveDirectCommandResponse(ctx, thread, message, commandResult.Response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
@@ -468,6 +548,9 @@ func runDefaultChat(
 				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
 					return sessionID, err
 				}
+			}
+			if err := sink.Send(ChatEvent{Kind: "result", ConversationID: sessionID, Result: &commandResult.Response}); err != nil {
+				logger.G(ctx).WithError(err).Debug("failed to send command result event")
 			}
 			return sessionID, nil
 		case agentenv.CommandActionRunAgent:
@@ -519,23 +602,22 @@ func runDefaultChat(
 		}
 	}
 
-	thread, newThread, releaseThread, err := acquireChatThread(threadOwner, sessionID, llmConfig)
-	if err != nil {
-		return sessionID, errors.Wrap(err, "failed to create LLM thread")
+	if err := prepareThread(ctx); err != nil {
+		return sessionID, err
 	}
-	defer releaseThread()
+	if checkpointSaved && commandResult.Matched {
+		setter, ok := thread.(interface {
+			SetCommandConfig(string, []string, []string)
+		})
+		if !ok {
+			return sessionID, errors.New("conversation provider cannot apply command restrictions")
+		}
+		setter.SetCommandConfig(llmConfig.RecipeName, llmConfig.AllowedTools, llmConfig.AllowedCommands)
+	}
 	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
 		extensionSetter.SetExtensions(extensionRuntime)
 	}
 
-	thread.SetConversationID(sessionID)
-	if strings.TrimSpace(req.RunnerID) != "" {
-		thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))
-		thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
-	}
-	if newThread {
-		thread.EnablePersistence(ctx, true)
-	}
 	if renameName != "" {
 		name, err := conversationservice.RenameThread(ctx, thread, renameName)
 		if err != nil {
@@ -580,12 +662,17 @@ func runDefaultChat(
 		sink:           sink,
 	}
 	environmentHandedOff = true
-	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      imageInputs,
-	})
+	messageOpt := executionMessageOpt(req.Options)
+	if strings.TrimSpace(req.RunnerID) != "" {
+		ctx = contextWithCentralModelHelper(ctx, thread)
+	}
+	messageOpt.Images = imageInputs
+	result, err := thread.SendMessage(ctx, message, handler, messageOpt)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to process chat message")
+	}
+	if err := sink.Send(ChatEvent{Kind: "result", ConversationID: sessionID, Result: &result}); err != nil {
+		logger.G(ctx).WithError(err).Debug("failed to send final result event")
 	}
 
 	return sessionID, nil
@@ -597,7 +684,7 @@ type assistantMessageAppender interface {
 
 func persistDirectCommandResponse(
 	ctx context.Context,
-	owner *DefaultChatRunner,
+	owner *Executor,
 	conversationID string,
 	config llmtypes.Config,
 	runnerID string,
@@ -620,6 +707,10 @@ func persistDirectCommandResponse(
 	if !thread.IsPersisted() {
 		thread.EnablePersistence(ctx, true)
 	}
+	return saveDirectCommandResponse(ctx, thread, message, response, images)
+}
+
+func saveDirectCommandResponse(ctx context.Context, thread llmtypes.Thread, message, response string, images []string) error {
 	appender, ok := thread.(assistantMessageAppender)
 	if !ok {
 		return errors.New("conversation provider cannot persist direct command responses")
@@ -635,7 +726,7 @@ func persistDirectCommandResponse(
 }
 
 func acquireChatThread(
-	owner *DefaultChatRunner,
+	owner *Executor,
 	sessionID string,
 	config llmtypes.Config,
 ) (thread llmtypes.Thread, newThread bool, release func(), err error) {
@@ -730,7 +821,7 @@ func chatThreadConfigFingerprint(config llmtypes.Config) (string, error) {
 	return string(data), nil
 }
 
-func (r *DefaultChatRunner) evictIdleSessionsLocked(currentID string, now time.Time) []*defaultChatSession {
+func (r *Executor) evictIdleSessionsLocked(currentID string, now time.Time) []*defaultChatSession {
 	evicted := make([]*defaultChatSession, 0)
 	for id, session := range r.sessions {
 		if id == currentID || session.inUse != 0 || now.Sub(session.lastUsed) < defaultChatSessionIdleTTL {
@@ -898,11 +989,25 @@ func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, reque
 	return config, err
 }
 
+type profileResolverContextKey struct{}
+
+// ContextWithProfileResolver installs the daemon's caller/runner-bound profile lookup.
+func ContextWithProfileResolver(ctx context.Context, resolve func(string, string) (llmtypes.Config, error)) context.Context {
+	return context.WithValue(ctx, profileResolverContextKey{}, resolve)
+}
+
+func resolveRemoteNewConversationConfig(ctx context.Context, profile, effort string) (llmtypes.Config, error) {
+	if resolve, ok := ctx.Value(profileResolverContextKey{}).(func(string, string) (llmtypes.Config, error)); ok {
+		return resolve(profile, effort)
+	}
+	return ResolveConfigForNewConversation(profile, effort)
+}
+
 // ResolveRemoteConfigWithReasoningAndEnvironmentProfile resolves central model policy and the independently locked runner profile.
 func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedEnvironmentProfile string) (llmtypes.Config, string, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		config, err := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, err := resolveRemoteNewConversationConfig(ctx, requestedProfile, requestedReasoningEffort)
 		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), err
 	}
@@ -920,11 +1025,11 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 		if !errors.Is(err, convtypes.ErrConversationNotFound) {
 			return llmtypes.Config{}, "", errors.Wrap(err, "failed to load remote conversation")
 		}
-		config, configErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, configErr := resolveRemoteNewConversationConfig(ctx, requestedProfile, requestedReasoningEffort)
 		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), configErr
 	}
-	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
+	config, err := resolveConfigForExistingConversation(ctx, record, requestedReasoningEffort)
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}
@@ -1050,6 +1155,10 @@ func ResolveConfigForNewConversation(requestedProfile string, requestedReasoning
 }
 
 func ResolveConfigForExistingConversation(record *conversationservice.GetConversationResponse, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
+	return resolveConfigForExistingConversation(context.Background(), record, requestedReasoningEfforts...)
+}
+
+func resolveConfigForExistingConversation(ctx context.Context, record *conversationservice.GetConversationResponse, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
 	requestedReasoningEffort := ""
 	if len(requestedReasoningEfforts) > 0 {
 		requestedReasoningEffort = requestedReasoningEfforts[0]
@@ -1057,7 +1166,7 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 	if record != nil {
 		snapshot, hasSnapshot, err := conversationservice.ConfigSnapshotFromMetadata(record.Metadata)
 		if err != nil {
-			return llmtypes.Config{}, errors.Wrap(err, "failed to load conversation config snapshot")
+			return llmtypes.Config{}, errors.Wrap(err, "failed to load the conversation's saved settings")
 		}
 		if hasSnapshot {
 			if strings.TrimSpace(requestedReasoningEffort) != "" {
@@ -1076,7 +1185,9 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 
 			profileName := NormalizeRequestedProfile(snapshot.Profile)
 			var config llmtypes.Config
-			if profileName != "" && llm.HasConfiguredProfile(profileName) {
+			if snapshot.ExtensionProfile {
+				config, err = extensionSnapshotBase(ctx, snapshot)
+			} else if profileName != "" && llm.HasConfiguredProfile(profileName) {
 				config, err = llm.GetConfigFromViperWithProfile(profileName)
 			} else {
 				config, err = llm.GetConfigFromViperWithoutProfile()
@@ -1146,8 +1257,6 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 
 	if hasStoredProfile && profileName == "" {
 		config.Profile = "default"
-	} else {
-		config.Profile = profileName
 	}
 	if strings.TrimSpace(requestedReasoningEffort) != "" {
 		return llmtypes.Config{}, errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")

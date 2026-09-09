@@ -4,16 +4,40 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 )
 
 type webUIInputBroker struct {
-	conversationID string
-	sink           chat.ChatEventSink
-	pending        map[string]chan extensions.UIInputResponse
-	mu             sync.Mutex
+	conversationID  string
+	sink            chat.ChatEventSink
+	pending         map[string]chan extensions.UIInputResponse
+	mu              sync.Mutex
+	owner           *uiInputOwner
+	closed          bool
+	native          *nativeUIState
+	shortcutCancels map[string]context.CancelFunc
+}
+
+type uiInputOwner struct {
+	clientID string
+	sink     chat.ChatEventSink
+	ctx      context.Context
+	stop     func() bool
+}
+
+func validUIClientID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, char := range id {
+		if char != '-' && char != '_' && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUIInputBroker {
@@ -22,6 +46,62 @@ func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUII
 		sink:           sink,
 		pending:        make(map[string]chan extensions.UIInputResponse),
 	}
+}
+
+// setOwner binds interactive UI to the submitting client for this execution.
+// Disconnecting dismisses pending prompts without selecting an attached viewer.
+func (b *webUIInputBroker) setOwner(ctx context.Context, clientID string, sink chat.ChatEventSink) func() {
+	owner := &uiInputOwner{clientID: clientID, sink: sink, ctx: ctx}
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return func() {}
+	}
+	if b.owner != nil && b.owner.stop != nil {
+		b.owner.stop()
+	}
+	b.dismissPendingLocked()
+	b.invalidateNativeUILocked()
+	b.owner = owner
+	owner.stop = context.AfterFunc(ctx, func() { b.detachOwner(owner) })
+	b.mu.Unlock()
+	return func() { owner.stop(); b.detachOwner(owner) }
+}
+
+func (b *webUIInputBroker) detachOwner(owner *uiInputOwner) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.owner == owner {
+		b.invalidateNativeUILocked()
+		b.owner = nil
+		b.dismissPendingLocked()
+	}
+}
+
+func (b *webUIInputBroker) dismissPendingLocked() {
+	for id, cancel := range b.shortcutCancels {
+		cancel()
+		delete(b.shortcutCancels, id)
+	}
+	for id, response := range b.pending {
+		delete(b.pending, id)
+		select {
+		case response <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed, Reason: "interactive client detached or execution ended"}:
+		default:
+		}
+	}
+}
+
+func (b *webUIInputBroker) close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	b.invalidateNativeUILocked()
+	if b.owner != nil && b.owner.stop != nil {
+		b.owner.stop()
+	}
+	b.owner = nil
+	b.dismissPendingLocked()
 }
 
 func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInputRequest) (extensions.UIInputResponse, error) {
@@ -106,7 +186,13 @@ func (b *webUIInputBroker) Notify(ctx context.Context, request extensions.UINoti
 	if err := ctx.Err(); err != nil {
 		return extensions.UIInputResponse{}, err
 	}
-	if err := b.sink.Send(chat.ChatEvent{
+	b.mu.Lock()
+	owner := b.owner
+	b.mu.Unlock()
+	if owner == nil || owner.ctx.Err() != nil {
+		return unavailableUIResponse("no interactive client owns this execution"), nil
+	}
+	if err := owner.sink.Send(chat.ChatEvent{
 		Kind:           "ui-notification",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
@@ -124,6 +210,24 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event c
 	responseCh := make(chan extensions.UIInputResponse, 1)
 
 	b.mu.Lock()
+	owner := b.owner
+	if b.closed || owner == nil || owner.ctx.Err() != nil {
+		b.mu.Unlock()
+		return unavailableUIResponse("no interactive client owns this execution"), nil
+	}
+	if owner.clientID != "" {
+		// Extensions may reuse IDs. Never reuse a client-facing response capability.
+		requestID = extensions.NewUIInputRequestID()
+		if event.UIInput != nil {
+			event.UIInput.ID = requestID
+		}
+		if event.UIConfirm != nil {
+			event.UIConfirm.ID = requestID
+		}
+		if event.UISelect != nil {
+			event.UISelect.ID = requestID
+		}
+	}
 	if previous, ok := b.pending[requestID]; ok {
 		select {
 		case previous <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}:
@@ -138,6 +242,11 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event c
 			delete(b.pending, requestID)
 		}
 		b.mu.Unlock()
+		if owner.clientID != "" {
+			// Clear a visible prompt on expiry or cancellation. This is
+			// sent only to its original owner, never to an observing client.
+			_ = owner.sink.Send(chat.ChatEvent{Kind: "ui-request-end", ConversationID: b.conversationID, UIRequestID: requestID})
+		}
 	}()
 
 	if event.Kind == "" {
@@ -149,13 +258,20 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event c
 	if event.Role == "" {
 		event.Role = "assistant"
 	}
-	if err := b.sink.Send(event); err != nil {
-		return extensions.UIInputResponse{}, err
+	if err := owner.sink.Send(event); err != nil {
+		b.detachOwner(owner)
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed, Reason: "interactive client is unavailable"}, nil
 	}
 
+	timer := time.NewTimer(5 * time.Minute)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}, ctx.Err()
+	case <-owner.ctx.Done():
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed, Reason: "interactive client disconnected"}, nil
+	case <-timer.C:
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusTimeout}, nil
 	case response := <-responseCh:
 		if response.Status == "" {
 			response.Status = extensions.UIInputStatusDismissed
@@ -165,6 +281,10 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event c
 }
 
 func (b *webUIInputBroker) Respond(requestID string, response extensions.UIInputResponse) bool {
+	return b.respondOwned("", requestID, response)
+}
+
+func (b *webUIInputBroker) respondOwned(clientID, requestID string, response extensions.UIInputResponse) bool {
 	if b == nil {
 		return false
 	}
@@ -173,13 +293,17 @@ func (b *webUIInputBroker) Respond(requestID string, response extensions.UIInput
 		return false
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || b.owner == nil || b.owner.clientID != clientID || b.owner.ctx.Err() != nil {
+		return false
+	}
 	responseCh, ok := b.pending[requestID]
-	b.mu.Unlock()
 	if !ok {
 		return false
 	}
 	select {
 	case responseCh <- response:
+		delete(b.pending, requestID)
 		return true
 	default:
 		return false

@@ -49,7 +49,7 @@ func buildToolsWithAllowed(state tooltypes.State, noToolUse bool, extensionAllow
 }
 
 func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Tool, noToolUse bool, extensionAllowedTools []string) []responses.ToolUnionParam {
-	if noToolUse {
+	if noToolUse || config.ExecutionOptions.ToolsDisabled() {
 		return nil
 	}
 
@@ -73,12 +73,18 @@ func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Too
 	}
 
 	result := make([]responses.ToolUnionParam, 0, len(availableTools)+1)
-	if shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) {
+	if shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) && config.EnvironmentOptions().ToolAllowed(openAISearchToolName) {
 		result = append(result, buildNativeOpenAISearchTool(llmConfig))
 	}
 
 	if len(availableTools) > 0 {
-		result = append(result, toResponsesAPITools(availableTools)...)
+		allowedTools := make([]tooltypes.Tool, 0, len(availableTools))
+		for _, tool := range availableTools {
+			if tool != nil && config.ExecutionOptions.ToolAllowed(tool.Name()) {
+				allowedTools = append(allowedTools, tool)
+			}
+		}
+		result = append(result, toResponsesAPITools(allowedTools)...)
 	}
 
 	if len(result) == 0 {

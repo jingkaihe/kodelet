@@ -200,24 +200,25 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		}
 	}()
 
-	// The first snapshot may need to cold-start extensions. It is bounded by the
-	// runner lifetime rather than the short periodic-refresh timeout.
-	initialDigest, err := r.service.ProbeManifestDigest(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil
+	// A service host can provision enrollment after construction, while holding
+	// the workspace lock. Pin that credential before starting the transport.
+	if strings.TrimSpace(r.config.AuthToken) == "" {
+		credential, found, err := r.store.LoadCredential(r.server, r.workspace)
+		if err != nil {
+			return pkgerrors.Wrap(err, "failed to load enrolled runner credential")
 		}
-		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
+		r.credential = nil
+		if found {
+			r.credential = &credential
+		}
 	}
-	logger.G(ctx).WithField("manifest_digest", initialDigest).Debug("discovered initial runner manifest")
 
 	backoff := r.config.ReconnectMin
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		connected, connectionErr := r.runConnection(ctx, initialDigest)
-		err = connectionErr
+		connected, err := r.runConnection(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -247,9 +248,6 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		case <-timer.C:
 		}
 		backoff = min(backoff*2, r.config.ReconnectMax)
-		if digest, probeErr := r.probeManifestDigest(ctx); probeErr == nil {
-			initialDigest = digest
-		}
 	}
 }
 
@@ -278,9 +276,9 @@ func (r *Runner) Close() error {
 	return lockErr
 }
 
-func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
+func (r *Runner) runConnection(ctx context.Context) (bool, error) {
 	ctx = r.loggingContext(ctx)
-	logger.G(ctx).Debug("connecting runner to control plane")
+	logger.G(ctx).Debug("connecting runner to server")
 	if _, err := r.refreshStoredCredential(); err != nil {
 		return false, &permanentConnectionError{err: pkgerrors.Wrap(err, "failed to reload enrolled runner credential")}
 	}
@@ -318,7 +316,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	if conn.Subprotocol() != protocol.Subprotocol {
 		_ = conn.Close()
-		return false, &permanentConnectionError{err: pkgerrors.New("control plane did not negotiate the runner websocket subprotocol")}
+		return false, &permanentConnectionError{err: pkgerrors.New("server did not negotiate the runner websocket subprotocol")}
 	}
 
 	peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
@@ -349,9 +347,16 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			ConcurrentRuns:    true,
-			WorkspaceGitDiff:  true,
-			WorkspaceTerminal: true,
+			SessionExtensions:       true,
+			ConcurrentRuns:          true,
+			WorkspaceGitDiff:        true,
+			WorkspaceGitCommit:      true,
+			WorkspaceTerminal:       true,
+			WorkspaceDiscovery:      true,
+			WorkspaceInspection:     true,
+			WorkspaceMessageHistory: true,
+			WorkspaceCWD:            true,
+			RunCheckpoint:           true,
 		},
 		DisplayName: r.config.DisplayName,
 		Host:        r.host,
@@ -360,7 +365,6 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 			Name: filepath.Base(r.workspace),
 		},
 		KodeletVersion: version.Get().Version,
-		ManifestDigest: initialDigest,
 	}
 	if found {
 		params.RunnerID = cached.RunnerID
@@ -392,10 +396,29 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 		heartbeatInterval = 15 * time.Second
 	}
 	ctx = withRunnerRegistrationLogFields(ctx, registration)
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
+	go func() {
+		select {
+		case <-peer.TransportDone():
+			cancelConnection()
+		case <-connectionCtx.Done():
+		}
+	}()
+
+	// Cold discovery needs negotiated capabilities and may exceed the refresh timeout.
+	initialDigest, err := r.service.ProbeManifestDigest(connectionCtx)
+	if err != nil {
+		err = pkgerrors.Wrap(err, "failed to discover initial runner manifest")
+		if connectionCtx.Err() == nil && peer.Err() == nil {
+			return connected, &permanentConnectionError{err: err}
+		}
+		return connected, err
+	}
 	logger.G(ctx).WithFields(map[string]any{
 		"heartbeat_interval": heartbeatInterval,
 		"manifest_digest":    initialDigest,
-	}).Info("runner registered with control plane")
+	}).Info("runner registered with server")
 	if r.config.OnRegistered != nil {
 		r.config.OnRegistered(registration)
 	}
@@ -407,8 +430,6 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	defer heartbeatTicker.Stop()
 	defer manifestTicker.Stop()
 	lastAdvertisedDigest := initialDigest
-	connectionCtx, cancelConnection := context.WithCancel(ctx)
-	defer cancelConnection()
 	type manifestProbeResult struct {
 		digest string
 		err    error
@@ -419,7 +440,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	for {
 		select {
 		case <-ctx.Done():
-			logger.G(ctx).Debug("stopping runner control-plane connection")
+			logger.G(ctx).Debug("disconnecting runner from server")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), connectionShutdownPeriod)
 			_ = peer.Notify(shutdownCtx, protocol.MethodRunnerGoodbye, protocol.GoodbyeParams{
 				RunnerID:   registration.RunnerID,

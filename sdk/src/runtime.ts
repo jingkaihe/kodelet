@@ -25,6 +25,14 @@ interface JsonRpcResponse {
   };
 }
 
+export type ExtensionRPCMessage = JsonRpcRequest | JsonRpcResponse;
+
+export interface ExtensionRuntimeTransport {
+  send(message: ExtensionRPCMessage): Promise<void>;
+  /** Return undefined to forward the request to the runner instead. */
+  request?(method: string, params: unknown, signal: AbortSignal): Promise<unknown> | undefined;
+}
+
 interface PendingRequest {
   request?: ActiveRequest;
   resolve(value: unknown): void;
@@ -67,17 +75,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-class StdioHostRPCClient implements HostRPCClient {
+class RuntimeHostRPCClient implements HostRPCClient {
   private nextId = 0;
   private pending = new Map<number, PendingRequest>();
   private notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  private readonly controller = new AbortController();
+
+  constructor(private readonly transport: ExtensionRuntimeTransport, private readonly fail: (error: Error) => void) {}
+
+  send(message: ExtensionRPCMessage): void {
+    if (this.controller.signal.aborted) return;
+    void Promise.resolve().then(() => {
+      if (!this.controller.signal.aborted) return this.transport.send(message);
+    }).catch((error) => this.fail(asError(error)));
+  }
 
   request(method: string, params?: unknown): Promise<unknown> {
     return this.requestFor(undefined, method, params);
   }
 
   notify(method: string, params?: unknown): Promise<void> {
-    return writeMessageAsync({ jsonrpc: "2.0", method, params });
+    this.controller.signal.throwIfAborted();
+    return this.transport.send({ jsonrpc: "2.0", method, params }).catch((error) => {
+      this.fail(asError(error));
+      throw error;
+    });
   }
 
   onNotification(handler: (method: string, params: unknown) => void): () => void {
@@ -92,14 +114,37 @@ class StdioHostRPCClient implements HostRPCClient {
   }
 
   requestFor(request: ActiveRequest | undefined, method: string, params?: unknown): Promise<unknown> {
+    this.controller.signal.throwIfAborted();
     if (request && !request.active) {
       throw new Error("Extension request is no longer active");
     }
     const id = ++this.nextId;
-    writeMessage({ jsonrpc: "2.0", id, parentId: request?.id, method, params });
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, request });
+      void Promise.resolve().then(async () => {
+        if (!this.pending.has(id)) return;
+        const local = this.transport.request?.(method, params, request?.controller.signal ?? this.controller.signal);
+        if (local !== undefined) {
+          this.handleResponse({ jsonrpc: "2.0", id, result: await local });
+        } else {
+          try {
+            await this.transport.send({ jsonrpc: "2.0", id, parentId: request?.id, method, params });
+          } catch (error) {
+            this.fail(asError(error));
+          }
+        }
+      }).catch((error) => {
+        this.pending.get(id)?.reject(asError(error));
+        this.pending.delete(id);
+      });
     });
+  }
+
+  close(error: Error): void {
+    this.controller.abort(error);
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    this.notificationHandlers.clear();
   }
 
   finishRequest(request: ActiveRequest, error = new Error("Extension request completed")): void {
@@ -136,41 +181,57 @@ export async function runExtension(entrypoint: ExtensionEntrypoint | { default: 
   runStdioServer(host);
 }
 
+/** The same extension dispatcher used by stdio and session-scoped ACP relays. */
+export class ExtensionRuntime {
+  private readonly hostClient: RuntimeHostRPCClient;
+  private readonly activeRequests = new Map<number | string, ActiveRequest>();
+  private readonly handleSessionEnd: SessionEndHandler;
+  private closed = false;
+  private closePromise?: Promise<void>;
+
+  constructor(private readonly host: ExtensionHost, transport: ExtensionRuntimeTransport) {
+    this.hostClient = new RuntimeHostRPCClient(transport, (error) => { void this.close(error); });
+    this.handleSessionEnd = createSessionEndHandler(host);
+  }
+
+  receive(message: ExtensionRPCMessage): void {
+    if (this.closed) throw new Error("Extension runtime is closed");
+    handleMessage(this.host, this.hostClient, this.activeRequests, this.handleSessionEnd, message);
+  }
+
+  close(error = new Error("Extension host disconnected")): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    this.hostClient.close(error);
+    for (const request of this.activeRequests.values()) {
+      request.cancel(error);
+      this.hostClient.finishRequest(request, error);
+    }
+    this.activeRequests.clear();
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error("Extension shutdown timed out after host disconnect"));
+        resolve();
+      }, hostDisconnectShutdownTimeoutMs);
+    });
+    const cleanup = runWithHostRPCClient(this.hostClient, () => this.handleSessionEnd(
+      { id: "host-disconnected", event: "session.end", context: {} }, controller.signal,
+    )).then(() => undefined, () => undefined);
+    this.closePromise = Promise.race([cleanup, timeout]).finally(() => {
+      clearTimeout(timer);
+      controller.abort(error);
+    });
+    return this.closePromise;
+  }
+}
+
 function runStdioServer(host: ExtensionHost): void {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  const hostClient = new StdioHostRPCClient();
-  const activeRequests = new Map<number | string, ActiveRequest>();
-  const handleSessionEnd = createSessionEndHandler(host);
-  let shuttingDown = false;
-
+  const runtime = new ExtensionRuntime(host, { send: writeMessageAsync });
   const shutdownAfterHostDisconnect = (): void => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-
-    const disconnectError = new Error("Extension host disconnected");
-    for (const request of activeRequests.values()) {
-      request.cancel(disconnectError);
-      hostClient.finishRequest(request, disconnectError);
-    }
-    activeRequests.clear();
-
-    const controller = new AbortController();
-    const forceExit = setTimeout(() => {
-      controller.abort(new Error("Extension shutdown timed out after host disconnect"));
-      nodeProcess.exit(0);
-    }, hostDisconnectShutdownTimeoutMs);
-
-    void handleSessionEnd(
-      { id: "host-disconnected", event: "session.end", context: {} },
-      controller.signal,
-    )
-      .catch(() => undefined)
-      .finally(() => {
-        clearTimeout(forceExit);
-        nodeProcess.exit(0);
-      });
+    void runtime.close().finally(() => nodeProcess.exit(0));
   };
 
   nodeProcess.stdin.on("data", (chunk: Buffer) => {
@@ -181,7 +242,14 @@ function runStdioServer(host: ExtensionHost): void {
         break;
       }
       buffer = frame.remaining;
-      handleMessage(host, hostClient, activeRequests, handleSessionEnd, frame.payload);
+      let message: ExtensionRPCMessage;
+      try {
+        message = JSON.parse(frame.payload.toString("utf8")) as ExtensionRPCMessage;
+      } catch (error) {
+        void writeMessageAsync({ jsonrpc: "2.0", id: null, error: { code: -32700, message: errorMessage(error) } });
+        continue;
+      }
+      runtime.receive(message);
     }
   });
   nodeProcess.stdin.once("end", shutdownAfterHostDisconnect);
@@ -200,20 +268,15 @@ function createSessionEndHandler(host: ExtensionHost): SessionEndHandler {
 
 function handleMessage(
   host: ExtensionHost,
-  hostClient: StdioHostRPCClient,
+  hostClient: RuntimeHostRPCClient,
   activeRequests: Map<number | string, ActiveRequest>,
   handleSessionEnd: SessionEndHandler,
-  payload: Buffer,
+  message: ExtensionRPCMessage,
 ): void {
-  let request: JsonRpcRequest;
-  try {
-    request = JSON.parse(payload.toString("utf8")) as JsonRpcRequest;
-  } catch (error) {
-    writeResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: errorMessage(error) } });
-    return;
-  }
-
-  if (!request.method && hostClient.handleResponse(request as JsonRpcResponse)) {
+  const request = message as JsonRpcRequest;
+  if (!request.method) {
+    // Duplex IDs are independent: even unmatched responses are not requests.
+    hostClient.handleResponse(request as JsonRpcResponse);
     return;
   }
 
@@ -240,7 +303,7 @@ function handleMessage(
 
 function startRequest(
   host: ExtensionHost,
-  hostClient: StdioHostRPCClient,
+  hostClient: RuntimeHostRPCClient,
   activeRequests: Map<number | string, ActiveRequest>,
   handleSessionEnd: SessionEndHandler,
   request: JsonRpcRequest,
@@ -271,14 +334,14 @@ function startRequest(
       const shouldRespond = active.active;
       hostClient.finishRequest(active);
       if (shouldRespond) {
-        writeResponse({ jsonrpc: "2.0", id: requestId, result });
+        hostClient.send({ jsonrpc: "2.0", id: requestId, result: result ?? null });
       }
     })
     .catch((error) => {
       const shouldRespond = active.active;
       hostClient.finishRequest(active);
       if (shouldRespond) {
-        writeResponse({ jsonrpc: "2.0", id: requestId, error: { code: -32000, message: errorMessage(error) } });
+        hostClient.send({ jsonrpc: "2.0", id: requestId, error: { code: error instanceof HostRPCError ? error.code : -32000, message: errorMessage(error) } });
       }
     })
     .finally(() => {
@@ -311,7 +374,7 @@ async function dispatch(
       return await host.handleEvent(request.params as never, signal);
     }
     default:
-      throw new Error(`Unknown JSON-RPC method: ${request.method}`);
+      throw new HostRPCError({ code: -32601, message: `Unknown JSON-RPC method: ${request.method}` });
   }
 }
 
@@ -350,15 +413,6 @@ function parseContentLength(header: string): number {
   throw new Error("Missing Content-Length header");
 }
 
-function writeResponse(response: JsonRpcResponse): void {
-  writeMessage(response);
-}
-
-function writeMessage(message: JsonRpcRequest | JsonRpcResponse): void {
-  const payload = JSON.stringify(message);
-  nodeProcess.stdout.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
-}
-
 function writeMessageAsync(message: JsonRpcRequest | JsonRpcResponse): Promise<void> {
   const payload = JSON.stringify(message);
   const frame = `Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`;
@@ -375,4 +429,8 @@ function writeMessageAsync(message: JsonRpcRequest | JsonRpcResponse): Promise<v
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

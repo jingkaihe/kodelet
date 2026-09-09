@@ -222,6 +222,47 @@ func TestResolveConfigForExistingConversationUsesSnapshotAndLocksReasoning(t *te
 	config, err = ResolveConfigForExistingConversation(record)
 	require.NoError(t, err)
 	assert.Equal(t, "persisted-model", config.Model)
+	assert.Equal(t, "work", config.Profile, "removed profiles retain their immutable snapshot identity")
+	assert.False(t, config.ExtensionProfile)
+	assert.Equal(t, []string{"file_read"}, config.AllowedTools, "removed profiles inherit current base policy")
+}
+
+func TestResolveConfigForLegacyConversationPreservesSelectedProfile(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("provider", "openai")
+	viper.Set("model", "base-model")
+	viper.Set("tool_mode", "full")
+	viper.Set("profile", "deep")
+	viper.Set("profiles", map[string]any{
+		"deep": map[string]any{"model": "active-model", "tool_mode": "patch"},
+	})
+	for _, test := range []struct {
+		name     string
+		metadata map[string]any
+		profile  string
+		mode     llmtypes.ToolMode
+	}{
+		{name: "nil metadata", profile: "deep", mode: llmtypes.ToolModePatch},
+		{name: "missing profile", metadata: map[string]any{}, profile: "deep", mode: llmtypes.ToolModePatch},
+		{name: "stored empty", metadata: map[string]any{"profile": ""}, profile: "default", mode: llmtypes.ToolModeFull},
+		{name: "stored default", metadata: map[string]any{"profile": " DEFAULT "}, profile: "default", mode: llmtypes.ToolModeFull},
+		{name: "stored named", metadata: map[string]any{"profile": "deep"}, profile: "deep", mode: llmtypes.ToolModePatch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			record := &conversations.GetConversationResponse{ID: "legacy", Metadata: test.metadata}
+			before, err := json.Marshal(record)
+			require.NoError(t, err)
+			config, err := ResolveConfigForExistingConversation(record)
+			require.NoError(t, err)
+			assert.Equal(t, test.profile, config.Profile)
+			assert.Equal(t, test.mode, config.ToolMode)
+			after, err := json.Marshal(record)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "resolution must not rewrite legacy metadata")
+		})
+	}
 }
 
 func TestResolveConfigForExistingLegacyConversationRejectsReasoningOverride(t *testing.T) {

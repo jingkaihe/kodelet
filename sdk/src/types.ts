@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { ExtensionProfileOptions } from "./execution.js";
 
 export type Awaitable<T> = T | Promise<T>;
 export type AnyZodSchema = z.ZodTypeAny;
@@ -64,6 +65,7 @@ export interface CommandInvocation {
 
 export interface BaseCallContext {
   sessionId?: string;
+  runnerId?: string;
   conversationId?: string;
   /** Opaque host scope used internally to route persistent UI. */
   uiScopeId?: string;
@@ -266,6 +268,8 @@ export interface UISurface {
   close(): Promise<void>;
   onInput(handler: (event: UISurfaceInputEvent) => void): () => void;
   onResize(handler: (event: UISurfaceResizeEvent) => void): () => void;
+  /** Called once on close, or immediately if already closed. Returns an unsubscribe function. */
+  onClose(handler: () => void): () => void;
 }
 
 export type UIInputStatus = "submitted" | "dismissed" | "timeout" | "unavailable";
@@ -484,8 +488,17 @@ export type EventHandler<Name extends EventName = EventName> = (
   ctx: EventContext,
 ) => Awaitable<EventResult | void>;
 
+/** A self-contained profile using ordinary configuration keys and built-in defaults. */
+export type ExtensionProfileRegistration = ExtensionProfileOptions & {
+  name: string;
+  /** Hide from ordinary profile pickers; this is not access control. Defaults to false. */
+  hidden?: boolean;
+};
+
 export interface ExtensionAPI {
   setMetadata(metadata: ExtensionMetadata): void;
+  /** Declare a self-contained profile with native snake_case configuration and return its name unchanged. */
+  registerProfile(registration: ExtensionProfileRegistration): string;
   registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void;
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(
     registration: CommandRegistration<Schema>,
@@ -502,6 +515,7 @@ export interface InitializeParams {
   kodelet?: Record<string, unknown>;
   extension: {
     id: string;
+    runnerId?: string;
     config?: Record<string, unknown>;
     cwd?: string;
     dataDir?: string;
@@ -512,6 +526,11 @@ export interface InitializeParams {
 export interface InitializeResult {
   name: string;
   version?: string;
+  profiles?: Array<{
+    name: string;
+    options: ExtensionProfileOptions;
+    hidden: boolean;
+  }>;
   tools: Array<{
     name: string;
     description: string;

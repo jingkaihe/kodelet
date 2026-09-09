@@ -1,12 +1,8 @@
 # Kodelet configuration
 
-Kodelet uses layered configuration:
+Configure provider/model settings on the daemon, workspace/tool settings on the runner, and endpoint/display settings on the client. Trusted process settings load defaults, `~/.kodelet/config.yaml`, then an explicit `KODELET_CONFIG_FILE`; supported environment variables and flags override them. `KODELET_CONFIG_FILE_MODE=isolated` omits the global file. Client model configuration is not uploaded.
 
-1. Environment variables.
-2. Global config: `~/.kodelet/config.yaml`.
-3. Repository config: `./kodelet-config.yaml`.
-
-Repository config overrides global config. See `config.sample.yaml` in the repo for the complete schema.
+Runners independently resolve defaults → execution-CWD `kodelet-config.yaml` → trusted environment profile → permitted request restrictions. Repository settings cannot configure daemon credentials/models/endpoints, introduce trusted environment profiles, or widen host permissions. Isolated process configuration does not bypass repository policy. Workspace edits affect later runs; owner defaults require restart. See `config.sample.yaml` for the complete schema.
 
 ## Control-plane server
 
@@ -16,13 +12,13 @@ Configure a default `kodelet serve` control plane once for terminal chat, ACP, a
 server: https://kodelet.example
 ```
 
-With this setting, `kodelet chat` and `kodelet acp` enter server-backed mode without an explicit flag, and `kodelet runner` subcommands use the configured URL instead of `http://localhost:8080`. Repository-level `kodelet-config.yaml` is deliberately ignored for `server` so a repository cannot redirect credentials or workspace execution. `kodelet run` remains local. The precedence is `--server`, then `KODELET_SERVER`, then user-level configuration. Without a selected server, chat and ACP remain local while runner commands use `http://localhost:8080`.
+All ordinary commands use the daemon, including `run`, chat, and ACP. Endpoint precedence is `--server`, then `KODELET_SERVER`, trusted client configuration, then `http://localhost:8080`. An unavailable daemon fails explicitly without local execution fallback. Repository settings cannot redirect clients.
 
 The listener and authentication policy of the control plane can be configured either with explicit `kodelet serve` flags or with a top-level `serve` block in `~/.kodelet/config.yaml` or an explicitly selected `KODELET_CONFIG_FILE`. Repository-level `kodelet-config.yaml` cannot set `serve`, preventing a checked-out project from changing listener addresses, tokens, OIDC issuer/client settings, role allowlists, or runner enrollment policy. Explicit CLI flags override the corresponding trusted YAML values; serve and OIDC policy is not read from `KODELET_SERVE_*` environment variables. Web modes are `token`, `oidc`, and `none`; runner modes are `token`, `enrollment`, and `none`.
 
 ```yaml
 serve:
-  disable_control_plane_workspace: true
+  embedded_runner: false
   web_auth_mode: oidc
   runner_auth_mode: enrollment
   oidc:
@@ -35,13 +31,13 @@ serve:
     runner_admin_emails: [runners@example.com]
 ```
 
-Set `serve.disable_control_plane_workspace: true`, or pass `kodelet serve --disable-control-plane-workspace`, when the control plane must not expose a local workspace environment. The mode requires workspace runners for executable conversations and disables local chat execution, the server-host terminal, Git diff, CWD suggestions, and control-plane workspace command and extension discovery. It cannot be combined with `serve.cwd` or `--cwd`; provider requests, conversation persistence, and runner coordination remain on the control plane.
+`serve` enables an embedded runner by default; set `serve.embedded_runner: false` or pass `--embedded-runner=false` for external runners only. Workspace execution, discovery, Git and terminals always use runners. Use `serve.runner_workspace` instead of the removed `serve.cwd`; provider requests, history and runner coordination remain daemon-owned.
 
 The OIDC client secret is read from a regular, non-empty, user-only referenced file, not accepted directly as a YAML value or secret-valued CLI flag. On Unix, trusted configuration containing `serve.auth_token` or `serve.runner_auth_token` must likewise be inaccessible to group and other users, such as mode `0600`; configured token values are not echoed at startup. An unreadable or malformed explicitly selected configuration file and an invalid `KODELET_CONFIG_FILE_MODE` fail closed.
 
 In OIDC mode, browser users authenticate through server-side sessions. Non-browser clients run `kodelet auth login --server https://kodelet.example`, approve the request in an OIDC-authenticated browser, and store the resulting Kodelet-issued credential in user-only state keyed by canonical server URL. `kodelet chat --server`, `kodelet acp --server`, and runner-administration commands discover it automatically. Explicit `--auth-token` values override `KODELET_AUTH_TOKEN`, which overrides stored login state; static tokens remain administrative migration or automation credentials, and pure OIDC mode does not generate one automatically.
 
-Runner enrollment state is also outside project configuration. Run `kodelet runner enroll --server https://kodelet.example` from the workspace; Kodelet stores the pending enrollment, opaque access token, private key, credential identifier, and stable registration in user-only runner state. `kodelet runner start` and server-backed ACP load that DPoP credential automatically when no explicit runner token is supplied. Runner tokens apply only when the server uses runner token mode; remove explicit token overrides when using enrollment mode.
+Runner enrollment state is also outside project configuration. Run `kodelet runner enroll --server https://kodelet.example` from the workspace; Kodelet stores the pending enrollment, opaque access token, private key, credential identifier, and stable registration in user-only runner state. `kodelet runner start` loads that DPoP credential automatically when no explicit runner token is supplied. ACP uses client authentication, never runner credentials. Runner tokens apply only in token mode; remove token overrides when using enrollment mode.
 
 ## Provider setup
 
@@ -123,6 +119,8 @@ profiles:
 Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
+
+Profile definitions support `hidden: true` to omit them from normal pickers without preventing explicit selection. Extensions can [register self-contained profiles](sdk.md#registered-model-profiles) using ordinary configuration keys and built-in defaults, without editing daemon configuration.
 
 ## Skills config
 

@@ -39,8 +39,6 @@ weak_model: gpt-5.6-luna
 weak_model_max_tokens: 8192
 profiles:
     openai:
-        enable_fs_search_tools: false
-        tool_mode: patch
         max_tokens: 128000
         model: gpt-6-astra
         openai:
@@ -55,7 +53,6 @@ profiles:
             - max
         weak_model: gpt-5.6-luna
     anthropic:
-        enable_fs_search_tools: true
         max_tokens: 64000
         model: opus-5
         provider: anthropic
@@ -66,7 +63,6 @@ profiles:
             - high
             - xhigh
             - max
-        tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192
 `
@@ -75,7 +71,7 @@ profiles:
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Set up Kodelet configuration",
-	Long:  `Set up Kodelet configuration with sensible defaults.`,
+	Long:  `Create a Kodelet configuration file with sensible defaults on this machine. Restart 'kodelet serve' to apply changes to a running server.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		override, _ := cmd.Flags().GetBool("override")
@@ -173,7 +169,7 @@ var setupCmd = &cobra.Command{
 			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
 		}
 		presenter.Info("You can modify these settings at any time by editing the config file")
-		presenter.Info("Use different profiles with: --profile openai|anthropic")
+		presenter.Info("Restart 'kodelet serve' after changing its configuration")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
 
 		presenter.Separator()
@@ -190,11 +186,9 @@ var setupCmd = &cobra.Command{
 
 		presenter.Separator()
 		presenter.Section("Getting Started")
-		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.6-sol")
-		presenter.Info("  kodelet run --profile anthropic \"query\"  # Use Anthropic profile (Claude Opus)")
-		presenter.Info("  kodelet serve                         # Start web UI server")
-		presenter.Info("  toad acp 'kodelet acp'                # Start interactive chat via ACP")
-		presenter.Info("  kodelet --help                        # Show all available commands")
+		presenter.Info("  kodelet serve                      # Start the server")
+		presenter.Info("  kodelet serve --profile anthropic  # Use the Anthropic profile")
+		presenter.Info("In another terminal, set KODELET_AUTH_TOKEN to the API token printed by 'kodelet serve', then run 'kodelet chat' or 'kodelet run'")
 
 		logger.G(ctx).Info("Kodelet setup completed successfully")
 	},

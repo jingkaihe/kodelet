@@ -29,6 +29,17 @@ func skipIfNoOpenAIAPIKey(t *testing.T) {
 	}
 }
 
+// Live API tests require explicit opt-in, not just ambient credentials.
+func requireAnthropicIntegration(t *testing.T) {
+	t.Helper()
+	if os.Getenv("KODELET_ANTHROPIC_INTEGRATION_TESTS") != "1" {
+		t.Skip("set KODELET_ANTHROPIC_INTEGRATION_TESTS=1 to run live Anthropic API tests")
+	}
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY environment variable not set")
+	}
+}
+
 func TestNewThread(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -146,11 +157,7 @@ func TestExtractConversationEntriesAppliesMessageDisplay(t *testing.T) {
 
 // Integration test for SendMessageAndGetText with real Anthropic client
 func TestSendMessageAndGetText(t *testing.T) {
-	// Skip if no API key is available
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		t.Skip("ANTHROPIC_API_KEY environment variable not set")
-	}
+	requireAnthropicIntegration(t)
 
 	ctx := context.Background()
 
@@ -206,11 +213,7 @@ func (m *MockMessageHandler) HandleDone() {
 
 // TestSendMessageRealClient tests the SendMessage method with the real Anthropic client
 func TestSendMessageRealClient(t *testing.T) {
-	// Skip if no API key is available
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		t.Skip("ANTHROPIC_API_KEY environment variable not set")
-	}
+	requireAnthropicIntegration(t)
 
 	ctx := context.Background()
 	mockHandler := new(MockMessageHandler)
@@ -338,11 +341,7 @@ func TestExtractConversationEntriesPreservesOpenAIRawItem(t *testing.T) {
 
 // TestSendMessageWithToolUse tests the tool-using capability of the Thread with real API
 func TestSendMessageWithToolUse(t *testing.T) {
-	// Skip if no API key is available
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		t.Skip("ANTHROPIC_API_KEY environment variable not set")
-	}
+	requireAnthropicIntegration(t)
 
 	// Add timeout for API calls
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

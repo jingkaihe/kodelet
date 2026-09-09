@@ -826,7 +826,7 @@ func TestRemoteConversationHistoryLoadsFromControlPlaneSource(t *testing.T) {
 		},
 	}}
 
-	msg, ok := loadConversationHistoryFromSource(t.Context(), "conversation-remote", "conversation-remote", "", runner)().(initialHistoryMsg)
+	msg, ok := loadConversationHistoryFromSource(t.Context(), "conversation-remote", "conversation-remote", runner)().(initialHistoryMsg)
 	require.True(t, ok)
 	require.NoError(t, msg.err)
 	assert.True(t, msg.loaded)

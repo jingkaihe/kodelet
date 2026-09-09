@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,8 +46,8 @@ type controlPlaneAuthStatusConfig struct {
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Manage control-plane authentication",
-	Long:  "Log in to, log out from, and inspect authentication for a Kodelet control plane.",
+	Short: "Manage Kodelet sign-in",
+	Long:  "Log in to, log out from, and inspect authentication for a Kodelet server.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()
@@ -55,7 +56,7 @@ var authCmd = &cobra.Command{
 
 var authLoginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Log in to a control plane",
+	Short: "Log in to a server",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runControlPlaneAuthLogin(cmd.Context(), controlPlaneAuthLoginConfigFromFlags(cmd), cmd.OutOrStdout())
@@ -64,7 +65,7 @@ var authLoginCmd = &cobra.Command{
 
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Log out from a control plane",
+	Short: "Log out from a server",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runControlPlaneAuthLogout(cmd.Context(), controlPlaneAuthLogoutConfigFromFlags(cmd), cmd.OutOrStdout())
@@ -73,7 +74,7 @@ var authLogoutCmd = &cobra.Command{
 
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show control-plane authentication status",
+	Short: "Show sign-in status",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runControlPlaneAuthStatus(cmd.Context(), controlPlaneAuthStatusConfigFromFlags(cmd), cmd.OutOrStdout())
@@ -82,7 +83,7 @@ var authStatusCmd = &cobra.Command{
 
 func init() {
 	for _, command := range []*cobra.Command{authLoginCmd, authLogoutCmd, authStatusCmd} {
-		command.Flags().String("server", defaultRunnerServer, "Control-plane URL")
+		command.Flags().String("server", defaultRunnerServer, "Server URL")
 	}
 	authLoginCmd.Flags().Bool("no-browser", false, "Do not open the browser automatically")
 	authCmd.AddCommand(authLoginCmd, authLogoutCmd, authStatusCmd)
@@ -114,14 +115,14 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 
 	credential, found, err := store.LoadCredential(server)
 	if err != nil {
-		return errors.Wrap(err, "failed to load local control-plane credential")
+		return errors.Wrap(err, "failed to load saved sign-in credentials")
 	}
 	if found {
 		if !credential.ExpiresAt.After(time.Now().UTC()) {
 			if _, err := store.DeleteCredential(server, credential.CredentialID); err != nil {
-				return errors.Wrap(err, "failed to delete expired local control-plane credential")
+				return errors.Wrap(err, "failed to delete expired sign-in credentials")
 			}
-			fmt.Fprintln(output, "Stored control-plane credential has expired; starting a new login")
+			fmt.Fprintln(output, "Your saved sign-in has expired; signing in again")
 		} else {
 			principal, validateErr := userauth.ValidateCredential(ctx, server, credential.BearerToken, config.HTTPClient)
 			switch {
@@ -132,11 +133,11 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 				return nil
 			case isControlPlaneAuthUnauthorized(validateErr):
 				if _, err := store.DeleteCredential(server, credential.CredentialID); err != nil {
-					return errors.Wrap(err, "failed to delete invalid local control-plane credential")
+					return errors.Wrap(err, "failed to delete invalid sign-in credentials")
 				}
-				fmt.Fprintln(output, "Stored control-plane credential is invalid or revoked; starting a new login")
+				fmt.Fprintln(output, "Your saved sign-in is invalid or has been revoked; signing in again")
 			default:
-				return errors.Wrap(validateErr, "failed to validate existing control-plane credential")
+				return errors.Wrap(validateErr, "failed to check your saved sign-in")
 			}
 		}
 	}
@@ -151,9 +152,9 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 		HTTPClient: config.HTTPClient,
 		OnPending: func(info userauth.LoginInfo) {
 			if info.Resumed {
-				fmt.Fprintln(output, "Resuming pending control-plane login")
+				fmt.Fprintln(output, "Resuming sign-in")
 			} else {
-				fmt.Fprintln(output, "Control-plane login started")
+				fmt.Fprintln(output, "Sign-in started")
 			}
 			fmt.Fprintf(output, "Login code: %s\n", info.UserCode)
 			fmt.Fprintf(output, "Enter this code at: %s\n", info.VerificationURL)
@@ -170,7 +171,7 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 		return err
 	}
 
-	fmt.Fprintln(output, "Control-plane login approved")
+	fmt.Fprintln(output, "Sign-in approved")
 	fmt.Fprintf(output, "Server: %s\n", server)
 	writeControlPlaneCredential(output, credential.CredentialID, credential.Principal, credential.ExpiresAt)
 	fmt.Fprintf(output, "Credentials directory: %s\n", store.Root())
@@ -186,7 +187,7 @@ func runControlPlaneAuthLogout(ctx context.Context, config controlPlaneAuthLogou
 
 	credential, found, err := store.LoadCredential(server)
 	if err != nil {
-		return errors.Wrap(err, "failed to load local control-plane credential")
+		return errors.Wrap(err, "failed to load saved sign-in credentials")
 	}
 	if !found {
 		fmt.Fprintf(output, "Already logged out from %s\n", server)
@@ -195,10 +196,10 @@ func runControlPlaneAuthLogout(ctx context.Context, config controlPlaneAuthLogou
 
 	revokeErr := userauth.RevokeCredential(ctx, server, credential.BearerToken, config.HTTPClient)
 	if revokeErr != nil && !isControlPlaneAuthUnauthorized(revokeErr) {
-		return errors.Wrap(revokeErr, "failed to revoke control-plane credential")
+		return errors.Wrap(revokeErr, "failed to revoke your sign-in credentials")
 	}
 	if _, err := store.DeleteCredential(server, credential.CredentialID); err != nil {
-		return errors.Wrap(err, "failed to delete local control-plane credential")
+		return errors.Wrap(err, "failed to delete saved sign-in credentials")
 	}
 	fmt.Fprintf(output, "Logged out from %s\n", server)
 	return nil
@@ -213,11 +214,11 @@ func runControlPlaneAuthStatus(ctx context.Context, config controlPlaneAuthStatu
 
 	credential, credentialFound, err := store.LoadCredential(server)
 	if err != nil {
-		return errors.Wrap(err, "failed to load local control-plane credential")
+		return errors.Wrap(err, "failed to load saved sign-in credentials")
 	}
 	pending, pendingFound, err := store.LoadPendingLogin(server)
 	if err != nil {
-		return errors.Wrap(err, "failed to load pending control-plane login")
+		return errors.Wrap(err, "failed to load the pending sign-in")
 	}
 
 	fmt.Fprintf(output, "Server: %s\n", server)
@@ -239,7 +240,7 @@ func runControlPlaneAuthStatus(ctx context.Context, config controlPlaneAuthStatu
 				fmt.Fprintln(output, "Credential status: invalid or revoked")
 				writeControlPlanePrincipal(output, credential.Principal)
 			default:
-				return errors.Wrap(validateErr, "failed to validate control-plane credential")
+				return errors.Wrap(validateErr, "failed to check your sign-in")
 			}
 		}
 	}
@@ -269,6 +270,19 @@ func resolveControlPlaneAuthToken(cmd *cobra.Command, server string) (token stri
 	if environment := strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)); environment != "" {
 		return environment, controlPlaneAuthTokenSourceEnvironment, nil
 	}
+	if cmd != nil {
+		if _, configured := serverFlagOrConfig(cmd); !configured {
+			directory, pathErr := localServerDirectory()
+			if pathErr != nil {
+				return "", "local-server", pathErr
+			}
+			connection, readErr := readLocalServerConnection(directory)
+			if readErr == nil && connection.URL == server {
+				value, tokenErr := os.ReadFile(filepath.Join(directory, "client-token"))
+				return strings.TrimSpace(string(value)), "local-server", tokenErr
+			}
+		}
+	}
 
 	canonicalServer, store, err := prepareControlPlaneAuthState(server, nil)
 	if err != nil {
@@ -276,13 +290,13 @@ func resolveControlPlaneAuthToken(cmd *cobra.Command, server string) (token stri
 	}
 	credential, found, err := store.LoadCredential(canonicalServer)
 	if err != nil {
-		return "", controlPlaneAuthTokenSourceStored, errors.Wrap(err, "failed to load local control-plane credential")
+		return "", controlPlaneAuthTokenSourceStored, errors.Wrap(err, "failed to load saved sign-in credentials")
 	}
 	if !found {
 		return "", controlPlaneAuthTokenSourceNone, nil
 	}
 	if !credential.ExpiresAt.After(time.Now().UTC()) {
-		return "", controlPlaneAuthTokenSourceStored, errors.Errorf("stored control-plane credential for %s expired at %s; run `kodelet auth login --server %s`", canonicalServer, formatControlPlaneAuthTime(credential.ExpiresAt), canonicalServer)
+		return "", controlPlaneAuthTokenSourceStored, errors.Errorf("your sign-in for %s expired at %s; run `kodelet auth login --server %s`", canonicalServer, formatControlPlaneAuthTime(credential.ExpiresAt), canonicalServer)
 	}
 	return credential.BearerToken, controlPlaneAuthTokenSourceStored, nil
 }
@@ -290,12 +304,12 @@ func resolveControlPlaneAuthToken(cmd *cobra.Command, server string) (token stri
 func prepareControlPlaneAuthState(server string, store *userauth.Store) (string, *userauth.Store, error) {
 	canonicalServer, err := controlplaneurl.NormalizeBase(server)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "invalid control-plane URL")
+		return "", nil, errors.Wrap(err, "invalid server URL")
 	}
 	if store == nil {
 		store, err = userauth.NewStore()
 		if err != nil {
-			return "", nil, errors.Wrap(err, "failed to initialize local control-plane authentication state")
+			return "", nil, errors.Wrap(err, "failed to open saved sign-in settings")
 		}
 	}
 	return canonicalServer, store, nil

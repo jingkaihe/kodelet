@@ -32,8 +32,8 @@ const (
 
 var profileCmd = &cobra.Command{
 	Use:   "profile",
-	Short: "Manage configuration profiles",
-	Long:  "Manage named configuration profiles for different model setups",
+	Short: "Manage model profile files on this host",
+	Long:  "View or edit model profiles stored on this machine. Run this command on the server host and restart 'kodelet serve' to apply changes.",
 }
 
 var profileCurrentCmd = &cobra.Command{
@@ -181,8 +181,9 @@ var profileShowCmd = &cobra.Command{
 
 var profileUseCmd = &cobra.Command{
 	Use:   "use [profile-name]",
-	Short: "Switch to a different profile",
-	Long: `Switch to a different profile. 
+	Short: "Set this host's configured default profile",
+	Long: `Set a profile in a host-local configuration file. Use -g for server defaults,
+then restart the server. Repository files do not configure server model profiles.
 Without -g flag: updates ./kodelet-config.yaml
 With -g flag: updates ~/.kodelet/config.yaml
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,7 @@ type recordingRuntimeProvider struct {
 	activeVariant     string
 	activeConfig      extensions.Config
 	activeCallContext extensions.ExtensionCallContext
+	capabilities      extensions.RuntimeCapabilities
 }
 
 type leaseRecordingRuntimeProvider struct {
@@ -115,13 +117,15 @@ func (p *leaseRecordingRuntimeProvider) RuntimeWithConfigAndCallContextForLease(
 	return p.runtime, nil
 }
 
-func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(context.Context, string, string, extensions.Config) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(ctx context.Context, _ string, _ string, _ extensions.Config) (*extensions.Runtime, error) {
 	p.discoveryCalls++
+	p.capabilities = extensions.RuntimeCapabilitiesFromContext(ctx)
 	return p.runtime, nil
 }
 
-func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(_ context.Context, _ string, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(ctx context.Context, _ string, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	p.activeCalls++
+	p.capabilities = extensions.RuntimeCapabilitiesFromContext(ctx)
 	p.activeVariant = variant
 	p.activeConfig = config
 	p.activeCallContext = callContext
@@ -313,6 +317,72 @@ func newRegisteredTestService(t *testing.T, workspace string, options ServiceOpt
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 	return service
+}
+
+func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	readTools := []string{"file_read", "grep_tool", "glob_tool"}
+	for _, tt := range []struct {
+		name    string
+		legacy  []string
+		policy  *llmtypes.ExecutionOptions
+		want    []string
+		wantErr string
+	}{
+		{"unrestricted defaults", nil, nil, readTools, ""},
+		{"runner allowlist", []string{"grep_tool", "glob_tool"}, nil, []string{"grep_tool", "glob_tool"}, ""},
+		{"runner deny all", []string{"none"}, nil, nil, ""},
+		{"typed empty", nil, &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}, nil, ""},
+		{"no tools", nil, &llmtypes.ExecutionOptions{NoTools: new(true)}, nil, ""},
+		{"explicit disabled search", nil, &llmtypes.ExecutionOptions{EnableFSSearchTools: new(false)}, nil, "runner policy"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			filePath := filepath.Join(workspace, "selected.txt")
+			require.NoError(t, os.WriteFile(filePath, []byte("runner-selected-content\n"), 0o600))
+			service := newRegisteredTestService(t, workspace, ServiceOptions{
+				ConfigLoader: func(string) (llmtypes.Config, error) {
+					return llmtypes.Config{ToolMode: llmtypes.ToolModePatch, EnableFSSearchTools: false, AllowedTools: tt.legacy, ExecutionOptions: tt.policy}, nil
+				},
+			})
+			params := protocol.RunOpenParams{
+				RunID: "search-run", ConversationID: "search-conversation",
+				Agent:   protocol.AgentDescriptor{Provider: "openai", Model: "gpt-4o"},
+				Options: &llmtypes.ExecutionOptions{AllowedTools: &readTools, EnableFSSearchTools: new(true), NoExtensions: new(true), NoSkills: new(true)},
+			}
+			value, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, params))
+			if tt.wantErr != "" {
+				require.NotNil(t, rpcErr)
+				assert.Contains(t, rpcErr.Message, tt.wantErr)
+				return
+			}
+			require.Nil(t, rpcErr)
+			manifest := value.(runnerpayload.Manifest)
+			assert.ElementsMatch(t, tt.want, manifestToolNames(manifest))
+			assert.Equal(t, llmtypes.ToolModePatch, manifest.Config.ToolMode)
+			assert.True(t, manifest.Config.EnableFSSearchTools)
+			assert.True(t, *manifest.Config.Options.NoExtensions)
+			assert.True(t, *manifest.Config.Options.NoSkills)
+			result := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
+				RunID: "search-run", ToolCallID: "read", Name: "file_read", Input: mustJSON(t, map[string]any{"file_path": filePath, "offset": 1, "line_limit": 10}),
+			})
+			if slices.Contains(tt.want, "file_read") {
+				assert.True(t, result.Result.Structured.Success)
+				assert.Contains(t, result.Result.AssistantFacing, "runner-selected-content")
+			} else {
+				assert.False(t, result.Result.Structured.Success)
+				assert.Contains(t, result.Result.Error, "not allowed")
+			}
+			blocked := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
+				RunID: "search-run", ToolCallID: "write", Name: "file_write", Input: mustJSON(t, map[string]any{"file_path": filePath, "content": "must not write"}),
+			})
+			assert.False(t, blocked.Result.Structured.Success)
+			assert.Contains(t, blocked.Result.Error, "not allowed")
+			content, err := os.ReadFile(filePath)
+			require.NoError(t, err)
+			assert.Equal(t, "runner-selected-content\n", string(content))
+		})
+	}
 }
 
 func TestServiceOpensPinnedManifestAndExecutesRunnerTool(t *testing.T) {
@@ -908,6 +978,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 		SyspromptArgs:       map[string]string{"audience": "developer"},
 	}, nil, "runner-1", "run-1", 4, []string{"get_goal", " "})
 	require.NoError(t, err)
+	assert.Equal(t, new(0), manifest.ExtensionCount, "no runtime is an explicitly known zero")
 	require.Len(t, manifest.ContextFiles, 2)
 	assert.Equal(t, "a/AGENTS.md", manifest.ContextFiles[0].Path)
 	assert.Equal(t, "z/AGENTS.md", manifest.ContextFiles[1].Path)
@@ -934,7 +1005,78 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 			Placement: agentenv.ToolPlacementEnvironment,
 		}},
 	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"get_goal"})
-	require.ErrorContains(t, err, "collides with a reserved control-plane tool")
+	require.ErrorContains(t, err, "collides with a reserved server tool")
+}
+
+func TestServiceRemoteProfileCapabilityFollowsServerRegistration(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	provider := &recordingRuntimeProvider{runtime: runtime}
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		RuntimeProvider: provider,
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}}, nil
+		},
+	})
+	for generation, supported := range []bool{false, true, false} {
+		require.NoError(t, service.SetRegistration(protocol.RegisterResult{
+			RunnerID: "runner-1", Generation: int64(generation + 1), RemoteProfiles: supported,
+		}))
+		_, err := service.ProbeManifest(t.Context(), "")
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		_, err = service.inspectWorkspace(t.Context(), protocol.WorkspaceInspectParams{Operation: "recipe.list"})
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "run", ConversationID: "conversation"})
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: supported}, provider.capabilities)
+		require.ErrorContains(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 4, RemoteProfiles: !supported}), "active runs")
+		ctx := service.decorateRunContext(t.Context(), "run", "conversation")
+		assert.Equal(t, supported, extensions.RuntimeCapabilitiesFromContext(ctx).RemoteProfiles)
+		require.NoError(t, service.closeRun(t.Context(), "run"))
+	}
+}
+
+func TestBuildWireManifestProfilesAreSourceBoundAndIndependent(t *testing.T) {
+	service, peer := newSessionTestService(t, llmtypes.Config{})
+	peer.registration = extensions.InitializeResult{
+		Profiles: []extensions.ProfileRegistration{
+			{Name: "search", Options: llmtypes.ProfileConfig{
+				"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none",
+				"openai": map[string]any{"platform": "codex"},
+				"future": map[string]any{"values": []any{false, nil}},
+			}, Hidden: true},
+		},
+	}
+	params := sessionTestOpen("profiles-run")
+	params.Options = &llmtypes.ExecutionOptions{AllowedTools: &[]string{}, NoSkills: new(true)}
+	manifest, err := service.openRun(t.Context(), params)
+	require.NoError(t, err)
+	assert.Empty(t, manifest.Tools, "profile declarations are independent of presentation tools")
+	require.Len(t, manifest.Profiles, 1)
+	assert.Equal(t, "search", manifest.Profiles[0].Name)
+	assert.True(t, manifest.Profiles[0].Hidden)
+	assert.Equal(t, "session:inline-1", manifest.Profiles[0].ExtensionID)
+	digest, err := runnerpayload.ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, digest, manifest.Digest)
+	manifest.Profiles[0].Options["model"] = "mutated-output"
+	manifest.Profiles[0].Options["openai"].(map[string]any)["platform"] = "openai"
+	manifest.Profiles[0].Options["future"].(map[string]any)["values"].([]any)[0] = true
+	peer.registration.Profiles[0].Name = "mutated-input"
+	peer.registration.Profiles[0].Options["openai"].(map[string]any)["platform"] = "copilot"
+	peer.registration.Profiles[0].Options["future"].(map[string]any)["values"].([]any)[1] = "mutated-input"
+	profiles := service.runs[params.RunID].runtime.Profiles()
+	require.Len(t, profiles, 1)
+	assert.Equal(t, "search", profiles[0].Name)
+	assert.Equal(t, "gpt-5.6-luna", profiles[0].Options["model"])
+	assert.Equal(t, "none", profiles[0].Options["reasoning_effort"])
+	assert.Equal(t, "codex", profiles[0].Options["openai"].(map[string]any)["platform"])
+	assert.Equal(t, map[string]any{"values": []any{false, nil}}, profiles[0].Options["future"])
+	require.NoError(t, service.closeRun(t.Context(), params.RunID))
 }
 
 func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
@@ -1052,7 +1194,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 			return llmtypes.Config{
 				Provider:          "openai",
 				Model:             "gpt-test",
-				ExtensionSettings: map[string]any{"enabled": false},
+				ExtensionSettings: map[string]any{"enabled": true},
 			}, nil
 		},
 	})
@@ -1074,7 +1216,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	assert.Equal(t, 1, provider.activeCalls)
 	assert.Equal(t, []string{"", "runner-work"}, loadedProfiles)
 	assert.Equal(t, "runner-work", provider.activeVariant)
-	assert.False(t, provider.activeConfig.Enabled)
+	assert.True(t, provider.activeConfig.Enabled)
 	assert.Equal(t, "conversation-1", provider.activeCallContext.ConversationID)
 	assert.Equal(t, "anthropic", provider.activeCallContext.Provider)
 	assert.Equal(t, "claude-test", provider.activeCallContext.Model)
@@ -1285,8 +1427,6 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 		assert.True(t, response.Accepted)
 		assert.Equal(t, uint64(7), response.LatestSequence)
 	}
-	service.CleanupExtensionUI(source.owner)
-
 	peer.mu.Lock()
 	assert.Equal(t, []string{
 		protocol.MethodUIInput,
@@ -1314,6 +1454,12 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 	assert.NotEqual(t, confirmParams.Request.ID, selectParams.Request.ID)
 	assert.Equal(t, "run-1", widgetParams.RunID)
 	assert.Equal(t, runnerpayload.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, widgetParams.Owner)
+	service.CleanupExtensionUI(source.owner)
+	require.Eventually(t, func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return slices.Contains(peer.calls, protocol.MethodUIExtensionCleanup)
+	}, time.Second, time.Millisecond)
 
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 	_, err = service.Input(t.Context(), extensions.UIInputRequest{Title: "closed"})

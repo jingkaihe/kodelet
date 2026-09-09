@@ -11,10 +11,64 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProfileNamesRequireBoundedASCIISlugs(t *testing.T) {
+	options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
+	for _, name := range []string{"A", "0", "Search.v1_fast-2", strings.Repeat("x", 128)} {
+		t.Run("valid/"+name, func(t *testing.T) {
+			assert.NoError(t, (ProfileRegistration{Name: name, Options: options}).Validate())
+		})
+	}
+	for _, name := range []string{"", " ", "leading ", " trailing", ".dot", "_under", "-dash", "a/b", "a\\b", "a:b", "a@b", "é", "a\n", "a\x00", strings.Repeat("x", 129), "default", "DEFAULT", "Default"} {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			assert.Error(t, (ProfileRegistration{Name: name, Options: options}).Validate())
+		})
+	}
+	assert.ErrorContains(t, (ProfileRegistration{Name: "search"}).Validate(), "provider must be a nonempty string")
+	assert.Error(t, (Profile{Name: "default", ExtensionID: "source", Options: options}).Validate())
+	assert.Error(t, (Profile{Name: "search", Options: options}).Validate())
+	assert.Error(t, (Profile{Name: "search", ExtensionID: "bad\x00source", Options: options}).Validate())
+}
+
+func TestProfileWireShapeAndIndependentClone(t *testing.T) {
+	optionsJSON := `{"provider":"openai","model":"copilot-custom","weak_model":"weak","max_tokens":4096,"reasoning_effort":"low","allowed_tools":["file_read"],"openai":{"platform":"copilot","websocket_mode":false},"future":{"values":[1.5,null,{"enabled":false}]}}`
+	var result InitializeResult
+	require.NoError(t, json.Unmarshal([]byte(`{"profiles":[{"name":"search","options":`+optionsJSON+`,"hidden":true}]}`), &result))
+	require.Len(t, result.Profiles, 1)
+	registration := result.Profiles[0]
+	profile := Profile{Name: registration.Name, ExtensionID: "org@plugin/code-search", Options: registration.Options, Hidden: registration.Hidden}
+	require.NoError(t, profile.Validate())
+	data, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"search","extensionId":"org@plugin/code-search","options":`+optionsJSON+`,"hidden":true}`, string(data))
+	clone := profile.Clone()
+	clone.Options["model"] = "another-model"
+	clone.Options["openai"].(map[string]any)["platform"] = "openai"
+	clone.Options["allowed_tools"].([]any)[0] = "bash"
+	clone.Options["future"].(map[string]any)["values"].([]any)[2].(map[string]any)["enabled"] = true
+	data, err = json.Marshal(profile.Options)
+	require.NoError(t, err)
+	assert.JSONEq(t, optionsJSON, string(data), "cloning must isolate arbitrary nested JSON")
+	assert.Nil(t, (Profile{}).Clone().Options)
+}
+
+func TestProfileOptionsRequireOnlyProviderAndModel(t *testing.T) {
+	for _, field := range []string{"provider", "model"} {
+		for _, value := range []any{nil, " \n", "bad\x00value", 42} {
+			options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
+			options[field] = value
+			assert.ErrorContains(t, (ProfileRegistration{Name: "search", Options: options}).Validate(), field)
+		}
+	}
+	assert.ErrorContains(t, (ProfileRegistration{Name: "search", Options: llmtypes.ProfileConfig{
+		"provider": "unknown", "model": "search",
+	}}).Validate(), "unsupported")
+}
 
 func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {
 	reader, writer := io.Pipe()
@@ -201,6 +255,48 @@ func TestRPCClientUsesPersistentHostContextForParentlessRequests(t *testing.T) {
 	result, rpcErr := selected.HandleRPCRequest(ctx, "kodelet.ui.widget.set", nil)
 	require.Nil(t, rpcErr)
 	assert.Equal(t, map[string]any{"accepted": true, "conversation": "conversation-host"}, result)
+}
+
+type backgroundContextHostHandler struct{ ctx context.Context }
+
+func (h backgroundContextHostHandler) hostContext() context.Context { return h.ctx }
+
+func (h backgroundContextHostHandler) HandleRPCRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+	return map[string]any{"scope": ctx.Value(rpcCallContextKey{}), "cancelled": ctx.Err() != nil}, nil
+}
+
+func TestRPCClientBackgroundReleaseNeverBorrowsPendingForegroundContext(t *testing.T) {
+	for _, method := range []string{BackgroundTaskReleaseMethod} {
+		t.Run(method, func(t *testing.T) {
+			var outbound bytes.Buffer
+			client := newRPCClient(strings.NewReader(""), &outbound)
+			host := backgroundContextHostHandler{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "retained")}
+			client.setHostRequestHandler(host)
+			pending, cancel := context.WithCancel(context.WithValue(t.Context(), rpcCallContextKey{}, "unrelated new turn"))
+			cancel()
+			client.pending[7] = &rpcPendingCall{ctx: pending, handler: host}
+			client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), Method: method, Params: json.RawMessage(`{"leaseId":"owned"}`)})
+			frames := readAllTestFrames(t, outbound.Bytes())
+			require.Len(t, frames, 1)
+			var response rpcResponse
+			require.NoError(t, json.Unmarshal(frames[0], &response))
+			require.Nil(t, response.Error)
+			assert.JSONEq(t, `{"scope":"retained","cancelled":false}`, string(response.Result))
+		})
+	}
+	// An explicitly parented lease acquisition still uses the active request.
+	var outbound bytes.Buffer
+	client := newRPCClient(strings.NewReader(""), &outbound)
+	host := backgroundContextHostHandler{ctx: t.Context()}
+	client.setHostRequestHandler(host)
+	client.pending[7] = &rpcPendingCall{ctx: context.WithValue(t.Context(), rpcCallContextKey{}, "active tool"), handler: host}
+	client.dispatchIncomingRequest(rpcIncomingMessage{ID: json.RawMessage(`42`), ParentID: json.RawMessage(`7`), Method: BackgroundTaskAcquireMethod})
+	frames := readAllTestFrames(t, outbound.Bytes())
+	require.Len(t, frames, 1)
+	var response rpcResponse
+	require.NoError(t, json.Unmarshal(frames[0], &response))
+	require.Nil(t, response.Error)
+	assert.JSONEq(t, `{"scope":"active tool","cancelled":false}`, string(response.Result))
 }
 
 func TestRPCClientRunsPostResponseHookAfterWriteAttempt(t *testing.T) {

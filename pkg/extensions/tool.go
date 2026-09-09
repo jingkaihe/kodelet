@@ -65,6 +65,9 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 // Name returns the extension tool name.
 func (t *Tool) Name() string { return t.name }
 
+// ExtensionID identifies the extension that owns this tool.
+func (t *Tool) ExtensionID() string { return t.extensionID }
+
 // Description returns the extension tool description.
 func (t *Tool) Description() string { return t.description }
 

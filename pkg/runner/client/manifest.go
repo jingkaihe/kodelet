@@ -45,7 +45,7 @@ func buildWireManifest(
 				continue
 			}
 			if _, collision := reserved[tool.Name()]; collision {
-				return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a reserved control-plane tool", tool.Name())
+				return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a reserved server tool", tool.Name())
 			}
 		}
 	}
@@ -74,7 +74,7 @@ func buildWireManifest(
 			continue
 		}
 		if _, collision := reserved[definition.Name]; collision {
-			return runnerpayload.Manifest{}, errors.Errorf("runner tool %s collides with a reserved control-plane tool", definition.Name)
+			return runnerpayload.Manifest{}, errors.Errorf("runner tool %s collides with a reserved server tool", definition.Name)
 		}
 		if runtimeTool := runtimeToolByName(runtime, definition.Name); runtimeTool != nil && runtimeTool != definition.Tool {
 			return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a runner tool", definition.Name)
@@ -85,6 +85,9 @@ func buildWireManifest(
 			InputSchema: cloneJSONMap(definition.InputSchema),
 			Placement:   string(agentenv.ToolPlacementEnvironment),
 		})
+		if extensionTool, ok := definition.Tool.(*extensions.Tool); ok {
+			wireTools[len(wireTools)-1].ExtensionID = extensionTool.ExtensionID()
+		}
 		if skillTool, ok := definition.Tool.(*tools.SkillTool); ok {
 			for _, skill := range skillTool.GetSkills() {
 				if skill == nil {
@@ -110,6 +113,8 @@ func buildWireManifest(
 	}
 	systemInformation := sysprompt.CollectSystemInformation(local.WorkingDirectory)
 	manifest := runnerpayload.Manifest{
+		Shortcuts:        wireShortcuts(runtime),
+		Profiles:         runtime.Profiles(),
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         runnerID,
 		RunID:            runID,
@@ -120,6 +125,7 @@ func buildWireManifest(
 		Skills:           skillDefinitions,
 		Commands:         commands,
 		Config: runnerpayload.EnvironmentConfig{
+			Options:             config.EnvironmentOptions(),
 			AllowedCommands:     append([]string(nil), config.AllowedCommands...),
 			ToolMode:            config.ToolMode,
 			EnableFSSearchTools: config.EnableFSSearchTools,
@@ -129,6 +135,7 @@ func buildWireManifest(
 			SystemInformation:   systemInformation.Clone(),
 		},
 		ExtensionGeneration: 1,
+		ExtensionCount:      new(runtime.ExtensionCount()),
 		Capabilities: runnerpayload.EnvironmentCapabilities{
 			ToolUpdates:        true,
 			InteractiveUI:      true,
@@ -143,6 +150,14 @@ func buildWireManifest(
 	}
 	manifest.Digest = digest
 	return manifest, nil
+}
+
+func wireShortcuts(runtime *extensions.Runtime) []protocol.ShortcutDescriptor {
+	var result []protocol.ShortcutDescriptor
+	for _, shortcut := range runtime.Shortcuts() {
+		result = append(result, protocol.ShortcutDescriptor{Key: shortcut.Key, Description: shortcut.Description, ExtensionID: shortcut.ExtensionID, Generation: shortcut.Generation})
+	}
+	return result
 }
 
 func runtimeToolByName(runtime *extensions.Runtime, name string) tooltypes.Tool {
@@ -163,6 +178,9 @@ func contentDigest(content string) string {
 }
 
 func loadSystemPrompt(config llmtypes.Config, workingDirectory string) (string, string, error) {
+	if config.SyspromptInline {
+		return "", config.SyspromptContent, nil
+	}
 	path := strings.TrimSpace(config.Sysprompt)
 	if path == "" {
 		return "", "", nil

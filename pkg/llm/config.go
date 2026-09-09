@@ -49,7 +49,13 @@ func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) 
 // GetConfigFromViperWithEnvironmentProfile loads runner-owned configuration from
 // the separate environment_profiles namespace without applying a model profile.
 func GetConfigFromViperWithEnvironmentProfile(profileName string) (llmtypes.Config, error) {
-	settings := cloneSettings(viper.AllSettings())
+	return GetConfigFromSettingsWithEnvironmentProfile(viper.AllSettings(), profileName)
+}
+
+// GetConfigFromSettingsWithEnvironmentProfile resolves a runner-owned settings
+// snapshot without consulting or mutating the process-global Viper instance.
+func GetConfigFromSettingsWithEnvironmentProfile(settings map[string]any, profileName string) (llmtypes.Config, error) {
+	settings = cloneSettings(settings)
 	delete(settings, "profile")
 
 	config, err := loadConfigFromSettings(settings)
@@ -112,6 +118,52 @@ func HasConfiguredProfile(profileName string) bool {
 	}
 	_, exists := viper.GetStringMap("profiles")[profileName]
 	return exists
+}
+
+// IsProfileHidden reports presentation metadata, not a restriction on explicit selection.
+func IsProfileHidden(profileName string) bool {
+	profile, ok := viper.GetStringMap("profiles")[profileName].(map[string]any)
+	if !ok {
+		return false
+	}
+	hidden, _ := profile["hidden"].(bool)
+	return hidden
+}
+
+// GetConfigFromProfile decodes an isolated profile using ordinary configuration
+// keys and built-in defaults, without consulting daemon or workspace settings.
+func GetConfigFromProfile(profile llmtypes.ProfileConfig) (llmtypes.Config, error) {
+	config, err := loadConfigFromSettings(cloneSettings(profile))
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return llmtypes.Config{}, err
+	}
+	config.Aliases = withDefaultModelAliases(config.Aliases)
+	config.Model = resolveModelAlias(strings.TrimSpace(config.Model), config.Aliases)
+	config.WeakModel = resolveModelAlias(strings.TrimSpace(config.WeakModel), config.Aliases)
+	config.ModelAliasesResolved = true
+	return config, nil
+}
+
+// ProviderPlatform returns the normalized platform for a provider's configuration block.
+func ProviderPlatform(config llmtypes.Config, provider string) string {
+	platform := ""
+	switch provider {
+	case "openai":
+		if config.OpenAI != nil {
+			platform = config.OpenAI.Platform
+		}
+	case "anthropic":
+		if config.Anthropic != nil {
+			platform = config.Anthropic.Platform
+		}
+	}
+	if platform = strings.ToLower(strings.TrimSpace(platform)); platform == "" {
+		return provider
+	}
+	return platform
 }
 
 func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool, ignoredFlags ...string) (llmtypes.Config, error) {

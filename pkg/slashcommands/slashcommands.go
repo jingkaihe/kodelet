@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -63,7 +64,7 @@ func Parse(text string) (command string, args string, found bool) {
 //	key_value      = key "=" value
 //	key            = 1*non_space_non_eq
 //	value          = quoted_value / unquoted_value
-//	quoted_value   = DQUOTE *non_dquote DQUOTE
+//	quoted_value   = Go-style double-quoted string (backslash escapes supported)
 //	unquoted_value = *non_space
 //	word           = 1*non_space (collected as additional_text)
 func ParseArgs(args string) (kvArgs map[string]string, additionalText string) {
@@ -134,9 +135,16 @@ func parseValue(s string, start int) (value string, nextPos int) {
 func parseQuotedValue(s string, start int) (value string, nextPos int) {
 	end := start
 	for end < len(s) && s[end] != '"' {
+		if s[end] == '\\' && end+1 < len(s) {
+			end++
+		}
 		end++
 	}
 	if end < len(s) {
+		if decoded, err := strconv.Unquote(s[start-1 : end+1]); err == nil {
+			return decoded, end + 1
+		}
+		// Keep accepting manually entered values with unknown escape sequences.
 		return s[start:end], end + 1
 	}
 	return s[start:end], end

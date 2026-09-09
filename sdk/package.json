@@ -35,7 +35,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "example:inline": "tsx examples/inline-extension-session.ts",
     "postinstall": "node -e \"const fs=require('fs');const p='./dist/extensions/mcp/install.js';if(fs.existsSync(p))import(p).catch(e=>{console.error(e);process.exit(1)})\"",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

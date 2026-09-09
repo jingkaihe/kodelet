@@ -702,8 +702,9 @@ OUTER:
 		}
 	}
 
-	// Save conversation state
-	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
+	// A cancelled pre-turn hook can leave input only in the durable admission
+	// checkpoint. Do not overwrite it with the pre-input compaction context.
+	if incomingUserAppended && t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
 		t.SaveConversation(saveCtx)
 	}
@@ -2566,6 +2567,19 @@ func rawMessagesForName(items []StoredInputItem) json.RawMessage {
 	return raw
 }
 
+// SavePendingUserMessage saves an admission checkpoint without changing the live
+// context, including the Responses pre-turn compaction ordering.
+func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
+	return t.Thread.SavePendingUserMessage(ctx, t, func(ctx context.Context) (context.Context, func()) {
+		snapshot := t.snapshotNoSaveState()
+		return context.WithValue(ctx, responsesNoSaveOperationContextKey{}, snapshot.operation), func() {
+			t.restoreNoSaveState(snapshot)
+		}
+	}, message, images...)
+}
+
 // SaveConversation saves the current thread to the conversation store.
 func (t *Thread) SaveConversation(ctx context.Context) error {
 	t.ConversationMu.Lock()
@@ -2581,30 +2595,23 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	return t.Store.Save(ctx, record)
 }
 
-// ForkConversation snapshots the live thread into a new persisted conversation.
-func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+// SnapshotConversationFork captures the safe live fork source without publishing a new ID.
+func (t *Thread) SnapshotConversationFork(ctx context.Context) (convtypes.ConversationRecord, error) {
 	if t.ConversationForkBlocked() {
-		return "", llmtypes.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llmtypes.ErrConversationForkUnavailable
 	}
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
 	if !t.Persisted || t.Store == nil {
-		return "", llmtypes.ErrConversationForkUnavailable
+		return convtypes.ConversationRecord{}, llmtypes.ErrConversationForkUnavailable
 	}
-	record, err := t.buildConversationRecord(ctx, t.snapshotConversationState(false), false)
-	if err != nil {
-		return "", err
-	}
-	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
-	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
-		forkOptions.Initiator = &initiator
-	}
-	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
-	if err != nil {
-		return "", err
-	}
-	return forked.ID, nil
+	return t.buildConversationRecord(ctx, t.snapshotConversationState(false), false)
+}
+
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	return t.Thread.ForkConversation(ctx, t.SnapshotConversationFork)
 }
 
 type conversationStateSnapshot struct {

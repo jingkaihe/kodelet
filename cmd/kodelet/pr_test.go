@@ -2,15 +2,102 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func remotePRCommandForTest(t *testing.T, args ...string) *cobra.Command {
+	t.Helper()
+	cmd := remoteRunCommandForTest()
+	cmd.Use = "pr"
+	cmd.SetContext(t.Context())
+	cmd.Flags().String("target", "main", "")
+	cmd.Flags().String("template-file", "", "")
+	cmd.Flags().Bool("draft", false, "")
+	require.NoError(t, cmd.ParseFlags(append([]string{"--provider=github"}, args...)))
+	return cmd
+}
+
+func TestRemotePRProviderIsVCSNotModelProvider(t *testing.T) {
+	cmd := remotePRCommandForTest(t, "--target=develop", "--draft", "--template-file=/runner-only/template with spaces.md", "--model=central-model", "--allowed-tools=", "--no-tools=false", "--max-turns=0")
+	request, err := remotePRRequest(cmd)
+	require.NoError(t, err)
+	assert.Nil(t, request.Options.Provider, "github must never become a model provider")
+	assert.Equal(t, new("central-model"), request.Options.Model)
+	assert.Equal(t, new(false), request.Options.NoTools)
+	assert.Equal(t, new([]string{}), request.Options.AllowedTools)
+	assert.Equal(t, new(0), request.Options.MaxTurns)
+	assert.Contains(t, request.Message, "/github/pr ")
+	assert.Contains(t, request.Message, "target=develop")
+	assert.Contains(t, request.Message, "draft=true")
+	assert.Contains(t, request.Message, `/runner-only/template with spaces.md`)
+	_, err = remoteRunExecutionOptions(cmd)
+	require.ErrorContains(t, err, "unsupported execution provider", "only the PR adapter may ignore its VCS flag")
+}
+
+func TestRemotePRRejectsUnsupportedOptionsBeforeHTTP(t *testing.T) {
+	var calls atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer daemon.Close()
+	for _, flag := range []string{"--provider=gitlab", "--target=", "--no-save=false", "--max-tokens=0", "--sysprompt=/client/prompt", "--allowed-domains-file=/client/policy"} {
+		cmd := remotePRCommandForTest(t, "--server="+daemon.URL, "--auth-token=client", flag)
+		require.Error(t, runRemotePR(cmd), flag)
+	}
+	assert.Zero(t, calls.Load())
+}
+
+func TestRemotePRProcessDoesNotReadClientGitOrProviderState(t *testing.T) {
+	var submissions atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/api/chat/settings":
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{DefaultRunnerID: "registered", DefaultRunnerReady: true}))
+		case "/api/chat":
+			submissions.Add(1)
+			var request chat.ChatRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			assert.Equal(t, "registered", request.RunnerID)
+			assert.Equal(t, "/runner-only/repo", request.CWD)
+			assert.Contains(t, request.Message, "/github/pr ")
+			assert.Contains(t, request.Message, "target=develop")
+			assert.Nil(t, request.Options.Provider)
+			assert.Equal(t, new("daemon-model"), request.Options.Model)
+			assert.NotEmpty(t, request.ConversationID)
+			assert.NotEmpty(t, request.TurnID)
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "result", Result: new("created remotely")}))
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer daemon.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	invalidStore := filepath.Join(root, "no-client-state")
+	require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
+	// Empty PATH also proves no local git/gh command is invoked by the client.
+	env := []string{"PATH=" + root, "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1", "KODELET_BASE_PATH=" + invalidStore}
+	process := daemonCLIProcess(ctx, t, root, env, "pr", "--server="+daemon.URL, "--auth-token=client", "--provider=github", "--target=develop", "--model=daemon-model", "--cwd=/runner-only/repo", "--template-file=/runner-only/template.md", "--result-only")
+	output, err := process.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	assert.Equal(t, "created remotely\n", string(output))
+	assert.EqualValues(t, 1, submissions.Load())
+}
 
 func TestPRFragmentContent(t *testing.T) {
 	ctx := context.Background()
@@ -82,7 +169,6 @@ func TestPRConfigDefaults(t *testing.T) {
 	assert.Equal(t, "main", config.Target, "Expected default Target to be 'main'")
 	assert.Empty(t, config.TemplateFile, "Expected default TemplateFile to be empty")
 	assert.False(t, config.Draft, "Expected default Draft to be false")
-	assert.False(t, config.NoSave, "Expected default NoSave to be false")
 	assert.False(t, config.ResultOnly, "Expected default ResultOnly to be false")
 }
 
@@ -93,14 +179,12 @@ func TestGetPRConfigFromFlags(t *testing.T) {
 	cmd.Flags().StringP("target", "t", defaults.Target, "")
 	cmd.Flags().String("template-file", defaults.TemplateFile, "")
 	cmd.Flags().BoolP("draft", "d", defaults.Draft, "")
-	cmd.Flags().Bool("no-save", defaults.NoSave, "")
 	cmd.Flags().Bool("result-only", defaults.ResultOnly, "")
 
 	require.NoError(t, cmd.Flags().Set("provider", "github"))
 	require.NoError(t, cmd.Flags().Set("target", "develop"))
 	require.NoError(t, cmd.Flags().Set("template-file", "/tmp/template.md"))
 	require.NoError(t, cmd.Flags().Set("draft", "true"))
-	require.NoError(t, cmd.Flags().Set("no-save", "true"))
 	require.NoError(t, cmd.Flags().Set("result-only", "true"))
 
 	config := getPRConfigFromFlags(cmd)
@@ -109,7 +193,6 @@ func TestGetPRConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "develop", config.Target)
 	assert.Equal(t, "/tmp/template.md", config.TemplateFile)
 	assert.True(t, config.Draft)
-	assert.True(t, config.NoSave)
 	assert.True(t, config.ResultOnly)
 }
 
@@ -155,47 +238,4 @@ func TestPRConfigValidation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestGhHelpersUsePathStubs(t *testing.T) {
-	t.Run("installed and authenticated", func(t *testing.T) {
-		stubDir := t.TempDir()
-		writeGHStub(t, stubDir, `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  exit 0
-fi
-exit 0
-`)
-		t.Setenv("PATH", stubDir)
-
-		assert.True(t, isGhCliInstalled())
-		assert.True(t, isGhAuthenticated())
-	})
-
-	t.Run("installed but not authenticated", func(t *testing.T) {
-		stubDir := t.TempDir()
-		writeGHStub(t, stubDir, `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  exit 1
-fi
-exit 0
-`)
-		t.Setenv("PATH", stubDir)
-
-		assert.True(t, isGhCliInstalled())
-		assert.False(t, isGhAuthenticated())
-	})
-
-	t.Run("missing gh", func(t *testing.T) {
-		t.Setenv("PATH", t.TempDir())
-
-		assert.False(t, isGhCliInstalled())
-		assert.False(t, isGhAuthenticated())
-	})
-}
-
-func writeGHStub(t *testing.T, dir, content string) {
-	t.Helper()
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(content), 0o755))
 }

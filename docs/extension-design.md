@@ -114,6 +114,18 @@ Kodelet itself should only need the generated JSON Schema for LLM tool registrat
 
 ## Extension discovery
 
+### Session callback attachments
+
+SDK sessions can additionally attach in-memory extensions without installing executables on the runner. TypeScript uses `client.createSession({ extensions: [entrypoint] })`; Python uses `client.create_session(extensions=[ext])` with ordinary `@ext.tool` registrations. Both SDKs and ACP negotiate `_meta.sessionExtensions = { "version": 1 }`; new/load requests provide `{ "version": 1, "extensionIds": ["inline-1", ...] }` in that metadata key.
+
+ACP opens an authenticated WebSocket at `/api/session/extensions` with subprotocol `kodelet.session.extensions.v1.jsonrpc`. `session.extensions.attach` binds one live connection to a client/principal, conversation, and runner generation. `session.extension.frame` carries `{ attachmentId, runId, extensionId, message }`, or `close: true` instead of `message`; ACP relays the same inner payload using `kodelet/extensionFrame` and replaces the attachment identity with the session ID. Frames acknowledge delivery, not callback execution. The inner extension JSON-RPC, including IDs, `parentId`, cancellations, errors, and updates, is unchanged.
+
+The runner mounts each callback as a nonrestartable `Process` in an isolated runtime before lifecycle startup. It uses the logical policy identity `session:<extensionId>`, ordinary registration/collision checks, effective extension settings, and model tool ceilings. Only run.open-pinned channels accept frames, including bounded cancellation and session-end replies during cleanup. A late close notice carries no execution authority. The manifest persists the required extension IDs, not the live attachment capability, so resuming requires explicit reattachment even after daemon restart. Session callbacks are excluded from ordinary workspace discovery and shared runtime caches.
+
+Basic SDK UI handlers may service input, confirm, select, and notify locally. Other supported context RPCs use the normal runner execution handler and its originating-request authority. Callback channels cannot acquire background leases, cannot transfer to another runner generation, and close at run end or transport failure without reconnect/replay. Installed extensions retain their existing subprocess and background-lifetime behavior. Callback closures execute on the SDK host; workspace paths in their context do not make direct language-runtime file or process operations remote.
+
+### Installed extension discovery
+
 Kodelet should discover extension executables from configured extension roots. By default these roots are:
 
 1. `./.kodelet/extensions`
@@ -533,6 +545,24 @@ When initialization advertises `capabilities.toolUpdates: true`, a running tool 
 
 Renderers accept at most 14 visible activities: up to 8 running, 3 recently completed, and 3 recently failed. SDK helpers retain full observed counters and report hidden entries through the `omittedSucceeded`, `omittedFailed`, and `omittedRunning` fields; labels and previews are length-bounded before publication.
 
+### ACP agent sessions
+
+Use the SDK `Client` for subagents and code search. ACP provides ordinary conversation admission, persistence, cancellation, and live streaming. Named forks preserve agent titles; `TaskProgress.attach(session)` tracks tool activity.
+
+- Pass typed `ExecutionOptions` directly; ACP sends them to the daemon from any extension host. `profile` selects a configured or registered daemon profile, and `options.provider` must match it.
+- Supply instructions through an inline `agent.init` hook with extensions enabled. Read prompt files in the extension process, not on the daemon.
+- For read-only search, allowlist `file_read`, `grep_tool`, and `glob_tool`, enable filesystem search, and disable skills. The caller's presentation-only tool list is not inherited; runner policy still applies.
+- Configure normal client authentication and server/runner targeting on the extension host. Provider credentials stay on the daemon. A runner token or background lease is not client authorization.
+- Own session cancellation and cleanup; release background leases after work and client cleanup finish.
+
+Scoped child RPCs, `ctx.children`, and `get_profile` remain removed. Existing history remains readable; legacy preset metadata is no longer enforced, and old run-scoped steering is not replayed. Runner-targeted credentials and general conversation-ownership changes remain phase two.
+
+### Registered model profiles
+
+TypeScript `ext.registerProfile(...)` and Python `ext.register_profile(...)` require `provider` and `model` and return the flat name unchanged. Names are 1–128-character ASCII slugs; `default` is reserved and conflicting configured or registered names are rejected. Profiles are scoped to the authenticated caller and runner; ACP clients must use the same owner's credentials and target `ctx.runnerId` (Python: `ctx.runner_id`).
+
+Registration accepts ordinary profile JSON with native snake_case keys and built-in defaults, without inheriting model settings or requiring catalog entries. Credentials stay on the daemon; host/runner restrictions still apply. Resuming requires a matching live registration. `hidden: true` hides profiles from pickers without preventing selection. See the [SDK example](../skills/kodelet/references/sdk.md#registered-model-profiles).
+
 ### Live conversation forks
 
 When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task" }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`.
@@ -545,7 +575,13 @@ Fork availability is invocation-scoped and requires a persistent live thread. Un
 
 `capabilities.runtime.backgroundTasks` tells an extension whether it may acquire a lifetime handle for work that continues after an individual tool request returns. Extensions must hide tools that require asynchronous continuation when this capability is unavailable.
 
-Persistent local runtimes and runner-backed runtimes both advertise `backgroundTasks: true`; extensions do not need to know which lifetime mechanism the host uses. In a persistent local runtime, acquisition returns a no-op handle because the host-wide lifetime already covers asynchronous work. In a runner-backed handler, acquisition creates a real lease that keeps that conversation's isolated extension runtime and execution instance alive after the parent control-plane run closes. The runner may report itself idle and accept other runs while the lease exists; reopening the same conversation with the same environment profile reattaches it to the retained resources. Releasing the final lease after no foreground run remains closes those resources.
+Persistent local runtimes and runner-backed execution runtimes both advertise `backgroundTasks: true`; extensions do not need to know which lifetime mechanism the host uses. In a persistent local runtime, acquisition returns a no-op handle because the host-wide lifetime already covers asynchronous work. Runner execution is run-isolated by default: each conversation receives separate extension processes, and an ordinary run close ends those processes unless an explicit background lease retains them. A retained conversation may be idle while other conversations execute. Client attachment alone never retains an extension process.
+
+Runner leases acquired during initialization or `session.start` are provisional: they reserve capacity but become background retention only after `run.open` successfully finishes environment discovery. A failed or canceled opening revokes its provisional leases and closes its resources. Extensions must tolerate this cleanup even after acquisition returned a handle; acquisition does not acknowledge a successful open. The runner allows at most 64 leases in total, including provisional leases, with descriptions limited to 1,024 bytes.
+
+Reopening the same conversation with the same CWD, environment profile, and extension settings reattaches its retained runtime. `session.start` describes that runtime's initial session and is not replayed for each submission; per-run agent/tool events receive the current invocation context. A retained generation is not hot-reloaded, and attempts to change or disable its extension settings fail until its leases are released. After final release and run close, later submissions discover fresh processes, including executable replacements or removals. Releasing the final lease after no foreground run remains closes the retained resources immediately.
+
+Losing the runner's connection to the daemon revokes its retained leases and closes the corresponding processes, including workers whose foreground run already completed. Reconnecting does not restore process or UI authority: a later execution starts fresh processes and may read existing extension-owned persistent storage. Detaching a UI client is different; it closes that client's interactive surfaces but does not cancel daemon-owned execution or its explicitly leased workers.
 
 The TypeScript SDK exposes `await ctx.acquireBackgroundTask(description?)`; Python exposes `await ctx.acquire_background_task(description)`. Both return a lease whose `close()` method is idempotent and may be called after the originating handler has returned. Local hosts return a no-op lease. Runner hosts acquire through the active request and release through the persistent extension connection, so extensions should keep the lease until their worker and any final state/UI updates have completed.
 
@@ -554,7 +590,11 @@ The TypeScript SDK exposes `await ctx.acquireBackgroundTask(description?)`; Pyth
 | `kodelet.runtime.background.acquire` | Request with active `parentId` | Acquire a host lifetime handle from optional `{ "description": "..." }`; returns `{}` for an already-persistent host or `{ "leaseId": "..." }` when explicit retention is required. |
 | `kodelet.runtime.background.release` | Persistent request | Release `{ "leaseId": "..." }`; returns `{ "released": true|false }`. |
 
-This is a host resource-lifetime API, not a scheduler or domain-persistence API. Leases do not survive runner-process termination, and Kodelet does not own extension-specific task state. An extension that needs recovery across process loss should persist its own domain state beneath `extension.dataDir`, fence concurrent workers itself, and reconcile that state during initialization and `session.end`. Kodelet automatically releases leases owned by an extension process generation if that process closes or fails.
+This is a host resource-lifetime API, not a scheduler or domain-persistence API. Explicit run cancellation revokes its workers, and runner shutdown closes both active and retained resources. Closing or crashing an extension process releases that generation's leases. Shutdown allows at most five seconds for `session.end`, even when an extension disables ordinary event timeouts, then reaps its processes; it never restarts a crashed process just to dispatch `session.end`. Cleanup handlers are best-effort, not a durable commit hook.
+
+Leases do not survive runner-process termination, and Kodelet does not own extension-specific task state. Persistent files beneath `extension.dataDir` outlive process release, reload, and executable removal; that extension-scoped directory is shared across concurrent conversation runtimes. Extensions must namespace conversation data, coordinate concurrent writers/workers themselves, and reconcile interrupted work on later initialization. A process lifetime handle does not provide persistence, locking, or exactly-once execution.
+
+Command/capability discovery uses a disposable isolated runtime with `backgroundTasks: false` and no `session.start`/`session.end` events. Discovery closes its processes before returning and cannot retain background workers. Initializers must therefore respect the capability instead of starting unconditional persistent work. Request-scoped discovery restrictions such as disabling extensions or skills are applied before discovery and do not change the runner's default manifest cache.
 
 ### Steering child ACP sessions
 
@@ -563,6 +603,12 @@ Agent SDK sessions can queue additional guidance for the prompt currently runnin
 ### Persistent widgets and interactive surfaces
 
 The native Bubble Tea TUI advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. The browser Web UI advertises widgets only; one-shot CLI and ACP hosts advertise all three as unavailable. Runner-backed runtimes mirror the attached client's persistent UI capabilities, so a browser-backed runner proxies widgets but not transcript entries or interactive surfaces. Extension authors must treat every persistent UI capability as optional. The TypeScript and Python SDKs make transcript and widget helpers no-ops when unavailable and reject surface creation when surfaces are unavailable.
+
+Daemon-backed native surfaces and transcript appends go only to the capable submitting client, with acknowledgements bounded to five seconds. Surface input and resize acknowledgements use an opaque route bound to the client owner, runner connection generation, extension process generation, conversation, and surface opening. Output frames remain visible across individual tool/command returns, but surfaces close on disconnect, cancellation, or execution completion. A retained worker must explicitly reopen its surface during a later execution; UI never acquires a worker lease or restores a surface transparently. Late acknowledgements, input, resize, and output from revoked owner epochs cannot recreate interactive UI. Each execution allows at most 32 open surfaces and 64 pending native requests; individual native requests are limited to 512 KiB.
+
+Each new run refreshes retained processes via `kodelet.ui.capabilities` (`widgets`, `surfaces`, `transcript`), using its submitting client's capabilities. SDK overrides are RPC-client-local and leave initialization snapshots unchanged. UI cannot move between clients mid-run. Host cleanup sends `extension.ui.surface.closed` with `scopeId`, `id`, and the original `openSequence`, so delayed closure cannot dispose a replacement. These notifications neither restart extensions nor restore UI.
+
+Use `surface.onClose(handler)` to stop recording, timers, or input waits after successful explicit close or host cleanup. It returns an unsubscribe function; callbacks run once, immediately if already closed. Failed closes remain retryable. Surface closure does not cancel the daemon execution.
 
 The Web UI control plane keeps the latest widget frame in memory per conversation and streams `ui-widget` updates over the durable conversation stream, including after the parent turn emits `done`. A newly attached browser receives a `ui-widgets` snapshot before subsequent live updates. Runner-backed widgets may continue publishing while a background lease exists: after the parent run closes, the runner supplies the explicit conversation scope and validates it against runner affinity; if the conversation starts another run, later frames route through that attached run. Deleting the conversation removes its widgets; restarting the control plane also clears these presentation snapshots, so extensions that need recovery must rebuild them from extension-owned state during a later lifecycle event.
 
@@ -963,7 +1009,7 @@ Shortcut registrations are returned from `extension.initialize` as `{ key, descr
 
 Shortcut names are normalized to lowercase with canonical modifier order. The initial ASCII-only grammar intentionally accepts only `ctrl+<ASCII letter>`, `alt+<ASCII letter-or-digit>`, `ctrl+alt+<ASCII letter>`, and unmodified `f1` through `f12`; `control` aliases `ctrl` and `option` aliases `alt`. `ctrl+i` and `ctrl+m`, including Ctrl+Alt variants, are rejected because the terminal input layer reports them as Tab and Enter. Shift, Command/Meta/Super, modified function keys, punctuation, spaces, non-ASCII characters, and navigation-key combinations are also rejected. The SDK fails unsupported registrations immediately, while the Go host skips invalid direct-protocol registrations with a diagnostic so only validated shortcuts are advertised. Duplicate shortcuts within one SDK extension fail registration. Across extensions, later discovery wins with a warning. The native TUI skips hard-reserved host keys, allows selected composer bindings to be overridden with a warning, and routes dialogs, pickers, history search, slash completion, and focused extension surfaces before registered shortcuts.
 
-The first implementation is intentionally native-TUI-only. Web UI, ACP, and runner-backed hosts do not advertise or execute extension shortcut registrations. User remapping can be added later as a host-owned layer between registrations and effective TUI bindings without changing the extension RPC contract.
+Shortcuts are native-TUI-only and execute on the selected runner. Discovery checks workspace policy and registrations, excluding capability-dependent tool catalogs; execution still uses the full pinned manifest. Upgrade daemon and standalone runners together when changing discovery digest semantics.
 
 ## Lifecycle overview
 

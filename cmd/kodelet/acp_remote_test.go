@@ -1,436 +1,279 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"sync"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
-	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestEmbeddedACPRemoteProviderWaitsForControlPlaneReadiness(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		assert.Equal(t, "/api/runners", request.URL.Path)
-		assert.Equal(t, "Bearer api-secret", request.Header.Get("Authorization"))
-		status := runnerregistry.RunnerStatusConnecting
-		if requests.Add(1) > 1 {
-			status = runnerregistry.RunnerStatusIdle
-		}
-		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:        "runner-1",
-			Connected: true,
-			Status:    status,
-		}}}))
-	}))
-	t.Cleanup(server.Close)
-
-	provider := newEmbeddedACPRemoteProvider(server.URL, "api-secret", "", nil)
-	provider.registeredRunner(protocol.RegisterResult{RunnerID: "runner-1"})
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	client, runnerID, err := provider.WaitForRemoteChat(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	assert.Equal(t, "runner-1", runnerID)
-	assert.GreaterOrEqual(t, requests.Load(), int32(2))
-}
-
-func TestEmbeddedACPRemoteProviderRejectsIncompatibleRunner(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:                 "runner-1",
-			Connected:          true,
-			Status:             runnerregistry.RunnerStatusIncompatible,
-			CompatibilityError: "runner protocol mismatch",
-		}}}))
-	}))
-	t.Cleanup(server.Close)
-
-	provider := newEmbeddedACPRemoteProvider(server.URL, "", "", nil)
-	provider.registeredRunner(protocol.RegisterResult{RunnerID: "runner-1"})
-	_, _, err := provider.WaitForRemoteChat(t.Context())
-	require.ErrorContains(t, err, "protocol mismatch")
-}
-
-func TestAcquireOrReuseACPRunnerOwnsUnlockedWorkspace(t *testing.T) {
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: t.TempDir(),
-		Store:     store,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-
-	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
-	require.NoError(t, err)
-	assert.True(t, owned)
-	assert.Empty(t, runnerID)
-}
-
-func TestAcquireOrReuseACPRunnerUsesLiveLockRunnerID(t *testing.T) {
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	workspace := t.TempDir()
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
-		Server:   "http://localhost:8080",
-		RunnerID: "runner-existing",
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: workspace,
-		Store:     store,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-
-	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
-	require.NoError(t, err)
-	assert.False(t, owned)
-	assert.Equal(t, "runner-existing", runnerID)
-}
-
-func TestAcquireOrReuseACPRunnerServesWhileExistingRunnerRegisters(t *testing.T) {
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	workspace := t.TempDir()
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: "http://localhost:8080"})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: workspace,
-		Store:     store,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-
-	startedAt := time.Now()
-	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
-	require.NoError(t, err)
-	assert.False(t, owned)
-	assert.Empty(t, runnerID)
-	assert.Less(t, time.Since(startedAt), time.Second)
-}
-
-func TestAcquireOrReuseACPRunnerRejectsAnotherServer(t *testing.T) {
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	workspace := t.TempDir()
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
-		Server:   "http://localhost:9090",
-		RunnerID: "runner-existing",
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: workspace,
-		Store:     store,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-
-	_, _, err = acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
-	require.ErrorContains(t, err, "already registered with http://localhost:9090")
-}
-
-func TestAcquireOrReuseACPRunnerIgnoresStoppingLockMetadata(t *testing.T) {
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	workspace := t.TempDir()
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
-		Server:   "http://localhost:9090",
-		RunnerID: "runner-stopping",
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	metadata := lock.Metadata()
-	stoppedAt := time.Now().UTC()
-	metadata.StoppedAt = &stoppedAt
-	require.NoError(t, lock.WriteMetadata(metadata))
-	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
-		Server:    "http://localhost:8080",
-		Workspace: workspace,
-		Store:     store,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runner.Close()) })
-
-	type result struct {
-		owned    bool
-		runnerID string
-		err      error
-	}
-	done := make(chan result, 1)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	go func() {
-		owned, runnerID, acquireErr := acquireOrReuseACPRunner(ctx, runner, "http://localhost:8080")
-		done <- result{owned: owned, runnerID: runnerID, err: acquireErr}
-	}()
-	select {
-	case result := <-done:
-		t.Fatalf("stopping lock metadata was reused before release: %+v", result)
-	case <-time.After(30 * time.Millisecond):
-	}
-	require.NoError(t, lock.Close())
-	select {
-	case result := <-done:
-		require.NoError(t, result.err)
-		assert.True(t, result.owned)
-		assert.Empty(t, result.runnerID)
-	case <-time.After(time.Second):
-		t.Fatal("ACP did not acquire the workspace after the stopping owner released it")
-	}
-}
-
-func TestEmbeddedACPRemoteProviderRefreshesRunnerIDFromLiveLock(t *testing.T) {
-	workspace := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:        "runner-new",
-			Connected: true,
-			Status:    runnerregistry.RunnerStatusIdle,
-			Workspace: protocol.Workspace{Path: workspace},
-		}}}))
-	}))
-	t.Cleanup(server.Close)
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-old"})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
-	provider.registeredRunnerID("runner-old")
-	metadata := lock.Metadata()
-	metadata.RunnerID = "runner-new"
-	require.NoError(t, lock.WriteMetadata(metadata))
-
-	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	assert.Equal(t, "runner-new", runnerID)
-}
-
-func TestEmbeddedACPRemoteProviderReportsReusedRunnerExit(t *testing.T) {
-	workspace := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:        "runner-1",
-			Connected: true,
-			Status:    runnerregistry.RunnerStatusIdle,
-			Workspace: protocol.Workspace{Path: workspace},
-		}}}))
-	}))
-	t.Cleanup(server.Close)
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-1"})
-	require.NoError(t, err)
-	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
-	provider.reuseRunner("runner-1")
-
-	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	assert.Equal(t, "runner-1", runnerID)
-	require.NoError(t, lock.Close())
-
-	_, _, err = provider.WaitForRemoteChat(t.Context())
-	require.ErrorContains(t, err, "reused workspace runner stopped")
-}
-
-func TestEmbeddedACPRemoteProviderRecoversSameRunnerIDAfterHandoff(t *testing.T) {
-	workspace := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:        "runner-1",
-			Connected: true,
-			Status:    runnerregistry.RunnerStatusIdle,
-			Workspace: protocol.Workspace{Path: workspace},
-		}}}))
-	}))
-	t.Cleanup(server.Close)
-	store, err := localstate.NewStoreAt(t.TempDir())
-	require.NoError(t, err)
-	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-1"})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
-	provider.reuseRunner("runner-1")
-
-	_, _, err = provider.WaitForRemoteChat(t.Context())
-	require.NoError(t, err)
-	metadata := lock.Metadata()
-	stoppedAt := time.Now().UTC()
-	metadata.StoppedAt = &stoppedAt
-	require.NoError(t, lock.WriteMetadata(metadata))
-	require.NoError(t, provider.refreshAdvertisedRunner())
-	provider.mu.Lock()
-	assert.False(t, provider.ready)
-	provider.mu.Unlock()
-
-	metadata.StoppedAt = nil
-	require.NoError(t, lock.WriteMetadata(metadata))
-	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	assert.Equal(t, "runner-1", runnerID)
-}
-
-func TestEmbeddedACPRemoteProviderCanonicalizesServerURL(t *testing.T) {
-	provider := newEmbeddedACPRemoteProvider(" HTTP://LOCALHOST:8080/ ", "", "", nil)
-	assert.Equal(t, "http://localhost:8080", provider.server)
-}
-
-func TestValidateRemoteACPFlagsRejectsLocalLoopOverrides(t *testing.T) {
-	cmd := &cobra.Command{}
-	for _, name := range []string{
-		"provider",
-		"model",
-		"max-tokens",
-		"max-turns",
-		"thinking-budget-tokens",
-		"weak-model",
-		"weak-model-max-tokens",
-		"weak-reasoning-effort",
-		"compact-ratio",
-		"anthropic-api-access",
-		"enable-openai-search",
-		"profile",
-	} {
-		cmd.Flags().String(name, "", "")
-	}
-	require.NoError(t, cmd.Flags().Set("model", "local-model"))
-	require.ErrorContains(t, validateRemoteACPFlags(cmd), "--model")
-
-	cmd = &cobra.Command{}
-	cmd.Flags().String("profile", "", "")
-	require.NoError(t, cmd.Flags().Set("profile", "server-profile"))
-	require.NoError(t, validateRemoteACPFlags(cmd))
-}
-
-func TestValidateReusedACPFlagsRejectsEmbeddedRunnerOverrides(t *testing.T) {
-	cmd := &cobra.Command{}
-	cmd.Flags().Bool("no-skills", false, "")
-	cmd.Flags().Bool("no-extensions", false, "")
-	cmd.Flags().Bool("enable-fs-search-tools", false, "")
-	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
-	require.ErrorContains(t, validateReusedACPFlags(cmd), "already-running workspace runner")
-}
-
-func TestRemoteACPCommandSourceUsesOnlyLockOwner(t *testing.T) {
-	runner := &runnerclient.Runner{}
-	assert.Same(t, runner, remoteACPCommandSource(runner, true))
-	assert.Nil(t, remoteACPCommandSource(runner, false))
-}
-
-func TestRemoteACPServiceOptionsKeepCLIRestrictionsAfterEnvironmentProfile(t *testing.T) {
-	viper.Reset()
-	t.Cleanup(viper.Reset)
-	viper.Set("environment_profiles", map[string]any{
-		"workspace": map[string]any{
-			"skills":                 map[string]any{"enabled": true},
-			"extensions":             map[string]any{"enabled": true},
-			"enable_fs_search_tools": false,
-		},
-	})
-
-	cmd := &cobra.Command{}
-	cmd.Flags().Bool("no-skills", false, "")
-	cmd.Flags().Bool("no-extensions", false, "")
-	cmd.Flags().Bool("enable-fs-search-tools", false, "")
-	require.NoError(t, cmd.Flags().Set("no-skills", "true"))
-	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
-	require.NoError(t, cmd.Flags().Set("enable-fs-search-tools", "true"))
-
-	options := remoteACPServiceOptions(cmd)
-	require.NotNil(t, options.ConfigLoader)
-	config, err := options.ConfigLoader("workspace")
-	require.NoError(t, err)
-	require.NotNil(t, config.Skills)
-	assert.False(t, config.Skills.Enabled)
-	assert.Equal(t, false, config.ExtensionSettings["enabled"])
-	assert.True(t, config.EnableFSSearchTools)
-}
-
-func TestResolveRemoteACPAuthTokensUsesEnvironmentOverrides(t *testing.T) {
-	t.Setenv(controlPlaneAuthTokenEnv, "api-secret")
-	t.Setenv(runnerAuthTokenEnv, "runner-secret")
-	cmd := &cobra.Command{}
-	cmd.Flags().String("auth-token", "", "")
+func remoteACPCommandForTest() *cobra.Command {
+	cmd := remoteRunCommandForTest()
+	cmd.Use = "acp"
 	cmd.Flags().String("runner-auth-token", "", "")
+	return cmd
+}
 
-	apiToken, runnerToken, err := resolveRemoteACPAuthTokens(cmd, defaultRunnerServer)
+func TestRemoteACPRejectsRunnerCredentialsAndOwnerConfig(t *testing.T) {
+	for _, test := range []struct {
+		flag, hint string
+	}{
+		{"--runner-auth-token=runner-only", "use --auth-token or 'kodelet auth login' to authenticate"},
+		{"--sysprompt=/client/prompt", "server or runner configuration"},
+		{"--allowed-domains-file=/client/domains", "server or runner configuration"},
+		{"--compact-ratio=0.5", "server or runner configuration"},
+		{"--enable-openai-search=false", "server or runner configuration"},
+	} {
+		cmd := remoteACPCommandForTest()
+		require.NoError(t, cmd.ParseFlags([]string{test.flag}))
+		require.ErrorContains(t, validateRemoteACPFlags(cmd), test.hint)
+	}
+}
 
+func TestRemoteACPUsesTypedOptionsWithoutLoadingClientConfig(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(base, []byte("no local state"), 0o600))
+	t.Setenv("KODELET_BASE_PATH", base)
+	t.Setenv("KODELET_SERVER", "https://unchanged.example")
+	cmd := remoteACPCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--auth-token=client-only", "--profile=daemon-profile", "--runner-profile=environment", "--model=daemon-model", "--allowed-tools=", "--no-tools=false", "--max-turns=0"}))
+	config, err := remoteACPSessionConfig(t.Context(), cmd, "https://daemon.example")
 	require.NoError(t, err)
-	assert.Equal(t, "api-secret", apiToken)
-	assert.Equal(t, "runner-secret", runnerToken)
-	assert.Equal(t, "api-secret", os.Getenv(controlPlaneAuthTokenEnv))
-	assert.Equal(t, "runner-secret", os.Getenv(runnerAuthTokenEnv))
+	assert.Equal(t, "daemon-profile", config.Profile)
+	assert.Equal(t, "environment", config.EnvironmentProfile)
+	assert.True(t, config.EnvironmentProfileExplicit)
+	assert.Equal(t, &llmtypes.ExecutionOptions{Model: new("daemon-model"), AllowedTools: new([]string{}), NoTools: new(false), MaxTurns: new(0)}, config.Options)
+	_, runnerID, err := config.Provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, runnerID, "default runner is selected for each new session, not substituted on resume")
+	assert.Equal(t, "https://unchanged.example", os.Getenv("KODELET_SERVER"), "ACP does not mutate the process environment")
 }
 
-type fakeEmbeddedRunner struct {
-	err     error
-	started chan struct{}
-	stopped chan struct{}
-	once    sync.Once
+func TestRemoteACPSelectsRegisteredRunnerAndUsesDiscoveryClient(t *testing.T) {
+	var targets []chat.WorkspaceTarget
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer client-token", r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/api/runners":
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"runners": []runnerregistry.Runner{{ID: "runner-123", DisplayName: "workstation", Connected: true, Status: runnerregistry.RunnerStatusIdle}}}))
+		case "/api/chat/slash-commands":
+			q := r.URL.Query()
+			var options *llmtypes.ExecutionOptions
+			if q.Has("options") {
+				require.NoError(t, json.Unmarshal([]byte(q.Get("options")), &options))
+			}
+			targets = append(targets, chat.WorkspaceTarget{RunnerID: q.Get("runnerId"), CWD: q.Get("cwd"), EnvironmentProfile: q.Get("environmentProfile"), ConversationID: q.Get("conversationId"), Options: options})
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/runner-only/repo", EnvironmentProfile: "gpu"}))
+		case "/api/chat/cwd-suggestions":
+			assert.Equal(t, "../oth", r.URL.Query().Get("q"))
+			assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only", Hints: []protocol.DirectoryHint{{Path: "/runner-only/other"}}}))
+		default:
+			http.Error(w, "unexpected endpoint", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	cmd := remoteACPCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--runner=workstation", "--auth-token=client-token"}))
+	config, err := remoteACPSessionConfig(t.Context(), cmd, server.URL)
+	require.NoError(t, err)
+	client, runnerID, err := config.Provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "runner-123", runnerID)
+	target := chat.WorkspaceTarget{RunnerID: runnerID, CWD: "~/repo with spaces", EnvironmentProfile: "gpu", Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true), AllowedTools: new([]string{})}}
+	result, err := client.DiscoverWorkspace(t.Context(), target)
+	require.NoError(t, err)
+	assert.Equal(t, "/runner-only/repo", result.CWD)
+	assert.Equal(t, []chat.WorkspaceTarget{target}, targets)
+	hints, err := client.(*chat.Client).WorkspaceCWDSuggestions(t.Context(), chat.WorkspaceTarget{ConversationID: "saved"}, "../oth")
+	require.NoError(t, err)
+	assert.Equal(t, "/runner-only/other", hints.Hints[0].Path)
 }
 
-func (r *fakeEmbeddedRunner) Run(ctx context.Context) error {
-	if r.started != nil {
-		r.once.Do(func() { close(r.started) })
+func TestRemoteACPDoesNotFallbackWhenDaemonIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer server.Close()
+	cmd := remoteACPCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--runner=missing", "--auth-token=client-token"}))
+	err := runRemoteACP(context.Background(), cmd, server.URL)
+	require.ErrorContains(t, err, "could not start the ACP connection")
+}
+
+func TestRemoteACPInitializesWithoutLocalRunnerOrDatabase(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(base, []byte("no local store"), 0o600))
+	t.Setenv("KODELET_BASE_PATH", base)
+	cmd := remoteACPCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--auth-token=client-token"}))
+	cmd.SetIn(strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1}}\n"))
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	require.NoError(t, runRemoteACP(t.Context(), cmd, "https://daemon.example"))
+	assert.Contains(t, output.String(), `"protocolVersion":1`)
+}
+
+func TestRemoteACPDiscoveryRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	client, err := chat.NewClient(server.URL, "client-token", "")
+	require.NoError(t, err)
+	for _, options := range []*llmtypes.ExecutionOptions{
+		{Model: new("model")},
+		{MaxTurns: new(0)},
+		{AllowedCommands: new([]string{""})},
+		{AllowedCommands: new([]string{strings.Repeat("x", 17*1024)})},
+	} {
+		_, err := client.DiscoverWorkspace(t.Context(), chat.WorkspaceTarget{RunnerID: "runner", Options: options})
+		require.Error(t, err)
 	}
-	if r.err != nil {
-		return r.err
-	}
-	<-ctx.Done()
-	if r.stopped != nil {
-		close(r.stopped)
-	}
-	return nil
+	_, err = client.DiscoverWorkspace(t.Context(), chat.WorkspaceTarget{})
+	require.Error(t, err)
+	assert.Zero(t, calls.Load())
 }
 
-func TestRunACPServerWithEmbeddedRunnerStopsRunnerWhenACPStops(t *testing.T) {
-	wantErr := errors.New("ACP input closed")
-	server := newFakeACPServerLifecycle()
-	server.runResult <- wantErr
-	runner := &fakeEmbeddedRunner{started: make(chan struct{}), stopped: make(chan struct{})}
-	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "", "", nil)
-
-	err := runACPServerWithEmbeddedRunner(t.Context(), server, runner, provider)
-	require.ErrorIs(t, err, wantErr)
-	assertClosed(t, runner.started)
-	assertClosed(t, runner.stopped)
-}
-
-func TestRunACPServerWithEmbeddedRunnerReturnsRunnerFailure(t *testing.T) {
-	wantErr := errors.New("runner authentication failed")
-	server := newFakeACPServerLifecycle()
-	runner := &fakeEmbeddedRunner{err: wantErr, started: make(chan struct{})}
-	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "", "", nil)
-
-	err := runACPServerWithEmbeddedRunner(t.Context(), server, runner, provider)
-	require.ErrorIs(t, err, wantErr)
-	assertClosed(t, runner.started)
-	assertClosed(t, server.shutdown)
+func TestRemoteACPProcessHasNoLocalExecutionOwnership(t *testing.T) {
+	for _, outcome := range []string{"complete", "detach", "cancel"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			requests := make(chan chat.ChatRequest, 1)
+			stops := make(chan string, 1)
+			var discoveryCalls atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer client-only", r.Header.Get("Authorization"))
+				switch r.URL.Path {
+				case "/api/runners":
+					assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{"runners": []runnerregistry.Runner{{ID: "registered", DisplayName: "workstation", Connected: true, Status: runnerregistry.RunnerStatusIdle}}}))
+				case "/api/chat/slash-commands":
+					discoveryCalls.Add(1)
+					assert.Equal(t, "registered", r.URL.Query().Get("runnerId"))
+					assert.Equal(t, "/runner-only/outside-client-workspace", r.URL.Query().Get("cwd"))
+					var options llmtypes.ExecutionOptions
+					assert.NoError(t, json.Unmarshal([]byte(r.URL.Query().Get("options")), &options))
+					assert.Equal(t, new(true), options.NoExtensions)
+					assert.Equal(t, new(true), options.NoSkills)
+					assert.Nil(t, options.Model)
+					assert.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceDiscoverResult{CWD: "/runner-only/outside-client-workspace", EnvironmentProfile: "environment"}))
+				case "/api/chat":
+					var request chat.ChatRequest
+					if err := json.NewDecoder(r.Body).Decode(&request); !assert.NoError(t, err) {
+						return
+					}
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					assert.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "conversation", ConversationID: request.ConversationID}))
+					w.(http.Flusher).Flush()
+					requests <- request
+					if outcome == "complete" {
+						assert.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "text-delta", Delta: "daemon-only answer"}))
+						assert.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"}))
+					} else {
+						select {
+						case <-r.Context().Done():
+						case <-ctx.Done():
+						}
+					}
+				default:
+					if strings.HasSuffix(r.URL.Path, "/stop") {
+						stops <- r.URL.Query().Get("turnId")
+						assert.NoError(t, json.NewEncoder(w).Encode(map[string]bool{"stopped": true}))
+						return
+					}
+					http.NotFound(w, r)
+				}
+			}))
+			defer daemon.Close()
+			root := t.TempDir()
+			invalidStore := filepath.Join(root, "no-client-database")
+			require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
+			// This child receives neither provider nor runner credentials. A file
+			// at the state path makes accidental local database/runner setup fail.
+			environment := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1", "KODELET_BASE_PATH=" + invalidStore, "KODELET_SERVER=" + daemon.URL}
+			process := daemonCLIProcess(ctx, t, root, environment, "acp", "--auth-token=client-only", "--runner=workstation", "--model=central-model", "--no-extensions", "--no-skills", "--allowed-tools=", "--no-tools=false", "--max-turns=0")
+			input, err := process.StdinPipe()
+			require.NoError(t, err)
+			output, err := process.StdoutPipe()
+			require.NoError(t, err)
+			var stderr bytes.Buffer
+			process.Stderr = &stderr
+			require.NoError(t, process.Start())
+			waited := false
+			defer func() {
+				if !waited {
+					cancel()
+					_ = process.Wait()
+				}
+				if t.Failed() {
+					t.Log(stderr.String())
+				}
+			}()
+			encoder, decoder := json.NewEncoder(input), json.NewDecoder(output)
+			readResponse := func(id int) map[string]any {
+				t.Helper()
+				for {
+					var response map[string]any
+					require.NoError(t, decoder.Decode(&response))
+					if response["id"] == float64(id) {
+						require.Nil(t, response["error"], "%v", response["error"])
+						return response["result"].(map[string]any)
+					}
+				}
+			}
+			require.NoError(t, encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": 1}}))
+			assert.Equal(t, float64(1), readResponse(1)["protocolVersion"])
+			require.NoError(t, encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": map[string]any{"cwd": "/runner-only/outside-client-workspace"}}))
+			sessionID := readResponse(2)["sessionId"].(string)
+			require.NoError(t, encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": map[string]any{"sessionId": sessionID, "prompt": []map[string]string{{"type": "text", "text": "work"}}}}))
+			var request chat.ChatRequest
+			select {
+			case request = <-requests:
+			case <-ctx.Done():
+				require.FailNow(t, "ACP did not submit a daemon request")
+			}
+			assert.Equal(t, sessionID, request.ConversationID)
+			assert.Equal(t, "registered", request.RunnerID)
+			assert.Equal(t, "/runner-only/outside-client-workspace", request.CWD)
+			assert.Equal(t, "environment", request.EnvironmentProfile)
+			require.NotNil(t, request.Options)
+			assert.Equal(t, new("central-model"), request.Options.Model)
+			assert.Equal(t, new([]string{}), request.Options.AllowedTools)
+			assert.Equal(t, new(false), request.Options.NoTools)
+			assert.Equal(t, new(0), request.Options.MaxTurns)
+			switch outcome {
+			case "cancel":
+				require.NoError(t, encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": sessionID}}))
+				assert.Equal(t, "cancelled", readResponse(3)["stopReason"])
+				select {
+				case turnID := <-stops:
+					assert.NotEmpty(t, turnID)
+					assert.Equal(t, request.TurnID, turnID)
+				case <-ctx.Done():
+					require.FailNow(t, "ACP did not send scoped cancellation")
+				}
+			case "complete":
+				assert.Equal(t, "end_turn", readResponse(3)["stopReason"])
+			}
+			require.NoError(t, input.Close())
+			err = process.Wait()
+			waited = true
+			require.NoError(t, err, "stderr: %s", stderr.String())
+			assert.Empty(t, stops, "EOF/detach must not issue an additional stop")
+			assert.GreaterOrEqual(t, discoveryCalls.Load(), int32(1))
+		})
+	}
 }

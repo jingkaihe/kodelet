@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -591,6 +592,58 @@ func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
 	)
 
 	assert.Empty(t, state.Tools(), "NoToolsMarker should block all later tool registration")
+}
+
+func TestExplicitExecutionToolSelection(t *testing.T) {
+	readTools := []string{"file_read", "grep_tool", "glob_tool"}
+	for _, mode := range []llmtypes.ToolMode{llmtypes.ToolModeFull, llmtypes.ToolModePatch} {
+		for _, withMainTools := range []bool{false, true} {
+			for _, tt := range []struct {
+				name   string
+				legacy []string
+				opts   *llmtypes.ExecutionOptions
+				want   []string
+			}{
+				{"read only", nil, &llmtypes.ExecutionOptions{AllowedTools: &readTools}, readTools},
+				{"explicit patch", nil, &llmtypes.ExecutionOptions{AllowedTools: new([]string{"apply_patch"})}, []string{"apply_patch"}},
+				{"legacy ceiling", []string{"file_read"}, &llmtypes.ExecutionOptions{AllowedTools: &readTools}, []string{"file_read"}},
+				{"legacy deny", []string{NoToolsMarker}, &llmtypes.ExecutionOptions{AllowedTools: &readTools}, nil},
+				{"empty", nil, &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}, nil},
+				{"no tools", nil, &llmtypes.ExecutionOptions{AllowedTools: &readTools, NoTools: new(true)}, nil},
+				{"disabled search", nil, &llmtypes.ExecutionOptions{AllowedTools: &readTools, EnableFSSearchTools: new(false)}, []string{"file_read"}},
+				{"unknown never defaults", nil, &llmtypes.ExecutionOptions{AllowedTools: new([]string{"not-a-tool"})}, nil},
+			} {
+				t.Run(string(mode)+"/"+tt.name+"/main="+strconv.FormatBool(withMainTools), func(t *testing.T) {
+					config := llmtypes.Config{ToolMode: mode, AllowedTools: tt.legacy, EnableFSSearchTools: true, ExecutionOptions: tt.opts}
+					opts := []BasicStateOption{WithLLMConfig(config)}
+					if withMainTools {
+						opts = append(opts, WithMainTools())
+					}
+					state := NewBasicState(t.Context(), opts...)
+					var names []string
+					for _, tool := range state.Tools() {
+						names = append(names, tool.Name())
+					}
+					assert.ElementsMatch(t, tt.want, names)
+					assert.Equal(t, mode, state.llmConfig.ToolMode)
+				})
+			}
+		}
+	}
+}
+
+func TestOmittedExecutionToolSelectionPreservesMode(t *testing.T) {
+	for _, options := range []*llmtypes.ExecutionOptions{nil, {}, {NoSkills: new(true)}} {
+		state := NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{ToolMode: llmtypes.ToolModePatch, ExecutionOptions: options}), WithMainTools())
+		var names []string
+		for _, tool := range state.Tools() {
+			names = append(names, tool.Name())
+		}
+		assert.Contains(t, names, "apply_patch")
+		for _, name := range []string{"file_read", "file_write", "file_edit", "grep_tool", "glob_tool"} {
+			assert.NotContains(t, names, name)
+		}
+	}
 }
 
 func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {

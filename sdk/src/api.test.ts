@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createToolContext, runWithHostRPCClient } from "./context.js";
+
 import {
   type BackgroundTaskLease,
   ConversationForkUnavailableError,
+  ExtensionHost,
+  type ExtensionProfileRegistration,
   type ExtensionToolData,
   HostRPCError,
   createTestHarness,
@@ -15,8 +19,146 @@ import {
   renderTemplate,
   z,
   type JSONSchema,
+  type InitializeParams,
   type ToolPresentation,
 } from "./index.js";
+
+test("remote profiles preserve ordinary configuration JSON and isolate input and manifest snapshots", () => {
+  const params: InitializeParams = {
+    protocolVersion: "test",
+    extension: { id: "installed-id" },
+    capabilities: { profiles: { remote: true } },
+  };
+  for (const provider of ["openai", "anthropic"] as const) {
+    const settings = {
+      platform: provider === "openai" ? "codex" : "copilot",
+      api_mode: "responses",
+      service_tier: "custom-tier",
+      websocket_mode: false,
+      base_url: "https://provider.invalid",
+      api_key: "test-key",
+      api_key_env_var: "PROVIDER_KEY",
+      account: "work",
+      future_setting: { values: [false, null, 1.5, "value"] },
+    };
+    const registration: ExtensionProfileRegistration = {
+      name: "search",
+      provider,
+      model: "gpt-5.6-luna",
+      weak_model: "weak-model",
+      reasoning_effort: "none",
+      max_tokens: 4096,
+      weak_model_max_tokens: 1024,
+      thinking_budget_tokens: 0,
+      allowed_reasoning_efforts: ["none", "low"],
+      compact_ratio: 0.7,
+      retry: { attempts: 2 },
+      aliases: { fast: "weak-model" },
+      allowed_tools: ["file_read"],
+      future_profile_setting: { values: [null, false, { value: 1.5 }] },
+      [provider]: settings,
+      ...(provider === "anthropic" ? { anthropic_api_access: "subscription", anthropic_account: "work" } : { hidden: true }),
+    };
+    const { name, hidden = false, ...options } = structuredClone(registration);
+    const expected = [{ name, options, hidden }];
+    const ext = new ExtensionHost();
+    assert.equal(ext.registerProfile(registration), name);
+    registration.model = "mutated-input";
+    registration.hidden = !hidden;
+    settings.future_setting.values.push("mutated-input");
+    const manifest = ext.initialize(params);
+    assert.deepEqual(JSON.parse(JSON.stringify(manifest)).profiles, expected);
+    assert.ok(manifest.profiles);
+    const snapshot = manifest.profiles[0];
+    snapshot.options.model = "mutated-output";
+    snapshot.hidden = !hidden;
+    (snapshot.options[provider] as typeof settings).future_setting.values.push("mutated-output");
+    manifest.profiles.pop();
+    assert.deepEqual(ext.initialize(params).profiles, expected);
+    const empty = {
+      provider,
+      model: "custom-model",
+      [provider]: {},
+    };
+    ext.registerProfile({ name: "empty", ...empty, hidden: false });
+    assert.deepEqual(ext.initialize(params).profiles, [...expected, { name: "empty", options: empty, hidden: false }]);
+  }
+});
+
+test("remote profiles reject invalid required fields, metadata and non-JSON configuration", () => {
+  const nonJSON = [undefined, () => {}, Symbol("setting"), 1n, NaN, Infinity, new Date()];
+  for (const [index, options] of [
+    { provider: undefined }, { model: undefined }, { provider: "unknown" }, { provider: null },
+    { model: "" }, { model: " \n" }, { model: "a\0b" }, { model: null }, { model: 3 },
+    { hidden: "false" }, { hidden: 0 }, { hidden: null },
+    ...nonJSON.map((value) => ({ future_profile_setting: value })),
+    ...nonJSON.map((value) => ({ openai: { future_setting: [value] } })),
+  ].entries()) {
+    const ext = new ExtensionHost();
+    assert.throws(() => ext.registerProfile({
+      name: "search",
+      provider: "openai",
+      model: "test-model",
+      ...options,
+    } as unknown as ExtensionProfileRegistration), `invalid configuration case ${index}`);
+    assert.equal("profiles" in ext.initialize({
+      protocolVersion: "test",
+      extension: { id: "test" },
+    }), false);
+  }
+});
+
+test("remote profiles validate names independently of extension metadata", () => {
+  const registration = {
+    name: "search",
+    provider: "openai",
+    model: "gpt-5.6-luna",
+  } as const;
+  const ext = new ExtensionHost();
+  for (const name of ["", "a/b", "a b", "-search", "_search", ".search", "écho", "search\n", "a\0b", "a".repeat(129)]) {
+    assert.throws(() => ext.registerProfile({ ...registration, name }), /slug/);
+  }
+  for (const name of ["default", "DEFAULT", "Default"]) {
+    assert.throws(() => ext.registerProfile({ ...registration, name }), /reserved/);
+  }
+  const profile = ext.registerProfile(registration);
+  assert.equal(profile, "search");
+  const params: InitializeParams = {
+    protocolVersion: "test",
+    extension: { id: "installed-id" },
+    capabilities: { profiles: { remote: true } },
+  };
+  const manifest = ext.initialize(params);
+  for (const name of ["code-search", "default", "renamed extension", undefined]) {
+    ext.setMetadata({ name });
+    const updated = ext.initialize(params);
+    assert.equal(updated.name, name ?? "installed-id");
+    assert.deepEqual(updated.profiles, manifest.profiles);
+    assert.equal(updated.profiles?.[0].name, profile);
+  }
+  assert.throws(() => ext.registerProfile({ ...registration, model: "different" }), /Duplicate/);
+  assert.deepEqual(ext.initialize(params).profiles, manifest.profiles);
+  for (const name of ["A", "A" + "a".repeat(127), "0" + "._-".repeat(42) + "z"]) {
+    assert.equal(ext.registerProfile({ ...registration, name }), name);
+  }
+});
+
+test("remote profiles require explicit host support without affecting ordinary extensions", () => {
+  for (const capabilities of [
+    undefined, {}, { profiles: null }, { profiles: {} }, { profiles: [] },
+    { profiles: { remote: false } }, { profiles: { remote: "true" } }, { profiles: { remote: 1 } },
+  ]) {
+    const params: InitializeParams = { protocolVersion: "test", extension: { id: "test" }, capabilities };
+    const ext = new ExtensionHost();
+    ext.registerProfile({
+      name: "search",
+      provider: "openai",
+      model: "gpt-5.6-luna",
+    });
+    assert.throws(() => ext.initialize(params), /update the Kodelet daemon and runner/);
+    assert.equal("profiles" in new ExtensionHost().initialize(params), false);
+  }
+});
 
 test("registers tools, commands, events and executes handlers", async () => {
   let shortcutContext: { conversationId?: string; cwd: string; profile?: string } | undefined;
@@ -383,6 +525,13 @@ test("preserves explicit zero timeout and merges event timeout options", async (
   );
 });
 
+test("tool context runner identity comes from initialize metadata", () => {
+  assert.equal(createToolContext(undefined).runnerId, undefined);
+  assert.equal(createToolContext({
+    protocolVersion: "test", extension: { id: "search", runnerId: "selected-runner" },
+  }).runnerId, "selected-runner");
+});
+
 test("agent.init can patch the system prompt and tool list", async () => {
   const extension = defineExtension((ext) => {
     ext.on("agent.init", (_event, ctx) => {
@@ -711,6 +860,145 @@ test("background task capability returns a local no-op lease and rejects unavail
   });
 });
 
+test("native UI capability refresh updates only its client and closes only the matching surface opening", async () => {
+  const clients = [0, 1].map(() => {
+    const handlers = new Set<(method: string, params: unknown) => void>();
+    const requests: Array<{ method: string; params?: unknown }> = [];
+    return {
+      handlers, requests,
+      async request(method: string, params?: unknown) {
+        requests.push({ method, params });
+        return { accepted: true };
+      },
+      onNotification(handler: (method: string, params: unknown) => void) {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
+      notify(method: string, params: unknown) {
+        for (const handler of handlers) handler(method, params);
+      },
+    };
+  });
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { widgets: false, surfaces: false, transcript: false } } };
+  const contexts = await Promise.all(clients.map((client) => runWithHostRPCClient(client, async () => createToolContext(init, { uiScopeId: "conversation" }))));
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /not available/);
+  clients[0].notify("kodelet.ui.capabilities", { widgets: true, surfaces: true, transcript: true });
+  await assert.rejects(contexts[1].ui.openSurface({ id: "canvas" }), /not available/);
+  assert.equal(init.capabilities.ui.surfaces, false, "notification must not mutate a shared initialization snapshot");
+  const surface = await contexts[0].ui.openSurface({ id: "canvas" });
+  const closed: string[] = [];
+  surface.onClose(() => closed.push("original"));
+  surface.onClose(() => closed.push("second subscriber"));
+  const unsubscribe = surface.onClose(() => closed.push("unsubscribed"));
+  unsubscribe();
+  unsubscribe();
+  const open = clients[0].requests.at(-1)?.params as { frame: { sequence: number } };
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "another", id: "canvas", openSequence: open.frame.sequence });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  assert.deepEqual(closed, []);
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  assert.deepEqual(closed, ["original", "second subscriber"]);
+  const unsubscribeLate = surface.onClose(() => closed.push("late subscriber"));
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber"]);
+  unsubscribeLate();
+  const previousRequests = clients[0].requests.length;
+  surface.update(["late frame"]);
+  await surface.close();
+  assert.equal(clients[0].requests.length, previousRequests, "revoked handles cannot issue frames or close a replacement");
+  const replacement = await contexts[0].ui.openSurface({ id: "canvas" });
+  replacement.onClose(() => closed.push("replacement"));
+  clients[0].notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: open.frame.sequence });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /already open/);
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber"]);
+  await replacement.close();
+  await replacement.close();
+  assert.deepEqual(closed, ["original", "second subscriber", "late subscriber", "replacement"]);
+  replacement.onClose(() => closed.push("late explicit subscriber"));
+  assert.equal(closed.at(-1), "late explicit subscriber");
+  clients[0].notify("kodelet.ui.capabilities", { widgets: true, surfaces: false, transcript: false });
+  await assert.rejects(contexts[0].ui.openSurface({ id: "canvas" }), /not available/);
+  await contexts[0].ui.setWidget("background", ["still active"]);
+  assert.equal(clients[0].requests.at(-1)?.method, "kodelet.ui.widget.set");
+});
+
+test("surface onClose notifies once when host closure races an explicit close", async () => {
+  let notify: (method: string, params: unknown) => void = () => undefined;
+  let finishClose: (value: unknown) => void = () => undefined;
+  let closeRequests = 0;
+  let openingSequence = 0;
+  const host = {
+    async request(method: string, params?: unknown): Promise<unknown> {
+      if (method === "kodelet.ui.surface.open") {
+        openingSequence ||= (params as { frame: { sequence: number } }).frame.sequence;
+      }
+      if (method === "kodelet.ui.surface.close" && closeRequests++ === 0) {
+        return new Promise((resolve) => { finishClose = resolve; });
+      }
+      return { accepted: true };
+    },
+    onNotification(handler: typeof notify) { notify = handler; return () => undefined; },
+  };
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { surfaces: true } } };
+  const context = await runWithHostRPCClient(host, async () => createToolContext(init, { uiScopeId: "conversation" }));
+  const surface = await context.ui.openSurface({ id: "canvas" });
+  let closed = 0;
+  let replacement = Promise.resolve(surface);
+  surface.onClose(() => {
+    closed++;
+    replacement = context.ui.openSurface({ id: "canvas" });
+  });
+  const closing = surface.close();
+  assert.equal(closed, 0);
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 1);
+  const reopened = await replacement;
+  let replacementClosed = 0;
+  reopened.onClose(() => replacementClosed++);
+  finishClose({ accepted: true });
+  await closing;
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 1);
+  assert.equal(replacementClosed, 0);
+  await assert.rejects(context.ui.openSurface({ id: "canvas" }), /already open/);
+  await reopened.close();
+  assert.equal(replacementClosed, 1);
+  assert.equal(closeRequests, 2);
+});
+
+test("native surface revoked while opening cannot activate a stale handle", async () => {
+  let notify: (method: string, params: unknown) => void = () => undefined;
+  let finishOpen: (value: unknown) => void = () => undefined;
+  let openingSequence = 0;
+  const host = {
+    async request(method: string, params?: unknown): Promise<unknown> {
+      if (openingSequence !== 0 || method !== "kodelet.ui.surface.open") {
+        return { accepted: true };
+      }
+      const request = params as { frame: { sequence: number } };
+      openingSequence = request.frame.sequence;
+      return new Promise((resolve) => {
+        finishOpen = resolve;
+        notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: request.frame.sequence });
+      });
+    },
+    onNotification(handler: typeof notify) { notify = handler; return () => undefined; },
+  };
+  const init = { protocolVersion: "2026-05-30", kodelet: { version: "test" }, extension: { id: "native", cwd: process.cwd(), dataDir: "", config: {} }, capabilities: { ui: { surfaces: true } } };
+  const context = await runWithHostRPCClient(host, async () => createToolContext(init, { uiScopeId: "conversation" }));
+  const opening = context.ui.openSurface({ id: "canvas" });
+  const replacement = await context.ui.openSurface({ id: "canvas" });
+  let closed = 0;
+  replacement.onClose(() => closed++);
+  finishOpen({ accepted: true });
+  await assert.rejects(opening, /closed.*while.*opening/);
+  notify("extension.ui.surface.closed", { scopeId: "conversation", id: "canvas", openSequence: openingSequence });
+  assert.equal(closed, 0);
+  await assert.rejects(context.ui.openSurface({ id: "canvas" }), /already open/);
+  await replacement.close();
+  assert.equal(closed, 1);
+});
+
 test("widgets use sequences and surfaces route host events", async () => {
   let openedSurface: any;
   const inputEvents: unknown[] = [];
@@ -873,6 +1161,7 @@ test("same surface ID is isolated by UI scope and routes scoped events", async (
 
 test("surface IDs reject overlapping ownership until the active handle closes", async () => {
   let openedSurface: any;
+  let closed = 0;
   let releaseFirstOpen: ((response: { accepted: boolean }) => void) | undefined;
   let releaseFirstClose: ((response: { accepted: boolean }) => void) | undefined;
   let openRequests = 0;
@@ -903,11 +1192,17 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
         releaseFirstOpen?.({ accepted: true });
         openedSurface = await firstOpen;
+        openedSurface.onClose(() => closed++);
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
         const firstClose = openedSurface.close();
+        const concurrentClose = openedSurface.close();
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
+        assert.equal(closed, 0, "callbacks wait for a successful close acknowledgement");
         releaseFirstClose?.({ accepted: true });
-        await firstClose;
+        await Promise.all([firstClose, concurrentClose]);
+        assert.equal(closed, 1);
+        await openedSurface.close();
+        assert.equal(closed, 1);
         openedSurface = await ctx.ui.openSurface({ id: "singleton" });
         return { action: "respond", response: "opened" };
       },
@@ -941,12 +1236,19 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
 
 test("failed surface close keeps ownership and can be retried", async () => {
   let closeAttempts = 0;
+  let closed = 0;
   const requests: Array<{ method: string; params?: unknown }> = [];
   const host = {
     async request(method: string, params?: unknown) {
       requests.push({ method, params });
-      if (method === "kodelet.ui.surface.close" && closeAttempts++ === 0) {
-        throw new Error("close failed");
+      if (method === "kodelet.ui.surface.close") {
+        closeAttempts++;
+        if (closeAttempts === 1) {
+          throw new Error("close failed");
+        }
+        if (closeAttempts === 2) {
+          return { accepted: false, reason: "close rejected" };
+        }
       }
       return { accepted: true };
     },
@@ -957,9 +1259,14 @@ test("failed surface close keeps ownership and can be retried", async () => {
       description: "Retry a failed close",
       async execute(_input, ctx) {
         const surface = await ctx.ui.openSurface({ id: "retryable" });
+        surface.onClose(() => closed++);
         await assert.rejects(surface.close(), /close failed/);
+        assert.equal(closed, 0);
+        await assert.rejects(surface.close(), /close rejected/);
+        assert.equal(closed, 0);
         await assert.rejects(ctx.ui.openSurface({ id: "retryable" }), /already open, opening, or closing/);
         await surface.close();
+        assert.equal(closed, 1);
         const replacement = await ctx.ui.openSurface({ id: "retryable" });
         await replacement.close();
         return { action: "respond", response: "closed" };
@@ -977,13 +1284,14 @@ test("failed surface close keeps ownership and can be retried", async () => {
     "kodelet.ui.surface.open",
     "kodelet.ui.surface.close",
     "kodelet.ui.surface.close",
+    "kodelet.ui.surface.close",
     "kodelet.ui.surface.open",
     "kodelet.ui.surface.close",
   ]);
   assert.deepEqual(requests.map((request) => {
     const params = request.params as { sequence?: number; frame?: { sequence?: number } };
     return params.sequence ?? params.frame?.sequence;
-  }), [1, 2, 3, 4, 5]);
+  }), [1, 2, 3, 4, 5, 6]);
 });
 
 test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {
@@ -1616,6 +1924,48 @@ test("runtime does not replay a persistent UI request after its handler complete
   assert.deepEqual(client.hostRequests[0]?.params, { scopeId: "conversation-once", message: "once" });
 });
 
+test("late reverse responses cannot cancel an active forward request with the same ID", { timeout: 5000 }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-duplex-ids-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const extensionFile = path.join(directory, "extension.ts");
+  await writeFile(extensionFile, `
+    import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+    let release;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    runExtension(defineExtension((ext) => {
+      ext.registerTool({ name: "driver", description: "Wait across a late response", inputSchema: z.object({}),
+        async execute() { await waiting; return "driver remained active"; }
+      });
+      ext.registerTool({ name: "orphan", description: "Leave unanswered reverse RPC", inputSchema: z.object({}),
+        execute(_, ctx) {
+          void ctx.ui.input("first").catch(() => undefined);
+          void ctx.ui.input("second").catch(() => undefined);
+          return "handler ended";
+        }
+      });
+      ext.registerTool({ name: "release", description: "Release the driver", inputSchema: z.object({}),
+        execute() { release(); return "released"; }
+      });
+    }));
+  `);
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => child.kill());
+  const client = new RpcTestClient(child.stdout, child.stdin, false);
+  await client.call("extension.initialize", { protocolVersion: "2026-05-30", extension: { id: "duplex", cwd: process.cwd(), dataDir: "" }, capabilities: { ui: { input: true } } });
+  const driver = client.beginCall("extension.tool.execute", { name: "driver", input: {} });
+  assert.equal(driver.id, 2);
+  const result = await client.call("extension.tool.execute", { name: "orphan", input: {} });
+  assert.deepEqual(result, { content: "handler ended" });
+  assert.equal(client.hostRequests.length, 2);
+  assert.equal(client.hostRequests[1].id, driver.id);
+  // Both pending reverse requests were removed when the orphan handler ended.
+  client.respondHostError(2, { code: -1, message: "late error" });
+  client.respondHostResult(2, { status: "submitted", value: "late result" });
+  const released = client.call("extension.tool.execute", { name: "release", input: {} });
+  assert.deepEqual(await driver.response, { content: "driver remained active" });
+  assert.deepEqual(await released, { content: "released" });
+});
+
 test("runtime cancellation aborts handlers and blocks late host RPC", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-cancel-rpc-")), "extension.ts");
   await writeFile(
@@ -1736,6 +2086,11 @@ class RpcTestClient {
 
   respondHostError(id: number | string, error: { code: number; message: string; data?: unknown }): void {
     const payload = JSON.stringify({ jsonrpc: "2.0", id, error });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
+  respondHostResult(id: number | string, result: unknown): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 

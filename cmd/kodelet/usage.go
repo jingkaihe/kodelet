@@ -5,17 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strconv"
 	"text/tabwriter"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/usage"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -55,14 +54,12 @@ Examples:
   kodelet usage --breakdown                  # Show breakdown by provider
   kodelet usage --breakdown --since 1w      # Provider breakdown for past week
 `,
-	Run: func(cmd *cobra.Command, _ []string) {
-		ctx := cmd.Context()
-		config := getUsageConfigFromFlags(cmd)
-		runUsageCmd(ctx, config)
-	},
+	Args: cobra.NoArgs,
+	RunE: runRemoteUsage,
 }
 
 func init() {
+	addRemoteAdministrationFlags(usageCmd)
 	defaults := NewUsageConfig()
 	usageCmd.Flags().String("since", defaults.Since, "Show usage since this time (e.g., 2025-06-01, 1d, 1w)")
 	usageCmd.Flags().String("until", defaults.Until, "Show usage until this time (e.g., 2025-06-01)")
@@ -99,10 +96,6 @@ func toUsageSummaries(summaries []convtypes.ConversationSummary) []usage.Convers
 		result[i] = s
 	}
 	return result
-}
-
-func parseTimeSpec(spec string) (time.Time, error) {
-	return parseTimeSpecWithClock(spec, time.Now)
 }
 
 func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error) {
@@ -147,39 +140,50 @@ type (
 	UsageStats = usage.Stats
 )
 
-func runUsageCmd(ctx context.Context, config *UsageConfig) {
+func runRemoteUsage(cmd *cobra.Command, _ []string) error {
+	config := getUsageConfigFromFlags(cmd)
+	if config.Format != "table" && config.Format != "json" {
+		return errors.New("--format must be table or json")
+	}
+	if config.Provider != "" && config.Provider != "anthropic" && config.Provider != "openai" && config.Provider != "openai-responses" {
+		return errors.New("--provider must be anthropic, openai or openai-responses")
+	}
 	var startTime, endTime time.Time
 	var err error
+	now := time.Now()
+	clock := func() time.Time { return now }
 
 	if config.Since != "" {
-		startTime, err = parseTimeSpec(config.Since)
+		startTime, err = parseTimeSpecWithClock(config.Since, clock)
 		if err != nil {
-			presenter.Error(err, "Invalid since time specification")
-			os.Exit(1)
+			return errors.Wrap(err, "invalid --since value")
 		}
 		startTime = startTime.Truncate(24 * time.Hour)
 	}
 
 	if config.Until != "" {
-		endTime, err = parseTimeSpec(config.Until)
+		endTime, err = parseTimeSpecWithClock(config.Until, clock)
 		if err != nil {
-			presenter.Error(err, "Invalid until time specification")
-			os.Exit(1)
+			return errors.Wrap(err, "invalid --until value")
 		}
 		endTime = endTime.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second)
 	}
 
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		presenter.Error(err, "Failed to initialize conversation store")
-		os.Exit(1)
+	if !startTime.IsZero() && !endTime.IsZero() && startTime.After(endTime) {
+		return errors.New("--since must not be later than --until")
 	}
-	defer store.Close()
+	client, err := remoteAdministrationClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 
-	options := convtypes.QueryOptions{
-		SortBy:    "updated",
-		SortOrder: "desc",
+	options := conversations.ListConversationsRequest{
+		SortBy:    "createdAt",
+		SortOrder: "asc",
 		Provider:  config.Provider,
+		Limit:     200,
 	}
 
 	if !startTime.IsZero() {
@@ -189,36 +193,45 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		options.EndDate = &endTime
 	}
 
-	result, err := store.Query(ctx, options)
-	if err != nil {
-		presenter.Error(err, "Failed to query conversations")
-		os.Exit(1)
+	var summaries []convtypes.ConversationSummary
+	for {
+		result, err := client.QueryConversations(ctx, options)
+		if err != nil {
+			return errors.Wrap(err, "could not load complete usage data; totals were not displayed")
+		}
+		summaries = append(summaries, result.Conversations...)
+		if !result.HasMore {
+			break
+		}
+		if len(result.Conversations) == 0 {
+			return errors.New("the server returned incomplete usage data; totals were not displayed")
+		}
+		options.Offset += len(result.Conversations)
 	}
 
-	summaries := result.ConversationSummaries
-
-	if len(summaries) == 0 {
-		presenter.Info("No conversations found in the specified time range.")
-		return
+	if len(summaries) == 0 && config.Format != "json" {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No conversations found in the specified time range.")
+		return err
 	}
 
 	if config.Breakdown {
 		dailyProviderStats := usage.CalculateDailyProviderBreakdownStats(toUsageSummaries(summaries), startTime, endTime)
 
 		if config.Format == "json" {
-			displayDailyProviderBreakdownJSON(os.Stdout, dailyProviderStats)
+			displayDailyProviderBreakdownJSON(cmd.OutOrStdout(), dailyProviderStats)
 		} else {
-			displayDailyProviderBreakdownTable(os.Stdout, dailyProviderStats)
+			displayDailyProviderBreakdownTable(cmd.OutOrStdout(), dailyProviderStats)
 		}
 	} else {
 		stats := usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 
 		if config.Format == "json" {
-			displayUsageJSON(os.Stdout, stats)
+			displayUsageJSON(cmd.OutOrStdout(), stats)
 		} else {
-			displayUsageTable(os.Stdout, stats)
+			displayUsageTable(cmd.OutOrStdout(), stats)
 		}
 	}
+	return nil
 }
 
 func displayUsageTable(w io.Writer, stats *UsageStats) {

@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.6.3-beta
+
+Made CLI, TUI, and ACP workflows daemon-backed, with automatic local server startup and `kodelet server` lifecycle commands.
+
+Added durable turn tracking, execution checkpoints, scoped cancellation, and conversation moves between runners.
+
+Separated daemon model profiles from runner environments, enforcing permission limits and per-conversation working directories.
+
+Added SDK child agents, execution presets, and authenticated inline extension callbacks with local UI handlers.
+
+Improved TUI startup, extension shortcuts and surfaces, runner-backed `Ctrl+R` history, and disconnect cleanup.
+
+**Breaking changes:** All runs persist; `--no-save` is removed and `--follow` requires runner or directory scope. Replace `serve --cwd` with `--runner-workspace` and `--disable-control-plane-workspace` with `--embedded-runner=false`. SDK sessions use typed execution options instead of temporary configuration files.
+
+**Upgrade:** Stop older processes, back up your Kodelet state directory, and upgrade clients, daemon, runners, and SDK together. Use `kodelet conversation move` to assign legacy history to a runner; never use older direct-write clients with the upgraded database.
+
 ## 0.5.47-beta
 
 Added GPT-6 Astra support and made it the default for OpenAI and Codex, with platform-specific pricing, reasoning, prompt caching, and original-detail image support.

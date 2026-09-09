@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -24,6 +25,7 @@ type ContextFile struct {
 
 // ToolDefinition is one serializable model-facing runner tool.
 type ToolDefinition struct {
+	ExtensionID string         `json:"extensionId,omitempty"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
@@ -40,6 +42,7 @@ type SkillDefinition struct {
 
 // EnvironmentConfig is the sanitized runner-owned configuration projection.
 type EnvironmentConfig struct {
+	Options             *llmtypes.ExecutionOptions  `json:"options,omitempty"`
 	AllowedCommands     []string                    `json:"allowedCommands,omitempty"`
 	ToolMode            llmtypes.ToolMode           `json:"toolMode,omitempty"`
 	EnableFSSearchTools bool                        `json:"enableFSSearchTools,omitempty"`
@@ -60,19 +63,23 @@ type EnvironmentCapabilities struct {
 
 // Manifest is the immutable wire snapshot returned by run.open.
 type Manifest struct {
-	ProtocolVersion     int                     `json:"protocolVersion"`
-	RunnerID            string                  `json:"runnerId"`
-	RunID               string                  `json:"runId"`
-	Generation          int64                   `json:"generation"`
-	Digest              string                  `json:"digest"`
-	WorkingDirectory    string                  `json:"workingDirectory"`
-	ContextFiles        []ContextFile           `json:"contextFiles"`
-	Tools               []ToolDefinition        `json:"tools"`
-	Skills              []SkillDefinition       `json:"skills"`
-	Commands            []slashcommands.Command `json:"commands"`
-	Config              EnvironmentConfig       `json:"config"`
-	ExtensionGeneration int64                   `json:"extensionGeneration"`
-	Capabilities        EnvironmentCapabilities `json:"capabilities"`
+	SessionExtensionIDs []string                      `json:"sessionExtensionIds,omitempty"`
+	Shortcuts           []protocol.ShortcutDescriptor `json:"shortcuts,omitempty"`
+	Profiles            []extensions.Profile          `json:"profiles,omitempty"`
+	ProtocolVersion     int                           `json:"protocolVersion"`
+	RunnerID            string                        `json:"runnerId"`
+	RunID               string                        `json:"runId"`
+	Generation          int64                         `json:"generation"`
+	Digest              string                        `json:"digest"`
+	WorkingDirectory    string                        `json:"workingDirectory"`
+	ContextFiles        []ContextFile                 `json:"contextFiles"`
+	Tools               []ToolDefinition              `json:"tools"`
+	Skills              []SkillDefinition             `json:"skills"`
+	Commands            []slashcommands.Command       `json:"commands"`
+	Config              EnvironmentConfig             `json:"config"`
+	ExtensionGeneration int64                         `json:"extensionGeneration"`
+	ExtensionCount      *int                          `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
+	Capabilities        EnvironmentCapabilities       `json:"capabilities"`
 }
 
 // ComputeManifestDigest returns a stable digest when callers provide deterministically ordered slices.
@@ -82,6 +89,12 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.Generation = 0
 	manifest.Digest = ""
 	manifest.ExtensionGeneration = 0
+	// Display-only metadata must not change execution or discovery identity.
+	manifest.ExtensionCount = nil
+	manifest.Shortcuts = append([]protocol.ShortcutDescriptor(nil), manifest.Shortcuts...)
+	for i := range manifest.Shortcuts {
+		manifest.Shortcuts[i].Generation = 0
+	}
 	// System information is pinned in each run.open response but excluded from
 	// the protocol-v1 resource digest for additive wire compatibility and to
 	// avoid date-only manifest churn.
@@ -92,6 +105,27 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	}
 	digest := sha256.Sum256(payload)
 	return fmt.Sprintf("sha256:%x", digest[:]), nil
+}
+
+// ComputeDiscoveryDigest fences workspace policy and command registrations, not
+// tool schemas that may depend on model identity or execution-only capabilities.
+// Actual tool and shortcut calls still use the pinned run's full manifest digest.
+func ComputeDiscoveryDigest(manifest Manifest) (string, error) {
+	manifest.Tools = nil
+	return ComputeManifestDigest(manifest)
+}
+
+// ShortcutExecuteParams fences a shortcut to a pinned run and registration.
+type ShortcutExecuteParams struct {
+	RunID    string                      `json:"runId"`
+	Digest   string                      `json:"digest"`
+	Shortcut protocol.ShortcutDescriptor `json:"shortcut"`
+}
+
+// ShortcutExecuteResult returns a host action, never starts a model turn.
+type ShortcutExecuteResult struct {
+	Matched bool                       `json:"matched"`
+	Result  *extensions.ShortcutResult `json:"result,omitempty"`
 }
 
 // CommandExecuteParams routes a workspace or extension slash command.
@@ -263,9 +297,10 @@ type UITranscriptAppendParams struct {
 }
 
 type UISurfaceOpenParams struct {
-	RunID   string                          `json:"runId"`
-	Owner   ExtensionOwner                  `json:"owner"`
-	Request extensions.UISurfaceOpenRequest `json:"request"`
+	RunID     string                          `json:"runId"`
+	Owner     ExtensionOwner                  `json:"owner"`
+	Request   extensions.UISurfaceOpenRequest `json:"request"`
+	Lifecycle uint64                          `json:"lifecycle"`
 }
 
 type UISurfaceFrameParams struct {
@@ -292,4 +327,18 @@ type UISurfaceResizeParams struct {
 	Owner     ExtensionOwner                         `json:"owner"`
 	Lifecycle uint64                                 `json:"lifecycle"`
 	Request   extensions.UISurfaceResizeNotification `json:"request"`
+}
+
+// UISurfaceInvalidateParams revokes one native surface without ending its worker.
+type UISurfaceInvalidateParams struct {
+	RunID     string         `json:"runId"`
+	Owner     ExtensionOwner `json:"owner"`
+	ScopeID   string         `json:"scopeId"`
+	ID        string         `json:"id"`
+	Lifecycle uint64         `json:"lifecycle"`
+}
+
+// UIExtensionCleanupParams revokes UI owned by one failed/closed process.
+type UIExtensionCleanupParams struct {
+	Owner ExtensionOwner `json:"owner"`
 }
