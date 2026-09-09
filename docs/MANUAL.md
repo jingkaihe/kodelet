@@ -101,6 +101,7 @@ kodelet chat                    # start or reuse the local server, then open cha
 kodelet run "inspect this repo" # use the same server from another terminal
 kodelet server start            # explicitly start or reuse the local server
 kodelet server status           # check server readiness
+kodelet server url --open       # open the Web UI (omit --open to print the address)
 kodelet server logs             # show recent logs
 kodelet server stop             # refuse if agent runs are active
 kodelet server restart          # apply configuration changes or a new version
@@ -112,7 +113,7 @@ The server keeps running after clients exit, but does not start at login or rebo
 
 Configure `serve` in `~/.kodelet/config.yaml`, then run `kodelet server restart` to apply changes. The server uses the environment it started with, not later shell changes. Stop it before switching `KODELET_CONFIG_FILE` or configuration mode. Independent deployments need separate `KODELET_BASE_PATH` directories.
 
-Automatic startup requires loopback binding, token authentication, and an enabled built-in runner. The default port is 8080; `serve.port: 0` chooses an available port. For public/OIDC or external-runner-only deployments, start `kodelet serve` explicitly and connect with `--server`. Saved OIDC sign-ins and OIDC-configured servers remain connect-only.
+Automatic startup requires loopback binding, token authentication, and an enabled built-in runner. The server binds an available port by default; set `serve.port` to pin one. For public/OIDC or external-runner-only deployments, start `kodelet serve` explicitly and connect with `--server`. Saved OIDC sign-ins and OIDC-configured servers remain connect-only.
 
 ### One-shot Mode
 
@@ -263,7 +264,7 @@ Start the browser-based chat UI with:
 kodelet serve
 ```
 
-By default, `kodelet serve` uses token authentication and generates separate browser/API and runner tokens when they are not supplied. Opening the printed `?token=...` URL stores the browser token in an HTTP-only cookie. To use a stable browser/API token:
+By default, `kodelet serve` uses token authentication and generates separate browser/API and runner tokens when they are not supplied. A generated browser token is not printed for loopback servers; run `kodelet server url [--open]` to get the `?token=...` address, which stores the token in an HTTP-only cookie. Non-loopback servers still print it at startup. To use a stable browser/API token:
 
 ```bash
 kodelet serve --auth-token "your-secret-token"

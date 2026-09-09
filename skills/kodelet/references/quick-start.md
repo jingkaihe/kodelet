@@ -79,13 +79,14 @@ Chat starts or reuses the local server unless one is explicitly selected. Direct
 ```bash
 kodelet server start
 kodelet server status
+kodelet server url --open
 kodelet server logs
 kodelet server stop             # refuses while agent runs are active
 kodelet server restart         # reload trusted configuration after changes
 kodelet server stop --force    # cancel active runs and stop
 ```
 
-Connection state and the local API credential live under `~/.kodelet/server/` (or `$KODELET_BASE_PATH/server/`), separately from user-edited configuration. The directory is private (`0700`) and files are owner-only (`0600`). Managed startup requires loopback token authentication and an enabled embedded runner; public/OIDC or external-runner-only deployments use explicit `serve` and `--server`. The default port is 8080; `serve.port: 0` selects an available port and publishes it for discovery. The managed runner defaults to the home directory for stable identity, while new same-host conversations use the client's current directory. Trusted configuration/environment is inherited at startup and remains pinned until restart. Foreground `kodelet serve` remains available and operator-owned. Detachment is not a reboot/login service or automatic crash supervisor.
+Connection state and the local API credential live under `~/.kodelet/server/` (or `$KODELET_BASE_PATH/server/`), separately from user-edited configuration. The directory is private (`0700`) and files are owner-only (`0600`). Managed startup requires loopback token authentication and an enabled embedded runner; public/OIDC or external-runner-only deployments use explicit `serve` and `--server`. The server binds an available port by default and publishes it for discovery; set `serve.port` to pin one. `kodelet server url [--open]` returns the Web UI address with its token. The managed runner defaults to the home directory for stable identity, while new same-host conversations use the client's current directory. Trusted configuration/environment is inherited at startup and remains pinned until restart. Foreground `kodelet serve` remains available and operator-owned. Detachment is not a reboot/login service or automatic crash supervisor.
 
 ### Web UI
 

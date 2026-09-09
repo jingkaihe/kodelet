@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +23,15 @@ func init() {
 	}
 	start := &cobra.Command{Use: "start", Short: "Start or reuse the local background server", Args: cobra.NoArgs, RunE: startLocalServerCommand}
 	status := &cobra.Command{Use: "status", Short: "Show local server status", Args: cobra.NoArgs, RunE: localServerStatusCommand}
+	urlCommand := &cobra.Command{
+		Use:   "url",
+		Short: "Print the Web UI address for the local server",
+		Long:  "Print the local server's Web UI address, including the local access token. Starts the background server when one is not already running.",
+		Args:  cobra.NoArgs,
+		RunE:  localServerURLCommand,
+	}
+	urlCommand.Flags().Bool("open", false, "Open the address in a browser instead of printing it")
+	urlCommand.Flags().Bool("no-token", false, "Print the address without the access token")
 	stop := &cobra.Command{Use: "stop", Short: "Stop the local background server", Args: cobra.NoArgs, RunE: stopLocalServerCommand}
 	restart := &cobra.Command{Use: "restart", Short: "Restart the local server to apply configuration changes", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if err := stopLocalServerCommand(cmd, args); err != nil {
@@ -53,7 +64,7 @@ func init() {
 		_, err = io.Copy(cmd.OutOrStdout(), file)
 		return err
 	}}
-	server.AddCommand(start, status, stop, restart, logs)
+	server.AddCommand(start, status, urlCommand, stop, restart, logs)
 	rootCmd.AddCommand(server)
 }
 
@@ -91,6 +102,42 @@ func localServerStatusCommand(cmd *cobra.Command, _ []string) error {
 	if status.EmbeddedRunner.Error != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "Runner error: %s\n", status.EmbeddedRunner.Error)
 	}
+	return nil
+}
+
+// localServerOpenBrowser is a variable so tests can observe browser launches.
+var localServerOpenBrowser = osutil.OpenBrowser
+
+func localServerURLCommand(cmd *cobra.Command, _ []string) error {
+	open, _ := cmd.Flags().GetBool("open")
+	noToken, _ := cmd.Flags().GetBool("no-token")
+	connection, err := ensureLocalServer(cmd.Context(), cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	target := connection.URL
+	if !noToken {
+		directory, err := localServerDirectory()
+		if err != nil {
+			return err
+		}
+		token, err := os.ReadFile(filepath.Join(directory, "client-token"))
+		if err != nil {
+			return errors.Wrap(err, "failed to read the local server access token")
+		}
+		target = serveURLWithToken(connection.URL, strings.TrimSpace(string(token)))
+	}
+	if !open {
+		fmt.Fprintln(cmd.OutOrStdout(), target)
+		return nil
+	}
+	if err := localServerOpenBrowser(target); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Could not open the browser automatically: %v\n", err)
+		fmt.Fprintln(cmd.OutOrStdout(), target)
+		return nil
+	}
+	// Keep the credential out of stdout once the browser already has it.
+	fmt.Fprintf(cmd.OutOrStdout(), "Opened %s\n", connection.URL)
 	return nil
 }
 

@@ -210,6 +210,13 @@ func TestValidateServeConfig(t *testing.T) {
 	}
 }
 
+func TestNewServeConfigBindsEphemeralPort(t *testing.T) {
+	config := NewServeConfig()
+	assert.Equal(t, "localhost", config.Host)
+	assert.Equal(t, 0, config.Port)
+	assert.NoError(t, validateServeConfig(config))
+}
+
 func TestServeBaseURL(t *testing.T) {
 	assert.Equal(t, "http://localhost:8080", serveBaseURL("localhost", 8080))
 	assert.Equal(t, "http://localhost:8080", serveBaseURL("0.0.0.0", 8080))

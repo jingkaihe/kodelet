@@ -92,7 +92,7 @@ type trustedServeOIDCConfig struct {
 func NewServeConfig() *ServeConfig {
 	return &ServeConfig{
 		Host:           "localhost",
-		Port:           8080,
+		Port:           0,
 		CWD:            "",
 		CompactRatio:   llmtypes.DefaultCompactRatio,
 		EmbeddedRunner: true,
@@ -106,7 +106,9 @@ func NewServeConfig() *ServeConfig {
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the Kodelet server",
-	Long: `Start the Kodelet server and Web UI at http://localhost:8080. CLI commands and editor integrations connect to this server.
+	Long: `Start the Kodelet server and Web UI on a loopback address. CLI commands and editor integrations connect to this server.
+
+The server binds an available port by default; pass --port to pin one. Run 'kodelet server url' to print (or open) the Web UI address for the local server.
 
 A built-in runner provides file access and tools on this machine. Its default workspace is the startup directory; use --runner-workspace to choose another directory. Use --embedded-runner=false if you manage runners separately.
 
@@ -124,7 +126,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().Bool("managed", false, "Internal: run the managed local server")
 	_ = cmd.Flags().MarkHidden("managed")
 	cmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
-	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (0 selects an available port)")
+	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (default: 0, an available port)")
 	cmd.Flags().String("cwd", defaults.CWD, "Removed; use --runner-workspace for the embedded runner")
 	cmd.Flags().String("web-auth-mode", string(defaults.WebAuthMode), "Web authentication mode: token, oidc, or none (default: token)")
 	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, or none (default: token)")
@@ -640,7 +642,8 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
 	// Foreground loopback token servers are discoverable too, but remain
 	// operator-owned: local lifecycle commands may not stop/restart them.
-	if controlplaneurl.IsLoopbackHostname(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken {
+	discoverable := controlplaneurl.IsLoopbackHostname(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken
+	if discoverable {
 		if err := publishLocalServer(directory, baseURL, serverConfig.AuthToken, serverConfig.InstanceID, config.Managed); err != nil {
 			return errors.Wrap(err, "failed to publish local server connection")
 		}
@@ -657,9 +660,17 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 	switch serverConfig.WebAuthMode {
 	case controlplane.WebAuthModeToken:
 		presenter.Info("Web UI authentication mode: token")
-		if webTokenConfigured {
+		switch {
+		case webTokenConfigured:
 			presenter.Info("Authentication token: configured (value not displayed)")
-		} else {
+		case discoverable:
+			// Generated credentials stay in owner-only local state instead of
+			// scrolling through logs, terminal scrollback, and log shippers.
+			presenter.Info(fmt.Sprintf("Authentication token: generated (stored in %s)", filepath.Join(directory, "client-token")))
+			presenter.Info("Open the Web UI with: kodelet server url --open")
+		default:
+			// Non-loopback binds publish no local state, so the operator needs
+			// the generated credential here to reach the server at all.
 			presenter.Info(fmt.Sprintf("Authentication token: %s", serverConfig.AuthToken))
 			presenter.Info(fmt.Sprintf("Open this URL: %s", serveURLWithToken(baseURL, serverConfig.AuthToken)))
 		}

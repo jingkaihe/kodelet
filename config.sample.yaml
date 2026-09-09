@@ -25,6 +25,7 @@ log_format: "json"
 # Restart the server after changing defaults (`kodelet server restart` locally).
 # serve:
 #   host: "0.0.0.0"
+#   # Omit or set 0 to bind an available port.
 #   port: 8080
 #   # Set false to use only separately managed runners.
 #   embedded_runner: true
