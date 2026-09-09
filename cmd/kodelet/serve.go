@@ -664,13 +664,10 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 		case webTokenConfigured:
 			presenter.Info("Authentication token: configured (value not displayed)")
 		case discoverable:
-			// Generated credentials stay in owner-only local state instead of
-			// scrolling through logs, terminal scrollback, and log shippers.
 			presenter.Info(fmt.Sprintf("Authentication token: generated (stored in %s)", filepath.Join(directory, "client-token")))
 			presenter.Info("Open the Web UI with: kodelet server url --open")
 		default:
-			// Non-loopback binds publish no local state, so the operator needs
-			// the generated credential here to reach the server at all.
+			// Non-loopback binds publish no local state to discover.
 			presenter.Info(fmt.Sprintf("Authentication token: %s", serverConfig.AuthToken))
 			presenter.Info(fmt.Sprintf("Open this URL: %s", serveURLWithToken(baseURL, serverConfig.AuthToken)))
 		}

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -62,26 +63,48 @@ func IsBinaryFile(filePath string) bool {
 	return false
 }
 
-// OpenBrowser attempts to open the default browser with the given URL
-func OpenBrowser(url string) error {
-	var cmd string
-	var args []string
-
+var browserCommand = func(url string) (*exec.Cmd, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = "open"
-		args = []string{url}
+		return exec.Command("open", url), nil
 	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
+		return exec.Command("xdg-open", url), nil
 	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", url}
+		return exec.Command("cmd", "/c", "start", url), nil
 	default:
-		return errors.New("unsupported operating system")
+		return nil, errors.New("unsupported operating system")
 	}
+}
 
-	return exec.Command(cmd, args...).Start()
+// OpenBrowser attempts to open the default browser with the given URL
+func OpenBrowser(url string) error {
+	cmd, err := browserCommand(url)
+	if err != nil {
+		return err
+	}
+	return cmd.Start()
+}
+
+// OpenBrowserWithin opens the default browser, waiting up to grace for the
+// launcher to exit. A launcher still running at grace is unconfirmed, not
+// successful: xdg-open exits nonzero when no browser is available.
+func OpenBrowserWithin(url string, grace time.Duration) (confirmed bool, err error) {
+	cmd, err := browserCommand(url)
+	if err != nil {
+		return false, err
+	}
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err == nil, err
+	case <-time.After(grace):
+		go func() { <-done }()
+		return false, nil
+	}
 }
 
 // IsGHCLIInstalled checks if GitHub CLI (gh) is installed

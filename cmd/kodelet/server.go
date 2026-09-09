@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
@@ -105,38 +106,61 @@ func localServerStatusCommand(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// localServerOpenBrowser is a variable so tests can observe browser launches.
-var localServerOpenBrowser = osutil.OpenBrowser
+var localServerOpenBrowser = func(url string) (bool, error) {
+	return osutil.OpenBrowserWithin(url, localServerBrowserGrace)
+}
+
+const localServerBrowserGrace = 3 * time.Second
+
+// discoverLocalServer reuses any reachable server, including one without an
+// embedded runner, and otherwise falls back to managed startup.
+func discoverLocalServer(ctx context.Context, output io.Writer) (localServerConnection, string, error) {
+	directory, err := localServerDirectory()
+	if err != nil {
+		return localServerConnection{}, "", err
+	}
+	if connection, err := readLocalServerConnection(directory); err == nil {
+		if token, err := os.ReadFile(filepath.Join(directory, "client-token")); err == nil {
+			status, probeErr := probeLocalServer(ctx, connection, string(token))
+			if probeErr == nil && status.APIReady {
+				return connection, strings.TrimSpace(string(token)), nil
+			}
+		}
+	}
+	connection, err := ensureLocalServer(ctx, output)
+	if err != nil {
+		return localServerConnection{}, "", err
+	}
+	token, err := os.ReadFile(filepath.Join(directory, "client-token"))
+	if err != nil {
+		return connection, "", errors.Wrap(err, "failed to read the local server access token")
+	}
+	return connection, strings.TrimSpace(string(token)), nil
+}
 
 func localServerURLCommand(cmd *cobra.Command, _ []string) error {
 	open, _ := cmd.Flags().GetBool("open")
 	noToken, _ := cmd.Flags().GetBool("no-token")
-	connection, err := ensureLocalServer(cmd.Context(), cmd.ErrOrStderr())
+	connection, token, err := discoverLocalServer(cmd.Context(), cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	target := connection.URL
 	if !noToken {
-		directory, err := localServerDirectory()
-		if err != nil {
-			return err
-		}
-		token, err := os.ReadFile(filepath.Join(directory, "client-token"))
-		if err != nil {
-			return errors.Wrap(err, "failed to read the local server access token")
-		}
-		target = serveURLWithToken(connection.URL, strings.TrimSpace(string(token)))
+		target = serveURLWithToken(connection.URL, token)
 	}
 	if !open {
 		fmt.Fprintln(cmd.OutOrStdout(), target)
 		return nil
 	}
-	if err := localServerOpenBrowser(target); err != nil {
+	confirmed, err := localServerOpenBrowser(target)
+	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Could not open the browser automatically: %v\n", err)
+	}
+	if !confirmed {
 		fmt.Fprintln(cmd.OutOrStdout(), target)
 		return nil
 	}
-	// Keep the credential out of stdout once the browser already has it.
 	fmt.Fprintf(cmd.OutOrStdout(), "Opened %s\n", connection.URL)
 	return nil
 }

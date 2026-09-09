@@ -80,4 +80,4 @@ USER 65532:65532
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/kodelet", "serve", "--host=0.0.0.0", "--embedded-runner=false"]
+ENTRYPOINT ["/kodelet", "serve", "--host=0.0.0.0", "--port=8080", "--embedded-runner=false"]

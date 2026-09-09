@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// localServerURLTestCommand mirrors the flags registered on `kodelet server url`.
 func localServerURLTestCommand() (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	command := &cobra.Command{Use: "url", RunE: localServerURLCommand}
 	command.Flags().Bool("open", false, "")
@@ -27,12 +26,17 @@ func localServerURLTestCommand() (*cobra.Command, *bytes.Buffer, *bytes.Buffer) 
 
 func publishHealthyLocalServer(t *testing.T, directory string) string {
 	t.Helper()
+	return publishLocalServerWithRunner(t, directory, controlplane.EmbeddedRunnerStatus{Enabled: true, Ready: true})
+}
+
+func publishLocalServerWithRunner(t *testing.T, directory string, runner controlplane.EmbeddedRunnerStatus) string {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer private-token", r.Header.Get("Authorization"))
 		_ = json.NewEncoder(w).Encode(localServerStatus{
 			APIReady:       true,
 			InstanceID:     "same",
-			EmbeddedRunner: controlplane.EmbeddedRunnerStatus{Enabled: true, Ready: true},
+			EmbeddedRunner: runner,
 		})
 	}))
 	t.Cleanup(server.Close)
@@ -55,6 +59,26 @@ func TestLocalServerURLCommandPrintsTokenURL(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
+func TestLocalServerURLCommandWorksWithoutEmbeddedRunner(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		runner controlplane.EmbeddedRunnerStatus
+	}{
+		{"disabled", controlplane.EmbeddedRunnerStatus{Enabled: false}},
+		{"failed", controlplane.EmbeddedRunnerStatus{Enabled: true, Error: "workspace locked"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			endpoint := publishLocalServerWithRunner(t, directory, test.runner)
+
+			command, stdout, _ := localServerURLTestCommand()
+			require.NoError(t, command.ExecuteContext(t.Context()))
+			assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
+		})
+	}
+}
+
 func TestLocalServerURLCommandOmitsTokenOnRequest(t *testing.T) {
 	directory := localServerTestState(t)
 	forbidLocalServerSpawn(t)
@@ -74,9 +98,9 @@ func TestLocalServerURLCommandOpensBrowserWithoutLeakingToken(t *testing.T) {
 	previous := localServerOpenBrowser
 	t.Cleanup(func() { localServerOpenBrowser = previous })
 	var opened string
-	localServerOpenBrowser = func(target string) error {
+	localServerOpenBrowser = func(target string) (bool, error) {
 		opened = target
-		return nil
+		return true, nil
 	}
 
 	command, stdout, _ := localServerURLTestCommand()
@@ -94,11 +118,27 @@ func TestLocalServerURLCommandFallsBackWhenBrowserFails(t *testing.T) {
 
 	previous := localServerOpenBrowser
 	t.Cleanup(func() { localServerOpenBrowser = previous })
-	localServerOpenBrowser = func(string) error { return errors.New("no browser") }
+	localServerOpenBrowser = func(string) (bool, error) { return false, errors.New("no browser") }
 
 	command, stdout, stderr := localServerURLTestCommand()
 	require.NoError(t, command.Flags().Set("open", "true"))
 	require.NoError(t, command.ExecuteContext(t.Context()))
 	assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
 	assert.Contains(t, stderr.String(), "Could not open the browser automatically")
+}
+
+func TestLocalServerURLCommandPrintsURLWhenLaunchIsUnconfirmed(t *testing.T) {
+	directory := localServerTestState(t)
+	forbidLocalServerSpawn(t)
+	endpoint := publishHealthyLocalServer(t, directory)
+
+	previous := localServerOpenBrowser
+	t.Cleanup(func() { localServerOpenBrowser = previous })
+	localServerOpenBrowser = func(string) (bool, error) { return false, nil }
+
+	command, stdout, stderr := localServerURLTestCommand()
+	require.NoError(t, command.Flags().Set("open", "true"))
+	require.NoError(t, command.ExecuteContext(t.Context()))
+	assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
+	assert.Empty(t, stderr.String())
 }
