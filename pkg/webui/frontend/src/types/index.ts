@@ -322,6 +322,7 @@ export interface ChatProfileOption {
   name: string;
   scope: string;
   active?: boolean;
+  hidden?: boolean;
 }
 
 export interface SlashCommandOption {

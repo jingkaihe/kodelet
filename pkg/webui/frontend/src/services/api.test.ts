@@ -764,6 +764,20 @@ describe("ApiService", () => {
 			);
 			expect(result.reasoningEffortOptions).toEqual(["medium", "high", "max"]);
 		});
+
+		it.each([undefined, "code-search"])("targets runner profile discovery (%s)", async (profile) => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ profiles: [] }),
+			});
+
+			await apiService.getChatSettings(profile, "runner/one");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				`/api/chat/settings?${profile ? "profile=code-search&" : ""}runnerId=runner%2Fone`,
+				expect.any(Object),
+			);
+		});
 	});
 
 	describe.each([

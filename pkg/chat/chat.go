@@ -989,11 +989,25 @@ func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, reque
 	return config, err
 }
 
+type profileResolverContextKey struct{}
+
+// ContextWithProfileResolver installs the daemon's caller/runner-bound profile lookup.
+func ContextWithProfileResolver(ctx context.Context, resolve func(string, string) (llmtypes.Config, error)) context.Context {
+	return context.WithValue(ctx, profileResolverContextKey{}, resolve)
+}
+
+func resolveRemoteNewConversationConfig(ctx context.Context, profile, effort string) (llmtypes.Config, error) {
+	if resolve, ok := ctx.Value(profileResolverContextKey{}).(func(string, string) (llmtypes.Config, error)); ok {
+		return resolve(profile, effort)
+	}
+	return ResolveConfigForNewConversation(profile, effort)
+}
+
 // ResolveRemoteConfigWithReasoningAndEnvironmentProfile resolves central model policy and the independently locked runner profile.
 func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedEnvironmentProfile string) (llmtypes.Config, string, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		config, err := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, err := resolveRemoteNewConversationConfig(ctx, requestedProfile, requestedReasoningEffort)
 		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), err
 	}
@@ -1011,11 +1025,11 @@ func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, 
 		if !errors.Is(err, convtypes.ErrConversationNotFound) {
 			return llmtypes.Config{}, "", errors.Wrap(err, "failed to load remote conversation")
 		}
-		config, configErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, configErr := resolveRemoteNewConversationConfig(ctx, requestedProfile, requestedReasoningEffort)
 		config.WorkingDirectory = ""
 		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), configErr
 	}
-	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
+	config, err := resolveConfigForExistingConversation(ctx, record, requestedReasoningEffort)
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}
@@ -1141,6 +1155,10 @@ func ResolveConfigForNewConversation(requestedProfile string, requestedReasoning
 }
 
 func ResolveConfigForExistingConversation(record *conversationservice.GetConversationResponse, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
+	return resolveConfigForExistingConversation(context.Background(), record, requestedReasoningEfforts...)
+}
+
+func resolveConfigForExistingConversation(ctx context.Context, record *conversationservice.GetConversationResponse, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
 	requestedReasoningEffort := ""
 	if len(requestedReasoningEfforts) > 0 {
 		requestedReasoningEffort = requestedReasoningEfforts[0]
@@ -1167,7 +1185,9 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 
 			profileName := NormalizeRequestedProfile(snapshot.Profile)
 			var config llmtypes.Config
-			if profileName != "" && llm.HasConfiguredProfile(profileName) {
+			if snapshot.ExtensionProfile {
+				config, err = extensionSnapshotBase(ctx, snapshot)
+			} else if profileName != "" && llm.HasConfiguredProfile(profileName) {
 				config, err = llm.GetConfigFromViperWithProfile(profileName)
 			} else {
 				config, err = llm.GetConfigFromViperWithoutProfile()

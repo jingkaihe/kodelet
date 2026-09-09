@@ -80,6 +80,8 @@ type Server struct {
 	runnerRegistry        *runnerregistry.Registry
 	sessionExtensions     map[string]*sessionExtensionAttachment
 	sessionExtensionsMu   sync.Mutex
+	extensionProfiles     map[extensionProfileKey]registeredExtensionProfile
+	extensionProfilesMu   sync.RWMutex
 	turns                 *turnStore
 	authStore             *authStore
 	oidcFlow              OIDCFlow
@@ -808,6 +810,9 @@ func (s *Server) chatExecutionContext(requestCtx context.Context) context.Contex
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
+	if principal, ok := principalFromContext(requestCtx); ok {
+		baseCtx = contextWithPrincipal(baseCtx, principal)
+	}
 
 	return logger.WithLogger(baseCtx, logger.G(requestCtx))
 }
@@ -1229,6 +1234,7 @@ type ChatProfileOption struct {
 	Name   string `json:"name"`
 	Scope  string `json:"scope"`
 	Active bool   `json:"active,omitempty"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 // ChatSettingsResponse contains new-conversation settings for the web chat composer.
@@ -1402,6 +1408,9 @@ func getWebUIProfileOptions() []ChatProfileOption {
 	sort.Strings(names)
 
 	for _, name := range names {
+		if llm.IsProfileHidden(name) {
+			continue
+		}
 		source := profileSources[name]
 		scope := webUIRepoProfileScope
 		switch source {
@@ -1440,7 +1449,11 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		profile = "default"
 	}
 
-	config, err := chat.ResolveConfigForNewConversation(profile)
+	runnerID := strings.TrimSpace(r.URL.Query().Get("runnerId"))
+	if runnerID == "" {
+		runnerID = s.EmbeddedRunnerStatus().RunnerID
+	}
+	config, err := s.resolveModelProfile(r.Context(), runnerID, profile, "")
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusBadRequest, "failed to resolve chat settings", err)
 		return
@@ -1456,7 +1469,7 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSONResponse(w, ChatSettingsResponse{
 		CurrentProfile:         profile,
-		Profiles:               getWebUIProfileOptions(),
+		Profiles:               s.modelProfileOptions(r.Context(), runnerID, profile, r.URL.Query().Get("includeHidden") == "true"),
 		ReasoningEffort:        config.ReasoningEffort,
 		ReasoningEffortOptions: llmtypes.ReasoningEffortOptions(config),
 		DefaultCWD:             defaultCWD,

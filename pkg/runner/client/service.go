@@ -110,6 +110,7 @@ type Service struct {
 	peer                  Peer
 	runnerID              string
 	generation            int64
+	remoteProfiles        bool
 	runs                  map[string]*activeRun
 	backgrounds           map[string]*runnerBackgroundResources
 	backgroundRunIDs      map[string]*runnerBackgroundResources
@@ -244,6 +245,7 @@ func (s *Service) SetRegistration(result protocol.RegisterResult) error {
 	}
 	s.runnerID = strings.TrimSpace(result.RunnerID)
 	s.generation = result.Generation
+	s.remoteProfiles = result.RemoteProfiles
 	return nil
 }
 
@@ -1034,7 +1036,9 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
 	}
 	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe", "runner-manifest-probe")
-	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, extensions.RuntimeCapabilities{BackgroundTasks: false})
+	capabilities := extensions.RuntimeCapabilitiesFromContext(probeCtx)
+	capabilities.BackgroundTasks = false
+	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
 	probeCtx, cancelProbe := context.WithCancel(probeCtx)
 	defer cancelProbe()
 	runtime, release, err := s.inspectionRuntime(probeCtx, workingDirectory, environmentProfile, config, extensionConfig)
@@ -1397,8 +1401,14 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 
 func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID string) context.Context {
 	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
+	s.mu.Lock()
+	remoteProfiles := s.remoteProfiles
+	runnerID := s.runnerID
+	s.mu.Unlock()
+	ctx = extensions.ContextWithRunnerID(ctx, runnerID)
 	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{
 		BackgroundTasks: true,
+		RemoteProfiles:  remoteProfiles,
 	})
 	ctx = extensions.ContextWithBackgroundTaskHost(ctx, s)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)

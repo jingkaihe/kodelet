@@ -1,5 +1,5 @@
 export { z } from "zod";
-export type { ExecutionOptions } from "./execution.js";
+export type { ExecutionOptions, ExtensionProfileOptions } from "./execution.js";
 export { AgentRunError, Client, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
@@ -83,6 +83,7 @@ export type {
   ExtensionEntrypoint,
   ExtensionEvent,
   ExtensionMetadata,
+  ExtensionProfileRegistration,
   ExtensionToolData,
   FileInfo,
   FileSystemContext,

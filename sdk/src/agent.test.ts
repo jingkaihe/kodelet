@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
-import { Client, Profile, defineExtension, type ToolContext } from "./index.js";
+import { Client, Profile, createTestHarness, defineExtension, type ToolContext } from "./index.js";
 import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
@@ -705,6 +705,14 @@ test("Session rejects unsupported bridge transport values and daemon settings be
   await assert.rejects(client.createSession({ profile: { openai: { api_key_env_var: "LOCAL_KEY" } } }));
   await assert.rejects(client.createSession({ profile: { sysprompt: "/client/prompt.md" } }));
   await assert.rejects(client.createSession({ options: null as never }));
+  for (const options of [
+    { openai: { platform: "codex" } },
+    { anthropic: { platform: "anthropic" } },
+    { anthropicAPIAccess: "subscription" },
+  ]) {
+    await assert.rejects(client.createSession({ options: options as never }));
+    await assert.rejects(client.createSession({ profile: options }));
+  }
   assert.equal(spawned, false);
 });
 
@@ -738,6 +746,41 @@ test("Remote session flags preserve runner paths and named profile selection", a
   assert.equal(processes[1].requests[1].method, "session/load");
   assert.deepEqual(processes[1].requests[1].params, { sessionId: "existing", cwd: "/stored/path" });
   await client.close();
+});
+
+test("Registered profile names reach ACP without expanding model options", async () => {
+  let profile = "";
+  const harness = await createTestHarness(defineExtension((ext) => {
+    profile = ext.registerProfile({
+      name: "code-search",
+      provider: "openai",
+      model: "gpt-5.6-luna",
+      reasoningEffort: "none",
+      openai: {
+        platform: "codex",
+        api_mode: "responses",
+        service_tier: "fast",
+      },
+      hidden: true,
+    });
+  }));
+  const manifest = harness.initialize({ capabilities: { profiles: { remote: true } } });
+  assert.equal(profile, "code-search");
+  assert.equal(manifest.profiles?.[0].name, profile);
+  const calls: string[][] = [];
+  const process = new FakeACPProcess();
+  const client = new Client({ spawn: (_command, args) => {
+    calls.push(args);
+    return process;
+  } });
+  try {
+    await client.createSession({ profile, cwd: "/only/on/runner" });
+    assert.deepEqual(calls, [["acp", "--profile=code-search"]]);
+    assert.equal(process.requests[1].method, "session/new");
+    assert.deepEqual(process.requests[1].params, { cwd: "/only/on/runner" });
+  } finally {
+    await client.close();
+  }
 });
 
 interface RelayFrame {

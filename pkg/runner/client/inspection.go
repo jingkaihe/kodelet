@@ -107,7 +107,9 @@ func (s *Service) inspectWorkspace(ctx context.Context, params protocol.Workspac
 	}
 	// Listing includes dynamic recipes, but never renders templates or opens a model turn.
 	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe", "runner-manifest-probe")
-	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, extensions.RuntimeCapabilities{BackgroundTasks: false})
+	capabilities := extensions.RuntimeCapabilitiesFromContext(probeCtx)
+	capabilities.BackgroundTasks = false
+	probeCtx = extensions.ContextWithRuntimeCapabilities(probeCtx, capabilities)
 	probeCtx, cancel := context.WithCancel(probeCtx)
 	defer cancel()
 	runtime, release, err := s.inspectionRuntime(probeCtx, cwd, params.EnvironmentProfile, config, extensionConfig)

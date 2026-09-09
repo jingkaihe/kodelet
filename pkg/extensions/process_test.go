@@ -39,6 +39,8 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 		require.NoError(t, writeFrame(sdk, payload))
 	}
 	ctx := ContextWithUIInputBroker(t.Context(), staticUIInputBroker{value: "runner-owned"})
+	ctx = ContextWithRunnerID(ctx, "worker-one")
+	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true})
 	initialized := make(chan error, 1)
 	go func() {
 		_, err := process.Initialize(ctx, "/workspace")
@@ -49,7 +51,9 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 	var params initializeParams
 	require.NoError(t, json.Unmarshal(init.Params, &params))
 	assert.Equal(t, "session:inline-1", params.Extension.ID)
+	assert.Equal(t, "worker-one", params.Extension.RunnerID)
 	assert.False(t, params.Capabilities["runtime"].(map[string]any)["backgroundTasks"].(bool))
+	assert.True(t, params.Capabilities["profiles"].(map[string]any)["remote"].(bool))
 	send(map[string]any{"jsonrpc": "2.0", "id": 100, "parentId": init.ID, "method": "kodelet.ui.input", "params": map[string]any{"title": "initialize"}})
 	assert.Contains(t, string(read().Result), "runner-owned")
 	send(map[string]any{"jsonrpc": "2.0", "id": init.ID, "result": InitializeResult{Name: "inline"}})
@@ -179,9 +183,11 @@ func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 
 func TestRuntimeCapabilitiesDefaultAndOverride(t *testing.T) {
 	assert.True(t, RuntimeCapabilitiesFromContext(context.Background()).BackgroundTasks)
+	assert.False(t, RuntimeCapabilitiesFromContext(context.Background()).RemoteProfiles)
 
-	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false})
+	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false, RemoteProfiles: true})
 	assert.False(t, RuntimeCapabilitiesFromContext(ctx).BackgroundTasks)
+	assert.True(t, RuntimeCapabilitiesFromContext(ctx).RemoteProfiles)
 }
 
 type capabilityRecordingExtensionUIHost struct {
@@ -221,12 +227,14 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 		name           string
 		ctx            context.Context
 		expected       bool
+		remoteProfiles bool
 		uiCapabilities *ExtensionUIHostCapabilities
 	}{
 		{name: "local default", ctx: context.Background(), expected: true},
 		{name: "explicitly unavailable", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false}), expected: false},
 		{name: "widget-only UI host", ctx: context.Background(), expected: true, uiCapabilities: &ExtensionUIHostCapabilities{Widgets: true}},
 		{name: "runner host", ctx: ContextWithBackgroundTaskHost(ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true}), &recordingBackgroundTaskHost{}), expected: true},
+		{name: "profile-capable runner", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true}), expected: true, remoteProfiles: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			clientReader, serverWriter := io.Pipe()
@@ -273,6 +281,9 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 			runtimeCapabilities, ok := request.Params.Capabilities["runtime"].(map[string]any)
 			require.True(t, ok)
 			assert.Equal(t, test.expected, runtimeCapabilities["backgroundTasks"])
+			profileCapabilities, ok := request.Params.Capabilities["profiles"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, test.remoteProfiles, profileCapabilities["remote"])
 			uiCapabilities, ok := request.Params.Capabilities["ui"].(map[string]any)
 			require.True(t, ok)
 			if test.uiCapabilities == nil {

@@ -10,6 +10,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRegisterResultRemoteProfilesCompatibility(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		wire      string
+		supported bool
+	}{
+		{"old server", `{"runnerId":"runner","generation":1}`, false},
+		{"new server", `{"runnerId":"runner","generation":2,"remoteProfiles":true}`, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var result RegisterResult
+			require.NoError(t, json.Unmarshal([]byte(test.wire), &result))
+			assert.Equal(t, test.supported, result.RemoteProfiles)
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(encoded, &fields))
+			if test.supported {
+				assert.Equal(t, json.RawMessage("true"), fields["remoteProfiles"])
+			} else {
+				assert.NotContains(t, fields, "remoteProfiles")
+			}
+		})
+	}
+}
+
 func TestSessionExtensionWireContract(t *testing.T) {
 	descriptor := SessionExtensions{ID: "attachment-1", ExtensionIDs: []string{"inline-1", "inline-2"}}
 	require.NoError(t, descriptor.Validate())

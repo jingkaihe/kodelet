@@ -267,6 +267,13 @@ func (a *sessionExtensionAttachment) close() {
 // RunnerExtensionsDetached invalidates client attachments rather than silently
 // transferring callback authority to the next runner connection generation.
 func (s *Server) RunnerExtensionsDetached(identity runnerregistry.UIRequestIdentity) {
+	s.extensionProfilesMu.Lock()
+	for key, profile := range s.extensionProfiles {
+		if key.runnerID == identity.RunnerID && profile.generation == identity.Generation {
+			delete(s.extensionProfiles, key)
+		}
+	}
+	s.extensionProfilesMu.Unlock()
 	s.sessionExtensionsMu.Lock()
 	defer s.sessionExtensionsMu.Unlock()
 	for _, attachment := range s.sessionExtensions {

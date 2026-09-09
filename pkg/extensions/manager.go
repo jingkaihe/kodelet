@@ -110,7 +110,9 @@ func (m *RuntimeManager) RuntimeWithAttachmentsForIsolatedLease(ctx, leaseCtx co
 // RuntimeForCommandDiscoveryWithIsolatedLease creates a disposable discovery
 // runtime. It never starts session events or grants background-worker lifetime.
 func (m *RuntimeManager) RuntimeForCommandDiscoveryWithIsolatedLease(ctx context.Context, cwd, _ string, config Config) (*Runtime, func() error, error) {
-	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+	capabilities := RuntimeCapabilitiesFromContext(ctx)
+	capabilities.BackgroundTasks = false
+	ctx = ContextWithRuntimeCapabilities(ctx, capabilities)
 	return m.isolatedRuntime(ctx, ctx, cwd, config, false, ExtensionCallContext{})
 }
 

@@ -101,6 +101,7 @@ type ControlPlaneProfileOption struct {
 	Name   string `json:"name"`
 	Scope  string `json:"scope"`
 	Active bool   `json:"active,omitempty"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 // ControlPlaneChatSettings contains server-owned settings for a new conversation.
@@ -722,11 +723,14 @@ func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlane
 	if err != nil {
 		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to parse chat settings URL")
 	}
+	query := parsed.Query()
 	if profile = strings.TrimSpace(profile); profile != "" {
-		query := parsed.Query()
 		query.Set("profile", profile)
-		parsed.RawQuery = query.Encode()
 	}
+	if r.runnerID != "" {
+		query.Set("runnerId", r.runnerID)
+	}
+	parsed.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to create chat settings request")

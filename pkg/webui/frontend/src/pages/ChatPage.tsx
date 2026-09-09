@@ -1021,7 +1021,7 @@ const ChatPage: React.FC = () => {
       });
 
     void apiService
-      .getChatSettings()
+      .getChatSettings(undefined, selectedRunnerID || undefined)
       .then((settings) => {
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
         setChatSettings(settings);
@@ -2897,19 +2897,41 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleNewChatProfileDraftChange = (profileName: string) => {
+  const handleNewChatProfileDraftChange = (
+    profileName: string,
+    runnerID = newChatRunnerDraft,
+    discoverProfiles = false
+  ) => {
+    const previousProfile = newChatProfileDraft;
     const previousEffort = newChatReasoningEffortDraft;
+    const previousOptions = newChatReasoningEffortOptions;
     const previousEffortWasExplicit = newChatReasoningEffortExplicit;
     const requestId = reasoningSettingsRequestRef.current + 1;
     reasoningSettingsRequestRef.current = requestId;
 
-    setNewChatProfileDraft(profileName);
+    if (!discoverProfiles) {
+      setNewChatProfileDraft(profileName);
+    }
     setReasoningSettingsLoading(true);
 
     void apiService
-      .getChatSettings(profileName)
+      .getChatSettings(discoverProfiles ? undefined : profileName, runnerID || undefined)
       .then((settings) => {
         if (reasoningSettingsRequestRef.current !== requestId) {
+          return;
+        }
+        // The previous runner's profile may not exist on this runner.
+        if (
+          discoverProfiles &&
+          profileName !== settings.currentProfile &&
+          settings.profiles.some((profile) => profile.name === profileName)
+        ) {
+          return apiService.getChatSettings(profileName, runnerID || undefined);
+        }
+        return settings;
+      })
+      .then((settings) => {
+        if (!settings || reasoningSettingsRequestRef.current !== requestId) {
           return;
         }
 
@@ -2917,6 +2939,8 @@ const ChatPage: React.FC = () => {
         const preserveExplicitEffort =
           previousEffortWasExplicit && reasoningSettings.options.includes(previousEffort);
 
+        setChatSettings((current) => ({ ...current, profiles: settings.profiles }));
+        setNewChatProfileDraft(settings.currentProfile || profileName || 'default');
         setNewChatReasoningEffortOptions(reasoningSettings.options);
         setNewChatReasoningEffortDraft(
           preserveExplicitEffort ? previousEffort : reasoningSettings.effort
@@ -2930,28 +2954,42 @@ const ChatPage: React.FC = () => {
         }
 
         console.error('Failed to load profile reasoning settings', error);
-        setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
-        setNewChatReasoningEffortDraft(selectedReasoningEffort);
-        setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
-        setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
+        if (discoverProfiles) {
+          setNewChatRunnerDraft(selectedRunnerID);
+        }
+        setNewChatProfileDraft(previousProfile);
+        setNewChatReasoningEffortDraft(previousEffort);
+        setNewChatReasoningEffortOptions(previousOptions);
+        setNewChatReasoningEffortExplicit(previousEffortWasExplicit);
         setReasoningSettingsLoading(false);
       });
   };
 
+  useEffect(() => {
+    if (!newChatDialogOpen || !newChatRunnerDraft || !chatSettingsLoaded) {
+      return;
+    }
+    handleNewChatProfileDraftChange(newChatProfileDraft, newChatRunnerDraft, true);
+    return () => {
+      reasoningSettingsRequestRef.current += 1;
+    };
+  }, [newChatDialogOpen, newChatRunnerDraft, chatSettingsLoaded]);
+
   const availableProfiles = useMemo(() => {
     const configuredProfiles = chatSettings.profiles || [];
-    if (configuredProfiles.some((profile) => profile.name === currentProfileLabel)) {
+    const profileName = newChatDialogOpen ? newChatProfileDraft : currentProfileLabel;
+    if (configuredProfiles.some((profile) => profile.name === profileName)) {
       return configuredProfiles;
     }
 
     return [
       ...configuredProfiles,
       {
-        name: currentProfileLabel,
+        name: profileName,
         scope: conversationId ? 'conversation' : 'selected',
       },
     ];
-  }, [chatSettings.profiles, conversationId, currentProfileLabel]);
+  }, [chatSettings.profiles, conversationId, currentProfileLabel, newChatDialogOpen, newChatProfileDraft]);
 
   const composerContextText = useMemo(() => {
     const directoryLabel = !isRemoteConversation

@@ -223,6 +223,7 @@ function createSharedContext(
   return {
     signal,
     sessionId: context.sessionId,
+    runnerId: init?.extension.runnerId,
     conversationId: context.conversationId,
     uiScopeId: uiScopeId || undefined,
     cwd,

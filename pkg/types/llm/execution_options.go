@@ -3,7 +3,6 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"slices"
 	"strings"
 
@@ -31,6 +30,89 @@ type ExecutionOptions struct {
 	EnableFSSearchTools  *bool     `json:"enableFSSearchTools,omitempty"`
 }
 
+// ExtensionProfileOptions declares model choices and native provider configuration.
+type ExtensionProfileOptions struct {
+	Provider             *string             `json:"provider,omitempty"`
+	Model                *string             `json:"model,omitempty"`
+	WeakModel            *string             `json:"weakModel,omitempty"`
+	MaxTokens            *int                `json:"maxTokens,omitempty"`
+	WeakModelMaxTokens   *int                `json:"weakModelMaxTokens,omitempty"`
+	ThinkingBudgetTokens *int                `json:"thinkingBudgetTokens,omitempty"`
+	ReasoningEffort      *string             `json:"reasoningEffort,omitempty"`
+	OpenAI               map[string]any      `json:"openai,omitzero"`
+	Anthropic            map[string]any      `json:"anthropic,omitzero"`
+	AnthropicAPIAccess   *AnthropicAPIAccess `json:"anthropicAPIAccess,omitempty"`
+}
+
+func (o *ExtensionProfileOptions) UnmarshalJSON(data []byte) error {
+	type wireOptions ExtensionProfileOptions
+	var value wireOptions
+	if err := decodeOptions(data, &value); err != nil {
+		return errors.Wrap(err, "invalid extension profile options")
+	}
+	options := ExtensionProfileOptions(value)
+	if err := options.Validate(); err != nil {
+		return err
+	}
+	*o = options
+	return nil
+}
+
+// ModelOptions returns independent model fields for the execution-option resolver.
+func (o *ExtensionProfileOptions) ModelOptions() *ExecutionOptions {
+	if o == nil {
+		return nil
+	}
+	return &ExecutionOptions{
+		Provider:             cloneOption(o.Provider),
+		Model:                cloneOption(o.Model),
+		WeakModel:            cloneOption(o.WeakModel),
+		MaxTokens:            cloneOption(o.MaxTokens),
+		WeakModelMaxTokens:   cloneOption(o.WeakModelMaxTokens),
+		ThinkingBudgetTokens: cloneOption(o.ThinkingBudgetTokens),
+		ReasoningEffort:      cloneOption(o.ReasoningEffort),
+	}
+}
+
+// Clone returns an independent declaration, including nested provider options.
+func (o *ExtensionProfileOptions) Clone() *ExtensionProfileOptions {
+	if o == nil {
+		return nil
+	}
+	c := *o
+	c.Provider = cloneOption(o.Provider)
+	c.Model = cloneOption(o.Model)
+	c.WeakModel = cloneOption(o.WeakModel)
+	c.MaxTokens = cloneOption(o.MaxTokens)
+	c.WeakModelMaxTokens = cloneOption(o.WeakModelMaxTokens)
+	c.ThinkingBudgetTokens = cloneOption(o.ThinkingBudgetTokens)
+	c.ReasoningEffort = cloneOption(o.ReasoningEffort)
+	c.AnthropicAPIAccess = cloneOption(o.AnthropicAPIAccess)
+	c.OpenAI = cloneConfigMap(o.OpenAI)
+	c.Anthropic = cloneConfigMap(o.Anthropic)
+	return &c
+}
+
+// Validate checks explicit choices without reading daemon configuration or credentials.
+func (o *ExtensionProfileOptions) Validate() error {
+	if o == nil || o.Provider == nil || o.Model == nil {
+		return errors.New("extension profile options require provider and model")
+	}
+	if err := o.ModelOptions().Validate(); err != nil {
+		return err
+	}
+	if o.OpenAI != nil && *o.Provider != "openai" {
+		return errors.New("openai settings require provider openai")
+	}
+	if (o.Anthropic != nil || o.AnthropicAPIAccess != nil) && *o.Provider != "anthropic" {
+		return errors.New("anthropic settings require provider anthropic")
+	}
+	if o.AnthropicAPIAccess != nil && !slices.Contains([]AnthropicAPIAccess{AnthropicAPIAccessAuto, AnthropicAPIAccessSubscription, AnthropicAPIAccessAPIKey}, *o.AnthropicAPIAccess) {
+		return errors.Errorf("unsupported anthropicAPIAccess %q", *o.AnthropicAPIAccess)
+	}
+	return nil
+}
+
 // MarshalJSON preserves deny-all when a Go caller supplies a non-nil pointer
 // to a nil slice. Such lists are empty restrictions, never null/inheritance.
 func (o ExecutionOptions) MarshalJSON() ([]byte, error) {
@@ -41,29 +123,10 @@ func (o ExecutionOptions) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON rejects unknown options rather than silently dropping client
 // settings, including removed persistence flags and arbitrary configuration.
 func (o *ExecutionOptions) UnmarshalJSON(data []byte) error {
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		return errors.New("execution options must be an object, not null; omit options to inherit")
-	}
 	type wireOptions ExecutionOptions
 	var value wireOptions
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := decodeOptions(data, &value); err != nil {
 		return errors.Wrap(err, "invalid execution options")
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("invalid trailing execution options data")
-	}
-	// Null is not a synonym for an omitted restriction. Requiring callers to
-	// omit absent fields prevents null/empty-array mistakes from widening tools.
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	for name, raw := range fields {
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return errors.Errorf("execution option %s must not be null; omit it to inherit", name)
-		}
 	}
 	options := ExecutionOptions(value)
 	if err := options.Validate(); err != nil {
@@ -71,6 +134,24 @@ func (o *ExecutionOptions) UnmarshalJSON(data []byte) error {
 	}
 	*o = options
 	return nil
+}
+
+func decodeOptions(data []byte, value any) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if fields == nil {
+		return errors.New("options must be an object, not null; omit options to inherit")
+	}
+	for name, raw := range fields {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return errors.Errorf("option %s must not be null; omit it to inherit", name)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(value)
 }
 
 // Clone returns a fully independent copy, preserving explicit empty lists.

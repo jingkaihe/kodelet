@@ -917,6 +917,76 @@ func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate extension tool registration: get_weather")
 }
 
+func TestRuntimeProfilesBindSourceSortAndClone(t *testing.T) {
+	var nilRuntime *Runtime
+	assert.Empty(t, nilRuntime.Profiles())
+	for _, metadataName := range []string{"", "Legacy extension"} {
+		t.Run(metadataName, func(t *testing.T) {
+			runtime := EmptyRuntime()
+			t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+			assert.Empty(t, runtime.Profiles())
+			var result InitializeResult
+			require.NoError(t, json.Unmarshal([]byte(`{"profiles":[
+				{"name":"z","extensionId":"spoofed","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex","service_tier":"fast"}},"hidden":true},
+				{"name":"a","options":{"provider":"anthropic","model":"daemon-custom"}}
+			]}`), &result))
+			for _, registration := range result.Profiles {
+				require.NoError(t, runtime.register(t.Context(), &Process{Extension: Extension{ID: "org@plugin/" + registration.Name}}, &InitializeResult{
+					Name: metadataName, Profiles: []ProfileRegistration{registration},
+				}))
+			}
+			profiles := runtime.Profiles()
+			require.Len(t, profiles, 2)
+			assert.Equal(t, "a", profiles[0].Name)
+			assert.False(t, profiles[0].Hidden)
+			assert.Equal(t, "z", profiles[1].Name)
+			assert.True(t, profiles[1].Hidden)
+			for _, profile := range profiles {
+				assert.Equal(t, "org@plugin/"+profile.Name, profile.ExtensionID)
+			}
+			*result.Profiles[0].Options.Model = "mutated-input"
+			result.Profiles[0].Options.OpenAI["platform"] = "openai"
+			profiles[1].Options.OpenAI["service_tier"] = "default"
+			*profiles[0].Options.Model = "mutated-output"
+			profiles[0].Name = "mutated-output"
+			profiles = runtime.Profiles()
+			assert.Equal(t, "a", profiles[0].Name)
+			assert.Equal(t, "daemon-custom", *profiles[0].Options.Model)
+			assert.Equal(t, "gpt-5.6-luna", *profiles[1].Options.Model)
+			assert.Equal(t, "codex", profiles[1].Options.OpenAI["platform"])
+			assert.Equal(t, "fast", profiles[1].Options.OpenAI["service_tier"])
+		})
+	}
+}
+
+func TestRuntimeRejectsProfileCollisionsWithoutPublishingPartialProfiles(t *testing.T) {
+	options := &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("search")}
+	for _, source := range []string{"source", "other"} {
+		t.Run(source, func(t *testing.T) {
+			runtime := EmptyRuntime()
+			t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+			require.NoError(t, runtime.register(t.Context(), &Process{Extension: Extension{ID: "source"}}, &InitializeResult{
+				Name: "code-search", Profiles: []ProfileRegistration{{Name: "search", Options: options}},
+			}))
+			existing := runtime.Profiles()
+			err := runtime.register(t.Context(), &Process{Extension: Extension{ID: source}}, &InitializeResult{
+				Name: "another-extension", Profiles: []ProfileRegistration{{Name: "new", Options: options}, {Name: "search", Options: options}},
+			})
+			require.ErrorContains(t, err, "duplicate extension profile")
+			assert.Equal(t, existing, runtime.Profiles())
+		})
+	}
+	for _, invalid := range []InitializeResult{
+		{Name: "code-search", Profiles: []ProfileRegistration{{Name: "search", Options: options}, {Name: "search", Options: options}}},
+		{Name: "code-search", Profiles: []ProfileRegistration{{Name: "valid", Options: options}, {Name: "invalid"}}},
+	} {
+		runtime := EmptyRuntime()
+		require.Error(t, runtime.register(t.Context(), &Process{Extension: Extension{ID: "source"}}, &invalid))
+		assert.Empty(t, runtime.Profiles())
+		require.NoError(t, runtime.Close())
+	}
+}
+
 func TestRuntimeRejectsDuplicateCommandRegistrations(t *testing.T) {
 	runtime := EmptyRuntime()
 	registration := CommandRegistration{Name: "doctor", Aliases: []string{"/doctor"}, Description: "Inspect extension runtime health"}

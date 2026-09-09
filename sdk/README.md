@@ -2,6 +2,10 @@
 
 The SDK starts `kodelet acp` as a client of the Kodelet daemon. The daemon owns the model loop and conversation history; the selected embedded or standalone runner owns workspace execution and tool policy. Configure credentials and model profiles on the daemon, not in temporary SDK launch files.
 
+## Extension model profiles
+
+`ext.registerProfile({ name, provider, model, ...options })` declares a daemon-resolved profile for ACP sessions. See the [registration example](../skills/kodelet/references/sdk.md#registered-model-profiles) for provider settings and subscriptions. These settings do not belong in session `ExecutionOptions`.
+
 ## Inline extensions
 
 Pass extension entrypoints to `Client.createSession({ extensions })` to expose callbacks from your TypeScript process without installing extension executables on the runner:

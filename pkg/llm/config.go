@@ -120,6 +120,77 @@ func HasConfiguredProfile(profileName string) bool {
 	return exists
 }
 
+// IsProfileHidden reports presentation metadata, not a restriction on explicit selection.
+func IsProfileHidden(profileName string) bool {
+	profile, ok := viper.GetStringMap("profiles")[profileName].(map[string]any)
+	if !ok {
+		return false
+	}
+	hidden, _ := profile["hidden"].(bool)
+	return hidden
+}
+
+// GetConfigForExtensionProvider keeps base policy and selects daemon-owned transport settings.
+func GetConfigForExtensionProvider(provider, platform string) (llmtypes.Config, error) {
+	if provider != "openai" && provider != "anthropic" {
+		return llmtypes.Config{}, errors.Errorf("unsupported extension profile provider %q", provider)
+	}
+	config, err := GetConfigFromViperWithoutProfile()
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	defaults, err := GetConfigFromViper()
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	selected := config
+	if defaults.Provider == provider && (platform == "" || ProviderPlatform(defaults, provider) == platform) {
+		selected = defaults
+	}
+	if platform != "" && ProviderPlatform(selected, provider) != platform {
+		switch provider {
+		case "openai":
+			selected.OpenAI = &llmtypes.OpenAIConfig{Platform: platform}
+		case "anthropic":
+			selected.Anthropic = &llmtypes.AnthropicConfig{Platform: platform}
+			selected.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto
+		}
+	}
+	if config.Provider != provider || ProviderPlatform(config, provider) != ProviderPlatform(selected, provider) {
+		config.Model, config.WeakModel = "", ""
+		config.ThinkingBudgetTokens = 0
+	}
+	switch provider {
+	case "openai":
+		config.OpenAI = selected.OpenAI
+	case "anthropic":
+		config.Anthropic = selected.Anthropic
+		config.AnthropicAPIAccess = selected.AnthropicAPIAccess
+		config.AnthropicAccount = selected.AnthropicAccount
+	}
+	config.Provider, config.Profile = provider, ""
+	return config, nil
+}
+
+// ProviderPlatform returns the normalized platform for a provider's configuration block.
+func ProviderPlatform(config llmtypes.Config, provider string) string {
+	platform := ""
+	switch provider {
+	case "openai":
+		if config.OpenAI != nil {
+			platform = config.OpenAI.Platform
+		}
+	case "anthropic":
+		if config.Anthropic != nil {
+			platform = config.Anthropic.Platform
+		}
+	}
+	if platform = strings.ToLower(strings.TrimSpace(platform)); platform == "" {
+		return provider
+	}
+	return platform
+}
+
 func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool, ignoredFlags ...string) (llmtypes.Config, error) {
 	settings := cloneSettings(viper.AllSettings())
 	if ignoreActiveProfile {

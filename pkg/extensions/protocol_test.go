@@ -11,10 +11,48 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProfileNamesRequireBoundedASCIISlugs(t *testing.T) {
+	options := &llmtypes.ExtensionProfileOptions{Provider: new("openai"), Model: new("search")}
+	for _, name := range []string{"A", "0", "Search.v1_fast-2", strings.Repeat("x", 128)} {
+		t.Run("valid/"+name, func(t *testing.T) {
+			assert.NoError(t, (ProfileRegistration{Name: name, Options: options}).Validate())
+		})
+	}
+	for _, name := range []string{"", " ", "leading ", " trailing", ".dot", "_under", "-dash", "a/b", "a\\b", "a:b", "a@b", "é", "a\n", "a\x00", strings.Repeat("x", 129), "default", "DEFAULT", "Default"} {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			assert.Error(t, (ProfileRegistration{Name: name, Options: options}).Validate())
+		})
+	}
+	assert.ErrorContains(t, (ProfileRegistration{Name: "search"}).Validate(), "require provider and model")
+	assert.Error(t, (Profile{Name: "default", ExtensionID: "source", Options: options}).Validate())
+	assert.Error(t, (Profile{Name: "search", Options: options}).Validate())
+	assert.Error(t, (Profile{Name: "search", ExtensionID: "bad\x00source", Options: options}).Validate())
+}
+
+func TestProfileWireShapeAndIndependentClone(t *testing.T) {
+	var result InitializeResult
+	require.NoError(t, json.Unmarshal([]byte(`{"profiles":[{"name":"search","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex"}},"hidden":true}]}`), &result))
+	require.Len(t, result.Profiles, 1)
+	registration := result.Profiles[0]
+	profile := Profile{Name: registration.Name, ExtensionID: "org@plugin/code-search", Options: registration.Options, Hidden: registration.Hidden}
+	require.NoError(t, profile.Validate())
+	data, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"search","extensionId":"org@plugin/code-search","options":{"provider":"openai","model":"gpt-5.6-luna","openai":{"platform":"codex"}},"hidden":true}`, string(data))
+	clone := profile.Clone()
+	*clone.Options.Model = "another-model"
+	clone.Options.OpenAI["platform"] = "openai"
+	assert.Equal(t, "gpt-5.6-luna", *profile.Options.Model)
+	assert.Equal(t, "codex", profile.Options.OpenAI["platform"])
+	assert.Nil(t, (Profile{}).Clone().Options)
+	require.ErrorContains(t, json.Unmarshal([]byte(`{"name":"search","options":{"provider":"openai","model":"search","noTools":true}}`), &ProfileRegistration{}), "unknown field")
+}
 
 func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {
 	reader, writer := io.Pipe()

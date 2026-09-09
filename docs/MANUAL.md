@@ -967,6 +967,8 @@ aliases:
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 
+Set `hidden: true` to omit a profile from pickers without preventing explicit selection. Extensions can also [register model profiles](extension-design.md#registered-model-profiles) without editing configuration.
+
 Define workspace presets under `environment_profiles` in the daemon configuration for its built-in runner, or in a standalone runner's configuration. They select tools and resources independently of model profiles and cannot relax daemon restrictions:
 
 ```yaml

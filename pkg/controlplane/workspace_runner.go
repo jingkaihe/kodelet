@@ -63,6 +63,7 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 		profile = "default"
 	}
 	environmentProfile := chat.NormalizeEnvironmentProfile(r.URL.Query().Get("environmentProfile"))
+	extensionProfile := false
 	if s == nil || s.runnerRegistry == nil {
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner registry is unavailable"}
 	}
@@ -95,6 +96,7 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 			storedProfile, hasStoredProfile := record.Metadata["profile"].(string)
 			if hasSnapshot {
 				storedProfile, hasStoredProfile = snapshot.Profile, true
+				extensionProfile = snapshot.ExtensionProfile
 			}
 			storedProfile = strings.TrimSpace(storedProfile)
 			// An empty persisted profile means the base configuration, not the
@@ -128,6 +130,21 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 	}
 	if !runner.Connected {
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner is offline"}
+	}
+	if conversationID == "" && chat.NormalizeRequestedProfile(profile) != "" && !llm.HasConfiguredProfile(profile) {
+		if principal, ok := principalFromContext(r.Context()); ok {
+			registered, found := s.registeredProfile(extensionProfileKey{principal.ID, runnerID, profile}, runner.Generation)
+			if found {
+				if _, err := chat.ResolveExtensionProfile(registered, ""); err != nil {
+					return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "could not resolve extension profile", err: err}
+				}
+				extensionProfile = true
+			}
+		}
+	}
+	if extensionProfile {
+		// Registered model profiles have no runner-local environment overlay.
+		profile = "default"
 	}
 	return &workspaceRunnerTarget{Runner: runner, CWD: cwd, Profile: profile, EnvironmentProfile: environmentProfile}, nil
 }

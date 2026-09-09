@@ -223,6 +223,7 @@ func TestResolveConfigForExistingConversationUsesSnapshotAndLocksReasoning(t *te
 	require.NoError(t, err)
 	assert.Equal(t, "persisted-model", config.Model)
 	assert.Equal(t, "work", config.Profile, "removed profiles retain their immutable snapshot identity")
+	assert.False(t, config.ExtensionProfile)
 	assert.Equal(t, []string{"file_read"}, config.AllowedTools, "removed profiles inherit current base policy")
 }
 

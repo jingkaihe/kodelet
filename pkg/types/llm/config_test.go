@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -139,6 +140,28 @@ func TestConfigExecutionOptionsAreTransient(t *testing.T) {
 	data, err = yaml.Marshal(config)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "executionoptions")
+}
+
+func TestConfigExtensionProfileIsInternal(t *testing.T) {
+	config := Config{ExtensionProfile: true}
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "ExtensionProfile")
+	assert.NotContains(t, string(data), "extension_profile")
+	data, err = yaml.Marshal(config)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "extensionprofile")
+	assert.NotContains(t, string(data), "extension_profile")
+	var decoded Config
+	require.NoError(t, json.Unmarshal([]byte(`{"ExtensionProfile":true,"extension_profile":true}`), &decoded))
+	assert.False(t, decoded.ExtensionProfile)
+	require.NoError(t, yaml.Unmarshal([]byte("extensionprofile: true\nextension_profile: true\n"), &decoded))
+	assert.False(t, decoded.ExtensionProfile)
+	require.NoError(t, mapstructure.Decode(map[string]any{
+		"ExtensionProfile":  true,
+		"extension_profile": true,
+	}, &decoded))
+	assert.False(t, decoded.ExtensionProfile)
 }
 
 func TestOpenAIServiceTierParsingAndWireValue(t *testing.T) {

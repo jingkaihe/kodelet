@@ -4,11 +4,72 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestManifestProfilesWireCompatibilityAndDigest(t *testing.T) {
+	data, err := json.Marshal(Manifest{})
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &fields))
+	assert.NotContains(t, fields, "profiles")
+	var legacy Manifest
+	require.NoError(t, json.Unmarshal([]byte(`{}`), &legacy))
+	assert.Nil(t, legacy.Profiles)
+
+	manifest := Manifest{Profiles: []extensions.Profile{
+		{
+			Name: "code-search", ExtensionID: "search-extension", Hidden: true,
+			Options: &llmtypes.ExtensionProfileOptions{
+				Provider: new("openai"), Model: new("gpt-5.6-luna"),
+				OpenAI: map[string]any{"future": []any{false, nil}},
+			},
+		},
+		{
+			Name: "review", ExtensionID: "review-extension",
+			Options: &llmtypes.ExtensionProfileOptions{
+				Provider: new("anthropic"), Model: new("claude-sonnet-4-6"),
+				Anthropic:          map[string]any{"platform": "anthropic"},
+				AnthropicAPIAccess: new(llmtypes.AnthropicAPIAccessSubscription),
+			},
+		},
+	}}
+	data, err = json.Marshal(manifest)
+	require.NoError(t, err)
+	var restored Manifest
+	require.NoError(t, json.Unmarshal(data, &restored))
+	assert.Equal(t, manifest, restored)
+	for name, change := range map[string]func(*Manifest){
+		"removed":    func(m *Manifest) { m.Profiles = nil },
+		"name":       func(m *Manifest) { m.Profiles[0].Name = "other" },
+		"source":     func(m *Manifest) { m.Profiles[0].ExtensionID = "other-source" },
+		"visibility": func(m *Manifest) { m.Profiles[0].Hidden = false },
+		"model":      func(m *Manifest) { m.Profiles[0].Options.Model = new("other") },
+		"openai":     func(m *Manifest) { m.Profiles[0].Options.OpenAI["future"].([]any)[0] = true },
+		"anthropic":  func(m *Manifest) { m.Profiles[1].Options.Anthropic["platform"] = "copilot" },
+		"subscription": func(m *Manifest) {
+			m.Profiles[1].Options.AnthropicAPIAccess = new(llmtypes.AnthropicAPIAccessAPIKey)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var changed Manifest
+			require.NoError(t, json.Unmarshal(data, &changed))
+			change(&changed)
+			for _, compute := range []func(Manifest) (string, error){ComputeManifestDigest, ComputeDiscoveryDigest} {
+				original, err := compute(manifest)
+				require.NoError(t, err)
+				modified, err := compute(changed)
+				require.NoError(t, err)
+				assert.NotEqual(t, original, modified)
+			}
+			assert.Equal(t, restored, manifest, "hashing must not mutate profiles")
+		})
+	}
+}
 
 func TestManifestDigestPinsSessionExtensionsWithoutTools(t *testing.T) {
 	manifest := Manifest{SessionExtensionIDs: []string{"inline-1"}}

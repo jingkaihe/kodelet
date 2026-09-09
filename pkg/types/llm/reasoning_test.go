@@ -144,6 +144,115 @@ func TestConversationConfigSnapshotCapturesProviderDefaults(t *testing.T) {
 	assert.Equal(t, "https://live.example", applied.Anthropic.BaseURL)
 }
 
+func TestConversationConfigSnapshotProfileAccess(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		provider     string
+		extension    bool
+		access       AnthropicAPIAccess
+		pinnedAccess AnthropicAPIAccess
+	}{
+		{name: "OpenAI ordinary", provider: "openai"},
+		{name: "OpenAI extension", provider: "openai", extension: true},
+		{name: "Claude ordinary", provider: "anthropic", access: AnthropicAPIAccessSubscription},
+		{name: "Claude legacy extension", provider: "anthropic", extension: true},
+		{name: "Claude subscription", provider: "anthropic", extension: true, access: AnthropicAPIAccessSubscription, pinnedAccess: AnthropicAPIAccessSubscription},
+		{name: "Claude auto", provider: "anthropic", extension: true, access: AnthropicAPIAccessAuto, pinnedAccess: AnthropicAPIAccessAuto},
+		{name: "Claude API key", provider: "anthropic", extension: true, access: AnthropicAPIAccessAPIKey, pinnedAccess: AnthropicAPIAccessAPIKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot, err := NewConversationConfigSnapshot(Config{
+				Profile:            "review",
+				ExtensionProfile:   test.extension,
+				Provider:           test.provider,
+				Model:              "saved-model",
+				ReasoningEffort:    "medium",
+				AnthropicAPIAccess: test.access,
+				AnthropicAccount:   "creation-account",
+				Anthropic: &AnthropicConfig{
+					Platform:         "anthropic",
+					BaseURL:          "https://do-not-snapshot.invalid",
+					AdaptiveThinking: true,
+				},
+				OpenAI: &OpenAIConfig{Platform: "codex", APIKeyEnvVar: "SECRET_ENV"},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, test.extension, snapshot.ExtensionProfile)
+			if test.provider == "anthropic" {
+				require.Equal(t, &ConversationAnthropicSnapshot{
+					Platform:         "anthropic",
+					APIAccess:        test.pinnedAccess,
+					AdaptiveThinking: true,
+				}, snapshot.Anthropic)
+			}
+			data, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			if !test.extension {
+				assert.NotContains(t, string(data), "extension_profile")
+			}
+			if test.pinnedAccess == "" {
+				assert.NotContains(t, string(data), "api_access")
+			}
+			for _, value := range []string{"creation-account", "do-not-snapshot.invalid", "SECRET_ENV", "base_url", "api_key"} {
+				assert.NotContains(t, string(data), value)
+			}
+			var restored ConversationConfigSnapshot
+			require.NoError(t, json.Unmarshal(data, &restored))
+			assert.Equal(t, snapshot, &restored)
+			clone := CloneConversationConfigSnapshot(&restored)
+			assert.Equal(t, snapshot, clone)
+			if clone.Anthropic != nil {
+				clone.Anthropic.APIAccess = "changed"
+				assert.Equal(t, test.pinnedAccess, restored.Anthropic.APIAccess)
+			}
+			applied, err := restored.Apply(Config{
+				ExtensionProfile:   !test.extension,
+				AnthropicAPIAccess: AnthropicAPIAccessAPIKey,
+				AnthropicAccount:   "live-account",
+				Anthropic:          &AnthropicConfig{BaseURL: "https://live.invalid"},
+				AllowedTools:       []string{"file_read"},
+			})
+			require.NoError(t, err)
+			wantAccess := test.pinnedAccess
+			if wantAccess == "" {
+				wantAccess = AnthropicAPIAccessAPIKey
+			}
+			assert.Equal(t, wantAccess, applied.AnthropicAPIAccess)
+			assert.Equal(t, "live-account", applied.AnthropicAccount)
+			assert.Equal(t, []string{"file_read"}, applied.AllowedTools)
+			assert.Equal(t, test.extension, applied.ExtensionProfile)
+			assert.Equal(t, test.provider, applied.Provider)
+			assert.Equal(t, "review", applied.Profile)
+			assert.Equal(t, "saved-model", applied.Model)
+			assert.Equal(t, "medium", applied.ReasoningEffort)
+			if test.provider == "anthropic" {
+				assert.Equal(t, &AnthropicConfig{
+					Platform:         "anthropic",
+					BaseURL:          "https://live.invalid",
+					AdaptiveThinking: true,
+				}, applied.Anthropic)
+			}
+		})
+	}
+}
+
+func TestConversationConfigSnapshotRejectsInvalidAnthropicAccess(t *testing.T) {
+	for _, access := range []AnthropicAPIAccess{"oauth", "Subscription"} {
+		t.Run(string(access), func(t *testing.T) {
+			snapshot := &ConversationConfigSnapshot{
+				Version:         ConversationConfigSnapshotVersion,
+				Provider:        "anthropic",
+				Model:           "claude-snapshot",
+				ReasoningEffort: "medium",
+				Anthropic:       &ConversationAnthropicSnapshot{APIAccess: access},
+			}
+			require.ErrorContains(t, snapshot.Validate(), "api_access")
+			_, err := snapshot.Apply(Config{})
+			require.ErrorContains(t, err, "api_access")
+		})
+	}
+}
+
 func TestConversationConfigSnapshotPreservesUnsetOpenAITextVerbosity(t *testing.T) {
 	snapshot, err := NewConversationConfigSnapshot(Config{
 		Provider:        "openai",

@@ -679,6 +679,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		ConnectionID:        entry.ConnectionID,
 		Generation:          entry.Generation,
 		HeartbeatIntervalMS: r.heartbeatInterval.Milliseconds(),
+		RemoteProfiles:      true,
 	}
 	r.mu.Unlock()
 

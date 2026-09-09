@@ -81,6 +81,10 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
 	}
+	profileCtx := ctx
+	ctx = chat.ContextWithProfileResolver(ctx, func(profile, effort string) (llmtypes.Config, error) {
+		return r.server.resolveModelProfile(profileCtx, req.RunnerID, profile, effort)
+	})
 	resultConversationID, runErr := r.runner.Run(ctx, req, sink)
 	if strings.TrimSpace(resultConversationID) == "" {
 		resultConversationID = conversationID
@@ -119,7 +123,10 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		return nil, err
 	}
 	var profileOption agentenv.RemoteEnvironmentOption
-	if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
+	if config.ExtensionProfile {
+		// Registered profiles carry model settings only, never runner preferences.
+		profileOption = agentenv.WithRemoteModelProfile("default")
+	} else if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
 		if r.server.conversationService == nil {
 			return nil, errors.New("conversation service is unavailable")
 		}
@@ -157,6 +164,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	if admitted {
 		controller = admittedTurnController{Registry: r.server.runnerRegistry}
 	}
+	controller = profileRegisteringController{RemoteController: controller, server: r.server}
 	return agentenv.NewRemoteEnvironment(
 		controller,
 		runnerID,

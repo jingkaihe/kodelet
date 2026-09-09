@@ -549,13 +549,19 @@ Renderers accept at most 14 visible activities: up to 8 running, 3 recently comp
 
 Use the SDK `Client` for subagents and code search. ACP provides ordinary conversation admission, persistence, cancellation, and live streaming. Named forks preserve agent titles; `TaskProgress.attach(session)` tracks tool activity.
 
-- Pass typed `ExecutionOptions` directly; ACP sends them to the daemon from any extension host. `profile` selects an existing daemon profile, and `options.provider` must match it.
+- Pass typed `ExecutionOptions` directly; ACP sends them to the daemon from any extension host. `profile` selects a configured or registered daemon profile, and `options.provider` must match it.
 - Supply instructions through an inline `agent.init` hook with extensions enabled. Read prompt files in the extension process, not on the daemon.
 - For read-only search, allowlist `file_read`, `grep_tool`, and `glob_tool`, enable filesystem search, and disable skills. The caller's presentation-only tool list is not inherited; runner policy still applies.
 - Configure normal client authentication and server/runner targeting on the extension host. Provider credentials stay on the daemon. A runner token or background lease is not client authorization.
 - Own session cancellation and cleanup; release background leases after work and client cleanup finish.
 
-Scoped child RPCs, `ctx.children`, and extension profile registration/lookup are removed. Existing history remains readable; legacy preset metadata is no longer enforced, and old run-scoped steering is not replayed. Runner-targeted identity and conversation-ownership checks are deferred to phase two.
+Scoped child RPCs, `ctx.children`, and `get_profile` remain removed. Existing history remains readable; legacy preset metadata is no longer enforced, and old run-scoped steering is not replayed. Runner-targeted credentials and general conversation-ownership changes remain phase two.
+
+### Registered model profiles
+
+TypeScript `ext.registerProfile(...)` and Python `ext.register_profile(...)` require `provider` and `model` and return the flat name unchanged. Names are 1–128-character ASCII slugs; `default` is reserved and conflicting configured or registered names are rejected. Profiles are scoped to the authenticated caller and runner; ACP clients must use the same owner's credentials and target `ctx.runnerId` (Python: `ctx.runner_id`).
+
+`openai` and `anthropic` accept ordinary daemon configuration keys without an extra field allowlist. Profiles use daemon base defaults, not the parent's profile, and retain daemon/runner restrictions. `hidden: true` omits profiles from pickers without preventing explicit selection. See the [SDK example](../skills/kodelet/references/sdk.md#registered-model-profiles).
 
 ### Live conversation forks
 

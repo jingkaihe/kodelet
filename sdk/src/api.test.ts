@@ -10,6 +10,8 @@ import { createToolContext, runWithHostRPCClient } from "./context.js";
 import {
   type BackgroundTaskLease,
   ConversationForkUnavailableError,
+  ExtensionHost,
+  type ExtensionProfileRegistration,
   type ExtensionToolData,
   HostRPCError,
   createTestHarness,
@@ -17,8 +19,151 @@ import {
   renderTemplate,
   z,
   type JSONSchema,
+  type InitializeParams,
   type ToolPresentation,
 } from "./index.js";
+
+test("remote profiles preserve provider JSON and isolate input and manifest snapshots", () => {
+  const params: InitializeParams = {
+    protocolVersion: "test",
+    extension: { id: "installed-id" },
+    capabilities: { profiles: { remote: true } },
+  };
+  for (const provider of ["openai", "anthropic"] as const) {
+    const settings = {
+      platform: provider === "openai" ? "codex" : "copilot",
+      api_mode: "responses",
+      service_tier: "custom-tier",
+      websocket_mode: false,
+      base_url: "https://provider.invalid",
+      api_key: "test-key",
+      api_key_env_var: "PROVIDER_KEY",
+      account: "work",
+      future_setting: { values: [false, null, 1.5, "value"] },
+    };
+    const registration: ExtensionProfileRegistration = {
+      name: "search",
+      provider,
+      model: "gpt-5.6-luna",
+      weakModel: "weak-model",
+      reasoningEffort: "none",
+      maxTokens: 4096,
+      weakModelMaxTokens: 1024,
+      thinkingBudgetTokens: 0,
+      [provider]: settings,
+      ...(provider === "anthropic" ? { anthropicAPIAccess: "subscription" } : { hidden: true }),
+    };
+    const { name, hidden = false, ...options } = structuredClone(registration);
+    const expected = [{ name, options, hidden }];
+    const ext = new ExtensionHost();
+    assert.equal(ext.registerProfile(registration), name);
+    registration.model = "mutated-input";
+    registration.hidden = !hidden;
+    settings.future_setting.values.push("mutated-input");
+    const manifest = ext.initialize(params);
+    assert.deepEqual(JSON.parse(JSON.stringify(manifest)).profiles, expected);
+    assert.ok(manifest.profiles);
+    const snapshot = manifest.profiles[0];
+    snapshot.options.model = "mutated-output";
+    snapshot.hidden = !hidden;
+    (snapshot.options[provider] as typeof settings).future_setting.values.push("mutated-output");
+    manifest.profiles.pop();
+    assert.deepEqual(ext.initialize(params).profiles, expected);
+    const empty = {
+      provider,
+      model: "custom-model",
+      [provider]: {},
+    };
+    ext.registerProfile({ name: "empty", ...empty, hidden: false });
+    assert.deepEqual(ext.initialize(params).profiles, [...expected, { name: "empty", options: empty, hidden: false }]);
+  }
+});
+
+test("remote profiles reject invalid model options, provider blocks and session controls", () => {
+  const invalidBlocks = [null, [], "codex", true, 3, { callback: () => {} }, { value: undefined }];
+  for (const options of [
+    ...invalidBlocks.map((openai) => ({ provider: "openai", openai })),
+    ...invalidBlocks.map((anthropic) => ({ provider: "anthropic", anthropic })),
+    { provider: "openai", anthropic: {} },
+    { provider: "openai", anthropicAPIAccess: "subscription" },
+    { provider: "anthropic", openai: {} },
+    { provider: "anthropic", anthropicAPIAccess: null },
+    { provider: "anthropic", anthropicAPIAccess: "oauth" },
+    { provider: "anthropic", anthropicAccount: "work" },
+    { provider: undefined }, { model: undefined }, { provider: "unknown" }, { provider: null },
+    { model: "" }, { model: null }, { weakModel: "" }, { reasoningEffort: null }, { reasoningEffort: "" },
+    { maxTokens: 0 }, { maxTokens: true }, { weakModelMaxTokens: -1 }, { thinkingBudgetTokens: -1 },
+    { maxTokens: "100" }, { hidden: "false" }, { hidden: 0 }, { hidden: null },
+    { maxTurns: 0 }, { useWeakModel: false }, { noTools: false }, { noExtensions: false },
+    { noSkills: false }, { allowedTools: [] }, { allowedCommands: [] }, { enableFSSearchTools: false },
+    { apiKey: "secret" }, { baseURL: "https://example.invalid" },
+    { allowedReasoningEfforts: ["none"] },
+  ]) {
+    const ext = new ExtensionHost();
+    assert.throws(() => ext.registerProfile({
+      name: "search",
+      provider: "openai",
+      model: "test-model",
+      ...options,
+    } as ExtensionProfileRegistration), JSON.stringify(options));
+    assert.equal("profiles" in ext.initialize({
+      protocolVersion: "test",
+      extension: { id: "test" },
+    }), false);
+  }
+});
+
+test("remote profiles validate names independently of extension metadata", () => {
+  const registration = {
+    name: "search",
+    provider: "openai",
+    model: "gpt-5.6-luna",
+  } as const;
+  const ext = new ExtensionHost();
+  for (const name of ["", "a/b", "a b", "-search", "_search", ".search", "écho", "search\n", "a\0b", "a".repeat(129)]) {
+    assert.throws(() => ext.registerProfile({ ...registration, name }), /slug/);
+  }
+  for (const name of ["default", "DEFAULT", "Default"]) {
+    assert.throws(() => ext.registerProfile({ ...registration, name }), /reserved/);
+  }
+  const profile = ext.registerProfile(registration);
+  assert.equal(profile, "search");
+  const params: InitializeParams = {
+    protocolVersion: "test",
+    extension: { id: "installed-id" },
+    capabilities: { profiles: { remote: true } },
+  };
+  const manifest = ext.initialize(params);
+  for (const name of ["code-search", "default", "renamed extension", undefined]) {
+    ext.setMetadata({ name });
+    const updated = ext.initialize(params);
+    assert.equal(updated.name, name ?? "installed-id");
+    assert.deepEqual(updated.profiles, manifest.profiles);
+    assert.equal(updated.profiles?.[0].name, profile);
+  }
+  assert.throws(() => ext.registerProfile({ ...registration, model: "different" }), /Duplicate/);
+  assert.deepEqual(ext.initialize(params).profiles, manifest.profiles);
+  for (const name of ["A", "A" + "a".repeat(127), "0" + "._-".repeat(42) + "z"]) {
+    assert.equal(ext.registerProfile({ ...registration, name }), name);
+  }
+});
+
+test("remote profiles require explicit host support without affecting ordinary extensions", () => {
+  for (const capabilities of [
+    undefined, {}, { profiles: null }, { profiles: {} }, { profiles: [] },
+    { profiles: { remote: false } }, { profiles: { remote: "true" } }, { profiles: { remote: 1 } },
+  ]) {
+    const params: InitializeParams = { protocolVersion: "test", extension: { id: "test" }, capabilities };
+    const ext = new ExtensionHost();
+    ext.registerProfile({
+      name: "search",
+      provider: "openai",
+      model: "gpt-5.6-luna",
+    });
+    assert.throws(() => ext.initialize(params), /update the Kodelet daemon and runner/);
+    assert.equal("profiles" in new ExtensionHost().initialize(params), false);
+  }
+});
 
 test("registers tools, commands, events and executes handlers", async () => {
   let shortcutContext: { conversationId?: string; cwd: string; profile?: string } | undefined;
@@ -383,6 +528,13 @@ test("preserves explicit zero timeout and merges event timeout options", async (
       { event: "tool.update", priority: 2, timeoutInSec: 1 },
     ],
   );
+});
+
+test("tool context runner identity comes from initialize metadata", () => {
+  assert.equal(createToolContext(undefined).runnerId, undefined);
+  assert.equal(createToolContext({
+    protocolVersion: "test", extension: { id: "search", runnerId: "selected-runner" },
+  }).runnerId, "selected-runner");
 });
 
 test("agent.init can patch the system prompt and tool list", async () => {

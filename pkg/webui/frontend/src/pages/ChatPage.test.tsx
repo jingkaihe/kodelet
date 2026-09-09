@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ChatPage from './ChatPage';
-import type { ChatStreamEvent, ConversationListResponse, Runner, WorkspaceTarget } from '../types';
+import type { ChatSettings, ChatStreamEvent, ConversationListResponse, Runner, WorkspaceTarget } from '../types';
 
 vi.mock('../components/workspace/TerminalModal', () => ({
   default: ({
@@ -85,6 +85,7 @@ const renderChatWithRunner = async () => {
   await flushAsyncUpdates();
   fireEvent.click(screen.getByRole('button', { name: /Workspace runner required/ }));
   selectWorkspaceRunner();
+  await flushAsyncUpdates();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
   await flushAsyncUpdates();
   return result;
@@ -179,6 +180,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../other-project' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: message },
@@ -623,6 +625,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     if (!terminal && !diff) {
@@ -1144,7 +1147,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
       target: { value: 'anthropic' },
     });
-    await waitFor(() => expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic'));
+    await waitFor(() => expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1'));
     await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toHaveValue('high'));
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '/workspace/alt' },
@@ -1187,6 +1190,141 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toHaveValue('low'));
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
+  });
+
+  it.each(['success', 'failure'])('ignores a stale runner profile discovery %s', async (outcome) => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockClear();
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner(), makeRunner({ id: 'runner-2' })] });
+    let resolveOld: (settings: ChatSettings) => void = () => {};
+    let rejectOld: (error: Error) => void = () => {};
+    const oldRequest = new Promise<ChatSettings>((resolve, reject) => {
+      resolveOld = resolve;
+      rejectOld = reject;
+    });
+    mockGetChatSettings.mockImplementation((_profile?: string, runnerId?: string) => {
+      if (runnerId === 'runner-1') return oldRequest;
+      return Promise.resolve({
+        ...defaults,
+        profiles: [
+          ...defaults.profiles,
+          ...(runnerId ? [{ name: 'new-runner/search', scope: 'extension' }] : []),
+        ],
+      });
+    });
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-2');
+    expect(screen.getByRole('option', { name: 'new-runner/search' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+
+    await act(async () => {
+      if (outcome === 'failure') {
+        rejectOld(new Error('old runner unavailable'));
+      } else {
+        resolveOld({
+          ...defaults,
+          profiles: [{ name: 'old-runner/search', scope: 'extension' }],
+          reasoningEffort: 'none',
+          reasoningEffortOptions: ['none'],
+        });
+      }
+    });
+    expect(screen.queryByRole('option', { name: 'old-runner/search' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'new-runner/search' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
+    expect(screen.getByLabelText('Environment')).toHaveValue('runner-2');
+    expect(mockGetChatSettings).toHaveBeenCalledTimes(3);
+  });
+
+  it('discards a pending profile response when its runner changes', async () => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner(), makeRunner({ id: 'runner-2' })] });
+    let resolveOld: (settings: ChatSettings) => void = () => {};
+    const oldRequest = new Promise<ChatSettings>((resolve) => { resolveOld = resolve; });
+    mockGetChatSettings.mockImplementation((profile?: string, runnerId?: string) => {
+      if (profile === 'code-search') return oldRequest;
+      return Promise.resolve({
+        ...defaults,
+        profiles: [
+          ...defaults.profiles,
+          ...(runnerId === 'runner-1' ? [{ name: 'code-search', scope: 'extension' }] : []),
+        ],
+      });
+    });
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: 'code-search' } });
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith('code-search', 'runner-1');
+    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    await flushAsyncUpdates();
+
+    expect(screen.getByLabelText('Profile')).toHaveValue('work');
+    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveOld({
+        ...defaults,
+        currentProfile: 'code-search',
+        profiles: [{ name: 'code-search', scope: 'extension' }],
+        reasoningEffort: 'none',
+        reasoningEffortOptions: ['none'],
+      });
+    });
+    expect(screen.getByLabelText('Profile')).toHaveValue('work');
+    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
+    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+  });
+
+  it.each([
+    { profile: 'anthropic', expectedProfile: 'anthropic' },
+    { profile: 'code-search', expectedProfile: 'work' },
+  ])('revalidates the selected $profile on another runner', async ({ profile, expectedProfile }) => {
+    const defaultSettings = mockGetChatSettings.getMockImplementation();
+    mockGetChatSettings.mockImplementation(async (profile?: string, runnerId?: string) => {
+      const settings = await defaultSettings?.(profile);
+      return {
+        ...settings,
+        profiles: [
+          ...settings.profiles,
+          ...(runnerId === 'runner-1' ? [{ name: 'code-search', scope: 'extension' }] : []),
+        ],
+      };
+    });
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner(), makeRunner({ id: 'runner-2' })] });
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: profile } });
+    await flushAsyncUpdates();
+    fireEvent.change(screen.getByLabelText('Reasoning effort'), { target: { value: 'high' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: /effort:high/ }));
+    await flushAsyncUpdates();
+    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    await flushAsyncUpdates();
+
+    expect(mockGetChatSettings).toHaveBeenLastCalledWith(
+      expectedProfile === 'work' ? undefined : expectedProfile, 'runner-2'
+    );
+    expect(screen.getByLabelText('Profile')).toHaveValue(expectedProfile);
+    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('high');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 
   it('reverts the profile when its reasoning settings fail to load', async () => {
@@ -1441,6 +1579,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: 'kodelet-website' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello' },
@@ -1501,6 +1640,7 @@ describe('ChatPage', () => {
     expect(screen.getByText('/runner/kodelet')).toBeVisible();
     const cwdInput = screen.getByLabelText('Working directory');
     fireEvent.change(cwdInput, { target: { value: '/runner/other-project' } });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
 
@@ -1539,6 +1679,7 @@ describe('ChatPage', () => {
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       fireEvent.change(screen.getByLabelText('Environment'), { target: { value: runnerId } });
+      await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       await flushAsyncUpdates();
       fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: '/' } });
@@ -1668,6 +1809,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument();
@@ -1728,6 +1870,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello remotely' },
@@ -1778,6 +1921,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../corrected-project' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -1917,6 +2061,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'first message' },
@@ -1967,6 +2112,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
     });
+    await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
 
@@ -2063,6 +2209,7 @@ describe('ChatPage', () => {
     });
     expect(screen.getByLabelText('Working directory')).toHaveValue('');
     expect(screen.getByLabelText('Working directory')).toHaveAttribute('placeholder', '/runner/required');
+    await flushAsyncUpdates();
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
@@ -2108,6 +2255,7 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('recent-workspaces')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     selectWorkspaceRunner();
+    await flushAsyncUpdates();
     expect(screen.getByLabelText('Working directory')).toHaveValue('');
     expect(screen.queryByTestId('recent-workspaces')).not.toBeInTheDocument();
     expect(mockGetCWDHints).not.toHaveBeenCalled();

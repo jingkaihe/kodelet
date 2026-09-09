@@ -10,6 +10,149 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExtensionProfileOptionsJSONRoundTrip(t *testing.T) {
+	inputs := []string{
+		`{"provider":"openai","model":"search"}`,
+		`{"provider":"openai","model":"search","openai":{}}`,
+		`{"provider":"openai","model":"search","weakModel":"weak","maxTokens":4096,"weakModelMaxTokens":2048,"thinkingBudgetTokens":0,"reasoningEffort":"none","openai":{"platform":"codex","api_mode":"responses","service_tier":"fast"}}`,
+		`{"provider":"openai","model":"search","openai":{"platform":"codex","api_mode":"chat_completions"}}`,
+		`{"provider":"openai","model":"search","openai":{"platform":"future","api_mode":false,"service_tier":null,"future":{"enabled":false,"values":[1,null,{"key":"value"}]}}}`,
+		`{"provider":"openai","model":"search","openai":{"base_url":"https://example.invalid","api_key_env_var":"KEY","api_key":"example","account":"other"}}`,
+		`{"provider":"anthropic","model":"search","anthropic":{}}`,
+		`{"provider":"anthropic","model":"search","anthropic":{"platform":"copilot"}}`,
+		`{"provider":"anthropic","model":"search","anthropic":{"platform":"copilot","future":{"values":[false,null]}},"anthropicAPIAccess":"subscription"}`,
+		`{"provider":"anthropic","model":"search","anthropic":{"base_url":"https://example.invalid","api_key_env_var":"KEY","api_key":"example","account":"other"}}`,
+		`{"provider":"anthropic","model":"search","anthropicAPIAccess":"subscription"}`,
+	}
+	for _, access := range []string{"auto", "subscription", "api-key"} {
+		inputs = append(inputs, `{"provider":"anthropic","model":"search","anthropic":{"platform":"anthropic"},"anthropicAPIAccess":"`+access+`"}`)
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			var options ExtensionProfileOptions
+			require.NoError(t, json.Unmarshal([]byte(input), &options))
+			require.NoError(t, options.Validate())
+			data, err := json.Marshal(options)
+			require.NoError(t, err)
+			assert.JSONEq(t, input, string(data))
+			assert.Equal(t, &options, options.Clone())
+		})
+	}
+	var absent *ExtensionProfileOptions
+	assert.Nil(t, absent.Clone())
+	assert.Nil(t, absent.ModelOptions())
+	assert.ErrorContains(t, absent.Validate(), "require provider and model")
+}
+
+func TestExtensionProfileOptionsRejectInvalidJSON(t *testing.T) {
+	inputs := []string{
+		`null`, `[]`, `true`, `"options"`, `123`, `{} {}`, `{`, `{}`,
+		`{"provider":"openai"}`, `{"model":"search"}`,
+		`{"provider":"","model":"search"}`, `{"provider":"openai","model":""}`,
+		`{"provider":"unknown","model":"search"}`,
+		`{"provider":"openai","model":" "}`,
+		`{"provider":"openai","model":"bad\u0000model"}`,
+		`{"provider":"openai","model":"search","maxTokens":0}`,
+		`{"provider":"openai","model":"search","weakModelMaxTokens":-1}`,
+		`{"provider":"openai","model":"search","thinkingBudgetTokens":-1}`,
+		`{"provider":"openai","model":"search","reasoningEffort":"unknown"}`,
+		`{"provider":"openai","model":"search","weakModel":""}`,
+		`{"provider":"openai","model":"search","anthropic":{}}`,
+		`{"provider":"openai","model":"search","anthropicAPIAccess":"subscription"}`,
+		`{"provider":"anthropic","model":"search","openai":{}}`,
+	}
+	for _, field := range []string{
+		`"maxTurns":0`, `"useWeakModel":false`, `"noTools":false`,
+		`"noExtensions":false`, `"noSkills":false`, `"allowedTools":[]`,
+		`"allowedCommands":[]`, `"enableFSSearchTools":false`,
+		`"apiKey":"secret"`, `"baseURL":"https://untrusted.invalid"`,
+		`"anthropicAccount":"other"`, `"sysprompt":"/file"`, `"unknown":true`,
+	} {
+		inputs = append(inputs, `{"provider":"openai","model":"search",`+field+`}`)
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		for _, nested := range []string{`null`, `[]`, `true`, `"settings"`, `12`} {
+			inputs = append(inputs, `{"provider":"`+provider+`","model":"search","`+provider+`":`+nested+`}`)
+		}
+	}
+	for _, access := range []string{"", "token", " SUBSCRIPTION "} {
+		inputs = append(inputs, `{"provider":"anthropic","model":"search","anthropicAPIAccess":"`+access+`"}`)
+	}
+	typ := reflect.TypeFor[ExtensionProfileOptions]()
+	for i := range typ.NumField() {
+		name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		inputs = append(inputs, `{"provider":"openai","model":"search","`+name+`":null}`)
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			options := ExtensionProfileOptions{Provider: new("openai"), Model: new("unchanged")}
+			before := options.Clone()
+			require.Error(t, json.Unmarshal([]byte(input), &options))
+			assert.Equal(t, before, &options)
+		})
+	}
+}
+
+func TestExtensionProfileOptionsCloneAndModelOptions(t *testing.T) {
+	options := &ExtensionProfileOptions{
+		Provider:             new("openai"),
+		Model:                new("main"),
+		WeakModel:            new("weak"),
+		MaxTokens:            new(4096),
+		WeakModelMaxTokens:   new(2048),
+		ThinkingBudgetTokens: new(0),
+		ReasoningEffort:      new("none"),
+		OpenAI: map[string]any{
+			"future": map[string]any{"values": []any{map[string]any{"enabled": false}, nil}},
+		},
+	}
+	cloned := options.Clone()
+	assert.Equal(t, options, cloned)
+	originalValue, clonedValue := reflect.ValueOf(*options), reflect.ValueOf(*cloned)
+	for i := range originalValue.NumField() {
+		if originalValue.Field(i).Kind() == reflect.Pointer && !originalValue.Field(i).IsNil() {
+			assert.NotEqual(t, originalValue.Field(i).Pointer(), clonedValue.Field(i).Pointer(), originalValue.Type().Field(i).Name)
+		}
+	}
+	cloned.OpenAI["added"] = true
+	clonedValues := cloned.OpenAI["future"].(map[string]any)["values"].([]any)
+	clonedValues[0].(map[string]any)["enabled"] = true
+	clonedValues[1] = "changed"
+	assert.NotContains(t, options.OpenAI, "added")
+	assert.Equal(t, map[string]any{"values": []any{map[string]any{"enabled": false}, nil}}, options.OpenAI["future"])
+	model := options.ModelOptions()
+	assert.Equal(t, &ExecutionOptions{
+		Provider:             new("openai"),
+		Model:                new("main"),
+		WeakModel:            new("weak"),
+		MaxTokens:            new(4096),
+		WeakModelMaxTokens:   new(2048),
+		ThinkingBudgetTokens: new(0),
+		ReasoningEffort:      new("none"),
+	}, model)
+	modelValue := reflect.ValueOf(*model)
+	for i := range modelValue.NumField() {
+		if !modelValue.Field(i).IsNil() {
+			name := modelValue.Type().Field(i).Name
+			assert.NotEqual(t, originalValue.FieldByName(name).Pointer(), modelValue.Field(i).Pointer(), name)
+		}
+	}
+	*model.Model = "changed"
+	assert.Equal(t, "main", *options.Model)
+	options.Provider = new("anthropic")
+	options.OpenAI = nil
+	options.Anthropic = map[string]any{"platform": "anthropic", "future": []any{map[string]any{"enabled": false}}}
+	options.AnthropicAPIAccess = new(AnthropicAPIAccessSubscription)
+	cloned = options.Clone()
+	assert.Equal(t, options, cloned)
+	cloned.Anthropic["platform"] = "copilot"
+	cloned.Anthropic["future"].([]any)[0].(map[string]any)["enabled"] = true
+	*cloned.AnthropicAPIAccess = AnthropicAPIAccessAPIKey
+	assert.Equal(t, "anthropic", options.Anthropic["platform"])
+	assert.Equal(t, []any{map[string]any{"enabled": false}}, options.Anthropic["future"])
+	assert.Equal(t, AnthropicAPIAccessSubscription, *options.AnthropicAPIAccess)
+}
+
 func TestExecutionOptionsJSONPresence(t *testing.T) {
 	var omitted ExecutionOptions
 	require.NoError(t, json.Unmarshal([]byte(`{}`), &omitted))
@@ -61,6 +204,8 @@ func TestExecutionOptionsRejectInvalidJSON(t *testing.T) {
 		`null`, `[]`, `true`, `"options"`, `{} {}`, `{`,
 		`{"unknown":true}`, `{"noSave":false}`, `{"max_tokens":100}`,
 		`{"openai":{"base_url":"https://untrusted.invalid"}}`,
+		`{"openai":{"platform":"codex"}}`, `{"anthropic":{"platform":"anthropic"}}`,
+		`{"anthropicAPIAccess":"subscription"}`,
 		`{"apiKey":"secret"}`, `{"extensions":{}}`, `{"sysprompt":"/client/file"}`,
 		`{"noTools":"false"}`, `{"maxTurns":1.5}`, `{"allowedTools":"bash"}`,
 		`{"provider":"other"}`, `{"model":" "}`, `{"weakModel":""}`,

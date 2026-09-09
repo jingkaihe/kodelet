@@ -23,11 +23,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -350,6 +352,7 @@ func TestDaemonFirstCLIProcess(t *testing.T) {
 }
 
 func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
+	sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK")
 	for _, placement := range []string{"standalone", "embedded"} {
 		t.Run(placement, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
@@ -366,7 +369,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			executable, err := os.Executable()
 			require.NoError(t, err)
 			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionProcess$'\n", executable)
-			if sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK"); sdk != "" {
+			if sdk != "" {
 				script = daemonSDKSearchExtension(t, extensionDir, sdk)
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "kodelet-extension-search"), []byte(script), 0o700))
@@ -409,6 +412,10 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			viper.Set("weak_model", "gpt-4o")
 			viper.Set("max_tokens", 256)
 			viper.Set("reasoning_effort", "medium")
+			viper.Set("profiles", map[string]any{"deep": map[string]any{
+				"provider": "openai", "model": "gpt-4o", "reasoning_effort": "xhigh",
+				"allowed_reasoning_efforts": []string{"high", "xhigh"},
+			}})
 			viper.Set("openai", map[string]any{"platform": "openai", "base_url": provider.URL, "api_key_env_var": "KODELET_TEST_PROVIDER_KEY", "api_mode": "chat_completions"})
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
@@ -481,7 +488,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				}
 				return false
 			}, 15*time.Second, 50*time.Millisecond)
-			require.NoError(t, os.WriteFile(wrapper, []byte(fmt.Sprintf("#!/bin/sh\nKODELET_SERVER=%q KODELET_RUNNER=%q KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- \"$@\"\n", serverURL, runnerID, executable)), 0o700))
+			require.NoError(t, os.WriteFile(wrapper, []byte(fmt.Sprintf("#!/bin/sh\nKODELET_SERVER=%q KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- \"$@\"\n", serverURL, executable)), 0o700))
 			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
 			require.NoError(t, err)
 			invalidStore := filepath.Join(root, "client-store-is-a-file")
@@ -501,6 +508,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				}
 				if scenario == "delegation" {
 					message = "delegate code search"
+					args = append(args, "--profile=deep")
 					// Use patch-mode settings and hide read/search tools in the parent's
 					// agent.init hook. Explicit ACP options must select them independently.
 					require.NoError(t, os.WriteFile(filepath.Join(workspace, "kodelet-config.yaml"), []byte("tool_mode: patch\n"), 0o600))
@@ -550,6 +558,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			require.Len(t, history, 5, "four parent runs and one durable child; no extraction helper conversation")
 			extractionFound := false
 			childFound := false
+			parentFound := false
 			for _, summary := range history {
 				stored, err := client.LoadConversation(ctx, summary.ID)
 				require.NoError(t, err)
@@ -573,8 +582,37 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 					assert.Contains(t, string(record.RawMessages), "child code search")
 					assert.Contains(t, string(record.RawMessages), "runner-file-evidence")
 				}
+				if sdk != "" && summary.Metadata["profile"] == "code-search" {
+					childFound = true
+					record, err := client.LoadConversationRecord(ctx, summary.ID)
+					require.NoError(t, err)
+					snapshot, present, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+					require.NoError(t, err)
+					require.True(t, present)
+					assert.Equal(t, "code-search", snapshot.Profile)
+					assert.True(t, snapshot.ExtensionProfile)
+					assert.Equal(t, "gpt-5.6-luna", snapshot.Model)
+					assert.Equal(t, "none", snapshot.ReasoningEffort)
+					assert.Equal(t, llmtypes.OpenAIAPIModeResponses, snapshot.OpenAI.APIMode)
+					assert.Equal(t, llmtypes.OpenAIServiceTierFast, snapshot.OpenAI.ServiceTier)
+					assert.Contains(t, string(record.RawMessages), "child code search")
+					assert.Contains(t, string(record.RawMessages), "runner-file-evidence")
+					assert.NotContains(t, string(record.RawMessages), "delegate code search")
+				}
 				if summary.FirstMessage == "delegate code search" && summary.Summary != daemonACPSearchName {
+					parentFound = true
+					snapshot, present, err := conversations.ConfigSnapshotFromMetadata(summary.Metadata)
+					require.NoError(t, err)
+					require.True(t, present)
+					assert.Equal(t, "deep", snapshot.Profile)
+					assert.Equal(t, "gpt-4o", snapshot.Model)
+					assert.Equal(t, "xhigh", snapshot.ReasoningEffort)
 					assert.Equal(t, 10, stored.Usage.OutputTokens, "ordinary ACP session usage is not charged to the parent again")
+					if sdk != "" {
+						record, err := client.LoadConversationRecord(ctx, summary.ID)
+						require.NoError(t, err)
+						assert.Contains(t, string(record.RawMessages), "extension-runner:"+runnerID, "SDK context metadata must identify the selected runner")
+					}
 					for _, message := range stored.Messages {
 						assert.NotContains(t, message.Content, daemonACPSearchPrompt)
 					}
@@ -582,7 +620,19 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			}
 			assert.True(t, extractionFound, "extraction history and usage assertions must run")
 			assert.True(t, childFound, "child has its own persisted conversation")
-			if sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK"); sdk != "" {
+			assert.True(t, parentFound, "parent profile, runner metadata and usage assertions must run")
+			if sdk != "" {
+				profileSettings, err := client.ChatSettings(ctx, "code-search")
+				require.NoError(t, err)
+				assert.Equal(t, "code-search", profileSettings.CurrentProfile)
+				assert.Equal(t, "none", profileSettings.ReasoningEffort)
+				for _, profile := range profileSettings.Profiles {
+					assert.NotEqual(t, "code-search", profile.Name, "hidden profiles must not appear in normal pickers")
+				}
+				parentSettings, err := client.ChatSettings(ctx, "deep")
+				require.NoError(t, err)
+				assert.Equal(t, "xhigh", parentSettings.ReasoningEffort)
+				assert.Equal(t, []string{"high", "xhigh"}, parentSettings.ReasoningEffortOptions)
 				daemonSDKClient(ctx, t, root, workspace, sdk, serverURL, runnerID, clientEnv)
 			}
 			// The commit client has no Git executable, provider credentials or local
@@ -679,26 +729,39 @@ func daemonSDKSearchExtension(t *testing.T, dir, sdk string) string {
 		source = fmt.Sprintf(`import { Client, defineExtension, z } from %q;
 import { runExtension } from %q;
 await runExtension(defineExtension(ext => {
+  const profile = ext.registerProfile({
+    name: "code-search",
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    reasoningEffort: "none",
+    openai: {
+      api_mode: "responses",
+      service_tier: "fast",
+      websocket_mode: false,
+    },
+    hidden: true,
+  });
   let parentSearch = false;
   ext.on("user.message", event => { parentSearch = event.message === "delegate code search"; });
   ext.on("agent.init", () => parentSearch ? { tools: { disable: ["file_read", "grep_tool", "glob_tool"] } } : undefined);
   ext.registerTool({ name: "code_search", description: "Run restricted code search", inputSchema: z.object({}),
     async execute(_input, ctx) {
-      const resume = await ctx.forkConversation({ name: %q });
-      const client = new Client({ command: process.env.KODELET_BIN, cwd: ctx.cwd });
+      if (!ctx.runnerId) throw new Error("Missing extension runner metadata");
+      const client = new Client({ command: process.env.KODELET_BIN, cwd: ctx.cwd, runner: ctx.runnerId });
       try {
-        const session = await client.createSession({ resume, options: {
+        const session = await client.createSession({ profile, options: {
           allowedTools: ["file_read", "grep_tool", "glob_tool"],
           noSkills: true, enableFSSearchTools: true, maxTurns: 3,
         }, extensions: [api => api.on("agent.init", () => ({ systemPrompt: { replace: %q } }))] });
-        return (await session.runAndWait({ message: "child code search", signal: ctx.signal })).content;
+        const result = await session.runAndWait({ message: "child code search", signal: ctx.signal });
+        return "extension-runner:" + ctx.runnerId + "\n" + result.content;
       } finally {
         await client.close();
       }
     }
   });
 }));
-`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), daemonACPSearchName, daemonACPSearchPrompt)
+`, "file://"+filepath.Join(dist, "index.js"), "file://"+filepath.Join(dist, "runtime.js"), daemonACPSearchPrompt)
 	case "python":
 		root := os.Getenv("KODELET_PYTHON_SDK_PATH")
 		require.NotEmpty(t, root, "set KODELET_PYTHON_SDK_PATH to a uv-synced SDK checkout")
@@ -707,7 +770,19 @@ await runExtension(defineExtension(ext => {
 		source = fmt.Sprintf(`import asyncio, os
 from kodelet_sdk import BaseModel, Client, ExecutionOptions, Extension
 from kodelet_sdk.runtime import run_extension
-ext = Extension(name="code_search")
+ext = Extension()
+profile = ext.register_profile(
+    "code-search",
+    provider="openai",
+    model="gpt-5.6-luna",
+    reasoning_effort="none",
+    openai={
+        "api_mode": "responses",
+        "service_tier": "fast",
+        "websocket_mode": False,
+    },
+    hidden=True,
+)
 parent_search = False
 @ext.on("user.message")
 def user_message(event, _ctx):
@@ -725,18 +800,20 @@ class Input(BaseModel):
     pass
 @ext.tool("code_search", description="Run restricted code search", input_schema=Input)
 async def search(_input, ctx):
-    resume = await ctx.fork_conversation(%q)
-    client = Client(command=os.environ["KODELET_BIN"], cwd=ctx.cwd)
+    if not ctx.runner_id:
+        raise RuntimeError("Missing extension runner metadata")
+    client = Client(command=os.environ["KODELET_BIN"], cwd=ctx.cwd, runner=ctx.runner_id)
     try:
-        session = await client.create_session(resume=resume, options=ExecutionOptions(
+        session = await client.create_session(profile=profile, options=ExecutionOptions(
             allowed_tools=["file_read", "grep_tool", "glob_tool"],
             no_skills=True, enable_fs_search_tools=True, max_turns=3,
         ), extensions=[prompt])
-        return (await session.run_and_wait(message="child code search")).content
+        result = await session.run_and_wait(message="child code search")
+        return "extension-runner:" + ctx.runner_id + "\n" + result.content
     finally:
         await client.close()
 asyncio.run(run_extension(ext))
-`, daemonACPSearchPrompt, daemonACPSearchName)
+`, daemonACPSearchPrompt)
 	default:
 		t.Fatalf("unknown extension SDK %q", sdk)
 	}
@@ -810,6 +887,10 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer daemon-only-key", r.Header.Get("Authorization"))
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			daemonSearchResponses(t, w, r, filePath, toolResults, childGate)
+			return
+		}
 		var request struct {
 			Model    string           `json:"model"`
 			Stream   bool             `json:"stream"`
@@ -977,4 +1058,79 @@ func daemonTestProvider(t *testing.T, filePath, pageURL string, toolResults, hel
 		encoded, _ := json.Marshal(chunk)
 		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", encoded)
 	}))
+}
+
+func daemonSearchResponses(t *testing.T, w http.ResponseWriter, r *http.Request, filePath string, toolResults *atomic.Int32, childGate func(context.Context, bool)) {
+	t.Helper()
+	var request struct {
+		Model        string `json:"model"`
+		Stream       bool   `json:"stream"`
+		Instructions string `json:"instructions"`
+		Reasoning    struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+		Input []struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+			CallID  string          `json:"call_id"`
+			Output  json.RawMessage `json:"output"`
+		} `json:"input"`
+	}
+	if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&request)) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	assert.Equal(t, "gpt-5.6-luna", request.Model)
+	assert.Equal(t, "none", request.Reasoning.Effort)
+	assert.True(t, request.Stream)
+	assert.Contains(t, request.Instructions, daemonACPSearchPrompt)
+	var names []string
+	for _, tool := range request.Tools {
+		names = append(names, tool.Name)
+	}
+	assert.ElementsMatch(t, []string{"file_read", "grep_tool", "glob_tool"}, names)
+	var found, child bool
+	for _, item := range request.Input {
+		child = child || strings.Contains(string(item.Content), "child code search")
+		if item.Type == "function_call_output" {
+			assert.Equal(t, "call-read", item.CallID)
+			assert.Contains(t, string(item.Output), "runner-file-evidence")
+			toolResults.Add(1)
+			found = true
+		}
+	}
+	assert.True(t, child)
+	childGate(r.Context(), false)
+	w.Header().Set("Content-Type", "text/event-stream")
+	emit := func(event map[string]any) {
+		encoded, err := json.Marshal(event)
+		assert.NoError(t, err)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
+	}
+	if found {
+		emit(map[string]any{"type": "response.output_text.delta", "delta": "runner-file-evidence"})
+		w.(http.Flusher).Flush()
+		childGate(r.Context(), true)
+		emit(map[string]any{"type": "response.output_item.done", "item": map[string]any{
+			"type": "message", "role": "assistant", "status": "completed",
+			"content": []any{map[string]any{"type": "output_text", "text": "runner-file-evidence"}},
+		}})
+	} else {
+		arguments, err := json.Marshal(map[string]string{"file_path": filePath})
+		assert.NoError(t, err)
+		emit(map[string]any{"type": "response.output_item.done", "item": map[string]any{
+			"type": "function_call", "call_id": "call-read", "name": "file_read", "arguments": string(arguments),
+		}})
+	}
+	emit(map[string]any{"type": "response.completed", "response": map[string]any{
+		"id": "search-response", "status": "completed", "model": request.Model,
+		"usage": map[string]any{
+			"input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+			"input_tokens_details":  map[string]int{"cached_tokens": 0},
+			"output_tokens_details": map[string]int{"reasoning_tokens": 0},
+		},
+	}})
 }

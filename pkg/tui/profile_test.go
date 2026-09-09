@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -181,4 +182,44 @@ func TestLoadProfileOptionsIncludesOverrideLastAndHonoursIsolatedMode(t *testing
 		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
 		assert.Equal(t, []string{"default", "override-only"}, loadProfileOptions())
 	})
+}
+
+func TestLoadProfileOptionsHidesProfilesWithoutLosingExplicitOrSavedSelection(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`profiles:
+  hidden-search:
+    hidden: true
+    model: search-model
+  visible-search:
+    hidden: false
+    model: search-model
+  work:
+    model: work-model
+  default:
+    hidden: true
+`), 0o644))
+	t.Setenv(llm.ConfigFileEnv, configPath)
+	t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigFile(configPath)
+	require.NoError(t, viper.ReadInConfig())
+
+	options := loadProfileOptions()
+	assert.Equal(t, []string{"default", "visible-search", "work"}, options)
+	for _, conversationID := range []string{"", "saved-conversation"} {
+		t.Run("conversation="+conversationID, func(t *testing.T) {
+			m := newModel(t.Context(), Config{
+				Remote: true, ConversationID: conversationID,
+				Profile: "hidden-search", ProfileOptions: options,
+			})
+			t.Cleanup(m.cancel)
+			assert.Equal(t, "hidden-search", m.profile)
+			assert.Equal(t, "hidden-search", m.profileOptions[m.profileIndex])
+			assert.Equal(t, "hidden-search", profileForRequest(m.profile))
+			assert.Equal(t, conversationID == "", m.canChangeProfile())
+		})
+	}
 }

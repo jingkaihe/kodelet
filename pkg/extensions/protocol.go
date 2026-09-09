@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -110,6 +112,52 @@ type Subscription struct {
 	TimeoutInSec *float64 `json:"timeoutInSec,omitempty"`
 }
 
+// ProfileRegistration declares model defaults for remote daemon resolution.
+type ProfileRegistration struct {
+	Name    string                            `json:"name"`
+	Options *llmtypes.ExtensionProfileOptions `json:"options"`
+	Hidden  bool                              `json:"hidden"`
+}
+
+// Profile is a declaration bound to its runner-discovered source.
+// Registration does not grant credentials or permission to execute a model.
+type Profile struct {
+	Name        string                            `json:"name"`
+	ExtensionID string                            `json:"extensionId"`
+	Options     *llmtypes.ExtensionProfileOptions `json:"options"`
+	Hidden      bool                              `json:"hidden"`
+}
+
+// Validate checks the profile name and options contract.
+func (p ProfileRegistration) Validate() error {
+	if !profileNamePattern.MatchString(p.Name) {
+		return errors.New("invalid extension profile name: must contain 1 to 128 ASCII characters matching [A-Za-z0-9][A-Za-z0-9._-]*")
+	}
+	if strings.EqualFold(p.Name, "default") {
+		return errors.New("extension profile name default is reserved")
+	}
+	if err := p.Options.Validate(); err != nil {
+		return errors.Wrap(err, "invalid extension profile options")
+	}
+	return nil
+}
+
+// Validate checks a source-bound profile without resolving it.
+func (p Profile) Validate() error {
+	if strings.TrimSpace(p.ExtensionID) == "" || strings.ContainsRune(p.ExtensionID, '\x00') {
+		return errors.New("extension profile source id is required and must contain no NUL")
+	}
+	return (ProfileRegistration{Name: p.Name, Options: p.Options, Hidden: p.Hidden}).Validate()
+}
+
+// Clone returns a declaration with independent options.
+func (p Profile) Clone() Profile {
+	p.Options = p.Options.Clone()
+	return p
+}
+
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
 type initializeParams struct {
 	ProtocolVersion string                  `json:"protocolVersion"`
 	Kodelet         map[string]any          `json:"kodelet"`
@@ -118,16 +166,18 @@ type initializeParams struct {
 }
 
 type initializeExtensionInfo struct {
-	ID      string         `json:"id"`
-	Config  map[string]any `json:"config"`
-	CWD     string         `json:"cwd"`
-	DataDir string         `json:"dataDir"`
+	ID       string         `json:"id"`
+	RunnerID string         `json:"runnerId,omitempty"`
+	Config   map[string]any `json:"config"`
+	CWD      string         `json:"cwd"`
+	DataDir  string         `json:"dataDir"`
 }
 
 // InitializeResult is returned by extension.initialize.
 type InitializeResult struct {
 	Name          string                 `json:"name"`
 	Version       string                 `json:"version,omitempty"`
+	Profiles      []ProfileRegistration  `json:"profiles,omitempty"`
 	Tools         []ToolRegistration     `json:"tools,omitempty"`
 	Commands      []CommandRegistration  `json:"commands,omitempty"`
 	Shortcuts     []ShortcutRegistration `json:"shortcuts,omitempty"`

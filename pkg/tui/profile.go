@@ -30,7 +30,9 @@ func loadProfileOptions() []string {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		appendOption(name)
+		if !llm.IsProfileHidden(name) {
+			appendOption(name)
+		}
 	}
 	return options
 }

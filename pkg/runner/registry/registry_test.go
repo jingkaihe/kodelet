@@ -206,12 +206,14 @@ func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T)
 	first, err := registry.Register(params, firstLink)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), first.Generation)
+	assert.True(t, first.RemoteProfiles)
 
 	secondLink := newFakeLink()
 	params.RunnerID = first.RunnerID
 	params.DisplayName = "renamed"
 	second, err := registry.Register(params, secondLink)
 	require.NoError(t, err)
+	assert.True(t, second.RemoteProfiles)
 	assert.Equal(t, first.RunnerID, second.RunnerID)
 	assert.Equal(t, int64(2), second.Generation)
 	assert.True(t, firstLink.isClosed())
@@ -379,6 +381,7 @@ func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing
 	})
 	require.NoError(t, err)
 	assert.Equal(t, offline.ID, registration.RunnerID)
+	assert.True(t, registration.RemoteProfiles)
 
 	params.RunnerID = "runner-other"
 	_, err = registry.RegisterAuthenticated(params, newFakeLink(), RegistrationPrincipal{

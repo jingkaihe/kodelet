@@ -48,6 +48,7 @@ type recordingRuntimeProvider struct {
 	activeVariant     string
 	activeConfig      extensions.Config
 	activeCallContext extensions.ExtensionCallContext
+	capabilities      extensions.RuntimeCapabilities
 }
 
 type leaseRecordingRuntimeProvider struct {
@@ -116,13 +117,15 @@ func (p *leaseRecordingRuntimeProvider) RuntimeWithConfigAndCallContextForLease(
 	return p.runtime, nil
 }
 
-func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(context.Context, string, string, extensions.Config) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(ctx context.Context, _ string, _ string, _ extensions.Config) (*extensions.Runtime, error) {
 	p.discoveryCalls++
+	p.capabilities = extensions.RuntimeCapabilitiesFromContext(ctx)
 	return p.runtime, nil
 }
 
-func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(_ context.Context, _ string, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(ctx context.Context, _ string, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	p.activeCalls++
+	p.capabilities = extensions.RuntimeCapabilitiesFromContext(ctx)
 	p.activeVariant = variant
 	p.activeConfig = config
 	p.activeCallContext = callContext
@@ -1003,6 +1006,72 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 		}},
 	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"get_goal"})
 	require.ErrorContains(t, err, "collides with a reserved server tool")
+}
+
+func TestServiceRemoteProfileCapabilityFollowsServerRegistration(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	provider := &recordingRuntimeProvider{runtime: runtime}
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		RuntimeProvider: provider,
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}}, nil
+		},
+	})
+	for generation, supported := range []bool{false, true, false} {
+		require.NoError(t, service.SetRegistration(protocol.RegisterResult{
+			RunnerID: "runner-1", Generation: int64(generation + 1), RemoteProfiles: supported,
+		}))
+		_, err := service.ProbeManifest(t.Context(), "")
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		_, err = service.inspectWorkspace(t.Context(), protocol.WorkspaceInspectParams{Operation: "recipe.list"})
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "run", ConversationID: "conversation"})
+		require.NoError(t, err)
+		assert.Equal(t, extensions.RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: supported}, provider.capabilities)
+		require.ErrorContains(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 4, RemoteProfiles: !supported}), "active runs")
+		ctx := service.decorateRunContext(t.Context(), "run", "conversation")
+		assert.Equal(t, supported, extensions.RuntimeCapabilitiesFromContext(ctx).RemoteProfiles)
+		require.NoError(t, service.closeRun(t.Context(), "run"))
+	}
+}
+
+func TestBuildWireManifestProfilesAreSourceBoundAndIndependent(t *testing.T) {
+	service, peer := newSessionTestService(t, llmtypes.Config{})
+	peer.registration = extensions.InitializeResult{
+		Profiles: []extensions.ProfileRegistration{
+			{Name: "search", Options: &llmtypes.ExtensionProfileOptions{
+				Provider: new("openai"), Model: new("gpt-5.6-luna"),
+				OpenAI: map[string]any{"platform": "codex"},
+			}, Hidden: true},
+		},
+	}
+	params := sessionTestOpen("profiles-run")
+	params.Options = &llmtypes.ExecutionOptions{AllowedTools: &[]string{}, NoSkills: new(true)}
+	manifest, err := service.openRun(t.Context(), params)
+	require.NoError(t, err)
+	assert.Empty(t, manifest.Tools, "profile declarations are independent of presentation tools")
+	require.Len(t, manifest.Profiles, 1)
+	assert.Equal(t, "search", manifest.Profiles[0].Name)
+	assert.True(t, manifest.Profiles[0].Hidden)
+	assert.Equal(t, "session:inline-1", manifest.Profiles[0].ExtensionID)
+	digest, err := runnerpayload.ComputeManifestDigest(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, digest, manifest.Digest)
+	*manifest.Profiles[0].Options.Model = "mutated-output"
+	manifest.Profiles[0].Options.OpenAI["platform"] = "openai"
+	peer.registration.Profiles[0].Name = "mutated-input"
+	peer.registration.Profiles[0].Options.OpenAI["platform"] = "copilot"
+	profiles := service.runs[params.RunID].runtime.Profiles()
+	require.Len(t, profiles, 1)
+	assert.Equal(t, "search", profiles[0].Name)
+	assert.Equal(t, "gpt-5.6-luna", *profiles[0].Options.Model)
+	assert.Equal(t, "codex", profiles[0].Options.OpenAI["platform"])
+	require.NoError(t, service.closeRun(t.Context(), params.RunID))
 }
 
 func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {

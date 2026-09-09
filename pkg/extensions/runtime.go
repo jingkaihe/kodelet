@@ -33,6 +33,7 @@ type Runtime struct {
 	mu                  sync.RWMutex
 	processes           []*Process
 	tools               map[string]*Tool
+	profiles            map[string]Profile
 	commands            []Command
 	shortcuts           map[string]registeredShortcut
 	subs                []Subscription
@@ -80,6 +81,7 @@ func emptyRuntimeWithContext(ctx context.Context) *Runtime {
 		runtimeCtx:          runtimeCtx,
 		cancelRuntime:       cancelRuntime,
 		tools:               map[string]*Tool{},
+		profiles:            map[string]Profile{},
 		shortcuts:           map[string]registeredShortcut{},
 		eventHandlersByName: map[string][]eventHandler{},
 	}
@@ -284,6 +286,25 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 	if result == nil {
 		return nil
 	}
+	profiles := make(map[string]Profile, len(result.Profiles))
+	for _, registration := range result.Profiles {
+		profile := Profile{
+			Name:        registration.Name,
+			ExtensionID: proc.Extension.ID,
+			Options:     registration.Options.Clone(),
+			Hidden:      registration.Hidden,
+		}
+		if err := profile.Validate(); err != nil {
+			return errors.Wrapf(err, "failed to register extension profile %q", profile.Name)
+		}
+		if _, exists := r.profiles[profile.Name]; exists {
+			return errors.Errorf("duplicate extension profile registration: %s", profile.Name)
+		}
+		if _, exists := profiles[profile.Name]; exists {
+			return errors.Errorf("duplicate extension profile registration: %s", profile.Name)
+		}
+		profiles[profile.Name] = profile
+	}
 	for _, registration := range result.Tools {
 		if !r.toolEnabled(registration.Name) {
 			continue
@@ -356,6 +377,9 @@ func (r *Runtime) register(ctx context.Context, proc *Process, result *Initializ
 			sub:     subscription,
 			order:   len(r.subs) - 1,
 		})
+	}
+	for name, profile := range profiles {
+		r.profiles[name] = profile
 	}
 	return nil
 }
@@ -447,6 +471,23 @@ func (r *Runtime) Tools() []tooltypes.Tool {
 		tools = append(tools, r.tools[name])
 	}
 	return tools
+}
+
+// Profiles returns sorted, independent declarations for daemon acceptance.
+// They become remotely selectable only after the daemon accepts the manifest,
+// not during extension.initialize, session.start, or resources.discover.
+func (r *Runtime) Profiles() []Profile {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	profiles := make([]Profile, 0, len(r.profiles))
+	for _, profile := range r.profiles {
+		profiles = append(profiles, profile.Clone())
+	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	return profiles
 }
 
 // Commands returns registered extension commands.

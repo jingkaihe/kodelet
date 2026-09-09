@@ -584,6 +584,7 @@ func TestClientSettingsSteeringAndStop(t *testing.T) {
 		switch request.URL.Path {
 		case "/base/api/chat/settings":
 			assert.Equal(t, "work", request.URL.Query().Get("profile"))
+			assert.Equal(t, "runner-1", request.URL.Query().Get("runnerId"))
 			require.NoError(t, json.NewEncoder(w).Encode(ControlPlaneChatSettings{
 				CurrentProfile:         "work",
 				Profiles:               []ControlPlaneProfileOption{{Name: "default"}, {Name: "work"}},
@@ -616,6 +617,25 @@ func TestClientSettingsSteeringAndStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, queued)
 	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-1"))
+}
+
+func TestClientChatSettingsRunnerSelection(t *testing.T) {
+	for _, runnerID := range []string{"", "runner/one"} {
+		t.Run("runner="+runnerID, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				assert.Equal(t, "/api/chat/settings", request.URL.Path)
+				assert.Equal(t, runnerID != "", request.URL.Query().Has("runnerId"))
+				assert.Equal(t, runnerID, request.URL.Query().Get("runnerId"))
+				assert.False(t, request.URL.Query().Has("profile"))
+				_, _ = w.Write([]byte(`{"profiles":[]}`))
+			}))
+			defer server.Close()
+			client, err := NewClient(server.URL, "", runnerID)
+			require.NoError(t, err)
+			_, err = client.ChatSettings(t.Context(), "")
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestClientTreatsStaleScopedStopAsSuccess(t *testing.T) {

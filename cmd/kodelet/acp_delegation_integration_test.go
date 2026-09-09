@@ -35,12 +35,12 @@ func assertDaemonACPSearchBroadcast(ctx context.Context, t *testing.T, client *c
 	require.NoError(t, err)
 	var conversationID string
 	for _, summary := range history {
-		if summary.Summary == daemonACPSearchName {
+		if summary.Summary == daemonACPSearchName || (os.Getenv("KODELET_TEST_EXTENSION_SDK") != "" && summary.Metadata["profile"] == "code-search") {
 			conversationID = summary.ID
 			assert.True(t, summary.IsRunning, "ACP must register a normal active chat")
 		}
 	}
-	require.NotEmpty(t, conversationID, "the live named fork must appear in ordinary conversation history")
+	require.NotEmpty(t, conversationID, "the live ACP child must appear in ordinary conversation history")
 	var observers []<-chan chat.ChatEvent
 	for range 2 {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"/api/conversations/"+conversationID+"/stream", nil)
@@ -103,7 +103,11 @@ func assertDaemonACPSearchBroadcast(ctx context.Context, t *testing.T, client *c
 	for _, summary := range history {
 		if summary.ID == conversationID {
 			assert.True(t, summary.IsRunning, "live deltas must arrive before completion")
-			assert.Equal(t, daemonACPSearchName, summary.Summary)
+			if os.Getenv("KODELET_TEST_EXTENSION_SDK") != "" {
+				assert.Equal(t, "code-search", summary.Metadata["profile"])
+			} else {
+				assert.Equal(t, daemonACPSearchName, summary.Summary)
+			}
 		}
 	}
 	finish()

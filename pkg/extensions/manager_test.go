@@ -280,6 +280,23 @@ func TestRuntimeManagerIsolatesConcurrentCallerLeases(t *testing.T) {
 	}
 }
 
+func TestRuntimeManagerIsolatedDiscoveryPreservesRemoteProfileCapability(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		capabilities := RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: supported}
+		ctx := ContextWithRuntimeCapabilities(t.Context(), capabilities)
+		manager := newRuntimeManager(func(ctx context.Context, _ string, _ Config) (*Runtime, error) {
+			assert.Equal(t, RuntimeCapabilities{RemoteProfiles: supported}, RuntimeCapabilitiesFromContext(ctx))
+			return EmptyRuntime(), nil
+		})
+		runtime, release, err := manager.RuntimeForCommandDiscoveryWithIsolatedLease(ctx, "/workspace", "", Config{Enabled: false})
+		require.NoError(t, err)
+		assert.False(t, runtime.lifecycleStarted)
+		assert.Equal(t, capabilities, RuntimeCapabilitiesFromContext(ctx))
+		require.NoError(t, release())
+		require.NoError(t, manager.Close())
+	}
+}
+
 func TestRuntimeManagerDoesNotCacheRuntimeCreatedByCanceledCaller(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls int

@@ -306,10 +306,13 @@ class ApiService {
 		return this.request<RunnerListResponse>("/api/runners");
 	}
 
-	async getChatSettings(profile?: string): Promise<ChatSettings> {
+	async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {
 		const params = new URLSearchParams();
 		if (profile) {
 			params.append("profile", profile);
+		}
+		if (runnerId) {
+			params.append("runnerId", runnerId);
 		}
 		const suffix = params.toString();
 		return this.request<ChatSettings>(

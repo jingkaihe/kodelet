@@ -90,7 +90,8 @@ type Config struct {
 	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration
-	Profile             string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`                                        // Active model profile name
+	Profile             string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"` // Active model profile name
+	ExtensionProfile    bool                     `mapstructure:"-" json:"-" yaml:"-"`
 	Profiles            map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"`                                     // Named model configuration profiles
 	EnvironmentProfiles map[string]ProfileConfig `mapstructure:"environment_profiles" json:"environment_profiles,omitempty" yaml:"environment_profiles,omitempty"` // Named runner-local environment profiles
 

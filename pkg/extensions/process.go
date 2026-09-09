@@ -44,12 +44,22 @@ type Process struct {
 	uiSource     *processExtensionUISource
 }
 
-// RuntimeCapabilities describes execution-lifetime guarantees available to an extension process.
+// RuntimeCapabilities describes host capabilities available to an extension process.
 type RuntimeCapabilities struct {
 	BackgroundTasks bool
+	// RemoteProfiles reports negotiated daemon support for profile manifests.
+	RemoteProfiles bool
 }
 
-type runtimeCapabilitiesContextKey struct{}
+type (
+	runtimeCapabilitiesContextKey struct{}
+	runnerIDContextKey            struct{}
+)
+
+// ContextWithRunnerID identifies the runner hosting an extension.
+func ContextWithRunnerID(ctx context.Context, runnerID string) context.Context {
+	return context.WithValue(ctx, runnerIDContextKey{}, runnerID)
+}
 
 // ContextWithRuntimeCapabilities overrides extension runtime capabilities for an execution environment.
 func ContextWithRuntimeCapabilities(ctx context.Context, capabilities RuntimeCapabilities) context.Context {
@@ -299,7 +309,9 @@ func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult
 
 func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient, source *processExtensionUISource) (*InitializeResult, error) {
 	if p.transport != nil {
-		ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+		capabilities := RuntimeCapabilitiesFromContext(ctx)
+		capabilities.BackgroundTasks = false
+		ctx = ContextWithRuntimeCapabilities(ctx, capabilities)
 	}
 	if source != nil {
 		source.setHostContext(ctx)
@@ -324,6 +336,7 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 		hasExtensionTranscript = capabilities.Transcript
 	}
 	runtimeCapabilities := RuntimeCapabilitiesFromContext(ctx)
+	runnerID, _ := ctx.Value(runnerIDContextKey{}).(string)
 
 	dataDir, err := extensionDataDir(p.Extension.ID)
 	if err != nil {
@@ -335,15 +348,19 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 			"version": "dev",
 		},
 		Extension: initializeExtensionInfo{
-			ID:      p.Extension.ID,
-			Config:  map[string]any{},
-			CWD:     cwd,
-			DataDir: dataDir,
+			ID:       p.Extension.ID,
+			RunnerID: runnerID,
+			Config:   map[string]any{},
+			CWD:      cwd,
+			DataDir:  dataDir,
 		},
 		Capabilities: map[string]any{
 			"tools":       true,
 			"toolUpdates": true,
 			"commands":    true,
+			"profiles": map[string]any{
+				"remote": runtimeCapabilities.RemoteProfiles,
+			},
 			"runtime": map[string]any{
 				"backgroundTasks": runtimeCapabilities.BackgroundTasks,
 			},
@@ -632,7 +649,9 @@ func (p *Process) HandleRPCRequest(ctx context.Context, method string, params js
 
 func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource, method string, params json.RawMessage) (any, *rpcError) {
 	if p.transport != nil {
-		ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: false})
+		capabilities := RuntimeCapabilitiesFromContext(ctx)
+		capabilities.BackgroundTasks = false
+		ctx = ContextWithRuntimeCapabilities(ctx, capabilities)
 	}
 	if isPersistentExtensionUIRequest(method) && !hasExplicitExtensionUIScope(params) {
 		ctx = ContextWithExtensionUIImplicitScope(ctx)

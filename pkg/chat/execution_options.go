@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
@@ -167,6 +169,86 @@ func applyExecutionOptions(config llmtypes.Config, options *llmtypes.ExecutionOp
 		return llmtypes.Config{}, errors.New("model settings cannot be changed for this conversation; start a new conversation to change them")
 	}
 	return config, nil
+}
+
+// ResolveExtensionProfile validates model declarations against daemon-owned
+// provider configuration. It never modifies the daemon's configured profiles.
+func ResolveExtensionProfile(profile extensions.Profile, reasoningEffort string) (llmtypes.Config, error) {
+	if err := profile.Validate(); err != nil {
+		return llmtypes.Config{}, err
+	}
+	options := profile.Options
+	blocks := make(map[string]any)
+	if options.OpenAI != nil {
+		blocks["openai"] = options.OpenAI
+	}
+	if options.Anthropic != nil {
+		blocks["anthropic"] = options.Anthropic
+	}
+	data, err := json.Marshal(blocks)
+	if err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
+	}
+	var overrides llmtypes.Config
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
+	}
+	platform := ""
+	if overrides.OpenAI != nil {
+		platform = overrides.OpenAI.Platform
+	}
+	if overrides.Anthropic != nil {
+		platform = overrides.Anthropic.Platform
+	}
+	if options.AnthropicAPIAccess != nil && platform == "" {
+		platform = "anthropic"
+	}
+	config, err := llm.GetConfigForExtensionProvider(*options.Provider, strings.ToLower(strings.TrimSpace(platform)))
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "invalid profile provider settings")
+	}
+	if options.AnthropicAPIAccess != nil {
+		config.AnthropicAPIAccess = *options.AnthropicAPIAccess
+	}
+	config.Profile = profile.Name
+	config.ExtensionProfile = true
+	config, err = applyExecutionOptions(config, options.ModelOptions(), nil)
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	if strings.TrimSpace(reasoningEffort) != "" {
+		config, err = applyExecutionOptions(config, &llmtypes.ExecutionOptions{ReasoningEffort: &reasoningEffort}, nil)
+		if err != nil {
+			return llmtypes.Config{}, err
+		}
+	}
+	config.ExecutionOptions = nil
+	return config, nil
+}
+
+func extensionSnapshotBase(ctx context.Context, snapshot *llmtypes.ConversationConfigSnapshot) (llmtypes.Config, error) {
+	platform := snapshot.Provider
+	switch snapshot.Provider {
+	case "openai":
+		if snapshot.OpenAI != nil && snapshot.OpenAI.Platform != "" {
+			platform = snapshot.OpenAI.Platform
+		}
+	case "anthropic":
+		if snapshot.Anthropic != nil && snapshot.Anthropic.Platform != "" {
+			platform = snapshot.Anthropic.Platform
+		}
+	}
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if resolve, ok := ctx.Value(profileResolverContextKey{}).(func(string, string) (llmtypes.Config, error)); ok {
+		live, err := resolve(snapshot.Profile, "")
+		if err == nil && live.ExtensionProfile && live.Provider == snapshot.Provider && llm.ProviderPlatform(live, snapshot.Provider) == platform {
+			return live.Clone(), nil
+		}
+	}
+	return llm.GetConfigForExtensionProvider(snapshot.Provider, platform)
 }
 
 // The provider namespace is selected by trusted daemon configuration. Requests

@@ -65,6 +65,7 @@ type EnvironmentCapabilities struct {
 type Manifest struct {
 	SessionExtensionIDs []string                      `json:"sessionExtensionIds,omitempty"`
 	Shortcuts           []protocol.ShortcutDescriptor `json:"shortcuts,omitempty"`
+	Profiles            []extensions.Profile          `json:"profiles,omitempty"`
 	ProtocolVersion     int                           `json:"protocolVersion"`
 	RunnerID            string                        `json:"runnerId"`
 	RunID               string                        `json:"runId"`

@@ -261,6 +261,7 @@ type RegisterResult struct {
 	ConnectionID        string `json:"connectionId"`
 	Generation          int64  `json:"generation"`
 	HeartbeatIntervalMS int64  `json:"heartbeatIntervalMs"`
+	RemoteProfiles      bool   `json:"remoteProfiles,omitempty"`
 }
 
 // RunnerState is the application-level availability reported by heartbeats.

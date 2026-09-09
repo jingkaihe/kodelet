@@ -164,11 +164,27 @@ Omit `name` to preserve the source title. Unavailable forks raise `ConversationF
 
 ### ACP subagents and code search
 
-Use ordinary `Client` sessions with normal client credentials and the intended server/runner. Pass typed `options` directly; `profile` selects an existing daemon profile, and `options.provider` must match it. Scoped `ctx.children` and extension profile registration/lookup are removed.
+Use ordinary `Client` sessions with normal client credentials and the intended server/runner. Pass typed `options` directly; `profile` selects a configured or registered daemon profile, and `options.provider` must match it. Scoped `ctx.children` and `get_profile` remain removed.
 
 Use inline `agent.init` hooks for instructions, keeping extensions enabled. Explicitly allowlist search tools and disable skills; runner policy still applies, but the caller's presentation-only tool list is not inherited.
 
 For inherited context, create a named fork inside the tool handler, then load it with `createSession({ resume: conversationId })`. ACP preserves normal history and streaming; `TaskProgress.attach(session)` tracks activity. Steering never starts a new turn. Own cancellation and client cleanup before releasing any background lease. Runner-targeted credentials remain phase two.
+
+### Registered model profiles
+
+Declare a profile, then use its returned name in a later tool handler's `client.createSession({ profile: searchProfile })`:
+
+```typescript
+const searchProfile = ext.registerProfile({
+  name: "code-search",
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  reasoningEffort: "none",
+  hidden: true,
+});
+```
+
+For Claude subscriptions, use `provider: "anthropic"` and `anthropicAPIAccess: "subscription"` (Python: `anthropic_api_access`). Provider credentials stay on the daemon.
 
 ### Background extension work
 
