@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -106,7 +107,6 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	}
 	diagnostics.Info("")
 	diagnostics.Stats(presenter.ConvertUsageStats(sink.usage))
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Conversation: %s\nRepository: %s\n", request.ConversationID, snapshot.GitRoot)
 	diagnostics.Info("")
 	if !config.NoConfirm {
 		var confirmed bool
@@ -127,7 +127,14 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if result.Output != "" {
 		presentation.Info(result.Output)
 	}
-	presentation.Success(fmt.Sprintf("Commit created successfully! (%s)", result.Commit))
+	presentation.Success("Commit created successfully!")
+	// Only discard this command's temporary history after Git acknowledges the
+	// commit. Failed or uncertain commits retain their recovery information.
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := runner.DeleteConversation(cleanup, request.ConversationID); err != nil {
+		diagnostics.Warning("The commit was created, but its temporary conversation could not be deleted.")
+	}
 	return nil
 }
 

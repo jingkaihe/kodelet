@@ -75,19 +75,21 @@ func TestRemoteCommitRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
 }
 
 func TestRemoteCommitProcessDoesNotReadClientGitOrProviderState(t *testing.T) {
-	t.Run("complete", func(t *testing.T) { testRemoteCommitProcess(t, false) })
-	t.Run("truncated", func(t *testing.T) { testRemoteCommitProcess(t, true) })
-	t.Run("color", func(t *testing.T) { testRemoteCommitProcess(t, false, "KODELET_COLOR=always") })
-	t.Run("no-color", func(t *testing.T) { testRemoteCommitProcess(t, false, "KODELET_COLOR=always", "NO_COLOR=1") })
+	t.Run("complete", func(t *testing.T) { testRemoteCommitProcess(t, false, "") })
+	t.Run("truncated", func(t *testing.T) { testRemoteCommitProcess(t, true, "") })
+	t.Run("color", func(t *testing.T) { testRemoteCommitProcess(t, false, "", "KODELET_COLOR=always") })
+	t.Run("no-color", func(t *testing.T) { testRemoteCommitProcess(t, false, "", "KODELET_COLOR=always", "NO_COLOR=1") })
+	t.Run("cleanup-failure", func(t *testing.T) { testRemoteCommitProcess(t, false, "cleanup") })
+	t.Run("commit-failure", func(t *testing.T) { testRemoteCommitProcess(t, false, "commit") })
 }
 
-func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
+func testRemoteCommitProcess(t *testing.T, truncated bool, failure string, colorEnv ...string) {
 	t.Helper()
 	snapshot := protocol.WorkspaceGitCommitSnapshot{CWD: "/runner-only/repo", GitRoot: "/runner-only/repo", Head: strings.Repeat("a", 40), HeadRef: "refs/heads/main", Tree: strings.Repeat("b", 40), RunnerID: "registered", Generation: 7, Diff: "approved staged diff"}
 	if truncated {
 		snapshot.Truncated, snapshot.DiffStat = true, "summary of all staged changes"
 	}
-	var preparations, submissions, approvals atomic.Int32
+	var preparations, submissions, approvals, deletions atomic.Int32
 	var conversationID string
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
@@ -111,6 +113,11 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
 			assert.Equal(t, int64(7), approval.Generation)
 			assert.Equal(t, "/runner-only/repo", approval.CWD)
 			assert.True(t, approval.SignOff)
+			if failure == "commit" {
+				w.WriteHeader(http.StatusBadGateway)
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"error": "runner commit was not acknowledged; inspect Git history before retrying"}))
+				return
+			}
 			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40), Output: "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)"}))
 		case "/api/chat":
 			submissions.Add(1)
@@ -137,6 +144,17 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
 				CurrentContextWindow: 20, MaxContextWindow: 100,
 			}}))
 			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"}))
+		case "/api/conversations/" + conversationID:
+			deletions.Add(1)
+			assert.Equal(t, http.MethodDelete, r.Method)
+			assert.NotEmpty(t, conversationID)
+			assert.EqualValues(t, 1, approvals.Load(), "cleanup must follow the commit")
+			if failure == "cleanup" {
+				w.WriteHeader(http.StatusInternalServerError)
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"error": "failed to delete conversation"}))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -151,7 +169,18 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
 	env = append(env, colorEnv...)
 	process := daemonCLIProcess(ctx, t, root, env, "commit", "--server="+daemon.URL, "--auth-token=client", "--cwd=/runner-only/repo", "--prefix=TICKET", "--no-confirm")
 	output, err := process.CombinedOutput()
+	assert.EqualValues(t, 1, preparations.Load())
+	assert.EqualValues(t, 1, submissions.Load())
+	assert.EqualValues(t, 1, approvals.Load())
+	if failure == "commit" {
+		require.Error(t, err)
+		assert.Contains(t, string(output), "check 'git log'")
+		assert.NotContains(t, string(output), "Commit created successfully!")
+		assert.Zero(t, deletions.Load(), "uncertain commits must retain their conversation")
+		return
+	}
 	require.NoError(t, err, "%s", output)
+	assert.EqualValues(t, 1, deletions.Load())
 	if len(colorEnv) == 1 {
 		assert.Contains(t, string(output), "\x1b[", "explicit color mode should style terminal output")
 	} else {
@@ -163,18 +192,16 @@ func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
 	assert.Contains(t, text, "[Usage Stats] Input tokens: 10 | Output tokens: 5 | Cache write: 2 | Cache read: 3 | Total: 20")
 	assert.Contains(t, text, "[Context Window] Current: 20 | Max: 100 | Usage: 20.0%")
 	assert.Contains(t, text, "[Cost Stats] Input: $0.0010 | Output: $0.0020 | Cache write: $0.0030 | Cache read: $0.0040 | Total: $0.0100")
-	assert.Contains(t, text, "Conversation: "+conversationID+"\nRepository: /runner-only/repo\n")
 	assert.Contains(t, text, "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)\n")
-	assert.Contains(t, text, "✓ Commit created successfully! ("+strings.Repeat("c", 40)+")\n")
+	assert.Contains(t, text, "✓ Commit created successfully!\n")
 	if truncated {
 		assert.Contains(t, text, "⚠ Staged changes are too large to preview in full")
 		assert.Contains(t, text, "commit will include all staged changes")
+	} else if failure == "cleanup" {
+		assert.Contains(t, text, "⚠ The commit was created, but its temporary conversation could not be deleted.")
 	} else {
 		assert.NotContains(t, text, "⚠")
 	}
-	assert.EqualValues(t, 1, preparations.Load())
-	assert.EqualValues(t, 1, submissions.Load())
-	assert.EqualValues(t, 1, approvals.Load())
 }
 
 func TestRemoteCommitPreparationErrorsAreActionable(t *testing.T) {

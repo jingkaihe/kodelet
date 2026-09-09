@@ -654,10 +654,15 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			if placement == "standalone" {
 				commitArgs = append(commitArgs, "--runner="+runnerID)
 			}
+			historyBeforeCommit, err := client.ListConversationsInCWD(ctx, 100, workspace)
+			require.NoError(t, err)
 			commit := daemonCLIProcess(ctx, t, root, append(clientEnv, "PATH="+root), commitArgs...)
 			output, err := commit.CombinedOutput()
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "Commit created successfully!")
+			historyAfterCommit, err := client.ListConversationsInCWD(ctx, 100, workspace)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, historyBeforeCommit, historyAfterCommit, "successful commits should remove only their temporary conversation")
 			assert.Contains(t, git("log", "-1", "--format=%B"), "feat: commit runner snapshot")
 			assert.Contains(t, git("log", "-1", "--format=%B"), "Signed-off-by: Runner Commit User <commit@example.com>")
 			assert.Equal(t, "APPROVED_RUNNER_COMMIT_CONTENT", git("show", "HEAD:commit-evidence.txt"))
