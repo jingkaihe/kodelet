@@ -238,6 +238,28 @@ func TestApplyEnvironmentOptionsFilesystemSelectionAndCeiling(t *testing.T) {
 	}
 }
 
+func TestRunnerOptionsCarriesFilesystemSelection(t *testing.T) {
+	profile := Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}
+	assert.Nil(t, profile.EnvironmentOptions().EnableFSSearchTools, "restrictions stay free of presentation defaults")
+	assert.Equal(t, new(true), profile.RunnerOptions().EnableFSSearchTools)
+
+	runner := Config{}
+	resolved, err := ApplyEnvironmentOptions(runner, profile.RunnerOptions())
+	require.NoError(t, err)
+	assert.True(t, resolved.EnableFSSearchTools, "the runner presents filesystem search the profile selected")
+	for _, name := range []string{"file_read", "grep_tool", "glob_tool"} {
+		assert.True(t, resolved.ExecutionOptions.ToolAllowed(name), name)
+	}
+
+	assert.Nil(t, Config{}.RunnerOptions().EnableFSSearchTools, "an unselected default stays the runner's own choice")
+	restricted := Config{EnableFSSearchTools: true, ExecutionOptions: &ExecutionOptions{EnableFSSearchTools: new(false)}}
+	assert.Equal(t, new(false), restricted.RunnerOptions().EnableFSSearchTools, "selection never relaxes an inherited restriction")
+	denied, err := ApplyEnvironmentOptions(runner, restricted.RunnerOptions())
+	require.NoError(t, err)
+	assert.False(t, denied.EnableFSSearchTools)
+	assert.False(t, denied.ExecutionOptions.ToolAllowed("grep_tool"))
+}
+
 func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 	for _, options := range []*ExecutionOptions{
 		nil,

@@ -154,7 +154,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		ClientCapabilities: e.clientCapabilities,
 		SessionExtensions:  e.sessionExtensions,
 		ReservedToolNames:  tools.ControlPlaneToolNames(),
-		Options:            spec.Config.EnvironmentOptions(),
+		Options:            spec.Config.RunnerOptions(),
 	}
 	wireManifest, err := e.controller.OpenRun(ctx, e.runnerID, params)
 	if err != nil {

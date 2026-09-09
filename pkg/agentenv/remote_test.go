@@ -178,6 +178,35 @@ func TestRemoteEnvironmentModelProfileOverridePreservesConfig(t *testing.T) {
 	require.NoError(t, environment.Close(t.Context()))
 }
 
+func TestRemoteEnvironmentSendsFilesystemSearchSelection(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config llmtypes.Config
+		want   *bool
+	}{
+		{"selected", llmtypes.Config{EnableFSSearchTools: true}, new(true)},
+		{"runner default", llmtypes.Config{}, nil},
+		{
+			"inherited restriction",
+			llmtypes.Config{EnableFSSearchTools: true, ExecutionOptions: &llmtypes.ExecutionOptions{EnableFSSearchTools: new(false)}},
+			new(false),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
+				ProtocolVersion: protocol.Version, RunnerID: "runner", RunID: "run",
+				Generation: 1, WorkingDirectory: "/runner/workspace",
+			}}
+			environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
+			_, err := environment.Open(t.Context(), RunSpec{ConversationID: "saved", Config: tt.config})
+			require.NoError(t, err)
+			require.NotNil(t, controller.openParams.Options)
+			assert.Equal(t, tt.want, controller.openParams.Options.EnableFSSearchTools)
+			require.NoError(t, environment.Close(t.Context()))
+		})
+	}
+}
+
 func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	contextContent := "# Runner instructions"
 	controller := &fakeRemoteController{}

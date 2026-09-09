@@ -209,6 +209,16 @@ func (c Config) EnvironmentOptions() *ExecutionOptions {
 	return o
 }
 
+// RunnerOptions returns environment restrictions plus the filesystem search
+// selection, which a runner cannot resolve from a daemon-only profile.
+func (c Config) RunnerOptions() *ExecutionOptions {
+	o := c.EnvironmentOptions()
+	if o.EnableFSSearchTools == nil && c.EnableFSSearchTools {
+		o.EnableFSSearchTools = new(true)
+	}
+	return o
+}
+
 func intersectPolicy(host []string, requested *[]string) *[]string {
 	if len(host) == 0 {
 		return intersectRestrictions(nil, requested)
