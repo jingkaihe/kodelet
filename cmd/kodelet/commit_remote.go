@@ -11,6 +11,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -72,11 +73,21 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	}
 	snapshot, err := runner.PrepareCommit(ctx, chat.WorkspaceTarget{RunnerID: request.RunnerID, CWD: request.CWD})
 	if err != nil {
+		// Preparation cannot mutate Git. Show the daemon's actionable message
+		// instead of transport details, without changing shared HTTP errors or
+		// the uncertainty warnings returned by CreateCommit below.
+		var responseErr *chat.ControlPlaneHTTPError
+		if errors.As(err, &responseErr) && strings.TrimSpace(responseErr.Message) != "" {
+			return errors.New(strings.TrimPrefix(strings.TrimSpace(responseErr.Message), "runner commit preparation failed: "))
+		}
 		return err
 	}
+	presentation := presenter.NewWithOptions(cmd.OutOrStdout(), cmd.ErrOrStderr(), presenter.ColorAuto)
+	diagnostics := presenter.NewWithOptions(cmd.ErrOrStderr(), cmd.ErrOrStderr(), presenter.ColorAuto)
 	if snapshot.Truncated {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: staged changes are too large to preview in full. The commit message will use a summary and part of the diff; the commit will include all staged changes.")
+		diagnostics.Warning("Staged changes are too large to preview in full. The commit message will use a summary and part of the diff; the commit will include all staged changes.")
 	}
+	diagnostics.Info("Analyzing staged changes and generating commit message...")
 	request.RunnerID, request.CWD = snapshot.RunnerID, snapshot.CWD
 	request.Message = remoteCommitPrompt(snapshot, config)
 	sink := &remoteRunSink{output: io.Discard, diagnostics: cmd.ErrOrStderr(), resultOnly: true}
@@ -88,18 +99,24 @@ func runRemoteCommit(cmd *cobra.Command) error {
 		return errors.New("the generated commit message was empty; no commit was created")
 	}
 	message = prefixCommitMessage(message, config.Prefix)
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Generated commit message:\n%s\n", message); err != nil {
+	presentation.Info("")
+	presentation.Section("Generated Commit Message")
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), message); err != nil {
 		return err
 	}
-	if sink.usage != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Usage: %d input tokens, %d output tokens\n", sink.usage.InputTokens, sink.usage.OutputTokens)
-	}
+	diagnostics.Info("")
+	diagnostics.Stats(presenter.ConvertUsageStats(sink.usage))
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Conversation: %s\nRepository: %s\n", request.ConversationID, snapshot.GitRoot)
+	diagnostics.Info("")
 	if !config.NoConfirm {
 		var confirmed bool
 		confirmed, message, err = confirmRemoteCommit(ctx, broker, message)
-		if err != nil || !confirmed {
+		if err != nil {
 			return err
+		}
+		if !confirmed {
+			presentation.Info("Commit aborted.")
+			return nil
 		}
 	}
 	approval := protocol.WorkspaceGitCommitParams{CWD: snapshot.CWD, Head: snapshot.Head, HeadRef: snapshot.HeadRef, Tree: snapshot.Tree, Generation: snapshot.Generation, Message: message, SignOff: !config.NoSign}
@@ -107,8 +124,11 @@ func runRemoteCommit(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Commit created: %s\n", result.Commit)
-	return err
+	if result.Output != "" {
+		presentation.Info(result.Output)
+	}
+	presentation.Success(fmt.Sprintf("Commit created successfully! (%s)", result.Commit))
+	return nil
 }
 
 func remoteCommitPrompt(snapshot protocol.WorkspaceGitCommitSnapshot, config *CommitConfig) string {
@@ -131,7 +151,7 @@ func remoteCommitPrompt(snapshot protocol.WorkspaceGitCommitSnapshot, config *Co
 
 func confirmRemoteCommit(ctx context.Context, broker extensions.UIInputBroker, message string) (bool, string, error) {
 	for {
-		response, err := broker.Input(ctx, extensions.UIInputRequest{Title: "Create commit with this message? (Y/n/e to edit)", DefaultValue: "y"})
+		response, err := broker.Input(ctx, extensions.UIInputRequest{Title: "Create commit with this message?", SubmitButtonText: "Y/n/e (edit)", DefaultValue: "y"})
 		if err != nil {
 			return false, message, err
 		}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -76,9 +77,11 @@ func TestRemoteCommitRejectsInvalidOptionsBeforeHTTP(t *testing.T) {
 func TestRemoteCommitProcessDoesNotReadClientGitOrProviderState(t *testing.T) {
 	t.Run("complete", func(t *testing.T) { testRemoteCommitProcess(t, false) })
 	t.Run("truncated", func(t *testing.T) { testRemoteCommitProcess(t, true) })
+	t.Run("color", func(t *testing.T) { testRemoteCommitProcess(t, false, "KODELET_COLOR=always") })
+	t.Run("no-color", func(t *testing.T) { testRemoteCommitProcess(t, false, "KODELET_COLOR=always", "NO_COLOR=1") })
 }
 
-func testRemoteCommitProcess(t *testing.T, truncated bool) {
+func testRemoteCommitProcess(t *testing.T, truncated bool, colorEnv ...string) {
 	t.Helper()
 	snapshot := protocol.WorkspaceGitCommitSnapshot{CWD: "/runner-only/repo", GitRoot: "/runner-only/repo", Head: strings.Repeat("a", 40), HeadRef: "refs/heads/main", Tree: strings.Repeat("b", 40), RunnerID: "registered", Generation: 7, Diff: "approved staged diff"}
 	if truncated {
@@ -108,7 +111,7 @@ func testRemoteCommitProcess(t *testing.T, truncated bool) {
 			assert.Equal(t, int64(7), approval.Generation)
 			assert.Equal(t, "/runner-only/repo", approval.CWD)
 			assert.True(t, approval.SignOff)
-			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40)}))
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceGitCommitResult{Commit: strings.Repeat("c", 40), Output: "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)"}))
 		case "/api/chat":
 			submissions.Add(1)
 			var request chat.ChatRequest
@@ -128,7 +131,11 @@ func testRemoteCommitProcess(t *testing.T, truncated bool) {
 			conversationID = request.ConversationID
 			w.Header().Set("Content-Type", "application/x-ndjson")
 			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "result", Result: new("feat: runner change")}))
-			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "usage", Usage: &llmtypes.Usage{InputTokens: 10, OutputTokens: 5}}))
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "usage", Usage: &llmtypes.Usage{
+				InputTokens: 10, OutputTokens: 5, CacheCreationInputTokens: 2, CacheReadInputTokens: 3,
+				InputCost: 0.001, OutputCost: 0.002, CacheCreationCost: 0.003, CacheReadCost: 0.004,
+				CurrentContextWindow: 20, MaxContextWindow: 100,
+			}}))
 			require.NoError(t, json.NewEncoder(w).Encode(chat.ChatEvent{Kind: "done"}))
 		default:
 			http.NotFound(w, r)
@@ -141,31 +148,90 @@ func testRemoteCommitProcess(t *testing.T, truncated bool) {
 	invalidStore := filepath.Join(root, "no-client-state")
 	require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
 	env := []string{"PATH=" + root, "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1", "KODELET_BASE_PATH=" + invalidStore}
+	env = append(env, colorEnv...)
 	process := daemonCLIProcess(ctx, t, root, env, "commit", "--server="+daemon.URL, "--auth-token=client", "--cwd=/runner-only/repo", "--prefix=TICKET", "--no-confirm")
 	output, err := process.CombinedOutput()
 	require.NoError(t, err, "%s", output)
-	assert.Contains(t, string(output), "TICKET feat: runner change")
-	assert.Contains(t, string(output), "Usage: 10 input tokens, 5 output tokens")
-	assert.Contains(t, string(output), "Commit created:")
-	if truncated {
-		assert.Contains(t, string(output), "Warning: staged changes are too large to preview in full")
-		assert.Contains(t, string(output), "commit will include all staged changes")
+	if len(colorEnv) == 1 {
+		assert.Contains(t, string(output), "\x1b[", "explicit color mode should style terminal output")
 	} else {
-		assert.NotContains(t, string(output), "Warning: staged diff")
+		assert.NotContains(t, string(output), "\x1b[", "pipes and NO_COLOR should use plain text")
+	}
+	text := ansi.Strip(string(output))
+	assert.Contains(t, text, "Analyzing staged changes and generating commit message...\n")
+	assert.Contains(t, text, "Generated Commit Message\n------------------------\nTICKET feat: runner change\n")
+	assert.Contains(t, text, "[Usage Stats] Input tokens: 10 | Output tokens: 5 | Cache write: 2 | Cache read: 3 | Total: 20")
+	assert.Contains(t, text, "[Context Window] Current: 20 | Max: 100 | Usage: 20.0%")
+	assert.Contains(t, text, "[Cost Stats] Input: $0.0010 | Output: $0.0020 | Cache write: $0.0030 | Cache read: $0.0040 | Total: $0.0100")
+	assert.Contains(t, text, "Conversation: "+conversationID+"\nRepository: /runner-only/repo\n")
+	assert.Contains(t, text, "[main ccccccc] TICKET feat: runner change\n 1 file changed, 1 insertion(+)\n")
+	assert.Contains(t, text, "✓ Commit created successfully! ("+strings.Repeat("c", 40)+")\n")
+	if truncated {
+		assert.Contains(t, text, "⚠ Staged changes are too large to preview in full")
+		assert.Contains(t, text, "commit will include all staged changes")
+	} else {
+		assert.NotContains(t, text, "⚠")
 	}
 	assert.EqualValues(t, 1, preparations.Load())
 	assert.EqualValues(t, 1, submissions.Load())
 	assert.EqualValues(t, 1, approvals.Load())
 }
 
+func TestRemoteCommitPreparationErrorsAreActionable(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"no staged changes", http.StatusBadGateway, `{"error":"runner commit preparation failed: no staged changes; stage changes on the selected runner first"}`, "no staged changes; stage changes on the selected runner first"},
+		{"git error", http.StatusBadGateway, `{"error":"runner commit preparation failed: runner Git write-tree failed: unmerged index"}`, "runner Git write-tree failed: unmerged index"},
+		{"runner offline", http.StatusConflict, `{"error":"runner is offline; reconnect it before trying again"}`, "runner is offline; reconnect it before trying again"},
+		{"unknown gateway error", http.StatusBadGateway, "Bad Gateway", "server returned HTTP 502"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var preparations, unexpectedCalls atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/chat/settings":
+					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{DefaultRunnerID: "registered", DefaultRunnerReady: true}))
+				case r.URL.Path == "/api/git/commit" && r.Method == http.MethodGet:
+					preparations.Add(1)
+					w.WriteHeader(scenario.status)
+					_, _ = w.Write([]byte(scenario.body))
+				default:
+					unexpectedCalls.Add(1)
+					http.NotFound(w, r)
+				}
+			}))
+			defer daemon.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			root := t.TempDir()
+			env := []string{"PATH=" + root, "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1", "NO_COLOR=1"}
+			process := daemonCLIProcess(ctx, t, root, env, "commit", "--server="+daemon.URL, "--auth-token=client", "--cwd=/runner-only/repo", "--no-confirm")
+			output, err := process.CombinedOutput()
+			require.Error(t, err)
+			assert.Equal(t, 1, process.ProcessState.ExitCode())
+			assert.Equal(t, "Error: "+scenario.want+"\n", string(output), "show only actionable guidance, without usage or transport wrappers")
+			assert.EqualValues(t, 1, preparations.Load())
+			assert.Zero(t, unexpectedCalls.Load(), "preparation errors must not generate messages, create commits, or retry")
+		})
+	}
+}
+
 func TestRemoteCommitConfirmationDismissalAndCancellation(t *testing.T) {
 	for _, value := range []string{"n\n", "y\n", ""} {
-		broker := extensions.NewTerminalUIInputBroker(strings.NewReader(value), &strings.Builder{})
+		var output strings.Builder
+		broker := extensions.NewTerminalUIInputBroker(strings.NewReader(value), &output)
 		broker.Interactive = true
 		confirmed, message, err := confirmRemoteCommit(t.Context(), broker, "message")
 		require.NoError(t, err)
 		assert.Equal(t, value == "y\n", confirmed)
 		assert.Equal(t, "message", message)
+		assert.Contains(t, output.String(), "Create commit with this message?")
+		assert.Contains(t, output.String(), "Y/n/e (edit)> ")
+		assert.NotContains(t, output.String(), "Submit>")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

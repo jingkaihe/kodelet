@@ -657,7 +657,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			commit := daemonCLIProcess(ctx, t, root, append(clientEnv, "PATH="+root), commitArgs...)
 			output, err := commit.CombinedOutput()
 			require.NoError(t, err, "%s", output)
-			assert.Contains(t, string(output), "Commit created:")
+			assert.Contains(t, string(output), "Commit created successfully!")
 			assert.Contains(t, git("log", "-1", "--format=%B"), "feat: commit runner snapshot")
 			assert.Contains(t, git("log", "-1", "--format=%B"), "Signed-off-by: Runner Commit User <commit@example.com>")
 			assert.Equal(t, "APPROVED_RUNNER_COMMIT_CONTENT", git("show", "HEAD:commit-evidence.txt"))
