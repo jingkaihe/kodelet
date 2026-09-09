@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.6.1-alpha
+## 0.6.2-alpha
 
 Alpha preview of the daemon-first architecture for testing, not production use.
 
