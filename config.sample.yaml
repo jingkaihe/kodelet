@@ -414,6 +414,7 @@ extensions:
 
   # Optional allow/deny rules. Plugin extensions use org@repo/extension.
   # Standalone extensions use their directory path or executable path.
+  # Inline callbacks bypass allow; deny can match exact IDs such as session:inline-1.
   # allow:
   #   - org@repo/weather
   #   - ./.kodelet/extensions/weather

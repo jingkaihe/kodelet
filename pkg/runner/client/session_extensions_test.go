@@ -205,9 +205,8 @@ func TestServiceSessionExtensionPolicyAndCollisions(t *testing.T) {
 		wantNoTool bool
 	}{
 		{name: "disabled", settings: map[string]any{"enabled": false}, wantErr: "disabled"},
-		{name: "path allow is not logical", settings: map[string]any{"allow": []string{"./inline-1"}}, wantErr: "not allowed"},
-		{name: "deny wins", settings: map[string]any{"allow": []string{"session:inline-1"}, "deny": []string{"session:inline-1"}}, wantErr: "not allowed"},
-		{name: "logical allow", settings: map[string]any{"allow": []string{"session:inline-1"}}, allowed: []string{"inline_tool"}},
+		{name: "installed-only allowlist", settings: map[string]any{"allow": []string{"org@repo/code-search"}}, allowed: []string{"inline_tool"}},
+		{name: "explicit deny", settings: map[string]any{"allow": []string{"org@repo/code-search"}, "deny": []string{"session:inline-1"}}, wantErr: "not allowed"},
 		{name: "tool disabled", settings: map[string]any{"tools": map[string]any{"inline_tool": map[string]any{"enabled": false}}}, allowed: []string{"inline_tool"}, wantNoTool: true},
 		{name: "tool ceiling", allowed: []string{"file_read"}, wantNoTool: true},
 		{name: "reserved collision", reserved: []string{"inline_tool"}, wantErr: "reserved"},
@@ -236,6 +235,8 @@ func TestServiceSessionExtensionPolicyAndCollisions(t *testing.T) {
 				require.NoError(t, err)
 				assert.False(t, result.Result.Structured.Success)
 				assert.Empty(t, peer.frames, "policy must block before invoking the callback")
+			} else {
+				assert.Contains(t, manifestToolNames(manifest), "inline_tool")
 			}
 		})
 	}

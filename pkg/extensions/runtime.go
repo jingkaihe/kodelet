@@ -191,7 +191,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 // attach runs only during isolated runtime construction, before lifecycle events.
 func (r *Runtime) attach(ctx context.Context, attachments []Attachment) error {
 	r.sessionExtensions = len(attachments) > 0
-	allow := newMatcher(r.config.Allow, r.workingDir)
+	// Explicit session callbacks bypass the installed-extension allowlist.
 	deny := newMatcher(r.config.Deny, r.workingDir)
 	seen := make(map[string]bool, len(attachments))
 	for _, attachment := range attachments {
@@ -200,7 +200,7 @@ func (r *Runtime) attach(ctx context.Context, attachments []Attachment) error {
 			return errors.Errorf("invalid or duplicate session extension id %q", attachment.ID)
 		}
 		seen[ext.ID] = true
-		if !r.config.Enabled || deny.matches(ext) || !allow.allows(ext) {
+		if !r.config.Enabled || deny.matches(ext) {
 			return errors.Errorf("session extension %s is not allowed by extension policy", ext.ID)
 		}
 	}
