@@ -219,7 +219,7 @@ var themes = map[string]tuiTheme{
 		ToolHeader:       "#179299", // teal
 		ToolBody:         "#6c6f85", // subtext0
 		DiffAdded:        "#40a02b", // green
-		DiffRemoved:      "#d20f39", // red
+		DiffRemoved:      "#d70000", // ANSI 160 red; #d20f39 downsamples to gray/bright black
 		Steering:         "#8839ef", // mauve
 		SteeringError:    "#d20f39", // red
 		InputBorder:      "#4c4f69", // text

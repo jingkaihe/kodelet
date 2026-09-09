@@ -12,7 +12,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/alecthomas/chroma/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
+	"github.com/charmbracelet/colorprofile"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +86,38 @@ func TestExplicitThemeIgnoresBackgroundColorMessages(t *testing.T) {
 
 	assert.Equal(t, LightThemeName, m.themeSelection)
 	assert.Equal(t, LightThemeName, m.theme.Name)
+}
+
+func TestLatteDiffDeletionsStayRedAcrossTerminalProfiles(t *testing.T) {
+	newThemeTestModel(t, Config{Theme: LightThemeName})
+	renderings := []struct {
+		name  string
+		text  string
+		token string
+	}{
+		{"line", renderDiffRenderedLine(diffview.RenderedLine{Kind: diffview.LineRemoved, Text: "-old"}), "-old"},
+		{"count", renderToolGroupLabelPart(toolRenderLabelPart{kind: diffview.LineRemoved, text: "-1"}), "-1"},
+	}
+	for _, profile := range []struct {
+		profile colorprofile.Profile
+		red     color.Color
+	}{
+		{colorprofile.TrueColor, color.RGBA{R: 215, A: 255}},
+		{colorprofile.ANSI256, xansi.IndexedColor(160)},
+		{colorprofile.ANSI, xansi.BrightRed},
+	} {
+		for _, rendered := range renderings {
+			t.Run(profile.profile.String()+"/"+rendered.name, func(t *testing.T) {
+				var output strings.Builder
+				writer := colorprofile.Writer{Forward: &output, Profile: profile.profile}
+				_, err := writer.WriteString(rendered.text)
+				require.NoError(t, err)
+
+				red := xansi.Style{}.ForegroundColor(profile.red).String()
+				assert.Contains(t, output.String(), red+rendered.token)
+			})
+		}
+	}
 }
 
 func TestThemePickerOptionsIncludeThemesAndMarkCurrent(t *testing.T) {
