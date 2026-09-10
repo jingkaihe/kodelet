@@ -80,6 +80,17 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
     .join('');
 };
 
+interface MarkdownContentProps {
+  html: string;
+  className: string;
+}
+
+const MarkdownContent = React.memo(({ html, className }: MarkdownContentProps) => {
+  // Stream events clone messages; keep unchanged HTML stable to preserve text selection.
+  const markup = useMemo(() => ({ __html: html }), [html]);
+  return <div className={className} dangerouslySetInnerHTML={markup} />;
+});
+
 const normalizeThinkingMarkdown = (content: string): string =>
   content
     .replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2')
@@ -99,11 +110,9 @@ const renderThinkingContent = (content: string) => {
   }
 
   return (
-    <div
+    <MarkdownContent
       className="chat-prose max-w-none text-kodelet-dark"
-      dangerouslySetInnerHTML={{
-        __html: renderContent(normalizeThinkingMarkdown(content)),
-      }}
+      html={renderContent(normalizeThinkingMarkdown(content))}
     />
   );
 };
@@ -191,9 +200,9 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
     return isSlashCommandText(content) ? (
       renderSlashCommandCard(content)
     ) : (
-      <div
+      <MarkdownContent
         className="chat-prose max-w-none text-kodelet-dark"
-        dangerouslySetInnerHTML={{ __html: renderContent(content) }}
+        html={renderContent(content)}
       />
     );
   }
@@ -216,10 +225,10 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
     }
 
     return (
-      <div
+      <MarkdownContent
         key={`${block.type}-${index}`}
         className="chat-prose max-w-none text-kodelet-dark"
-        dangerouslySetInnerHTML={{ __html: renderContent([block]) }}
+        html={renderContent([block])}
       />
     );
   });
@@ -317,9 +326,9 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               content={copyText}
             />
           ) : null}
-          <div
+          <MarkdownContent
             className="chat-prose max-w-none pr-12 text-kodelet-dark"
-            dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+            html={renderContent(block.content)}
           />
         </div>
       );

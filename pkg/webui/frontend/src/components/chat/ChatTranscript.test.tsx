@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
+import { applyChatStreamEvent } from '../../features/chat/state';
+import type { ChatRenderMessage, ChatStreamEvent } from '../../types';
 import ChatTranscript from './ChatTranscript';
 
 const { copyToClipboardMock } = vi.hoisted(() => ({
@@ -29,6 +31,84 @@ describe('ChatTranscript', () => {
     );
 
     expect(screen.getByText('Good afternoon')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['user question', 'user question'],
+    ['earlier answer', 'earlier answer'],
+    ['follow-up question', 'follow-up question'],
+    ['completed thought', 'completed thought'],
+    ['completed block', 'completed block'],
+    ['user question', 'earlier answer'],
+  ])('preserves selection from %s to %s while other blocks stream', (startText, endText) => {
+    let messages: ChatRenderMessage[] = [
+      { role: 'user', content: 'Keep this **user question** selected.' },
+      {
+        role: 'assistant',
+        blocks: [{ type: 'message', content: 'Keep this **earlier answer** selected.' }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Keep this **follow-up question** selected.' }],
+      },
+      {
+        role: 'assistant',
+        blocks: [
+          { type: 'thinking', content: 'Keep this **completed thought** selected.' },
+          {
+            type: 'message',
+            content: [{ type: 'text', text: 'Keep this **completed block** selected.' }],
+          },
+          { type: 'thinking', content: 'Current reasoning', inProgress: true },
+        ],
+      },
+    ];
+    const { container, rerender } = render(
+      <ChatTranscript isStreaming={true} messages={messages} />
+    );
+    const thoughts = container.querySelector('details');
+    assert(thoughts);
+    thoughts.open = true;
+
+    const selection = window.getSelection();
+    assert(selection);
+    const startNode = screen.getByText(startText).firstChild;
+    const endNode = screen.getByText(endText).firstChild;
+    assert(startNode);
+    assert(endNode);
+    const range = document.createRange();
+    range.setStart(startNode, 1);
+    range.setEnd(endNode, endText.length - 1);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const selectedText = selection.toString();
+    const events: ChatStreamEvent[] = [
+      { kind: 'thinking-delta', delta: ' continues' },
+      { kind: 'thinking-end' },
+      { kind: 'text-delta', delta: 'A live ' },
+      { kind: 'text-delta', delta: '**response**.' },
+      { kind: 'content-end' },
+      { kind: 'done' },
+    ];
+
+    try {
+      expect(selectedText).not.toBe('');
+      for (const event of events) {
+        messages = applyChatStreamEvent(messages, event);
+        rerender(<ChatTranscript isStreaming={event.kind !== 'done'} messages={messages} />);
+
+        expect(selection.toString()).toBe(selectedText);
+        expect(selection.anchorNode).toBe(startNode);
+        expect(selection.focusNode).toBe(endNode);
+        expect(startNode.isConnected).toBe(true);
+        expect(endNode.isConnected).toBe(true);
+      }
+
+      expect(screen.getByText('Current reasoning continues')).toBeInTheDocument();
+      expect(screen.getByText('response').tagName).toBe('STRONG');
+    } finally {
+      selection.removeAllRanges();
+    }
   });
 
   it('renders completed thinking blocks collapsed by default', () => {
