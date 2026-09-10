@@ -142,6 +142,21 @@ func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {
 	assert.Equal(t, "weather", metadata.ExtensionID)
 }
 
+func TestToolResultPreservesImageAttachments(t *testing.T) {
+	var execution ToolExecutionResult
+	require.NoError(t, json.Unmarshal([]byte(`{"content":"Generated image","attachments":[{"type":"image","path":"/runner/generated.png","alt":"A drawing"}]}`), &execution))
+	tool := &Tool{name: "generate_image", extensionID: "generator", maxOutput: 100}
+	result := tool.resultFromExecution(execution, 0)
+	structured := result.StructuredData()
+	require.Len(t, structured.Attachments, 1)
+	assert.Equal(t, execution.Attachments, structured.Attachments)
+	assert.Contains(t, result.AssistantFacing(), "Generated image")
+	assert.NotContains(t, result.AssistantFacing(), "base64")
+	execution.Attachments[0].Path = "changed"
+	structured.Attachments[0].Path = "also changed"
+	assert.Equal(t, "/runner/generated.png", result.StructuredData().Attachments[0].Path)
+}
+
 func TestToolResultNormalizesAndBoundsPresentationData(t *testing.T) {
 	tool := &Tool{maxOutput: 96}
 	result := tool.resultFromExecution(ToolExecutionResult{

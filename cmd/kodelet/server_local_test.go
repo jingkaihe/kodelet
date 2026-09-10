@@ -426,8 +426,10 @@ func TestEnsureLocalServerReportsEarlyExitAndTimeout(t *testing.T) {
 func TestPrepareLocalServeConfig(t *testing.T) {
 	localServerTestState(t)
 	config := NewServeConfig()
+	config.PublicBaseURL = "https://images.example.com"
 	require.NoError(t, prepareLocalServeConfig(config))
 	assert.Equal(t, os.Getenv("HOME"), config.RunnerWorkspace)
+	assert.Equal(t, "https://images.example.com", config.PublicBaseURL)
 	for _, host := range []string{"localhost", "LOCALHOST.", "127.0.0.1", "127.0.0.2", "::1"} {
 		t.Run(host, func(t *testing.T) {
 			config := NewServeConfig()

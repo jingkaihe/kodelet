@@ -8,6 +8,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 cmd/kodelet/     # CLI commands
 pkg/             # Core packages
   ├── auth/      # Authentication
+  ├── artifacts/ # Persisted image files and conversation references
   ├── binaries/  # External binary management (ripgrep, fd)
   ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
   ├── conversations/  # Conversation storage (SQLite)

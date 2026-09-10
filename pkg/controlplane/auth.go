@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 )
@@ -552,6 +553,11 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == runnerpayload.ArtifactUploadPath && r.Method == http.MethodPut {
+			// The upload handler checks an active-tool-bound, one-use ticket.
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Method == http.MethodOptions || s.isPublicRequestPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return

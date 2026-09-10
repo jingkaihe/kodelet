@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,14 +19,16 @@ import (
 
 // ViewImageInput defines the input parameters for the view_image tool.
 type ViewImageInput struct {
-	Path   string `json:"path" jsonschema:"description=Local filesystem path to an image file. Absolute paths are preferred."`
-	Detail string `json:"detail,omitempty" jsonschema:"description=Optional. Set to 'original' for maximum detail."`
+	Path       string `json:"path,omitempty" jsonschema:"minLength=1,description=Local filesystem path to an image file. Supply exactly one of path or artifactId."`
+	ArtifactID string `json:"artifactId,omitempty" jsonschema:"minLength=1,description=Persisted image artifact ID returned by a tool in this conversation. Supply exactly one of artifactId or path."`
+	Detail     string `json:"detail,omitempty" jsonschema:"description=Optional. Set to 'original' for maximum detail."`
 }
 
 // ViewImageToolResult represents the result of a view_image operation.
 type ViewImageToolResult struct {
-	base tooltypes.BaseToolResult
-	data *vision.Result
+	base       tooltypes.BaseToolResult
+	data       *vision.Result
+	attachment *tooltypes.ToolAttachment
 }
 
 func (r *ViewImageToolResult) AssistantFacing() string {
@@ -59,12 +62,26 @@ func (r *ViewImageToolResult) StructuredData() tooltypes.StructuredToolResult {
 	if r.data != nil {
 		result.Metadata = vision.MetadataFromResult(r.data)
 	}
+	if r.attachment != nil {
+		result.Attachments = []tooltypes.ToolAttachment{*r.attachment}
+		if metadata, ok := result.Metadata.(*tooltypes.ViewImageMetadata); ok {
+			metadata.ArtifactID = r.attachment.ArtifactID
+		}
+	}
 	return result
 }
 
 func (r *ViewImageToolResult) ContentParts() []tooltypes.ToolResultContentPart {
 	if r.data == nil || r.base.Error != "" {
 		return nil
+	}
+	if r.attachment != nil {
+		return []tooltypes.ToolResultContentPart{{
+			Type:       tooltypes.ToolResultContentPartTypeImage,
+			ArtifactID: r.attachment.ArtifactID,
+			MimeType:   r.attachment.MimeType,
+			Detail:     r.data.Detail,
+		}}
 	}
 	return []tooltypes.ToolResultContentPart{{
 		Type:     tooltypes.ToolResultContentPartTypeImage,
@@ -74,7 +91,7 @@ func (r *ViewImageToolResult) ContentParts() []tooltypes.ToolResultContentPart {
 	}}
 }
 
-// ViewImageTool implements the view_image tool for local image inspection.
+// ViewImageTool implements local and persisted-artifact image inspection.
 type ViewImageTool struct {
 	model    string
 	provider string
@@ -91,6 +108,9 @@ func (t *ViewImageTool) Name() string {
 
 func (t *ViewImageTool) GenerateSchema() *jsonschema.Schema {
 	schema := GenerateSchema[ViewImageInput]()
+	if schema != nil {
+		schema.OneOf = []*jsonschema.Schema{{Required: []string{"path"}}, {Required: []string{"artifactId"}}}
+	}
 	if schema != nil && schema.Properties != nil && !vision.SupportsViewImageOriginalDetail(t.model) {
 		schema.Properties.Delete("detail")
 	}
@@ -102,7 +122,7 @@ func (t *ViewImageTool) Description() string {
 	if vision.SupportsViewImageOriginalDetail(t.model) {
 		detailText = "The optional `detail` field is available for this model and supports only `original`. Use it when high-fidelity image perception or precise localization is needed. Original resolution is preserved within safe image limits; oversized images are proportionally downscaled."
 	}
-	return "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached in the conversation context).\n\n" + detailText
+	return "View an image from a local filepath supplied by the user, or an artifactId returned by a tool in this conversation. Supply exactly one of path or artifactId. Do not inspect an image already visible in the model's conversation context; a user-interface attachment alone does not make its pixels visible to the model.\n\n" + detailText
 }
 
 func (t *ViewImageTool) ValidateInput(state tooltypes.State, parameters string) error {
@@ -110,11 +130,17 @@ func (t *ViewImageTool) ValidateInput(state tooltypes.State, parameters string) 
 	if err := json.Unmarshal([]byte(parameters), input); err != nil {
 		return err
 	}
-	if strings.TrimSpace(input.Path) == "" {
-		return errors.New("path is required")
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(parameters), &fields); err != nil {
+		return err
+	}
+	_, hasPath := fields["path"]
+	_, hasArtifact := fields["artifactId"]
+	if hasPath == hasArtifact || (strings.TrimSpace(input.Path) == "" && strings.TrimSpace(input.ArtifactID) == "") {
+		return errors.New("exactly one of path or artifactId is required")
 	}
 	if input.Detail != "" {
-		var model string
+		model := t.model
 		if state != nil {
 			if cfg, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 				model = cfg.Model
@@ -127,7 +153,10 @@ func (t *ViewImageTool) ValidateInput(state tooltypes.State, parameters string) 
 	return nil
 }
 
-func (t *ViewImageTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *ViewImageTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+	if err := t.ValidateInput(state, parameters); err != nil {
+		return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: err.Error()}}
+	}
 	input := &ViewImageInput{}
 	if err := json.Unmarshal([]byte(parameters), input); err != nil {
 		return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: err.Error()}}
@@ -145,6 +174,25 @@ func (t *ViewImageTool) Execute(_ context.Context, state tooltypes.State, parame
 			provider = cfg.Provider
 			model = cfg.Model
 		}
+	}
+	if strings.TrimSpace(input.ArtifactID) != "" {
+		resolver := tooltypes.ArtifactResolverFromContext(ctx)
+		if resolver == nil {
+			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: "image artifact access is unavailable"}}
+		}
+		attachment, err := resolver(ctx, strings.TrimSpace(input.ArtifactID))
+		if err != nil {
+			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: err.Error()}}
+		}
+		if attachment.Type != "image" || attachment.ArtifactID != strings.TrimSpace(input.ArtifactID) || attachment.Error != "" {
+			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: "artifact is not an available image"}}
+		}
+		detail, _ := vision.NormalizeViewImageDetail(input.Detail, model)
+		result := &vision.Result{
+			MimeType: attachment.MimeType, Width: attachment.Width, Height: attachment.Height, Detail: detail,
+			Assistant: fmt.Sprintf("Viewed image %s (%dx%d, %s)", attachment.ArtifactID, attachment.Width, attachment.Height, attachment.MimeType),
+		}
+		return &ViewImageToolResult{base: tooltypes.BaseToolResult{Result: result.Assistant}, data: result, attachment: &attachment}
 	}
 
 	result, err := vision.MakeViewImageResult(resolved, input.Detail, model, provider)
@@ -165,6 +213,9 @@ func (t *ViewImageTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	}
 	attrs := []attribute.KeyValue{
 		attribute.String("path", input.Path),
+	}
+	if input.ArtifactID != "" {
+		attrs = []attribute.KeyValue{attribute.String("artifact_id", input.ArtifactID)}
 	}
 	if strings.TrimSpace(input.Detail) != "" {
 		attrs = append(attrs, attribute.String("detail", strings.TrimSpace(input.Detail)))

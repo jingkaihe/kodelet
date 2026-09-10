@@ -3,14 +3,21 @@ import { ToolResult } from '../types';
 import FallbackRenderer from './tool-renderers/FallbackRenderer';
 import { getToolRendererRegistration } from './tool-renderers/registry';
 import { normalizeToolName } from './tool-renderers/reference';
+import ToolImageAttachments from './tool-renderers/ToolImageAttachments';
 
 interface ToolRendererProps {
   toolResult: ToolResult;
   toolInput?: string;
   isPartial?: boolean;
+  showAttachments?: boolean;
 }
 
-const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput, isPartial }) => {
+const ToolRenderer: React.FC<ToolRendererProps> = ({
+  toolResult,
+  toolInput,
+  isPartial,
+  showAttachments = true,
+}) => {
   const renderTool = () => {
     const normalizedToolName = normalizeToolName(toolResult.toolName);
     const rendererRegistration = getToolRendererRegistration(toolResult);
@@ -57,7 +64,12 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput, isPa
   };
 
   try {
-    return renderTool();
+    return (
+      <>
+        {renderTool()}
+        {showAttachments && !isPartial ? <ToolImageAttachments toolResult={toolResult} /> : null}
+      </>
+    );
   } catch (error) {
     console.error('Error rendering tool result:', error, toolResult);
     return (

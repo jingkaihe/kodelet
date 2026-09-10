@@ -71,7 +71,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 						b.WriteString(header)
 						b.WriteString("\n")
 						regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line, toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex})
-						line++
+						line += lineCount(header)
 						if group.expanded || group.active {
 							body := group.body
 							if group.markdownBody {
@@ -226,6 +226,13 @@ func (m model) renderThoughtHeader(block assistantBlock) string {
 }
 
 func (m model) renderToolGroupHeader(group toolRenderGroup) string {
+	if group.plainHeader {
+		lines := strings.Split(wrapPreservingWhitespace(group.label, m.transcriptTextWidth()), "\n")
+		for index, line := range lines {
+			lines[index] = renderPersistentStyle(toolHeaderStyle, line)
+		}
+		return strings.Join(lines, "\n")
+	}
 	if group.active {
 		prefix := m.spinnerGlyph() + " "
 		suffix := "… ▾"

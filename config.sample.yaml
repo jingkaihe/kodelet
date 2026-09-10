@@ -27,6 +27,10 @@ log_format: "json"
 #   host: "0.0.0.0"
 #   # Omit or set 0 to bind an available port.
 #   port: 8080
+#   # Optional advertised URL for authenticated image links printed by the TUI.
+#   # May include a proxy prefix, e.g. https://kodelet.example/kodelet.
+#   # Does not change the listen address, configure TLS, or make images public.
+#   public_base_url: "https://kodelet.example"
 #   # Set false to use only separately managed runners.
 #   embedded_runner: true
 #   # runner_workspace: "/srv/workspaces"

@@ -9,6 +9,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"mime"
 	"os"
@@ -45,6 +46,8 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 
 const (
 	maxImageFileSize              = 5 * 1024 * 1024
+	maxArtifactImageSize          = 32 * 1024 * 1024
+	maxDecodedImagePixels         = 40_000_000
 	ViewImageMaxWidth             = 2048
 	ViewImageMaxHeight            = 768
 	viewImagePatchSize            = 32
@@ -97,7 +100,7 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 		return nil, errors.New("view_image is not allowed because the current model may not support image inputs")
 	}
 
-	normalizedDetail, err := NormalizeViewImageDetail(detail, model)
+	_, err := NormalizeViewImageDetail(detail, model)
 	if err != nil {
 		return nil, err
 	}
@@ -118,21 +121,49 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 		return nil, errors.Errorf("image path `%s` is not a file", cleanPath)
 	}
 
-	fileBytes, err := os.ReadFile(cleanPath)
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open image file")
+	}
+	defer file.Close()
+	fileBytes, err := io.ReadAll(io.LimitReader(file, maxImageFileSize+1))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read image file")
 	}
 	if len(fileBytes) > maxImageFileSize {
 		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", len(fileBytes), maxImageFileSize)
 	}
+	return MakeViewImageResultBytes(fileBytes, cleanPath, detail, model, provider)
+}
+
+// MakeViewImageResultBytes preprocesses a persisted image without a runner filesystem round trip.
+// Artifact payloads are bounded to 32 MiB and 40 million decoded pixels before decoding.
+func MakeViewImageResultBytes(fileBytes []byte, label, detail, model, provider string) (*Result, error) {
+	if !SupportsImageInputs(provider, model) {
+		return nil, errors.New("view_image is not allowed because the current model may not support image inputs")
+	}
+	normalizedDetail, err := NormalizeViewImageDetail(detail, model)
+	if err != nil {
+		return nil, err
+	}
+	if len(fileBytes) > maxArtifactImageSize {
+		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", len(fileBytes), maxArtifactImageSize)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(fileBytes))
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to process image %s: unsupported image", label)
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxDecodedImagePixels/config.Height {
+		return nil, errors.New("image exceeds the decoded pixel limit")
+	}
 
 	img, format, err := image.Decode(bytes.NewReader(fileBytes))
 	if err != nil {
-		guessedMime := mime.TypeByExtension(strings.ToLower(filepath.Ext(cleanPath)))
+		guessedMime := mime.TypeByExtension(strings.ToLower(filepath.Ext(label)))
 		if guessedMime == "" {
 			guessedMime = "unknown"
 		}
-		return nil, errors.Wrapf(err, "unable to process image at `%s`: unsupported image `%s`", cleanPath, guessedMime)
+		return nil, errors.Wrapf(err, "unable to process image at `%s`: unsupported image `%s`", label, guessedMime)
 	}
 
 	bounds := img.Bounds()
@@ -175,14 +206,14 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 	encoded := base64.StdEncoding.EncodeToString(outputBytes)
 	dataURL := dataURLFromBase64Payload(mimeType, encoded)
 	result := &Result{
-		Path:     cleanPath,
+		Path:     label,
 		ImageURL: dataURL,
 		MimeType: mimeType,
 		Width:    outputWidth,
 		Height:   outputHeight,
 		Detail:   normalizedDetail,
 	}
-	result.Assistant = fmt.Sprintf("Viewed image %s (%dx%d, %s)", cleanPath, result.Width, result.Height, mimeType)
+	result.Assistant = fmt.Sprintf("Viewed image %s (%dx%d, %s)", label, result.Width, result.Height, mimeType)
 	return result, nil
 }
 

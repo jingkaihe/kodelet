@@ -2,6 +2,8 @@ package vision
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -35,6 +37,39 @@ func TestMakeViewImageResultUsesDecodedImageFormat(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "image/png", result.MimeType)
 	assert.Contains(t, result.ImageURL, "data:image/png;base64,")
+}
+
+func TestMakeViewImageResultBytes(t *testing.T) {
+	var buffer bytes.Buffer
+	require.NoError(t, png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 2304, 100))))
+	data := buffer.Bytes()
+	result, err := MakeViewImageResultBytes(data, "art_image", "", "gpt-5.5", "openai")
+	require.NoError(t, err)
+	assert.Equal(t, "art_image", result.Path)
+	assert.Equal(t, ViewImageMaxWidth, result.Width)
+	assert.Contains(t, result.ImageURL, "data:image/png;base64,")
+	original, err := MakeViewImageResultBytes(data, "art_image", "original", "gpt-5.5", "openai")
+	require.NoError(t, err)
+	assert.Equal(t, 2304, original.Width)
+
+	// Padding leaves a valid PNG but exercises the separate artifact/file limits.
+	large := append(append([]byte(nil), data...), make([]byte, maxImageFileSize)...)
+	_, err = MakeViewImageResultBytes(large, "art_large", "", "gpt-5.5", "openai")
+	require.NoError(t, err)
+	_, err = MakeViewImageResultBytes(make([]byte, maxArtifactImageSize+1), "art_large", "", "gpt-5.5", "openai")
+	require.ErrorContains(t, err, "too large")
+	_, err = MakeViewImageResultBytes(data, "art_image", "original", "gpt-5", "openai")
+	require.ErrorContains(t, err, "compatible models")
+	_, err = MakeViewImageResultBytes([]byte("not an image"), "art_image", "", "gpt-5.5", "openai")
+	require.ErrorContains(t, err, "unsupported image")
+
+	// Reject a valid oversized header before allocating its decoded pixel buffer.
+	huge := append([]byte(nil), data...)
+	binary.BigEndian.PutUint32(huge[16:20], 100_000)
+	binary.BigEndian.PutUint32(huge[20:24], 100_000)
+	binary.BigEndian.PutUint32(huge[29:33], crc32.ChecksumIEEE(huge[12:29]))
+	_, err = MakeViewImageResultBytes(huge, "art_huge", "", "gpt-5.5", "openai")
+	require.ErrorContains(t, err, "pixel limit")
 }
 
 func TestSupportsViewImageOriginalDetail(t *testing.T) {

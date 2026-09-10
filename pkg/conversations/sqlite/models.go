@@ -3,6 +3,8 @@ package sqlite
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"maps"
+	"slices"
 	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -116,6 +118,16 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 
 // fromConversationRecord converts domain model to database record
 func fromConversationRecord(record conversations.ConversationRecord) *dbConversationRecord {
+	// Public origins can change. Persist opaque image handles, not URLs, without
+	// mutating the live thread's map or attachment slices.
+	results := maps.Clone(record.ToolResults)
+	for callID, result := range results {
+		result.Attachments = slices.Clone(result.Attachments)
+		for i := range result.Attachments {
+			result.Attachments[i].ViewURL = ""
+		}
+		results[callID] = result
+	}
 	dbRecord := &dbConversationRecord{
 		ID:          record.ID,
 		RawMessages: record.RawMessages,
@@ -124,7 +136,7 @@ func fromConversationRecord(record conversations.ConversationRecord) *dbConversa
 		CreatedAt:   record.CreatedAt,
 		UpdatedAt:   record.UpdatedAt,
 		Metadata:    JSONField[map[string]any]{Data: record.Metadata},
-		ToolResults: JSONField[map[string]tools.StructuredToolResult]{Data: record.ToolResults},
+		ToolResults: JSONField[map[string]tools.StructuredToolResult]{Data: results},
 	}
 
 	if record.Summary != "" {

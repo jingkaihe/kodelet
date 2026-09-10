@@ -135,6 +135,7 @@ func (m *model) configure(config Config) {
 	m.runner = config.Runner
 	m.conversationSource, _ = config.Runner.(chat.ConversationSource)
 	m.conversationStream, _ = config.Runner.(chat.ConversationStreamer)
+	m.serverURL = strings.TrimSpace(config.ServerURL)
 	m.remote = config.Remote
 	m.remoteDefaultCWD = strings.TrimSpace(config.DefaultCWD)
 	m.environmentProfile = strings.TrimSpace(config.EnvironmentProfile)

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/jingkaihe/kodelet/pkg/diffview"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -25,6 +26,7 @@ type toolRenderGroup struct {
 	expanded     bool
 	active       bool
 	failed       bool
+	plainHeader  bool
 }
 
 type toolRenderLabelPart struct {
@@ -38,9 +40,13 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	for idx := 0; idx < len(block.tools); {
 		tool := block.tools[idx]
 		switch {
+		case isImageAttachmentTool(tool):
+			groups = append(groups, m.buildImageToolGroup(block, idx))
+			idx++
+
 		case isBashTool(tool):
 			end := idx + 1
-			for end < len(block.tools) && isBashTool(block.tools[end]) {
+			for end < len(block.tools) && isBashTool(block.tools[end]) && !isImageAttachmentTool(block.tools[end]) {
 				end++
 			}
 			groups = append(groups, m.buildBashToolGroup(block, idx, end))
@@ -78,6 +84,33 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	}
 
 	return groups
+}
+
+func isImageAttachmentTool(tool toolCall) bool {
+	if !tool.done || tool.structured == nil {
+		return false
+	}
+	for _, attachment := range tool.structured.Attachments {
+		if attachment.Type == "image" {
+			return true
+		}
+	}
+	return false
+}
+
+func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	return toolRenderGroup{
+		toolStart:   idx,
+		toolEnd:     idx,
+		changeIndex: -1,
+		label:       sanitizeExtensionTranscriptText(strings.Join(renderers.ImageAttachmentLines(*tool.structured, m.serverURL), "\n")),
+		body:        joinTools([]toolCall{tool}),
+		wrapBody:    true,
+		expanded:    block.expanded || tool.expanded || tool.failed,
+		failed:      tool.failed,
+		plainHeader: true,
+	}
 }
 
 func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
@@ -748,7 +781,7 @@ func isExtensionPresentationTool(tool toolCall) bool {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileChangeTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool)
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileChangeTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool) && !isImageAttachmentTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {

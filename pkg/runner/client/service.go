@@ -78,6 +78,8 @@ type EnvironmentFactory func(workingDirectory string, runtime *extensions.Runtim
 
 // ServiceOptions configures the runner-side request service.
 type ServiceOptions struct {
+	// ArtifactBaseURL is the runner's control-plane address, not the advertised image host.
+	ArtifactBaseURL           string
 	RuntimeProvider           RuntimeProvider
 	ConfigLoader              ConfigLoader
 	WorkspaceConfigLoader     WorkspaceConfigLoader
@@ -92,6 +94,7 @@ type ServiceOptions struct {
 
 // Service handles control-plane requests for one workspace-bound runner process.
 type Service struct {
+	artifactBaseURL       string
 	ctx                   context.Context
 	mu                    sync.Mutex
 	snapshotGate          *semaphore.Weighted
@@ -162,6 +165,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		parent = context.Background()
 	}
 	service := &Service{
+		artifactBaseURL:       options.ArtifactBaseURL,
 		ctx:                   parent,
 		snapshotGate:          semaphore.NewWeighted(1),
 		workspace:             workspace,
@@ -1246,6 +1250,7 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 
 	peer := s.currentPeer()
 	operationCtx = contextWithRunnerModelHelper(operationCtx, peer, run.id, params.ToolCallID)
+	operationCtx = contextWithRunnerArtifactResolver(operationCtx, peer, run.id, params.ToolCallID)
 	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
 	if peer != nil {
 		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID}
@@ -1283,9 +1288,11 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
+	wire := serializeToolResult(execution.Result, execution.StructuredResult)
+	s.ingestAttachments(operationCtx, peer, run, params.ToolCallID, &wire)
 	return runnerpayload.ToolExecuteResult{
 		Input:    input,
-		Result:   serializeToolResult(execution.Result, execution.StructuredResult),
+		Result:   wire,
 		Modified: execution.Modified,
 	}, nil
 }

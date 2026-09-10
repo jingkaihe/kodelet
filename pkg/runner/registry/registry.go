@@ -274,6 +274,7 @@ type Registry struct {
 	toolUpdates       *toolUpdateRouter
 	toolForkers       map[toolForkKey]*toolForkRegistration
 	modelHelpers      map[modelHelperKey]*modelHelperRegistration
+	artifactTools     map[modelHelperKey]*artifactToolRegistration
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -1306,6 +1307,11 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 
 // ExecuteTool invokes tool.execute and routes replaceable transient updates to the supplied sink.
 func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
+	cleanupArtifacts, err := r.registerArtifactTool(ctx, params)
+	if err != nil {
+		return runnerpayload.ToolExecuteResult{}, err
+	}
+	defer cleanupArtifacts()
 	params.WantUpdates = updates != nil
 	cleanup := func() {}
 	if updates != nil {
@@ -1414,6 +1420,7 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 	}
 	r.mu.Lock()
 	r.clearRunModelHelpersLocked(runID)
+	r.clearRunArtifactToolsLocked(runID)
 	r.mu.Unlock()
 	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
 		return err
@@ -1440,6 +1447,9 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 	if err != nil {
 		return err
 	}
+	r.mu.Lock()
+	r.clearRunArtifactToolsLocked(runID)
+	r.mu.Unlock()
 	callErr := link.Call(ctx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID}, nil)
 	if remoteRunAlreadyClosed(callErr) {
 		callErr = nil
@@ -1522,6 +1532,7 @@ func (r *Registry) EnvironmentError(runnerID, connectionID string, generation in
 	}
 	run.Status = RunStatusFailed
 	run.Error = params.Message
+	r.clearRunArtifactToolsLocked(params.RunID)
 	now := r.now().UTC()
 	run.UpdatedAt = now
 	entry.Status = RunnerStatusBusy
@@ -1883,6 +1894,7 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 func (r *Registry) clearRunTransientStateLocked(runID string) {
 	r.toolUpdates.clearRun(runID)
 	r.clearRunModelHelpersLocked(runID)
+	r.clearRunArtifactToolsLocked(runID)
 }
 
 func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {

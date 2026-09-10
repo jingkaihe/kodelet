@@ -8,6 +8,60 @@ import ChatToolActivity, {
 } from './ChatToolActivity';
 
 describe('ChatToolActivity', () => {
+  it('keeps generated image previews visible outside collapsed tool details', () => {
+    const tool: ChatRenderToolCall = {
+      callId: 'diagram-1',
+      name: 'draw_diagram',
+      input: '{"prompt":"Draw the architecture"}',
+      result: {
+        toolName: 'draw_diagram',
+        metadataType: 'extension_tool',
+        success: true,
+        metadata: { extensionId: 'diagram', toolName: 'draw_diagram', output: 'Generated a diagram.' },
+        attachments: [{
+          type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png',
+          alt: 'Architecture diagram',
+        }],
+      },
+    };
+    const { container } = render(<ChatToolActivity tools={[tool]} />);
+
+    expect(screen.getByText('Generated image')).toBeVisible();
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    const preview = screen.getByRole('img', { name: 'Architecture diagram' });
+    expect(preview).toBeVisible();
+    expect(preview.closest('details')).toBeNull();
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Download image: Architecture diagram' })).toBeVisible();
+  });
+
+  it('does not show image previews from transient tool updates', () => {
+    render(<ChatToolActivity tools={[{
+      callId: 'diagram-1', name: 'draw_diagram', input: '{}', inProgress: true,
+      result: {
+        toolName: 'draw_diagram', success: true,
+        attachments: [{ type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png' }],
+      },
+    }]} />);
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
+  });
+
+  it('uses an inspected image label for artifact-backed view_image results', () => {
+    const tool: ChatRenderToolCall = {
+      callId: 'view-1', name: 'view_image', input: '{"artifactId":"art_1"}',
+      result: {
+        toolName: 'view_image', success: true,
+        attachments: [{ type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png' }],
+      },
+    };
+    render(<ChatToolActivity tools={[tool]} />);
+
+    expect(getToolSummary(tool)).toBe('Viewed image');
+    expect(screen.getByRole('img', { name: 'Viewed image' })).toBeVisible();
+  });
+
   it('renders a running tool with a compact input preview', () => {
     const longPrompt = 'x'.repeat(700);
     const { container } = render(

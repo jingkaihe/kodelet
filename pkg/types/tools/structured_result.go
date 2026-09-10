@@ -10,30 +10,33 @@ import (
 
 // StructuredToolResult represents a tool's execution result with structured metadata
 type StructuredToolResult struct {
-	ToolName  string       `json:"toolName"`
-	Success   bool         `json:"success"`
-	Error     string       `json:"error,omitempty"`
-	Metadata  ToolMetadata `json:"metadata,omitempty"`
-	Timestamp time.Time    `json:"timestamp"`
+	ToolName    string           `json:"toolName"`
+	Success     bool             `json:"success"`
+	Error       string           `json:"error,omitempty"`
+	Metadata    ToolMetadata     `json:"metadata,omitempty"`
+	Timestamp   time.Time        `json:"timestamp"`
+	Attachments []ToolAttachment `json:"attachments,omitempty"`
 }
 
 // rawStructuredToolResult is used for JSON marshaling/unmarshaling
 type rawStructuredToolResult struct {
-	ToolName     string          `json:"toolName"`
-	Success      bool            `json:"success"`
-	Error        string          `json:"error,omitempty"`
-	MetadataType string          `json:"metadataType,omitempty"`
-	Metadata     json.RawMessage `json:"metadata,omitempty"`
-	Timestamp    time.Time       `json:"timestamp"`
+	ToolName     string           `json:"toolName"`
+	Success      bool             `json:"success"`
+	Error        string           `json:"error,omitempty"`
+	MetadataType string           `json:"metadataType,omitempty"`
+	Metadata     json.RawMessage  `json:"metadata,omitempty"`
+	Timestamp    time.Time        `json:"timestamp"`
+	Attachments  []ToolAttachment `json:"attachments,omitempty"`
 }
 
 // MarshalJSON implements custom JSON marshaling for StructuredToolResult
 func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 	raw := rawStructuredToolResult{
-		ToolName:  s.ToolName,
-		Success:   s.Success,
-		Error:     s.Error,
-		Timestamp: s.Timestamp,
+		ToolName:    s.ToolName,
+		Success:     s.Success,
+		Error:       s.Error,
+		Timestamp:   s.Timestamp,
+		Attachments: s.Attachments,
 	}
 
 	if s.Metadata != nil {
@@ -84,6 +87,7 @@ func (s *StructuredToolResult) UnmarshalJSON(data []byte) error {
 	s.Success = raw.Success
 	s.Error = raw.Error
 	s.Timestamp = raw.Timestamp
+	s.Attachments = raw.Attachments
 
 	// Handle metadata based on type
 	if raw.MetadataType != "" && len(raw.Metadata) > 0 {
@@ -287,10 +291,11 @@ func (m ExtensionToolMetadata) ToolType() string { return "extension_tool" }
 
 // ViewImageMetadata contains metadata about a view_image operation.
 type ViewImageMetadata struct {
-	Path      string          `json:"path"`
-	MimeType  string          `json:"mimeType,omitempty"`
-	Detail    string          `json:"detail,omitempty"`
-	ImageSize ImageDimensions `json:"imageSize,omitempty"`
+	Path       string          `json:"path"`
+	ArtifactID string          `json:"artifactId,omitempty"`
+	MimeType   string          `json:"mimeType,omitempty"`
+	Detail     string          `json:"detail,omitempty"`
+	ImageSize  ImageDimensions `json:"imageSize,omitempty"`
 }
 
 // ImageDimensions represents the dimensions of an image

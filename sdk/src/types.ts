@@ -26,10 +26,20 @@ export interface ExtensionToolData {
   [key: string]: unknown;
 }
 
+/** A runner-local image output ingested and persisted by the host. */
+export interface ToolAttachment {
+  type: "image";
+  path: string;
+  filename?: string;
+  mimeType?: string;
+  alt?: string;
+}
+
 export interface ToolExecutionResult {
   content: string;
   data?: ExtensionToolData;
   error?: string;
+  attachments?: ToolAttachment[];
 }
 
 export interface ToolUpdateRequest {

@@ -106,6 +106,16 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			},
 		},
 		{
+			name: "Image attachments",
+			result: StructuredToolResult{
+				ToolName: "generate_image", Success: true, Timestamp: time.Now(),
+				Attachments: []ToolAttachment{{
+					Type: "image", ArtifactID: "art_internal", ShortCode: "independent-code", ViewURL: "/i/independent-code",
+					Filename: "generated.png", MimeType: "image/png", Width: 32, Height: 24, Size: 200, Alt: "A drawing",
+				}},
+			},
+		},
+		{
 			name: "NoMetadata",
 			result: StructuredToolResult{
 				ToolName:  "unknown",
@@ -142,6 +152,10 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			assert.Equal(t, tt.result.ToolName, unmarshaled.ToolName, "ToolName mismatch")
 			assert.Equal(t, tt.result.Success, unmarshaled.Success, "Success mismatch")
 			assert.Equal(t, tt.result.Error, unmarshaled.Error, "Error mismatch")
+			assert.Equal(t, tt.result.Attachments, unmarshaled.Attachments, "Attachments mismatch")
+			if len(tt.result.Attachments) == 0 {
+				assert.NotContains(t, jsonMap, "attachments")
+			}
 
 			// Compare metadata
 			if tt.result.Metadata == nil {

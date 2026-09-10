@@ -83,11 +83,12 @@ const (
 // ToolResultContentPart describes one rich content block attached to a tool result.
 // Providers can translate these parts into their native multimodal message formats.
 type ToolResultContentPart struct {
-	Type     ToolResultContentPartType `json:"type"`
-	Text     string                    `json:"text,omitempty"`
-	ImageURL string                    `json:"image_url,omitempty"`
-	MimeType string                    `json:"mime_type,omitempty"`
-	Detail   string                    `json:"detail,omitempty"`
+	Type       ToolResultContentPartType `json:"type"`
+	Text       string                    `json:"text,omitempty"`
+	ImageURL   string                    `json:"image_url,omitempty"`
+	ArtifactID string                    `json:"artifactId,omitempty"`
+	MimeType   string                    `json:"mime_type,omitempty"`
+	Detail     string                    `json:"detail,omitempty"`
 }
 
 // MultiModalToolResult is implemented by tool results that can provide

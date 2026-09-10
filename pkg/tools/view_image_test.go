@@ -1,12 +1,16 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pkg/errors"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -26,6 +30,12 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	require.NotNil(t, schema.Properties)
 	_, hasPath := schema.Properties.Get("path")
 	assert.True(t, hasPath)
+	_, hasArtifact := schema.Properties.Get("artifactId")
+	assert.True(t, hasArtifact)
+	require.Len(t, schema.OneOf, 2)
+	assert.Equal(t, []string{"path"}, schema.OneOf[0].Required)
+	assert.Equal(t, []string{"artifactId"}, schema.OneOf[1].Required)
+	assert.Empty(t, schema.Required)
 	_, hasDetail := schema.Properties.Get("detail")
 	assert.False(t, hasDetail)
 
@@ -59,7 +69,11 @@ func TestViewImageTool_ValidateInput(t *testing.T) {
 
 	err := tool.ValidateInput(state, `{"detail":"original"}`)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "path is required")
+	assert.Contains(t, err.Error(), "exactly one of path or artifactId is required")
+	assert.NoError(t, tool.ValidateInput(nil, `{"artifactId":"art_image","detail":"original"}`))
+	assert.Error(t, tool.ValidateInput(state, `{"path":"/tmp/test.png","artifactId":"art_image"}`))
+	assert.Error(t, tool.ValidateInput(state, `{"path":"","artifactId":"art_image"}`))
+	assert.Error(t, tool.ValidateInput(state, `{"artifactId":"  "}`))
 
 	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5"})), `{"path":"/tmp/test.png","detail":"original"}`)
 	assert.Error(t, err)
@@ -103,6 +117,45 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 	require.Len(t, parts, 1)
 	assert.Equal(t, tooltypes.ToolResultContentPartTypeImage, parts[0].Type)
 	assert.Contains(t, parts[0].ImageURL, "data:image/png;base64,")
+}
+
+func TestViewImageTool_Artifact(t *testing.T) {
+	tool := NewViewImageTool("gpt-5.5", "openai")
+	attachment := tooltypes.ToolAttachment{Type: "image", ArtifactID: "art_image", ShortCode: "short", MimeType: "image/png", Width: 30, Height: 20}
+	ctx := tooltypes.ContextWithArtifactResolver(t.Context(), func(ctx context.Context, id string) (tooltypes.ToolAttachment, error) {
+		assert.Equal(t, "art_image", id)
+		require.NoError(t, ctx.Err())
+		return attachment, nil
+	})
+	result := tool.Execute(ctx, nil, `{"artifactId":"art_image","detail":"original"}`)
+	require.False(t, result.IsError(), result.GetError())
+	assert.Contains(t, result.AssistantFacing(), "Viewed image art_image")
+	structured := result.StructuredData()
+	assert.Equal(t, []tooltypes.ToolAttachment{attachment}, structured.Attachments)
+	var meta tooltypes.ViewImageMetadata
+	require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &meta))
+	assert.Empty(t, meta.Path)
+	assert.Equal(t, "art_image", meta.ArtifactID)
+	assert.Equal(t, tooltypes.ImageDimensions{Width: 30, Height: 20}, meta.ImageSize)
+	assert.Equal(t, []tooltypes.ToolResultContentPart{{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "art_image", MimeType: "image/png", Detail: "original"}}, result.(tooltypes.MultiModalToolResult).ContentParts())
+	encoded, err := json.Marshal(structured)
+	require.NoError(t, err)
+	var restored tooltypes.StructuredToolResult
+	require.NoError(t, json.Unmarshal(encoded, &restored))
+	assert.Equal(t, structured.Attachments, restored.Attachments)
+
+	for _, input := range []string{`{}`, `{"path":"a","artifactId":"art_image"}`, `{"artifactId":"art_image","detail":"high"}`, `null`, `{`} {
+		assert.True(t, tool.Execute(ctx, nil, input).IsError(), input)
+	}
+	assert.Contains(t, tool.Execute(t.Context(), nil, `{"artifactId":"art_image"}`).GetError(), "unavailable")
+	denied := tooltypes.ContextWithArtifactResolver(t.Context(), func(context.Context, string) (tooltypes.ToolAttachment, error) {
+		return tooltypes.ToolAttachment{}, errors.New("image artifact not found")
+	})
+	failed := tool.Execute(denied, nil, `{"artifactId":"art_image"}`)
+	assert.Contains(t, failed.GetError(), "not found")
+	assert.Empty(t, failed.(tooltypes.MultiModalToolResult).ContentParts())
+	attachment.Type = "text"
+	assert.True(t, tool.Execute(ctx, nil, `{"artifactId":"art_image"}`).IsError())
 }
 
 func TestViewImageTool_TracingKVs(t *testing.T) {

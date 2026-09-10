@@ -35,6 +35,7 @@ export interface ToolResult {
   metadataType?: string;
   success: boolean;
   error?: string;
+  attachments?: ToolAttachment[];
   metadata?:
     | FileMetadata
     | ApplyPatchMetadata
@@ -52,6 +53,21 @@ export interface ToolResult {
     | ExtensionToolMetadata
     | Record<string, unknown>;
   timestamp?: string;
+}
+
+export interface ToolAttachment {
+  type: 'image';
+  path?: string;
+  artifactId?: string;
+  shortCode?: string;
+  viewUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+  error?: string;
 }
 
 export interface Usage {

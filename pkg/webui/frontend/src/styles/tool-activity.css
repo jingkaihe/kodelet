@@ -9,6 +9,61 @@
   margin-bottom: 0.1rem;
 }
 
+.tool-image-attachments {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0 0.58rem 0.58rem 2.05rem;
+}
+
+.tool-image-attachment.chat-uploaded-image {
+  margin: 0;
+}
+
+.tool-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+}
+
+.tool-image-action {
+  min-height: 2rem;
+  padding: 0.4rem 0.65rem;
+  border-color: var(--kodelet-light-gray);
+  background: transparent;
+  color: color-mix(in srgb, var(--kodelet-dark) 65%, var(--kodelet-light));
+  font-weight: 500;
+  letter-spacing: normal;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.tool-image-action svg {
+  flex: 0 0 auto;
+}
+
+.tool-image-action:hover {
+  border-color: var(--kodelet-mid-gray);
+  background: var(--kodelet-panel);
+  color: var(--kodelet-dark);
+  box-shadow: none;
+  transform: none;
+}
+
+.tool-image-action:focus-visible {
+  outline: 2px solid var(--kodelet-orange);
+  outline-offset: 2px;
+  background: var(--kodelet-panel);
+  color: var(--kodelet-dark);
+}
+
+@media (any-pointer: coarse) {
+  .tool-image-action {
+    min-height: 2.75rem;
+  }
+}
+
 .activity-card {
   position: relative;
   overflow: hidden;
@@ -363,4 +418,3 @@
     transform: rotate(360deg);
   }
 }
-

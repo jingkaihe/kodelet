@@ -25,5 +25,6 @@ func All() []db.Migration {
 		Migration20260813130000CreateRunnerDPoPReplays(),
 		Migration20260906130000CreateChatTurns(),
 		Migration20260906160000ScopeChildSteering(),
+		Migration20260910120000CreateImageArtifacts(),
 	}
 }

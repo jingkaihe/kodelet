@@ -121,6 +121,7 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 		PID:        os.Getpid(),
 	}
 	serviceCtx := withRunnerLogFields(ctx, server, workspace, config.DisplayName, host)
+	config.ServiceOptions.ArtifactBaseURL = server
 	service, err := NewService(serviceCtx, workspace, config.ServiceOptions)
 	if err != nil {
 		return nil, err

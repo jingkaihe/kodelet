@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
 
@@ -230,9 +231,10 @@ type ExtensionCallContext struct {
 
 // ToolExecutionResult is returned by extension.tool.execute.
 type ToolExecutionResult struct {
-	Content string         `json:"content"`
-	Data    map[string]any `json:"data,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Content     string                     `json:"content"`
+	Data        map[string]any             `json:"data,omitempty"`
+	Error       string                     `json:"error,omitempty"`
+	Attachments []tooltypes.ToolAttachment `json:"attachments,omitempty"`
 }
 
 // CommandInvocation describes the user prompt that invoked an extension command.

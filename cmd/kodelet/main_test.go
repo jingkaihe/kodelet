@@ -328,6 +328,7 @@ server: https://global.example/control
 profile: global-profile
 serve:
   web_auth_mode: oidc
+  public_base_url: https://global.example/images
   oidc:
     issuer: https://global-issuer.example
 `
@@ -339,6 +340,7 @@ server: https://repo.example/control
 serve.web_auth_mode: none
 serve:
   web_auth_mode: none
+  public_base_url: https://repo.example/images
   skip_auth: true
   auth_token: repo-secret
   oidc:
@@ -364,6 +366,7 @@ extensions:
 	assert.Equal(t, "global-profile", viper.GetString("profile"))
 	assert.Equal(t, "/tmp/sdk-extensions", viper.GetString("extensions.local_dir"))
 	assert.Equal(t, "oidc", viper.GetString("serve.web_auth_mode"))
+	assert.Equal(t, "https://global.example/images", viper.GetString("serve.public_base_url"))
 	assert.Equal(t, "enrollment", viper.GetString("serve.runner_auth_mode"))
 	assert.False(t, viper.GetBool("serve.skip_auth"))
 	assert.Empty(t, viper.GetString("serve.auth_token"))

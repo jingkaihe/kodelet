@@ -21,6 +21,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
+	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -32,6 +33,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -83,6 +85,8 @@ type Server struct {
 	extensionProfiles     map[extensionProfileKey]registeredExtensionProfile
 	extensionProfilesMu   sync.RWMutex
 	turns                 *turnStore
+	artifacts             *artifacts.Store
+	artifactUploads       artifactUploadManager
 	authStore             *authStore
 	oidcFlow              OIDCFlow
 	activeChats           map[string]*activeChatRun
@@ -172,6 +176,7 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the control-plane server.
 type ServerConfig struct {
+	PublicBaseURL   string
 	Host            string
 	Port            int
 	CWD             string // Deprecated: rejected; configure the runner workspace instead.
@@ -227,6 +232,11 @@ func (c *ServerConfig) Validate() error {
 	if _, err := normalizeConfiguredCORSOrigins(c.CORSOrigins); err != nil {
 		return err
 	}
+	publicURL, err := NormalizePublicBaseURL(c.PublicBaseURL)
+	if err != nil {
+		return err
+	}
+	c.PublicBaseURL = publicURL
 
 	return nil
 }
@@ -308,6 +318,15 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		_ = conversationService.Close()
 		return nil, err
 	}
+	artifactStore, err := artifacts.Open(runCtx, dbPath)
+	if err != nil {
+		runCancel()
+		_ = turns.db.Close()
+		_ = runnerRegistry.Close()
+		_ = authenticationStore.Close()
+		_ = conversationService.Close()
+		return nil, errors.Wrap(err, "failed to open image artifact storage")
+	}
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
@@ -320,6 +339,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		runCancel:             runCancel,
 		runnerRegistry:        runnerRegistry,
 		turns:                 turns,
+		artifacts:             artifactStore,
 		authStore:             authenticationStore,
 		oidcFlow:              oidcFlow,
 		activeChats:           make(map[string]*activeChatRun),
@@ -344,6 +364,8 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 
 // setupRoutes configures all the HTTP routes
 func (s *Server) setupRoutes() {
+	s.router.HandleFunc("/i/{shortCode}", s.requireRole(RoleUser, s.handleImageLink)).Methods("GET", "HEAD")
+	s.router.HandleFunc(runnerpayload.ArtifactUploadPath, s.handleArtifactUpload).Methods("PUT")
 	// Authentication and browser approval routes.
 	s.router.HandleFunc("/auth/login", s.handleOIDCLogin).Methods("GET")
 	s.router.HandleFunc(OIDCCallbackPath, s.handleOIDCCallback).Methods("GET")
@@ -409,6 +431,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/ui-persistent/ack", s.handlePersistentUIAck).Methods("POST")
 	api.HandleFunc("/conversations/{id}/ui-persistent/input", s.handlePersistentUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
+	api.HandleFunc("/conversations/{id}/artifacts/{artifactId}", s.requireRole(RoleUser, s.handleConversationArtifact)).Methods("GET", "HEAD")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
 
@@ -1503,6 +1526,9 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get conversation", err)
 		return
 	}
+	for toolCallID, result := range response.ToolResults {
+		response.ToolResults[toolCallID] = s.decorateImageAttachments(result)
+	}
 	if r.URL.Query().Get("format") == "raw" {
 		s.writeJSONResponse(w, conversationtypes.ConversationRecord{
 			ID: response.ID, CWD: response.CWD, Provider: response.Provider,
@@ -1986,6 +2012,7 @@ func (s *Server) handleGetToolResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	response.Result = s.decorateImageAttachments(response.Result)
 	s.writeJSONResponse(w, response)
 }
 
@@ -2522,6 +2549,11 @@ func (s *Server) Close() error {
 	if s.conversationService != nil {
 		if err := s.conversationService.Close(); err != nil && firstErr == nil {
 			firstErr = errors.Wrap(err, "failed to close conversation service")
+		}
+	}
+	if s.artifacts != nil {
+		if err := s.artifacts.Close(); err != nil && firstErr == nil {
+			firstErr = errors.Wrap(err, "failed to close image artifact storage")
 		}
 	}
 	return firstErr

@@ -17,6 +17,7 @@ import {
 import type { ChatRenderToolCall, ToolResult } from '../../types';
 import { cn, formatDuration } from '../../utils';
 import ToolRenderer from '../ToolRenderer';
+import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/ToolImageAttachments';
 import {
   formatTaskRunElapsed,
   getTaskRunSnapshot,
@@ -247,6 +248,12 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   if (presentation) {
     return presentation.summary;
   }
+  const images = toolCall.result?.attachments?.filter(
+    (attachment) => attachment.type === 'image' && imageAttachmentURL(attachment)
+  );
+  if (!toolCall.inProgress && images?.length) {
+    return `${normalizedToolName === 'view_image' ? 'Viewed' : 'Generated'} ${images.length === 1 ? 'image' : 'images'}`;
+  }
   const taskRun = getTaskRunSnapshot(toolCall.result);
   if (taskRun) {
     return taskRun.title;
@@ -405,6 +412,10 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   Search,
   Skill: PocketKnife,
   'View image': FileImage,
+  'Viewed image': FileImage,
+  'Viewed images': FileImage,
+  'Generated image': FileImage,
+  'Generated images': FileImage,
   'Web search': Globe,
   'Write file': FilePlus,
 };
@@ -563,52 +574,59 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
           !builtinToolNames.has(normalizedToolName);
 
         return (
-          <details
+          <React.Fragment
             key={`${toolCall.callId || `${toolCall.name}-${toolIndex}`}-${activityStatus === 'running' ? 'running' : 'settled'}`}
-            className={cn(
-              'activity-card',
-              activityStatus === 'running' && 'activity-card-live',
-              activityStatus === 'failed' && 'activity-card-error'
-            )}
-            open={activityStatus === 'running' ? true : undefined}
           >
-            <summary className="tool-summary activity-summary" title={summaryText}>
-              <span className="tool-summary-chevron" aria-hidden="true">
-                ›
-              </span>
-              <ActivitySummaryText
-                toolName={toolCall.name}
-                summaryText={summaryText}
-                status={activityStatus}
-                isExtensionTool={isExtensionTool}
-              />
-              <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
-                {activityStatus}
-              </span>
-            </summary>
-
-            <div className="activity-detail-content space-y-2">
-              {toolCall.result ? (
-                <ToolRenderer
-                  isPartial={toolCall.inProgress}
-                  toolInput={toolCall.input}
-                  toolResult={toolCall.result}
-                />
-              ) : (
-                <>
-                  <p className="tool-awaiting">Awaiting tool result…</p>
-                  {toolCall.input ? (
-                    <div className="running-tool-input-preview">
-                      <ReferenceCodeBlock
-                        content={formatToolInputPreview(toolCall.input)}
-                        language="json"
-                      />
-                    </div>
-                  ) : null}
-                </>
+            <details
+              className={cn(
+                'activity-card',
+                activityStatus === 'running' && 'activity-card-live',
+                activityStatus === 'failed' && 'activity-card-error'
               )}
-            </div>
-          </details>
+              open={activityStatus === 'running' ? true : undefined}
+            >
+              <summary className="tool-summary activity-summary" title={summaryText}>
+                <span className="tool-summary-chevron" aria-hidden="true">
+                  ›
+                </span>
+                <ActivitySummaryText
+                  toolName={toolCall.name}
+                  summaryText={summaryText}
+                  status={activityStatus}
+                  isExtensionTool={isExtensionTool}
+                />
+                <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                  {activityStatus}
+                </span>
+              </summary>
+
+              <div className="activity-detail-content space-y-2">
+                {toolCall.result ? (
+                  <ToolRenderer
+                    isPartial={toolCall.inProgress}
+                    showAttachments={false}
+                    toolInput={toolCall.input}
+                    toolResult={toolCall.result}
+                  />
+                ) : (
+                  <>
+                    <p className="tool-awaiting">Awaiting tool result…</p>
+                    {toolCall.input ? (
+                      <div className="running-tool-input-preview">
+                        <ReferenceCodeBlock
+                          content={formatToolInputPreview(toolCall.input)}
+                          language="json"
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </details>
+            {toolCall.result && !toolCall.inProgress ? (
+              <ToolImageAttachments toolResult={toolCall.result} />
+            ) : null}
+          </React.Fragment>
         );
       })}
     </div>

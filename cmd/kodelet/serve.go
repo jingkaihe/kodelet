@@ -42,6 +42,7 @@ type ServeConfig struct {
 	Managed              bool
 	Host                 string
 	Port                 int
+	PublicBaseURL        string
 	CWD                  string
 	CompactRatio         float64
 	AuthToken            string
@@ -61,6 +62,7 @@ type ServeConfig struct {
 type trustedServeConfig struct {
 	Host            *string                 `mapstructure:"host"`
 	Port            *int                    `mapstructure:"port"`
+	PublicBaseURL   *string                 `mapstructure:"public_base_url"`
 	CWD             *string                 `mapstructure:"cwd"`
 	AuthToken       *string                 `mapstructure:"auth_token"`
 	RunnerAuthToken *string                 `mapstructure:"runner_auth_token"`
@@ -127,6 +129,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	_ = cmd.Flags().MarkHidden("managed")
 	cmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
 	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (default: 0, an available port)")
+	cmd.Flags().String("public-base-url", defaults.PublicBaseURL, "Advertised HTTP(S) base URL for image links, including an optional reverse-proxy path prefix")
 	cmd.Flags().String("cwd", defaults.CWD, "Removed; use --runner-workspace for the embedded runner")
 	cmd.Flags().String("web-auth-mode", string(defaults.WebAuthMode), "Web authentication mode: token, oidc, or none (default: token)")
 	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, or none (default: token)")
@@ -163,6 +166,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if port, err := cmd.Flags().GetInt("port"); err == nil && cmd.Flags().Changed("port") {
 		config.Port = port
+	}
+	if publicBaseURL, err := cmd.Flags().GetString("public-base-url"); err == nil && cmd.Flags().Changed("public-base-url") {
+		config.PublicBaseURL = strings.TrimSpace(publicBaseURL)
 	}
 	if cwd, err := cmd.Flags().GetString("cwd"); err == nil && cmd.Flags().Changed("cwd") {
 		config.CWD = strings.TrimSpace(cwd)
@@ -267,6 +273,9 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	if trusted.Port != nil {
 		config.Port = *trusted.Port
 	}
+	if trusted.PublicBaseURL != nil {
+		config.PublicBaseURL = strings.TrimSpace(*trusted.PublicBaseURL)
+	}
 	if trusted.CWD != nil {
 		config.CWD = strings.TrimSpace(*trusted.CWD)
 	}
@@ -343,6 +352,9 @@ func validateServeConfig(config *ServeConfig) error {
 	}
 	if config.ConfigError != nil {
 		return config.ConfigError
+	}
+	if _, err := controlplane.NormalizePublicBaseURL(config.PublicBaseURL); err != nil {
+		return err
 	}
 
 	if config.Host == "" {
@@ -505,6 +517,10 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 	if err := validateServeConfig(config); err != nil {
 		return nil, err
 	}
+	publicBaseURL, err := controlplane.NormalizePublicBaseURL(config.PublicBaseURL)
+	if err != nil {
+		return nil, err
+	}
 
 	webAuthMode, runnerAuthMode, err := resolveServeAuthModes(config)
 	if err != nil {
@@ -539,6 +555,7 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 	serverConfig := &controlplane.ServerConfig{
 		Host:            config.Host,
 		Port:            config.Port,
+		PublicBaseURL:   publicBaseURL,
 		CWD:             config.CWD,
 		CompactRatio:    config.CompactRatio,
 		AuthToken:       authToken,

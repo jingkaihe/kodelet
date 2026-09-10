@@ -103,6 +103,16 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 		}
 		return result, nil
 	}
+	if method == runnerpayload.MethodArtifactUpload || method == runnerpayload.MethodArtifactResolve {
+		if router, ok := s.ui.(interface {
+			HandleRunnerArtifactRequest(context.Context, UIRequestIdentity, string, json.RawMessage) (any, *protocol.RPCError)
+		}); ok {
+			return router.HandleRunnerArtifactRequest(ctx, UIRequestIdentity{
+				RunnerID: runnerID, ConnectionID: connectionID, Generation: generation,
+			}, method, params)
+		}
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "artifact storage is unavailable"}
+	}
 	if isUIRequest(method) {
 		if s.ui == nil {
 			return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "runner UI routing is unavailable"}

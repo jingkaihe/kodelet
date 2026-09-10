@@ -14,6 +14,7 @@ import (
 	"time"
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -250,6 +251,56 @@ func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
 	cmd.Flags().String("theme", tui.AutoThemeName, "")
 	require.NoError(t, cmd.ParseFlags(append([]string{"--auth-token=client"}, args...)))
 	return cmd
+}
+
+func TestPrepareDaemonChatUsesConnectedServerURL(t *testing.T) {
+	for _, test := range []struct {
+		name, prefix string
+		local        bool
+	}{
+		{name: "normalized explicit server with base path", prefix: "/kodelet"},
+		{name: "discovered local daemon with assigned port", local: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			var statusCalls atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+				switch r.URL.Path {
+				case test.prefix + "/api/status":
+					statusCalls.Add(1)
+					require.NoError(t, json.NewEncoder(w).Encode(localServerStatus{APIReady: true, InstanceID: "chat", EmbeddedRunner: controlplane.EmbeddedRunnerStatus{Enabled: true, Ready: true}}))
+				case test.prefix + "/api/chat/settings":
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{DefaultRunnerID: "runner", DefaultRunnerReady: true}))
+				case test.prefix + "/api/chat/cwd-suggestions":
+					require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/workspace"}))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer daemon.Close()
+			var args []string
+			if test.local {
+				lock, err := tryLocalServerLock(directory, "server.lock")
+				require.NoError(t, err)
+				require.NotNil(t, lock)
+				defer lock.Close()
+				require.NoError(t, publishLocalServer(directory, daemon.URL, "client", "chat", true))
+			} else {
+				args = []string{"--server=" + daemon.URL + test.prefix + "//./"}
+			}
+			config, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, args...))
+			require.NoError(t, err)
+			assert.Equal(t, daemon.URL+test.prefix, config.ServerURL)
+			assert.Equal(t, "/workspace", config.CWD)
+			if test.local {
+				assert.Positive(t, statusCalls.Load(), "chat must connect through local daemon discovery")
+			} else {
+				assert.Zero(t, statusCalls.Load(), "explicit servers must not use local daemon discovery")
+			}
+		})
+	}
 }
 
 func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 15)
+	require.Len(t, migrations, 16)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -41,6 +41,7 @@ func TestAll(t *testing.T) {
 		20260813130000,
 		20260906130000,
 		20260906160000,
+		20260910120000,
 	}, versions)
 }
 
@@ -58,6 +59,9 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "steering_messages")
 	assertColumnExists(t, database.DB, "steering_messages", "run_id")
 	assertTableExists(t, database.DB, "chat_turns")
+	assertTableExists(t, database.DB, "image_artifacts")
+	assertTableExists(t, database.DB, "conversation_artifacts")
+	assertIndexExists(t, database.DB, "idx_conversation_artifacts_artifact")
 	assertIndexExists(t, database.DB, "idx_chat_turns_active")
 	assertTableExists(t, database.DB, "runner_registrations")
 	assertTableExists(t, database.DB, "runner_runs")
@@ -127,6 +131,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260813130000,
 		20260906130000,
 		20260906160000,
+		20260910120000,
 	}, versions)
 }
 
@@ -411,6 +416,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"chat turns down", Migration20260906130000CreateChatTurns().Down},
 		{"child steering up", Migration20260906160000ScopeChildSteering().Up},
 		{"child steering down", Migration20260906160000ScopeChildSteering().Down},
+		{"image artifacts up", Migration20260910120000CreateImageArtifacts().Up},
+		{"image artifacts down", Migration20260910120000CreateImageArtifacts().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -425,6 +432,12 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Image metadata rollback leaves conversation history intact.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "conversation_artifacts")
+	assertTableMissing(t, database.DB, "image_artifacts")
+	assertTableExists(t, database.DB, "conversations")
 
 	// Receipt rollback leaves ordinary conversations and runner history intact.
 	require.NoError(t, runner.Rollback(ctx, All()))

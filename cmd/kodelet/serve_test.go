@@ -490,6 +490,20 @@ func TestBuildControlPlaneServerConfigAuthResolution(t *testing.T) {
 	})
 }
 
+func TestBuildControlPlaneServerConfigPublicBaseURL(t *testing.T) {
+	config := NewServeConfig()
+	config.PublicBaseURL = " https://images.example.com/kodelet/ "
+	serverConfig, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.Equal(t, "https://images.example.com/kodelet", serverConfig.PublicBaseURL)
+	assert.Equal(t, config.Host, serverConfig.Host)
+	assert.Equal(t, config.Port, serverConfig.Port)
+
+	config.PublicBaseURL = "https://images.example.com?token=secret"
+	_, err = buildControlPlaneServerConfig(config)
+	require.ErrorContains(t, err, "public base URL")
+}
+
 func TestLoadOIDCClientSecret(t *testing.T) {
 	t.Run("trims file contents", func(t *testing.T) {
 		path := writeOIDCSecretFile(t, "  super-secret\n")
@@ -667,6 +681,7 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
 		"host":                            "127.0.0.1",
 		"port":                            8443,
+		"public_base_url":                 " https://images.example.com/kodelet ",
 		"cwd":                             " /srv/kodelet ",
 		"web_auth_mode":                   "oidc",
 		"runner_auth_mode":                "enrollment",
@@ -693,6 +708,7 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	require.NoError(t, config.ConfigError)
 	assert.Equal(t, "127.0.0.1", config.Host)
 	assert.Equal(t, 8443, config.Port)
+	assert.Equal(t, "https://images.example.com/kodelet", config.PublicBaseURL)
 	assert.Equal(t, "/srv/kodelet", config.CWD)
 	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
 	assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
@@ -728,6 +744,7 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	t.Setenv("KODELET_SERVE_OIDC_ISSUER", "https://environment.example.com")
 	t.Setenv("KODELET_SERVE_EMBEDDED_RUNNER", "false")
 	t.Setenv("KODELET_SERVE_RUNNER_WORKSPACE", "/untrusted/workspace")
+	t.Setenv("KODELET_SERVE_PUBLIC_BASE_URL", "https://environment.example.com")
 
 	config := getServeConfigFromFlags(newServeCommandForTest())
 
@@ -738,11 +755,13 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 	assert.True(t, config.EmbeddedRunner)
 	assert.Empty(t, config.RunnerWorkspace)
+	assert.Empty(t, config.PublicBaseURL)
 }
 
 func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
 		"host":                            "127.0.0.1",
+		"public_base_url":                 "https://yaml.example.com",
 		"web_auth_mode":                   "token",
 		"runner_auth_mode":                "token",
 		"auth_token":                      "yaml-token",
@@ -755,6 +774,7 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	cmd := newServeCommandForTest()
 	require.NoError(t, cmd.ParseFlags([]string{
 		"--host=0.0.0.0",
+		"--public-base-url=https://flag.example.com/kodelet",
 		"--web-auth-mode=oidc",
 		"--runner-auth-mode=none",
 		"--auth-token=flag-token",
@@ -766,6 +786,7 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	config := getServeConfigFromFlags(cmd)
 	require.NoError(t, config.ConfigError)
 	assert.Equal(t, "0.0.0.0", config.Host)
+	assert.Equal(t, "https://flag.example.com/kodelet", config.PublicBaseURL)
 	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
 	assert.Equal(t, controlplane.RunnerAuthModeNone, config.RunnerAuthMode)
 	assert.Equal(t, "flag-token", config.AuthToken)
@@ -775,8 +796,9 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 
 func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
-		"auth_token":   "yaml-token",
-		"cors_origins": []string{"https://app.example.com"},
+		"auth_token":      "yaml-token",
+		"cors_origins":    []string{"https://app.example.com"},
+		"public_base_url": "https://images.example.com",
 		"oidc": map[string]any{
 			"scopes": []string{"openid", "profile", "email"},
 		},
@@ -785,6 +807,7 @@ func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testin
 	require.NoError(t, cmd.ParseFlags([]string{
 		"--auth-token=",
 		"--cors-origins=",
+		"--public-base-url=",
 		"--oidc-scopes=",
 	}))
 
@@ -792,6 +815,7 @@ func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testin
 	require.NoError(t, config.ConfigError)
 	assert.Empty(t, config.AuthToken)
 	assert.Empty(t, config.CORSOrigins)
+	assert.Empty(t, config.PublicBaseURL)
 	assert.Empty(t, config.OIDC.Scopes)
 }
 

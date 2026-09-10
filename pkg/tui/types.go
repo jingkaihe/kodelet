@@ -30,6 +30,7 @@ type Config struct {
 	CWD                     string
 	DefaultCWD              string
 	Theme                   string
+	ServerURL               string          // Connected control-plane base URL for relative image links.
 	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.
 	// Initialize optionally prepares the daemon connection after the TUI renders.
 	// Until it succeeds, typing and quitting remain available but submission is disabled.
@@ -248,6 +249,7 @@ type model struct {
 	runner             chat.ChatRunner
 	conversationSource chat.ConversationSource
 	conversationStream chat.ConversationStreamer
+	serverURL          string
 	remote             bool
 	remoteDefaultCWD   string
 	environmentProfile string

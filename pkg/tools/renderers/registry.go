@@ -60,20 +60,21 @@ func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer)
 
 // Render finds the appropriate renderer and renders the result
 func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
-	if _, ok := result.Metadata.(*tools.ExtensionToolMetadata); ok {
-		return (&ExtensionToolRenderer{}).RenderCLI(result)
+	var output string
+	switch result.Metadata.(type) {
+	case *tools.ExtensionToolMetadata, tools.ExtensionToolMetadata:
+		output = (&ExtensionToolRenderer{}).RenderCLI(result)
+	default:
+		if renderer, exists := r.resolveRenderer(result.ToolName); exists {
+			output = renderer.RenderCLI(result)
+		} else {
+			output = r.renderFallback(result)
+		}
 	}
-	if _, ok := result.Metadata.(tools.ExtensionToolMetadata); ok {
-		return (&ExtensionToolRenderer{}).RenderCLI(result)
+	if images := ImageAttachmentLines(result, ""); len(images) > 0 {
+		return strings.TrimSpace(strings.Join(images, "\n") + "\n\n" + output)
 	}
-
-	renderer, exists := r.resolveRenderer(result.ToolName)
-	if exists {
-		return renderer.RenderCLI(result)
-	}
-
-	// Fallback renderer for unknown tools
-	return r.renderFallback(result)
+	return output
 }
 
 // RenderMarkdown finds the appropriate renderer and renders the result as markdown.

@@ -21,7 +21,25 @@ import {
   type JSONSchema,
   type InitializeParams,
   type ToolPresentation,
+  type ToolAttachment,
 } from "./index.js";
+
+test("preserves declared image attachments in final tool results", async () => {
+  const attachment: ToolAttachment = {
+    type: "image", path: "/runner/generated.png", filename: "generated.png",
+    mimeType: "image/png", alt: "Generated illustration",
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "generate_image", description: "Generate an image", inputSchema: z.object({}),
+      execute: () => ({ content: "Generated an illustration", attachments: [attachment] }),
+    });
+  });
+  const harness = await createTestHarness(extension);
+  assert.deepEqual(await harness.executeTool({ name: "generate_image", input: {} }), {
+    content: "Generated an illustration", attachments: [attachment],
+  });
+});
 
 test("remote profiles preserve ordinary configuration JSON and isolate input and manifest snapshots", () => {
   const params: InitializeParams = {

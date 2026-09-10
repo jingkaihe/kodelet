@@ -23,6 +23,7 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 type staticRuntimeProvider struct {
@@ -636,6 +637,36 @@ func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
 	assert.LessOrEqual(t, len(result.DisplayOutput), maxToolDisplayOutputBytes)
 	assert.True(t, strings.HasSuffix(result.DisplayOutput, toolDisplayOutputTruncationMarker))
 	assert.True(t, utf8.ValidString(result.DisplayOutput))
+}
+
+func TestServiceUploadAttachmentRejectsFIFOWithoutBlocking(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "image.png")
+	require.NoError(t, unix.Mkfifo(path, 0o600))
+	service := &Service{artifactBaseURL: "http://127.0.0.1"}
+	peer := &recordingPeer{}
+	run := &activeRun{manifest: runnerpayload.Manifest{WorkingDirectory: workspace}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.uploadAttachment(t.Context(), peer, run, "tool", tooltypes.ToolAttachment{Type: "image", Path: "image.png"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "attachment must be a nonempty regular file")
+	case <-time.After(time.Second):
+		// Release a regressed blocking open before failing so the test leaves no goroutine behind.
+		writer, err := os.OpenFile(path, os.O_RDWR|unix.O_NONBLOCK, 0)
+		require.NoError(t, err)
+		defer writer.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			assert.Fail(t, "attachment reader did not unblock after opening a FIFO writer")
+		}
+		require.FailNow(t, "opening a FIFO attachment must not wait for a writer")
+	}
+	assert.Empty(t, peer.calls, "nonregular files must be rejected before authorizing an upload")
 }
 
 func TestServiceSupportsConcurrentRunsAndProfileProbes(t *testing.T) {

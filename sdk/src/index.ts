@@ -105,6 +105,7 @@ export type {
   ShortcutSubmitResult,
   StorageContext,
   SystemPromptPatch,
+  ToolAttachment,
   ToolCallDetails,
   ToolCallEvent,
   ToolUpdateEvent,

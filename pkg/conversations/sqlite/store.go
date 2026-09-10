@@ -12,7 +12,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 
+	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
@@ -155,7 +157,7 @@ func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversatio
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation summary")
 	}
-	return nil
+	return artifacts.SaveReferences(ctx, tx, record.ID, record.ToolResults)
 }
 
 // Load retrieves a conversation record by ID
@@ -258,6 +260,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
+	removedArtifacts, err := artifacts.DeleteReferences(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+
 	_, err = tx.ExecContext(ctx, "DELETE FROM runner_runs WHERE conversation_id = ?", id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation runner run history")
@@ -281,7 +288,13 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		return errors.Wrap(err, "failed to delete conversation summary")
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if err := artifacts.RemoveFiles(s.dbPath, removedArtifacts); err != nil {
+		logger.G(ctx).WithError(err).Warn("conversation deleted; orphan image files will be retried at startup")
+	}
+	return nil
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination

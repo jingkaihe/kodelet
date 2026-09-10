@@ -135,6 +135,7 @@ func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime tim
 		result:        content,
 		err:           result.Error,
 		data:          normalizeExtensionResultData(result.Data, t.maxOutput),
+		attachments:   append([]tooltypes.ToolAttachment(nil), result.Attachments...),
 	}
 }
 
@@ -245,6 +246,7 @@ type ToolResult struct {
 	result        string
 	err           string
 	data          map[string]any
+	attachments   []tooltypes.ToolAttachment
 }
 
 // AssistantFacing returns the result for the assistant.
@@ -264,9 +266,10 @@ func (r *ToolResult) GetResult() string { return r.result }
 // StructuredData returns structured metadata.
 func (r *ToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
-		ToolName:  r.toolName,
-		Success:   !r.IsError(),
-		Timestamp: time.Now(),
+		ToolName:    r.toolName,
+		Success:     !r.IsError(),
+		Timestamp:   time.Now(),
+		Attachments: append([]tooltypes.ToolAttachment(nil), r.attachments...),
 		Metadata: &tooltypes.ExtensionToolMetadata{
 			ExtensionID:   r.extensionID,
 			ToolName:      r.toolName,
