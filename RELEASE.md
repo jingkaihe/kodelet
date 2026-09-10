@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.6.7-alpha
+
+Added persistent tool image attachments, including TypeScript SDK extension outputs, with runner uploads, authenticated image links, fork-safe conversation references, and cleanup of unreferenced images.
+
+Added inline image previews, full-size viewing, and downloads in the Web UI, plus image links in the native TUI. Configure `serve --public-base-url` or `serve.public_base_url` to advertise image links behind a reverse proxy.
+
+Allowed `view_image` to inspect persisted images by `artifactId`, with access scoped to the current conversation.
+
+Fixed `read_conversation` to read central storage and extract relevant content with the daemon's weak model, without spawning CLI subprocesses or creating another saved conversation.
+
+Preserved Web UI transcript text selection during streaming updates and runner polling.
+
 ## 0.6.3-beta
 
 Made CLI, TUI, and ACP workflows daemon-backed, with automatic local server startup and `kodelet server` lifecycle commands.
