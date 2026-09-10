@@ -62,6 +62,12 @@ func (r *Registry) registerToolModelHelper(ctx context.Context, params runnerpay
 // executeModelHelper is reachable only through an authenticated runner Session.
 // Neither a runner credential alone nor a saved conversation grants authority.
 func (r *Registry) executeModelHelper(ctx context.Context, runnerID, connectionID string, generation int64, params runnerpayload.ModelHelperParams) (any, *protocol.RPCError) {
+	if params.Request.Operation != tooltypes.ModelHelperWebFetchExtract {
+		return nil, &protocol.RPCError{
+			Code:    protocol.ErrorCodeInvalidParams,
+			Message: "unsupported runner model helper operation",
+		}
+	}
 	if err := params.Request.Validate(); err != nil {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
 	}

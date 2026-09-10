@@ -10,24 +10,43 @@ import (
 // ModelHelperWebFetchExtract is the only runner-delegated utility operation.
 const ModelHelperWebFetchExtract = "web_fetch.extract"
 
-// ModelHelperRequest contains complete, in-memory input for an internal model
-// utility. It deliberately accepts no configuration, paths, or persistence mode.
+// ModelHelperReadConversationExtract reads central history without runner delegation.
+const ModelHelperReadConversationExtract = "read_conversation.extract"
+
+// ModelHelperRequest supplies a document or a central conversation ID for an
+// internal model utility. It accepts no configuration, paths, or persistence mode.
 type ModelHelperRequest struct {
-	Operation string `json:"operation"`
-	URL       string `json:"url"`
-	Content   string `json:"content"`
-	Prompt    string `json:"prompt"`
+	Operation      string `json:"operation"`
+	URL            string `json:"url"`
+	Content        string `json:"content"`
+	Prompt         string `json:"prompt"`
+	ConversationID string `json:"conversationId,omitempty"`
 }
 
 // Validate rejects unsupported operations and bounds input below the RPC limit.
 func (r ModelHelperRequest) Validate() error {
-	if r.Operation != ModelHelperWebFetchExtract {
+	switch r.Operation {
+	case ModelHelperWebFetchExtract:
+		if strings.TrimSpace(r.URL) == "" || strings.TrimSpace(r.Prompt) == "" {
+			return errors.New("model helper URL and extraction prompt are required")
+		}
+		if r.ConversationID != "" {
+			return errors.New("web extraction does not accept a conversation ID")
+		}
+	case ModelHelperReadConversationExtract:
+		if strings.TrimSpace(r.ConversationID) == "" || strings.TrimSpace(r.Prompt) == "" {
+			return errors.New("model helper conversation ID and extraction prompt are required")
+		}
+		if r.URL != "" || r.Content != "" {
+			return errors.New("conversation extraction reads central history, not supplied URL or content")
+		}
+	default:
 		return errors.New("unsupported internal model helper operation")
 	}
-	if strings.TrimSpace(r.URL) == "" || strings.TrimSpace(r.Prompt) == "" {
-		return errors.New("model helper URL and extraction prompt are required")
-	}
-	if len(r.URL) > 8192 || len(r.Prompt) > 64*1024 || len(r.Content) > 512*1024 {
+	if len(r.URL) > 8192 ||
+		len(r.ConversationID) > 8192 ||
+		len(r.Prompt) > 64*1024 ||
+		len(r.Content) > 512*1024 {
 		return errors.New("model helper input exceeds the extraction limit")
 	}
 	return nil
@@ -59,7 +78,7 @@ func RunModelHelper(ctx context.Context, request ModelHelperRequest) (string, er
 	}
 	helper := ModelHelperFromContext(ctx)
 	if helper == nil {
-		return "", errors.New("AI-assisted web extraction is unavailable; use a runner connected to the server")
+		return "", errors.New("AI-assisted extraction is unavailable; use a daemon-managed run")
 	}
 	return helper(ctx, request)
 }

@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -335,14 +336,14 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, metada
 		preview = strings.ReplaceAll(preview, "\r", " ")
 
 		metadata := metadataByID[summary.ID]
-		platform, apiMode := extractProviderMetadata(summary.Provider, metadata)
+		platform, apiMode := conversations.ProviderMetadata(summary.Provider, metadata)
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
 			ID:             summary.ID,
 			CreatedAt:      summary.CreatedAt,
 			UpdatedAt:      summary.UpdatedAt,
 			MessageCount:   summary.MessageCount,
-			Provider:       displayProviderName(summary.Provider),
+			Provider:       conversations.ProviderDisplayName(summary.Provider),
 			Platform:       platform,
 			APIMode:        apiMode,
 			Preview:        preview,
@@ -353,51 +354,6 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, metada
 	}
 
 	return output
-}
-
-func normalizeProviderMetadataString(value any) string {
-	strValue, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(strings.ToLower(strValue))
-}
-
-func extractProviderMetadata(provider string, metadata map[string]any) (string, string) {
-	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
-
-	platform := ""
-	apiMode := ""
-	if metadata != nil {
-		if platformValue, exists := metadata["platform"]; exists {
-			platform = normalizeProviderMetadataString(platformValue)
-		}
-		if modeValue, exists := metadata["api_mode"]; exists {
-			apiMode = normalizeProviderMetadataString(modeValue)
-		}
-	}
-
-	switch apiMode {
-	case "chat", "chatcompletions":
-		apiMode = "chat_completions"
-	}
-
-	if normalizedProvider == "openai-responses" && apiMode == "" {
-		apiMode = "responses"
-	}
-
-	return platform, apiMode
-}
-
-func displayProviderName(provider string) string {
-	switch strings.TrimSpace(strings.ToLower(provider)) {
-	case "anthropic":
-		return "Anthropic"
-	case "openai", "openai-responses":
-		return "OpenAI"
-	default:
-		return provider
-	}
 }
 
 func (o *ConversationListOutput) Render(w io.Writer) error {
@@ -505,8 +461,8 @@ type ConversationShowOutput struct {
 }
 
 func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, config *ConversationShowConfig) error {
-	platform, apiMode := extractProviderMetadata(record.Provider, record.Metadata)
-	providerDisplay := displayProviderName(record.Provider)
+	platform, apiMode := conversations.ProviderMetadata(record.Provider, record.Metadata)
+	providerDisplay := conversations.ProviderDisplayName(record.Provider)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 
@@ -555,7 +511,7 @@ func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, 
 		showHeader := !config.NoHeader
 		showMessages := !config.StatsOnly
 		if showHeader {
-			fmt.Fprint(w, renderConversationHeaderMarkdown(record, providerDisplay, platform, apiMode))
+			fmt.Fprint(w, conversations.RenderHeaderMarkdown(record))
 			if showMessages {
 				fmt.Fprintln(w)
 			}
@@ -639,53 +595,6 @@ func displayConversation(w io.Writer, messages []llmtypes.Message) {
 		presentation.Section(roleLabel)
 		fmt.Fprintf(w, "%s\n", msg.Content)
 	}
-}
-
-func renderConversationHeaderMarkdown(record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) string {
-	var output strings.Builder
-
-	output.WriteString("# Conversation\n\n")
-	output.WriteString("## Info\n\n")
-	fmt.Fprintf(&output, "- **ID:** %s\n", inlineMarkdownCode(record.ID))
-	fmt.Fprintf(&output, "- **Provider:** %s\n", providerDisplay)
-	if platform != "" {
-		fmt.Fprintf(&output, "- **Platform:** %s\n", inlineMarkdownCode(platform))
-	}
-	if apiMode != "" {
-		fmt.Fprintf(&output, "- **API Mode:** %s\n", inlineMarkdownCode(apiMode))
-	}
-	fmt.Fprintf(&output, "- **Created:** %s\n", inlineMarkdownCode(record.CreatedAt.Format(time.RFC3339)))
-	fmt.Fprintf(&output, "- **Updated:** %s\n", inlineMarkdownCode(record.UpdatedAt.Format(time.RFC3339)))
-	if record.Summary != "" {
-		fmt.Fprintf(&output, "- **Summary:** %s\n", sanitizeMarkdownText(record.Summary))
-	}
-
-	usage := record.Usage
-	output.WriteString("\n## Usage\n\n")
-	fmt.Fprintf(&output, "- **Input Tokens:** %d\n", usage.InputTokens)
-	fmt.Fprintf(&output, "- **Output Tokens:** %d\n", usage.OutputTokens)
-	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
-		fmt.Fprintf(&output, "- **Cache Read:** %d\n", usage.CacheReadInputTokens)
-		fmt.Fprintf(&output, "- **Cache Creation:** %d\n", usage.CacheCreationInputTokens)
-	}
-	fmt.Fprintf(&output, "- **Total Cost:** $%.4f\n", usage.TotalCost())
-	if usage.MaxContextWindow > 0 {
-		fmt.Fprintf(&output, "- **Context Window:** %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
-	}
-
-	return output.String()
-}
-
-func inlineMarkdownCode(value string) string {
-	if strings.Contains(value, "`") {
-		return fmt.Sprintf("``%s``", value)
-	}
-
-	return fmt.Sprintf("`%s`", value)
-}
-
-func sanitizeMarkdownText(value string) string {
-	return strings.ReplaceAll(value, "\n", " ")
 }
 
 func createGist(conversationID string, jsonData []byte, isPrivate bool) error {

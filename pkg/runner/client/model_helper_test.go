@@ -55,7 +55,7 @@ func TestRunnerModelHelperDelegatesWithoutLocalFallback(t *testing.T) {
 			text, err := tooltypes.RunModelHelper(ctx, request)
 			assert.Zero(t, localCalls)
 			if tt.absent {
-				assert.ErrorContains(t, err, "AI-assisted web extraction is unavailable")
+				assert.ErrorContains(t, err, "AI-assisted extraction is unavailable")
 				assert.Zero(t, remoteCalls)
 			} else {
 				assert.Equal(t, 1, remoteCalls)

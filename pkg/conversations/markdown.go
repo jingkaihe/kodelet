@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -36,6 +38,90 @@ type MarkdownOptions struct {
 	MaxToolResultChars  int
 	MaxToolResultBytes  int
 	ExcludeThinking     bool
+}
+
+// RenderHeaderMarkdown renders a saved conversation's metadata and usage as Markdown.
+func RenderHeaderMarkdown(record convtypes.ConversationRecord) string {
+	platform, apiMode := ProviderMetadata(record.Provider, record.Metadata)
+	var output strings.Builder
+
+	output.WriteString("# Conversation\n\n")
+	output.WriteString("## Info\n\n")
+	fmt.Fprintf(&output, "- **ID:** %s\n", inlineMarkdownCode(record.ID))
+	fmt.Fprintf(&output, "- **Provider:** %s\n", ProviderDisplayName(record.Provider))
+	if platform != "" {
+		fmt.Fprintf(&output, "- **Platform:** %s\n", inlineMarkdownCode(platform))
+	}
+	if apiMode != "" {
+		fmt.Fprintf(&output, "- **API Mode:** %s\n", inlineMarkdownCode(apiMode))
+	}
+	fmt.Fprintf(&output, "- **Created:** %s\n", inlineMarkdownCode(record.CreatedAt.Format(time.RFC3339)))
+	fmt.Fprintf(&output, "- **Updated:** %s\n", inlineMarkdownCode(record.UpdatedAt.Format(time.RFC3339)))
+	if record.Summary != "" {
+		fmt.Fprintf(&output, "- **Summary:** %s\n", strings.ReplaceAll(record.Summary, "\n", " "))
+	}
+
+	usage := record.Usage
+	output.WriteString("\n## Usage\n\n")
+	fmt.Fprintf(&output, "- **Input Tokens:** %d\n", usage.InputTokens)
+	fmt.Fprintf(&output, "- **Output Tokens:** %d\n", usage.OutputTokens)
+	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		fmt.Fprintf(&output, "- **Cache Read:** %d\n", usage.CacheReadInputTokens)
+		fmt.Fprintf(&output, "- **Cache Creation:** %d\n", usage.CacheCreationInputTokens)
+	}
+	fmt.Fprintf(&output, "- **Total Cost:** $%.4f\n", usage.TotalCost())
+	if usage.MaxContextWindow > 0 {
+		fmt.Fprintf(&output, "- **Context Window:** %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
+	}
+
+	return output.String()
+}
+
+func normalizeProviderMetadataString(value any) string {
+	strValue, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(strings.ToLower(strValue))
+}
+
+// ProviderMetadata returns normalized platform and API mode values for a saved provider.
+func ProviderMetadata(provider string, metadata map[string]any) (string, string) {
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+
+	platform := ""
+	apiMode := ""
+	if metadata != nil {
+		if platformValue, exists := metadata["platform"]; exists {
+			platform = normalizeProviderMetadataString(platformValue)
+		}
+		if modeValue, exists := metadata["api_mode"]; exists {
+			apiMode = normalizeProviderMetadataString(modeValue)
+		}
+	}
+
+	switch apiMode {
+	case "chat", "chatcompletions":
+		apiMode = "chat_completions"
+	}
+
+	if normalizedProvider == "openai-responses" && apiMode == "" {
+		apiMode = "responses"
+	}
+
+	return platform, apiMode
+}
+
+// ProviderDisplayName returns the display label for a saved provider.
+func ProviderDisplayName(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
+	case "anthropic":
+		return "Anthropic"
+	case "openai", "openai-responses":
+		return "OpenAI"
+	default:
+		return provider
+	}
 }
 
 // RenderMarkdown converts conversation entries into markdown.

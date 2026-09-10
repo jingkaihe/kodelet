@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -475,31 +476,79 @@ func TestDisplayConversation(t *testing.T) {
 	assert.Contains(t, output, "blank role")
 }
 
-func TestRenderConversationHeaderMarkdown(t *testing.T) {
+func TestRenderConversationRecordMarkdown(t *testing.T) {
 	record := convtypes.ConversationRecord{
-		ID:        "conv-md",
-		Summary:   "Summary line",
-		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
-		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		ID:       "conv`md",
+		Provider: "openai",
+		Metadata: map[string]any{
+			"platform": " Fireworks ",
+			"api_mode": "responses",
+		},
+		Summary:     "Summary\nline",
+		CreatedAt:   time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 		Usage: llmtypes.Usage{
-			InputTokens:          123,
-			OutputTokens:         45,
-			InputCost:            0.001,
-			OutputCost:           0.002,
-			CurrentContextWindow: 1000,
-			MaxContextWindow:     8000,
+			InputTokens:              123,
+			OutputTokens:             45,
+			InputCost:                0.001,
+			OutputCost:               0.002,
+			CacheReadInputTokens:     20,
+			CacheCreationInputTokens: 10,
+			CacheReadCost:            0.0004,
+			CacheCreationCost:        0.0005,
+			CurrentContextWindow:     1000,
+			MaxContextWindow:         8000,
 		},
 	}
 
-	output := renderConversationHeaderMarkdown(record, "OpenAI", "fireworks", "responses")
-	assert.Contains(t, output, "# Conversation")
-	assert.Contains(t, output, "- **ID:** `conv-md`")
-	assert.Contains(t, output, "- **Provider:** OpenAI")
-	assert.Contains(t, output, "- **Platform:** `fireworks`")
-	assert.Contains(t, output, "- **API Mode:** `responses`")
-	assert.Contains(t, output, "## Usage")
-	assert.Contains(t, output, "- **Total Cost:** $0.0030")
-	assert.Contains(t, output, "- **Context Window:** 1000 / 8000")
+	header := "# Conversation\n\n## Info\n\n" +
+		"- **ID:** ``conv`md``\n" +
+		"- **Provider:** OpenAI\n" +
+		"- **Platform:** `fireworks`\n" +
+		"- **API Mode:** `responses`\n" +
+		"- **Created:** `2026-01-23T10:00:00Z`\n" +
+		"- **Updated:** `2026-01-23T10:30:00Z`\n" +
+		"- **Summary:** Summary line\n\n## Usage\n\n" +
+		"- **Input Tokens:** 123\n" +
+		"- **Output Tokens:** 45\n" +
+		"- **Cache Read:** 20\n" +
+		"- **Cache Creation:** 10\n" +
+		"- **Total Cost:** $0.0039\n" +
+		"- **Context Window:** 1000 / 8000\n"
+	assert.Equal(t, header, conversations.RenderHeaderMarkdown(record))
+	messages := "## Messages\n\n### User\n\nhello\n"
+	for _, tt := range []struct {
+		name      string
+		noHeader  bool
+		statsOnly bool
+		want      string
+	}{
+		{
+			name: "header and messages",
+			want: header + "\n" + messages,
+		},
+		{
+			name:      "stats only",
+			statsOnly: true,
+			want:      header,
+		},
+		{
+			name:     "no header",
+			noHeader: true,
+			want:     messages,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			require.NoError(t, renderConversationRecord(&output, record, &ConversationShowConfig{
+				Format:    "markdown",
+				NoHeader:  tt.noHeader,
+				StatsOnly: tt.statsOnly,
+			}))
+			assert.Equal(t, tt.want, output.String())
+		})
+	}
 }
 
 func TestDisplayProviderName(t *testing.T) {
@@ -527,7 +576,7 @@ func TestDisplayProviderName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
+			assert.Equal(t, tt.expected, conversations.ProviderDisplayName(tt.provider))
 		})
 	}
 }
@@ -568,17 +617,11 @@ func TestExtractProviderMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			platform, apiMode := extractProviderMetadata(tt.provider, tt.metadata)
+			platform, apiMode := conversations.ProviderMetadata(tt.provider, tt.metadata)
 			assert.Equal(t, tt.expectedPlatform, platform)
 			assert.Equal(t, tt.expectedAPIMode, apiMode)
 		})
 	}
-}
-
-func TestMarkdownHelpers(t *testing.T) {
-	assert.Equal(t, "`plain`", inlineMarkdownCode("plain"))
-	assert.Equal(t, "``has`tick``", inlineMarkdownCode("has`tick"))
-	assert.Equal(t, "hello world", sanitizeMarkdownText("hello\nworld"))
 }
 
 func TestCreateGistInvokesGHWithExpectedVisibility(t *testing.T) {

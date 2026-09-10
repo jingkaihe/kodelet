@@ -46,7 +46,23 @@ func TestModelHelperRequiresRegistration(t *testing.T) {
 }
 
 func TestModelHelperAuthorization(t *testing.T) {
-	for _, name := range []string{"absent capability", "wrong tool type", "wrong run", "wrong tool", "wrong runner", "wrong connection", "wrong generation", "stale run connection", "stale run generation", "inactive run", "unowned run", "canceled tool", "unsupported operation", "missing prompt"} {
+	for _, name := range []string{
+		"absent capability",
+		"wrong tool type",
+		"wrong run",
+		"wrong tool",
+		"wrong runner",
+		"wrong connection",
+		"wrong generation",
+		"stale run connection",
+		"stale run generation",
+		"inactive run",
+		"unowned run",
+		"canceled tool",
+		"unsupported operation",
+		"central conversation operation",
+		"missing prompt",
+	} {
 		t.Run(name, func(t *testing.T) {
 			registry, _, session := newModelHelperRegistry(t)
 			calls := 0
@@ -98,6 +114,14 @@ func TestModelHelperAuthorization(t *testing.T) {
 				cancel()
 			case "unsupported operation":
 				params.Request.Operation = "agent.run"
+				wantCode = protocol.ErrorCodeInvalidParams
+			case "central conversation operation":
+				params.Request = tooltypes.ModelHelperRequest{
+					Operation:      tooltypes.ModelHelperReadConversationExtract,
+					ConversationID: "conversation-one",
+					Prompt:         "Extract title",
+				}
+				require.NoError(t, params.Request.Validate(), "valid central requests must still be rejected over runner RPC")
 				wantCode = protocol.ErrorCodeInvalidParams
 			case "missing prompt":
 				params.Request.Prompt = ""

@@ -1,15 +1,10 @@
 package tools
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -18,19 +13,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-//go:embed prompts/read_conversation.txt
-var readConversationPromptTemplate string
-
-type (
-	conversationMarkdownRenderer func(ctx context.Context, conversationID string) (string, error)
-	conversationExtractor        func(ctx context.Context, state tooltypes.State, markdown string, goal string) (string, error)
-)
-
 // ReadConversationTool reads a saved conversation and extracts the parts relevant to a goal.
-type ReadConversationTool struct {
-	renderConversation conversationMarkdownRenderer
-	extractContent     conversationExtractor
-}
+type ReadConversationTool struct{}
 
 // ReadConversationInput reuses the shared read_conversation input schema while preserving pkg/tools schema IDs.
 type ReadConversationInput tooltypes.ReadConversationInput
@@ -43,12 +27,9 @@ type ReadConversationToolResult struct {
 	err            string
 }
 
-// NewReadConversationTool creates a read_conversation tool with production dependencies.
+// NewReadConversationTool creates a read_conversation tool backed by the central model helper.
 func NewReadConversationTool() *ReadConversationTool {
-	return &ReadConversationTool{
-		renderConversation: defaultConversationMarkdownRenderer,
-		extractContent:     defaultConversationExtractor,
-	}
+	return &ReadConversationTool{}
 }
 
 // Name returns the tool name.
@@ -70,8 +51,9 @@ Input:
 - goal: required description of what to extract
 
 Behavior:
-- Renders the saved conversation to markdown using the built-in CLI view
-- Runs a goal-based extraction pass and returns only the relevant content
+- Reads the saved conversation directly from central storage and renders it as markdown
+- Runs a goal-based extraction pass using the daemon's weak model, without creating another saved conversation
+- Returns only the relevant content
 
 The result preserves exact technical details when they matter and omits clearly irrelevant parts.`
 }
@@ -112,7 +94,7 @@ func (t *ReadConversationTool) TracingKVs(parameters string) ([]attribute.KeyVal
 }
 
 // Execute executes the read_conversation tool.
-func (t *ReadConversationTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *ReadConversationTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ReadConversationInput{}
 	if err := json.Unmarshal([]byte(parameters), input); err != nil {
 		return &ReadConversationToolResult{
@@ -125,16 +107,15 @@ func (t *ReadConversationTool) Execute(ctx context.Context, state tooltypes.Stat
 	input.ConversationID = strings.TrimSpace(input.ConversationID)
 	input.Goal = strings.TrimSpace(input.Goal)
 
-	markdown, err := t.renderConversation(ctx, input.ConversationID)
-	if err != nil {
-		return &ReadConversationToolResult{
-			conversationID: input.ConversationID,
-			goal:           input.Goal,
-			err:            fmt.Sprintf("Failed to render conversation: %s", err),
-		}
+	content, err := tooltypes.RunModelHelper(ctx, tooltypes.ModelHelperRequest{
+		Operation:      tooltypes.ModelHelperReadConversationExtract,
+		ConversationID: input.ConversationID,
+		Prompt:         input.Goal,
+	})
+	content = strings.TrimSpace(content)
+	if err == nil && content == "" {
+		err = errors.New("empty extraction response")
 	}
-
-	content, err := t.extractContent(ctx, state, markdown, input.Goal)
 	if err != nil {
 		return &ReadConversationToolResult{
 			conversationID: input.ConversationID,
@@ -146,7 +127,7 @@ func (t *ReadConversationTool) Execute(ctx context.Context, state tooltypes.Stat
 	return &ReadConversationToolResult{
 		conversationID: input.ConversationID,
 		goal:           input.Goal,
-		content:        strings.TrimSpace(content),
+		content:        content,
 	}
 }
 
@@ -188,77 +169,4 @@ func (r *ReadConversationToolResult) StructuredData() tooltypes.StructuredToolRe
 	}
 
 	return result
-}
-
-func defaultConversationMarkdownRenderer(ctx context.Context, conversationID string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get executable path")
-	}
-
-	cmd := exec.CommandContext(ctx, exe, "conversation", "show", conversationID, "--format", "markdown", "--truncate-tool-results")
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", errors.Errorf("conversation show failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", err
-	}
-
-	return strings.TrimSpace(string(output)), nil
-}
-
-func defaultConversationExtractor(ctx context.Context, state tooltypes.State, markdown string, goal string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get executable path")
-	}
-
-	args := []string{"run", "--result-only", "--no-save", "--no-extensions", "--no-skills", "--use-weak-model", "--no-tools"}
-
-	prompt, err := buildReadConversationPrompt(markdown, goal)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to build read conversation prompt")
-	}
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Stdin = strings.NewReader(prompt)
-
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", errors.Errorf("content extraction failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", err
-	}
-
-	content := strings.TrimSpace(string(output))
-	if content == "" {
-		return "", errors.New("empty extraction response")
-	}
-
-	return content, nil
-}
-
-func buildReadConversationPrompt(markdown string, goal string) (string, error) {
-	data := struct {
-		Conversation string
-		Goal         string
-	}{
-		Conversation: strings.TrimSpace(markdown),
-		Goal:         strings.TrimSpace(goal),
-	}
-
-	tmpl, err := template.New("read_conversation_prompt").Parse(readConversationPromptTemplate)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse read_conversation prompt template")
-	}
-
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, data); err != nil {
-		return "", errors.Wrap(err, "failed to execute read_conversation prompt template")
-	}
-
-	return rendered.String(), nil
 }

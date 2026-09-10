@@ -5,10 +5,29 @@ import (
 	"testing"
 	"time"
 
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRenderHeaderMarkdownWithoutOptionalFields(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		ID:        "conv-header",
+		Provider:  "anthropic",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.FixedZone("local", 3600)),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.FixedZone("local", 3600)),
+	}
+	expected := "# Conversation\n\n## Info\n\n" +
+		"- **ID:** `conv-header`\n" +
+		"- **Provider:** Anthropic\n" +
+		"- **Created:** `2026-01-23T10:00:00+01:00`\n" +
+		"- **Updated:** `2026-01-23T10:30:00+01:00`\n\n## Usage\n\n" +
+		"- **Input Tokens:** 0\n" +
+		"- **Output Tokens:** 0\n" +
+		"- **Total Cost:** $0.0000\n"
+	assert.Equal(t, expected, RenderHeaderMarkdown(record))
+}
 
 func TestRenderMarkdownIncludesThinkingByDefault(t *testing.T) {
 	messages := []StreamableMessage{

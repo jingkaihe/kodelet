@@ -23,6 +23,13 @@ func TestModelHelperRequestValidate(t *testing.T) {
 		{name: "other operation", change: func(r *ModelHelperRequest) { r.Operation = "conversation.delete" }, err: "unsupported"},
 		{name: "missing URL", change: func(r *ModelHelperRequest) { r.URL = " \t" }, err: "required"},
 		{name: "missing prompt", change: func(r *ModelHelperRequest) { r.Prompt = "\n " }, err: "required"},
+		{
+			name: "web extraction rejects conversation ID",
+			change: func(r *ModelHelperRequest) {
+				r.ConversationID = "conv-one"
+			},
+			err: "does not accept",
+		},
 		{name: "URL limit", change: func(r *ModelHelperRequest) { r.URL = strings.Repeat("u", 8192) }},
 		{name: "prompt limit", change: func(r *ModelHelperRequest) { r.Prompt = strings.Repeat("p", 64*1024) }},
 		{name: "content limit", change: func(r *ModelHelperRequest) { r.Content = strings.Repeat("c", 512*1024) }},
@@ -32,6 +39,70 @@ func TestModelHelperRequestValidate(t *testing.T) {
 		{name: "limit counts bytes", change: func(r *ModelHelperRequest) { r.Prompt = strings.Repeat("é", 32*1024+1) }, err: "limit"},
 	}
 	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := valid
+			tt.change(&request)
+			err := request.Validate()
+			if tt.err != "" {
+				assert.ErrorContains(t, err, tt.err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestConversationModelHelperRequestValidate(t *testing.T) {
+	valid := ModelHelperRequest{
+		Operation:      ModelHelperReadConversationExtract,
+		ConversationID: "conv-one",
+		Prompt:         "Extract the fix",
+	}
+	for _, tt := range []struct {
+		name   string
+		change func(*ModelHelperRequest)
+		err    string
+	}{
+		{
+			name:   "valid",
+			change: func(*ModelHelperRequest) {},
+		},
+		{
+			name: "missing ID",
+			change: func(r *ModelHelperRequest) {
+				r.ConversationID = " \t"
+			},
+			err: "required",
+		},
+		{
+			name: "missing goal",
+			change: func(r *ModelHelperRequest) {
+				r.Prompt = " \n"
+			},
+			err: "required",
+		},
+		{
+			name: "supplied URL",
+			change: func(r *ModelHelperRequest) {
+				r.URL = "https://example.com"
+			},
+			err: "central history",
+		},
+		{
+			name: "supplied content",
+			change: func(r *ModelHelperRequest) {
+				r.Content = "fake history"
+			},
+			err: "central history",
+		},
+		{
+			name: "oversized ID",
+			change: func(r *ModelHelperRequest) {
+				r.ConversationID = strings.Repeat("c", 8193)
+			},
+			err: "limit",
+		},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			request := valid
 			tt.change(&request)
@@ -60,8 +131,16 @@ func TestRunModelHelper(t *testing.T) {
 	}{
 		{name: "delegates", wantCalls: 1},
 		{name: "propagates error", helperErr: helperErr, wantCalls: 1, wantErr: helperErr.Error()},
-		{name: "absent capability", absent: true, wantErr: "AI-assisted web extraction is unavailable"},
-		{name: "nil masks inherited capability", masked: true, wantErr: "AI-assisted web extraction is unavailable"},
+		{
+			name:    "absent capability",
+			absent:  true,
+			wantErr: "AI-assisted extraction is unavailable",
+		},
+		{
+			name:    "nil masks inherited capability",
+			masked:  true,
+			wantErr: "AI-assisted extraction is unavailable",
+		},
 		{name: "canceled before invocation", canceled: true, wantErr: context.Canceled.Error()},
 		{name: "invalid before invocation", invalid: true, wantErr: "unsupported"},
 	}
