@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ChatPage from './ChatPage';
 import type { ChatSettings, ChatStreamEvent, ConversationListResponse, Runner, WorkspaceTarget } from '../types';
@@ -687,6 +687,70 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-remote'));
     await waitForTerminalAccess();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+  });
+
+  it('preserves transcript text selection while runner polling updates status', async () => {
+    vi.useFakeTimers();
+    routeParams = { id: 'conv-remote' };
+    const runner = makeRunner();
+    mockGetRunners
+      .mockResolvedValueOnce({ runners: [runner] })
+      .mockResolvedValueOnce({ runners: [{ ...runner }] })
+      .mockResolvedValue({ runners: [{ ...runner, status: 'busy' }] });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-remote',
+      createdAt: '2026-09-10T00:00:00Z',
+      updatedAt: '2026-09-10T00:00:00Z',
+      messageCount: 2,
+      cwd: '/runner/kodelet',
+      runnerId: runner.id,
+      runner,
+      messages: [
+        { role: 'user', content: 'Keep this question selected.' },
+        { role: 'assistant', content: 'Keep this answer selected.' },
+      ],
+      toolResults: {},
+    });
+
+    const selection = window.getSelection();
+    try {
+      assert(selection);
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+      await flushAsyncUpdates();
+
+      const startNode = screen.getByText('Keep this question selected.').firstChild;
+      const endNode = screen.getByText('Keep this answer selected.').firstChild;
+      assert(startNode);
+      assert(endNode);
+      const range = document.createRange();
+      range.setStart(startNode, 5);
+      range.setEnd(endNode, 16);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const selectedText = selection.toString();
+      expect(selectedText).not.toBe('');
+      expect(mockGetRunners).toHaveBeenCalledTimes(1);
+
+      for (const [index, status] of ['idle', '1 active'].entries()) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+        });
+
+        expect(mockGetRunners).toHaveBeenCalledTimes(index + 2);
+        expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
+          `runner:kodelet-gpu (${status})`
+        );
+        expect(selection.toString()).toBe(selectedText);
+        expect(selection.anchorNode).toBe(startNode);
+        expect(selection.focusNode).toBe(endNode);
+        expect(startNode.isConnected).toBe(true);
+        expect(endNode.isConnected).toBe(true);
+      }
+    } finally {
+      selection?.removeAllRanges();
+      vi.useRealTimers();
+    }
   });
 
   it('remounts the terminal after runner reconnection without changing its workspace target', async () => {

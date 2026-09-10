@@ -382,4 +382,5 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   );
 };
 
-export default ChatTranscript;
+// Runner polling must not rewrite unchanged message HTML and clear text selection.
+export default React.memo(ChatTranscript);
