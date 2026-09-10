@@ -15,7 +15,8 @@
   padding: 0 0.58rem 0.58rem 2.05rem;
 }
 
-.tool-image-attachment.chat-uploaded-image {
+.tool-image-attachment {
+  width: min(100%, 34rem);
   margin: 0;
 }
 
@@ -24,19 +25,29 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  padding-top: 0.5rem;
+  margin-left: -0.45rem;
+  padding-top: 0.3rem;
 }
 
 .tool-image-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   min-height: 2rem;
-  padding: 0.4rem 0.65rem;
-  border-color: var(--kodelet-light-gray);
+  padding: 0.4rem 0.45rem;
+  border: 0;
+  border-radius: 0.4rem;
   background: transparent;
   color: color-mix(in srgb, var(--kodelet-dark) 65%, var(--kodelet-light));
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
   font-weight: 500;
-  letter-spacing: normal;
+  line-height: 1;
   text-decoration: none;
-  box-shadow: none;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .tool-image-action svg {
@@ -44,11 +55,8 @@
 }
 
 .tool-image-action:hover {
-  border-color: var(--kodelet-mid-gray);
   background: var(--kodelet-panel);
   color: var(--kodelet-dark);
-  box-shadow: none;
-  transform: none;
 }
 
 .tool-image-action:focus-visible {

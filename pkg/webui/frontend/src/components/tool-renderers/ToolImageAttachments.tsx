@@ -27,7 +27,7 @@ const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }>
     attachment.alt?.trim() || attachment.filename || (viewed ? 'Viewed image' : 'Generated image');
 
   return (
-    <figure className="tool-image-attachment chat-uploaded-image">
+    <figure className="tool-image-attachment">
       {url && !failed ? (
         <a
           href={url}
@@ -57,7 +57,7 @@ const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }>
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="panel-action-button tool-image-action"
+            className="tool-image-action"
             aria-label={`Open full size in a new tab: ${alt}`}
             title="Open full-size image in a new tab"
           >
@@ -67,7 +67,7 @@ const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }>
           <a
             href={`${url}?download=1`}
             download
-            className="panel-action-button tool-image-action"
+            className="tool-image-action"
             aria-label={`Download image: ${alt}`}
             title="Save image to your device"
           >

@@ -27,6 +27,8 @@ describe('ToolImageAttachments', () => {
     const preview = screen.getByRole('img', { name: image.alt });
     expect(preview).toHaveAttribute('src', '/i/public_image-code');
     expect(preview).toHaveAttribute('loading', 'lazy');
+    expect(preview.closest('figure')).toHaveClass('tool-image-attachment');
+    expect(preview.closest('figure')).not.toHaveClass('chat-uploaded-image');
     const open = screen.getByRole('link', { name: `Open full size in a new tab: ${image.alt}` });
     expect(open).toHaveTextContent('Open full size');
     expect(open).toHaveAttribute('href', '/i/public_image-code');
@@ -42,7 +44,8 @@ describe('ToolImageAttachments', () => {
     expect(download).toHaveAttribute('title', 'Save image to your device');
     expect(download).not.toHaveAttribute('target');
     for (const action of [open, download]) {
-      expect(action).toHaveClass('panel-action-button', 'tool-image-action');
+      expect(action).toHaveClass('tool-image-action');
+      expect(action).not.toHaveClass('panel-action-button');
       expect(action.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     }
   });
