@@ -50,36 +50,68 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	m.width = 140
 	m.height = 40
 	m.resize()
-	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{
-		kind: blockTools,
-		tools: []toolCall{
-			{name: "grep_tool", done: true},
-			{
-				name: "draw_chart", done: true, result: "Generated a chart using 20 measurements.",
-				structured: &tooltypes.StructuredToolResult{
-					ToolName: "draw_chart", Success: true,
-					Attachments: []tooltypes.ToolAttachment{
-						{Type: "image", ArtifactID: "internal-artifact-1", ShortCode: "public", ViewURL: "https://images.example/i/public", Filename: "chart.png", Width: 1536, Height: 1024},
-						{Type: "image", ArtifactID: "internal-artifact-2", ShortCode: "second", ViewURL: "/i/second"},
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{
+				{name: "grep_tool", done: true},
+				{
+					name:   "draw_chart",
+					done:   true,
+					result: "Generated a chart using 20 measurements.",
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "draw_chart",
+						Success:  true,
+						Attachments: []tooltypes.ToolAttachment{
+							{
+								Type:       "image",
+								ArtifactID: "internal-artifact-1",
+								ShortCode:  "public",
+								ViewURL:    "https://images.example/i/public",
+								Filename:   "chart.png",
+								Width:      1536,
+								Height:     1024,
+							},
+							{
+								Type:       "image",
+								ArtifactID: "internal-artifact-2",
+								ShortCode:  "second",
+								ViewURL:    "/i/second",
+							},
+						},
 					},
 				},
-			},
-			{
-				name: "view_image", done: true,
-				structured: &tooltypes.StructuredToolResult{
-					ToolName: "view_image", Success: true,
-					Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "internal-artifact-1", ShortCode: "public", ViewURL: "https://images.example/i/public"}},
+				{
+					name: "view_image",
+					done: true,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "view_image",
+						Success:  true,
+						Attachments: []tooltypes.ToolAttachment{{
+							Type:       "image",
+							ArtifactID: "internal-artifact-1",
+							ShortCode:  "public",
+							ViewURL:    "https://images.example/i/public",
+						}},
+					},
+				},
+				{
+					name:   "glob_tool",
+					done:   true,
+					result: "file list",
 				},
 			},
-			{name: "glob_tool", done: true, result: "file list"},
-		},
-	}}}}
+		}},
+	}}
 
 	m.refreshViewport(true)
 	content, regions := m.renderTranscript()
 	plain := xansi.Strip(content)
 	require.Len(t, regions, 4)
-	assert.Contains(t, plain, "\nGenerated image - https://images.example/i/public\nGenerated image - https://connected.example/kodelet/i/second\n")
+	assert.Contains(t, plain,
+		"\nGenerated image - https://images.example/i/public\nGenerated image - https://connected.example/kodelet/i/second\n",
+	)
 	assert.Contains(t, plain, "\nViewed image - https://images.example/i/public\n")
 	assert.NotContains(t, plain, "internal-artifact")
 	assert.NotContains(t, plain, "chart.png")
@@ -105,16 +137,24 @@ func TestRenderTranscriptImageAttachmentFailure(t *testing.T) {
 	m.width = 100
 	m.height = 24
 	m.resize()
-	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{
-		kind: blockTools,
-		tools: []toolCall{{
-			name: "draw_chart", done: true,
-			structured: &tooltypes.StructuredToolResult{
-				ToolName: "draw_chart", Success: true,
-				Attachments: []tooltypes.ToolAttachment{{Type: "image", Error: "Upload interrupted"}},
-			},
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name: "draw_chart",
+				done: true,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "draw_chart",
+					Success:  true,
+					Attachments: []tooltypes.ToolAttachment{{
+						Type:  "image",
+						Error: "Upload interrupted",
+					}},
+				},
+			}},
 		}},
-	}}}}
+	}}
 
 	content, _ := m.renderTranscript()
 	assert.Contains(t, xansi.Strip(content), "Image unavailable - Upload interrupted")

@@ -23,7 +23,9 @@ func contextWithRunnerArtifactResolver(ctx context.Context, peer Peer, runID, to
 		}
 		var result tooltypes.ToolAttachment
 		err := peer.Call(ctx, runnerpayload.MethodArtifactResolve, runnerpayload.ArtifactRequest{
-			RunID: runID, ToolCallID: toolCallID, ArtifactID: id,
+			RunID:      runID,
+			ToolCallID: toolCallID,
+			ArtifactID: id,
 		}, &result)
 		return result, err
 	})
@@ -33,7 +35,8 @@ func (s *Service) ingestAttachments(ctx context.Context, peer Peer, run *activeR
 	attachments := append([]tooltypes.ToolAttachment(nil), result.Structured.Attachments...)
 	if len(attachments) > runnerpayload.MaxToolAttachments {
 		attachments = append(attachments[:runnerpayload.MaxToolAttachments], tooltypes.ToolAttachment{
-			Type: "image", Error: "additional attachments omitted: at most eight images are allowed per tool result",
+			Type:  "image",
+			Error: "additional attachments omitted: at most eight images are allowed per tool result",
 		})
 	}
 	for i, attachment := range attachments {
@@ -52,7 +55,13 @@ func (s *Service) ingestAttachments(ctx context.Context, peer Peer, run *activeR
 	result.Structured.Attachments = attachments
 }
 
-func (s *Service) uploadAttachment(ctx context.Context, peer Peer, run *activeRun, toolCallID string, attachment tooltypes.ToolAttachment) (tooltypes.ToolAttachment, error) {
+func (s *Service) uploadAttachment(
+	ctx context.Context,
+	peer Peer,
+	run *activeRun,
+	toolCallID string,
+	attachment tooltypes.ToolAttachment,
+) (tooltypes.ToolAttachment, error) {
 	if attachment.Type != "image" || strings.TrimSpace(attachment.Path) == "" || attachment.ArtifactID != "" {
 		return tooltypes.ToolAttachment{}, errors.New("image attachment requires a local path and no artifactId")
 	}
@@ -82,7 +91,9 @@ func (s *Service) uploadAttachment(ctx context.Context, peer Peer, run *activeRu
 	attachment.Path, attachment.ViewURL, attachment.ShortCode = "", "", ""
 	var grant runnerpayload.ArtifactUploadGrant
 	if err := peer.Call(ctx, runnerpayload.MethodArtifactUpload, runnerpayload.ArtifactRequest{
-		RunID: run.id, ToolCallID: toolCallID, Attachment: attachment,
+		RunID:      run.id,
+		ToolCallID: toolCallID,
+		Attachment: attachment,
 	}, &grant); err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to authorize image upload")
 	}
@@ -90,13 +101,20 @@ func (s *Service) uploadAttachment(ctx context.Context, peer Peer, run *activeRu
 		return tooltypes.ToolAttachment{}, errors.New("image upload authorization was empty")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut,
-		strings.TrimRight(s.artifactBaseURL, "/")+runnerpayload.ArtifactUploadPath, io.LimitReader(file, runnerpayload.MaxArtifactBytes+1))
+		strings.TrimRight(s.artifactBaseURL, "/")+runnerpayload.ArtifactUploadPath,
+		io.LimitReader(file, runnerpayload.MaxArtifactBytes+1),
+	)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to construct image upload")
 	}
 	request.Header.Set("Authorization", "Bearer "+grant.Token)
 	request.Header.Set("Content-Type", "application/octet-stream")
-	client := &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{
+		Timeout: 2 * time.Minute,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to upload image")

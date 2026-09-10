@@ -56,9 +56,15 @@ func (r *Registry) ArtifactToolContext(identity UIRequestIdentity, runID, toolCa
 	run := r.runs[runID]
 	owner := r.artifactTools[modelHelperKey{runID, toolCallID}]
 	runner, err := r.currentRunnerLocked(identity.RunnerID, identity.ConnectionID, identity.Generation)
-	if err != nil || run == nil || owner == nil || owner.ctx.Err() != nil ||
-		run.Status != RunStatusRunning || run.RunnerID != identity.RunnerID ||
-		run.connectionID != identity.ConnectionID || run.generation != identity.Generation || !runnerHasActiveRun(runner, runID) {
+	if err != nil ||
+		run == nil ||
+		owner == nil ||
+		owner.ctx.Err() != nil ||
+		run.Status != RunStatusRunning ||
+		run.RunnerID != identity.RunnerID ||
+		run.connectionID != identity.ConnectionID ||
+		run.generation != identity.Generation ||
+		!runnerHasActiveRun(runner, runID) {
 		return nil, "", errors.New("artifact access requires active tool and runner ownership")
 	}
 	return owner.ctx, run.ConversationID, nil

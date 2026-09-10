@@ -144,8 +144,15 @@ func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {
 
 func TestToolResultPreservesImageAttachments(t *testing.T) {
 	var execution ToolExecutionResult
-	require.NoError(t, json.Unmarshal([]byte(`{"content":"Generated image","attachments":[{"type":"image","path":"/runner/generated.png","alt":"A drawing"}]}`), &execution))
-	tool := &Tool{name: "generate_image", extensionID: "generator", maxOutput: 100}
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"content":"Generated image","attachments":[{"type":"image","path":"/runner/generated.png","alt":"A drawing"}]}`),
+		&execution,
+	))
+	tool := &Tool{
+		name:        "generate_image",
+		extensionID: "generator",
+		maxOutput:   100,
+	}
 	result := tool.resultFromExecution(execution, 0)
 	structured := result.StructuredData()
 	require.Len(t, structured.Attachments, 1)

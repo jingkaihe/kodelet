@@ -28,7 +28,10 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	require.NoError(t, png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 2, 3))))
 	parent := convtypes.NewConversationRecord("parent")
 	parent.Provider = "openai"
-	attachment, err := images.Put(t.Context(), parent.ID, "generate", tooltypes.ToolAttachment{Type: "image", Filename: "generated.png"}, bytes.NewReader(imageData.Bytes()))
+	attachment, err := images.Put(t.Context(), parent.ID, "generate",
+		tooltypes.ToolAttachment{Type: "image", Filename: "generated.png"},
+		bytes.NewReader(imageData.Bytes()),
+	)
 	require.NoError(t, err)
 	attachment.ViewURL = "https://old.example/i/" + attachment.ShortCode
 
@@ -36,7 +39,11 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 	require.NoError(t, store.Save(t.Context(), parent))
 	_, path, err := images.Get(t.Context(), parent.ID, attachment.ArtifactID)
 	require.NoError(t, err)
-	parent.ToolResults["generate"] = tooltypes.StructuredToolResult{ToolName: "generate", Success: true, Attachments: []tooltypes.ToolAttachment{attachment}}
+	parent.ToolResults["generate"] = tooltypes.StructuredToolResult{
+		ToolName:    "generate",
+		Success:     true,
+		Attachments: []tooltypes.ToolAttachment{attachment},
+	}
 	require.NoError(t, store.Save(t.Context(), parent))
 	loaded, err := store.Load(t.Context(), parent.ID)
 	require.NoError(t, err)
@@ -93,10 +100,15 @@ func TestArtifactReferencesRollbackWithConversation(t *testing.T) {
 	require.NoError(t, err)
 	parent := convtypes.NewConversationRecord("parent")
 	parent.Provider = "openai"
-	parent.ToolResults["call"] = tooltypes.StructuredToolResult{Success: true, Attachments: []tooltypes.ToolAttachment{attachment}}
+	parent.ToolResults["call"] = tooltypes.StructuredToolResult{
+		Success:     true,
+		Attachments: []tooltypes.ToolAttachment{attachment},
+	}
 	require.NoError(t, store.Save(t.Context(), parent))
 
-	_, err = store.db.Exec(`CREATE TRIGGER prevent_conversation_delete BEFORE DELETE ON conversations BEGIN SELECT RAISE(ABORT, 'forced failure'); END`)
+	_, err = store.db.Exec(
+		`CREATE TRIGGER prevent_conversation_delete BEFORE DELETE ON conversations BEGIN SELECT RAISE(ABORT, 'forced failure'); END`,
+	)
 	require.NoError(t, err)
 	require.ErrorContains(t, store.Delete(t.Context(), "parent"), "forced failure")
 	assert.FileExists(t, path)
@@ -104,7 +116,11 @@ func TestArtifactReferencesRollbackWithConversation(t *testing.T) {
 	require.NoError(t, err)
 
 	child := convtypes.ForkConversationRecord(parent)
-	child.ToolResults["missing"] = tooltypes.StructuredToolResult{Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "missing"}}}
+	child.ToolResults["missing"] = tooltypes.StructuredToolResult{
+		Attachments: []tooltypes.ToolAttachment{
+			{Type: "image", ArtifactID: "missing"},
+		},
+	}
 	require.Error(t, store.Save(t.Context(), child))
 	_, err = store.Load(t.Context(), child.ID)
 	assert.ErrorIs(t, err, convtypes.ErrConversationNotFound)

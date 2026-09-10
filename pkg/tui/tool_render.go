@@ -104,7 +104,9 @@ func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGrou
 		toolStart:   idx,
 		toolEnd:     idx,
 		changeIndex: -1,
-		label:       sanitizeExtensionTranscriptText(strings.Join(renderers.ImageAttachmentLines(*tool.structured, m.serverURL), "\n")),
+		label: sanitizeExtensionTranscriptText(strings.Join(
+			renderers.ImageAttachmentLines(*tool.structured, m.serverURL), "\n",
+		)),
 		body:        joinTools([]toolCall{tool}),
 		wrapBody:    true,
 		expanded:    block.expanded || tool.expanded || tool.failed,
@@ -781,7 +783,13 @@ func isExtensionPresentationTool(tool toolCall) bool {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileChangeTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool) && !isExtensionPresentationTool(tool) && !isImageAttachmentTool(tool)
+	return !isBashTool(tool) &&
+		!isApplyPatchTool(tool) &&
+		!isFileChangeTool(tool) &&
+		!isTaskRunTool(tool) &&
+		!isDedicatedBuiltinTool(tool) &&
+		!isExtensionPresentationTool(tool) &&
+		!isImageAttachmentTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {

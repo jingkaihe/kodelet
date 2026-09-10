@@ -270,9 +270,19 @@ func TestPrepareDaemonChatUsesConnectedServerURL(t *testing.T) {
 				switch r.URL.Path {
 				case test.prefix + "/api/status":
 					statusCalls.Add(1)
-					require.NoError(t, json.NewEncoder(w).Encode(localServerStatus{APIReady: true, InstanceID: "chat", EmbeddedRunner: controlplane.EmbeddedRunnerStatus{Enabled: true, Ready: true}}))
+					require.NoError(t, json.NewEncoder(w).Encode(localServerStatus{
+						APIReady:   true,
+						InstanceID: "chat",
+						EmbeddedRunner: controlplane.EmbeddedRunnerStatus{
+							Enabled: true,
+							Ready:   true,
+						},
+					}))
 				case test.prefix + "/api/chat/settings":
-					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{DefaultRunnerID: "runner", DefaultRunnerReady: true}))
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+						DefaultRunnerID:    "runner",
+						DefaultRunnerReady: true,
+					}))
 				case test.prefix + "/api/chat/cwd-suggestions":
 					require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/workspace"}))
 				default:

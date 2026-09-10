@@ -29,7 +29,12 @@ type artifactUploadManager struct {
 }
 
 // HandleRunnerArtifactRequest is reachable only through a registered runner session.
-func (s *Server) HandleRunnerArtifactRequest(ctx context.Context, identity runnerregistry.UIRequestIdentity, method string, raw json.RawMessage) (any, *protocol.RPCError) {
+func (s *Server) HandleRunnerArtifactRequest(
+	ctx context.Context,
+	identity runnerregistry.UIRequestIdentity,
+	method string,
+	raw json.RawMessage,
+) (any, *protocol.RPCError) {
 	if s.artifacts == nil || s.runnerRegistry == nil {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "artifact storage is unavailable"}
 	}
@@ -44,16 +49,24 @@ func (s *Server) HandleRunnerArtifactRequest(ctx context.Context, identity runne
 	if method == runnerpayload.MethodArtifactResolve {
 		attachment, _, err := s.artifacts.Get(ctx, conversationID, request.ArtifactID)
 		if err != nil {
-			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "image artifact is not available in this conversation"}
+			return nil, &protocol.RPCError{
+				Code:    protocol.ErrorCodeInvalidParams,
+				Message: "image artifact is not available in this conversation",
+			}
 		}
 		attachment.ViewURL = s.imageViewURL(attachment.ShortCode)
 		return attachment, nil
 	}
-	if method != runnerpayload.MethodArtifactUpload || request.Attachment.Type != "image" || request.Attachment.ArtifactID != "" {
+	if method != runnerpayload.MethodArtifactUpload ||
+		request.Attachment.Type != "image" ||
+		request.Attachment.ArtifactID != "" {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "expected a new image attachment"}
 	}
 	if len(request.Attachment.Alt) > 4096 || len(request.Attachment.Filename) > 255 {
-		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "image attachment metadata is too large"}
+		return nil, &protocol.RPCError{
+			Code:    protocol.ErrorCodeInvalidParams,
+			Message: "image attachment metadata is too large",
+		}
 	}
 	manager := &s.artifactUploads
 	manager.mu.Lock()
@@ -80,7 +93,12 @@ func (s *Server) HandleRunnerArtifactRequest(ctx context.Context, identity runne
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "failed to create image upload ticket"}
 	}
 	token := base64.RawURLEncoding.EncodeToString(secret)
-	manager.tickets[token] = &artifactUploadTicket{identity: identity, request: request, owner: owner, expires: now.Add(2 * time.Minute)}
+	manager.tickets[token] = &artifactUploadTicket{
+		identity: identity,
+		request:  request,
+		owner:    owner,
+		expires:  now.Add(2 * time.Minute),
+	}
 	return runnerpayload.ArtifactUploadGrant{Token: token}, nil
 }
 
@@ -91,7 +109,9 @@ func (s *Server) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	manager := &s.artifactUploads
 	manager.mu.Lock()
 	ticket := manager.tickets[token]
-	valid := ok && scheme == "Bearer" && ticket != nil && !ticket.used && ticket.owner.Err() == nil && time.Now().Before(ticket.expires)
+	valid := ok && scheme == "Bearer" &&
+		ticket != nil && !ticket.used &&
+		ticket.owner.Err() == nil && time.Now().Before(ticket.expires)
 	if valid {
 		ticket.used = true
 	}
@@ -100,7 +120,11 @@ func (s *Server) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusUnauthorized, "invalid or expired image upload ticket", nil)
 		return
 	}
-	owner, conversationID, err := s.runnerRegistry.ArtifactToolContext(ticket.identity, ticket.request.RunID, ticket.request.ToolCallID)
+	owner, conversationID, err := s.runnerRegistry.ArtifactToolContext(
+		ticket.identity,
+		ticket.request.RunID,
+		ticket.request.ToolCallID,
+	)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusUnauthorized, "image upload owner is no longer active", nil)
 		return

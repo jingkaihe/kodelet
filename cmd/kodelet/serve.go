@@ -129,7 +129,11 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	_ = cmd.Flags().MarkHidden("managed")
 	cmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
 	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to (default: 0, an available port)")
-	cmd.Flags().String("public-base-url", defaults.PublicBaseURL, "Advertised HTTP(S) base URL for image links, including an optional reverse-proxy path prefix")
+	cmd.Flags().String(
+		"public-base-url",
+		defaults.PublicBaseURL,
+		"Advertised HTTP(S) base URL for image links, including an optional reverse-proxy path prefix",
+	)
 	cmd.Flags().String("cwd", defaults.CWD, "Removed; use --runner-workspace for the embedded runner")
 	cmd.Flags().String("web-auth-mode", string(defaults.WebAuthMode), "Web authentication mode: token, oidc, or none (default: token)")
 	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, or none (default: token)")

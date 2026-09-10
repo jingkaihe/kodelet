@@ -165,7 +165,12 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		controller = admittedTurnController{Registry: r.server.runnerRegistry}
 	}
 	controller = profileRegisteringController{RemoteController: controller, server: r.server}
-	controller = artifactController{RemoteController: controller, server: r.server, conversationID: conversationID, config: config}
+	controller = artifactController{
+		RemoteController: controller,
+		server:           r.server,
+		conversationID:   conversationID,
+		config:           config,
+	}
 	return agentenv.NewRemoteEnvironment(
 		controller,
 		runnerID,

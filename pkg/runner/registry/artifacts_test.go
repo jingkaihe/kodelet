@@ -13,24 +13,46 @@ import (
 
 func TestArtifactToolOwnership(t *testing.T) {
 	for _, name := range []string{
-		"matching owner", "wrong runner", "wrong connection", "wrong generation", "wrong run", "wrong tool",
-		"stale run connection", "stale run generation", "unowned run", "canceled tool", "completed tool", "opening run",
+		"matching owner",
+		"wrong runner",
+		"wrong connection",
+		"wrong generation",
+		"wrong run",
+		"wrong tool",
+		"stale run connection",
+		"stale run generation",
+		"unowned run",
+		"canceled tool",
+		"completed tool",
+		"opening run",
 	} {
 		t.Run(name, func(t *testing.T) {
 			registry, _, session := newModelHelperRegistry(t)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			params := runnerpayload.ToolExecuteParams{RunID: "run-one", ToolCallID: "tool-one", Name: "generate_image"}
+			params := runnerpayload.ToolExecuteParams{
+				RunID:      "run-one",
+				ToolCallID: "tool-one",
+				Name:       "generate_image",
+			}
 			cleanup, err := registry.registerArtifactTool(ctx, params)
 			require.NoError(t, err)
 			defer cleanup()
 			runnerID, connectionID, generation, _ := session.connectionIdentity()
-			identity := UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation}
+			identity := UIRequestIdentity{
+				RunnerID:     runnerID,
+				ConnectionID: connectionID,
+				Generation:   generation,
+			}
 			switch name {
 			case "wrong runner":
 				other, err := registry.Register(testRegisterParams("other-host", "/work/other"), newFakeLink())
 				require.NoError(t, err)
-				identity = UIRequestIdentity{RunnerID: other.RunnerID, ConnectionID: other.ConnectionID, Generation: other.Generation}
+				identity = UIRequestIdentity{
+					RunnerID:     other.RunnerID,
+					ConnectionID: other.ConnectionID,
+					Generation:   other.Generation,
+				}
 			case "wrong connection":
 				identity.ConnectionID = "another-connection"
 			case "wrong generation":
@@ -78,14 +100,28 @@ func TestArtifactToolExecuteLifetime(t *testing.T) {
 		err  error
 	}{
 		{name: "success"},
-		{name: "RPC rejection", err: &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "tool rejected"}},
+		{
+			name: "RPC rejection",
+			err: &protocol.RPCError{
+				Code:    protocol.ErrorCodeInvalidParams,
+				Message: "tool rejected",
+			},
+		},
 		{name: "transport failure", err: protocol.ErrPeerClosed},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			registry, link, session := newModelHelperRegistry(t)
 			runnerID, connectionID, generation, _ := session.connectionIdentity()
-			identity := UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation}
-			params := runnerpayload.ToolExecuteParams{RunID: "run-one", ToolCallID: "tool-one", Name: "generate_image"}
+			identity := UIRequestIdentity{
+				RunnerID:     runnerID,
+				ConnectionID: connectionID,
+				Generation:   generation,
+			}
+			params := runnerpayload.ToolExecuteParams{
+				RunID:      "run-one",
+				ToolCallID: "tool-one",
+				Name:       "generate_image",
+			}
 			type ownerKey struct{}
 			ctx := context.WithValue(t.Context(), ownerKey{}, "server-owned-context")
 			var owner context.Context
@@ -121,14 +157,28 @@ func TestArtifactToolExecuteLifetime(t *testing.T) {
 }
 
 func TestArtifactToolRunRevocation(t *testing.T) {
-	for _, action := range []string{"cancel", "close", "environment failure", "disconnect", "reconnect", "registry close"} {
+	for _, action := range []string{
+		"cancel",
+		"close",
+		"environment failure",
+		"disconnect",
+		"reconnect",
+		"registry close",
+	} {
 		t.Run(action, func(t *testing.T) {
 			registry, link, session := newModelHelperRegistry(t)
-			cleanup, err := registry.registerArtifactTool(t.Context(), runnerpayload.ToolExecuteParams{RunID: "run-one", ToolCallID: "tool-one"})
+			cleanup, err := registry.registerArtifactTool(t.Context(), runnerpayload.ToolExecuteParams{
+				RunID:      "run-one",
+				ToolCallID: "tool-one",
+			})
 			require.NoError(t, err)
 			defer cleanup()
 			runnerID, connectionID, generation, _ := session.connectionIdentity()
-			identity := UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation}
+			identity := UIRequestIdentity{
+				RunnerID:     runnerID,
+				ConnectionID: connectionID,
+				Generation:   generation,
+			}
 			owner, _, err := registry.ArtifactToolContext(identity, "run-one", "tool-one")
 			require.NoError(t, err)
 			if action == "cancel" || action == "close" {
@@ -147,7 +197,10 @@ func TestArtifactToolRunRevocation(t *testing.T) {
 			case "close":
 				require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 			case "environment failure":
-				require.NoError(t, registry.EnvironmentError(runnerID, connectionID, generation, protocol.EnvironmentErrorParams{RunID: "run-one", Message: "failed"}))
+				require.NoError(t, registry.EnvironmentError(runnerID, connectionID, generation, protocol.EnvironmentErrorParams{
+					RunID:   "run-one",
+					Message: "failed",
+				}))
 			case "disconnect":
 				registry.Detach(runnerID, connectionID, generation, protocol.ErrPeerClosed)
 			case "reconnect":
@@ -167,7 +220,15 @@ func TestArtifactToolRunRevocation(t *testing.T) {
 }
 
 func TestArtifactToolRegistrationValidation(t *testing.T) {
-	for _, name := range []string{"missing run", "missing tool", "unknown run", "opening run", "canceled run", "completed run", "canceled context"} {
+	for _, name := range []string{
+		"missing run",
+		"missing tool",
+		"unknown run",
+		"opening run",
+		"canceled run",
+		"completed run",
+		"canceled context",
+	} {
 		t.Run(name, func(t *testing.T) {
 			registry, _, _ := newModelHelperRegistry(t)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -204,7 +265,11 @@ func TestArtifactToolRegistrationValidation(t *testing.T) {
 func TestArtifactToolCleanupIsolation(t *testing.T) {
 	registry, _, session := newModelHelperRegistry(t)
 	runnerID, connectionID, generation, _ := session.connectionIdentity()
-	identity := UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation}
+	identity := UIRequestIdentity{
+		RunnerID:     runnerID,
+		ConnectionID: connectionID,
+		Generation:   generation,
+	}
 	params := runnerpayload.ToolExecuteParams{RunID: "run-one", ToolCallID: "tool-one"}
 	cleanup, err := registry.registerArtifactTool(t.Context(), params)
 	require.NoError(t, err)
@@ -218,7 +283,10 @@ func TestArtifactToolCleanupIsolation(t *testing.T) {
 
 	_, err = registry.OpenRun(t.Context(), runnerID, testRunOpenParams("run-two", "conversation-two"))
 	require.NoError(t, err)
-	otherCleanup, err := registry.registerArtifactTool(t.Context(), runnerpayload.ToolExecuteParams{RunID: "run-two", ToolCallID: "tool-one"})
+	otherCleanup, err := registry.registerArtifactTool(t.Context(), runnerpayload.ToolExecuteParams{
+		RunID:      "run-two",
+		ToolCallID: "tool-one",
+	})
 	require.NoError(t, err)
 	defer otherCleanup()
 	require.NoError(t, registry.CancelRun(t.Context(), "run-one", "cancel first run"))
@@ -232,7 +300,12 @@ type artifactRequestRouter struct {
 	fakeUIRequestRouter
 }
 
-func (r *artifactRequestRouter) HandleRunnerArtifactRequest(ctx context.Context, identity UIRequestIdentity, method string, params json.RawMessage) (any, *protocol.RPCError) {
+func (r *artifactRequestRouter) HandleRunnerArtifactRequest(
+	ctx context.Context,
+	identity UIRequestIdentity,
+	method string,
+	params json.RawMessage,
+) (any, *protocol.RPCError) {
 	return r.HandleRunnerUIRequest(ctx, identity, method, params)
 }
 
@@ -249,14 +322,20 @@ func TestArtifactSessionReverseRPCRouting(t *testing.T) {
 		assert.Equal(t, protocol.ErrorCodeInvalidRequest, rpcErr.Code)
 		assert.Empty(t, router.method)
 	}
-	value, rpcErr := session.HandleRequest(t.Context(), protocol.MethodRunnerRegister, mustRegistryJSON(t, testRegisterParams("host-one", "/work/project")))
+	value, rpcErr := session.HandleRequest(t.Context(), protocol.MethodRunnerRegister,
+		mustRegistryJSON(t, testRegisterParams("host-one", "/work/project")),
+	)
 	require.Nil(t, rpcErr)
 	registered := value.(protocol.RegisterResult)
 	for _, method := range []string{runnerpayload.MethodArtifactUpload, runnerpayload.MethodArtifactResolve} {
 		value, rpcErr = session.HandleRequest(t.Context(), method, request)
 		require.Nil(t, rpcErr)
 		assert.Equal(t, map[string]bool{"ok": true}, value)
-		assert.Equal(t, UIRequestIdentity{RunnerID: registered.RunnerID, ConnectionID: registered.ConnectionID, Generation: registered.Generation}, router.identity)
+		assert.Equal(t, UIRequestIdentity{
+			RunnerID:     registered.RunnerID,
+			ConnectionID: registered.ConnectionID,
+			Generation:   registered.Generation,
+		}, router.identity)
 		assert.Equal(t, method, router.method)
 		assert.Equal(t, request, router.params)
 	}

@@ -109,7 +109,10 @@ func (t *ViewImageTool) Name() string {
 func (t *ViewImageTool) GenerateSchema() *jsonschema.Schema {
 	schema := GenerateSchema[ViewImageInput]()
 	if schema != nil {
-		schema.OneOf = []*jsonschema.Schema{{Required: []string{"path"}}, {Required: []string{"artifactId"}}}
+		schema.OneOf = []*jsonschema.Schema{
+			{Required: []string{"path"}},
+			{Required: []string{"artifactId"}},
+		}
 	}
 	if schema != nil && schema.Properties != nil && !vision.SupportsViewImageOriginalDetail(t.model) {
 		schema.Properties.Delete("detail")
@@ -178,21 +181,37 @@ func (t *ViewImageTool) Execute(ctx context.Context, state tooltypes.State, para
 	if strings.TrimSpace(input.ArtifactID) != "" {
 		resolver := tooltypes.ArtifactResolverFromContext(ctx)
 		if resolver == nil {
-			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: "image artifact access is unavailable"}}
+			return &ViewImageToolResult{
+				base: tooltypes.BaseToolResult{Error: "image artifact access is unavailable"},
+			}
 		}
 		attachment, err := resolver(ctx, strings.TrimSpace(input.ArtifactID))
 		if err != nil {
 			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: err.Error()}}
 		}
-		if attachment.Type != "image" || attachment.ArtifactID != strings.TrimSpace(input.ArtifactID) || attachment.Error != "" {
-			return &ViewImageToolResult{base: tooltypes.BaseToolResult{Error: "artifact is not an available image"}}
+		if attachment.Type != "image" ||
+			attachment.ArtifactID != strings.TrimSpace(input.ArtifactID) ||
+			attachment.Error != "" {
+			return &ViewImageToolResult{
+				base: tooltypes.BaseToolResult{Error: "artifact is not an available image"},
+			}
 		}
 		detail, _ := vision.NormalizeViewImageDetail(input.Detail, model)
 		result := &vision.Result{
-			MimeType: attachment.MimeType, Width: attachment.Width, Height: attachment.Height, Detail: detail,
-			Assistant: fmt.Sprintf("Viewed image %s (%dx%d, %s)", attachment.ArtifactID, attachment.Width, attachment.Height, attachment.MimeType),
+			MimeType: attachment.MimeType,
+			Width:    attachment.Width,
+			Height:   attachment.Height,
+			Detail:   detail,
+			Assistant: fmt.Sprintf(
+				"Viewed image %s (%dx%d, %s)",
+				attachment.ArtifactID, attachment.Width, attachment.Height, attachment.MimeType,
+			),
 		}
-		return &ViewImageToolResult{base: tooltypes.BaseToolResult{Result: result.Assistant}, data: result, attachment: &attachment}
+		return &ViewImageToolResult{
+			base:       tooltypes.BaseToolResult{Result: result.Assistant},
+			data:       result,
+			attachment: &attachment,
+		}
 	}
 
 	result, err := vision.MakeViewImageResult(resolved, input.Detail, model, provider)

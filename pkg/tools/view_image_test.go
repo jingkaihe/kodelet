@@ -121,7 +121,14 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 
 func TestViewImageTool_Artifact(t *testing.T) {
 	tool := NewViewImageTool("gpt-5.5", "openai")
-	attachment := tooltypes.ToolAttachment{Type: "image", ArtifactID: "art_image", ShortCode: "short", MimeType: "image/png", Width: 30, Height: 20}
+	attachment := tooltypes.ToolAttachment{
+		Type:       "image",
+		ArtifactID: "art_image",
+		ShortCode:  "short",
+		MimeType:   "image/png",
+		Width:      30,
+		Height:     20,
+	}
 	ctx := tooltypes.ContextWithArtifactResolver(t.Context(), func(ctx context.Context, id string) (tooltypes.ToolAttachment, error) {
 		assert.Equal(t, "art_image", id)
 		require.NoError(t, ctx.Err())
@@ -137,14 +144,25 @@ func TestViewImageTool_Artifact(t *testing.T) {
 	assert.Empty(t, meta.Path)
 	assert.Equal(t, "art_image", meta.ArtifactID)
 	assert.Equal(t, tooltypes.ImageDimensions{Width: 30, Height: 20}, meta.ImageSize)
-	assert.Equal(t, []tooltypes.ToolResultContentPart{{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "art_image", MimeType: "image/png", Detail: "original"}}, result.(tooltypes.MultiModalToolResult).ContentParts())
+	assert.Equal(t, []tooltypes.ToolResultContentPart{{
+		Type:       tooltypes.ToolResultContentPartTypeImage,
+		ArtifactID: "art_image",
+		MimeType:   "image/png",
+		Detail:     "original",
+	}}, result.(tooltypes.MultiModalToolResult).ContentParts())
 	encoded, err := json.Marshal(structured)
 	require.NoError(t, err)
 	var restored tooltypes.StructuredToolResult
 	require.NoError(t, json.Unmarshal(encoded, &restored))
 	assert.Equal(t, structured.Attachments, restored.Attachments)
 
-	for _, input := range []string{`{}`, `{"path":"a","artifactId":"art_image"}`, `{"artifactId":"art_image","detail":"high"}`, `null`, `{`} {
+	for _, input := range []string{
+		`{}`,
+		`{"path":"a","artifactId":"art_image"}`,
+		`{"artifactId":"art_image","detail":"high"}`,
+		`null`,
+		`{`,
+	} {
 		assert.True(t, tool.Execute(ctx, nil, input).IsError(), input)
 	}
 	assert.Contains(t, tool.Execute(t.Context(), nil, `{"artifactId":"art_image"}`).GetError(), "unavailable")

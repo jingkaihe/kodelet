@@ -108,10 +108,20 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 		{
 			name: "Image attachments",
 			result: StructuredToolResult{
-				ToolName: "generate_image", Success: true, Timestamp: time.Now(),
+				ToolName:  "generate_image",
+				Success:   true,
+				Timestamp: time.Now(),
 				Attachments: []ToolAttachment{{
-					Type: "image", ArtifactID: "art_internal", ShortCode: "independent-code", ViewURL: "/i/independent-code",
-					Filename: "generated.png", MimeType: "image/png", Width: 32, Height: 24, Size: 200, Alt: "A drawing",
+					Type:       "image",
+					ArtifactID: "art_internal",
+					ShortCode:  "independent-code",
+					ViewURL:    "/i/independent-code",
+					Filename:   "generated.png",
+					MimeType:   "image/png",
+					Width:      32,
+					Height:     24,
+					Size:       200,
+					Alt:        "A drawing",
 				}},
 			},
 		},

@@ -431,7 +431,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/ui-persistent/ack", s.handlePersistentUIAck).Methods("POST")
 	api.HandleFunc("/conversations/{id}/ui-persistent/input", s.handlePersistentUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
-	api.HandleFunc("/conversations/{id}/artifacts/{artifactId}", s.requireRole(RoleUser, s.handleConversationArtifact)).Methods("GET", "HEAD")
+	api.HandleFunc(
+		"/conversations/{id}/artifacts/{artifactId}",
+		s.requireRole(RoleUser, s.handleConversationArtifact),
+	).Methods("GET", "HEAD")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
 

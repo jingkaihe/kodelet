@@ -10,7 +10,8 @@ import (
 // Migration20260910120000CreateImageArtifacts adds immutable image artifacts and conversation references.
 func Migration20260910120000CreateImageArtifacts() db.Migration {
 	return db.Migration{
-		Version: 20260910120000, Description: "Create image artifacts and conversation references",
+		Version:     20260910120000,
+		Description: "Create image artifacts and conversation references",
 		Up: func(tx *sql.Tx) error {
 			_, err := tx.Exec(`CREATE TABLE image_artifacts (
 				id TEXT PRIMARY KEY,

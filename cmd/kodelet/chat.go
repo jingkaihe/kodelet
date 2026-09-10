@@ -275,7 +275,16 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		}
 		config.ResumeConvID = history[0].ID
 	}
-	result = tui.Config{Remote: true, Runner: runner, ServerURL: config.Server, Theme: config.Theme, ConversationID: config.ResumeConvID, CWD: config.CWD, EnvironmentProfile: config.RunnerProfile, ReasoningEffortExplicit: cmd.Flags().Changed("reasoning-effort")}
+	result = tui.Config{
+		Remote:                  true,
+		Runner:                  runner,
+		ServerURL:               config.Server,
+		Theme:                   config.Theme,
+		ConversationID:          config.ResumeConvID,
+		CWD:                     config.CWD,
+		EnvironmentProfile:      config.RunnerProfile,
+		ReasoningEffortExplicit: cmd.Flags().Changed("reasoning-effort"),
+	}
 	if cmd.Flags().Changed("profile") {
 		result.Profile, _ = cmd.Flags().GetString("profile")
 	}

@@ -648,7 +648,10 @@ func TestServiceUploadAttachmentRejectsFIFOWithoutBlocking(t *testing.T) {
 	run := &activeRun{manifest: runnerpayload.Manifest{WorkingDirectory: workspace}}
 	done := make(chan error, 1)
 	go func() {
-		_, err := service.uploadAttachment(t.Context(), peer, run, "tool", tooltypes.ToolAttachment{Type: "image", Path: "image.png"})
+		_, err := service.uploadAttachment(t.Context(), peer, run, "tool", tooltypes.ToolAttachment{
+			Type: "image",
+			Path: "image.png",
+		})
 		done <- err
 	}()
 	select {

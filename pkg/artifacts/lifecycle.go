@@ -34,10 +34,16 @@ func SaveReferences(ctx context.Context, tx *sqlx.Tx, conversationID string, res
 // Returned IDs must be unlinked only after the caller commits its transaction.
 func DeleteReferences(ctx context.Context, tx *sqlx.Tx, conversationID string) ([]string, error) {
 	var candidates []string
-	if err := tx.SelectContext(ctx, &candidates, `SELECT DISTINCT artifact_id FROM conversation_artifacts WHERE conversation_id = ?`, conversationID); err != nil {
+	if err := tx.SelectContext(ctx, &candidates,
+		`SELECT DISTINCT artifact_id FROM conversation_artifacts WHERE conversation_id = ?`,
+		conversationID,
+	); err != nil {
 		return nil, errors.Wrap(err, "failed to load conversation artifact references")
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_artifacts WHERE conversation_id = ?`, conversationID); err != nil {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM conversation_artifacts WHERE conversation_id = ?`,
+		conversationID,
+	); err != nil {
 		return nil, errors.Wrap(err, "failed to remove conversation artifact references")
 	}
 	var removed []string
@@ -124,7 +130,10 @@ func (s *Store) sweep(ctx context.Context) error {
 				continue
 			}
 			var exists bool
-			if err := s.db.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM image_artifacts WHERE id = ?)`, entry.Name()); err != nil {
+			if err := s.db.GetContext(ctx, &exists,
+				`SELECT EXISTS (SELECT 1 FROM image_artifacts WHERE id = ?)`,
+				entry.Name(),
+			); err != nil {
 				return errors.Wrap(err, "failed to check artifact file ownership")
 			}
 			if !exists {

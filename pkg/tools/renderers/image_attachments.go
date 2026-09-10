@@ -47,11 +47,17 @@ func imageAttachmentURL(attachment tools.ToolAttachment, baseURL string) string 
 	if value == "" {
 		value = imagePath
 	}
-	if strings.IndexFunc(value, func(ch rune) bool { return unicode.IsSpace(ch) || unicode.IsControl(ch) || unicode.Is(unicode.Cf, ch) }) >= 0 {
+	if strings.IndexFunc(value, func(ch rune) bool {
+		return unicode.IsSpace(ch) || unicode.IsControl(ch) || unicode.Is(unicode.Cf, ch)
+	}) >= 0 {
 		return ""
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !strings.HasSuffix(parsed.Path, imagePath) {
+	if err != nil ||
+		parsed.User != nil ||
+		parsed.RawQuery != "" ||
+		parsed.Fragment != "" ||
+		!strings.HasSuffix(parsed.Path, imagePath) {
 		return ""
 	}
 	if parsed.IsAbs() {
@@ -65,7 +71,12 @@ func imageAttachmentURL(attachment tools.ToolAttachment, baseURL string) string 
 	}
 	if baseURL != "" {
 		base, err := url.Parse(baseURL)
-		if err == nil && (base.Scheme == "http" || base.Scheme == "https") && base.Host != "" && base.User == nil && base.RawQuery == "" && base.Fragment == "" {
+		if err == nil &&
+			(base.Scheme == "http" || base.Scheme == "https") &&
+			base.Host != "" &&
+			base.User == nil &&
+			base.RawQuery == "" &&
+			base.Fragment == "" {
 			base.Path = strings.TrimRight(base.Path, "/") + imagePath
 			base.RawPath = ""
 			return base.String()

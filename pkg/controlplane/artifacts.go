@@ -91,7 +91,10 @@ func (*Server) serveImage(w http.ResponseWriter, r *http.Request, attachment too
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Type", attachment.MimeType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Filename}))
+	w.Header().Set(
+		"Content-Disposition",
+		mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Filename}),
+	)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -107,7 +110,11 @@ type artifactController struct {
 	config         llmtypes.Config
 }
 
-func (c artifactController) ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
+func (c artifactController) ExecuteTool(
+	ctx context.Context,
+	params runnerpayload.ToolExecuteParams,
+	updates func(runnerpayload.ToolUpdateParams),
+) (runnerpayload.ToolExecuteResult, error) {
 	result, err := c.RemoteController.ExecuteTool(ctx, params, updates)
 	if err != nil {
 		return result, err
@@ -160,7 +167,13 @@ func (c artifactController) normalizeAttachments(ctx context.Context, result *ru
 			if err == nil && attachment.Type == "image" {
 				stored.Alt = attachment.Alt
 				attachments[i] = stored
-				hint := fmt.Sprintf("\n\nImage artifact: %s (%dx%d, %s).", stored.ArtifactID, stored.Width, stored.Height, stored.MimeType)
+				hint := fmt.Sprintf(
+					"\n\nImage artifact: %s (%dx%d, %s).",
+					stored.ArtifactID,
+					stored.Width,
+					stored.Height,
+					stored.MimeType,
+				)
 				if !hasArtifactContent(result.ContentParts) {
 					hint += " Use view_image with artifactId to inspect it."
 				}

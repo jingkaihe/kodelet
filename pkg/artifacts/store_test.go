@@ -35,7 +35,9 @@ func testStore(t *testing.T) (*Store, string) {
 	require.NoError(t, database.Close())
 	store, err := Open(t.Context(), path)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	t.Cleanup(func() {
+		require.NoError(t, store.Close())
+	})
 	return store, path
 }
 
@@ -50,8 +52,14 @@ func TestPutGetAndScope(t *testing.T) {
 	store, path := testStore(t)
 	data := testPNG(t)
 	input := tooltypes.ToolAttachment{
-		Type: "image", Path: "/runner/cache/picture.png", MimeType: "text/html", Alt: "Generated picture",
-		ArtifactID: "untrusted", ShortCode: "untrusted", ViewURL: "https://old.example/image", Error: "old error",
+		Type:       "image",
+		Path:       "/runner/cache/picture.png",
+		MimeType:   "text/html",
+		Alt:        "Generated picture",
+		ArtifactID: "untrusted",
+		ShortCode:  "untrusted",
+		ViewURL:    "https://old.example/image",
+		Error:      "old error",
 	}
 	attachment, err := store.Put(t.Context(), "conversation", "call", input, bytes.NewReader(data))
 	require.NoError(t, err)
@@ -112,17 +120,25 @@ func TestSupportedImageFormats(t *testing.T) {
 	require.NoError(t, jpeg.Encode(&jpg, img, nil))
 	palette := color.Palette{color.Black, color.White}
 	frame := image.NewPaletted(image.Rect(0, 0, 3, 2), palette)
-	require.NoError(t, gif.EncodeAll(&animation, &gif.GIF{Image: []*image.Paletted{frame, frame}, Delay: []int{0, 1}}))
+	require.NoError(t, gif.EncodeAll(&animation, &gif.GIF{
+		Image: []*image.Paletted{frame, frame},
+		Delay: []int{0, 1},
+	}))
 	webp, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
 	require.NoError(t, err)
 	for _, tt := range []struct {
 		name string
 		data []byte
 	}{
-		{"png", testPNG(t)}, {"jpeg", jpg.Bytes()}, {"gif", animation.Bytes()}, {"webp", webp},
+		{"png", testPNG(t)},
+		{"jpeg", jpg.Bytes()},
+		{"gif", animation.Bytes()},
+		{"webp", webp},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			attachment, err := store.Put(t.Context(), "conversation", "call", tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(tt.data))
+			attachment, err := store.Put(t.Context(), "conversation", "call",
+				tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(tt.data),
+			)
 			require.NoError(t, err)
 			assert.Equal(t, "image/"+tt.name, attachment.MimeType)
 		})
@@ -178,14 +194,18 @@ func TestGIFBudgetAndCorruptLaterFrames(t *testing.T) {
 	}
 	var encoded bytes.Buffer
 	require.NoError(t, gif.EncodeAll(&encoded, animation))
-	_, err := store.Put(t.Context(), "conversation", "call", tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(encoded.Bytes()))
+	_, err := store.Put(t.Context(), "conversation", "call",
+		tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(encoded.Bytes()),
+	)
 	require.ErrorContains(t, err, "256-frame limit")
 
 	encoded.Reset()
 	animation.Image, animation.Delay = animation.Image[:2], animation.Delay[:2]
 	require.NoError(t, gif.EncodeAll(&encoded, animation))
 	truncated := encoded.Bytes()[:encoded.Len()-4]
-	_, err = store.Put(t.Context(), "conversation", "call", tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(truncated))
+	_, err = store.Put(t.Context(), "conversation", "call",
+		tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(truncated),
+	)
 	require.Error(t, err)
 }
 
@@ -194,7 +214,9 @@ func TestStartupSweep(t *testing.T) {
 	old := time.Now().UTC().Add(-48 * time.Hour)
 	data := testPNG(t)
 	put := func(conversationID string, age bool) tooltypes.ToolAttachment {
-		attachment, err := store.Put(t.Context(), conversationID, "call", tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(data))
+		attachment, err := store.Put(t.Context(), conversationID, "call",
+			tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(data),
+		)
 		require.NoError(t, err)
 		if age {
 			_, err = store.db.Exec(`UPDATE image_artifacts SET created_at = ? WHERE id = ?`, old, attachment.ArtifactID)
@@ -208,9 +230,18 @@ func TestStartupSweep(t *testing.T) {
 	fresh := put("fresh", false)
 	checkpointed := put("checkpointed", true)
 	active := put("active", true)
-	results, err := json.Marshal(map[string]tooltypes.StructuredToolResult{"call": {ToolName: "image", Success: true, Attachments: []tooltypes.ToolAttachment{checkpointed}}})
+	results, err := json.Marshal(map[string]tooltypes.StructuredToolResult{
+		"call": {
+			ToolName:    "image",
+			Success:     true,
+			Attachments: []tooltypes.ToolAttachment{checkpointed},
+		},
+	})
 	require.NoError(t, err)
-	_, err = store.db.Exec(`INSERT INTO conversations (id, raw_messages, provider, usage, tool_results, created_at, updated_at) VALUES (?, '[]', 'openai', '{}', ?, ?, ?)`, "checkpointed", string(results), old, old)
+	_, err = store.db.Exec(
+		`INSERT INTO conversations (id, raw_messages, provider, usage, tool_results, created_at, updated_at) VALUES (?, '[]', 'openai', '{}', ?, ?, ?)`,
+		"checkpointed", string(results), old, old,
+	)
 	require.NoError(t, err)
 	_, err = store.db.Exec(`INSERT INTO runner_registrations (id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at)
 		VALUES ('runner', 'local', 'host', '/work', 'work', 'online', ?, ?)`, old, old)
@@ -234,7 +265,11 @@ func TestStartupSweep(t *testing.T) {
 	for _, name := range []string{abandoned.ArtifactID, ".upload-orphan", "art_orphan"} {
 		assert.NoFileExists(t, filepath.Join(store.dir, name))
 	}
-	for conversationID, attachment := range map[string]tooltypes.ToolAttachment{"fresh": fresh, "checkpointed": checkpointed, "active": active} {
+	for conversationID, attachment := range map[string]tooltypes.ToolAttachment{
+		"fresh":        fresh,
+		"checkpointed": checkpointed,
+		"active":       active,
+	} {
 		_, file, err := reopened.Get(t.Context(), conversationID, attachment.ArtifactID)
 		require.NoError(t, err)
 		assert.FileExists(t, file)

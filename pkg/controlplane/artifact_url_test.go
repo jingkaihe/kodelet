@@ -23,11 +23,22 @@ func TestNormalizePublicBaseURL(t *testing.T) {
 		})
 	}
 	for _, input := range []string{
-		"images.example.com", "/images", "//images.example.com", "ftp://images.example.com", "https:///images",
-		"https://user:pass@images.example.com", "https://images.example.com?token=secret", "https://images.example.com?",
-		"https://images.example.com#fragment", "https://images.example.com#", "https://images.example.com/path space",
-		"https://images.example.com/../other", "https://images.example.com/%2e%2e/other", "https://images.example.com/%0a",
-		"https://images.example.com/%5cother", "https://images.example.com:bad",
+		"images.example.com",
+		"/images",
+		"//images.example.com",
+		"ftp://images.example.com",
+		"https:///images",
+		"https://user:pass@images.example.com",
+		"https://images.example.com?token=secret",
+		"https://images.example.com?",
+		"https://images.example.com#fragment",
+		"https://images.example.com#",
+		"https://images.example.com/path space",
+		"https://images.example.com/../other",
+		"https://images.example.com/%2e%2e/other",
+		"https://images.example.com/%0a",
+		"https://images.example.com/%5cother",
+		"https://images.example.com:bad",
 	} {
 		t.Run(input, func(t *testing.T) {
 			_, err := NormalizePublicBaseURL(input)

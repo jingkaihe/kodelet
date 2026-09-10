@@ -71,7 +71,12 @@ func (s *Store) Close() error {
 
 // Put validates and stores an image, adding its conversation/tool reference before returning.
 // The caller must authenticate the upload's conversation and tool-call ownership.
-func (s *Store) Put(ctx context.Context, conversationID, toolCallID string, attachment tooltypes.ToolAttachment, source io.Reader) (tooltypes.ToolAttachment, error) {
+func (s *Store) Put(
+	ctx context.Context,
+	conversationID, toolCallID string,
+	attachment tooltypes.ToolAttachment,
+	source io.Reader,
+) (tooltypes.ToolAttachment, error) {
 	if strings.TrimSpace(conversationID) == "" || strings.TrimSpace(toolCallID) == "" {
 		return tooltypes.ToolAttachment{}, errors.New("conversation ID and tool call ID are required")
 	}
@@ -107,7 +112,12 @@ func (s *Store) Put(ctx context.Context, conversationID, toolCallID string, atta
 	if err := ctx.Err(); err != nil {
 		return tooltypes.ToolAttachment{}, err
 	}
-	mimeType := map[string]string{"png": "image/png", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}[format]
+	mimeType := map[string]string{
+		"png":  "image/png",
+		"jpeg": "image/jpeg",
+		"gif":  "image/gif",
+		"webp": "image/webp",
+	}[format]
 	id, err := randomID()
 	if err != nil {
 		return tooltypes.ToolAttachment{}, err
@@ -149,7 +159,15 @@ func (s *Store) Put(ctx context.Context, conversationID, toolCallID string, atta
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO image_artifacts
 		(id, short_code, filename, mime_type, width, height, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		attachment.ArtifactID, code, attachment.Filename, mimeType, config.Width, config.Height, size, time.Now().UTC())
+		attachment.ArtifactID,
+		code,
+		attachment.Filename,
+		mimeType,
+		config.Width,
+		config.Height,
+		size,
+		time.Now().UTC(),
+	)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to save image artifact")
 	}
@@ -166,19 +184,35 @@ func (s *Store) Put(ctx context.Context, conversationID, toolCallID string, atta
 
 // Get resolves an image referenced by the conversation. The returned path is local to the control plane.
 func (s *Store) Get(ctx context.Context, conversationID, artifactID string) (tooltypes.ToolAttachment, string, error) {
-	return s.get(ctx, `a.id = ? AND EXISTS (SELECT 1 FROM conversation_artifacts r WHERE r.artifact_id = a.id AND r.conversation_id = ?)`, artifactID, conversationID)
+	return s.get(ctx,
+		`a.id = ? AND EXISTS (SELECT 1 FROM conversation_artifacts r WHERE r.artifact_id = a.id AND r.conversation_id = ?)`,
+		artifactID, conversationID,
+	)
 }
 
 // GetByShortCode resolves a short link only while at least one conversation references its image.
 // HTTP callers must still enforce the control plane's authentication policy.
 func (s *Store) GetByShortCode(ctx context.Context, code string) (tooltypes.ToolAttachment, string, error) {
-	return s.get(ctx, `a.short_code = ? AND EXISTS (SELECT 1 FROM conversation_artifacts r WHERE r.artifact_id = a.id)`, code)
+	return s.get(ctx,
+		`a.short_code = ? AND EXISTS (SELECT 1 FROM conversation_artifacts r WHERE r.artifact_id = a.id)`,
+		code,
+	)
 }
 
 func (s *Store) get(ctx context.Context, predicate string, args ...any) (tooltypes.ToolAttachment, string, error) {
 	attachment := tooltypes.ToolAttachment{Type: "image"}
-	err := s.db.QueryRowContext(ctx, `SELECT a.id, a.short_code, a.filename, a.mime_type, a.width, a.height, a.size FROM image_artifacts a WHERE `+predicate, args...).Scan(
-		&attachment.ArtifactID, &attachment.ShortCode, &attachment.Filename, &attachment.MimeType, &attachment.Width, &attachment.Height, &attachment.Size)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT a.id, a.short_code, a.filename, a.mime_type, a.width, a.height, a.size FROM image_artifacts a WHERE `+predicate,
+		args...,
+	).Scan(
+		&attachment.ArtifactID,
+		&attachment.ShortCode,
+		&attachment.Filename,
+		&attachment.MimeType,
+		&attachment.Width,
+		&attachment.Height,
+		&attachment.Size,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return tooltypes.ToolAttachment{}, "", ErrNotFound
 	}
