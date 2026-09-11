@@ -461,7 +461,77 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 	);
 };
 
-const groupConversationsByCwd = (conversations: Conversation[]) => {
+interface ConversationTreeNode {
+	conversation: Conversation;
+	parentId: string;
+	parent?: ConversationTreeNode;
+	children: ConversationTreeNode[];
+	latestActivity: number;
+	order: number;
+}
+
+type SidebarConversation = Conversation & {
+	depth: number;
+	parentId: string;
+	isLastChild: boolean;
+	ancestorGuides: boolean[];
+};
+
+export const groupConversationsByCwd = (conversations: Conversation[]) => {
+	const nodes = new Map<string, ConversationTreeNode>();
+	for (const conversation of conversations) {
+		if (nodes.has(conversation.id)) continue;
+		const parent = conversation.metadata?.parent_conversation_id ?? conversation.parentConversationId;
+		nodes.set(conversation.id, {
+			conversation,
+			parentId: typeof parent === "string" ? parent.trim() : "",
+			children: [],
+			latestActivity: getConversationTime(conversation),
+			order: nodes.size,
+		});
+	}
+	for (const node of nodes.values()) {
+		const parent = nodes.get(node.parentId);
+		if (parent !== node) node.parent = parent;
+	}
+	// Break one edge in each malformed cycle. Every conversation stays reachable,
+	// and each parent chain is examined only once.
+	const visited = new Set<ConversationTreeNode>();
+	for (const node of nodes.values()) {
+		const path = new Set<ConversationTreeNode>();
+		let current: ConversationTreeNode | undefined = node;
+		while (current && !visited.has(current)) {
+			if (path.has(current)) {
+				current.parent = undefined;
+				break;
+			}
+			path.add(current);
+			current = current.parent;
+		}
+		for (const entry of path) visited.add(entry);
+	}
+	const roots: ConversationTreeNode[] = [];
+	for (const node of nodes.values()) {
+		if (node.parent) node.parent.children.push(node);
+		else roots.push(node);
+	}
+	// The caller supplies the recency order. A tree takes its earliest member's
+	// position, preserving that order for unrelated conversations and ties.
+	const byActivity = (left: ConversationTreeNode, right: ConversationTreeNode) => left.order - right.order;
+	const traversal = [...roots];
+	for (let index = 0; index < traversal.length; index++) {
+		traversal.push(...traversal[index].children);
+	}
+	for (let index = traversal.length - 1; index >= 0; index--) {
+		const node = traversal[index];
+		if (node.parent) {
+			node.parent.latestActivity = Math.max(node.parent.latestActivity, node.latestActivity);
+			node.parent.order = Math.min(node.parent.order, node.order);
+		}
+		node.children.sort(byActivity);
+	}
+	roots.sort(byActivity);
+
 	const groups = new Map<
 		string,
 		{
@@ -470,37 +540,60 @@ const groupConversationsByCwd = (conversations: Conversation[]) => {
 			label: string;
 			primaryLabel: string;
 			secondaryLabel?: string;
-			conversations: Conversation[];
+			conversations: SidebarConversation[];
+			latestActivity: number;
 		}
 	>();
 
-	conversations.forEach((conversation) => {
-		const normalizedCwd = conversation.cwd?.trim();
+	for (const root of roots) {
+		const normalizedCwd = root.conversation.cwd?.trim();
 		const key = normalizedCwd || "__no_cwd__";
 
-		if (!groups.has(key)) {
+		let group = groups.get(key);
+		if (!group) {
 			const label = formatCwdGroupLabel(normalizedCwd);
-			groups.set(key, {
+			group = {
 				key,
 				cwd: normalizedCwd,
 				label,
 				primaryLabel: getCwdGroupPrimaryLabel(normalizedCwd),
 				secondaryLabel: normalizedCwd ? label : undefined,
 				conversations: [],
-			});
+				latestActivity: root.latestActivity,
+			};
+			groups.set(key, group);
 		}
+		group.latestActivity = Math.max(group.latestActivity, root.latestActivity);
 
-		groups.get(key)?.conversations.push(conversation);
-	});
+		const stack = [{ node: root, depth: 0, isLastChild: true, ancestorGuides: [] as boolean[] }];
+		while (stack.length) {
+			const { node, depth, isLastChild, ancestorGuides } = stack[stack.length - 1];
+			stack.pop();
+			group.conversations.push({ ...node.conversation, depth, parentId: node.parentId, isLastChild, ancestorGuides });
+			const childGuides = depth ? [...ancestorGuides, !isLastChild].slice(-5) : [];
+			for (let index = node.children.length - 1; index >= 0; index--) {
+				stack.push({ node: node.children[index], depth: depth + 1, isLastChild: index === node.children.length - 1, ancestorGuides: childGuides });
+			}
+		}
+	}
 
-	return Array.from(groups.values()).sort((left, right) => {
-		const leftTime = getConversationTime(left.conversations[0]);
-		const rightTime = getConversationTime(right.conversations[0]);
-		return rightTime - leftTime;
-	});
+	return Array.from(groups.values()).sort((left, right) => right.latestActivity - left.latestActivity);
 };
 
 type ConversationGroup = ReturnType<typeof groupConversationsByCwd>[number];
+
+// Extend a row limit to the end of its tree so Show more never splits a family.
+const visibleConversationCount = (group: ConversationGroup, requested: number): number => {
+	let count = Math.min(requested, group.conversations.length);
+	while (count < group.conversations.length && group.conversations[count].depth > 0) count++;
+	return count;
+};
+
+const minimumConversationCount = (group: ConversationGroup, activeId: string | null): number =>
+	visibleConversationCount(group, Math.max(
+		DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP,
+		group.conversations.findIndex((conversation) => conversation.id === activeId) + 1,
+	));
 
 const isGroupExpandedByDefault = (
 	group: ConversationGroup,
@@ -620,19 +713,10 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			const nextState: Record<string, number> = {};
 
 			groupedConversations.forEach((group) => {
-				const activeIndex = group.conversations.findIndex(
-					(conversation) => conversation.id === activeConversationId,
-				);
-				const minimumVisibleCount =
-					activeIndex >= 0
-						? Math.max(
-								DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP,
-								activeIndex + 1,
-							)
-						: DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP;
+				const minimumVisibleCount = minimumConversationCount(group, activeConversationId);
 
-				nextState[group.key] = Math.min(
-					group.conversations.length,
+				nextState[group.key] = visibleConversationCount(
+					group,
 					Math.max(currentState[group.key] ?? minimumVisibleCount, minimumVisibleCount),
 				);
 			});
@@ -724,21 +808,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 										groupIndex,
 										activeConversationId,
 									);
-								const activeIndex = group.conversations.findIndex(
-									(conversation) => conversation.id === activeConversationId,
-								);
-								const minimumVisibleCount =
-									activeIndex >= 0
-										? Math.max(
-												DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP,
-												activeIndex + 1,
-											)
-										: DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP;
-							const visibleCount = Math.min(
+								const minimumVisibleCount = minimumConversationCount(group, activeConversationId);
+							const visibleCount = visibleConversationCount(
+								group,
 								visibleGroupCounts[group.key] ?? minimumVisibleCount,
-								group.conversations.length,
 							);
 							const remainingCount = group.conversations.length - visibleCount;
+							const moreVisibleCount = visibleConversationCount(group, visibleCount + VISIBLE_CONVERSATIONS_STEP);
 							const canShowLess = visibleCount > minimumVisibleCount;
 							const canShowMore = remainingCount > 0;
 							const visibleConversations = group.conversations.slice(0, visibleCount);
@@ -796,15 +872,25 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 										return (
 											<div
 												data-testid={`conversation-row-${conversation.id}`}
+												data-depth={conversation.depth}
 												key={conversation.id}
 												className={cn(
 													"conversation-link-row",
+													conversation.depth > 0 && "is-child",
 													isActive && "active",
 													isRunning && "running",
 													isMenuOpen && "menu-open",
 												)}
 												ref={isMenuOpen ? menuRef : undefined}
 										>
+											{conversation.depth > 0 ? (
+												<span aria-hidden="true" className="conversation-tree-guide">
+													{conversation.ancestorGuides.map((continued, index) => (
+														<span key={index} className={cn("conversation-ancestor", continued && "continued")} />
+													))}
+													<span className={cn("conversation-branch", conversation.isLastChild && "last-child")} />
+												</span>
+											) : null}
 											<button
 												className={cn(
 													"conversation-link",
@@ -815,11 +901,15 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 														setOpenMenuConversationId(null);
 														onSelectConversation(conversation.id);
 													}}
+													title={conversation.parentId ? `Child of ${conversation.parentId}` : undefined}
 													type="button"
 												>
 													<span className="conversation-link-title">
 														{truncateText(preview, 80)}
 													</span>
+													{conversation.parentId && conversation.depth === 0 ? (
+														<span className="conversation-orphan-label" title="Parent is not available in this list">Child</span>
+													) : null}
 													{isRunning ? (
 														<span
 															className="conversation-running-indicator"
@@ -905,15 +995,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 													onClick={() =>
 														setVisibleGroupCounts((currentState) => ({
 															...currentState,
-															[group.key]: Math.min(
-																group.conversations.length,
-																visibleCount + VISIBLE_CONVERSATIONS_STEP,
-															),
+															[group.key]: moreVisibleCount,
 														}))
 													}
 													type="button"
 												>
-													Show {Math.min(remainingCount, VISIBLE_CONVERSATIONS_STEP)} more
+														Show {moreVisibleCount - visibleCount} more
 												</button>
 											) : null}
 										</div>

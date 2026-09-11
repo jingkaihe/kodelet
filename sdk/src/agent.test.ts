@@ -24,6 +24,7 @@ interface FakeACPProcessOptions {
   steerResult?: unknown;
   steeringSupported?: boolean;
   sessionExtensionsVersion?: number;
+  conversationHierarchyVersion?: number;
 }
 
 class FakeACPProcess extends EventEmitter implements SpawnedProcess {
@@ -119,6 +120,7 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
           agentCapabilities: {},
           authMethods: [],
           _meta: { ...(this.options.steeringSupported === false ? {} : { steering: { supported: true } }),
+            ...(this.options.conversationHierarchyVersion === undefined ? {} : { conversationHierarchy: { version: this.options.conversationHierarchyVersion } }),
             ...(this.options.sessionExtensionsVersion === undefined ? {} : { sessionExtensions: { version: this.options.sessionExtensionsVersion } }) },
         });
         return;
@@ -988,6 +990,52 @@ test("Inline hosts are isolated per session, run, and extension while retaining 
   assert.equal(registrations, 4);
   await client.close();
   assert.equal(ended, 4);
+});
+
+test("fresh child sessions send hierarchy metadata alongside inline extensions", async () => {
+  for (const withExtensions of [false, true]) {
+    const child = new FakeACPProcess({ conversationHierarchyVersion: 1, sessionExtensionsVersion: 1 });
+    const client = new Client({ spawn: () => child });
+    try {
+      await client.createSession({
+        cwd: "/runner/path",
+        parentConversationId: " parent-conversation ",
+        extensions: withExtensions ? [() => {}] : undefined,
+      });
+      assert.deepEqual(child.requests.find(({ method }) => method === "session/new")?.params, {
+        cwd: "/runner/path",
+        _meta: {
+          conversationHierarchy: { version: 1, parentConversationId: "parent-conversation" },
+          ...(withExtensions ? { sessionExtensions: { version: 1, extensionIds: ["inline-1"] } } : {}),
+        },
+      });
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("child sessions require advertised hierarchy support before creation", async () => {
+  for (const version of [undefined, 2]) {
+    const child = new FakeACPProcess({ conversationHierarchyVersion: version });
+    const client = new Client({ spawn: () => child });
+    try {
+      await assert.rejects(client.createSession({ parentConversationId: "parent" }), /conversationHierarchy version 1.*update Kodelet/);
+      assert.deepEqual(child.requests.map(({ method }) => method), ["initialize"]);
+      assert.equal(child.stdout.readableEnded, true);
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("parent options reject empty IDs and reparenting before starting ACP", async () => {
+  const client = new Client({ spawn: () => { throw new Error("must not spawn"); } });
+  for (const parentConversationId of ["", "  ", null, 42]) {
+    await assert.rejects(client.createSession({ parentConversationId: parentConversationId as never }), /parentConversationId must be a non-empty/);
+  }
+  await assert.rejects(client.createSession({ parentConversationId: "parent", resume: "child" }), /cannot be combined with resume/);
+  await client.close();
 });
 
 test("Inline relay rejects unknown sessions, extension IDs, malformed frames, replay, and non-initialize creation", { timeout: 5000 }, async (t) => {

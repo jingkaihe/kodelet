@@ -65,6 +65,8 @@ export interface CreateSessionOptions {
   cwd?: string;
   /** Existing Kodelet conversation ID to resume. */
   resume?: string;
+  /** Parent of a new conversation, independent of context inheritance. Cannot be combined with resume. */
+  parentConversationId?: string;
   /** Maximum agentic turns for each run. 0/undefined means Kodelet default. */
   maxTurns?: number;
   /** Local handlers for inline extension ctx.ui input, confirm, select, and notify requests. */
@@ -292,6 +294,15 @@ export class Client {
     if (options.extensionTransport !== undefined && options.extensionTransport !== "unix" && options.extensionTransport !== "tcp") {
       throw new Error("extensionTransport must be unix or tcp (both are compatibility no-ops)");
     }
+    const parentConversationId = options.parentConversationId;
+    if (parentConversationId !== undefined) {
+      if (typeof parentConversationId !== "string" || !parentConversationId.trim()) {
+        throw new Error("parentConversationId must be a non-empty conversation ID");
+      }
+      if (options.resume) {
+        throw new Error("parentConversationId cannot be combined with resume; existing conversations retain their parent");
+      }
+    }
     const cwd = options.cwd ?? this.cwd;
     const profile = normalizeProfile(options.profile);
     const inline = profile && !profile.isNamedOnly() ? remoteExecutionOptions(profile.config) : {};
@@ -306,7 +317,7 @@ export class Client {
         ...(options.environmentProfile ? [`--runner-profile=${options.environmentProfile}`] : [])];
       rpc = new ACPRPCClient(this._spawn(args, { cwd: process.cwd(), env, stdio: ["pipe", "pipe", "pipe"] }), options.extensions, options.ui);
       await rpc.initialize();
-      const sessionID = options.resume ? await rpc.loadSession(options.resume, cwd) : await rpc.createSession(cwd);
+      const sessionID = options.resume ? await rpc.loadSession(options.resume, cwd) : await rpc.createSession(cwd, parentConversationId?.trim());
       const session = new Session(this, {
         ...options,
         cwd,
@@ -620,6 +631,7 @@ class ACPRPCClient {
   private readonly extensionRuntimes = new Map<string, InlineExtensionRuntime>();
   private sessionId?: string;
   private sessionExtensionsSupported = false;
+  private conversationHierarchySupported = false;
   private extensionsClosePromise?: Promise<void>;
 
   constructor(private readonly child: SpawnedProcess, extensions: ExtensionEntrypoint[] = [], private readonly ui?: AgentUIHandlers) {
@@ -685,13 +697,20 @@ class ACPRPCClient {
       && isRecord(result._meta)
       && isRecord(result._meta.sessionExtensions)
       && result._meta.sessionExtensions.version === 1;
+    this.conversationHierarchySupported = isRecord(result)
+      && isRecord(result._meta)
+      && isRecord(result._meta.conversationHierarchy)
+      && result._meta.conversationHierarchy.version === 1;
     if (this.extensions.size && !this.sessionExtensionsSupported) {
       throw new Error("kodelet acp does not support inline session extensions (sessionExtensions version 1); update Kodelet and the selected runner");
     }
   }
 
-  async createSession(cwd: string): Promise<string> {
-    const result = await this.request("session/new", { cwd, ...this.extensionMetadata() });
+  async createSession(cwd: string, parentConversationId?: string): Promise<string> {
+    if (parentConversationId && !this.conversationHierarchySupported) {
+      throw new Error("Child conversations require kodelet acp conversationHierarchy version 1 support; update Kodelet and the daemon");
+    }
+    const result = await this.request("session/new", { cwd, ...this.sessionMetadata(parentConversationId) });
     if (!isRecord(result) || typeof result.sessionId !== "string") {
       throw new Error("Invalid session/new response from kodelet acp");
     }
@@ -704,7 +723,7 @@ class ACPRPCClient {
 
   async loadSession(sessionId: string, cwd: string): Promise<string> {
     this.sessionId = sessionId;
-    await this.request("session/load", { sessionId, cwd, ...this.extensionMetadata() });
+    await this.request("session/load", { sessionId, cwd, ...this.sessionMetadata() });
     return sessionId;
   }
 
@@ -887,8 +906,15 @@ class ACPRPCClient {
     });
   }
 
-  private extensionMetadata(): Record<string, unknown> {
-    return this.extensions.size ? { _meta: { sessionExtensions: { version: 1, extensionIds: [...this.extensions.keys()] } } } : {};
+  private sessionMetadata(parentConversationId?: string): Record<string, unknown> {
+    const meta: Record<string, unknown> = {};
+    if (this.extensions.size) {
+      meta.sessionExtensions = { version: 1, extensionIds: [...this.extensions.keys()] };
+    }
+    if (parentConversationId) {
+      meta.conversationHierarchy = { version: 1, parentConversationId };
+    }
+    return Object.keys(meta).length ? { _meta: meta } : {};
   }
 
   private acceptExtensionFrame(params: unknown): () => void {

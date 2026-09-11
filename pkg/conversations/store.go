@@ -21,6 +21,11 @@ type ConversationStore interface {
 	Close() error // Close doesn't need context
 }
 
+// ConversationMetadataStore optionally loads metadata without reading message or tool history.
+type ConversationMetadataStore interface {
+	LoadMetadata(ctx context.Context, id string) (map[string]any, error)
+}
+
 // AtomicConversationForkStore persists a fork and copies any durable runner
 // affinity in the same transaction.
 type AtomicConversationForkStore interface {

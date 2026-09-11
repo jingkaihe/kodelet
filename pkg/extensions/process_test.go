@@ -284,6 +284,9 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 			profileCapabilities, ok := request.Params.Capabilities["profiles"].(map[string]any)
 			require.True(t, ok)
 			assert.Equal(t, test.remoteProfiles, profileCapabilities["remote"])
+			conversationCapabilities, ok := request.Params.Capabilities["conversations"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, RuntimeCapabilitiesFromContext(test.ctx).ConversationHierarchy, conversationCapabilities["hierarchy"])
 			uiCapabilities, ok := request.Params.Capabilities["ui"].(map[string]any)
 			require.True(t, ok)
 			if test.uiCapabilities == nil {
@@ -331,6 +334,16 @@ func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
 		ToolName:    "subagent",
 	}, store.initiator)
 	assert.Equal(t, "Investigate fork naming", store.name)
+	assert.False(t, store.asChild)
+	_, rpcErr = (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, json.RawMessage(`{"asChild":true}`))
+	require.Nil(t, rpcErr)
+	assert.True(t, store.asChild)
+
+	unsupported := ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{})
+	_, rpcErr = (toolExecutionHostHandler{}).HandleRPCRequest(unsupported, ConversationForkMethod, json.RawMessage(`{"asChild":true}`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, conversationForkUnavailableCode, rpcErr.Code)
+	assert.Equal(t, 2, store.calls)
 }
 
 func TestToolExecutionHostHandlerRejectsUnavailableConversationFork(t *testing.T) {
@@ -735,6 +748,7 @@ type forkableMetadataStore struct {
 	initiator      conversationtypes.ConversationForkInitiator
 	hasInitiator   bool
 	name           string
+	asChild        bool
 }
 
 func (*forkableMetadataStore) GetMetadata() map[string]any { return nil }
@@ -745,6 +759,7 @@ func (s *forkableMetadataStore) ForkConversation(ctx context.Context) (string, e
 	s.calls++
 	s.initiator, s.hasInitiator = conversationtypes.ConversationForkInitiatorFromContext(ctx)
 	s.name = conversationmeta.ConversationForkNameFromContext(ctx)
+	s.asChild = conversationtypes.ConversationForkAsChildFromContext(ctx)
 	return s.conversationID, s.err
 }
 

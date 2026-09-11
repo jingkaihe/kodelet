@@ -106,6 +106,7 @@ export interface Conversation {
   platform?: string;
   api_mode?: string;
   metadata?: Record<string, unknown>;
+  parentConversationId?: string;
   isRunning?: boolean;
   preview?: string;
   firstMessage?: string; // For list view - truncated first user message

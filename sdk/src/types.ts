@@ -304,6 +304,8 @@ export interface UIContext {
 export interface ConversationForkOptions {
   /** Explicit user-facing name for the forked conversation. */
   name?: string;
+  /** Explicitly make the fork a child of the caller. Ordinary forks have no hierarchy parent. */
+  asChild?: boolean;
 }
 
 export interface BackgroundTaskLease {

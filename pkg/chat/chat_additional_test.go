@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,9 +207,10 @@ func (r *recordingEnvironmentResolver) ResolveEnvironment(_ context.Context, req
 
 type directCommandEnvironment struct {
 	agentenv.Environment
-	request  agentenv.CommandRequest
-	result   agentenv.CommandResult
-	manifest agentenv.Manifest
+	request       agentenv.CommandRequest
+	result        agentenv.CommandResult
+	manifest      agentenv.Manifest
+	beforeCommand func(context.Context) error
 }
 
 func (e *directCommandEnvironment) IsOpen() bool {
@@ -216,8 +218,13 @@ func (e *directCommandEnvironment) IsOpen() bool {
 }
 func (e *directCommandEnvironment) Manifest() agentenv.Manifest { return e.manifest }
 func (e *directCommandEnvironment) Close(context.Context) error { return nil }
-func (e *directCommandEnvironment) ExecuteCommand(_ context.Context, request agentenv.CommandRequest) (agentenv.CommandResult, error) {
+func (e *directCommandEnvironment) ExecuteCommand(ctx context.Context, request agentenv.CommandRequest) (agentenv.CommandResult, error) {
 	e.request = request
+	if e.beforeCommand != nil {
+		if err := e.beforeCommand(ctx); err != nil {
+			return agentenv.CommandResult{}, err
+		}
+	}
 	return e.result, nil
 }
 
@@ -576,6 +583,99 @@ func TestExecutorReusesAndClosesConversationThread(t *testing.T) {
 	assert.True(t, thread.closed)
 	assert.Empty(t, runner.sessions)
 	require.NoError(t, runner.Close())
+}
+
+func TestExecutorPersistsFreshChildAndPreservesParentOnResume(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4.1")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	store, err := conversations.GetConversationStore(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	parent := convtypes.NewConversationRecord("parent")
+	require.NoError(t, store.Save(t.Context(), parent))
+	runner := NewExecutor(t.TempDir(), &fakeExtensionRuntimeProvider{})
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+	_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: parent.ID, Message: "/rename Child"}, &recordingChatSink{})
+	require.NoError(t, err)
+	record, err := store.Load(t.Context(), "child")
+	require.NoError(t, err)
+	assert.Equal(t, parent.ID, convtypes.ParentConversationIDFromMetadata(record.Metadata))
+	assert.NotContains(t, record.Metadata, convtypes.ConversationForkMetadataKey)
+	_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", Message: "/rename Continued"}, &recordingChatSink{})
+	require.NoError(t, err)
+	record, err = store.Load(t.Context(), "child")
+	require.NoError(t, err)
+	assert.Equal(t, parent.ID, convtypes.ParentConversationIDFromMetadata(record.Metadata))
+	_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: "other", Message: "/rename Bad"}, &recordingChatSink{})
+	require.ErrorContains(t, err, "cannot be assigned or changed")
+}
+
+func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
+			originalSettings := viper.AllSettings()
+			t.Cleanup(func() {
+				viper.Reset()
+				for key, value := range originalSettings {
+					viper.Set(key, value)
+				}
+			})
+			viper.Reset()
+			viper.Set("provider", "openai")
+			viper.Set("model", "gpt-4.1")
+			t.Setenv("OPENAI_API_KEY", "test-key")
+			t.Setenv("KODELET_BASE_PATH", t.TempDir())
+			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+			store, err := conversations.GetConversationStore(t.Context())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			require.NoError(t, store.Save(t.Context(), convtypes.NewConversationRecord("parent")))
+			environment := &directCommandEnvironment{
+				manifest: agentenv.Manifest{WorkingDirectory: "/runner/project"},
+				result:   agentenv.CommandResult{Matched: true, Action: agentenv.CommandActionRespond, Response: "done"},
+			}
+			environment.beforeCommand = func(ctx context.Context) error {
+				if conflict {
+					// An independent turn created a root after preflight validation.
+					require.NoError(t, store.Save(ctx, convtypes.NewConversationRecord("child")))
+				}
+				checkpoint := agentenv.RunCheckpointFromContext(ctx)
+				require.NotNil(t, checkpoint)
+				if err := checkpoint(ctx, "/runner/project"); err != nil {
+					return err
+				}
+				// This models extension startup: the parent must already be durable.
+				record, err := store.Load(ctx, "child")
+				require.NoError(t, err)
+				assert.Equal(t, "parent", convtypes.ParentConversationIDFromMetadata(record.Metadata))
+				assert.Contains(t, string(record.RawMessages), "inspect")
+				return nil
+			}
+			runner := NewExecutor("")
+			runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
+			t.Cleanup(func() { require.NoError(t, runner.Close()) })
+			_, err = runner.Run(t.Context(), ChatRequest{ConversationID: "child", ParentConversationID: "parent", RunnerID: "runner", Message: "inspect"}, &recordingChatSink{})
+			if conflict {
+				require.ErrorContains(t, err, "cannot be assigned or changed")
+				record, err := store.Load(t.Context(), "child")
+				require.NoError(t, err)
+				assert.NotContains(t, record.Metadata, convtypes.ParentConversationIDMetadataKey)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {

@@ -364,7 +364,7 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		t.Fatal("runner did not register")
 	}
 	assert.NotEqual(t, "runner-stale", registration.RunnerID)
-	assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: true}, provider.capabilities, "initial discovery must follow server capability negotiation")
+	assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: true, ConversationHierarchy: true}, provider.capabilities, "initial discovery must follow server capability negotiation")
 	require.Eventually(t, func() bool {
 		entry, ok := registry.Runner(registration.RunnerID)
 		return ok && entry.Status == runnerregistry.RunnerStatusIdle && entry.ManifestDigest != ""

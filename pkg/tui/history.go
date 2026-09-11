@@ -29,6 +29,7 @@ func loadConversationHistoryFromSource(ctx context.Context, conversationKey, con
 			return result
 		}
 		result.loaded = true
+		result.parentConversationID = strings.TrimSpace(history.ParentConversationID)
 		result.entries = entriesFromHistory(history.Messages)
 		result.usage = history.Usage
 		result.cwd = strings.TrimSpace(history.CWD)

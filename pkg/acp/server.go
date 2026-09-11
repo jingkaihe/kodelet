@@ -558,6 +558,7 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 		},
 		AuthMethods: []acptypes.AuthMethod{},
 		Meta: map[string]any{
+			"conversationHierarchy": map[string]any{"version": 1},
 			"steering": map[string]any{
 				"supported": true,
 			},
@@ -583,6 +584,9 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 	var params acptypes.NewSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	if _, err := acptypes.ConversationHierarchyParent(params.Meta); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 	}
 	if _, err := s.requestedSessionExtensions(params.Meta); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
@@ -622,6 +626,9 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 	var params acptypes.LoadSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	if _, present := params.Meta["conversationHierarchy"]; present {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "conversationHierarchy is only supported by session/new, not session/load", nil)
 	}
 	if _, err := s.requestedSessionExtensions(params.Meta); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)

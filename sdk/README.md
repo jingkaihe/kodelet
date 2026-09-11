@@ -84,6 +84,21 @@ Handlers receive an abort signal and should stop pending interactions when it is
 - Disconnected callbacks are never automatically restarted or replayed. To resume a conversation, explicitly provide `extensions` again in `createSession({ resume: conversationId, extensions: [echo] })`, retaining the same extension order. Callbacks and captured application state are not serialized into history.
 - The deprecated `extensionTransport: "unix" | "tcp"` option is accepted as a compatibility no-op. Neither choice creates a socket, temporary executable, or configuration file.
 
+## Child conversations
+
+Parenthood is explicit and independent of context inheritance. Inside an extension tool handler, use either a fresh child or a child fork:
+
+```ts
+const fresh = await client.createSession({ parentConversationId: ctx.conversationId });
+
+const childId = await ctx.forkConversation({ name: "reviewer", asChild: true });
+const inherited = await client.createSession({ resume: childId });
+```
+
+Core persists `metadata.parent_conversation_id`, which the Web sidebar and TUI conversation picker use to group children. Ordinary forks do not establish parenthood or inherit the source's parent. Resumes retain the saved relationship; combining `parentConversationId` with `resume` is rejected. Parenthood does not imply permission inheritance, cancellation, or usage aggregation.
+
+Fresh children require ACP `_meta.conversationHierarchy.version: 1`; child forks require extension `capabilities.conversations.hierarchy: true`. Explicit hierarchy requests fail with an upgrade message on older hosts rather than silently creating unrelated conversations. Omit the new options to retain existing SDK behavior.
+
 ## Development
 
 From the repository root, run `mise run sdk-test` for TypeScript checking, build, SDK tests, and package dry-run. The real SDK/ACP/daemon/runner acceptance gate is `KODELET_TEST_EXTENSION_SDK=typescript mise exec -- go test ./cmd/kodelet -run '^TestSessionExtensionsAcrossProcessBoundary$' -count=1 -timeout=3m`.

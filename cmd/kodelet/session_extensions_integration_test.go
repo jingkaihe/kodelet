@@ -15,11 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,7 +135,10 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 				script = filepath.Join(root, "inline.mjs")
 				source = fmt.Sprintf(sessionExtensionTypeScriptFixture, "file://"+dist, options, workspace)
 			} else {
-				interpreter = filepath.Join(os.Getenv("KODELET_PYTHON_SDK_PATH"), ".venv", "bin", "python")
+				sdkPath := os.Getenv("KODELET_PYTHON_SDK_PATH")
+				require.NotEmpty(t, sdkPath, "set KODELET_PYTHON_SDK_PATH to the local Python SDK checkout")
+				interpreter = filepath.Join(sdkPath, ".venv", "bin", "python")
+				environment = append(environment, "PYTHONPATH="+filepath.Join(sdkPath, "src"))
 				script = filepath.Join(root, "inline.py")
 				source = fmt.Sprintf(sessionExtensionPythonFixture, options, workspace)
 			}
@@ -143,6 +148,7 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 			output, err := process.CombinedOutput()
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "inline acceptance passed")
+			assertSessionExtensionHierarchy(ctx, t, serverURL, string(output))
 			if sdk == "typescript" {
 				tsx, err := filepath.Abs("../../sdk/node_modules/.bin/tsx")
 				require.NoError(t, err)
@@ -159,6 +165,78 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 				assert.Contains(t, string(output), "Callbacks executed: 1")
 			}
 		})
+	}
+}
+
+func assertSessionExtensionHierarchy(ctx context.Context, t *testing.T, serverURL, output string) {
+	t.Helper()
+	var ids struct {
+		Main  string   `json:"main"`
+		Plain string   `json:"plain"`
+		Fresh string   `json:"fresh"`
+		Forks []string `json:"forks"`
+	}
+	var manifest string
+	for _, line := range strings.Split(output, "\n") {
+		if value, ok := strings.CutPrefix(line, "hierarchy acceptance: "); ok {
+			manifest = value
+		}
+	}
+	require.NotEmpty(t, manifest, output)
+	require.NoError(t, json.Unmarshal([]byte(manifest), &ids))
+	require.NotEmpty(t, ids.Main)
+	require.NotEmpty(t, ids.Plain)
+	require.NotEmpty(t, ids.Fresh)
+	require.Len(t, ids.Forks, 3, "successful callbacks must create explicit child forks")
+	client, err := chat.NewClient(serverURL, "client-secret", "")
+	require.NoError(t, err)
+	// Copy an actual child: ordinary copies must clear inherited parent metadata,
+	// even though their independent fork provenance still points to that child.
+	copyID, err := client.ForkConversation(ctx, ids.Fresh)
+	require.NoError(t, err)
+	parents := map[string]string{ids.Main: "", ids.Plain: "", ids.Fresh: ids.Main, copyID: ""}
+	for _, id := range ids.Forks {
+		require.NotEmpty(t, id)
+		parents[id] = ids.Main
+	}
+	require.Len(t, parents, 7, "fixture must create distinct conversations")
+	summaries, err := client.ListConversations(ctx, 100)
+	require.NoError(t, err)
+	byID := make(map[string]convtypes.ConversationSummary, len(summaries))
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+	for id, parentID := range parents {
+		summary, found := byID[id]
+		require.True(t, found, "conversation %s must be durably listed", id)
+		assert.Equal(t, parentID, summary.ParentConversationID, "list projection for %s", id)
+		record, err := client.LoadConversationRecord(ctx, id)
+		require.NoError(t, err)
+		for _, metadata := range []map[string]any{summary.Metadata, record.Metadata} {
+			if parentID == "" {
+				assert.NotContains(t, metadata, "parent_conversation_id", "unparented conversation %s", id)
+			} else {
+				assert.Equal(t, parentID, metadata["parent_conversation_id"], "persisted parent for %s", id)
+			}
+		}
+		history, err := client.LoadConversation(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, parentID, history.ParentConversationID, "history projection for %s", id)
+		if id == ids.Fresh {
+			assert.NotContains(t, record.Metadata, "conversation_fork", "fresh children must not acquire fork provenance")
+			var messages []string
+			for _, message := range history.Messages {
+				if message.Role == "user" {
+					messages = append(messages, message.Content)
+				}
+			}
+			assert.Equal(t, []string{"plain fresh child", "plain resumed child"}, messages, "both child turns must persist without inheriting parent context")
+		}
+		if id == copyID {
+			fork, ok := record.Metadata["conversation_fork"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, ids.Fresh, fork["source_conversation_id"])
+		}
 	}
 }
 
@@ -232,8 +310,14 @@ func sessionExtensionTestProvider(t *testing.T) *httptest.Server {
 
 const sessionExtensionTypeScriptFixture = `import assert from "node:assert/strict";
 import { Client } from %q;
-const client = new Client(%s);
+const clientOptions = %s;
+const client = new Client(clientOptions);
 const cwd = %q;
+async function assertParent(id, parentId) {
+  const response = await fetch(clientOptions.server + "/api/conversations/" + id, { headers: { Authorization: "Bearer " + process.env.KODELET_AUTH_TOKEN } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).parentConversationId, parentId);
+}
 let calls = 0, confirms = 0;
 const forks = [], updates = [];
 let started = Promise.withResolvers(), stopped = Promise.withResolvers();
@@ -254,7 +338,9 @@ const ext = api => {
     assert.equal(ctx.cwd, cwd);
     assert.equal(await ctx.ui.confirm({ message: "Allow callback?" }), true);
     await ctx.update("callback progress");
-    forks.push(await ctx.forkConversation({ name: "inline fork" }));
+    const fork = await ctx.forkConversation({ name: "inline fork", asChild: true });
+    await assertParent(fork, ctx.conversationId);
+    forks.push(fork);
     return "closure:" + calls;
   }});
   api.registerTool({ name: "sdk_forbidden", description: "Must be filtered", inputSchema: { type: "object" }, execute: () => { throw new Error("policy bypass"); } });
@@ -280,7 +366,18 @@ try {
   await resumed.close();
   const plain = await client.createSession({ cwd });
   assert.equal((await plain.runAndWait({ message: "plain" })).content, "plain answer");
+  const plainId = plain.id;
   await plain.close();
+  const fresh = await client.createSession({ cwd, parentConversationId: id, options: { noTools: true } });
+  assert.equal((await fresh.runAndWait({ message: "plain fresh child" })).content, "plain answer");
+  const freshId = fresh.id;
+  await assertParent(freshId, id);
+  await fresh.close();
+  const freshResumed = await client.createSession({ cwd, resume: freshId, options: { noTools: true } });
+  assert.equal(freshResumed.id, freshId);
+  assert.equal((await freshResumed.runAndWait({ message: "plain resumed child" })).content, "plain answer");
+  await assertParent(freshId, id);
+  await freshResumed.close();
   const restricted = await client.createSession({ ...options, options: { noTools: true } });
   assert.equal((await restricted.runAndWait({ message: "restricted" })).content, "restricted answer");
   assert.equal(calls, 4);
@@ -304,14 +401,23 @@ try {
   await disconnected.close();
   await abandoned; await stopped.promise;
   assert.equal(calls, 6);
+  console.log("hierarchy acceptance: " + JSON.stringify({ main: id, plain: plainId, fresh: freshId, forks }));
   console.log("inline acceptance passed");
 } finally { await client.close(); }
 `
 
 const sessionExtensionPythonFixture = `import asyncio
+import json
+import os
+import urllib.request
 from kodelet_sdk import Client, Extension, BaseModel, ToolContext
-client = Client(%s)
+client_options = %s
+client = Client(client_options)
 cwd = %q
+def assert_parent(id, parent_id):
+    request = urllib.request.Request(client_options["server"] + "/api/conversations/" + id, headers={"Authorization": "Bearer " + os.environ["KODELET_AUTH_TOKEN"]})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert json.load(response)["parentConversationId"] == parent_id
 calls = 0
 confirms = 0
 forks = []
@@ -336,7 +442,9 @@ async def echo(input: EchoInput, ctx: ToolContext):
     assert ctx.cwd == cwd
     assert await ctx.ui.confirm({"message": "Allow callback?"})
     await ctx.update("callback progress")
-    forks.append(await ctx.fork_conversation("inline fork"))
+    fork = await ctx.fork_conversation("inline fork", as_child=True)
+    await asyncio.to_thread(assert_parent, fork, ctx.conversation_id)
+    forks.append(fork)
     return "closure:" + str(calls)
 @ext.tool("sdk_forbidden", description="Must be filtered", input_schema={"type": "object"})
 async def forbidden(input, ctx):
@@ -371,7 +479,18 @@ async def main():
         await resumed.close()
         plain = await client.create_session(cwd=cwd)
         assert (await plain.run_and_wait(message="plain")).content == "plain answer"
+        plain_id = plain.id
         await plain.close()
+        fresh = await client.create_session(cwd=cwd, parent_conversation_id=id, options={"noTools": True})
+        assert (await fresh.run_and_wait(message="plain fresh child")).content == "plain answer"
+        fresh_id = fresh.id
+        await asyncio.to_thread(assert_parent, fresh_id, id)
+        await fresh.close()
+        fresh_resumed = await client.create_session(cwd=cwd, resume=fresh_id, options={"noTools": True})
+        assert fresh_resumed.id == fresh_id
+        assert (await fresh_resumed.run_and_wait(message="plain resumed child")).content == "plain answer"
+        await asyncio.to_thread(assert_parent, fresh_id, id)
+        await fresh_resumed.close()
         restricted = await client.create_session(**options, options={"noTools": True})
         assert (await restricted.run_and_wait(message="restricted")).content == "restricted answer"
         assert calls == 4
@@ -399,6 +518,7 @@ async def main():
         await asyncio.gather(abandoned, return_exceptions=True)
         await asyncio.wait_for(stopped.wait(), 5)
         assert calls == 6
+        print("hierarchy acceptance: " + json.dumps({"main": id, "plain": plain_id, "fresh": fresh_id, "forks": forks}))
         print("inline acceptance passed")
     finally:
         await client.close()

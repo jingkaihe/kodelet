@@ -52,19 +52,20 @@ type remoteSessionManager struct {
 }
 
 type remoteSession struct {
-	id                 acptypes.SessionID
-	started            bool
-	active             bool
-	uncertain          bool
-	client             RemoteChatClient
-	runnerID           string
-	cwd                string
-	options            *llmtypes.ExecutionOptions
-	environmentProfile string
-	initializing       bool
-	extensionRelay     chat.SessionExtensionRelay
-	extensionErr       error
-	extensionChannels  map[extensionChannel]struct{}
+	id                   acptypes.SessionID
+	parentConversationID string
+	started              bool
+	active               bool
+	uncertain            bool
+	client               RemoteChatClient
+	runnerID             string
+	cwd                  string
+	options              *llmtypes.ExecutionOptions
+	environmentProfile   string
+	initializing         bool
+	extensionRelay       chat.SessionExtensionRelay
+	extensionErr         error
+	extensionChannels    map[extensionChannel]struct{}
 }
 
 type remoteOutcomeSink struct {
@@ -89,12 +90,25 @@ func newRemoteSessionManager(config RemoteSessionConfig) *remoteSessionManager {
 }
 
 func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.NewSessionRequest) (acptypes.SessionID, error) {
+	parentID, err := acptypes.ConversationHierarchyParent(request.Meta)
+	if err != nil {
+		return "", err
+	}
 	if err := m.config.Options.Validate(); err != nil {
 		return "", err
 	}
 	client, runnerID, err := m.waitForClient(ctx)
 	if err != nil {
 		return "", err
+	}
+	if parentID != "" {
+		settings, err := client.ChatSettings(ctx, m.config.Profile)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to check daemon conversation hierarchy support")
+		}
+		if settings.ConversationHierarchyVersion != 1 {
+			return "", errors.New("daemon does not support conversation hierarchy; upgrade Kodelet")
+		}
 	}
 	if runnerID == "" {
 		settings, err := client.ChatSettings(ctx, m.config.Profile)
@@ -115,13 +129,16 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		return "", errors.New("the runner did not return a working directory; check the directory and runner logs")
 	}
 	id := acptypes.SessionID(convtypes.GenerateID())
-	if err := m.installSession(&remoteSession{id: id, client: client, runnerID: runnerID, cwd: discovery.CWD, options: m.config.Options.Clone(), environmentProfile: chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile)}, request.Meta); err != nil {
+	if err := m.installSession(&remoteSession{id: id, parentConversationID: parentID, client: client, runnerID: runnerID, cwd: discovery.CWD, options: m.config.Options.Clone(), environmentProfile: chat.NormalizeEnvironmentProfile(discovery.EnvironmentProfile)}, request.Meta); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
 func (m *remoteSessionManager) loadSession(ctx context.Context, request acptypes.LoadSessionRequest) (chat.ConversationHistory, error) {
+	if _, present := request.Meta["conversationHierarchy"]; present {
+		return chat.ConversationHistory{}, errors.New("conversationHierarchy is only supported by session/new, not session/load")
+	}
 	if err := m.config.Options.Validate(); err != nil {
 		return chat.ConversationHistory{}, err
 	}
@@ -290,6 +307,9 @@ func (m *remoteSessionManager) promptTarget(sessionID acptypes.SessionID) (Remot
 	defer m.mu.Unlock()
 	session := m.sessions[sessionID]
 	request := chat.ChatRequest{RunnerID: session.runnerID, CWD: session.cwd, EnvironmentProfile: session.environmentProfile, Options: session.options.Clone()}
+	if !session.started {
+		request.ParentConversationID = session.parentConversationID
+	}
 	if session.extensionRelay != nil {
 		request.SessionExtensionsID = session.extensionRelay.Attachment().ID
 	}

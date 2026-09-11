@@ -287,6 +287,48 @@ func createRemoteACPSession(t *testing.T, server *Server, output *bytes.Buffer, 
 	return acptypes.SessionID(result["sessionId"].(string))
 }
 
+func TestRemoteACPConversationHierarchy(t *testing.T) {
+	workspace := t.TempDir()
+	output := bytes.NewBuffer(nil)
+	client := &fakeRemoteChatClient{}
+	server := newRemoteACPTestServer(t, workspace, client, output)
+	meta := map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}}
+	_, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
+	require.ErrorContains(t, err, "daemon does not support conversation hierarchy")
+	assert.Empty(t, client.targets, "reject unsupported hierarchy before opening a workspace")
+	client.settings.ConversationHierarchyVersion = 1
+	sessionID, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
+	require.NoError(t, err)
+	prompt := acptypes.PromptRequest{SessionID: sessionID, Prompt: []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "inspect"}}}
+	for _, id := range []string{"2", "3"} {
+		require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage(id), Params: mustJSONRawMessage(t, prompt)}))
+		_ = readJSONRPCMessages(t, output)
+	}
+	requests := client.recordedRequests()
+	require.Len(t, requests, 2)
+	assert.Equal(t, "parent", requests[0].ParentConversationID)
+	assert.Empty(t, requests[1].ParentConversationID, "subsequent turns retain the persisted relation")
+	_, err = server.remoteSessions.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: sessionID, Meta: meta})
+	require.ErrorContains(t, err, "only supported by session/new")
+}
+
+func TestACPConversationHierarchyMetadataValidation(t *testing.T) {
+	for _, raw := range []string{
+		`null`, `true`, `[]`, `{}`, `{"version":2,"parentConversationId":"parent"}`,
+		`{"version":1,"parentConversationId":42}`, `{"version":1,"parentConversationId":" "}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			var value any
+			require.NoError(t, json.Unmarshal([]byte(raw), &value))
+			_, err := acptypes.ConversationHierarchyParent(map[string]any{"conversationHierarchy": value})
+			require.Error(t, err)
+		})
+	}
+	parent, err := acptypes.ConversationHierarchyParent(nil)
+	require.NoError(t, err)
+	assert.Empty(t, parent)
+}
+
 func TestRemoteACPNewSessionAndPrompt(t *testing.T) {
 	workspace := t.TempDir()
 	output := bytes.NewBuffer(nil)

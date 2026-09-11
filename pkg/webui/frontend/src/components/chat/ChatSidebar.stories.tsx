@@ -93,6 +93,27 @@ const ConversationSearchStory = (
 
 export const GroupedConversations: Story = {};
 
+export const ChildConversations: Story = {
+	args: {
+		activeConversationId: "child-review",
+		conversations: [
+			{ ...sampleConversations[0], id: "child-review", summary: "Review sidebar changes", isRunning: true, metadata: { parent_conversation_id: "conv-active" } },
+			{ ...sampleConversations[0], id: "child-tests", summary: "Check keyboard navigation", metadata: { parent_conversation_id: "child-review" } },
+			{ ...sampleConversations[0], id: "child-search", summary: "Find conversation metadata", metadata: { parent_conversation_id: "conv-active" } },
+			...sampleConversations,
+		],
+	},
+};
+
+export const SingleChildConversation: Story = {
+	args: {
+		conversations: [
+			{ ...sampleConversations[0], summary: "Ask subagent how many cores and RAM this machine has", isRunning: true },
+			{ ...sampleConversations[0], id: "child-inspect", summary: "Inspect this local machine using read-only shell commands", isRunning: true, metadata: { parent_conversation_id: "conv-active" } },
+		],
+	},
+};
+
 export const ConversationSearchModal: Story = {
 	render: (args) => <ConversationSearchStory {...args} />,
 };

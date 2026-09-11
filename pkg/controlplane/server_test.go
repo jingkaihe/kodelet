@@ -1777,6 +1777,41 @@ func TestServer_handleForkConversationReturnsNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestServerChatParentValidation(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		status     int
+	}{
+		{"fresh", `{"message":"hello","conversationId":"child","parentConversationId":"parent"}`, http.StatusOK},
+		{"self", `{"message":"hello","conversationId":"parent","parentConversationId":"parent"}`, http.StatusBadRequest},
+		{"missing", `{"message":"hello","parentConversationId":"missing"}`, http.StatusBadRequest},
+		{"reparent", `{"message":"hello","conversationId":"existing","parentConversationId":"parent"}`, http.StatusBadRequest},
+		{"invalid type", `{"message":"hello","parentConversationId":42}`, http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			server := &Server{
+				conversationService: &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+					if id == "parent" || id == "existing" {
+						return &conversations.GetConversationResponse{ID: id}, nil
+					}
+					return nil, convtypes.ErrConversationNotFound
+				}},
+				activeChats: make(map[string]*activeChatRun),
+				chatRunner: &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+					called = true
+					assert.Equal(t, "parent", req.ParentConversationID)
+					return req.ConversationID, nil
+				}},
+			}
+			response := httptest.NewRecorder()
+			server.handleChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(test.body)))
+			assert.Equal(t, test.status, response.Code, response.Body.String())
+			assert.Equal(t, test.status == http.StatusOK, called)
+		})
+	}
+}
+
 func TestServer_handleChat(t *testing.T) {
 	var capturedRequest ChatRequest
 	requestCtx, requestCancel := context.WithCancel(context.Background())

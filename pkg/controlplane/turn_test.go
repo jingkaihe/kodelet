@@ -49,6 +49,7 @@ func TestTurnRequestHashPreservesExecutionInputs(t *testing.T) {
 	for name, change := range map[string]func(*chat.ChatRequest){
 		"text":           func(req *chat.ChatRequest) { req.Message = "different" },
 		"runner":         func(req *chat.ChatRequest) { req.RunnerID = "other-runner" },
+		"parent":         func(req *chat.ChatRequest) { req.ParentConversationID = "parent" },
 		"cwd":            func(req *chat.ChatRequest) { req.CWD = "/other" },
 		"profile":        func(req *chat.ChatRequest) { req.Profile = "other" },
 		"environment":    func(req *chat.ChatRequest) { req.EnvironmentProfile = "other" },

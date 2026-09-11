@@ -109,15 +109,25 @@ export function createToolContext(
       if (!conversationForkSupported(init)) {
         throw new ConversationForkUnavailableError("Live conversation forking is not supported by this Kodelet host");
       }
+      if (options.asChild !== undefined && typeof options.asChild !== "boolean") {
+        throw new Error("asChild must be a boolean");
+      }
+      if (options.asChild && !conversationHierarchySupported(init)) {
+        throw new Error("Child conversation forks require conversation hierarchy support; update Kodelet and the selected runner");
+      }
       if (!client) {
         throw new ConversationForkUnavailableError("Live conversation forking requires an active tool request");
       }
 
       const requestedName = options.name?.trim();
+      const params = {
+        ...(requestedName ? { name: options.name } : {}),
+        ...(options.asChild ? { asChild: true } : {}),
+      };
       try {
         const response = await client.request(
           "kodelet.conversation.fork",
-          requestedName ? { name: options.name } : undefined,
+          Object.keys(params).length ? params : undefined,
         );
         if (!isRecord(response)) {
           throw new Error("Invalid conversation fork response from Kodelet host");
@@ -836,4 +846,9 @@ function toolUpdatesSupported(init: InitializeParams | undefined): boolean {
 function conversationForkSupported(init: InitializeParams | undefined): boolean {
   const conversations = init?.capabilities?.conversations;
   return isRecord(conversations) && conversations.fork === true;
+}
+
+function conversationHierarchySupported(init: InitializeParams | undefined): boolean {
+  const conversations = init?.capabilities?.conversations;
+  return isRecord(conversations) && conversations.hierarchy === true;
 }

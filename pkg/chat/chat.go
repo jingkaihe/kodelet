@@ -41,18 +41,19 @@ const (
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message             string                     `json:"message"`
-	Content             []ChatContentBlock         `json:"content,omitempty"`
-	ConversationID      string                     `json:"conversationId,omitempty"`
-	TurnID              string                     `json:"turnId,omitempty"`
-	RunnerID            string                     `json:"runnerId,omitempty"`
-	SessionExtensionsID string                     `json:"sessionExtensionsId,omitempty"`
-	Profile             string                     `json:"profile,omitempty"`
-	EnvironmentProfile  string                     `json:"environmentProfile,omitempty"`
-	ReasoningEffort     string                     `json:"reasoningEffort,omitempty"`
-	CWD                 string                     `json:"cwd,omitempty"`
-	Options             *llmtypes.ExecutionOptions `json:"options,omitempty"`
-	ClientCapabilities  *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
+	Message              string                     `json:"message"`
+	Content              []ChatContentBlock         `json:"content,omitempty"`
+	ConversationID       string                     `json:"conversationId,omitempty"`
+	ParentConversationID string                     `json:"parentConversationId,omitempty"`
+	TurnID               string                     `json:"turnId,omitempty"`
+	RunnerID             string                     `json:"runnerId,omitempty"`
+	SessionExtensionsID  string                     `json:"sessionExtensionsId,omitempty"`
+	Profile              string                     `json:"profile,omitempty"`
+	EnvironmentProfile   string                     `json:"environmentProfile,omitempty"`
+	ReasoningEffort      string                     `json:"reasoningEffort,omitempty"`
+	CWD                  string                     `json:"cwd,omitempty"`
+	Options              *llmtypes.ExecutionOptions `json:"options,omitempty"`
+	ClientCapabilities   *ChatClientCapabilities    `json:"clientCapabilities,omitempty"`
 }
 
 const (
@@ -196,17 +197,18 @@ type ConversationSource interface {
 
 // ConversationHistory is the client-facing persisted state needed to resume a conversation.
 type ConversationHistory struct {
-	ID                 string
-	CWD                string
-	Title              string
-	Provider           string
-	Profile            string
-	ReasoningEffort    string
-	RunnerID           string
-	EnvironmentProfile string
-	UpdatedAt          time.Time
-	Usage              llmtypes.Usage
-	Messages           []conversationservice.StreamableMessage
+	ID                   string
+	ParentConversationID string
+	CWD                  string
+	Title                string
+	Provider             string
+	Profile              string
+	ReasoningEffort      string
+	RunnerID             string
+	EnvironmentProfile   string
+	UpdatedAt            time.Time
+	Usage                llmtypes.Usage
+	Messages             []conversationservice.StreamableMessage
 }
 
 // ExtensionRuntimeProvider supplies extension runtimes for chat turns.
@@ -381,6 +383,20 @@ func runDefaultChat(
 	if sessionID == "" {
 		sessionID = convtypes.GenerateID()
 	}
+	validateParent := func(ctx context.Context) error {
+		if req.ParentConversationID == "" {
+			return nil
+		}
+		service, err := conversationservice.GetDefaultConversationService(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = service.Close() }()
+		return conversationservice.ValidateParentConversation(ctx, service, sessionID, req.ParentConversationID)
+	}
+	if err := validateParent(ctx); err != nil {
+		return sessionID, err
+	}
 	invokedBy := "main"
 	if strings.TrimSpace(req.ConversationID) != "" {
 		invokedBy, err = resolveConversationInvokedBy(ctx, sessionID)
@@ -491,6 +507,13 @@ func runDefaultChat(
 		thread.SetConversationID(sessionID)
 		if newThread {
 			thread.EnablePersistence(ctx, true)
+		}
+		// Another turn may have persisted this ID while we waited for its thread lock.
+		if err := validateParent(ctx); err != nil {
+			return err
+		}
+		if req.ParentConversationID != "" {
+			thread.SetMetadataValue(convtypes.ParentConversationIDMetadataKey, req.ParentConversationID)
 		}
 		if strings.TrimSpace(req.RunnerID) != "" {
 			thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))

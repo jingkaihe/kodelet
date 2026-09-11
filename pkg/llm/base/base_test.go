@@ -130,6 +130,29 @@ func TestBlockConversationFork(t *testing.T) {
 	assert.False(t, thread.ConversationForkBlocked(), "release must be idempotent")
 }
 
+func TestForkConversationPersistsExplicitHierarchy(t *testing.T) {
+	for _, asChild := range []bool{false, true} {
+		thread := NewThread(llmtypes.Config{}, "parent")
+		var saved convtypes.ConversationRecord
+		thread.Store = &mockConversationStore{saveFunc: func(_ context.Context, record convtypes.ConversationRecord) error {
+			saved = record
+			return nil
+		}}
+		source := convtypes.NewConversationRecord("parent")
+		source.Metadata[convtypes.ParentConversationIDMetadataKey] = "grandparent"
+		id, err := thread.ForkConversation(convtypes.ContextWithConversationForkAsChild(t.Context(), asChild), func(context.Context) (convtypes.ConversationRecord, error) {
+			return source, nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, id, saved.ID)
+		if asChild {
+			assert.Equal(t, source.ID, convtypes.ParentConversationIDFromMetadata(saved.Metadata))
+		} else {
+			assert.NotContains(t, saved.Metadata, convtypes.ParentConversationIDMetadataKey)
+		}
+	}
+}
+
 func TestForkConversationErrors(t *testing.T) {
 	wantErr := errors.New("persistence failed")
 	for _, snapshotFails := range []bool{true, false} {

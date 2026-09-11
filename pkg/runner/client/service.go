@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -114,6 +115,7 @@ type Service struct {
 	runnerID              string
 	generation            int64
 	remoteProfiles        bool
+	conversationHierarchy bool
 	runs                  map[string]*activeRun
 	backgrounds           map[string]*runnerBackgroundResources
 	backgroundRunIDs      map[string]*runnerBackgroundResources
@@ -250,6 +252,7 @@ func (s *Service) SetRegistration(result protocol.RegisterResult) error {
 	s.runnerID = strings.TrimSpace(result.RunnerID)
 	s.generation = result.Generation
 	s.remoteProfiles = result.RemoteProfiles
+	s.conversationHierarchy = result.ConversationHierarchy
 	return nil
 }
 
@@ -1253,7 +1256,7 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	operationCtx = contextWithRunnerArtifactResolver(operationCtx, peer, run.id, params.ToolCallID)
 	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
 	if peer != nil {
-		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID}
+		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID, hierarchy: extensions.RuntimeCapabilitiesFromContext(operationCtx).ConversationHierarchy}
 	}
 	operationCtx = tools.ContextWithToolContext(operationCtx, toolContext)
 	var updateSink agentenv.ToolUpdateSink
@@ -1301,6 +1304,7 @@ type controlPlaneConversationForker struct {
 	peer       Peer
 	runID      string
 	toolCallID string
+	hierarchy  bool
 }
 
 func (*controlPlaneConversationForker) GetMetadata() map[string]any { return nil }
@@ -1311,10 +1315,15 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 	if f == nil || f.peer == nil {
 		return "", llmtypes.ErrConversationForkUnavailable
 	}
+	asChild := convtypes.ConversationForkAsChildFromContext(ctx)
+	if asChild && !f.hierarchy {
+		return "", errors.Wrap(llmtypes.ErrConversationForkUnavailable, "daemon does not support conversation hierarchy")
+	}
 	params := runnerpayload.ConversationForkParams{
 		RunID:      f.runID,
 		ToolCallID: f.toolCallID,
 		Name:       conversationmeta.ConversationForkNameFromContext(ctx),
+		AsChild:    asChild,
 	}
 	var result runnerpayload.ConversationForkResult
 	if err := f.peer.Call(ctx, protocol.MethodConversationFork, params, &result); err != nil {
@@ -1410,12 +1419,14 @@ func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID 
 	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
 	s.mu.Lock()
 	remoteProfiles := s.remoteProfiles
+	conversationHierarchy := s.conversationHierarchy
 	runnerID := s.runnerID
 	s.mu.Unlock()
 	ctx = extensions.ContextWithRunnerID(ctx, runnerID)
 	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{
-		BackgroundTasks: true,
-		RemoteProfiles:  remoteProfiles,
+		BackgroundTasks:       true,
+		RemoteProfiles:        remoteProfiles,
+		ConversationHierarchy: conversationHierarchy,
 	})
 	ctx = extensions.ContextWithBackgroundTaskHost(ctx, s)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)

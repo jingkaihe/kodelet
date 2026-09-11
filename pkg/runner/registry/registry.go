@@ -675,12 +675,13 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		lostConversationIDs = append(lostConversationIDs, lostRun.ConversationID)
 	}
 	result := protocol.RegisterResult{
-		RunnerID:            entry.ID,
-		ProtocolVersion:     protocol.Version,
-		ConnectionID:        entry.ConnectionID,
-		Generation:          entry.Generation,
-		HeartbeatIntervalMS: r.heartbeatInterval.Milliseconds(),
-		RemoteProfiles:      true,
+		RunnerID:              entry.ID,
+		ProtocolVersion:       protocol.Version,
+		ConnectionID:          entry.ConnectionID,
+		Generation:            entry.Generation,
+		HeartbeatIntervalMS:   r.heartbeatInterval.Milliseconds(),
+		RemoteProfiles:        true,
+		ConversationHierarchy: true,
 	}
 	r.mu.Unlock()
 
@@ -1384,6 +1385,7 @@ func (r *Registry) forkToolConversation(ctx context.Context, runnerID, connectio
 		})
 	}
 	ctx = conversationmeta.ContextWithConversationForkName(ctx, params.Name)
+	ctx = convtypes.ContextWithConversationForkAsChild(ctx, params.AsChild)
 	conversationID, err := registration.forker.ForkConversation(ctx)
 	if err != nil {
 		return runnerpayload.ConversationForkResult{}, err

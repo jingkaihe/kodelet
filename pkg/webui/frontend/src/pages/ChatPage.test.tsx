@@ -5066,7 +5066,7 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(await screen.findByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

@@ -31,6 +31,26 @@ func TestNewConversationRecord(t *testing.T) {
 	assert.NotEmpty(t, record.ID, "ID should be generated")
 }
 
+func TestConversationHierarchyIsIndependentOfForkLineage(t *testing.T) {
+	assert.Empty(t, ParentConversationIDFromMetadata(nil))
+	assert.Empty(t, ParentConversationIDFromMetadata(map[string]any{ParentConversationIDMetadataKey: 42}))
+	assert.Equal(t, "parent", ParentConversationIDFromMetadata(map[string]any{ParentConversationIDMetadataKey: " parent "}))
+	parent := NewConversationRecord("parent")
+	parent.Metadata[ParentConversationIDMetadataKey] = "grandparent"
+	child := ForkConversationRecordWithOptions(parent, ConversationForkOptions{AsChild: true})
+	assert.Equal(t, parent.ID, ParentConversationIDFromMetadata(child.Metadata))
+	assert.Equal(t, parent.ID, child.ToSummary().ParentConversationID)
+	grandchild := ForkConversationRecordWithOptions(child, ConversationForkOptions{AsChild: true})
+	assert.Equal(t, child.ID, ParentConversationIDFromMetadata(grandchild.Metadata))
+	copy := ForkConversationRecord(child)
+	assert.Empty(t, ParentConversationIDFromMetadata(copy.Metadata))
+	assert.NotContains(t, copy.Metadata, ParentConversationIDMetadataKey)
+	assert.Contains(t, copy.Metadata, ConversationForkMetadataKey)
+	assert.Equal(t, "grandparent", ParentConversationIDFromMetadata(parent.Metadata))
+	assert.False(t, ConversationForkAsChildFromContext(t.Context()))
+	assert.True(t, ConversationForkAsChildFromContext(ContextWithConversationForkAsChild(t.Context(), true)))
+}
+
 func TestForkConversationRecord(t *testing.T) {
 	source := NewConversationRecord("source")
 	source.RawMessages = json.RawMessage(`[{"role":"user","content":"hello"}]`)
@@ -44,7 +64,8 @@ func TestForkConversationRecord(t *testing.T) {
 		MaxContextWindow:     456,
 	}
 	source.Metadata = map[string]any{
-		"profile": "work",
+		"profile":                                 "work",
+		ParentConversationIDMetadataKey:           "grandparent",
 		CodexResponsesWindowGenerationMetadataKey: float64(3),
 		goals.MetadataKey:                         goals.New("finish the parent task", time.Now()),
 		RunnerIDMetadataKey:                       "runner-1",
@@ -69,6 +90,8 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 	assert.NotContains(t, forked.Metadata, goals.MetadataKey)
 	assert.NotContains(t, forked.Metadata, RunnerIDMetadataKey)
+	assert.NotContains(t, forked.Metadata, ParentConversationIDMetadataKey)
+	assert.Equal(t, "grandparent", ParentConversationIDFromMetadata(source.Metadata))
 	assert.NotContains(t, forked.Metadata, RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, source.ToolResults, forked.ToolResults)
 	forkMetadata, ok := conversationForkMetadataFromMetadata(forked.Metadata)

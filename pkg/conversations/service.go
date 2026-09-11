@@ -6,6 +6,7 @@ package conversations
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -85,17 +86,18 @@ type ListConversationsResponse struct {
 
 // GetConversationResponse represents the response from getting a conversation
 type GetConversationResponse struct {
-	ID           string                                `json:"id"`
-	CWD          string                                `json:"cwd,omitempty"`
-	CreatedAt    time.Time                             `json:"createdAt"`
-	UpdatedAt    time.Time                             `json:"updatedAt"`
-	Provider     string                                `json:"provider"`
-	Summary      string                                `json:"summary,omitempty"`
-	Usage        llmtypes.Usage                        `json:"usage"`
-	RawMessages  json.RawMessage                       `json:"rawMessages"`
-	Metadata     map[string]any                        `json:"metadata,omitempty"`
-	ToolResults  map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`
-	MessageCount int                                   `json:"messageCount"`
+	ID                   string                                `json:"id"`
+	ParentConversationID string                                `json:"parentConversationId,omitempty"`
+	CWD                  string                                `json:"cwd,omitempty"`
+	CreatedAt            time.Time                             `json:"createdAt"`
+	UpdatedAt            time.Time                             `json:"updatedAt"`
+	Provider             string                                `json:"provider"`
+	Summary              string                                `json:"summary,omitempty"`
+	Usage                llmtypes.Usage                        `json:"usage"`
+	RawMessages          json.RawMessage                       `json:"rawMessages"`
+	Metadata             map[string]any                        `json:"metadata,omitempty"`
+	ToolResults          map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`
+	MessageCount         int                                   `json:"messageCount"`
 }
 
 // GetToolResultResponse represents the response from getting a tool result
@@ -183,6 +185,62 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	return response, nil
 }
 
+// ValidateParentConversation validates creation-time hierarchy or an idempotent retry.
+// Omitted parents leave existing metadata untouched; existing conversations cannot be reparented.
+func ValidateParentConversation(ctx context.Context, service ConversationServiceInterface, conversationID, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if parentID != strings.TrimSpace(parentID) || parentID == "." || parentID == ".." || len(parentID) > 128 || strings.ContainsAny(parentID, "/\\") || strings.IndexFunc(parentID, func(r rune) bool { return r <= ' ' || r == 127 }) >= 0 {
+		return errors.New("invalid parentConversationId")
+	}
+	if parentID == conversationID {
+		return errors.New("conversation cannot be its own parent")
+	}
+	if conversationID != "" {
+		existing, err := getConversationMetadata(ctx, service, conversationID)
+		if err == nil {
+			if conversations.ParentConversationIDFromMetadata(existing) != parentID {
+				return errors.New("parentConversationId cannot be assigned or changed on an existing conversation")
+			}
+			// A retry or continuation retains its parent even after that parent is deleted.
+			return nil
+		}
+		if !errors.Is(err, conversations.ErrConversationNotFound) {
+			return errors.Wrap(err, "failed to validate child conversation")
+		}
+	}
+	if _, err := getConversationMetadata(ctx, service, parentID); err != nil {
+		return errors.Wrap(err, "parent conversation is unavailable")
+	}
+	return nil
+}
+
+func getConversationMetadata(ctx context.Context, service ConversationServiceInterface, id string) (map[string]any, error) {
+	if reader, ok := service.(interface {
+		GetConversationMetadata(context.Context, string) (map[string]any, error)
+	}); ok {
+		return reader.GetConversationMetadata(ctx, id)
+	}
+	record, err := service.GetConversation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return record.Metadata, nil
+}
+
+// GetConversationMetadata avoids loading message history when supported by the store.
+func (s *ConversationService) GetConversationMetadata(ctx context.Context, id string) (map[string]any, error) {
+	if store, ok := s.store.(ConversationMetadataStore); ok {
+		return store.LoadMetadata(ctx, id)
+	}
+	record, err := s.store.Load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return record.Metadata, nil
+}
+
 // GetConversation retrieves a specific conversation with all its data
 func (s *ConversationService) GetConversation(ctx context.Context, id string) (*GetConversationResponse, error) {
 	logger.G(ctx).WithField("id", id).Debug("Getting conversation")
@@ -203,17 +261,18 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 	}
 
 	response := &GetConversationResponse{
-		ID:           record.ID,
-		CWD:          record.CWD,
-		CreatedAt:    record.CreatedAt,
-		UpdatedAt:    record.UpdatedAt,
-		Provider:     record.Provider,
-		Summary:      record.Summary,
-		Usage:        record.Usage,
-		RawMessages:  record.RawMessages,
-		Metadata:     record.Metadata,
-		ToolResults:  record.ToolResults,
-		MessageCount: messageCount,
+		ID:                   record.ID,
+		ParentConversationID: conversations.ParentConversationIDFromMetadata(record.Metadata),
+		CWD:                  record.CWD,
+		CreatedAt:            record.CreatedAt,
+		UpdatedAt:            record.UpdatedAt,
+		Provider:             record.Provider,
+		Summary:              record.Summary,
+		Usage:                record.Usage,
+		RawMessages:          record.RawMessages,
+		Metadata:             record.Metadata,
+		ToolResults:          record.ToolResults,
+		MessageCount:         messageCount,
 	}
 
 	logger.G(ctx).WithField("id", id).WithField("messageCount", messageCount).Debug("Retrieved conversation")

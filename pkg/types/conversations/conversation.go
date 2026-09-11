@@ -22,6 +22,8 @@ import (
 var ErrConversationNotFound = errors.New("conversation not found")
 
 const (
+	// ParentConversationIDMetadataKey stores the explicit hierarchy parent, independently of fork provenance.
+	ParentConversationIDMetadataKey = "parent_conversation_id"
 	// ConversationForkMetadataKey stores durable conversation fork lineage.
 	ConversationForkMetadataKey = "conversation_fork"
 	// ConversationForkMetadataVersion is the current fork metadata schema version.
@@ -68,6 +70,32 @@ type ConversationForkMetadata struct {
 type ConversationForkOptions struct {
 	Mode      ConversationForkMode
 	Initiator *ConversationForkInitiator
+	AsChild   bool
+}
+
+type conversationForkAsChildContextKey struct{}
+
+// ParentConversationIDFromMetadata returns the explicitly declared parent, never a fork source.
+func ParentConversationIDFromMetadata(metadata map[string]any) string {
+	parentID, _ := metadata[ParentConversationIDMetadataKey].(string)
+	return strings.TrimSpace(parentID)
+}
+
+// ContextWithConversationForkAsChild declares whether a fork also establishes hierarchy.
+func ContextWithConversationForkAsChild(ctx context.Context, asChild bool) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, conversationForkAsChildContextKey{}, asChild)
+}
+
+// ConversationForkAsChildFromContext reports whether the requested fork is a child.
+func ConversationForkAsChildFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	asChild, _ := ctx.Value(conversationForkAsChildContextKey{}).(bool)
+	return asChild
 }
 
 type conversationForkInitiatorContextKey struct{}
@@ -139,17 +167,18 @@ type ConversationRecord struct {
 
 // ConversationSummary provides a brief overview of a conversation
 type ConversationSummary struct {
-	ID           string         `json:"id"`
-	CWD          string         `json:"cwd,omitempty"`
-	MessageCount int            `json:"messageCount"`
-	FirstMessage string         `json:"firstMessage"`
-	Summary      string         `json:"summary,omitempty"`
-	Provider     string         `json:"provider"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
-	Usage        llmtypes.Usage `json:"usage"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
-	IsRunning    bool           `json:"isRunning,omitempty"`
+	ID                   string         `json:"id"`
+	ParentConversationID string         `json:"parentConversationId,omitempty"`
+	CWD                  string         `json:"cwd,omitempty"`
+	MessageCount         int            `json:"messageCount"`
+	FirstMessage         string         `json:"firstMessage"`
+	Summary              string         `json:"summary,omitempty"`
+	Provider             string         `json:"provider"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
+	Usage                llmtypes.Usage `json:"usage"`
+	CreatedAt            time.Time      `json:"createdAt"`
+	UpdatedAt            time.Time      `json:"updatedAt"`
+	IsRunning            bool           `json:"isRunning,omitempty"`
 }
 
 // QueryResult represents the result of a query operation
@@ -199,6 +228,7 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 	forked.Usage.MaxContextWindow = source.Usage.MaxContextWindow
 	if source.Metadata != nil {
 		forked.Metadata = maps.Clone(source.Metadata)
+		delete(forked.Metadata, ParentConversationIDMetadataKey)
 		delete(forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 		delete(forked.Metadata, goals.MetadataKey)
 		// Runner affinity is authoritative for a specific conversation ID and
@@ -208,6 +238,9 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 	}
 	if source.ToolResults != nil {
 		forked.ToolResults = maps.Clone(source.ToolResults)
+	}
+	if options.AsChild {
+		forked.Metadata[ParentConversationIDMetadataKey] = source.ID
 	}
 
 	mode := options.Mode
@@ -313,16 +346,17 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 	}
 
 	return ConversationSummary{
-		ID:           cr.ID,
-		CWD:          cr.CWD,
-		MessageCount: messageCount,
-		FirstMessage: firstMessage,
-		Summary:      cr.Summary,
-		Provider:     cr.Provider,
-		Metadata:     cr.Metadata,
-		Usage:        cr.Usage,
-		CreatedAt:    cr.CreatedAt,
-		UpdatedAt:    cr.UpdatedAt,
+		ID:                   cr.ID,
+		ParentConversationID: ParentConversationIDFromMetadata(cr.Metadata),
+		CWD:                  cr.CWD,
+		MessageCount:         messageCount,
+		FirstMessage:         firstMessage,
+		Summary:              cr.Summary,
+		Provider:             cr.Provider,
+		Metadata:             cr.Metadata,
+		Usage:                cr.Usage,
+		CreatedAt:            cr.CreatedAt,
+		UpdatedAt:            cr.UpdatedAt,
 	}
 }
 

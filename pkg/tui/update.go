@@ -277,6 +277,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		} else if msg.loaded {
 			m.loaded = true
+			if parentID := strings.TrimSpace(msg.parentConversationID); parentID != "" {
+				m.parentConversationID = parentID
+			}
 			if strings.TrimSpace(msg.title) != "" {
 				m.title = strings.TrimSpace(msg.title)
 			}
@@ -459,6 +462,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearActiveAssistantEntry()
 		m.entries = history.entries
 		m.usage = history.usage
+		if parentID := strings.TrimSpace(history.parentConversationID); parentID != "" {
+			m.parentConversationID = parentID
+		}
 		if strings.TrimSpace(history.title) != "" {
 			m.title = strings.TrimSpace(history.title)
 		}

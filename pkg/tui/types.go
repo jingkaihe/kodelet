@@ -131,6 +131,7 @@ type detailRegion struct {
 type conversationState struct {
 	key                    string
 	conversationID         string
+	parentConversationID   string
 	conversationWasResumed bool
 	loaded                 bool
 	title                  string
@@ -359,19 +360,20 @@ type conversationHistoryRefreshMsg struct {
 }
 
 type initialHistoryMsg struct {
-	conversationKey string
-	conversationID  string
-	loaded          bool
-	entries         []chatEntry
-	usage           llmtypes.Usage
-	cwd             string
-	title           string
-	updatedAt       time.Time
-	profile         string
-	provider        string
-	model           string
-	reasoningEffort string
-	err             error
+	conversationKey      string
+	conversationID       string
+	parentConversationID string
+	loaded               bool
+	entries              []chatEntry
+	usage                llmtypes.Usage
+	cwd                  string
+	title                string
+	updatedAt            time.Time
+	profile              string
+	provider             string
+	model                string
+	reasoningEffort      string
+	err                  error
 }
 
 type extensionLifecycleMsg struct {

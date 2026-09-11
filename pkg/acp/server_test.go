@@ -206,6 +206,7 @@ func TestServer_Initialize(t *testing.T) {
 	assert.NotNil(t, result["agentCapabilities"])
 	assert.NotNil(t, result["agentInfo"])
 	assert.Equal(t, true, result["_meta"].(map[string]any)["steering"].(map[string]any)["supported"])
+	assert.Equal(t, float64(1), result["_meta"].(map[string]any)["conversationHierarchy"].(map[string]any)["version"])
 
 	agentInfo := result["agentInfo"].(map[string]any)
 	assert.Equal(t, "kodelet", agentInfo["name"])

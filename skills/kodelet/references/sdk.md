@@ -162,6 +162,8 @@ const conversationId = await ctx.forkConversation({ name: "Investigate authentic
 
 Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
 
+To organize the fork beneath the calling conversation, explicitly pass `asChild: true` (`as_child=True` in Python). For a fresh child without inherited context, pass `parentConversationId: ctx.conversationId` to `client.createSession()` (`parent_conversation_id=ctx.conversation_id` in Python). Both paths persist `metadata.parent_conversation_id`; ordinary forks remain unrelated for hierarchy purposes. Resuming retains the saved parent, and parent options cannot be combined with `resume`. These options require hierarchy-capable hosts and fail explicitly on older versions.
+
 ### ACP subagents and code search
 
 Use ordinary `Client` sessions with normal client credentials and the intended server/runner. Pass typed `options` directly; `profile` selects a configured or registered daemon profile, and `options.provider` must match it. Scoped `ctx.children` and `get_profile` remain removed.

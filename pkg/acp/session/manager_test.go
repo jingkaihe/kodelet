@@ -204,6 +204,20 @@ func TestManagerCreatesAndLoadsSessionsWithLocalEnvironment(t *testing.T) {
 	stored, err := manager.GetSession(created.ID)
 	require.NoError(t, err)
 	assert.Same(t, created, stored)
+	child, err := manager.NewSession(t.Context(), acptypes.NewSessionRequest{
+		CWD:  workspace,
+		Meta: map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "loaded-session"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "loaded-session", convtypes.ParentConversationIDFromMetadata(child.Thread.GetMetadata()))
+	assert.NotContains(t, child.Thread.GetMetadata(), convtypes.ConversationForkMetadataKey)
+	_, err = manager.NewSession(t.Context(), acptypes.NewSessionRequest{
+		CWD:  workspace,
+		Meta: map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "missing"}},
+	})
+	require.ErrorContains(t, err, "parent conversation is unavailable")
+	_, err = manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: child.ID, Meta: map[string]any{"conversationHierarchy": nil}})
+	require.ErrorContains(t, err, "only supported by session/new")
 
 	loaded, err := manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: "loaded-session", CWD: workspace})
 	require.NoError(t, err)

@@ -225,6 +225,7 @@ type ConversationForkParams struct {
 	RunID      string `json:"runId"`
 	ToolCallID string `json:"toolCallId"`
 	Name       string `json:"name,omitempty"`
+	AsChild    bool   `json:"asChild,omitempty"`
 }
 
 // ConversationForkResult identifies the centrally persisted child conversation.

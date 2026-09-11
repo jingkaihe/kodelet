@@ -67,7 +67,8 @@ type conversationForkResult struct {
 }
 
 type conversationForkParams struct {
-	Name string `json:"name,omitempty"`
+	Name    string `json:"name,omitempty"`
+	AsChild bool   `json:"asChild,omitempty"`
 }
 
 type rpcHostRequestHandler interface {

@@ -30,6 +30,48 @@ func setupTestDB(t *testing.T, dbPath string) {
 	require.NoError(t, runner.Run(ctx, migrations.All()))
 }
 
+func TestStoreHierarchyMetadataSurvivesSaveAndFork(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hierarchy.db")
+	setupTestDB(t, dbPath)
+	store, err := NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	parent := conversations.NewConversationRecord("parent")
+	require.NoError(t, store.Save(t.Context(), parent))
+	fresh := conversations.NewConversationRecord("fresh")
+	fresh.Metadata[conversations.ParentConversationIDMetadataKey] = parent.ID
+	require.NoError(t, store.Save(t.Context(), fresh))
+	child := conversations.ForkConversationRecordWithOptions(parent, conversations.ConversationForkOptions{AsChild: true})
+	require.NoError(t, store.SaveConversationFork(t.Context(), parent.ID, child))
+	for _, id := range []string{fresh.ID, child.ID} {
+		loaded, err := store.Load(t.Context(), id)
+		require.NoError(t, err)
+		assert.Equal(t, parent.ID, conversations.ParentConversationIDFromMetadata(loaded.Metadata))
+		loaded.Summary = "continued"
+		require.NoError(t, store.Save(t.Context(), loaded))
+	}
+	result, err := store.Query(t.Context(), conversations.QueryOptions{})
+	require.NoError(t, err)
+	for _, summary := range result.ConversationSummaries {
+		if summary.ID != parent.ID {
+			assert.Equal(t, parent.ID, summary.ParentConversationID)
+		}
+	}
+	loaded, err := store.Load(t.Context(), fresh.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, loaded.Metadata, conversations.ConversationForkMetadataKey)
+	// Parent validation must not fetch or decode arbitrary message/tool history.
+	_, err = store.db.ExecContext(t.Context(), "UPDATE conversations SET raw_messages = 'unreadable', tool_results = 'unreadable' WHERE id = ?", parent.ID)
+	require.NoError(t, err)
+	metadata, err := store.LoadMetadata(t.Context(), parent.ID)
+	require.NoError(t, err)
+	assert.Empty(t, metadata)
+	_, err = store.LoadMetadata(t.Context(), "missing")
+	require.ErrorIs(t, err, conversations.ErrConversationNotFound)
+	_, err = store.Load(t.Context(), parent.ID)
+	require.Error(t, err)
+}
+
 func TestStore_BasicOperations(t *testing.T) {
 	ctx := context.Background()
 

@@ -565,11 +565,19 @@ Registration accepts ordinary profile JSON with native snake_case keys and built
 
 ### Live conversation forks
 
-When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task" }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`.
+When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task", "asChild": true }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`. `asChild` defaults to false and requires `capabilities.conversations.hierarchy: true`.
 
-SDK calls are `ctx.forkConversation({ name })` in TypeScript and `ctx.fork_conversation(name=name)` in Python. Omitting `name` preserves the source title.
+SDK calls are `ctx.forkConversation({ name, asChild: true })` in TypeScript and `ctx.fork_conversation(name=name, as_child=True)` in Python. Omitting `name` preserves the source title.
 
 Fork availability is invocation-scoped and requires a persistent live thread. Unavailable forks use `ConversationForkUnavailableError`; persistence failures remain ordinary host RPC errors.
+
+### Conversation hierarchy
+
+`metadata.parent_conversation_id` is the canonical parent link, independent of `conversation_fork`; summaries and detail responses expose `parentConversationId`. Child forks persist the invoking conversation as parent atomically. Ordinary forks strip inherited parent metadata. Resumes preserve the link; reassignment and self-parenting are rejected.
+
+Fresh sessions use SDK `parentConversationId` / `parent_conversation_id`, carried by ACP `session/new` as `_meta.conversationHierarchy: { version: 1, parentConversationId: "..." }`, then by `POST /api/chat` as `parentConversationId`. The parent must exist. ACP advertises `_meta.conversationHierarchy: { version: 1 }` at initialization and rejects hierarchy metadata on `session/load`.
+
+ACP checks the daemon's `/api/chat/settings` `conversationHierarchyVersion: 1` before accepting a child session. Runner registration returns `conversationHierarchy: true`; only negotiated runners advertise extension hierarchy support and forward fork `asChild`. Unsupported peers fail explicitly rather than silently creating an unlinked conversation.
 
 ### Background extension work
 

@@ -41,6 +41,8 @@ type conversationPickerState struct {
 type conversationPickerItem struct {
 	key        string
 	id         string
+	parentID   string
+	treePrefix string
 	title      string
 	cwd        string
 	updatedAt  time.Time
@@ -103,11 +105,24 @@ func (m *model) applyConversationList(msg conversationListMsg) {
 	m.conversationPicker.loading = false
 	m.conversationPicker.err = msg.err
 	m.conversationPicker.summaries = append([]convtypes.ConversationSummary(nil), msg.summaries...)
+	parents := make(map[string]string, len(msg.summaries))
+	for _, summary := range msg.summaries {
+		if id := strings.TrimSpace(summary.ID); id != "" {
+			parents[id] = conversationPickerParentID(summary)
+		}
+	}
+	for _, state := range m.conversations {
+		if state != nil {
+			if parentID, ok := parents[strings.TrimSpace(state.conversationID)]; ok {
+				state.parentConversationID = parentID
+			}
+		}
+	}
 	m.clampConversationPickerSelection()
 }
 
 func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSummary) []conversationPickerItem {
-	itemsByKey := make(map[string]conversationPickerItem, len(summaries)+len(m.conversations))
+	itemsByID := make(map[string]conversationPickerItem, len(summaries)+len(m.conversations))
 	for _, summary := range summaries {
 		id := strings.TrimSpace(summary.ID)
 		if id == "" {
@@ -120,9 +135,10 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 		if fallback == "" {
 			fallback = "Untitled conversation"
 		}
-		itemsByKey[id] = conversationPickerItem{
+		itemsByID[id] = conversationPickerItem{
 			key:       id,
 			id:        id,
+			parentID:  conversationPickerParentID(summary),
 			title:     conversations.ResolveConversationName(summary.Metadata, fallback),
 			cwd:       strings.TrimSpace(summary.CWD),
 			updatedAt: summary.UpdatedAt,
@@ -130,18 +146,35 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 		}
 	}
 
-	for key, state := range m.conversations {
+	// Durable IDs identify rows even when an ongoing conversation still uses a
+	// temporary state key. Merge aliases deterministically, preferring the active one.
+	keys := make([]string, 0, len(m.conversations))
+	for key := range m.conversations {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		state := m.conversations[key]
 		if state == nil {
 			continue
 		}
-		if conversationID := strings.TrimSpace(state.conversationID); conversationID != "" && conversationID != key {
-			delete(itemsByKey, conversationID)
+		id := strings.TrimSpace(state.conversationID)
+		if active := m.conversations[m.activeConversationKey]; active != nil && key != m.activeConversationKey && id != "" && id == strings.TrimSpace(active.conversationID) {
+			continue
 		}
-		item := itemsByKey[key]
+		identity := id
+		if identity == "" {
+			identity = key
+		}
+		item, found := itemsByID[identity]
 		item.key = key
-		item.id = strings.TrimSpace(state.conversationID)
-		item.title = strings.TrimSpace(state.title)
-		if item.title == "" {
+		item.id = id
+		if !found {
+			item.parentID = state.parentConversationID
+		}
+		if title := strings.TrimSpace(state.title); title != "" {
+			item.title = title
+		} else if item.title == "" {
 			item.title = conversationStateFallbackTitle(state)
 		}
 		if strings.TrimSpace(state.cwd) != "" {
@@ -153,35 +186,46 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 		item.running = state.running
 		item.unread = state.unread
 		item.needsInput = state.activeUIPrompt != nil
-		itemsByKey[key] = item
+		itemsByID[identity] = item
 	}
 
-	items := make([]conversationPickerItem, 0, len(itemsByKey)+1)
+	items := make([]conversationPickerItem, 0, len(itemsByID)+1)
 	items = append(items, conversationPickerItem{title: "New conversation", isNew: true})
-	for _, item := range itemsByKey {
+	for _, item := range itemsByID {
 		items = append(items, item)
 	}
 	sort.SliceStable(items[1:], func(i, j int) bool {
-		left := items[i+1]
-		right := items[j+1]
-		if left.running != right.running {
-			return left.running
-		}
-		if left.unread != right.unread {
-			return left.unread
-		}
-		if !left.updatedAt.Equal(right.updatedAt) {
-			return left.updatedAt.After(right.updatedAt)
-		}
-		leftTitle := strings.ToLower(left.title)
-		rightTitle := strings.ToLower(right.title)
-		if leftTitle != rightTitle {
-			return leftTitle < rightTitle
-		}
-		// Items originate from a map, so equal visible fields still need a stable order.
-		return left.key < right.key
+		return conversationPickerItemLess(items[i+1], items[j+1])
 	})
 	return items
+}
+
+func conversationPickerParentID(summary convtypes.ConversationSummary) string {
+	if parentID := convtypes.ParentConversationIDFromMetadata(summary.Metadata); parentID != "" {
+		return parentID
+	}
+	return strings.TrimSpace(summary.ParentConversationID)
+}
+
+func conversationPickerItemLess(left, right conversationPickerItem) bool {
+	if left.isNew != right.isNew {
+		return left.isNew
+	}
+	if left.running != right.running {
+		return left.running
+	}
+	if left.unread != right.unread {
+		return left.unread
+	}
+	if !left.updatedAt.Equal(right.updatedAt) {
+		return left.updatedAt.After(right.updatedAt)
+	}
+	leftTitle := strings.ToLower(left.title)
+	rightTitle := strings.ToLower(right.title)
+	if leftTitle != rightTitle {
+		return leftTitle < rightTitle
+	}
+	return conversationPickerSelectionKey(left) < conversationPickerSelectionKey(right)
 }
 
 func conversationStateFallbackTitle(state *conversationState) string {
@@ -207,17 +251,127 @@ func (m model) filteredConversationPickerItems() []conversationPickerItem {
 	}
 	items := m.mergeConversationPickerItems(m.conversationPicker.summaries)
 	query := strings.ToLower(strings.TrimSpace(m.conversationPicker.query))
-	if query == "" {
-		return items
-	}
-	filtered := make([]conversationPickerItem, 0, len(items))
-	for _, item := range items {
-		haystack := strings.ToLower(strings.Join([]string{item.title, item.id, item.cwd}, " "))
-		if strings.Contains(haystack, query) {
-			filtered = append(filtered, item)
+	return conversationPickerTree(items, query)
+}
+
+// conversationPickerTree builds a forest from the loaded rows only. Children
+// retain the merge's ordering; roots inherit activity from their entire tree.
+func conversationPickerTree(items []conversationPickerItem, query string) []conversationPickerItem {
+	byID := make(map[string]int, len(items))
+	for i, item := range items {
+		if item.id != "" {
+			byID[item.id] = i
 		}
 	}
-	return filtered
+	parents := make([]int, len(items))
+	for i, item := range items {
+		parents[i] = -1
+		if parent, ok := byID[item.parentID]; ok && parent != i {
+			parents[i] = parent
+		}
+	}
+	// Remove every edge inside a cycle, not just the first encountered edge, so
+	// malformed cycle members consistently fall back to standalone roots.
+	visited := make([]uint8, len(items))
+	for start := range items {
+		if visited[start] != 0 {
+			continue
+		}
+		path := []int{}
+		current := start
+		for current >= 0 && visited[current] == 0 {
+			visited[current] = 1
+			path = append(path, current)
+			current = parents[current]
+		}
+		if current >= 0 && visited[current] == 1 {
+			for node := current; ; {
+				next := parents[node]
+				parents[node] = -1
+				if next == current {
+					break
+				}
+				node = next
+			}
+		}
+		for _, node := range path {
+			visited[node] = 2
+		}
+	}
+
+	children := make([][]int, len(items))
+	roots := []int{}
+	for i, parent := range parents {
+		if parent >= 0 {
+			children[parent] = append(children[parent], i)
+		} else {
+			roots = append(roots, i)
+		}
+	}
+	priorities := make([]conversationPickerItem, len(items))
+	var aggregate func(int) conversationPickerItem
+	aggregate = func(index int) conversationPickerItem {
+		priority := items[index]
+		for _, child := range children[index] {
+			childPriority := aggregate(child)
+			priority.running = priority.running || childPriority.running
+			priority.unread = priority.unread || childPriority.unread
+			if childPriority.updatedAt.After(priority.updatedAt) {
+				priority.updatedAt = childPriority.updatedAt
+			}
+		}
+		return priority
+	}
+	for _, root := range roots {
+		priorities[root] = aggregate(root)
+	}
+	sort.SliceStable(roots, func(i, j int) bool {
+		return conversationPickerItemLess(priorities[roots[i]], priorities[roots[j]])
+	})
+
+	keep := make([]bool, len(items))
+	for i, item := range items {
+		haystack := strings.ToLower(strings.Join([]string{item.title, item.id, item.cwd}, " "))
+		if strings.Contains(haystack, query) {
+			for node := i; node >= 0 && !keep[node]; node = parents[node] {
+				keep[node] = true
+			}
+		}
+	}
+	// Prune before generating prefixes so hidden sibling branches leave no guides.
+	for i, siblings := range children {
+		children[i] = siblings[:0]
+		for _, sibling := range siblings {
+			if keep[sibling] {
+				children[i] = append(children[i], sibling)
+			}
+		}
+	}
+	rows := make([]conversationPickerItem, 0, len(items))
+	var appendRow func(int, string, string)
+	appendRow = func(index int, prefix, branch string) {
+		item := items[index]
+		item.treePrefix = prefix + branch
+		rows = append(rows, item)
+		if branch == "├─ " {
+			prefix += "│  "
+		} else if branch != "" {
+			prefix += "   "
+		}
+		for i, child := range children[index] {
+			childBranch := "├─ "
+			if i == len(children[index])-1 {
+				childBranch = "└─ "
+			}
+			appendRow(child, prefix, childBranch)
+		}
+	}
+	for _, root := range roots {
+		if keep[root] {
+			appendRow(root, "", "")
+		}
+	}
+	return rows
 }
 
 func (m *model) clampConversationPickerSelection() {
@@ -233,8 +387,9 @@ func (m *model) clampConversationPickerSelection() {
 	}
 	if selectedKey := m.conversationPicker.selectedKey; selectedKey != "" {
 		for index, item := range items {
-			if conversationPickerSelectionKey(item) == selectedKey {
+			if conversationPickerMatchesSelection(item, selectedKey) {
 				m.conversationPicker.selected = index
+				m.conversationPicker.selectedKey = conversationPickerSelectionKey(item)
 				return
 			}
 		}
@@ -255,7 +410,7 @@ func (m *model) rememberConversationPickerSelection() {
 	if len(items) == 0 {
 		return
 	}
-	index := min(max(0, m.conversationPicker.selected), len(items)-1)
+	index := m.conversationPickerSelectedIndex(items)
 	m.conversationPicker.selectedKey = conversationPickerSelectionKey(items[index])
 }
 
@@ -263,10 +418,15 @@ func conversationPickerSelectionKey(item conversationPickerItem) string {
 	if item.isNew {
 		return "new"
 	}
-	if item.key != "" {
-		return "conversation:" + item.key
+	if item.id != "" {
+		return "conversation:" + item.id
 	}
-	return "conversation:" + item.id
+	return "conversation:" + item.key
+}
+
+func conversationPickerMatchesSelection(item conversationPickerItem, selectedKey string) bool {
+	return conversationPickerSelectionKey(item) == selectedKey ||
+		(!item.isNew && item.key != "" && "conversation:"+item.key == selectedKey)
 }
 
 func (m model) conversationPickerSelectedIndex(items []conversationPickerItem) int {
@@ -275,7 +435,7 @@ func (m model) conversationPickerSelectedIndex(items []conversationPickerItem) i
 	}
 	if selectedKey := m.conversationPicker.selectedKey; selectedKey != "" {
 		for index, item := range items {
-			if conversationPickerSelectionKey(item) == selectedKey {
+			if conversationPickerMatchesSelection(item, selectedKey) {
 				return index
 			}
 		}
@@ -364,6 +524,9 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	if item.isNew {
 		return m.openNewConversationPrompt("")
 	}
+	if state := m.stateForKey(item.key); state != nil {
+		state.parentConversationID = item.parentID
+	}
 	if activated, cmd := m.activateConversation(item.key); activated {
 		return tea.Batch(cmd, m.closeConversationPicker())
 	}
@@ -372,6 +535,7 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	state.initialHistoryPending = true
 	state.deferSubmitUntilHistory = true
 	state.requestedCWD = ""
+	state.parentConversationID = item.parentID
 	state.title = item.title
 	state.updatedAt = item.updatedAt
 	if item.cwd != "" {
@@ -505,6 +669,12 @@ func (m model) renderConversationPickerItemAt(item conversationPickerItem, width
 		return fitVisible(status, width)
 	}
 	titleWidth, workspaceWidth, ageWidth := conversationPickerColumnWidths(width)
+	// Keep the end of a deep branch guide without allowing indentation to hide
+	// the whole title, especially on narrow terminals.
+	prefixWidth := titleWidth - min(conversationPickerTitleMinimumWidth, titleWidth/2)
+	if prefixWidth > 0 {
+		title = fitVisible(item.treePrefix, prefixWidth) + title
+	}
 	if workspaceWidth == 0 {
 		return status + padVisible(fitVisiblePrefix(title, titleWidth), titleWidth)
 	}

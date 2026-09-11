@@ -106,14 +106,15 @@ type ControlPlaneProfileOption struct {
 
 // ControlPlaneChatSettings contains server-owned settings for a new conversation.
 type ControlPlaneChatSettings struct {
-	CurrentProfile         string                      `json:"currentProfile,omitempty"`
-	Profiles               []ControlPlaneProfileOption `json:"profiles"`
-	ReasoningEffort        string                      `json:"reasoningEffort"`
-	ReasoningEffortOptions []string                    `json:"reasoningEffortOptions"`
-	DefaultCWD             string                      `json:"defaultCWD,omitempty"`
-	DefaultRunnerID        string                      `json:"defaultRunnerId,omitempty"`
-	DefaultRunnerHostID    string                      `json:"defaultRunnerHostId,omitempty"`
-	DefaultRunnerReady     bool                        `json:"defaultRunnerReady"`
+	ConversationHierarchyVersion int                         `json:"conversationHierarchyVersion,omitempty"`
+	CurrentProfile               string                      `json:"currentProfile,omitempty"`
+	Profiles                     []ControlPlaneProfileOption `json:"profiles"`
+	ReasoningEffort              string                      `json:"reasoningEffort"`
+	ReasoningEffortOptions       []string                    `json:"reasoningEffortOptions"`
+	DefaultCWD                   string                      `json:"defaultCWD,omitempty"`
+	DefaultRunnerID              string                      `json:"defaultRunnerId,omitempty"`
+	DefaultRunnerHostID          string                      `json:"defaultRunnerHostId,omitempty"`
+	DefaultRunnerReady           bool                        `json:"defaultRunnerReady"`
 }
 
 // NewClient creates a daemon HTTP client with an optional runner selection.
@@ -550,34 +551,36 @@ func (r *Client) LoadConversation(ctx context.Context, conversationID string) (C
 		title = conversationID
 	}
 	return ConversationHistory{
-		ID:                 firstNonEmptyString(result.ID, conversationID),
-		CWD:                strings.TrimSpace(result.CWD),
-		Title:              title,
-		Provider:           strings.TrimSpace(result.Provider),
-		Profile:            strings.TrimSpace(result.Profile),
-		ReasoningEffort:    strings.TrimSpace(result.ReasoningEffort),
-		RunnerID:           strings.TrimSpace(result.RunnerID),
-		EnvironmentProfile: strings.TrimSpace(result.EnvironmentProfile),
-		UpdatedAt:          result.UpdatedAt,
-		Usage:              result.Usage,
-		Messages:           messages,
+		ID:                   firstNonEmptyString(result.ID, conversationID),
+		ParentConversationID: strings.TrimSpace(result.ParentConversationID),
+		CWD:                  strings.TrimSpace(result.CWD),
+		Title:                title,
+		Provider:             strings.TrimSpace(result.Provider),
+		Profile:              strings.TrimSpace(result.Profile),
+		ReasoningEffort:      strings.TrimSpace(result.ReasoningEffort),
+		RunnerID:             strings.TrimSpace(result.RunnerID),
+		EnvironmentProfile:   strings.TrimSpace(result.EnvironmentProfile),
+		UpdatedAt:            result.UpdatedAt,
+		Usage:                result.Usage,
+		Messages:             messages,
 	}, nil
 }
 
 type controlPlaneConversationResponse struct {
-	ID                 string                                    `json:"id"`
-	UpdatedAt          time.Time                                 `json:"updatedAt"`
-	Provider           string                                    `json:"provider"`
-	CWD                string                                    `json:"cwd"`
-	Profile            string                                    `json:"profile"`
-	ReasoningEffort    string                                    `json:"reasoningEffort"`
-	RunnerID           string                                    `json:"runnerId"`
-	EnvironmentProfile string                                    `json:"environmentProfile"`
-	Summary            string                                    `json:"summary"`
-	Usage              llmtypes.Usage                            `json:"usage"`
-	Messages           []controlPlaneConversationMessage         `json:"messages"`
-	Entries            []conversations.StreamableMessage         `json:"entries"`
-	ToolResults        map[string]tooltypes.StructuredToolResult `json:"toolResults"`
+	ID                   string                                    `json:"id"`
+	ParentConversationID string                                    `json:"parentConversationId,omitempty"`
+	UpdatedAt            time.Time                                 `json:"updatedAt"`
+	Provider             string                                    `json:"provider"`
+	CWD                  string                                    `json:"cwd"`
+	Profile              string                                    `json:"profile"`
+	ReasoningEffort      string                                    `json:"reasoningEffort"`
+	RunnerID             string                                    `json:"runnerId"`
+	EnvironmentProfile   string                                    `json:"environmentProfile"`
+	Summary              string                                    `json:"summary"`
+	Usage                llmtypes.Usage                            `json:"usage"`
+	Messages             []controlPlaneConversationMessage         `json:"messages"`
+	Entries              []conversations.StreamableMessage         `json:"entries"`
+	ToolResults          map[string]tooltypes.StructuredToolResult `json:"toolResults"`
 }
 
 type controlPlaneConversationMessage struct {

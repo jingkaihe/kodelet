@@ -259,7 +259,10 @@ func (t *Thread) ForkConversation(ctx context.Context, snapshot func(context.Con
 	if err != nil {
 		return "", err
 	}
-	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
+	forkOptions := convtypes.ConversationForkOptions{
+		Mode:    convtypes.ConversationForkModeLiveSnapshot,
+		AsChild: convtypes.ConversationForkAsChildFromContext(ctx),
+	}
 	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
 		forkOptions.Initiator = &initiator
 	}

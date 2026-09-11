@@ -256,12 +256,13 @@ func SupportsVersion(versions []int, version int) bool {
 
 // RegisterResult establishes the stable runner ID and live connection generation.
 type RegisterResult struct {
-	RunnerID            string `json:"runnerId"`
-	ProtocolVersion     int    `json:"protocolVersion"`
-	ConnectionID        string `json:"connectionId"`
-	Generation          int64  `json:"generation"`
-	HeartbeatIntervalMS int64  `json:"heartbeatIntervalMs"`
-	RemoteProfiles      bool   `json:"remoteProfiles,omitempty"`
+	RunnerID              string `json:"runnerId"`
+	ProtocolVersion       int    `json:"protocolVersion"`
+	ConnectionID          string `json:"connectionId"`
+	Generation            int64  `json:"generation"`
+	HeartbeatIntervalMS   int64  `json:"heartbeatIntervalMs"`
+	RemoteProfiles        bool   `json:"remoteProfiles,omitempty"`
+	ConversationHierarchy bool   `json:"conversationHierarchy,omitempty"`
 }
 
 // RunnerState is the application-level availability reported by heartbeats.

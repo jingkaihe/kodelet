@@ -160,6 +160,18 @@ func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversatio
 	return artifacts.SaveReferences(ctx, tx, record.ID, record.ToolResults)
 }
 
+// LoadMetadata retrieves only persisted metadata, without decoding message or tool history.
+func (s *Store) LoadMetadata(ctx context.Context, id string) (map[string]any, error) {
+	var metadata JSONField[map[string]any]
+	if err := s.db.GetContext(ctx, &metadata, "SELECT metadata FROM conversations WHERE id = ?", id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(conversations.ErrConversationNotFound, "%s", id)
+		}
+		return nil, errors.Wrap(err, "failed to load conversation metadata")
+	}
+	return metadata.Data, nil
+}
+
 // Load retrieves a conversation record by ID
 func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	var dbRecord dbConversationRecord

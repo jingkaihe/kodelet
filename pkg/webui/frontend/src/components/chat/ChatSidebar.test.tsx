@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { AuthPrincipal } from "../../types";
-import ChatSidebar, { ConversationSearchDialog } from "./ChatSidebar";
+import type { AuthPrincipal, Conversation } from "../../types";
+import ChatSidebar, { ConversationSearchDialog, groupConversationsByCwd } from "./ChatSidebar";
 
 const renderSidebar = (authPrincipal?: AuthPrincipal | null) =>
 	render(
@@ -20,6 +20,122 @@ const renderSidebar = (authPrincipal?: AuthPrincipal | null) =>
 			/>
 		</div>,
 	);
+
+describe("ChatSidebar hierarchy", () => {
+	const conversation = (id: string, parent?: string, day = 1): Conversation => ({
+		id,
+		summary: id,
+		cwd: "/workspace/main",
+		createdAt: "2026-09-01T00:00:00Z",
+		updatedAt: `2026-09-${String(day).padStart(2, "0")}T00:00:00Z`,
+		messageCount: 1,
+		metadata: parent ? { parent_conversation_id: parent } : undefined,
+	});
+	const callbacks = () => ({
+		loading: false,
+		onDeleteConversation: vi.fn(),
+		onForkConversation: vi.fn(),
+		onNewChat: vi.fn(),
+		onSearch: vi.fn(),
+		onSelectConversation: vi.fn(),
+	});
+
+	it("orders trees by descendant activity and groups children under the root workspace", () => {
+		const input = [
+			{ ...conversation("grandchild", "child", 9), cwd: "/workspace/other" },
+			conversation("other-root", undefined, 8),
+			conversation("sibling", "parent", 7),
+			conversation("child", "parent", 2),
+			conversation("parent"),
+		];
+		const groups = groupConversationsByCwd(input);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].cwd).toBe("/workspace/main");
+		expect(groups[0].conversations.map(({ id, depth }) => [id, depth])).toEqual([
+			["parent", 0], ["child", 1], ["grandchild", 2], ["sibling", 1], ["other-root", 0],
+		]);
+		expect(input[0].id).toBe("grandchild");
+		expect(input[0]).not.toHaveProperty("depth");
+	});
+
+	it("keeps missing parents and malformed cycles visible exactly once without using fork lineage", () => {
+		const groups = groupConversationsByCwd([
+			conversation("orphan", "missing"),
+			conversation("self", "self"),
+			conversation("a", "b"),
+			conversation("b", "a"),
+			conversation("nested", "b"),
+			{ ...conversation("copy"), metadata: { conversation_fork: { source_conversation_id: "a" } } },
+			conversation("orphan", "missing"),
+		]);
+		const rows = groups.flatMap((group) => group.conversations);
+		expect(rows).toHaveLength(6);
+		expect(new Set(rows.map(({ id }) => id)).size).toBe(6);
+		for (const id of ["orphan", "self", "copy"]) {
+			expect(rows.find((row) => row.id === id)?.depth).toBe(0);
+		}
+		expect(rows.find((row) => row.id === "nested")?.depth).toBeGreaterThan(0);
+	});
+
+	it("supports projected parent IDs and deep chains without recursive rendering", () => {
+		const input = Array.from({ length: 2000 }, (_, index) => ({
+			...conversation(`node-${index}`),
+			parentConversationId: index ? `node-${index - 1}` : undefined,
+		}));
+		const rows = groupConversationsByCwd(input.reverse())[0].conversations;
+		expect(rows).toHaveLength(2000);
+		expect(rows[0].id).toBe("node-0");
+		expect(rows[1999].depth).toBe(1999);
+	});
+
+	it("preserves child selection, running indicators and per-conversation actions", () => {
+		const props = callbacks();
+		render(<ChatSidebar {...props} activeConversationId="child" conversations={[
+			{ ...conversation("child", "parent", 3), isRunning: true },
+			conversation("parent"),
+			conversation("orphan", "missing", 2),
+		]} />);
+		const rows = screen.getAllByTestId(/^conversation-row-/);
+		expect(rows.map((row) => row.dataset.testid)).toEqual([
+			"conversation-row-parent", "conversation-row-child", "conversation-row-orphan",
+		]);
+		const child = screen.getByTestId("conversation-row-child");
+		expect(child).toHaveAttribute("data-depth", "1");
+		expect(child).toHaveClass("active", "is-child");
+		expect(screen.getByTestId("conversation-row-parent")).not.toHaveClass("is-child");
+		expect(child.querySelector(".conversation-branch")).toHaveClass("last-child");
+		expect(within(child).getByTestId("conversation-running-indicator-child")).toBeInTheDocument();
+		fireEvent.click(within(child).getByRole("button", { name: "child Running" }));
+		expect(props.onSelectConversation).toHaveBeenCalledWith("child");
+		fireEvent.click(within(child).getByRole("button", { name: "More actions for child" }));
+		expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+		fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+		expect(props.onForkConversation).toHaveBeenCalledWith("child");
+		expect(within(screen.getByTestId("conversation-row-orphan")).getByText("Child")).toBeInTheDocument();
+	});
+
+	it("keeps whole trees together at Show more boundaries and reveals active descendants", () => {
+		const props = callbacks();
+		const conversations = [
+			...Array.from({ length: 9 }, (_, index) => conversation(`recent-${index}`, undefined, 9)),
+			conversation("parent", undefined, 8),
+			...Array.from({ length: 3 }, (_, index) => conversation(`child-${index}`, "parent", 7)),
+			...Array.from({ length: 10 }, (_, index) => conversation(`older-${index}`, undefined, 6)),
+			conversation("last-parent", undefined, 2),
+			conversation("last-child", "last-parent"),
+		];
+		const { rerender } = render(<ChatSidebar {...props} activeConversationId={null} conversations={conversations} />);
+		expect(screen.getAllByTestId(/^conversation-row-/)).toHaveLength(13);
+		expect(screen.getByTestId("conversation-row-child-2")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+		expect(screen.getAllByTestId(/^conversation-row-/)).toHaveLength(23);
+		fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+		expect(screen.getAllByTestId(/^conversation-row-/)).toHaveLength(13);
+		rerender(<ChatSidebar {...props} activeConversationId="last-child" conversations={conversations} />);
+		expect(screen.getByTestId("conversation-row-last-child")).toHaveClass("active");
+		expect(screen.getByTestId("conversation-row-last-parent")).toBeInTheDocument();
+	});
+});
 
 describe("ChatSidebar running indicator", () => {
 	it("uses the shared TUI dot spinner for running conversations", () => {

@@ -1056,20 +1056,21 @@ func TestServiceRemoteProfileCapabilityFollowsServerRegistration(t *testing.T) {
 	})
 	for generation, supported := range []bool{false, true, false} {
 		require.NoError(t, service.SetRegistration(protocol.RegisterResult{
-			RunnerID: "runner-1", Generation: int64(generation + 1), RemoteProfiles: supported,
+			RunnerID: "runner-1", Generation: int64(generation + 1), RemoteProfiles: supported, ConversationHierarchy: supported,
 		}))
 		_, err := service.ProbeManifest(t.Context(), "")
 		require.NoError(t, err)
-		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported, ConversationHierarchy: supported}, provider.capabilities)
 		_, err = service.inspectWorkspace(t.Context(), protocol.WorkspaceInspectParams{Operation: "recipe.list"})
 		require.NoError(t, err)
-		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported}, provider.capabilities)
+		assert.Equal(t, extensions.RuntimeCapabilities{RemoteProfiles: supported, ConversationHierarchy: supported}, provider.capabilities)
 		_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "run", ConversationID: "conversation"})
 		require.NoError(t, err)
-		assert.Equal(t, extensions.RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: supported}, provider.capabilities)
+		assert.Equal(t, extensions.RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: supported, ConversationHierarchy: supported}, provider.capabilities)
 		require.ErrorContains(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 4, RemoteProfiles: !supported}), "active runs")
 		ctx := service.decorateRunContext(t.Context(), "run", "conversation")
 		assert.Equal(t, supported, extensions.RuntimeCapabilitiesFromContext(ctx).RemoteProfiles)
+		assert.Equal(t, supported, extensions.RuntimeCapabilitiesFromContext(ctx).ConversationHierarchy)
 		require.NoError(t, service.closeRun(t.Context(), "run"))
 	}
 }

@@ -96,14 +96,15 @@ func (dbr *dbConversationRecord) ToConversationRecord() conversations.Conversati
 // ToConversationSummary converts database summary to domain model
 func (dbs *dbConversationSummary) ToConversationSummary() conversations.ConversationSummary {
 	summary := conversations.ConversationSummary{
-		ID:           dbs.ID,
-		MessageCount: dbs.MessageCount,
-		FirstMessage: dbs.FirstMessage,
-		Provider:     dbs.Provider,
-		Metadata:     dbs.Metadata.Data,
-		Usage:        dbs.Usage.Data,
-		CreatedAt:    dbs.CreatedAt,
-		UpdatedAt:    dbs.UpdatedAt,
+		ID:                   dbs.ID,
+		ParentConversationID: conversations.ParentConversationIDFromMetadata(dbs.Metadata.Data),
+		MessageCount:         dbs.MessageCount,
+		FirstMessage:         dbs.FirstMessage,
+		Provider:             dbs.Provider,
+		Metadata:             dbs.Metadata.Data,
+		Usage:                dbs.Usage.Data,
+		CreatedAt:            dbs.CreatedAt,
+		UpdatedAt:            dbs.UpdatedAt,
 	}
 
 	if dbs.Summary != nil {

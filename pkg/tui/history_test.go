@@ -194,7 +194,8 @@ func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
 func TestLoadInitialHistoryUsesInjectedSource(t *testing.T) {
 	source := &conversationSourceRunner{history: chat.ConversationHistory{
 		ID: "conversation-history", CWD: "/only/on/runner", Profile: "stored", Provider: "anthropic", ReasoningEffort: "high",
-		Usage: llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100},
+		ParentConversationID: " parent-id ",
+		Usage:                llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100},
 		Messages: []conversations.StreamableMessage{
 			{Kind: "text", Role: "user", Content: "old prompt"},
 			{Kind: "text", Role: "assistant", Content: "old answer"},
@@ -207,6 +208,7 @@ func TestLoadInitialHistoryUsesInjectedSource(t *testing.T) {
 	assert.True(t, msg.loaded)
 	assert.Equal(t, "/only/on/runner", msg.cwd)
 	assert.Equal(t, "state-key", msg.conversationKey)
+	assert.Equal(t, "parent-id", msg.parentConversationID)
 	assert.Equal(t, "stored", msg.profile)
 	assert.Equal(t, "anthropic", msg.provider)
 	assert.Equal(t, "high", msg.reasoningEffort)

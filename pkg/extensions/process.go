@@ -47,6 +47,8 @@ type Process struct {
 // RuntimeCapabilities describes host capabilities available to an extension process.
 type RuntimeCapabilities struct {
 	BackgroundTasks bool
+	// ConversationHierarchy reports negotiated support for explicit child forks.
+	ConversationHierarchy bool
 	// RemoteProfiles reports negotiated daemon support for profile manifests.
 	RemoteProfiles bool
 }
@@ -76,7 +78,7 @@ func RuntimeCapabilitiesFromContext(ctx context.Context) RuntimeCapabilities {
 			return capabilities
 		}
 	}
-	return RuntimeCapabilities{BackgroundTasks: true}
+	return RuntimeCapabilities{BackgroundTasks: true, ConversationHierarchy: true}
 }
 
 var extensionProcessGeneration atomic.Uint64
@@ -368,7 +370,8 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 				"submit": true,
 			},
 			"conversations": map[string]any{
-				"fork": true,
+				"fork":      true,
+				"hierarchy": runtimeCapabilities.ConversationHierarchy,
 			},
 			"ui": map[string]any{
 				"input":      true,
@@ -503,6 +506,9 @@ func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method s
 				return nil, &rpcError{Code: -32602, Message: err.Error()}
 			}
 		}
+		if forkParams.AsChild && !RuntimeCapabilitiesFromContext(ctx).ConversationHierarchy {
+			return nil, &rpcError{Code: conversationForkUnavailableCode, Message: "conversation hierarchy is unavailable; upgrade the daemon and runner"}
+		}
 		toolContext := kodelettools.ToolContextFromContext(ctx)
 		forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker)
 		if !ok {
@@ -516,6 +522,7 @@ func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method s
 			})
 		}
 		ctx = conversationmeta.ContextWithConversationForkName(ctx, forkParams.Name)
+		ctx = conversationtypes.ContextWithConversationForkAsChild(ctx, forkParams.AsChild)
 		conversationID, err := forker.ForkConversation(ctx)
 		if err != nil {
 			if errors.Is(err, llmtypes.ErrConversationForkUnavailable) {

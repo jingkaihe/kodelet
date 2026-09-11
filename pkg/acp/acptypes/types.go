@@ -3,7 +3,12 @@
 // applications (IDEs, text editors, or other UIs).
 package acptypes
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/pkg/errors"
+)
 
 // ProtocolVersion is the ACP protocol version (major only)
 const ProtocolVersion = 1
@@ -115,6 +120,29 @@ type AuthMethod struct {
 type NewSessionRequest struct {
 	CWD  string         `json:"cwd"`
 	Meta map[string]any `json:"_meta,omitempty"`
+}
+
+// ConversationHierarchyParent reads the versioned creation-only ACP hierarchy extension.
+func ConversationHierarchyParent(meta map[string]any) (string, error) {
+	value, present := meta["conversationHierarchy"]
+	if !present {
+		return "", nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", errors.Wrap(err, "invalid conversationHierarchy metadata")
+	}
+	var hierarchy struct {
+		Version              int    `json:"version"`
+		ParentConversationID string `json:"parentConversationId"`
+	}
+	if err := json.Unmarshal(data, &hierarchy); err != nil {
+		return "", errors.Wrap(err, "invalid conversationHierarchy metadata")
+	}
+	if hierarchy.Version != 1 || strings.TrimSpace(hierarchy.ParentConversationID) == "" {
+		return "", errors.New("conversationHierarchy requires version 1 and a nonempty parentConversationId")
+	}
+	return hierarchy.ParentConversationID, nil
 }
 
 // NewSessionResponse returns the new session ID

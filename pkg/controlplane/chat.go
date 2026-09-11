@@ -379,6 +379,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ConversationID = conversationID
+	if err := conversations.ValidateParentConversation(requestCtx, s.conversationService, conversationID, req.ParentConversationID); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
 	var receipt chat.TurnReceipt
 	if s.turns != nil {
 		var admitted bool

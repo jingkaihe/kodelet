@@ -231,6 +231,18 @@ func (m *Manager) storeSession(ctx context.Context, session *Session) {
 
 // NewSession creates a new session
 func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest) (*Session, error) {
+	parentID, err := acptypes.ConversationHierarchyParent(req.Meta)
+	if err != nil {
+		return nil, err
+	}
+	if parentID != "" {
+		if m.store == nil {
+			return nil, pkgerrors.New("conversation hierarchy requires a conversation store")
+		}
+		if err := conversations.ValidateParentConversation(ctx, conversations.NewConversationService(m.store), "", parentID); err != nil {
+			return nil, err
+		}
+	}
 	llmConfig := m.buildLLMConfig(req.CWD)
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
 	llmConfig.Extensions = extensionRuntime
@@ -251,6 +263,9 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		return nil, pkgerrors.Wrap(err, "failed to configure agent environment")
 	}
 	thread.EnablePersistence(ctx, true)
+	if parentID != "" {
+		thread.SetMetadataValue(convtypes.ParentConversationIDMetadataKey, parentID)
+	}
 
 	session := &Session{
 		ID:           acptypes.SessionID(thread.GetConversationID()),
@@ -268,6 +283,9 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 
 // LoadSession loads an existing session
 func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionRequest) (*Session, error) {
+	if _, present := req.Meta["conversationHierarchy"]; present {
+		return nil, pkgerrors.New("conversationHierarchy is only supported by session/new, not session/load")
+	}
 	if m.store == nil {
 		return nil, pkgerrors.New("conversation store not available")
 	}

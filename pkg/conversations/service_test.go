@@ -33,9 +33,74 @@ type atomicMockConversationStore struct {
 	sourceConversationID string
 }
 
+type metadataOnlyConversationStore struct {
+	*mockConversationStore
+}
+
+func (m metadataOnlyConversationStore) LoadMetadata(_ context.Context, id string) (map[string]any, error) {
+	if id == "parent" {
+		return map[string]any{}, nil
+	}
+	return nil, conversations.ErrConversationNotFound
+}
+
+func TestValidateParentUsesMetadataOnlyStore(t *testing.T) {
+	store := metadataOnlyConversationStore{newMockConversationStore()}
+	store.loadFunc = func(context.Context, string) (*conversations.ConversationRecord, error) {
+		assert.Fail(t, "hierarchy validation must not load message or tool history")
+		return nil, errors.New("unexpected full history load")
+	}
+	service := NewConversationService(store)
+	require.NoError(t, ValidateParentConversation(t.Context(), service, "child", "parent"))
+}
+
 func (m *atomicMockConversationStore) SaveConversationFork(ctx context.Context, sourceConversationID string, forked conversations.ConversationRecord) error {
 	m.sourceConversationID = sourceConversationID
 	return m.Save(ctx, forked)
+}
+
+func TestValidateParentConversation(t *testing.T) {
+	store := newMockConversationStore()
+	store.loadFunc = func(_ context.Context, id string) (*conversations.ConversationRecord, error) {
+		if record, ok := store.conversations[id]; ok {
+			return record, nil
+		}
+		return nil, conversations.ErrConversationNotFound
+	}
+	parent := conversations.NewConversationRecord("parent")
+	child := conversations.NewConversationRecord("child")
+	child.Metadata[conversations.ParentConversationIDMetadataKey] = parent.ID
+	require.NoError(t, store.Save(t.Context(), parent))
+	require.NoError(t, store.Save(t.Context(), child))
+	service := NewConversationService(store)
+	for _, test := range []struct {
+		name, child, parent, wantError string
+	}{
+		{name: "fresh child", child: "new", parent: "parent"},
+		{name: "omitted on resume", child: "child"},
+		{name: "idempotent retry", child: "child", parent: "parent"},
+		{name: "self", child: "parent", parent: "parent", wantError: "own parent"},
+		{name: "missing", child: "new", parent: "missing", wantError: "unavailable"},
+		{name: "reassignment", child: "child", parent: "other", wantError: "cannot be assigned or changed"},
+		{name: "existing root", child: "parent", parent: "other", wantError: "cannot be assigned or changed"},
+		{name: "invalid path", child: "new", parent: "../parent", wantError: "invalid"},
+		{name: "whitespace", child: "new", parent: " parent ", wantError: "invalid"},
+		{name: "newline", child: "new", parent: "parent\nnext", wantError: "invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateParentConversation(t.Context(), service, test.child, test.parent)
+			if test.wantError != "" {
+				require.ErrorContains(t, err, test.wantError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+	delete(store.conversations, "parent")
+	require.NoError(t, ValidateParentConversation(t.Context(), service, "child", "parent"))
+	detail, err := service.GetConversation(t.Context(), "child")
+	require.NoError(t, err)
+	assert.Equal(t, "parent", detail.ParentConversationID)
 }
 
 func newMockConversationStore() *mockConversationStore {

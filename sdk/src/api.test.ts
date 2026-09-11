@@ -719,6 +719,54 @@ test("tool context can request a named live conversation fork", async () => {
   ]);
 });
 
+test("tool context explicitly marks child forks without changing ordinary forks", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "fork",
+      description: "Fork as a child",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        await ctx.forkConversation({ name: "reviewer", asChild: true });
+        await ctx.forkConversation({ asChild: true });
+        await ctx.forkConversation({ asChild: false });
+        return "done";
+      },
+    });
+  });
+  const requests: unknown[] = [];
+  const harness = await createTestHarness(extension, {
+    async request(_method, params) {
+      requests.push(params);
+      return { conversationId: "child" };
+    },
+  });
+  harness.initialize({ capabilities: { conversations: { fork: true, hierarchy: true } } });
+  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "done" });
+  assert.deepEqual(requests, [{ name: "reviewer", asChild: true }, { asChild: true }, undefined]);
+});
+
+test("tool context does not silently downgrade a child fork on older hosts", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "fork",
+      description: "Fork as a child",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        await assert.rejects(ctx.forkConversation({ asChild: true }), /hierarchy support.*update Kodelet/);
+        await assert.rejects(ctx.forkConversation({ asChild: "true" as never }), /asChild must be a boolean/);
+        return "unsupported";
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, {
+    async request() {
+      assert.fail("unsupported child fork must not be sent");
+    },
+  });
+  harness.initialize({ capabilities: { conversations: { fork: true } } });
+  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "unsupported" });
+});
+
 test("tool context rejects unavailable live conversation forks", async () => {
   const extension = defineExtension((ext) => {
     ext.registerTool({

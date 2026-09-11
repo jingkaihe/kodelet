@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -516,6 +517,21 @@ func TestBackgroundShutdownBoundsSessionEnd(t *testing.T) {
 type backgroundForkPeer struct {
 	recordingPeer
 	forks []runnerpayload.ConversationForkParams
+}
+
+func TestConversationHierarchyRequiresNegotiatedDaemonSupport(t *testing.T) {
+	peer := &backgroundForkPeer{}
+	forker := &controlPlaneConversationForker{peer: peer, runID: "run", toolCallID: "call"}
+	ctx := convtypes.ContextWithConversationForkAsChild(t.Context(), true)
+	_, err := forker.ForkConversation(ctx)
+	require.ErrorIs(t, err, llmtypes.ErrConversationForkUnavailable)
+	assert.Empty(t, peer.forks, "never send asChild to a daemon that could silently ignore it")
+	forker.hierarchy = true
+	id, err := forker.ForkConversation(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "forked", id)
+	require.Len(t, peer.forks, 1)
+	assert.True(t, peer.forks[0].AsChild)
 }
 
 func (p *backgroundForkPeer) Call(ctx context.Context, method string, params, result any) error {
