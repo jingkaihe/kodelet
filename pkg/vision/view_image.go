@@ -53,7 +53,7 @@ const (
 	viewImagePatchSize            = 32
 	viewImageOriginalMaxDimension = 6000
 	viewImageOriginalMaxPatches   = 10_000
-	viewImageMaxEncodeAttempts    = 8
+	viewImageMaxDownscaleAttempts = 7
 	// The direct Claude API limits each base64-encoded image to 10 MB.
 	// https://platform.claude.com/docs/en/build-with-claude/vision#request-limits
 	maxAnthropicImageBase64Size = 10_000_000
@@ -200,33 +200,39 @@ func MakeViewImageResultBytes(fileBytes []byte, label, detail, model, provider s
 		outputHeight = maxInt(1, int(math.Floor(float64(originalHeight)*scale)))
 	}
 
-	maxBase64Size := 0
-	if strings.EqualFold(strings.TrimSpace(provider), "anthropic") {
-		maxBase64Size = maxAnthropicImageBase64Size
-	}
+	isAnthropic := strings.EqualFold(strings.TrimSpace(provider), "anthropic")
 	needsResize := outputWidth != originalWidth || outputHeight != originalHeight
-	for attempt := 0; attempt < viewImageMaxEncodeAttempts; attempt++ {
-		encodedSize := base64.StdEncoding.EncodedLen(len(outputBytes))
-		if !needsResize && (maxBase64Size == 0 || encodedSize <= maxBase64Size) {
-			break
-		}
-		// First re-encode at the requested resolution to strip padding/metadata
-		// and normalize to eight bits per channel while retaining transparency.
-		if attempt > 0 {
-			// Estimate a smaller pixel area, leaving headroom for encoding overhead.
-			scale := math.Min(0.9, math.Sqrt(float64(maxBase64Size)/float64(encodedSize))*0.95)
-			outputWidth = maxInt(1, int(math.Floor(float64(outputWidth)*scale)))
-			outputHeight = maxInt(1, int(math.Floor(float64(outputHeight)*scale)))
-		}
+	needsReencode := isAnthropic && base64.StdEncoding.EncodedLen(len(outputBytes)) > maxAnthropicImageBase64Size
+	if needsResize || needsReencode {
+		// Re-encode at the requested resolution first. This strips padding/metadata
+		// and converts to eight bits per channel without losing transparency.
 		resized := resizeImageNearest(img, outputWidth, outputHeight)
 		outputBytes, mimeType, err = encodeImageBytes(resized, mimeType)
 		if err != nil {
 			return nil, err
 		}
-		needsResize = false
 	}
-	if maxBase64Size > 0 && base64.StdEncoding.EncodedLen(len(outputBytes)) > maxBase64Size {
-		return nil, errors.Errorf("image could not fit within the %d byte base64 limit", maxBase64Size)
+
+	if isAnthropic {
+		for attempt := 0; ; attempt++ {
+			encodedSize := base64.StdEncoding.EncodedLen(len(outputBytes))
+			if encodedSize <= maxAnthropicImageBase64Size {
+				break
+			}
+			if attempt >= viewImageMaxDownscaleAttempts {
+				return nil, errors.Errorf("image could not fit within the %d byte base64 limit", maxAnthropicImageBase64Size)
+			}
+
+			// Reduce pixel area in proportion to the excess bytes, with encoding headroom.
+			scale := math.Min(0.9, math.Sqrt(float64(maxAnthropicImageBase64Size)/float64(encodedSize))*0.95)
+			outputWidth = maxInt(1, int(math.Floor(float64(outputWidth)*scale)))
+			outputHeight = maxInt(1, int(math.Floor(float64(outputHeight)*scale)))
+			resized := resizeImageNearest(img, outputWidth, outputHeight)
+			outputBytes, mimeType, err = encodeImageBytes(resized, mimeType)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(outputBytes)
