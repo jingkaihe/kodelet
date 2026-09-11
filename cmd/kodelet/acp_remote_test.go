@@ -71,6 +71,13 @@ func TestRemoteACPSelectsRegisteredRunnerAndUsesDiscoveryClient(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/runners":
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"runners": []runnerregistry.Runner{{ID: "runner-123", DisplayName: "workstation", Connected: true, Status: runnerregistry.RunnerStatusIdle}}}))
+		case "/api/chat/settings":
+			assert.Equal(t, "extension-profile", r.URL.Query().Get("profile"))
+			if r.URL.Query().Get("runnerId") != "runner-123" {
+				http.Error(w, "extension profile is not registered on the default runner", http.StatusBadRequest)
+				return
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{ConversationHierarchyVersion: 1}))
 		case "/api/chat/slash-commands":
 			q := r.URL.Query()
 			var options *llmtypes.ExecutionOptions
@@ -95,6 +102,9 @@ func TestRemoteACPSelectsRegisteredRunnerAndUsesDiscoveryClient(t *testing.T) {
 	client, runnerID, err := config.Provider.WaitForRemoteChat(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "runner-123", runnerID)
+	settings, err := client.ChatSettings(t.Context(), "extension-profile")
+	require.NoError(t, err)
+	assert.Equal(t, 1, settings.ConversationHierarchyVersion)
 	target := chat.WorkspaceTarget{RunnerID: runnerID, CWD: "~/repo with spaces", EnvironmentProfile: "gpu", Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true), AllowedTools: new([]string{})}}
 	result, err := client.DiscoverWorkspace(t.Context(), target)
 	require.NoError(t, err)

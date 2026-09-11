@@ -559,6 +559,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			extractionFound := false
 			childFound := false
 			parentFound := false
+			var sdkChildParentID, delegationParentID string
 			for _, summary := range history {
 				stored, err := client.LoadConversation(ctx, summary.ID)
 				require.NoError(t, err)
@@ -584,6 +585,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				}
 				if sdk != "" && summary.Metadata["profile"] == "code-search" {
 					childFound = true
+					sdkChildParentID = stored.ParentConversationID
 					record, err := client.LoadConversationRecord(ctx, summary.ID)
 					require.NoError(t, err)
 					snapshot, present, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
@@ -603,6 +605,7 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 				}
 				if summary.FirstMessage == "delegate code search" && summary.Summary != daemonACPSearchName {
 					parentFound = true
+					delegationParentID = summary.ID
 					snapshot, present, err := conversations.ConfigSnapshotFromMetadata(summary.Metadata)
 					require.NoError(t, err)
 					require.True(t, present)
@@ -623,6 +626,9 @@ func TestDaemonFirstRunAcrossProcessBoundary(t *testing.T) {
 			assert.True(t, extractionFound, "extraction history and usage assertions must run")
 			assert.True(t, childFound, "child has its own persisted conversation")
 			assert.True(t, parentFound, "parent profile, runner metadata and usage assertions must run")
+			if sdk == "typescript" {
+				assert.Equal(t, delegationParentID, sdkChildParentID, "registered-profile ACP children retain their requested parent")
+			}
 			if sdk != "" {
 				profileSettings, err := client.ChatSettings(ctx, "code-search")
 				require.NoError(t, err)
@@ -761,7 +767,7 @@ await runExtension(defineExtension(ext => {
       if (!ctx.runnerId) throw new Error("Missing extension runner metadata");
       const client = new Client({ command: process.env.KODELET_BIN, cwd: ctx.cwd, runner: ctx.runnerId });
       try {
-        const session = await client.createSession({ profile, options: {
+        const session = await client.createSession({ profile, parentConversationId: ctx.conversationId, options: {
           allowedTools: ["file_read", "grep_tool", "glob_tool"],
           noSkills: true, enableFSSearchTools: true, maxTurns: 3,
         }, extensions: [api => api.on("agent.init", () => ({ systemPrompt: { replace: %q } }))] });

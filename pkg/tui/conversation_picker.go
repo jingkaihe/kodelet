@@ -39,17 +39,18 @@ type conversationPickerState struct {
 }
 
 type conversationPickerItem struct {
-	key        string
-	id         string
-	parentID   string
-	treePrefix string
-	title      string
-	cwd        string
-	updatedAt  time.Time
-	running    bool
-	unread     bool
-	needsInput bool
-	isNew      bool
+	key          string
+	id           string
+	parentID     string
+	treePrefix   string
+	title        string
+	cwd          string
+	updatedAt    time.Time
+	running      bool
+	unread       bool
+	needsInput   bool
+	isNew        bool
+	matchesQuery bool
 }
 
 type conversationListMsg struct {
@@ -89,7 +90,7 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 		loading:   !m.remote || m.conversationSource != nil,
 		requestID: requestID,
 	}
-	m.clampConversationPickerSelection()
+	m.resetConversationPickerSelection()
 	focusTransition := tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 	if m.remote && m.conversationSource == nil {
 		return focusTransition
@@ -118,7 +119,11 @@ func (m *model) applyConversationList(msg conversationListMsg) {
 			}
 		}
 	}
-	m.clampConversationPickerSelection()
+	if m.conversationPicker.selectedKey == "" {
+		m.resetConversationPickerSelection()
+	} else {
+		m.clampConversationPickerSelection()
+	}
 }
 
 func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSummary) []conversationPickerItem {
@@ -332,7 +337,8 @@ func conversationPickerTree(items []conversationPickerItem, query string) []conv
 	keep := make([]bool, len(items))
 	for i, item := range items {
 		haystack := strings.ToLower(strings.Join([]string{item.title, item.id, item.cwd}, " "))
-		if strings.Contains(haystack, query) {
+		items[i].matchesQuery = strings.Contains(haystack, query)
+		if items[i].matchesQuery {
 			for node := i; node >= 0 && !keep[node]; node = parents[node] {
 				keep[node] = true
 			}
@@ -372,6 +378,23 @@ func conversationPickerTree(items []conversationPickerItem, query string) []conv
 		}
 	}
 	return rows
+}
+
+// Reset searches to an actual match, not an ancestor included only for context.
+// Explicit keyboard navigation can still select any visible row.
+func (m *model) resetConversationPickerSelection() {
+	if m.conversationPicker == nil {
+		return
+	}
+	m.conversationPicker.selected = 0
+	m.conversationPicker.selectedKey = ""
+	for index, item := range m.filteredConversationPickerItems() {
+		if item.matchesQuery {
+			m.conversationPicker.selected = index
+			m.conversationPicker.selectedKey = conversationPickerSelectionKey(item)
+			return
+		}
+	}
 }
 
 func (m *model) clampConversationPickerSelection() {
@@ -479,15 +502,11 @@ func (m *model) updateConversationPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.selectConversationPickerItem()
 	case "backspace":
 		m.conversationPicker.query = trimLastRune(m.conversationPicker.query)
-		m.conversationPicker.selected = 0
-		m.conversationPicker.selectedKey = ""
-		m.clampConversationPickerSelection()
+		m.resetConversationPickerSelection()
 		return nil
 	case "ctrl+u":
 		m.conversationPicker.query = ""
-		m.conversationPicker.selected = 0
-		m.conversationPicker.selectedKey = ""
-		m.clampConversationPickerSelection()
+		m.resetConversationPickerSelection()
 		return nil
 	}
 	if msg.Text != "" {
@@ -501,9 +520,7 @@ func (m *model) appendConversationPickerQuery(text string) {
 		return
 	}
 	m.conversationPicker.query += text
-	m.conversationPicker.selected = 0
-	m.conversationPicker.selectedKey = ""
-	m.clampConversationPickerSelection()
+	m.resetConversationPickerSelection()
 }
 
 func trimLastRune(value string) string {

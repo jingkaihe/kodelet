@@ -51,11 +51,7 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 	if err != nil {
 		return config, err
 	}
-	client, err := chat.NewClient(serverURL, token, "")
-	if err != nil {
-		return config, err
-	}
-	provider := &daemonACPProvider{client: client}
+	var runnerID string
 	selector, _ := cmd.Flags().GetString("runner")
 	if strings.TrimSpace(selector) != "" {
 		runners, _, err := fetchRunners(ctx, serverURL, token)
@@ -68,9 +64,13 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 		}
 		// Readiness and workspaceDiscovery capability are checked centrally on
 		// discovery, not by starting or acquiring a client-owned workspace.
-		provider.runnerID = runner.ID
+		runnerID = runner.ID
 	}
-	config.Provider = provider
+	client, err := chat.NewClient(serverURL, token, runnerID)
+	if err != nil {
+		return config, err
+	}
+	config.Provider = &daemonACPProvider{client: client, runnerID: runnerID}
 	config.Options = options
 	if cmd.Flags().Changed("profile") {
 		config.Profile, _ = cmd.Flags().GetString("profile")

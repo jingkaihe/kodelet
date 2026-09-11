@@ -983,6 +983,83 @@ func TestConversationPickerNestedBranchesAndFiltering(t *testing.T) {
 	}
 }
 
+func TestConversationPickerSearchSelectsMatchingDescendant(t *testing.T) {
+	child := pickerConversationSummary("child-id", "branch")
+	child.FirstMessage = "Target discussion"
+	child.CWD = "/runner/target"
+	summaries := []convtypes.ConversationSummary{
+		pickerConversationSummary("main", ""), pickerConversationSummary("branch", "main"), child,
+	}
+	for _, test := range []struct {
+		name  string
+		query string
+		msg   tea.Msg
+	}{
+		{name: "typed ID", msg: textKeyPress(" CHILD-ID ")},
+		{name: "pasted title", msg: tea.PasteMsg{Content: "target discussion"}},
+		{name: "edited workspace", query: "/runner/targetx", msg: keyPress(tea.KeyBackspace)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.conversationPicker = &conversationPickerState{query: test.query, summaries: summaries, selectedKey: "conversation:main"}
+
+			updated, _ := m.Update(test.msg)
+			m = updated.(model)
+			items := m.filteredConversationPickerItems()
+			require.Equal(t, []string{"main", "branch", "child-id"}, itemConversationIDs(items), "ancestors remain visible for context")
+			assert.Equal(t, "child-id", items[m.conversationPickerSelectedIndex(items)].id)
+
+			updated, _ = m.Update(keyPress(tea.KeyEnter))
+			m = updated.(model)
+			assert.Nil(t, m.conversationPicker)
+			assert.Equal(t, "child-id", m.conversationID, "Enter opens the match, not its contextual ancestor")
+		})
+	}
+}
+
+func TestSessionsSlashCommandSelectsMatchingChild(t *testing.T) {
+	summaries := []convtypes.ConversationSummary{
+		pickerConversationSummary("main", ""), pickerConversationSummary("child-id", "main"),
+	}
+	for _, loaded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already loaded=%t", loaded), func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			if loaded {
+				for _, summary := range summaries {
+					state := newConversationState(summary.ID, summary.ID, true, m.conversationDefaults)
+					state.parentConversationID = conversationPickerParentID(summary)
+					m.conversations[state.key] = state
+				}
+			}
+			m.slashCommands = withTUIBuiltInSlashCommands(nil)
+			m.textarea.SetValue("/sessions child-id")
+			updated, _ := m.Update(keyPress(tea.KeyEnter))
+			m = updated.(model)
+			require.NotNil(t, m.conversationPicker)
+			if loaded {
+				items := m.filteredConversationPickerItems()
+				require.Equal(t, "child-id", items[m.conversationPickerSelectedIndex(items)].id)
+			}
+
+			msg := conversationListMsg{requestID: m.conversationPicker.requestID, summaries: summaries}
+			m.applyConversationList(msg)
+			items := m.filteredConversationPickerItems()
+			require.Equal(t, []string{"main", "child-id"}, itemConversationIDs(items))
+			require.Equal(t, "child-id", items[m.conversationPickerSelectedIndex(items)].id)
+
+			m.updateConversationPickerKey(keyPress(tea.KeyUp))
+			m.applyConversationList(msg)
+			assert.Equal(t, "main", items[m.conversationPickerSelectedIndex(items)].id, "manual ancestor selection survives refresh")
+			m.updateConversationPickerKey(keyPress(tea.KeyDown))
+			m.updateConversationPickerKey(keyPress(tea.KeyEnter))
+			assert.Nil(t, m.conversationPicker)
+			assert.Equal(t, "child-id", m.conversationID)
+		})
+	}
+}
+
 func TestConversationPickerInvalidRelationshipsRemainVisibleOnce(t *testing.T) {
 	summaries := []convtypes.ConversationSummary{
 		pickerConversationSummary("orphan", "missing-parent"),
