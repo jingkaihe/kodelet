@@ -2,6 +2,8 @@ package vision
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"hash/crc32"
 	"image"
@@ -9,8 +11,10 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,6 +74,97 @@ func TestMakeViewImageResultBytes(t *testing.T) {
 	binary.BigEndian.PutUint32(huge[29:33], crc32.ChecksumIEEE(huge[12:29]))
 	_, err = MakeViewImageResultBytes(huge, "art_huge", "", "gpt-5.5", "openai")
 	require.ErrorContains(t, err, "pixel limit")
+}
+
+func TestMakeViewImageResultBytesFitsAnthropicPayload(t *testing.T) {
+	const payloadLimit = 10_000_000
+	for _, tt := range []struct {
+		name, model, detail string
+		width, height       int
+		sixteenBit          bool
+	}{
+		{"16-bit image within default dimensions", "claude-sonnet-4-6", "", 2048, 768, true},
+		{"original detail exceeds byte limit", "claude-opus-4-8", "original", 2048, 2048, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var img image.Image
+			var pixels []byte
+			if tt.sixteenBit {
+				value := image.NewNRGBA64(image.Rect(0, 0, tt.width, tt.height))
+				img, pixels = value, value.Pix
+			} else {
+				value := image.NewNRGBA(image.Rect(0, 0, tt.width, tt.height))
+				img, pixels = value, value.Pix
+			}
+			_, err := rand.New(rand.NewSource(1)).Read(pixels)
+			require.NoError(t, err)
+			clear(pixels[:8]) // Keep the first pixel transparent through encoding/resizing.
+			var buffer bytes.Buffer
+			require.NoError(t, png.Encode(&buffer, img))
+			data := buffer.Bytes()
+			before := sha256.Sum256(data)
+			require.LessOrEqual(t, len(data), maxArtifactImageSize)
+			require.Greater(t, base64.StdEncoding.EncodedLen(len(data)), payloadLimit)
+
+			result, err := MakeViewImageResultBytes(data, "art_large", tt.detail, tt.model, "anthropic")
+			require.NoError(t, err)
+			encoded := strings.TrimPrefix(result.ImageURL, "data:image/png;base64,")
+			assert.LessOrEqual(t, len(encoded), payloadLimit)
+			processed, err := base64.StdEncoding.DecodeString(encoded)
+			require.NoError(t, err)
+			decoded, format, err := image.Decode(bytes.NewReader(processed))
+			require.NoError(t, err)
+			assert.Equal(t, "png", format)
+			assert.Equal(t, "image/png", result.MimeType)
+			assert.Equal(t, tt.detail, result.Detail)
+			assert.Equal(t, result.Width, decoded.Bounds().Dx())
+			assert.Equal(t, result.Height, decoded.Bounds().Dy())
+			_, _, _, alpha := decoded.At(0, 0).RGBA()
+			assert.Zero(t, alpha, "the model copy must preserve transparency")
+			assert.Equal(t, before, sha256.Sum256(data), "the original artifact bytes must not change")
+			if tt.sixteenBit {
+				assert.Equal(t, tt.width, result.Width, "re-encoding should suffice without downscaling")
+				assert.Equal(t, tt.height, result.Height)
+			} else {
+				assert.Less(t, result.Width, tt.width)
+				assert.Less(t, result.Height, tt.height)
+				assert.Equal(t, result.Width, result.Height, "resizing must preserve the aspect ratio")
+			}
+
+			// The Anthropic budget must not reduce original-detail images for other providers.
+			other, err := MakeViewImageResultBytes(data, "art_large", "original", "gpt-5.5", "openai")
+			require.NoError(t, err)
+			assert.Equal(t, tt.width, other.Width)
+			assert.Equal(t, tt.height, other.Height)
+			assert.True(t, strings.TrimPrefix(other.ImageURL, "data:image/png;base64,") == base64.StdEncoding.EncodeToString(data))
+		})
+	}
+
+	t.Run("padding is removed without changing pixels", func(t *testing.T) {
+		img := testVisionImage(3, 2)
+		var buffer bytes.Buffer
+		require.NoError(t, png.Encode(&buffer, img))
+		data := buffer.Bytes()
+		original, err := MakeViewImageResultBytes(data, "art_small", "", "claude-sonnet-4-6", "anthropic")
+		require.NoError(t, err)
+		assert.Equal(t, "data:image/png;base64,"+base64.StdEncoding.EncodeToString(data), original.ImageURL)
+
+		padded := append(bytes.Clone(data), make([]byte, payloadLimit)...)
+		result, err := MakeViewImageResultBytes(padded, "art_padded", "", "claude-sonnet-4-6", "anthropic")
+		require.NoError(t, err)
+		encoded := strings.TrimPrefix(result.ImageURL, "data:image/png;base64,")
+		assert.LessOrEqual(t, len(encoded), payloadLimit)
+		processed, err := base64.StdEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		decoded, _, err := image.Decode(bytes.NewReader(processed))
+		require.NoError(t, err)
+		assert.Equal(t, img.Bounds(), decoded.Bounds())
+		for y := 0; y < 2; y++ {
+			for x := 0; x < 3; x++ {
+				assert.Equal(t, color.NRGBAModel.Convert(img.At(x, y)), color.NRGBAModel.Convert(decoded.At(x, y)))
+			}
+		}
+	})
 }
 
 func TestSupportsViewImageOriginalDetail(t *testing.T) {
