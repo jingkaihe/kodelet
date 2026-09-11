@@ -1,6 +1,10 @@
 # Kodelet
 
-## 0.6.8-beta
+## 0.6.9-beta
+
+Added parent conversation IDs across ACP, the TypeScript SDK, daemon, and runners, supporting fresh child sessions and child forks with nested grouping in the Web UI sidebar and native TUI conversation picker. Parent relationships persist across resumes and cancelled turns.
+
+Fixed ACP settings and profile lookups to use the selected runner instead of falling back to the default runner.
 
 Added persistent tool image attachments, including TypeScript SDK extension outputs, with runner uploads, authenticated image links, fork-safe conversation references, and cleanup of unreferenced images.
 
