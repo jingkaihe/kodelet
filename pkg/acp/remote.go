@@ -307,9 +307,9 @@ func (m *remoteSessionManager) promptTarget(sessionID acptypes.SessionID) (Remot
 	defer m.mu.Unlock()
 	session := m.sessions[sessionID]
 	request := chat.ChatRequest{RunnerID: session.runnerID, CWD: session.cwd, EnvironmentProfile: session.environmentProfile, Options: session.options.Clone()}
-	if !session.started {
-		request.ParentConversationID = session.parentConversationID
-	}
+	// A cancelled turn can finish before the first checkpoint. Repeating the
+	// requested parent is idempotent even once the conversation has been saved.
+	request.ParentConversationID = session.parentConversationID
 	if session.extensionRelay != nil {
 		request.SessionExtensionsID = session.extensionRelay.Attachment().ID
 	}

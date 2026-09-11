@@ -307,9 +307,48 @@ func TestRemoteACPConversationHierarchy(t *testing.T) {
 	requests := client.recordedRequests()
 	require.Len(t, requests, 2)
 	assert.Equal(t, "parent", requests[0].ParentConversationID)
-	assert.Empty(t, requests[1].ParentConversationID, "subsequent turns retain the persisted relation")
+	assert.Equal(t, "parent", requests[1].ParentConversationID, "subsequent turns repeat the parent idempotently")
 	_, err = server.remoteSessions.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: sessionID, Meta: meta})
 	require.ErrorContains(t, err, "only supported by session/new")
+}
+
+func TestRemoteACPParentSurvivesCancelledFirstTurn(t *testing.T) {
+	workspace := t.TempDir()
+	output := bytes.NewBuffer(nil)
+	client := &fakeRemoteChatClient{settings: chat.ControlPlaneChatSettings{ConversationHierarchyVersion: 1}}
+	client.run = func(_ context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
+		// Another client can cancel before the daemon's first checkpoint. The
+		// resulting done event does not guarantee that the parent was saved.
+		cancelled := request.Message == "cancel before checkpoint"
+		return request.ConversationID, sink.Send(chat.ChatEvent{Kind: "done", ConversationID: request.ConversationID, Cancelled: cancelled})
+	}
+	server := newRemoteACPTestServer(t, workspace, client, output)
+	sessionID, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{
+		CWD:  workspace,
+		Meta: map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}},
+	})
+	require.NoError(t, err)
+	for index, turn := range []struct {
+		message    string
+		stopReason acptypes.StopReason
+	}{
+		{"cancel before checkpoint", acptypes.StopReasonCancelled},
+		{"retry", acptypes.StopReasonEndTurn},
+		{"continue", acptypes.StopReasonEndTurn},
+	} {
+		prompt := acptypes.PromptRequest{SessionID: sessionID, Prompt: []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: turn.message}}}
+		require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: mustJSONRawMessage(t, index+1), Params: mustJSONRawMessage(t, prompt)}))
+		messages := readJSONRPCMessages(t, output)
+		require.Len(t, messages, 1)
+		require.Nil(t, messages[0]["error"])
+		assert.Equal(t, string(turn.stopReason), messages[0]["result"].(map[string]any)["stopReason"])
+	}
+	requests := client.recordedRequests()
+	require.Len(t, requests, 3)
+	for _, request := range requests {
+		assert.Equal(t, string(sessionID), request.ConversationID)
+		assert.Equal(t, "parent", request.ParentConversationID, "cancellation and successful retries must not discard the requested parent")
+	}
 }
 
 func TestACPConversationHierarchyMetadataValidation(t *testing.T) {
