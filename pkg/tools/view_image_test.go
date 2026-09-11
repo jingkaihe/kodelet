@@ -32,9 +32,7 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	assert.True(t, hasPath)
 	_, hasArtifact := schema.Properties.Get("artifactId")
 	assert.True(t, hasArtifact)
-	require.Len(t, schema.OneOf, 2)
-	assert.Equal(t, []string{"path"}, schema.OneOf[0].Required)
-	assert.Equal(t, []string{"artifactId"}, schema.OneOf[1].Required)
+	assert.Empty(t, schema.OneOf)
 	assert.Empty(t, schema.Required)
 	_, hasDetail := schema.Properties.Get("detail")
 	assert.False(t, hasDetail)
@@ -66,6 +64,7 @@ func TestViewImageTool_ValidateInput(t *testing.T) {
 
 	assert.NoError(t, tool.ValidateInput(state, `{"path":"/tmp/test.png"}`))
 	assert.NoError(t, tool.ValidateInput(state, `{"path":"/tmp/test.png","detail":"original"}`))
+	assert.NoError(t, tool.ValidateInput(state, `{"artifactId":"art_image"}`))
 
 	err := tool.ValidateInput(state, `{"detail":"original"}`)
 	assert.Error(t, err)
@@ -73,6 +72,11 @@ func TestViewImageTool_ValidateInput(t *testing.T) {
 	assert.NoError(t, tool.ValidateInput(nil, `{"artifactId":"art_image","detail":"original"}`))
 	assert.Error(t, tool.ValidateInput(state, `{"path":"/tmp/test.png","artifactId":"art_image"}`))
 	assert.Error(t, tool.ValidateInput(state, `{"path":"","artifactId":"art_image"}`))
+	assert.Error(t, tool.ValidateInput(state, `{"path":"/tmp/test.png","artifactId":""}`))
+	assert.Error(t, tool.ValidateInput(state, `{}`))
+	assert.Error(t, tool.ValidateInput(state, `{"path":""}`))
+	assert.Error(t, tool.ValidateInput(state, `{"path":"  "}`))
+	assert.Error(t, tool.ValidateInput(state, `{"artifactId":""}`))
 	assert.Error(t, tool.ValidateInput(state, `{"artifactId":"  "}`))
 
 	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5"})), `{"path":"/tmp/test.png","detail":"original"}`)

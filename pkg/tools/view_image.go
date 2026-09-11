@@ -107,13 +107,9 @@ func (t *ViewImageTool) Name() string {
 }
 
 func (t *ViewImageTool) GenerateSchema() *jsonschema.Schema {
+	// Anthropic rejects top-level schema combinators. Enforce the exclusive
+	// path/artifactId choice in ValidateInput instead.
 	schema := GenerateSchema[ViewImageInput]()
-	if schema != nil {
-		schema.OneOf = []*jsonschema.Schema{
-			{Required: []string{"path"}},
-			{Required: []string{"artifactId"}},
-		}
-	}
 	if schema != nil && schema.Properties != nil && !vision.SupportsViewImageOriginalDetail(t.model) {
 		schema.Properties.Delete("detail")
 	}
