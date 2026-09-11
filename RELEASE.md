@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.6.7-alpha
+## 0.6.8-beta
 
 Added persistent tool image attachments, including TypeScript SDK extension outputs, with runner uploads, authenticated image links, fork-safe conversation references, and cleanup of unreferenced images.
 
