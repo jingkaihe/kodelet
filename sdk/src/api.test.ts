@@ -693,56 +693,35 @@ test("tool updates are ignored when the host does not advertise support", async 
   assert.deepEqual(requests, []);
 });
 
-test("tool context can request a named live conversation fork", async () => {
-  const extension = defineExtension((ext) => {
-    ext.registerTool({
-      name: "fork",
-      description: "Fork the current conversation",
-      inputSchema: z.object({}),
-      async execute(_input, ctx) {
-        return await ctx.forkConversation({ name: "  Investigate fork naming  " });
-      },
-    });
-  });
-  const requests: Array<{ method: string; params?: unknown }> = [];
-  const harness = await createTestHarness(extension, {
-    async request(method, params) {
-      requests.push({ method, params });
-      return { conversationId: " forked-conversation " };
-    },
-  });
-  harness.initialize({ capabilities: { conversations: { fork: true } } });
+test("tool context preserves ordinary and explicit child fork requests", async (t) => {
+  for (const { options, hierarchy, params } of [
+    { options: { name: "  Investigate fork naming  " }, hierarchy: false, params: { name: "  Investigate fork naming  " } },
+    { options: { name: "reviewer", asChild: true }, hierarchy: true, params: { name: "reviewer", asChild: true } },
+    { options: { asChild: true }, hierarchy: true, params: { asChild: true } },
+    { options: { asChild: false }, hierarchy: true, params: undefined },
+  ]) {
+    await t.test(JSON.stringify(options), async () => {
+      const extension = defineExtension((ext) => {
+        ext.registerTool({
+          name: "fork",
+          description: "Fork the current conversation",
+          inputSchema: z.object({}),
+          execute: (_input, ctx) => ctx.forkConversation(options),
+        });
+      });
+      const requests: Array<{ method: string; params?: unknown }> = [];
+      const harness = await createTestHarness(extension, {
+        async request(method, params) {
+          requests.push({ method, params });
+          return { conversationId: " forked-conversation " };
+        },
+      });
+      harness.initialize({ capabilities: { conversations: { fork: true, ...(hierarchy ? { hierarchy } : {}) } } });
 
-  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "forked-conversation" });
-  assert.deepEqual(requests, [
-    { method: "kodelet.conversation.fork", params: { name: "  Investigate fork naming  " } },
-  ]);
-});
-
-test("tool context explicitly marks child forks without changing ordinary forks", async () => {
-  const extension = defineExtension((ext) => {
-    ext.registerTool({
-      name: "fork",
-      description: "Fork as a child",
-      inputSchema: z.object({}),
-      async execute(_input, ctx) {
-        await ctx.forkConversation({ name: "reviewer", asChild: true });
-        await ctx.forkConversation({ asChild: true });
-        await ctx.forkConversation({ asChild: false });
-        return "done";
-      },
+      assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "forked-conversation" });
+      assert.deepEqual(requests, [{ method: "kodelet.conversation.fork", params }]);
     });
-  });
-  const requests: unknown[] = [];
-  const harness = await createTestHarness(extension, {
-    async request(_method, params) {
-      requests.push(params);
-      return { conversationId: "child" };
-    },
-  });
-  harness.initialize({ capabilities: { conversations: { fork: true, hierarchy: true } } });
-  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "done" });
-  assert.deepEqual(requests, [{ name: "reviewer", asChild: true }, { asChild: true }, undefined]);
+  }
 });
 
 test("tool context does not silently downgrade a child fork on older hosts", async () => {

@@ -287,35 +287,10 @@ func createRemoteACPSession(t *testing.T, server *Server, output *bytes.Buffer, 
 	return acptypes.SessionID(result["sessionId"].(string))
 }
 
-func TestRemoteACPConversationHierarchy(t *testing.T) {
-	workspace := t.TempDir()
-	output := bytes.NewBuffer(nil)
-	client := &fakeRemoteChatClient{}
-	server := newRemoteACPTestServer(t, workspace, client, output)
-	meta := map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}}
-	_, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
-	require.ErrorContains(t, err, "daemon does not support conversation hierarchy")
-	assert.Empty(t, client.targets, "reject unsupported hierarchy before opening a workspace")
-	client.settings.ConversationHierarchyVersion = 1
-	sessionID, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
-	require.NoError(t, err)
-	prompt := acptypes.PromptRequest{SessionID: sessionID, Prompt: []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "inspect"}}}
-	for _, id := range []string{"2", "3"} {
-		require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage(id), Params: mustJSONRawMessage(t, prompt)}))
-		_ = readJSONRPCMessages(t, output)
-	}
-	requests := client.recordedRequests()
-	require.Len(t, requests, 2)
-	assert.Equal(t, "parent", requests[0].ParentConversationID)
-	assert.Equal(t, "parent", requests[1].ParentConversationID, "subsequent turns repeat the parent idempotently")
-	_, err = server.remoteSessions.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: sessionID, Meta: meta})
-	require.ErrorContains(t, err, "only supported by session/new")
-}
-
 func TestRemoteACPParentSurvivesCancelledFirstTurn(t *testing.T) {
 	workspace := t.TempDir()
 	output := bytes.NewBuffer(nil)
-	client := &fakeRemoteChatClient{settings: chat.ControlPlaneChatSettings{ConversationHierarchyVersion: 1}}
+	client := &fakeRemoteChatClient{}
 	client.run = func(_ context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 		// Another client can cancel before the daemon's first checkpoint. The
 		// resulting done event does not guarantee that the parent was saved.
@@ -323,10 +298,12 @@ func TestRemoteACPParentSurvivesCancelledFirstTurn(t *testing.T) {
 		return request.ConversationID, sink.Send(chat.ChatEvent{Kind: "done", ConversationID: request.ConversationID, Cancelled: cancelled})
 	}
 	server := newRemoteACPTestServer(t, workspace, client, output)
-	sessionID, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{
-		CWD:  workspace,
-		Meta: map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}},
-	})
+	meta := map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}}
+	_, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
+	require.ErrorContains(t, err, "daemon does not support conversation hierarchy")
+	assert.Empty(t, client.targets, "reject unsupported hierarchy before opening a workspace")
+	client.settings.ConversationHierarchyVersion = 1
+	sessionID, err := server.remoteSessions.newSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace, Meta: meta})
 	require.NoError(t, err)
 	for index, turn := range []struct {
 		message    string
@@ -349,6 +326,8 @@ func TestRemoteACPParentSurvivesCancelledFirstTurn(t *testing.T) {
 		assert.Equal(t, string(sessionID), request.ConversationID)
 		assert.Equal(t, "parent", request.ParentConversationID, "cancellation and successful retries must not discard the requested parent")
 	}
+	_, err = server.remoteSessions.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: sessionID, Meta: meta})
+	require.ErrorContains(t, err, "only supported by session/new")
 }
 
 func TestACPConversationHierarchyMetadataValidation(t *testing.T) {

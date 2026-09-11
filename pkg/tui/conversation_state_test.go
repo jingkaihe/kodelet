@@ -890,7 +890,7 @@ func pickerConversationSummary(id, parentID string) convtypes.ConversationSummar
 	}
 }
 
-func TestConversationPickerOrdersTreesByDescendantActivity(t *testing.T) {
+func TestConversationPickerOrdersTreesAndSiblingsByActivity(t *testing.T) {
 	now := time.Now()
 	summaries := []convtypes.ConversationSummary{
 		pickerConversationSummary("running-root", ""),
@@ -901,13 +901,20 @@ func TestConversationPickerOrdersTreesByDescendantActivity(t *testing.T) {
 		pickerConversationSummary("recent-root", ""),
 		pickerConversationSummary("recent-child", "recent-root"),
 		pickerConversationSummary("idle-root", ""),
+		pickerConversationSummary("zulu", "branch"),
+		pickerConversationSummary("alpha", "branch"),
+		pickerConversationSummary("recent-grandchild", "branch"),
+		pickerConversationSummary("unread-grandchild", "branch"),
 	}
 	summaries[2].IsRunning = true
+	summaries[4].UpdatedAt = now.Add(-time.Hour)
 	summaries[6].UpdatedAt = now
 	summaries[7].UpdatedAt = now.Add(-time.Hour)
+	summaries[10].UpdatedAt = now.Add(-2 * time.Hour)
 	m := model{
 		conversations: map[string]*conversationState{
-			"unread-child": {conversationID: "unread-child", unread: true},
+			"unread-child":      {conversationID: "unread-child", unread: true},
+			"unread-grandchild": {conversationID: "unread-grandchild", unread: true},
 		},
 		conversationPicker: &conversationPickerState{summaries: summaries},
 	}
@@ -916,34 +923,13 @@ func TestConversationPickerOrdersTreesByDescendantActivity(t *testing.T) {
 	require.Len(t, items, len(summaries)+1)
 	assert.True(t, items[0].isNew)
 	assert.Equal(t, []string{
-		"running-root", "branch", "running-grandchild",
+		"running-root", "branch", "running-grandchild", "unread-grandchild", "recent-grandchild", "alpha", "zulu",
 		"unread-root", "unread-child", "recent-root", "recent-child", "idle-root",
 	}, itemConversationIDs(items))
 	assert.False(t, items[1].running, "aggregate priority must not change the parent's status")
-	assert.False(t, items[4].unread)
+	assert.False(t, items[8].unread)
 	assert.True(t, items[3].running)
-	assert.True(t, items[5].unread)
-}
-
-func TestConversationPickerOrdersSiblingsByCurrentPriority(t *testing.T) {
-	now := time.Now()
-	summaries := []convtypes.ConversationSummary{
-		pickerConversationSummary("main", ""),
-		pickerConversationSummary("zulu", "main"),
-		pickerConversationSummary("alpha", "main"),
-		pickerConversationSummary("recent", "main"),
-		pickerConversationSummary("unread", "main"),
-		pickerConversationSummary("running", "main"),
-	}
-	summaries[3].UpdatedAt = now
-	summaries[5].IsRunning = true
-	m := model{
-		conversations: map[string]*conversationState{
-			"unread": {conversationID: "unread", unread: true},
-		},
-		conversationPicker: &conversationPickerState{summaries: summaries},
-	}
-	assert.Equal(t, []string{"main", "running", "unread", "recent", "alpha", "zulu"}, itemConversationIDs(m.filteredConversationPickerItems()))
+	assert.True(t, items[9].unread)
 }
 
 func TestConversationPickerNestedBranchesAndFiltering(t *testing.T) {
@@ -951,10 +937,11 @@ func TestConversationPickerNestedBranchesAndFiltering(t *testing.T) {
 		pickerConversationSummary("main", ""),
 		pickerConversationSummary("branch-a", " main "),
 		pickerConversationSummary("grandchild-a", "branch-a"),
-		pickerConversationSummary("branch-b", "main"),
+		{ID: "branch-b", ParentConversationID: " main "}, // Typed parent is used when metadata is absent.
 		pickerConversationSummary("grandchild-b", "branch-b"),
 		pickerConversationSummary("other", ""),
 	}
+	summaries[1].ParentConversationID = "other" // Canonical metadata takes precedence.
 	summaries[2].CWD = "/only/grandchild/workspace"
 	for _, test := range []struct {
 		query    string
@@ -1072,15 +1059,11 @@ func TestConversationPickerInvalidRelationshipsRemainVisibleOnce(t *testing.T) {
 		{ID: "fork-only", Metadata: map[string]any{"conversation_fork": map[string]any{"source_conversation_id": "self", "root_conversation_id": "self", "depth": 1}}},
 	}
 	m := model{conversationPicker: &conversationPickerState{summaries: summaries}}
-	want := itemConversationIDs(m.filteredConversationPickerItems())
 	for range 20 {
 		items := m.filteredConversationPickerItems()
 		require.Len(t, items, len(summaries)+1)
-		assert.Equal(t, want, itemConversationIDs(items))
-		seen := map[string]bool{}
+		assert.Equal(t, []string{"cycle-a", "cycle-child", "cycle-b", "cycle-c", "orphan", "self", "fork-only", "invalid"}, itemConversationIDs(items))
 		for _, item := range items {
-			assert.False(t, seen[item.id])
-			seen[item.id] = true
 			if item.id == "cycle-child" {
 				assert.Equal(t, "└─ ", item.treePrefix)
 			} else {
@@ -1135,100 +1118,10 @@ func TestConversationPickerMergesAliasesAndRetainsParentAcrossRefresh(t *testing
 	assert.Equal(t, "└─ ", items[2].treePrefix)
 }
 
-func TestConversationPickerPreservesParentWhenResumingAndSwitching(t *testing.T) {
-	m := newModel(t.Context(), Config{})
-	t.Cleanup(m.cancel)
-	previousKey := m.activeConversationKey
-	m.conversationPicker = &conversationPickerState{
-		query: "child",
-		summaries: []convtypes.ConversationSummary{
-			pickerConversationSummary("main", ""), pickerConversationSummary("child", "main"),
-		},
-		selectedKey: "conversation:child",
-	}
-	require.NotNil(t, m.selectConversationPickerItem())
-	child := m.conversationState
-	assert.Equal(t, "main", child.parentConversationID)
-	updated, _ := m.Update(initialHistoryMsg{conversationKey: child.key, conversationID: child.conversationID, loaded: true})
-	m = updated.(model)
-	requireConversationActivation(t, &m, previousKey)
-	requireConversationActivation(t, &m, child.key)
-	m.conversationPicker = &conversationPickerState{summaries: []convtypes.ConversationSummary{pickerConversationSummary("main", "")}}
-	items := m.filteredConversationPickerItems()
-	assert.Equal(t, []string{"main", "child"}, itemConversationIDs(items))
-	for _, item := range items {
-		if item.id == "child" {
-			assert.Equal(t, "└─ ", item.treePrefix)
-			assert.Equal(t, "main", item.parentID)
-		}
-	}
-}
-
-func TestConversationPickerKeepsSelectionWhenParentArrivesAndAliasChanges(t *testing.T) {
-	m := model{conversationPicker: &conversationPickerState{
-		requestID: 1,
-		summaries: []convtypes.ConversationSummary{
-			pickerConversationSummary("child", "main"), pickerConversationSummary("other", ""),
-		},
-		selectedKey: "conversation:child",
-	}}
-	m.clampConversationPickerSelection()
-	assert.Equal(t, 1, m.conversationPicker.selected)
-	// Background activity changes the numeric position before the list refresh.
-	child := &conversationState{key: "new:2", conversationID: "child"}
-	m.conversations = map[string]*conversationState{
-		child.key: child,
-		"other":   {key: "other", conversationID: "other", running: true},
-	}
-	m.applyConversationList(conversationListMsg{requestID: 1, summaries: []convtypes.ConversationSummary{
-		pickerConversationSummary("main", ""), pickerConversationSummary("child", "main"), pickerConversationSummary("other", ""),
-	}})
-	items := m.filteredConversationPickerItems()
-	selected := m.conversationPickerSelectedIndex(items)
-	assert.Equal(t, 3, selected)
-	assert.Equal(t, "child", items[selected].id)
-	assert.Equal(t, child.key, items[selected].key)
-	assert.Equal(t, "└─ ", items[selected].treePrefix)
-	assert.Equal(t, "conversation:child", m.conversationPicker.selectedKey)
-}
-
-func TestConversationPickerKeepsDraftSelectionAfterIDAssigned(t *testing.T) {
-	m := newModel(t.Context(), Config{})
-	t.Cleanup(m.cancel)
-	m.conversationPicker = &conversationPickerState{selectedKey: "conversation:" + m.activeConversationKey}
-	m.setConversationID(m.conversationState, "assigned-id")
-	m.clampConversationPickerSelection()
-	items := m.filteredConversationPickerItems()
-	assert.Equal(t, "assigned-id", items[m.conversationPickerSelectedIndex(items)].id)
-	assert.Equal(t, "conversation:assigned-id", m.conversationPicker.selectedKey)
-}
-
-func TestConversationPickerUsesTypedParentWhenMetadataAbsent(t *testing.T) {
-	parent := pickerConversationSummary("main", "")
-	child := convtypes.ConversationSummary{ID: "child", ParentConversationID: " main "}
-	m := model{conversationPicker: &conversationPickerState{summaries: []convtypes.ConversationSummary{parent, child}}}
-	items := m.filteredConversationPickerItems()
-	assert.Equal(t, []string{"main", "child"}, itemConversationIDs(items))
-	assert.Equal(t, "└─ ", items[2].treePrefix)
-	child.Metadata = map[string]any{"parent_conversation_id": "canonical"}
-	assert.Equal(t, "canonical", conversationPickerParentID(child))
-}
-
-func TestConversationPickerLearnsParentFromInitialHistory(t *testing.T) {
-	m := newModel(t.Context(), Config{ConversationID: "child"})
-	t.Cleanup(m.cancel)
-	updated, _ := m.Update(initialHistoryMsg{loaded: true, parentConversationID: " main "})
-	m = updated.(model)
-	m.conversationPicker = &conversationPickerState{summaries: []convtypes.ConversationSummary{pickerConversationSummary("main", "")}}
-	items := m.filteredConversationPickerItems()
-	assert.Equal(t, "main", m.parentConversationID)
-	assert.Equal(t, []string{"main", "child"}, itemConversationIDs(items))
-	assert.Equal(t, "└─ ", items[2].treePrefix)
-}
-
-func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {
+func TestConversationPickerFiltersLoadsAndRetainsParentWhenSwitching(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
+	previousKey := m.activeConversationKey
 	m.conversationPicker = &conversationPickerState{
 		query: "persisted project",
 		summaries: []convtypes.ConversationSummary{{
@@ -1236,6 +1129,7 @@ func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {
 			FirstMessage: "Persisted project discussion",
 			CWD:          "/tmp/project",
 			UpdatedAt:    time.Now(),
+			Metadata:     map[string]any{"parent_conversation_id": "main"},
 		}},
 	}
 
@@ -1250,6 +1144,18 @@ func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {
 	assert.Equal(t, "conversation-persisted", m.conversationID)
 	assert.True(t, m.initialHistoryPending)
 	assert.Equal(t, "Persisted project discussion", m.title)
+	child := m.conversationState
+	assert.Equal(t, "main", child.parentConversationID)
+	// Older history responses may omit parenthood learned from the picker.
+	updated, _ := m.Update(initialHistoryMsg{conversationKey: child.key, conversationID: child.conversationID, loaded: true})
+	m = updated.(model)
+	requireConversationActivation(t, &m, previousKey)
+	requireConversationActivation(t, &m, child.key)
+	m.conversationPicker = &conversationPickerState{summaries: []convtypes.ConversationSummary{pickerConversationSummary("main", "")}}
+	items = m.filteredConversationPickerItems()
+	require.Equal(t, []string{"main", "conversation-persisted"}, itemConversationIDs(items))
+	assert.Equal(t, "└─ ", items[2].treePrefix)
+	assert.Equal(t, "main", items[2].parentID)
 }
 
 func TestConversationPickerIgnoresResultsFromEarlierOpening(t *testing.T) {
@@ -1279,7 +1185,7 @@ func TestConversationPickerKeepsSelectedConversationAcrossAsyncReorder(t *testin
 	m.conversationPicker = &conversationPickerState{
 		summaries: []convtypes.ConversationSummary{
 			{ID: "conversation-a", FirstMessage: "A", UpdatedAt: now},
-			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(-time.Hour)},
+			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(-time.Hour), ParentConversationID: "main"},
 		},
 		selected:  2,
 		requestID: 7,
@@ -1291,7 +1197,7 @@ func TestConversationPickerKeepsSelectedConversationAcrossAsyncReorder(t *testin
 		requestID: 7,
 		summaries: []convtypes.ConversationSummary{
 			{ID: "conversation-a", FirstMessage: "A", UpdatedAt: now.Add(-time.Hour)},
-			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(time.Hour)},
+			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(time.Hour), ParentConversationID: "main"},
 		},
 	})
 
@@ -1299,6 +1205,19 @@ func TestConversationPickerKeepsSelectedConversationAcrossAsyncReorder(t *testin
 	selected := m.conversationPickerSelectedIndex(items)
 	assert.Equal(t, "conversation-b", items[selected].id)
 	assert.Equal(t, 1, selected)
+
+	// A temporary alias and background activity precede the missing parent's arrival.
+	child := &conversationState{key: "new:2", conversationID: "conversation-b"}
+	m.conversations[child.key] = child
+	m.conversations["conversation-a"] = &conversationState{key: "conversation-a", conversationID: "conversation-a", running: true}
+	m.applyConversationList(conversationListMsg{requestID: 7, summaries: append(m.conversationPicker.summaries, pickerConversationSummary("main", ""))})
+	items = m.filteredConversationPickerItems()
+	selected = m.conversationPickerSelectedIndex(items)
+	assert.Equal(t, 3, selected)
+	assert.Equal(t, "conversation-b", items[selected].id)
+	assert.Equal(t, child.key, items[selected].key)
+	assert.Equal(t, "└─ ", items[selected].treePrefix)
+	assert.Equal(t, "conversation:conversation-b", m.conversationPicker.selectedKey)
 }
 
 func TestPickerSelectedConversationQueuesSubmitUntilHistoryLoads(t *testing.T) {
@@ -1363,15 +1282,21 @@ func TestPickerSelectedConversationUsesStoredWorkspaceAndReloadsMessageHistorySc
 	assert.Empty(t, state.messageHistoryScopeCWD)
 
 	updated, _ := m.Update(initialHistoryMsg{
-		conversationKey: state.key,
-		conversationID:  state.conversationID,
-		loaded:          true,
-		cwd:             storedCWD,
+		conversationKey:      state.key,
+		conversationID:       state.conversationID,
+		parentConversationID: " main ",
+		loaded:               true,
+		cwd:                  storedCWD,
 	})
 	m = updated.(model)
 	wantScope, err := messagehistory.ResolveScopeCWD(storedCWD)
 	require.NoError(t, err)
 	assert.Equal(t, wantScope, state.messageHistoryScopeCWD)
+	assert.Equal(t, "main", state.parentConversationID, "initial history supplies the parent missing from the summary")
+	m.conversationPicker = &conversationPickerState{summaries: []convtypes.ConversationSummary{pickerConversationSummary("main", "")}}
+	items := m.filteredConversationPickerItems()
+	require.Equal(t, []string{"main", state.conversationID}, itemConversationIDs(items))
+	assert.Equal(t, "└─ ", items[2].treePrefix)
 }
 
 func TestConversationPickerConsumesShiftEnter(t *testing.T) {
@@ -1388,7 +1313,7 @@ func TestConversationPickerConsumesShiftEnter(t *testing.T) {
 	require.NotNil(t, m.conversationPicker)
 }
 
-func TestConversationPickerUsesWideDialogAndKeepsTitlePrefix(t *testing.T) {
+func TestConversationPickerTreeRenderingKeepsColumnsAndTitleVisible(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	now := time.Date(2026, time.July, 31, 6, 49, 0, 0, time.UTC)
@@ -1402,15 +1327,17 @@ func TestConversationPickerUsesWideDialogAndKeepsTitlePrefix(t *testing.T) {
 	assert.Greater(t, m.conversationPickerDialogWidth(), conversationPickerPreferredMinWidth)
 	assert.Equal(t, "First few…", fitVisiblePrefix("First few characters remain visible", 10))
 
-	line := m.renderConversationPickerItemAt(conversationPickerItem{
-		key:       m.activeConversationKey,
-		id:        "20260731abcdef",
-		title:     "First few characters should remain visible instead of the suffix",
-		cwd:       filepath.Join(homeDir, "workspace", "kodelet"),
-		updatedAt: now.Add(-2 * time.Hour),
-		running:   true,
-	}, 96, now)
-	assert.Contains(t, line, "First few characters")
+	child := conversationPickerItem{
+		key:        m.activeConversationKey,
+		id:         "20260731abcdef",
+		title:      "First few characters should remain visible instead of the suffix 界界界",
+		treePrefix: "│  └─ ",
+		cwd:        filepath.Join(homeDir, "workspace", "kodelet"),
+		updatedAt:  now.Add(-2 * time.Hour),
+		running:    true,
+	}
+	line := m.renderConversationPickerItemAt(child, 96, now)
+	assert.Contains(t, line, "│  └─ First few characters")
 	assert.Contains(t, line, "~/workspace/kodelet")
 	assert.Contains(t, line, "2h ago")
 	assert.NotContains(t, line, homeDir)
@@ -1431,6 +1358,18 @@ func TestConversationPickerUsesWideDialogAndKeepsTitlePrefix(t *testing.T) {
 	assert.Less(t, visibleTextColumn(line, "~/workspace/kodelet"), visibleTextColumn(line, "2h ago"))
 	assert.Equal(t, visibleTextEndColumn(line, "2h ago"), visibleTextEndColumn(other, "17h ago"))
 	assert.True(t, strings.HasSuffix(line, "  2h ago"))
+	assert.Equal(t, 96, lipgloss.Width(line))
+	for _, width := range []int{1, 4, 5, 10, 20, 29, 35, 96} {
+		for _, prefix := range []string{"└─ ", "│  └─ ", strings.Repeat("│  ", 30) + "└─ "} {
+			child.treePrefix = prefix
+			line := m.renderConversationPickerItemAt(child, width, now)
+			assert.LessOrEqual(t, lipgloss.Width(line), width)
+			if width >= 20 {
+				assert.Contains(t, line, "First", "deep indentation must not consume the entire title")
+				assert.Contains(t, line, "└─ ")
+			}
+		}
+	}
 
 	m.width = 90
 	m.resize()
@@ -1481,61 +1420,6 @@ func TestConversationPickerColumnWidthsPrioritizeWorkspaceOverAge(t *testing.T) 
 	assert.Equal(t, 25, titleWidth)
 	assert.Zero(t, workspaceWidth)
 	assert.Zero(t, ageWidth)
-}
-
-func TestConversationPickerTreeRenderingKeepsColumnsAndTitleVisible(t *testing.T) {
-	m := newModel(t.Context(), Config{})
-	t.Cleanup(m.cancel)
-	now := time.Now()
-	root := conversationPickerItem{
-		title: "Root title", cwd: "/workspace", updatedAt: now.Add(-time.Hour),
-	}
-	child := root
-	child.title = "Child title with a long suffix and wide characters 界界界"
-	child.treePrefix = "│  └─ "
-	child.updatedAt = now.Add(-12 * time.Hour)
-	rootLine := m.renderConversationPickerItemAt(root, 96, now)
-	childLine := m.renderConversationPickerItemAt(child, 96, now)
-	assert.Contains(t, childLine, "│  └─ Child title")
-	assert.Equal(t, visibleTextColumn(rootLine, "/workspace"), visibleTextColumn(childLine, "/workspace"))
-	assert.Equal(t, visibleTextEndColumn(rootLine, "1h ago"), visibleTextEndColumn(childLine, "12h ago"))
-	assert.Equal(t, 96, lipgloss.Width(childLine))
-	for _, width := range []int{1, 4, 5, 10, 20, 29, 35, 96} {
-		for _, prefix := range []string{"└─ ", "│  └─ ", strings.Repeat("│  ", 30) + "└─ "} {
-			child.treePrefix = prefix
-			line := m.renderConversationPickerItemAt(child, width, now)
-			assert.LessOrEqual(t, lipgloss.Width(line), width)
-			if width >= 20 {
-				assert.Contains(t, line, "Child", "deep indentation must not consume the entire title")
-				assert.Contains(t, line, "└─ ")
-			}
-		}
-	}
-}
-
-func TestConversationPickerTreeWindowKeepsSelectedChildVisible(t *testing.T) {
-	m := newModel(t.Context(), Config{})
-	t.Cleanup(m.cancel)
-	m.width = 96
-	m.height = 12
-	m.resize()
-	m.conversationPicker = &conversationPickerState{
-		loading:     true,
-		summaries:   []convtypes.ConversationSummary{pickerConversationSummary("main", "")},
-		selectedKey: "conversation:child-08",
-	}
-	for i := range 15 {
-		m.conversationPicker.summaries = append(m.conversationPicker.summaries, pickerConversationSummary(fmt.Sprintf("child-%02d", i), "main"))
-	}
-	m.clampConversationPickerSelection()
-	rendered := xansi.Strip(m.renderConversationPicker())
-	assert.Contains(t, rendered, "├─ child-08")
-	assert.Contains(t, rendered, "↑ more")
-	assert.Contains(t, rendered, "↓ more")
-	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
-	for _, line := range strings.Split(rendered, "\n") {
-		assert.LessOrEqual(t, lipgloss.Width(line), m.conversationPickerDialogWidth())
-	}
 }
 
 func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testing.T) {
@@ -1658,6 +1542,13 @@ func TestConversationPickerKeepsIdenticalUntitledRowsStable(t *testing.T) {
 		}
 		assert.Equal(t, wantKeys, keys)
 	}
+
+	m.conversationPicker.selectedKey = "conversation:" + third.key
+	m.setConversationID(third, "assigned-id")
+	m.clampConversationPickerSelection()
+	items := m.filteredConversationPickerItems()
+	assert.Equal(t, "assigned-id", items[m.conversationPickerSelectedIndex(items)].id)
+	assert.Equal(t, "conversation:assigned-id", m.conversationPicker.selectedKey)
 }
 
 func TestNewConversationPromptDefaultsToActiveCWDAndReturnsToPickerOnCancel(t *testing.T) {
@@ -2063,28 +1954,32 @@ func TestConversationPickerRendersLoadingErrorAndEmptyState(t *testing.T) {
 func TestConversationPickerHeightBudgetIncludesStatusAndOverflowRows(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
-	m.width = 100
-	m.height = 10
-	m.resize()
+	m.width = 96
 	m.conversationPicker = &conversationPickerState{
-		loading: true,
-		err:     errors.New("conversation store unavailable"),
+		loading:     true,
+		err:         errors.New("conversation store unavailable"),
+		summaries:   []convtypes.ConversationSummary{pickerConversationSummary("main", "")},
+		selectedKey: "conversation:child-08",
 	}
-	for index := range 12 {
-		m.conversationPicker.summaries = append(m.conversationPicker.summaries, convtypes.ConversationSummary{
-			ID:           fmt.Sprintf("conversation-%02d", index),
-			FirstMessage: fmt.Sprintf("Conversation %02d", index),
-			UpdatedAt:    time.Now().Add(-time.Duration(index) * time.Minute),
-		})
+	for index := range 15 {
+		m.conversationPicker.summaries = append(m.conversationPicker.summaries, pickerConversationSummary(fmt.Sprintf("child-%02d", index), "main"))
 	}
-	m.conversationPicker.selected = 8
 	m.clampConversationPickerSelection()
 
-	rendered := xansi.Strip(m.renderConversationPicker())
-	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
-	items := m.filteredConversationPickerItems()
-	selected := m.conversationPickerSelectedIndex(items)
-	assert.Contains(t, rendered, items[selected].title)
+	for _, height := range []int{10, 12} {
+		m.height = height
+		m.resize()
+		rendered := xansi.Strip(m.renderConversationPicker())
+		assert.Contains(t, rendered, "├─ child-08")
+		if height == 12 {
+			assert.Contains(t, rendered, "↑ more")
+			assert.Contains(t, rendered, "↓ more")
+		}
+		assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), height)
+		for _, line := range strings.Split(rendered, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(line), m.conversationPickerDialogWidth())
+		}
+	}
 }
 
 func TestParallelConversationRunsRouteEventsAndCompletion(t *testing.T) {

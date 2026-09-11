@@ -31,24 +31,10 @@ func TestNewConversationRecord(t *testing.T) {
 	assert.NotEmpty(t, record.ID, "ID should be generated")
 }
 
-func TestConversationHierarchyIsIndependentOfForkLineage(t *testing.T) {
+func TestParentConversationIDFromMetadata(t *testing.T) {
 	assert.Empty(t, ParentConversationIDFromMetadata(nil))
 	assert.Empty(t, ParentConversationIDFromMetadata(map[string]any{ParentConversationIDMetadataKey: 42}))
 	assert.Equal(t, "parent", ParentConversationIDFromMetadata(map[string]any{ParentConversationIDMetadataKey: " parent "}))
-	parent := NewConversationRecord("parent")
-	parent.Metadata[ParentConversationIDMetadataKey] = "grandparent"
-	child := ForkConversationRecordWithOptions(parent, ConversationForkOptions{AsChild: true})
-	assert.Equal(t, parent.ID, ParentConversationIDFromMetadata(child.Metadata))
-	assert.Equal(t, parent.ID, child.ToSummary().ParentConversationID)
-	grandchild := ForkConversationRecordWithOptions(child, ConversationForkOptions{AsChild: true})
-	assert.Equal(t, child.ID, ParentConversationIDFromMetadata(grandchild.Metadata))
-	copy := ForkConversationRecord(child)
-	assert.Empty(t, ParentConversationIDFromMetadata(copy.Metadata))
-	assert.NotContains(t, copy.Metadata, ParentConversationIDMetadataKey)
-	assert.Contains(t, copy.Metadata, ConversationForkMetadataKey)
-	assert.Equal(t, "grandparent", ParentConversationIDFromMetadata(parent.Metadata))
-	assert.False(t, ConversationForkAsChildFromContext(t.Context()))
-	assert.True(t, ConversationForkAsChildFromContext(ContextWithConversationForkAsChild(t.Context(), true)))
 }
 
 func TestForkConversationRecord(t *testing.T) {
@@ -113,7 +99,7 @@ func TestForkConversationRecord(t *testing.T) {
 
 func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {
 	source := NewConversationRecord("root-conversation")
-	firstFork := ForkConversationRecord(source)
+	firstFork := ForkConversationRecordWithOptions(source, ConversationForkOptions{AsChild: true})
 	persistedMetadata, err := json.Marshal(firstFork.Metadata)
 	require.NoError(t, err)
 	firstFork.Metadata = nil
@@ -127,7 +113,11 @@ func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {
 	secondFork := ForkConversationRecordWithOptions(firstFork, ConversationForkOptions{
 		Mode:      ConversationForkModeLiveSnapshot,
 		Initiator: &initiator,
+		AsChild:   true,
 	})
+	assert.Equal(t, source.ID, ParentConversationIDFromMetadata(firstFork.Metadata))
+	assert.Equal(t, source.ID, firstFork.ToSummary().ParentConversationID)
+	assert.Equal(t, firstFork.ID, ParentConversationIDFromMetadata(secondFork.Metadata))
 
 	firstMetadata, ok := conversationForkMetadataFromMetadata(firstFork.Metadata)
 	require.True(t, ok)
@@ -149,7 +139,9 @@ func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {
 	assert.Equal(t, initiator, persistedInitiator)
 }
 
-func TestConversationForkInitiatorContext(t *testing.T) {
+func TestConversationForkContext(t *testing.T) {
+	assert.False(t, ConversationForkAsChildFromContext(t.Context()))
+	assert.True(t, ConversationForkAsChildFromContext(ContextWithConversationForkAsChild(t.Context(), true)))
 	initiator := ConversationForkInitiator{
 		Type:        ConversationForkInitiatorTypeExtensionTool,
 		ExtensionID: " subagent ",

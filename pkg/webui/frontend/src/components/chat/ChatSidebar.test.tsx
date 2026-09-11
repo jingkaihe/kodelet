@@ -92,8 +92,8 @@ describe("ChatSidebar hierarchy", () => {
 		const props = callbacks();
 		render(<ChatSidebar {...props} activeConversationId="child" conversations={[
 			{ ...conversation("child", "parent", 3), isRunning: true },
-			conversation("parent"),
-			conversation("orphan", "missing", 2),
+			{ ...conversation("parent"), cwd: undefined },
+			{ ...conversation("orphan", "missing", 2), cwd: undefined },
 		]} />);
 		const rows = screen.getAllByTestId(/^conversation-row-/);
 		expect(rows.map((row) => row.dataset.testid)).toEqual([
@@ -104,7 +104,8 @@ describe("ChatSidebar hierarchy", () => {
 		expect(child).toHaveClass("active", "is-child");
 		expect(screen.getByTestId("conversation-row-parent")).not.toHaveClass("is-child");
 		expect(child.querySelector(".conversation-branch")).toHaveClass("last-child");
-		expect(within(child).getByTestId("conversation-running-indicator-child")).toBeInTheDocument();
+		const indicator = within(child).getByTestId("conversation-running-indicator-child");
+		expect(indicator.querySelector(".spinner-glyph")).toHaveTextContent("⣾");
 		fireEvent.click(within(child).getByRole("button", { name: "child Running" }));
 		expect(props.onSelectConversation).toHaveBeenCalledWith("child");
 		fireEvent.click(within(child).getByRole("button", { name: "More actions for child" }));
@@ -134,35 +135,6 @@ describe("ChatSidebar hierarchy", () => {
 		rerender(<ChatSidebar {...props} activeConversationId="last-child" conversations={conversations} />);
 		expect(screen.getByTestId("conversation-row-last-child")).toHaveClass("active");
 		expect(screen.getByTestId("conversation-row-last-parent")).toBeInTheDocument();
-	});
-});
-
-describe("ChatSidebar running indicator", () => {
-	it("uses the shared TUI dot spinner for running conversations", () => {
-		render(
-			<ChatSidebar
-				activeConversationId="conv-running"
-				conversations={[
-					{
-						id: "conv-running",
-						createdAt: "2026-08-20T00:00:00Z",
-						updatedAt: "2026-08-20T00:00:00Z",
-						messageCount: 1,
-						summary: "Running conversation",
-						isRunning: true,
-					},
-				]}
-				loading={false}
-				onDeleteConversation={vi.fn()}
-				onForkConversation={vi.fn()}
-				onNewChat={vi.fn()}
-				onSearch={vi.fn()}
-				onSelectConversation={vi.fn()}
-			/>,
-		);
-
-		const indicator = screen.getByTestId("conversation-running-indicator-conv-running");
-		expect(indicator.querySelector(".spinner-glyph")).toHaveTextContent("⣾");
 	});
 });
 

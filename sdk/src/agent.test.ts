@@ -700,7 +700,7 @@ test("Session rejects already-aborted run signals without starting a run", async
   await client.close();
 });
 
-test("Session rejects unsupported bridge transport values and daemon settings before spawning", async () => {
+test("Session rejects invalid transport, daemon settings and parent options before spawning", async () => {
   let spawned = false;
   const client = new Client({ spawn: () => { spawned = true; return new FakeACPProcess(); } });
   await assert.rejects(client.createSession({ extensionTransport: "socket" as never }), /extensionTransport must be unix or tcp/);
@@ -715,7 +715,12 @@ test("Session rejects unsupported bridge transport values and daemon settings be
     await assert.rejects(client.createSession({ options: options as never }));
     await assert.rejects(client.createSession({ profile: options }));
   }
+  for (const parentConversationId of ["", "  ", null, 42]) {
+    await assert.rejects(client.createSession({ parentConversationId: parentConversationId as never }), /parentConversationId must be a non-empty/);
+  }
+  await assert.rejects(client.createSession({ parentConversationId: "parent", resume: "child" }), /cannot be combined with resume/);
   assert.equal(spawned, false);
+  await client.close();
 });
 
 test("Session accepts empty extensions and undefined bridge/UI options", async () => {
@@ -857,17 +862,24 @@ class InlineRelay {
   }
 }
 
-for (const version of [undefined, 2]) {
-  test(`Inline extensions fail fast and close incompatible ACP version ${version}`, async () => {
-    const child = new FakeACPProcess({ sessionExtensionsVersion: version });
-    let invoked = false, exited = false;
-    child.once("close", () => { exited = true; });
-    const client = new Client({ spawn: () => child });
-    await assert.rejects(client.createSession({ extensions: [() => { invoked = true; }] }), /sessionExtensions version 1.*update Kodelet/);
-    assert.equal(invoked, false);
-    assert.equal(exited, true);
-    assert.deepEqual(child.requests.map(({ method }) => method), ["initialize"]);
-  });
+for (const capability of ["sessionExtensions", "conversationHierarchy"] as const) {
+  for (const version of [undefined, 2]) {
+    test(`${capability} fails fast and closes incompatible ACP version ${version}`, async (t) => {
+      const child = new FakeACPProcess({ [`${capability}Version`]: version });
+      let invoked = false, exited = false;
+      child.once("close", () => { exited = true; });
+      const client = new Client({ spawn: () => child });
+      t.after(() => client.close());
+      const options = capability === "sessionExtensions"
+        ? { extensions: [() => { invoked = true; }] }
+        : { parentConversationId: "parent" };
+      await assert.rejects(client.createSession(options), new RegExp(`${capability} version 1.*update Kodelet`));
+      assert.equal(invoked, false);
+      assert.equal(exited, true);
+      assert.equal(child.stdout.readableEnded, true);
+      assert.deepEqual(child.requests.map(({ method }) => method), ["initialize"]);
+    });
+  }
 }
 
 test("Inline extensions negotiate deterministic IDs for new and resumed sessions without launch configuration", async () => {
@@ -1013,29 +1025,6 @@ test("fresh child sessions send hierarchy metadata alongside inline extensions",
       await client.close();
     }
   }
-});
-
-test("child sessions require advertised hierarchy support before creation", async () => {
-  for (const version of [undefined, 2]) {
-    const child = new FakeACPProcess({ conversationHierarchyVersion: version });
-    const client = new Client({ spawn: () => child });
-    try {
-      await assert.rejects(client.createSession({ parentConversationId: "parent" }), /conversationHierarchy version 1.*update Kodelet/);
-      assert.deepEqual(child.requests.map(({ method }) => method), ["initialize"]);
-      assert.equal(child.stdout.readableEnded, true);
-    } finally {
-      await client.close();
-    }
-  }
-});
-
-test("parent options reject empty IDs and reparenting before starting ACP", async () => {
-  const client = new Client({ spawn: () => { throw new Error("must not spawn"); } });
-  for (const parentConversationId of ["", "  ", null, 42]) {
-    await assert.rejects(client.createSession({ parentConversationId: parentConversationId as never }), /parentConversationId must be a non-empty/);
-  }
-  await assert.rejects(client.createSession({ parentConversationId: "parent", resume: "child" }), /cannot be combined with resume/);
-  await client.close();
 });
 
 test("Inline relay rejects unknown sessions, extension IDs, malformed frames, replay, and non-initialize creation", { timeout: 5000 }, async (t) => {
