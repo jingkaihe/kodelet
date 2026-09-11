@@ -1050,6 +1050,24 @@ const ChatPage: React.FC = () => {
     return () => window.clearInterval(runnerRefresh);
   }, [refreshConversations, refreshRunners]);
 
+  const defaultRunner = runners.find((runner) => runner.id === chatSettings.defaultRunnerId);
+  const defaultRunnerID =
+    chatSettings.defaultRunnerReady &&
+    defaultRunner?.connected &&
+    (defaultRunner.status === 'idle' ||
+      (defaultRunner.status === 'busy' && defaultRunner.concurrentRuns))
+      ? defaultRunner.id
+      : '';
+
+  useEffect(() => {
+    if (conversationId || selectedRunnerID || newChatRunnerDraft || !defaultRunnerID) {
+      return;
+    }
+
+    setSelectedRunnerID(defaultRunnerID);
+    setNewChatRunnerDraft(defaultRunnerID);
+  }, [conversationId, defaultRunnerID, selectedRunnerID, newChatRunnerDraft]);
+
   useEffect(() => {
     return () => {
       resumeStreamRef.current += 1;
@@ -1787,8 +1805,8 @@ const ChatPage: React.FC = () => {
     setNewChatReasoningEffortDraft(reasoningSettings.effort);
     setNewChatReasoningEffortOptions(reasoningSettings.options);
     setNewChatReasoningEffortExplicit(false);
-    setSelectedRunnerID('');
-    setNewChatRunnerDraft('');
+    setSelectedRunnerID(defaultRunnerID);
+    setNewChatRunnerDraft(defaultRunnerID);
     setSelectedEnvironmentProfile('');
     setNewChatEnvironmentProfileDraft('');
     reasoningSettingsRequestRef.current += 1;

@@ -365,6 +365,8 @@ export interface ChatSettings {
   reasoningEffort: string;
   reasoningEffortOptions: string[];
   defaultCWD?: string;
+  defaultRunnerId?: string;
+  defaultRunnerReady?: boolean;
 }
 
 export interface CWDHint {

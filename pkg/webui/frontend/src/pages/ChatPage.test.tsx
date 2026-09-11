@@ -2233,6 +2233,86 @@ describe('ChatPage', () => {
     });
   });
 
+  describe('embedded runner defaults', () => {
+    const embeddedRunner = makeRunner({ id: 'runner-embedded' });
+    const settings: ChatSettings = {
+      currentProfile: 'work',
+      profiles: [{ name: 'work', scope: 'global' }],
+      reasoningEffort: 'medium',
+      reasoningEffortOptions: ['medium'],
+      defaultRunnerId: embeddedRunner.id,
+      defaultRunnerReady: true,
+    };
+
+    beforeEach(() => {
+      mockGetChatSettings.mockResolvedValue(settings);
+      mockGetRunners.mockResolvedValue({ runners: [makeRunner(), embeddedRunner] });
+      mockStreamChat.mockResolvedValue(undefined);
+    });
+
+    it('allows prompting without setup once the embedded runner loads', async () => {
+      let resolveRunners!: (value: { runners: Runner[] }) => void;
+      mockGetRunners.mockReturnValueOnce(new Promise((resolve) => { resolveRunners = resolve; }));
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+      expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+
+      await act(async () => resolveRunners({ runners: [makeRunner(), embeddedRunner] }));
+      expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+      expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
+      fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+        target: { value: 'hello immediately' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      await waitFor(() => expect(mockStreamChat).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'hello immediately', runnerId: embeddedRunner.id }),
+        expect.any(Object)
+      ));
+    });
+
+    it('does not preselect an embedded runner that is not ready', async () => {
+      mockGetChatSettings.mockResolvedValue({ ...settings, defaultRunnerReady: false });
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+
+      expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+      fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+      expect(screen.getByLabelText('Environment')).toHaveValue('');
+      expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    });
+
+    it('preserves a manual runner choice until starting a new chat', async () => {
+      vi.useFakeTimers();
+      try {
+        mockGetRunners.mockResolvedValueOnce({ runners: [makeRunner()] });
+        render(<ChatPage />);
+        await flushAsyncUpdates();
+
+        fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+        selectWorkspaceRunner();
+        await flushAsyncUpdates();
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(screen.getByLabelText('Environment')).toHaveValue('runner-1');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        fireEvent.click(screen.getByRole('button', { name: /\/runner\/kodelet/ }));
+        expect(screen.getByLabelText('Environment')).toHaveValue('runner-1');
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+        await flushAsyncUpdates();
+        expect(screen.getByLabelText('Environment')).toHaveValue(embeddedRunner.id);
+        expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('requires a workspace runner without a workspace-enabled setting', async () => {
     mockGetRunners.mockResolvedValue({
       runners: [
