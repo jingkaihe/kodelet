@@ -321,22 +321,14 @@ describe('ChatPage', () => {
     });
   });
 
-  const getGreeting = (): string => {
-    const hour = new Date().getHours();
-    if (hour < 12) {
-      return 'Good morning';
-    }
-    if (hour < 18) {
-      return 'Good afternoon';
-    }
-    return 'Good evening';
-  };
-
   it('toggles the sidebar shell from the panel controls', async () => {
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-    expect(screen.getAllByText(getGreeting())).toHaveLength(1);
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: 'Hello! What would you like me to work on?',
+    })).toBeInTheDocument();
     expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-new-chat-button').querySelector('svg')).toHaveClass(
       'lucide-square-pen'

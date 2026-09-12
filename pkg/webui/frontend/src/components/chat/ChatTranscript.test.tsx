@@ -22,16 +22,14 @@ describe('ChatTranscript', () => {
     copyToClipboardMock.mockReset();
   });
 
-  it('renders the supplied empty-state greeting', () => {
-    render(
-      <ChatTranscript
-        emptyStateTitle="Good afternoon"
-        isStreaming={false}
-        messages={[]}
-      />
-    );
+  it('renders the TUI welcome message for an empty conversation', () => {
+    render(<ChatTranscript isStreaming={false} messages={[]} />);
 
-    expect(screen.getByText('Good afternoon')).toBeInTheDocument();
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: 'Hello! What would you like me to work on?',
+    })).toBeInTheDocument();
+    expect(screen.queryByText(/Ask kodelet to inspect the repo/)).not.toBeInTheDocument();
   });
 
   it.each([

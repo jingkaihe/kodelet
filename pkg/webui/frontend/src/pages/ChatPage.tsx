@@ -123,17 +123,6 @@ const mergeConversationUsage = (
   };
 };
 
-const getGreeting = (): string => {
-  const hour = new Date().getHours();
-  if (hour < 12) {
-    return 'Good morning';
-  }
-  if (hour < 18) {
-    return 'Good afternoon';
-  }
-  return 'Good evening';
-};
-
 const DEFAULT_SIDEBAR_WIDTH = 320;
 const MIN_SIDEBAR_WIDTH = 260;
 const MAX_SIDEBAR_WIDTH = 520;
@@ -2690,13 +2679,6 @@ const ChatPage: React.FC = () => {
     await appendAttachments(files);
   };
 
-  const heading = useMemo(() => {
-    if (conversation?.summary) {
-      return conversation.summary;
-    }
-    return getGreeting();
-  }, [conversation?.summary]);
-
   const currentProfileLabel = useMemo(() => {
     if (conversationId) {
       return conversation?.profile || 'default';
@@ -3490,7 +3472,6 @@ const ChatPage: React.FC = () => {
             ) : (
               <>
                 <ChatTranscript
-                  emptyStateTitle={heading}
                   isStreaming={currentConversationIsStreaming}
                   messages={messages}
                 />

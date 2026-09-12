@@ -237,13 +237,11 @@ const assistantMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} a
 interface ChatTranscriptProps {
   messages: ChatRenderMessage[];
   isStreaming: boolean;
-  emptyStateTitle?: string;
 }
 
 const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   messages,
   isStreaming,
-  emptyStateTitle = 'Good morning',
 }) => {
   const assistantTurnCount = useMemo(
     () => messages.filter((message) => message.role === 'assistant').length,
@@ -334,16 +332,10 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
   if (messages.length === 0) {
     return (
-      <div className="flex min-h-full items-center justify-center px-4 pb-12 pt-20 sm:px-6 lg:py-12">
-        <div className="empty-state-copy-stack text-center">
-          <h1 className="empty-state-title">
-            {emptyStateTitle}
-          </h1>
-          <p className="empty-state-copy">
-            Ask kodelet to inspect the repo, make changes, run tools, and keep the entire
-            conversation threaded in one place.
-          </p>
-        </div>
+      <div className="chat-empty-state">
+        <h1 className="chat-empty-state-title">
+          Hello! What would you like me to work on?
+        </h1>
       </div>
     );
   }

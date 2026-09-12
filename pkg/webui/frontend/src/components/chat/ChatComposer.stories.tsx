@@ -181,7 +181,6 @@ export const InWorkspace: Story = {
 			<main className="chat-main-panel flex min-w-0 flex-1 flex-col overflow-hidden">
 				<div className="chat-main-scroll min-h-0 flex-1 overflow-y-auto">
 					<ChatTranscript
-						emptyStateTitle="Good afternoon"
 						isStreaming={false}
 						messages={[
 							{

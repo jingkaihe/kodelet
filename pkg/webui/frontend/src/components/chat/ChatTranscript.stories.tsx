@@ -27,7 +27,6 @@ const meta = {
 		),
 	],
 	args: {
-		emptyStateTitle: "Good afternoon",
 		isStreaming: false,
 		messages: sampleChatMessages,
 	},

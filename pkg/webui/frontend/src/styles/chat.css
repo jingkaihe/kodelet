@@ -2,6 +2,25 @@
   background: rgba(244, 239, 229, 0.78);
 }
 
+.chat-empty-state {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 3rem 1.5rem;
+}
+
+.chat-empty-state-title {
+  margin: 0;
+  color: #625d52;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.7;
+  text-align: center;
+  text-wrap: balance;
+}
+
 .chat-main-scroll {
   -ms-overflow-style: none;
   overscroll-behavior: contain;
