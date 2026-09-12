@@ -57,6 +57,9 @@ export const Spinner: React.FC<SpinnerProps> = ({
   ...props
 }) => {
   const { frame } = useSpinnerFrame(preset, resetKey);
+  const isDotSpinner = preset === TUI_DOT_SPINNER;
+  // Draw the same braille frame without depending on system symbol fonts.
+  const dots = isDotSpinner ? frame.charCodeAt(0) - 0x2800 : 0;
 
   return (
     <span
@@ -64,7 +67,20 @@ export const Spinner: React.FC<SpinnerProps> = ({
       {...props}
       className={cn('spinner-glyph', className)}
     >
-      {frame}
+      <span className={isDotSpinner ? 'sr-only' : undefined}>{frame}</span>
+      {isDotSpinner ? (
+        <svg aria-hidden="true" viewBox="0 0 10 16" width="1em" height="1em" fill="currentColor">
+          {[0, 1, 2, 6, 3, 4, 5, 7].map((bit, position) => (
+            <circle
+              key={bit}
+              cx={position < 4 ? 3 : 7}
+              cy={2 + (position % 4) * 4}
+              r="1.25"
+              opacity={dots & (1 << bit) ? 1 : 0.15}
+            />
+          ))}
+        </svg>
+      ) : null}
     </span>
   );
 };

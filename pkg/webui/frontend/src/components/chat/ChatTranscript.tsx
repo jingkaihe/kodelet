@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Brain, SquareSlash } from 'lucide-react';
+import { Check, ChevronRight, SquareSlash } from 'lucide-react';
 import { marked } from 'marked';
 import type {
   ChatAssistantBlock,
@@ -121,24 +121,19 @@ const renderCompletedThinkingGroup = (
   thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>>,
   key: string
 ) => {
-  const summaryText = thinkingBlocks.length === 1 ? 'Thought' : `${thinkingBlocks.length} Thoughts`;
+  const summaryText = `Had ${thinkingBlocks.length} ${thinkingBlocks.length === 1 ? 'thought' : 'thoughts'}`;
 
   return (
     <div key={key} className="activity-stack activity-stack-thinking">
       <details className="activity-card activity-card-thinking">
         <summary className="tool-summary activity-summary" title={summaryText}>
-          <span className="tool-summary-chevron" aria-hidden="true">
-            ›
+          <span className="activity-marker" aria-hidden="true">
+            <Check size={14} />
           </span>
-          <Brain
-            aria-hidden="true"
-            className="tool-summary-icon tool-summary-icon-thinking"
-            size={14}
-            strokeWidth={2.2}
-          />
           <span className="tool-summary-text" title={summaryText}>
             <span className="tool-summary-label">{summaryText}</span>
           </span>
+          <span className="tool-summary-chevron" aria-hidden="true"><ChevronRight size={12} /></span>
         </summary>
         <div className="activity-detail-content thinking-group-content">
           {thinkingBlocks.map((thinkingBlock, index) => (
@@ -290,7 +285,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               aria-live="polite"
             >
               <div className="tool-summary activity-summary activity-summary-static">
-                <Spinner className="chat-streaming-spinner" />
+                <Spinner className="chat-streaming-spinner activity-marker" />
                 <span className="tool-summary-text" title="Thinking">
                   <span className="tool-summary-label">Thinking</span>
                 </span>
@@ -364,7 +359,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
           (message.blocks || []).some(
             (block) =>
               ((block.type === 'thinking' || block.type === 'message') && block.inProgress) ||
-              (block.type === 'tools' && block.tools.some((toolCall) => !toolCall.result))
+              (block.type === 'tools' && block.tools.some((toolCall) => toolCall.inProgress || !toolCall.result))
           );
 
         return (

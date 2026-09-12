@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, LoaderCircle, X } from 'lucide-react';
+import Spinner from '../Spinner';
 import type {
   TaskRunActivity,
   TaskRunSnapshot,
@@ -128,23 +129,25 @@ const taskRunActivityPreview = (value?: string): string => {
   return lines[lines.length - 1] || '';
 };
 
-const ActivityMarker: React.FC<{ status: TaskRunActivity['status'] }> = ({ status }) => {
+const ActivityMarker: React.FC<{ status: TaskRunActivity['status']; isLive: boolean }> = ({ status, isLive }) => {
   if (status === 'failed') {
     return <X aria-hidden="true" className="task-run-activity-marker is-failed" size={14} />;
   }
   if (status === 'running') {
+    if (!isLive) {
+      return <LoaderCircle aria-hidden="true" className="task-run-activity-marker" size={14} />;
+    }
     return (
-      <LoaderCircle
+      <Spinner
         aria-hidden="true"
         className="task-run-activity-marker is-running"
-        size={14}
       />
     );
   }
   return <Check aria-hidden="true" className="task-run-activity-marker is-done" size={14} />;
 };
 
-const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot }) => {
+const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot; isLive?: boolean }> = ({ snapshot, isLive = false }) => {
   const omitted = [
     snapshot.omittedSucceeded
       ? `+${snapshot.omittedSucceeded} earlier completed`
@@ -164,7 +167,7 @@ const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot
           className={cn('task-run-activity', `is-${activity.status}`)}
           key={activity.id || `${activity.sequence}-${activity.label}`}
         >
-          <ActivityMarker status={activity.status} />
+          <ActivityMarker status={activity.status} isLive={isLive} />
           <div className="task-run-activity-copy">
             <div className="task-run-activity-label">{activity.label}</div>
             {activity.status === 'failed' && taskRunActivityPreview(activity.preview) ? (
@@ -211,7 +214,7 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
     return (
       <div className="task-run-progress">
         <TaskRunStats elapsedMs={liveElapsedMs} snapshot={snapshot} />
-        <TaskRunActivityList snapshot={snapshot} />
+        <TaskRunActivityList snapshot={snapshot} isLive />
       </div>
     );
   }

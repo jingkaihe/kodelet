@@ -1,5 +1,4 @@
 import React from 'react';
-import { SquareTerminal, UserRound } from 'lucide-react';
 import { cn } from '../../utils';
 import { CopyButton } from '../tool-renderers/shared';
 
@@ -30,31 +29,14 @@ const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
     <article className="w-full">
       <div
         className={cn(
-          'chat-message-panel group w-full rounded-[1.5rem] px-4 sm:px-5',
-          isUser ? 'py-4' : 'py-5'
+          'chat-message-panel group w-full',
+          isUser ? 'chat-message-panel-user' : 'chat-message-panel-assistant'
         )}
       >
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div
-              aria-hidden="true"
-              className={cn(
-                'message-avatar',
-                isUser ? 'message-avatar-user' : 'message-avatar-kodelet'
-              )}
-            >
-              {isUser ? (
-                <UserRound className="h-5 w-5" strokeWidth={1.8} />
-              ) : (
-                <SquareTerminal className="h-5 w-5" strokeWidth={1.9} />
-              )}
-            </div>
-            <div>
-              <p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
-                {getRoleLabel(role)}
-              </p>
-            </div>
-          </div>
+        <div className="chat-message-heading">
+          <p className="chat-message-role">
+            <span aria-hidden="true">{isUser ? '›' : '·'}</span> {getRoleLabel(role)}
+          </p>
 
           {isUser && copyText.trim() ? (
             <CopyButton

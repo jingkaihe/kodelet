@@ -1,7 +1,9 @@
 .activity-stack {
+  --activity-color: #087f8c;
   position: relative;
   display: grid;
-  gap: 0.34rem;
+  min-width: 0;
+  gap: 0.3rem;
 }
 
 .activity-stack-thinking {
@@ -74,99 +76,82 @@
 
 .activity-card {
   position: relative;
-  overflow: hidden;
-  border-radius: 0.65rem;
-  border: 1px solid transparent;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease;
-}
-
-.activity-card:hover,
-.activity-card[open] {
-  border-color: rgba(20, 20, 19, 0.06);
-  background: rgba(255, 255, 255, 0.24);
 }
 
 .activity-card-thinking {
-  border-color: transparent;
-  background: transparent;
-}
-
-.activity-card-thinking:hover,
-.activity-card-thinking[open] {
-  border-color: rgba(20, 20, 19, 0.045);
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.activity-card-live {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.activity-card-thinking.activity-card-live {
-  border-color: transparent;
-  background: transparent;
-}
-
-.activity-card-thinking.activity-card-live:hover {
-  background: rgba(255, 255, 255, 0.12);
+  --activity-color: #a36a12;
 }
 
 .activity-card-error {
-  background: rgba(191, 63, 63, 0.035);
-}
-
-.activity-summary {
-  min-height: 2.15rem;
-  padding: 0.36rem 0.58rem;
-}
-
-.activity-summary-static {
-  cursor: default;
-}
-
-.activity-summary-static:hover {
-  background: transparent;
+  --activity-color: #a63d3d;
 }
 
 .activity-detail-content {
-  margin: 0 0.58rem 0.58rem 2.05rem;
-  padding-top: 0.64rem;
-  border-top: 1px solid rgba(20, 20, 19, 0.055);
+  min-width: 0;
+  margin: 0.35rem 0 0.8rem 1.5rem;
+  padding: 0.1rem 0 0.1rem 0.85rem;
+  border-left: 1px solid color-mix(in srgb, var(--activity-color) 20%, transparent);
 }
 
 .activity-detail-content-live {
-  margin-top: -0.15rem;
-  padding-top: 0.48rem;
+  max-height: 18rem;
+  overflow: auto;
 }
 
 .tool-summary {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 2rem;
   cursor: pointer;
   list-style: none;
-  padding: 0.52rem 0.7rem;
-  transition:
-    background-color 160ms ease,
-    color 160ms ease;
+  padding: 0.25rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--activity-color);
+}
+
+.tool-summary::-webkit-details-marker {
+  display: none;
 }
 
 .tool-summary:hover {
-  background: rgba(255, 255, 255, 0.16);
+  color: color-mix(in srgb, var(--activity-color) 80%, var(--kodelet-dark));
 }
 
 .tool-summary:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px rgba(106, 155, 204, 0.28);
+  outline: 2px solid var(--activity-color);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.activity-summary-static {
+  cursor: default;
+}
+
+.activity-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 1rem;
+  width: 1rem;
+  text-align: center;
+  color: inherit;
+  font-family: var(--font-mono);
 }
 
 .tool-summary-chevron {
   flex: 0 0 auto;
-  font-family: var(--font-heading);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: rgba(122, 117, 107, 0.56);
+  color: inherit;
   transform: rotate(0deg);
   transform-origin: center;
   transition:
@@ -174,53 +159,34 @@
     color 180ms ease;
 }
 
-.activity-card[open] .tool-summary-chevron {
-  color: rgba(122, 117, 107, 0.84);
+.activity-card[open] > summary .tool-summary-chevron {
   transform: rotate(90deg);
 }
 
 .tool-summary-text {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-items: baseline;
   gap: 0.18rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-heading);
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: rgba(20, 20, 19, 0.66);
+  font-family: var(--font-mono);
+  font-size: inherit;
+  font-weight: 400;
+  color: inherit;
 }
 
 .tool-summary-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+
+.tool-summary-label-prefix {
   flex: 0 0 auto;
-  color: rgba(20, 20, 19, 0.72);
-}
-
-.tool-summary-icon {
-  flex: 0 0 auto;
-  align-self: center;
-  color: rgba(20, 20, 19, 0.58);
-  margin-right: 0.16rem;
-  stroke-width: 2.2;
-  transform: translateY(-0.02rem);
-}
-
-.tool-summary-icon-thinking {
-  color: #6f91b5;
-}
-
-.tool-summary-icon-running {
-  color: #c79643;
-  filter: drop-shadow(0 0 5px rgba(199, 150, 67, 0.16));
-  animation: kodeletActivityPulse 1.5s ease-in-out infinite;
-}
-
-.tool-summary-icon-error {
-  color: #b04a4a;
-  filter: drop-shadow(0 0 4px rgba(191, 63, 63, 0.14));
 }
 
 .tool-summary-detail {
@@ -229,22 +195,148 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: rgba(20, 20, 19, 0.52);
+  font-size: inherit;
+  font-weight: 400;
+  color: inherit;
 }
 
 .tool-summary-status {
   flex: 0 0 auto;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   line-height: 1;
   letter-spacing: 0.02em;
-  color: rgba(122, 117, 107, 0.52);
+  color: #70695f;
+}
+
+.activity-card-error > summary .tool-summary-status {
+  color: var(--activity-color);
+}
+
+.command-activity,
+.tool-activity {
+  min-width: 0;
+  padding: 0.25rem 0;
+}
+
+.command-activity-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #565d54;
+}
+
+.command-activity-command {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.activity-detail-content .tool-terminal,
+.activity-detail-content .tool-code-block {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #635e55;
+}
+
+.activity-detail-content .tool-terminal-body,
+.activity-detail-content .tool-code-block {
+  padding: 0.25rem 0;
+  color: #635e55;
+}
+
+.activity-detail-content .tool-code-block code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.activity-detail-content :is(.tool-kv-item, .diff-block, .grep-block, .tool-file-item, .tool-inline-code, .tool-detail-panel, .surface-panel) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.activity-detail-content .tool-kv-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+
+.activity-detail-content .tool-kv-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0;
+}
+
+.activity-detail-content :is(.tool-kv-label, .tool-kv-value, .tool-note) {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.activity-detail-content :is(.tool-note, .apply-patch-error) {
+  border: 0;
+  border-left: 1px solid var(--activity-color);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.25rem 0.65rem;
+  font-family: var(--font-mono);
+}
+
+.activity-detail-content .bash-tool-badge {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.activity-detail-content .bash-tool-brief {
+  justify-content: flex-start;
+}
+
+.activity-detail-content :is(.quiet-tool-muted, .quiet-tool-empty, .quiet-tool-path) {
+  color: #756e63;
+}
+
+.activity-detail-content .quiet-tool-path {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.activity-detail-content :is(.bash-tool-description, .bash-tool-badge, .quiet-tool-line, .quiet-tool-empty, .extension-presentation-body, .tool-compact-markdown) {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.activity-detail-content .tool-compact-markdown {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+@media (any-pointer: coarse) {
+  .tool-summary {
+    min-height: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-summary-chevron {
+    transition: none;
+  }
 }
 
 .tool-awaiting {
-  font-size: 0.82rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
   color: #6f6a5f;
 }
 
@@ -318,7 +410,7 @@
 .task-run-stats {
   font-family: var(--font-mono);
   font-size: 0.68rem;
-  color: rgba(122, 117, 107, 0.72);
+  color: #756e63;
 }
 
 .task-run-activities {
@@ -338,12 +430,12 @@
 .task-run-activity-marker {
   margin-top: 0.08rem;
   color: rgba(74, 122, 88, 0.82);
-  stroke-width: 2.3;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
 }
 
 .task-run-activity-marker.is-running {
   color: #c79643;
-  animation: taskRunSpin 1.15s linear infinite;
 }
 
 .task-run-activity-marker.is-failed {
@@ -387,7 +479,7 @@
   padding-left: 1.34rem;
   font-family: var(--font-mono);
   font-size: 0.66rem;
-  color: rgba(122, 117, 107, 0.62);
+  color: #756e63;
 }
 
 .task-run-response {
@@ -419,10 +511,4 @@
 
 .task-run-history .task-run-stats {
   margin-bottom: 0.34rem;
-}
-
-@keyframes taskRunSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }

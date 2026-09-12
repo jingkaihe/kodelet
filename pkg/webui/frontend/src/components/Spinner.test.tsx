@@ -14,12 +14,16 @@ describe('Spinner', () => {
     const spinner = container.querySelector('.spinner-glyph');
 
     expect(spinner).toHaveTextContent('⣾');
+    expect(spinner?.querySelectorAll('circle[opacity="1"]')).toHaveLength(7);
+    expect(spinner?.querySelector('circle')).toHaveAttribute('opacity', '0.15');
 
     act(() => vi.advanceTimersByTime(124));
     expect(spinner).toHaveTextContent('⣾');
 
     act(() => vi.advanceTimersByTime(1));
     expect(spinner).toHaveTextContent('⣽');
+    expect(spinner?.querySelector('circle')).toHaveAttribute('opacity', '1');
+    expect(spinner?.querySelectorAll('circle')[1]).toHaveAttribute('opacity', '0.15');
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);

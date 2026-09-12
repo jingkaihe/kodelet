@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyChatStreamEvent } from '../../features/chat/state';
-import type { ChatRenderMessage, ChatStreamEvent } from '../../types';
+import type { ChatAssistantBlock, ChatRenderMessage, ChatStreamEvent } from '../../types';
 import ChatTranscript from './ChatTranscript';
 
 const { copyToClipboardMock } = vi.hoisted(() => ({
@@ -130,11 +131,11 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Thought')).toBeInTheDocument();
+    expect(screen.getByText('Had 1 thought')).toBeVisible();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(container.querySelector('.lucide-brain')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-brain')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-dot-thinking')).not.toBeInTheDocument();
-    expect(screen.getByText('Plan')).toBeInTheDocument();
+    expect(screen.getByText('Plan')).not.toBeVisible();
     expect(container.querySelector('strong')?.textContent).toBe('Plan');
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
   });
@@ -301,9 +302,9 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(container.querySelector('details')).toBeNull();
     expect(screen.getByText('Thinking')).toBeInTheDocument();
     expect(container.querySelector('.chat-streaming-spinner')).toHaveTextContent('⣾');
+    expect(screen.getByText('Inspecting the repo')).toBeVisible();
 
     rerender(
       <ChatTranscript
@@ -323,8 +324,10 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Thought')).toBeInTheDocument();
+    expect(screen.getByText('Had 1 thought')).toBeVisible();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Inspecting the repo')).not.toBeVisible();
+    expect(container.querySelector('.chat-streaming-spinner')).not.toBeInTheDocument();
   });
 
   it('uses the shared TUI dot spinner on in-progress thinking blocks', () => {
@@ -350,7 +353,8 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-streaming-spinner')).toHaveTextContent('⣾');
   });
 
-  it('groups consecutive completed thinking blocks into one collapsible thoughts card', () => {
+  it('groups consecutive completed thinking blocks into one lightweight disclosure', async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -379,14 +383,24 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('3 Thoughts')).toBeInTheDocument();
+    expect(screen.getByText('Had 3 thoughts')).toBeVisible();
     expect(screen.queryByText('thought 1')).not.toBeInTheDocument();
     expect(screen.queryByText('thought 2')).not.toBeInTheDocument();
     expect(screen.queryByText('thought 3')).not.toBeInTheDocument();
-    expect(screen.getByText('First thought')).toBeInTheDocument();
-    expect(screen.getByText('Second thought')).toBeInTheDocument();
-    expect(screen.getByText('Third thought')).toBeInTheDocument();
+    expect(screen.getByText('First thought')).not.toBeVisible();
+    expect(screen.getByText('Second thought')).not.toBeVisible();
+    expect(screen.getByText('Third thought')).not.toBeVisible();
     expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(container.querySelector('.lucide-brain')).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('Had 3 thoughts'));
+
+    expect(screen.getByText('First thought')).toBeVisible();
+    expect(screen.getByText('Second thought')).toBeVisible();
+    expect(screen.getByText('Third thought')).toBeVisible();
+
+    await user.click(screen.getByText('Had 3 thoughts'));
+    expect(screen.getByText('First thought')).not.toBeVisible();
   });
 
   it('shows a streaming thinking indicator between assistant blocks', () => {
@@ -439,10 +453,25 @@ describe('ChatTranscript', () => {
       );
 
       expect(screen.queryByLabelText('Kodelet is working')).not.toBeInTheDocument();
-      expect(setIntervalSpy).not.toHaveBeenCalled();
+      expect(setIntervalSpy).toHaveBeenCalled();
+      expect(setIntervalSpy.mock.calls.every(([, delay]) => delay === 125)).toBe(true);
     } finally {
       setIntervalSpy.mockRestore();
     }
+  });
+
+  it('does not show a fallback working indicator alongside streamed tool output', () => {
+    render(<ChatTranscript isStreaming={true} messages={[{
+      role: 'assistant', blocks: [{ type: 'tools', tools: [{
+        callId: 'bash-1', name: 'bash', input: '{"command":"npm test"}', inProgress: true,
+        result: { toolName: 'bash', success: true, metadata: { command: 'npm test', output: 'Tests in progress' } },
+      }] }],
+    }]} />);
+
+    expect(screen.getByText('Running 1 command')).toBeVisible();
+    expect(screen.getByText('Tests in progress')).toBeVisible();
+    expect(screen.getByLabelText('Tool running')).toBeVisible();
+    expect(screen.queryByLabelText('Kodelet is working')).not.toBeInTheDocument();
   });
 
   it('renders embedded base64 images in user content', () => {
@@ -739,7 +768,7 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('Open page: URL unavailable')).toBeInTheDocument()
   })
 
-  it('renders each tool as its own collapsible row with concise summaries', () => {
+  it('keeps live bash and other builtin tools in separate compact groups', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -768,7 +797,9 @@ describe('ChatTranscript', () => {
       />
     )
 
-    expect(screen.getAllByTitle('Bash: rg -n "ChatTranscript" pkg/webui/frontend/src')).not.toHaveLength(0)
+    expect(screen.getByText('Running 1 command')).toBeVisible()
+    expect(screen.getByText('Running 1 tool')).toBeVisible()
+    expect(screen.getByText('$ rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeVisible()
     expect(
       screen.getByText(
         'Read file: /home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx'
@@ -779,7 +810,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout')
   })
 
-  it('uses icons instead of text labels for common developer tools', () => {
+  it('uses shared TUI spinners and groups developer tools without semantic icons', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -813,12 +844,16 @@ describe('ChatTranscript', () => {
       />
     )
 
-    expect(container.querySelector('.lucide-square-terminal')).toBeInTheDocument()
-    expect(container.querySelector('.lucide-pencil')).toBeInTheDocument()
-    expect(container.querySelector('.lucide-pocket-knife')).toBeInTheDocument()
+    expect(screen.getByText('Running 1 command')).toBeVisible()
+    expect(screen.getByText('Running 2 tools')).toBeVisible()
+    expect(container.querySelectorAll('details')).toHaveLength(2)
+    expect(container.querySelector('details details')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('summary .spinner-glyph')).toHaveLength(2)
+    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText('Tool running')).toHaveLength(3)
   })
 
-  it('uses the tool icon as the running status marker without adding a dot', () => {
+  it('uses the shared spinner as the running command marker', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -844,7 +879,8 @@ describe('ChatTranscript', () => {
 
     expect(screen.getByLabelText('Tool running')).toHaveTextContent('running')
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
-    expect(container.querySelector('.tool-summary-icon-running')).toBeInTheDocument()
+    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾')
+    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument()
   })
 
   it('keeps long running tool input previews compact', () => {
@@ -954,7 +990,96 @@ describe('ChatTranscript', () => {
 
     expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed')
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
-    expect(container.querySelector('.tool-summary-icon-error')).toBeInTheDocument()
+    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open')
+    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument()
+    expect(container.querySelector('summary')).toHaveTextContent('1 failed')
     expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument()
   })
+
+  it('renders plain role labels without avatars or rounded-card utilities', () => {
+    const { container } = render(<ChatTranscript isStreaming={false} messages={[
+      { role: 'user', content: 'Inspect the repository.' },
+      { role: 'assistant', blocks: [{ type: 'message', content: 'I will read the files.' }] },
+    ]} />);
+
+    expect(screen.getByText('You')).toBeVisible();
+    expect(screen.getByText('Kodelet')).toBeVisible();
+    expect(screen.getByText('Inspect the repository.')).toBeVisible();
+    expect(screen.getByText('I will read the files.')).toBeVisible();
+    expect(screen.getByText('You')).toHaveClass('chat-message-role');
+    expect(screen.getByText('Kodelet')).toHaveClass('chat-message-role');
+    for (const panel of container.querySelectorAll('.chat-message-panel')) {
+      expect(panel.className).not.toMatch(/rounded-|shadow-|border-/);
+    }
+    expect(container.querySelector('.message-avatar')).not.toBeInTheDocument();
+  });
+
+  it.each(['message', 'thinking'] as const)('does not merge command or builtin groups across a %s block', (type) => {
+    const toolsBlock = (suffix: string, name: string): ChatAssistantBlock => ({
+      type: 'tools',
+      tools: [{
+        callId: `${name}-${suffix}`, name,
+        input: JSON.stringify(name === 'bash' ? { command: `echo ${suffix}` } : { file_path: `${suffix}.md` }),
+        result: { toolName: name, success: true },
+      }],
+    });
+    const { container } = render(<ChatTranscript isStreaming={false} messages={[{
+      role: 'assistant', blocks: [
+        toolsBlock('first', 'bash'), { type, content: 'Between commands' }, toolsBlock('second', 'bash'),
+        toolsBlock('first', 'file_read'), { type, content: 'Between tools' }, toolsBlock('second', 'file_read'),
+      ],
+    }]} />);
+
+    expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
+    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(2);
+    expect(container.querySelectorAll('.activity-command-group')).toHaveLength(2);
+    expect(container.querySelectorAll('.activity-tool-group')).toHaveLength(2);
+    expect(screen.queryByText('Ran 2 commands')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ran 2 tools')).not.toBeInTheDocument();
+  });
+
+  it('does not merge command or thought groups across conversation turns', () => {
+    const assistant: ChatRenderMessage = {
+      role: 'assistant', blocks: [
+        { type: 'thinking', content: 'Inspecting the repository' },
+        { type: 'tools', tools: [{
+          callId: 'bash-1', name: 'bash', input: '{"command":"pwd"}',
+          result: { toolName: 'bash', success: true },
+        }] },
+      ],
+    };
+    const { container } = render(<ChatTranscript isStreaming={false} messages={[
+      assistant, { role: 'user', content: 'Please check again.' }, { ...assistant },
+    ]} />);
+
+    expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
+    expect(screen.getAllByText('Had 1 thought')).toHaveLength(2);
+    expect(container.querySelectorAll('.activity-command-group')).toHaveLength(2);
+    expect(screen.queryByText('Ran 2 commands')).not.toBeInTheDocument();
+    expect(screen.queryByText('Had 2 thoughts')).not.toBeInTheDocument();
+  });
+
+  it('preserves a manually expanded thought while another block streams', async () => {
+    const user = userEvent.setup();
+    const messages: ChatRenderMessage[] = [{
+      role: 'assistant', blocks: [
+        { type: 'thinking', content: 'Completed reasoning' },
+        { type: 'message', content: 'Working', inProgress: true },
+      ],
+    }];
+    const { container, rerender } = render(<ChatTranscript isStreaming={true} messages={messages} />);
+
+    await user.click(screen.getByText('Had 1 thought'));
+    const thoughts = container.querySelector('details');
+    expect(thoughts).toHaveAttribute('open');
+
+    rerender(<ChatTranscript isStreaming={true} messages={applyChatStreamEvent(messages, {
+      kind: 'text-delta', delta: ' on the implementation',
+    })} />);
+
+    expect(container.querySelector('details')).toBe(thoughts);
+    expect(thoughts).toHaveAttribute('open');
+    expect(screen.getByText('Completed reasoning')).toBeVisible();
+    expect(screen.getByText('Working on the implementation')).toBeVisible();
+  });
 });

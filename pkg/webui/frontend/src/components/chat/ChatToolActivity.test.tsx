@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ChatRenderToolCall } from '../../types';
 import ChatToolActivity, {
@@ -6,6 +7,21 @@ import ChatToolActivity, {
   getToolActivityStatus,
   getToolSummary,
 } from './ChatToolActivity';
+
+const bashTool = (
+  command: string,
+  overrides: Partial<ChatRenderToolCall> = {}
+): ChatRenderToolCall => ({
+  callId: command,
+  name: 'bash',
+  input: JSON.stringify({ command }),
+  result: {
+    toolName: 'bash',
+    success: true,
+    metadata: { command, output: `${command} output`, executionTime: 119000000, exitCode: 0 },
+  },
+  ...overrides,
+});
 
 describe('ChatToolActivity', () => {
   it('keeps generated image previews visible outside collapsed tool details', () => {
@@ -120,7 +136,8 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument();
   });
 
-  it('renders a successful bash result with duration status and tool details', () => {
+  it('collapses a successful command and reveals its shell transcript and duration on expansion', async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <ChatToolActivity
         tools={[
@@ -144,10 +161,21 @@ describe('ChatToolActivity', () => {
       />
     );
 
-    expect(screen.getByText('Bash: pwd')).toBeInTheDocument();
+    const group = container.querySelector('details.activity-card.activity-command-group');
+    expect(group).not.toHaveAttribute('open');
+    expect(screen.getByText('Ran 1 command')).toBeVisible();
+    expect(screen.queryByText('Bash: pwd')).not.toBeInTheDocument();
+    expect(screen.getByText('$ pwd')).not.toBeVisible();
+    expect(screen.getByText('/workspace/kodelet')).not.toBeVisible();
+
+    await user.click(screen.getByText('Ran 1 command'));
+
+    expect(group).toHaveAttribute('open');
+    expect(screen.getByText('$ pwd')).toBeVisible();
     expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms');
-    expect(screen.getByText('Print working directory')).toBeInTheDocument();
-    expect(screen.getByText('/workspace/kodelet')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tool 119ms')).toBeVisible();
+    expect(screen.getByText('Print working directory')).toBeVisible();
+    expect(screen.getByText('/workspace/kodelet')).toBeVisible();
     expect(container.querySelector('.activity-card-live')).not.toBeInTheDocument();
   });
 
@@ -174,13 +202,18 @@ describe('ChatToolActivity', () => {
       />
     );
 
+    expect(screen.getByText('Running 1 command')).toBeVisible();
+    expect(screen.getByText('$ long-task')).toBeVisible();
     expect(screen.getByLabelText('Tool running')).toHaveTextContent('running');
-    expect(screen.getByText('partial output')).toBeInTheDocument();
+    expect(screen.getByText('partial output')).toBeVisible();
+    expect(container.querySelector('details.activity-command-group')).toHaveAttribute('open');
     expect(screen.queryByText('Awaiting tool result…')).not.toBeInTheDocument();
+    expect(container.querySelector('.running-tool-input-preview')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-card-live')).toBeInTheDocument();
   });
 
-  it('renders failed tool results with error styling and failed status', () => {
+  it('collapses failed commands with visible failure status and expandable errors', async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <ChatToolActivity
         tools={[
@@ -205,11 +238,189 @@ describe('ChatToolActivity', () => {
       />
     );
 
-    expect(screen.getByText('Bash: false')).toBeInTheDocument();
+    expect(screen.getByText('Ran 1 command')).toBeVisible();
+    expect(screen.getByText('$ false')).not.toBeVisible();
+    expect(screen.getByText('Command exited with status 1.')).not.toBeVisible();
+    expect(container.querySelector('.activity-command-group.activity-card-error')).not.toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-x')).toBeVisible();
+    expect(screen.getByText('1 failed')).toBeVisible();
+
+    await user.click(screen.getByText('Ran 1 command'));
+
+    expect(screen.getByText('$ false')).toBeVisible();
     expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed');
-    expect(screen.getByText('Command exited with status 1.')).toBeInTheDocument();
-    expect(container.querySelector('.activity-card-error')).toBeInTheDocument();
-    expect(container.querySelector('.tool-summary-icon-error')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tool failed')).toBeVisible();
+    expect(screen.getByText('Command exited with status 1.')).toBeVisible();
+    expect(container.querySelector('.activity-command-group.activity-card-error')).toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
+    expect(container.querySelector('summary')).toHaveTextContent('1 failed');
+  });
+
+  it('groups consecutive bash calls in a single expandable disclosure', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatToolActivity tools={[bashTool('pwd'), bashTool('ls')]} />
+    );
+    const group = container.querySelector('details.activity-command-group');
+    const summary = screen.getByText('Ran 2 commands').closest('summary');
+
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(group).not.toHaveAttribute('open');
+    expect(summary?.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(screen.getByText('$ pwd')).not.toBeVisible();
+    expect(screen.getByText('$ ls')).not.toBeVisible();
+
+    // user-event omits summary from tab navigation and native Enter/Space activation.
+    // Check those in a browser rather than emulating browser defaults in this test.
+    await user.click(screen.getByText('Ran 2 commands'));
+
+    expect(group).toHaveAttribute('open');
+    for (const command of ['pwd', 'ls']) {
+      expect(screen.getByText(`$ ${command}`)).toBeVisible();
+      expect(screen.getByText(`${command} output`)).toBeVisible();
+    }
+    expect(screen.getAllByLabelText('Tool 119ms')).toHaveLength(2);
+
+    await user.click(screen.getByText('Ran 2 commands'));
+    expect(group).not.toHaveAttribute('open');
+    expect(screen.getByText('pwd output')).not.toBeVisible();
+  });
+
+  it('shows every command in a mixed live group and collapses only after the last command completes', async () => {
+    const user = userEvent.setup();
+    const completed = bashTool('pwd');
+    const streaming = bashTool('npm test', { inProgress: true });
+    const pending = bashTool('npm run lint', { result: undefined });
+    const { container, rerender } = render(
+      <ChatToolActivity tools={[completed, streaming, pending]} />
+    );
+
+    expect(screen.getByText('Running 3 commands')).toBeVisible();
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(container.querySelector('.activity-command-group')).toHaveAttribute('open');
+    expect(screen.getByLabelText('Tool 119ms')).toBeVisible();
+    expect(screen.getAllByLabelText('Tool running')).toHaveLength(2);
+    for (const command of ['pwd', 'npm test', 'npm run lint']) {
+      expect(screen.getByText(`$ ${command}`)).toBeVisible();
+    }
+    expect(screen.getByText('pwd output')).toBeVisible();
+    expect(screen.getByText('npm test output')).toBeVisible();
+    expect(container.querySelector('.running-tool-input-preview')).not.toBeInTheDocument();
+
+    rerender(<ChatToolActivity tools={[completed, { ...streaming, inProgress: false }, pending]} />);
+
+    expect(screen.getByText('Running 3 commands')).toBeVisible();
+    expect(container.querySelector('.activity-command-group')).toHaveAttribute('open');
+    expect(screen.getAllByLabelText('Tool 119ms')).toHaveLength(2);
+    expect(screen.getByLabelText('Tool running')).toBeVisible();
+    expect(screen.getByText('npm test output')).toBeVisible();
+
+    rerender(<ChatToolActivity tools={[completed, bashTool('npm test'), bashTool('npm run lint')]} />);
+
+    expect(screen.getByText('Ran 3 commands')).toBeVisible();
+    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
+    expect(screen.queryByLabelText('Tool running')).not.toBeInTheDocument();
+    expect(container.querySelector('.spinner-glyph')).not.toBeInTheDocument();
+    expect(screen.getByText('npm run lint output')).not.toBeVisible();
+
+    await user.click(screen.getByText('Ran 3 commands'));
+    for (const command of ['pwd', 'npm test', 'npm run lint']) {
+      expect(screen.getByText(`$ ${command}`)).toBeVisible();
+      expect(screen.getByText(`${command} output`)).toBeVisible();
+    }
+  });
+
+  it('shows pending command input without a Bash header or raw JSON', () => {
+    const { container } = render(
+      <ChatToolActivity tools={[bashTool('sleep 10', { result: undefined })]} />
+    );
+
+    expect(screen.getByText('Running 1 command')).toBeVisible();
+    expect(screen.getByText('$ sleep 10')).toBeVisible();
+    expect(screen.getByLabelText('Tool running')).toBeVisible();
+    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾');
+    expect(screen.queryByText('Bash: sleep 10')).not.toBeInTheDocument();
+    expect(screen.queryByText(/"command"/)).not.toBeInTheDocument();
+    expect(container.querySelector('.running-tool-input-preview')).not.toBeInTheDocument();
+  });
+
+  it('collapses failed groups only after their last running command finishes', async () => {
+    const user = userEvent.setup();
+    const failed = bashTool('false', {
+      result: {
+        toolName: 'bash', success: false, error: 'Command exited with status 1.',
+        metadata: { command: 'false', output: 'failure output', exitCode: 1 },
+      },
+    });
+    const { container, rerender } = render(
+      <ChatToolActivity tools={[failed, bashTool('pwd', { result: undefined })]} />
+    );
+
+    expect(screen.getByText('Running 2 commands')).toBeVisible();
+    expect(container.querySelector('summary')).toHaveTextContent('1 failed');
+    expect(screen.getByLabelText('Tool failed')).toBeVisible();
+    expect(screen.getByText('failure output')).toBeVisible();
+
+    rerender(<ChatToolActivity tools={[failed, bashTool('pwd')]} />);
+
+    expect(screen.getByText('Ran 2 commands')).toBeVisible();
+    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
+    expect(container.querySelector('summary')).toHaveTextContent('1 failed');
+    expect(screen.getByText('Command exited with status 1.')).not.toBeVisible();
+    expect(screen.getByText('$ pwd')).not.toBeVisible();
+
+    await user.click(screen.getByText('Ran 2 commands'));
+
+    expect(screen.getByText('Command exited with status 1.')).toBeVisible();
+    expect(screen.getByText('failure output')).toBeVisible();
+    expect(screen.getByText('$ pwd')).toBeVisible();
+  });
+
+  it('preserves manual expansion while an unrelated tool changes status', async () => {
+    const user = userEvent.setup();
+    const completed = bashTool('pwd');
+    const unrelated: ChatRenderToolCall = {
+      callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}',
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[completed, unrelated]} />);
+
+    await user.click(screen.getByText('Ran 1 command'));
+    const group = container.querySelector('.activity-command-group');
+    expect(group).toHaveAttribute('open');
+
+    rerender(<ChatToolActivity tools={[
+      { ...completed },
+      { ...unrelated, result: { toolName: 'file_read', success: true } },
+    ]} />);
+
+    expect(container.querySelector('.activity-command-group')).toBe(group);
+    expect(group).toHaveAttribute('open');
+    expect(screen.getByText('pwd output')).toBeVisible();
+  });
+
+  it('does not group bash across other tools or treat similarly named extension tools as bash', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={[
+      bashTool('pwd'),
+      { callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}', result: { toolName: 'file_read', success: true } },
+      bashTool('ls'),
+      { callId: 'remote-1', name: 'remote_command', input: '{}', result: { toolName: 'remote_command', success: true } },
+    ]} />);
+
+    const groups = container.querySelectorAll('details.activity-command-group');
+    expect(groups).toHaveLength(2);
+    expect(container.querySelectorAll('details')).toHaveLength(4);
+    expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
+    expect(screen.queryByText('Ran 2 commands')).not.toBeInTheDocument();
+    expect(groups[0]).toHaveTextContent('$ pwd');
+    expect(groups[0]).not.toHaveTextContent('$ ls');
+    expect(groups[1]).toHaveTextContent('$ ls');
+    expect(groups[1]).not.toHaveTextContent('$ pwd');
+
+    await user.click(screen.getAllByText('Ran 1 command')[0]);
+    expect(screen.getByText('$ pwd')).toBeVisible();
+    expect(screen.getByText('$ ls')).not.toBeVisible();
   });
 
   it('returns null for an empty tool collection', () => {
@@ -537,134 +748,219 @@ describe('ChatToolActivity', () => {
   });
 
   it.each([
-    ['repository_search', '.lucide-search'],
-    ['reviewAgent', '.lucide-file-cog'],
-    ['review-task', '.lucide-file-cog'],
-    ['remote_command', '.lucide-square-terminal'],
-    ['URLFetch', '.lucide-globe'],
-    ['config-edit', '.lucide-file-pen'],
-    ['XMLReader', '.lucide-file-text'],
-  ])('infers the semantic icon for external tool %s', (name, expectedIcon) => {
-    const { container } = render(
-      <ChatToolActivity
-        tools={[
-          {
-            callId: 'external-1',
-            name,
-            input: '{}',
-            result: {
-              toolName: name,
-              success: true,
-              metadataType: 'extension_tool',
-            },
-          },
-        ]}
-      />
-    );
+    { success: true, status: 'done', marker: '.lucide-check' },
+    { success: false, status: 'failed', marker: '.lucide-x' },
+  ])('uses a TUI glyph and accessible $status status for a collapsed extension result', async ({ success, status, marker }) => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'external-1', name: 'repository_search', input: '{}',
+      result: {
+        toolName: 'repository_search', success, metadataType: 'extension_tool',
+        metadata: {
+          extensionId: 'search', toolName: 'repository_search', output: 'Search results',
+          data: { presentation: { summary: 'Search repository' } },
+        },
+      },
+    }]} />);
 
-    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+    expect(screen.getByText('Search repository')).toBeVisible();
+    expect(screen.getByLabelText(`Tool ${status}`)).toBeVisible();
+    expect(container.querySelector(`summary ${marker}`)).toBeInTheDocument();
+    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument();
+    expect(container.querySelector('.spinner-glyph')).not.toBeInTheDocument();
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Search results')).not.toBeVisible();
+
+    await user.click(screen.getByText('Search repository'));
+
+    expect(screen.getByText('Search results')).toBeVisible();
   });
 
-  it.each([
-    ['http_search', '.lucide-globe'],
-    ['https_search', '.lucide-globe'],
-    ['fetch_search_results', '.lucide-globe'],
-    ['web_code_search', '.lucide-search'],
-    ['web_preview', '.lucide-globe'],
-  ])('applies semantic category priority for external tool %s', (name, expectedIcon) => {
-    const { container } = render(
-      <ChatToolActivity
-        tools={[
-          {
-            callId: 'external-1',
-            name,
-            input: '{}',
-            result: {
-              toolName: name,
-              success: true,
-              metadataType: 'extension_tool',
-            },
-          },
-        ]}
-      />
-    );
+  it('uses the shared TUI spinner for a pending extension without inferring an icon from its name or input', () => {
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'runner-1', name: 'repository_search', input: '{"task":"search the repository"}',
+    }]} />);
 
-    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾');
+    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Tool running')).toBeVisible();
   });
 
-  it.each([
-    ['openai_image_generation', '.lucide-file-text'],
-    ['OpenAIImageGeneration', '.lucide-file-text'],
-    ['openAIImageGeneration', '.lucide-file-text'],
-    ['OpenAPIValidator', '.lucide-file-text'],
-    ['OpenSSLScan', '.lucide-file-text'],
-    ['executive_summary', '.lucide-square-terminal'],
-    ['editorial_calendar', '.lucide-file-pen'],
-    ['readiness_probe', '.lucide-file-text'],
-  ])('avoids prefix false positives for external tool %s', (name, incorrectIcon) => {
-    const { container } = render(
-      <ChatToolActivity
-        tools={[
-          {
-            callId: 'external-1',
-            name,
-            input: '{}',
-            result: {
-              toolName: name,
-              success: true,
-              metadataType: 'extension_tool',
-            },
-          },
-        ]}
-      />
-    );
+  it('preserves extension presentation and attachments through live updates and completion', async () => {
+    const user = userEvent.setup();
+    const tool: ChatRenderToolCall = {
+      callId: 'review-1', name: 'review_repository', input: '{}', inProgress: true,
+      result: {
+        toolName: 'review_repository', success: true, metadataType: 'extension_tool',
+        metadata: {
+          extensionId: 'review', toolName: 'review_repository', output: 'Raw extension output',
+          data: { presentation: { summary: 'Review repository', body: 'Checking **parser**', format: 'markdown' } },
+        },
+      },
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[tool]} />);
 
-    expect(container.querySelector('.lucide-wrench')).toBeInTheDocument();
-    expect(container.querySelector(incorrectIcon)).not.toBeInTheDocument();
+    expect(screen.getByText('Review repository')).toBeVisible();
+    expect(screen.getByText('parser')).toBeVisible();
+    expect(screen.getByText('parser').tagName).toBe('STRONG');
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾');
+    expect(screen.queryByText('Raw extension output')).not.toBeInTheDocument();
+
+    const complete: ChatRenderToolCall = {
+      ...tool, inProgress: false,
+      result: {
+        toolName: 'review_repository', success: true, metadataType: 'extension_tool',
+        metadata: {
+          extensionId: 'review', toolName: 'review_repository', output: 'Raw final output',
+          data: { presentation: { summary: 'Repository reviewed', body: '**Parser looks good.**', format: 'markdown' } },
+        },
+        attachments: [{
+          type: 'image', artifactId: 'review_1', shortCode: 'review', mimeType: 'image/png', alt: 'Review diagram',
+        }],
+      },
+    };
+    rerender(<ChatToolActivity tools={[complete]} />);
+
+    expect(screen.getByText('Repository reviewed')).toBeVisible();
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-check')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tool done')).toBeVisible();
+    expect(screen.queryByLabelText('Tool running')).not.toBeInTheDocument();
+    expect(container.querySelector('.spinner-glyph')).not.toBeInTheDocument();
+    expect(screen.getByText('Parser looks good.')).not.toBeVisible();
+    expect(screen.getByRole('img', { name: 'Review diagram' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Review diagram' }).closest('details')).toBeNull();
+
+    await user.click(screen.getByText('Repository reviewed'));
+    expect(screen.getByText('Parser looks good.')).toBeVisible();
+    expect(screen.getByText('Parser looks good.').tagName).toBe('STRONG');
+    expect(screen.queryByText('Raw final output')).not.toBeInTheDocument();
+    expect(screen.queryByText('parser')).not.toBeInTheDocument();
+
+    rerender(<ChatToolActivity tools={[{ ...complete }]} />);
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(screen.getByText('Parser looks good.')).toBeVisible();
   });
 
-  it.each([
-    ['file_write', '{"file_path":"README.md"}', '.lucide-file-plus', '.lucide-file-pen'],
-    [
-      'apply_patch',
-      '{"input":"*** Begin Patch\\n*** Update File: README.md\\n*** End Patch"}',
-      '.lucide-pencil',
-      '.lucide-file-pen',
-    ],
-    ['view_image', '{"path":"screenshot.png"}', '.lucide-file-image', '.lucide-file-text'],
-    ['openai_web_search', '{}', '.lucide-globe', '.lucide-search'],
-  ])('preserves the explicit built-in icon for %s', (name, input, expectedIcon, inferredIcon) => {
-    const { container } = render(
-      <ChatToolActivity
-        tools={[
-          {
-            callId: 'builtin-1',
-            name,
-            input,
-          },
-        ]}
-      />
-    );
+  it('groups consecutive non-bash builtins with their summaries and results in one disclosure', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={[
+      {
+        callId: 'fetch-1', name: 'web_fetch', input: '{"url":"https://example.com/news"}',
+        result: { toolName: 'web_fetch', success: true, metadata: { url: 'https://example.com/news', content: 'Latest headlines', processedType: 'text' } },
+      },
+      {
+        callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}',
+        result: { toolName: 'file_read', success: true, metadata: { filePath: 'README.md', lines: ['Project instructions'], offset: 1 } },
+      },
+    ]} />);
+    const group = container.querySelector('details.activity-card.activity-tool-group');
 
-    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
-    expect(container.querySelector(inferredIcon)).not.toBeInTheDocument();
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(group).not.toHaveAttribute('open');
+    expect(screen.getByText('Ran 2 tools')).toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/news')).not.toBeVisible();
+    expect(screen.getByText('Read file: README.md')).not.toBeVisible();
+
+    await user.click(screen.getByText('Ran 2 tools'));
+
+    expect(group).toHaveAttribute('open');
+    expect(screen.getByText('Fetch URL: https://example.com/news')).toBeVisible();
+    expect(screen.getByText('Read file: README.md')).toBeVisible();
+    expect(screen.getByText('Latest headlines')).toBeVisible();
+    expect(screen.getByText('Project instructions')).toBeVisible();
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument();
   });
 
-  it('uses a generic icon for a running unmatched external tool without inspecting its input', () => {
-    const { container } = render(
-      <ChatToolActivity
-        tools={[
-          {
-            callId: 'runner-1',
-            name: 'runner',
-            input: '{"task":"search the repository"}',
-          },
-        ]}
-      />
-    );
+  it.each(['file_read', 'file_write', 'file_edit', 'apply_patch', 'skill', 'get_goal', 'update_goal', 'todo_read', 'todo_write', 'glob_tool', 'grep_tool', 'view_image', 'openai_web_search', 'web_fetch', 'read_conversation'])(
+    'groups the %s builtin as a tool rather than an extension', (name) => {
+      const { container } = render(<ChatToolActivity tools={[{
+        callId: name, name, input: '{}', result: { toolName: name, success: true },
+      }]} />);
 
-    expect(container.querySelector('.lucide-wrench')).toBeInTheDocument();
-    expect(container.querySelector('.lucide-search')).not.toBeInTheDocument();
-    expect(container.querySelector('.lucide-file-cog')).not.toBeInTheDocument();
+      expect(screen.getByText('Ran 1 tool')).toBeVisible();
+      expect(container.querySelector('details.activity-tool-group')).not.toHaveAttribute('open');
+      expect(container.querySelectorAll('details')).toHaveLength(1);
+    }
+  );
+
+  it.each([true, false])('collapses builtin groups on completion regardless of success (%s)', (success) => {
+    const completed: ChatRenderToolCall = {
+      callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}',
+      result: { toolName: 'file_read', success: true },
+    };
+    const pending: ChatRenderToolCall = {
+      callId: 'write-1', name: 'file_write', input: '{"file_path":"CHANGELOG.md"}',
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[completed, pending]} />);
+
+    expect(screen.getByText('Running 2 tools')).toBeVisible();
+    expect(container.querySelector('.activity-tool-group')).toHaveAttribute('open');
+    expect(screen.getByText('Read file: README.md')).toBeVisible();
+    expect(screen.getByText('Write file: CHANGELOG.md')).toBeVisible();
+    expect(screen.getByLabelText('Tool done')).toBeVisible();
+    expect(screen.getByLabelText('Tool running')).toBeVisible();
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+
+    rerender(<ChatToolActivity tools={[completed, { ...pending, result: { toolName: 'file_write', success } }]} />);
+
+    expect(screen.getByText('Ran 2 tools')).toBeVisible();
+    expect(container.querySelector('.activity-tool-group')).not.toHaveAttribute('open');
+    expect(screen.getByText('Read file: README.md')).not.toBeVisible();
+    expect(screen.getByText('Write file: CHANGELOG.md')).not.toBeVisible();
+    expect(screen.queryByLabelText('Tool running')).not.toBeInTheDocument();
+  });
+
+  it('collapses failed builtin groups with a visible failure count and expandable error', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'fetch-1', name: 'web_fetch', input: '{"url":"https://example.com/news"}',
+      result: { toolName: 'web_fetch', success: false, error: 'Page unavailable.' },
+    }]} />);
+
+    expect(screen.getByText('Ran 1 tool')).toBeVisible();
+    expect(container.querySelector('.activity-tool-group')).not.toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
+    expect(screen.getByText('1 failed')).toBeVisible();
+    expect(screen.getByText('Page unavailable.')).not.toBeVisible();
+
+    await user.click(screen.getByText('Ran 1 tool'));
+
+    expect(screen.getByLabelText('Tool failed')).toBeVisible();
+    expect(screen.getByText('Page unavailable.')).toBeVisible();
+  });
+
+  it('keeps builtin, command, and extension groups in transcript order without merging across boundaries', () => {
+    const read = (callId: string): ChatRenderToolCall => ({
+      callId, name: 'file_read', input: JSON.stringify({ file_path: `${callId}.md` }),
+      result: { toolName: 'file_read', success: true },
+    });
+    const { container } = render(<ChatToolActivity tools={[
+      read('first'), bashTool('pwd'), read('second'),
+      {
+        callId: 'extension-1', name: 'review_repository', input: '{}',
+        result: {
+          toolName: 'review_repository', success: true, metadataType: 'extension_tool',
+          metadata: { data: { presentation: { summary: 'Review repository' } } },
+        },
+      },
+      read('third'),
+    ]} />);
+
+    const rows = container.querySelectorAll('details');
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toHaveClass('activity-tool-group');
+    expect(rows[1]).toHaveClass('activity-command-group');
+    expect(rows[2]).toHaveClass('activity-tool-group');
+    expect(rows[3]).not.toHaveClass('activity-tool-group');
+    expect(rows[4]).toHaveClass('activity-tool-group');
+    expect(screen.getByText('Review repository')).toBeVisible();
+    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(3);
+    expect(within(rows[0] as HTMLElement).getByText('Read file: first.md')).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByText('Read file: second.md')).toBeInTheDocument();
+    expect(within(rows[4] as HTMLElement).getByText('Read file: third.md')).toBeInTheDocument();
   });
 });

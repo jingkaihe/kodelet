@@ -1,21 +1,8 @@
 import React from 'react';
-import {
-  BookOpenText,
-  FileCog,
-  FileImage,
-  FilePen,
-  FilePlus,
-  FileText,
-  Globe,
-  Pencil,
-  PocketKnife,
-  Search,
-  SquareTerminal,
-  Wrench,
-  type LucideIcon,
-} from 'lucide-react';
+import { Check, ChevronRight, X } from 'lucide-react';
 import type { ChatRenderToolCall, ToolResult } from '../../types';
 import { cn, formatDuration } from '../../utils';
+import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
 import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/ToolImageAttachments';
 import {
@@ -395,159 +382,17 @@ const splitActivitySummary = (summaryText: string): { label: string; detail?: st
   };
 };
 
-const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
-  'Apply patch': Pencil,
-  Bash: SquareTerminal,
-  'Code execution': FileCog,
-  'Code search': Search,
-  'Delegated task': FileCog,
-  'Edit file': FilePen,
-  'Extension tool': Wrench,
-  'Fetch URL': Globe,
-  'Find files': Search,
-  'Find in page': Search,
-  'Open page': Globe,
-  'Read conversation': BookOpenText,
-  'Read file': FileText,
-  Search,
-  Skill: PocketKnife,
-  'View image': FileImage,
-  'Viewed image': FileImage,
-  'Viewed images': FileImage,
-  'Generated image': FileImage,
-  'Generated images': FileImage,
-  'Web search': Globe,
-  'Write file': FilePlus,
-};
-
-const semanticToolIcons: Array<{ keywords: string[]; icon: LucideIcon }> = [
-  {
-    keywords: [
-      'agent',
-      'agents',
-      'agentic',
-      'subagent',
-      'subagents',
-      'delegate',
-      'delegated',
-      'delegation',
-      'worker',
-      'workers',
-      'task',
-      'tasks',
-    ],
-    icon: FileCog,
-  },
-  {
-    keywords: ['fetch', 'fetcher', 'fetching', 'http', 'https'],
-    icon: Globe,
-  },
-  {
-    keywords: ['search', 'searcher', 'searching', 'find', 'finder', 'finding', 'grep', 'glob', 'lookup'],
-    icon: Search,
-  },
-  {
-    keywords: ['bash', 'shell', 'command', 'commands', 'exec', 'execute', 'execution', 'terminal'],
-    icon: SquareTerminal,
-  },
-  {
-    keywords: ['web'],
-    icon: Globe,
-  },
-  {
-    keywords: ['write', 'writer', 'writing', 'edit', 'editor', 'editing', 'patch', 'patcher', 'patching'],
-    icon: FilePen,
-  },
-  {
-    keywords: ['read', 'reader', 'reading', 'view', 'viewer', 'viewing', 'open', 'opener', 'opening'],
-    icon: FileText,
-  },
-];
-
-const builtinToolNames = new Set([
-  'apply_patch',
-  'bash',
-  'file_edit',
-  'file_read',
-  'file_write',
-  'get_goal',
-  'glob_tool',
-  'grep_tool',
-  'openai_web_search',
-  'read_conversation',
-  'skill',
-  'update_goal',
-  'view_image',
-  'web_fetch',
-]);
-
-const tokenizeToolName = (toolName: string): Set<string> => {
-  const normalizedToolName = normalizeToolName(toolName);
-  const tokens = new Set(
-    normalizedToolName
-      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter(Boolean)
-  );
-
-  if (/(?:^|[^a-zA-Z0-9])(?:Open|open)[A-Z]{2}/.test(normalizedToolName)) {
-    tokens.delete('open');
-  }
-
-  return tokens;
-};
-
-const getToolSummaryIcon = (
-  toolName: string,
-  summaryLabel: string,
-  isExtensionTool: boolean
-): LucideIcon | undefined => {
-  const existingIcon = toolSummaryIcons[summaryLabel];
-  if (existingIcon) {
-    return existingIcon;
-  }
-
-  const tokens = tokenizeToolName(toolName);
-  for (const { keywords, icon } of semanticToolIcons) {
-    if (keywords.some((keyword) => tokens.has(keyword))) {
-      return icon;
-    }
-  }
-
-  return isExtensionTool ? Wrench : undefined;
-};
-
 const ActivitySummaryText: React.FC<{
-  toolName: string;
   summaryText: string;
-  status?: string;
-  isExtensionTool: boolean;
-}> = ({ toolName, summaryText, status, isExtensionTool }) => {
+}> = ({ summaryText }) => {
   const { label, detail } = splitActivitySummary(summaryText);
-  const SummaryIcon = getToolSummaryIcon(toolName, label, isExtensionTool);
 
   return (
     <span className="tool-summary-text" title={summaryText}>
       {detail ? <span className="sr-only">{summaryText}</span> : null}
-      {SummaryIcon ? (
-        <SummaryIcon
-          aria-hidden="true"
-          className={cn(
-            'tool-summary-icon',
-            status === 'running' && 'tool-summary-icon-running',
-            status === 'failed' && 'tool-summary-icon-error'
-          )}
-          size={14}
-          strokeWidth={2.2}
-        />
-      ) : (
-        <span className="tool-summary-label" aria-hidden={detail ? 'true' : undefined}>
-          {detail ? `${label}:` : label}
-        </span>
-      )}
-      {SummaryIcon && !detail ? <span className="tool-summary-label">{label}</span> : null}
+      <span className={cn('tool-summary-label', detail && 'tool-summary-label-prefix')} aria-hidden={detail ? 'true' : undefined}>
+        {detail ? `${label}:` : label}
+      </span>
       {detail ? (
         <span className="tool-summary-detail" aria-hidden="true">
           {' '}
@@ -558,74 +403,130 @@ const ActivitySummaryText: React.FC<{
   );
 };
 
+const builtinToolNames = new Set([
+  'apply_patch', 'file_edit', 'file_read', 'file_write', 'get_goal', 'glob_tool',
+  'grep_tool', 'openai_web_search', 'read_conversation', 'skill', 'todo_read',
+  'todo_write', 'update_goal', 'view_image', 'web_fetch',
+]);
+
+const toolGroupKind = (tool: ChatRenderToolCall): 'commands' | 'tools' | 'extension' => {
+  if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
+    return 'extension';
+  }
+  const name = normalizeToolName(tool.name);
+  if (name === 'bash') return 'commands';
+  return builtinToolNames.has(name) ? 'tools' : 'extension';
+};
+
 const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
   if (tools.length === 0) {
     return null;
   }
 
+  // Preserve transcript order and keep extension-owned presentations independent.
+  const groups: ChatRenderToolCall[][] = [];
+  for (const tool of tools) {
+    const previous = groups[groups.length - 1];
+    const kind = toolGroupKind(tool);
+    if (kind !== 'extension' && previous && toolGroupKind(previous[0]) === kind) {
+      previous.push(tool);
+    } else {
+      groups.push([tool]);
+    }
+  }
+
   return (
     <div className="activity-stack">
-      {tools.map((toolCall, toolIndex) => {
-        const summaryText = getToolSummary(toolCall);
-        const activityStatus = getToolActivityStatus(toolCall);
-        const normalizedToolName = normalizeToolName(toolCall.name);
-        const isExtensionTool =
-          toolCall.result?.metadataType === 'extension_tool' ||
-          !builtinToolNames.has(normalizedToolName);
+      {groups.map((group, groupIndex) => {
+        const toolCall = group[0];
+        const kind = toolGroupKind(toolCall);
+        const commands = kind === 'commands';
+        const builtin = kind !== 'extension';
+        const running = group.some((tool) => getToolActivityStatus(tool) === 'running');
+        const failedCount = group.filter((tool) => getToolActivityStatus(tool) === 'failed').length;
+        const noun = commands ? 'command' : 'tool';
+        const summaryText = builtin
+          ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
+          : getToolSummary(toolCall);
+        const activityStatus = running ? 'running' : failedCount ? 'failed' : getToolActivityStatus(toolCall);
 
         return (
           <React.Fragment
-            key={`${toolCall.callId || `${toolCall.name}-${toolIndex}`}-${activityStatus === 'running' ? 'running' : 'settled'}`}
+            key={`${toolCall.callId || `${toolCall.name}-${groupIndex}`}-${running ? 'running' : failedCount ? 'failed' : 'settled'}`}
           >
             <details
               className={cn(
                 'activity-card',
-                activityStatus === 'running' && 'activity-card-live',
-                activityStatus === 'failed' && 'activity-card-error'
+                commands && 'activity-command-group',
+                kind === 'tools' && 'activity-tool-group',
+                running && 'activity-card-live',
+                failedCount > 0 && 'activity-card-error'
               )}
-              open={activityStatus === 'running' ? true : undefined}
+              open={running ? true : undefined}
             >
               <summary className="tool-summary activity-summary" title={summaryText}>
+                <span className="activity-marker" aria-hidden="true">
+                  {running ? <Spinner /> : failedCount ? <X size={14} /> : <Check size={14} />}
+                </span>
+                <ActivitySummaryText summaryText={summaryText} />
                 <span className="tool-summary-chevron" aria-hidden="true">
-                  ›
+                  <ChevronRight size={12} />
                 </span>
-                <ActivitySummaryText
-                  toolName={toolCall.name}
-                  summaryText={summaryText}
-                  status={activityStatus}
-                  isExtensionTool={isExtensionTool}
-                />
-                <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
-                  {activityStatus}
-                </span>
+                {builtin ? (
+                  failedCount > 0 ? <span className="tool-summary-status">{failedCount} failed</span> : null
+                ) : (
+                  <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                    {activityStatus}
+                  </span>
+                )}
               </summary>
 
               <div className="activity-detail-content space-y-2">
-                {toolCall.result ? (
-                  <ToolRenderer
-                    isPartial={toolCall.inProgress}
-                    showAttachments={false}
-                    toolInput={toolCall.input}
-                    toolResult={toolCall.result}
-                  />
-                ) : (
-                  <>
-                    <p className="tool-awaiting">Awaiting tool result…</p>
-                    {toolCall.input ? (
-                      <div className="running-tool-input-preview">
-                        <ReferenceCodeBlock
-                          content={formatToolInputPreview(toolCall.input)}
-                          language="json"
+                {group.map((tool, toolIndex) => {
+                  const status = getToolActivityStatus(tool);
+                  const input = parseToolInput(tool.input);
+                  const commandText = getStringField(input, 'command') ||
+                    getStringField(getMetadataRecord(tool.result), 'command');
+                  return (
+                    <section className={commands ? 'command-activity' : 'tool-activity'} key={tool.callId || toolIndex}>
+                      {builtin ? (
+                        <div className="command-activity-header">
+                          {commands ? (
+                            <code className="command-activity-command">$ {commandText || 'Receiving command…'}</code>
+                          ) : <ActivitySummaryText summaryText={getToolSummary(tool)} />}
+                          <span className="tool-summary-status" aria-label={`Tool ${status}`}>{status}</span>
+                        </div>
+                      ) : null}
+                      {tool.result ? (
+                        <ToolRenderer
+                          isPartial={tool.inProgress}
+                          showAttachments={false}
+                          toolInput={tool.input}
+                          toolResult={tool.result}
                         />
-                      </div>
-                    ) : null}
-                  </>
-                )}
+                      ) : (
+                        <>
+                          <p className="tool-awaiting">{commands ? 'Waiting for command output…' : 'Awaiting tool result…'}</p>
+                          {!commands && tool.input ? (
+                            <div className="running-tool-input-preview">
+                              <ReferenceCodeBlock
+                                content={formatToolInputPreview(normalizeToolName(tool.name) === 'apply_patch'
+                                  ? getStringField(input, 'input') || tool.input
+                                  : tool.input)}
+                                language={normalizeToolName(tool.name) === 'apply_patch' ? 'diff' : 'json'}
+                              />
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             </details>
-            {toolCall.result && !toolCall.inProgress ? (
-              <ToolImageAttachments toolResult={toolCall.result} />
-            ) : null}
+            {group.map((tool, toolIndex) => tool.result && !tool.inProgress ? (
+              <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />
+            ) : null)}
           </React.Fragment>
         );
       })}
