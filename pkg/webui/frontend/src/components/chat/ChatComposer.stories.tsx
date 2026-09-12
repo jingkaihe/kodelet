@@ -1,6 +1,6 @@
 import React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import ChatComposer from "./ChatComposer";
 import ChatSidebar from "./ChatSidebar";
 import ChatTranscript from "./ChatTranscript";
@@ -40,6 +40,25 @@ const meta = {
 	title: "Chat/ChatComposer",
 	component: ChatComposer,
 	render: (args) => <InteractiveComposer {...args} />,
+	play: async ({ args, canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
+		const canvas = within(canvasElement);
+		await waitFor(() => {
+			const editor = canvas.getByTestId("composer-textarea");
+			const leading = canvas.getByRole("button", { name: "Add image" }).getBoundingClientRect();
+			const submit = canvas.getByRole("button", { name: args.submitActionLabel }).getBoundingClientRect();
+			expect(Math.abs(leading.y - submit.y)).toBeLessThan(1);
+			expect(Math.abs(leading.height - submit.height)).toBeLessThan(1);
+
+			if (!editor.parentElement?.classList.contains("is-multiline")) {
+				const styles = getComputedStyle(editor);
+				const textCenter = editor.getBoundingClientRect().top
+					+ Number.parseFloat(styles.paddingTop)
+					+ Number.parseFloat(styles.lineHeight) / 2;
+				expect(Math.abs(textCenter - (submit.y + submit.height / 2))).toBeLessThan(1);
+			}
+		});
+	},
 	parameters: {
 		layout: "fullscreen",
 	},

@@ -798,7 +798,7 @@ describe('ChatTranscript', () => {
     )
 
     expect(screen.getByText('Running 1 command')).toBeVisible()
-    expect(screen.getByText('Running 1 tool')).toBeVisible()
+    expect(screen.queryByText('Running 1 tool')).not.toBeInTheDocument()
     expect(screen.getByText('$ rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeVisible()
     expect(
       screen.getByText(
@@ -845,10 +845,11 @@ describe('ChatTranscript', () => {
     )
 
     expect(screen.getByText('Running 1 command')).toBeVisible()
-    expect(screen.getByText('Running 2 tools')).toBeVisible()
-    expect(container.querySelectorAll('details')).toHaveLength(2)
+    expect(screen.getByText('Running 1 tool')).toBeVisible()
+    expect(screen.getByText('Edit file: README.md')).toBeVisible()
+    expect(container.querySelectorAll('details')).toHaveLength(3)
     expect(container.querySelector('details details')).not.toBeInTheDocument()
-    expect(container.querySelectorAll('summary .spinner-glyph')).toHaveLength(2)
+    expect(container.querySelectorAll('summary .spinner-glyph')).toHaveLength(3)
     expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument()
     expect(screen.getAllByLabelText('Tool running')).toHaveLength(3)
   })
@@ -1031,9 +1032,10 @@ describe('ChatTranscript', () => {
     }]} />);
 
     expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
-    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(2);
+    expect(screen.getByText('Read file: first.md')).toBeVisible();
+    expect(screen.getByText('Read file: second.md')).toBeVisible();
     expect(container.querySelectorAll('.activity-command-group')).toHaveLength(2);
-    expect(container.querySelectorAll('.activity-tool-group')).toHaveLength(2);
+    expect(container.querySelectorAll('.activity-file')).toHaveLength(2);
     expect(screen.queryByText('Ran 2 commands')).not.toBeInTheDocument();
     expect(screen.queryByText('Ran 2 tools')).not.toBeInTheDocument();
   });

@@ -45,7 +45,7 @@
   max-width: 100%;
   min-height: 2.75rem;
   padding: 0.34rem 0.5rem;
-  color: #008494;
+  color: var(--sidebar-surface-ink);
   background: transparent;
   border: 0;
   text-align: left;
@@ -58,8 +58,8 @@
 }
 
 .sidebar-action-link:hover:not(:disabled) {
-  color: #006c79;
-  background: rgba(0, 132, 148, 0.05);
+  color: var(--kodelet-dark);
+  background: rgba(93, 83, 64, 0.06);
 }
 
 .sidebar-action-link:disabled {

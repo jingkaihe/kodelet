@@ -6,9 +6,12 @@
   gap: 0.3rem;
 }
 
-.activity-stack-thinking {
-  margin-top: 0.1rem;
-  margin-bottom: 0.1rem;
+.chat-assistant-blocks > * + * {
+  margin-top: 1rem;
+}
+
+.chat-assistant-blocks > .activity-stack + .activity-stack {
+  margin-top: 0.3rem;
 }
 
 .tool-image-attachments {
@@ -209,6 +212,11 @@
   color: #70695f;
 }
 
+.file-activity-counts {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .activity-card-error > summary .tool-summary-status {
   color: var(--activity-color);
 }
@@ -357,14 +365,15 @@
   box-shadow: var(--shadow-sm);
 }
 
-.tool-code-block code {
+.tool-code-block code,
+.tool-code-block code[class*="language-"] {
   display: block;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.5;
-  color: var(--kodelet-dark);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: inherit;
 }
 
 .web-fetch-code-preview .tool-code-block {

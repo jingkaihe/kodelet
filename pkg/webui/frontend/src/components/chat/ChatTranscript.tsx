@@ -371,7 +371,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
             {isUser ? (
               <div className="space-y-3">{renderUserContent(message.content)}</div>
             ) : (
-              <div className="space-y-4">
+              <div className="chat-assistant-blocks">
                 {renderAssistantBlocks(message.blocks || [])}
 
                 {isActiveStreamingAssistant && !hasVisibleInProgressBlock ? (

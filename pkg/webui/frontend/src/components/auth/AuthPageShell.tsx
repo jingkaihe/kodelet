@@ -86,7 +86,7 @@ export function AuthPageShell({
           ) : null}
         </div>
 
-        <section className="auth-card surface-panel" aria-labelledby="auth-page-title">
+        <section className="auth-card" aria-labelledby="auth-page-title">
           <header className="auth-header">
             <h1 className="auth-title" id="auth-page-title">
               {title}

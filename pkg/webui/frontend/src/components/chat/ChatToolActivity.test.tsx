@@ -852,8 +852,8 @@ describe('ChatToolActivity', () => {
         result: { toolName: 'web_fetch', success: true, metadata: { url: 'https://example.com/news', content: 'Latest headlines', processedType: 'text' } },
       },
       {
-        callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}',
-        result: { toolName: 'file_read', success: true, metadata: { filePath: 'README.md', lines: ['Project instructions'], offset: 1 } },
+        callId: 'fetch-2', name: 'web_fetch', input: '{"url":"https://example.com/docs"}',
+        result: { toolName: 'web_fetch', success: true, metadata: { url: 'https://example.com/docs', content: 'Project instructions', processedType: 'text' } },
       },
     ]} />);
     const group = container.querySelector('details.activity-card.activity-tool-group');
@@ -862,20 +862,20 @@ describe('ChatToolActivity', () => {
     expect(group).not.toHaveAttribute('open');
     expect(screen.getByText('Ran 2 tools')).toBeVisible();
     expect(screen.getByText('Fetch URL: https://example.com/news')).not.toBeVisible();
-    expect(screen.getByText('Read file: README.md')).not.toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/docs')).not.toBeVisible();
 
     await user.click(screen.getByText('Ran 2 tools'));
 
     expect(group).toHaveAttribute('open');
     expect(screen.getByText('Fetch URL: https://example.com/news')).toBeVisible();
-    expect(screen.getByText('Read file: README.md')).toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/docs')).toBeVisible();
     expect(screen.getByText('Latest headlines')).toBeVisible();
     expect(screen.getByText('Project instructions')).toBeVisible();
     expect(container.querySelector('details details')).not.toBeInTheDocument();
     expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument();
   });
 
-  it.each(['file_read', 'file_write', 'file_edit', 'apply_patch', 'skill', 'get_goal', 'update_goal', 'todo_read', 'todo_write', 'glob_tool', 'grep_tool', 'view_image', 'openai_web_search', 'web_fetch', 'read_conversation'])(
+  it.each(['skill', 'get_goal', 'update_goal', 'todo_read', 'todo_write', 'glob_tool', 'grep_tool', 'view_image', 'openai_web_search', 'web_fetch', 'read_conversation'])(
     'groups the %s builtin as a tool rather than an extension', (name) => {
       const { container } = render(<ChatToolActivity tools={[{
         callId: name, name, input: '{}', result: { toolName: name, success: true },
@@ -889,28 +889,28 @@ describe('ChatToolActivity', () => {
 
   it.each([true, false])('collapses builtin groups on completion regardless of success (%s)', (success) => {
     const completed: ChatRenderToolCall = {
-      callId: 'read-1', name: 'file_read', input: '{"file_path":"README.md"}',
-      result: { toolName: 'file_read', success: true },
+      callId: 'fetch-1', name: 'web_fetch', input: '{"url":"https://example.com/news"}',
+      result: { toolName: 'web_fetch', success: true },
     };
     const pending: ChatRenderToolCall = {
-      callId: 'write-1', name: 'file_write', input: '{"file_path":"CHANGELOG.md"}',
+      callId: 'fetch-2', name: 'web_fetch', input: '{"url":"https://example.com/docs"}',
     };
     const { container, rerender } = render(<ChatToolActivity tools={[completed, pending]} />);
 
     expect(screen.getByText('Running 2 tools')).toBeVisible();
     expect(container.querySelector('.activity-tool-group')).toHaveAttribute('open');
-    expect(screen.getByText('Read file: README.md')).toBeVisible();
-    expect(screen.getByText('Write file: CHANGELOG.md')).toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/news')).toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/docs')).toBeVisible();
     expect(screen.getByLabelText('Tool done')).toBeVisible();
     expect(screen.getByLabelText('Tool running')).toBeVisible();
     expect(container.querySelector('details details')).not.toBeInTheDocument();
 
-    rerender(<ChatToolActivity tools={[completed, { ...pending, result: { toolName: 'file_write', success } }]} />);
+    rerender(<ChatToolActivity tools={[completed, { ...pending, result: { toolName: 'web_fetch', success } }]} />);
 
     expect(screen.getByText('Ran 2 tools')).toBeVisible();
     expect(container.querySelector('.activity-tool-group')).not.toHaveAttribute('open');
-    expect(screen.getByText('Read file: README.md')).not.toBeVisible();
-    expect(screen.getByText('Write file: CHANGELOG.md')).not.toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/news')).not.toBeVisible();
+    expect(screen.getByText('Fetch URL: https://example.com/docs')).not.toBeVisible();
     expect(screen.queryByLabelText('Tool running')).not.toBeInTheDocument();
   });
 
@@ -933,7 +933,7 @@ describe('ChatToolActivity', () => {
     expect(screen.getByText('Page unavailable.')).toBeVisible();
   });
 
-  it('keeps builtin, command, and extension groups in transcript order without merging across boundaries', () => {
+  it('keeps file rows, builtin, command, and extension groups in transcript order', () => {
     const read = (callId: string): ChatRenderToolCall => ({
       callId, name: 'file_read', input: JSON.stringify({ file_path: `${callId}.md` }),
       result: { toolName: 'file_read', success: true },
@@ -948,19 +948,175 @@ describe('ChatToolActivity', () => {
         },
       },
       read('third'),
+      { callId: 'skill-1', name: 'skill', input: '{}', result: { toolName: 'skill', success: true } },
     ]} />);
 
     const rows = container.querySelectorAll('details');
-    expect(rows).toHaveLength(5);
-    expect(rows[0]).toHaveClass('activity-tool-group');
+    expect(rows).toHaveLength(6);
+    expect(rows[0]).toHaveClass('activity-file');
     expect(rows[1]).toHaveClass('activity-command-group');
-    expect(rows[2]).toHaveClass('activity-tool-group');
+    expect(rows[2]).toHaveClass('activity-file');
     expect(rows[3]).not.toHaveClass('activity-tool-group');
-    expect(rows[4]).toHaveClass('activity-tool-group');
+    expect(rows[4]).toHaveClass('activity-file');
+    expect(rows[5]).toHaveClass('activity-tool-group');
     expect(screen.getByText('Review repository')).toBeVisible();
-    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(3);
+    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(1);
     expect(within(rows[0] as HTMLElement).getByText('Read file: first.md')).toBeInTheDocument();
     expect(within(rows[2] as HTMLElement).getByText('Read file: second.md')).toBeInTheDocument();
     expect(within(rows[4] as HTMLElement).getByText('Read file: third.md')).toBeInTheDocument();
+  });
+
+  it('keeps consecutive reads visible as separate file rows with expandable content', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={['README.md', 'AGENTS.md'].map((path) => ({
+      callId: path, name: 'file_read', input: JSON.stringify({ file_path: path }),
+      result: { toolName: 'file_read', success: true, metadata: { filePath: path, lines: [`Contents of ${path}`] } },
+    }))} />);
+
+    expect(container.querySelectorAll('details.activity-file')).toHaveLength(2);
+    expect(container.querySelector('.activity-tool-group')).not.toBeInTheDocument();
+    expect(screen.getByText('Read file: README.md')).toBeVisible();
+    expect(screen.getByText('Read file: AGENTS.md')).toBeVisible();
+    expect(screen.getByText('Contents of README.md')).not.toBeVisible();
+    expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('Read file: README.md'));
+    expect(screen.getByText('Contents of README.md')).toBeVisible();
+    expect(screen.getByText('Contents of AGENTS.md')).not.toBeVisible();
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+  });
+
+  it.each([['file_edit', 'Edit'], ['file_write', 'Write']])(
+    'shows %s paths and real line counts without an outer tool group', async (name, label) => {
+      const user = userEvent.setup();
+      const tool: ChatRenderToolCall = {
+        callId: name, name, input: '{"file_path":"src/app.ts"}',
+        result: {
+          toolName: name, success: true,
+          metadata: { filePath: '/workspace/src/app.ts', unifiedDiff: '--- old\n+++ new\n@@ -10 +10,2 @@\n-old\n+new\n+extra\n@@ -20 +21 @@\n--- literal\n+++ literal\n' },
+        },
+      };
+      const { container, rerender } = render(<ChatToolActivity tools={[tool]} />);
+      const summary = container.querySelector('summary') as HTMLElement;
+
+      expect(screen.getByText(`${label} file: /workspace/src/app.ts`)).toBeVisible();
+      expect(within(summary).getByText('+3')).toBeVisible();
+      expect(within(summary).getByText('-2')).toBeVisible();
+      expect(container.querySelectorAll('details')).toHaveLength(1);
+      expect(container.querySelector('details')).not.toHaveAttribute('open');
+      expect(screen.getByText('old')).not.toBeVisible();
+
+      await user.click(summary);
+      expect(screen.getByText('old')).toBeVisible();
+      expect(container.querySelector('.diff-line-removed .diff-line-number')).toHaveTextContent('10');
+      expect(container.querySelector('.apply-patch-change-line')).not.toBeInTheDocument();
+
+      rerender(<ChatToolActivity tools={[{ ...tool }, bashTool('pwd')]} />);
+      expect(container.querySelector('details.activity-file')).toHaveAttribute('open');
+    }
+  );
+
+  it('splits multi-file patches into independent write, edit, delete, and move rows', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'patch-1', name: 'apply_patch', input: '{}',
+      result: {
+        toolName: 'apply_patch', success: true,
+        metadata: { changes: [
+          { path: 'new.txt', operation: 'add', unifiedDiff: '@@ -0,0 +1 @@\n+created\n' },
+          { path: 'edit.txt', operation: 'update', unifiedDiff: '@@ -1 +1 @@\n-old\n+updated\n' },
+          { path: 'deleted.txt', operation: 'delete', unifiedDiff: '@@ -1 +0,0 @@\n-removed\n' },
+          { path: 'before.txt', movePath: 'after.txt', operation: 'update', unifiedDiff: '' },
+        ] },
+        attachments: [{ type: 'image', artifactId: 'patch_1', shortCode: 'patch', mimeType: 'image/png', alt: 'Patch preview' }],
+      },
+    }]} />);
+
+    const summaries = container.querySelectorAll('summary');
+    expect(summaries).toHaveLength(4);
+    for (const text of ['Write file: new.txt', 'Edit file: edit.txt', 'Delete file: deleted.txt', 'Move file: before.txt → after.txt']) {
+      expect(screen.getByText(text)).toBeVisible();
+    }
+    expect(Array.from(summaries).map((summary) => summary.querySelector('.file-activity-counts')?.textContent)).toEqual([
+      '(+1 -0)', '(+1 -1)', '(+0 -1)', '(+0 -0)',
+    ]);
+    expect(screen.queryByText(/Ran .* tools?/)).not.toBeInTheDocument();
+    await user.click(screen.getByText('Delete file: deleted.txt'));
+    expect(screen.getByText('removed')).toBeVisible();
+    expect(screen.getByText('created')).not.toBeVisible();
+    expect(container.querySelectorAll('details[open]')).toHaveLength(1);
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: 'Patch preview' })).toHaveLength(1);
+    expect(screen.getByRole('img', { name: 'Patch preview' }).closest('details')).toBeNull();
+  });
+
+  it.each([true, false])('keeps pending patch paths visible and collapses on completion (success %s)', async (success) => {
+    const user = userEvent.setup();
+    const pending: ChatRenderToolCall = {
+      callId: 'patch-1', name: 'apply_patch',
+      input: JSON.stringify({ input: '*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n-old\n+new\n*** End Patch' }),
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[pending]} />);
+
+    expect(screen.getByText('Move file: old.txt → new.txt')).toBeVisible();
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('summary .spinner-glyph')).toBeInTheDocument();
+    expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
+
+    rerender(<ChatToolActivity tools={[{ ...pending, result: {
+      toolName: 'apply_patch', success, error: success ? undefined : 'Partial patch failed',
+      metadata: { changes: [{ path: 'old.txt', movePath: 'new.txt', operation: 'update', unifiedDiff: '@@ -1 +1 @@\n-old\n+new\n' }] },
+    } }]} />);
+
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Move file: old.txt → new.txt')).toBeVisible();
+    expect(screen.getByText('+1')).toBeVisible();
+    expect(container.querySelector('summary .spinner-glyph')).not.toBeInTheDocument();
+    if (!success) expect(screen.getByLabelText('Tool failed')).toBeVisible();
+
+    await user.click(screen.getByText('Move file: old.txt → new.txt'));
+    expect(screen.getByText('old')).toBeVisible();
+    expect(screen.getByText('new')).toBeVisible();
+    if (!success) expect(screen.getByRole('alert')).toHaveTextContent('Partial patch failed');
+  });
+
+  it.each([['file_read', 'Read'], ['file_edit', 'Edit'], ['file_write', 'Write']])(
+    'preserves %s paths and errors when results have no metadata', async (name, label) => {
+      const user = userEvent.setup();
+      const tool: ChatRenderToolCall = { callId: name, name, input: '{"file_path":"README.md"}' };
+      const { container, rerender } = render(<ChatToolActivity tools={[tool]} />);
+      expect(screen.getByText(`${label} file: README.md`)).toBeVisible();
+      expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
+      expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
+
+      rerender(<ChatToolActivity tools={[{ ...tool, result: { toolName: name, success: false, error: 'Permission denied' } }]} />);
+      expect(screen.getByLabelText('Tool failed')).toBeVisible();
+      expect(screen.getByText(`${label} file: README.md`)).toBeVisible();
+      await user.click(screen.getByText(`${label} file: README.md`));
+      expect(screen.getByText('Permission denied')).toBeVisible();
+      expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
+    }
+  );
+
+  it('does not claim attempted patch files were changed when the result reports no changes', () => {
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'patch-1', name: 'apply_patch', input: JSON.stringify({ input: '*** Begin Patch\n*** Update File: README.md\n*** End Patch' }),
+      result: { toolName: 'apply_patch', success: true, metadata: { changes: [] } },
+    }]} />);
+    expect(screen.queryByText('Edit file: README.md')).not.toBeInTheDocument();
+    expect(screen.getByText('No files were modified.')).toBeInTheDocument();
+    expect(container.querySelector('details')).toHaveClass('activity-file');
+    expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
+  });
+
+  it('preserves extension-owned presentations even when their tool name matches a file tool', () => {
+    const { container } = render(<ChatToolActivity tools={[{
+      callId: 'extension-edit', name: 'file_edit', input: '{"file_path":"README.md"}',
+      result: { toolName: 'file_edit', success: true, metadataType: 'extension_tool', metadata: {
+        data: { presentation: { summary: 'Review proposed edit', body: 'Awaiting approval' } },
+      } },
+    }]} />);
+    expect(screen.getByText('Review proposed edit')).toBeVisible();
+    expect(container.querySelector('.activity-file')).not.toBeInTheDocument();
   });
 });

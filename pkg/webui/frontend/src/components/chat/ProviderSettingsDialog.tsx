@@ -14,6 +14,7 @@ import Spinner from '../Spinner';
 
 const PROVIDER_DIALOG_FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
+  'input:not([disabled])',
   '[href]',
   "[tabindex]:not([tabindex='-1'])",
 ].join(',');

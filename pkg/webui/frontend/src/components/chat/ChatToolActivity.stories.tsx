@@ -81,10 +81,23 @@ const patchAndSearchTools: ChatRenderToolCall[] = [
           {
             path: 'pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
             operation: 'update',
+            unifiedDiff: '@@ -10 +10,2 @@\n-const tools = groupTools(calls);\n+const tools = groupActivities(calls);\n+renderFileActivities(tools);\n',
           },
           {
             path: 'pkg/webui/frontend/src/components/chat/ChatToolActivity.tsx',
             operation: 'add',
+            unifiedDiff: '@@ -0,0 +1,2 @@\n+export const FileActivity = () => {\n+};\n',
+          },
+          {
+            path: 'pkg/webui/frontend/src/components/chat/LegacyToolGroup.tsx',
+            operation: 'delete',
+            unifiedDiff: '@@ -1 +0,0 @@\n-export const LegacyToolGroup = () => null;\n',
+          },
+          {
+            path: 'pkg/webui/frontend/src/components/chat/OldActivity.tsx',
+            movePath: 'pkg/webui/frontend/src/components/chat/Activity.tsx',
+            operation: 'update',
+            unifiedDiff: '',
           },
         ],
       },
@@ -152,5 +165,25 @@ export const Failed: Story = {
 export const PatchAndSearch: Story = {
   args: {
     tools: patchAndSearchTools,
+  },
+};
+
+export const FileOperations: Story = {
+  args: {
+    tools: [
+      successfulTools[1],
+      {
+        callId: 'write-1', name: 'file_write', input: '{"file_path":"notes.md"}',
+        result: { toolName: 'file_write', success: true, metadata: {
+          filePath: 'notes.md', unifiedDiff: '@@ -0,0 +1 @@\n+# Notes\n',
+        } },
+      },
+      patchAndSearchTools[0],
+      {
+        callId: 'edit-failed', name: 'file_edit', input: '{"file_path":"config.yaml"}',
+        result: { toolName: 'file_edit', success: false, error: 'The text to replace was not found.', metadata: { filePath: 'config.yaml' } },
+      },
+      { callId: 'read-pending', name: 'file_read', input: '{"file_path":"AGENTS.md"}' },
+    ],
   },
 };

@@ -1,9 +1,10 @@
 import React from 'react';
 import { Check, ChevronRight, X } from 'lucide-react';
-import type { ChatRenderToolCall, ToolResult } from '../../types';
+import type { ApplyPatchChange, ChatRenderToolCall, ToolResult } from '../../types';
 import { cn, formatDuration } from '../../utils';
 import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
+import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
 import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/ToolImageAttachments';
 import {
   formatTaskRunElapsed,
@@ -13,6 +14,7 @@ import {
   getExtensionToolPresentation,
   normalizeToolName,
   ReferenceCodeBlock,
+  ReferenceDiffBlock,
 } from '../tool-renderers/reference';
 
 interface ChatToolActivityProps {
@@ -119,70 +121,56 @@ const summarizeList = (items: string[]): string | undefined => {
   return `${values[0]} (+${values.length - 1} more)`;
 };
 
-const summarizeApplyPatchInput = (patchInput: string): string | undefined => {
-  const operations: string[] = [];
+const parseApplyPatchInput = (patchInput: string): ApplyPatchChange[] => {
+  const changes: ApplyPatchChange[] = [];
 
   patchInput.split('\n').forEach((line) => {
     const trimmedLine = line.trim();
 
     if (trimmedLine.startsWith('*** Add File: ')) {
-      operations.push(`add ${trimmedLine.slice('*** Add File: '.length).trim()}`);
+      changes.push({ operation: 'add', path: trimmedLine.slice('*** Add File: '.length).trim() });
       return;
     }
 
     if (trimmedLine.startsWith('*** Update File: ')) {
-      operations.push(`update ${trimmedLine.slice('*** Update File: '.length).trim()}`);
+      changes.push({ operation: 'update', path: trimmedLine.slice('*** Update File: '.length).trim() });
       return;
     }
 
     if (trimmedLine.startsWith('*** Delete File: ')) {
-      operations.push(`delete ${trimmedLine.slice('*** Delete File: '.length).trim()}`);
+      changes.push({ operation: 'delete', path: trimmedLine.slice('*** Delete File: '.length).trim() });
       return;
     }
 
-    if (trimmedLine.startsWith('*** Move to: ') && operations.length > 0) {
-      const previousOperation = operations[operations.length - 1];
-      operations[operations.length - 1] =
-        `${previousOperation} → ${trimmedLine.slice('*** Move to: '.length).trim()}`;
+    if (trimmedLine.startsWith('*** Move to: ') && changes.length > 0) {
+      changes[changes.length - 1].movePath = trimmedLine.slice('*** Move to: '.length).trim();
     }
   });
 
-  return summarizeList(operations);
+  return changes;
 };
 
-const summarizeApplyPatchResult = (
+const getApplyPatchChanges = (
   metadata: Record<string, unknown> | null
-): string | undefined => {
+): ApplyPatchChange[] => {
   const changes = metadata?.changes;
   if (!Array.isArray(changes) || changes.length === 0) {
-    return summarizeList([
-      ...getStringArrayField(metadata, 'added').map((path) => `add ${path}`),
-      ...getStringArrayField(metadata, 'modified').map((path) => `update ${path}`),
-      ...getStringArrayField(metadata, 'deleted').map((path) => `delete ${path}`),
-    ]);
+    return [
+      ...getStringArrayField(metadata, 'added').map((path) => ({ operation: 'add', path })),
+      ...getStringArrayField(metadata, 'modified').map((path) => ({ operation: 'update', path })),
+      ...getStringArrayField(metadata, 'deleted').map((path) => ({ operation: 'delete', path })),
+    ];
   }
 
-  const operations = changes
-    .map((change) => {
-      if (!change || typeof change !== 'object') {
-        return undefined;
-      }
-
-      const changeRecord = change as Record<string, unknown>;
-      const operation = getStringField(changeRecord, 'operation') || 'update';
-      const path = getStringField(changeRecord, 'path');
-      const movePath = getStringField(changeRecord, 'movePath');
-
-      if (!path) {
-        return undefined;
-      }
-
-      return movePath ? `${operation} ${path} → ${movePath}` : `${operation} ${path}`;
-    })
-    .filter((value): value is string => Boolean(value));
-
-  return summarizeList(operations);
+  return changes.filter((change): change is ApplyPatchChange =>
+    Boolean(change && typeof change === 'object' && typeof change.path === 'string')
+  );
 };
+
+const summarizePatchChanges = (changes: ApplyPatchChange[]): string | undefined =>
+  summarizeList(changes.map((change) =>
+    `${change.operation || 'update'} ${change.path}${change.movePath ? ` → ${change.movePath}` : ''}`
+  ));
 
 const formatToolSummary = (label: string, value?: string): string => {
   if (!value) {
@@ -274,8 +262,8 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
     case 'apply_patch':
       return formatToolSummary(
         'Apply patch',
-        summarizeApplyPatchResult(metadata) ||
-          summarizeApplyPatchInput(getStringField(input, 'input') || '')
+        summarizePatchChanges(getApplyPatchChanges(metadata)) ||
+          summarizePatchChanges(parseApplyPatchInput(getStringField(input, 'input') || ''))
       );
 
     case 'grep_tool': {
@@ -403,18 +391,89 @@ const ActivitySummaryText: React.FC<{
   );
 };
 
+const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
+  const name = normalizeToolName(tool.name);
+  const input = parseToolInput(tool.input);
+  const metadata = getMetadataRecord(tool.result);
+  const status = getToolActivityStatus(tool);
+  const running = status === 'running';
+  const failed = status === 'failed';
+  let changes: ApplyPatchChange[];
+  if (name === 'apply_patch') {
+    changes = getApplyPatchChanges(metadata);
+    if (changes.length === 0 && (!tool.result?.success || !Array.isArray(metadata?.changes))) {
+      changes = parseApplyPatchInput(getStringField(input, 'input') || tool.input);
+    }
+  } else {
+    const path = getStringField(metadata, 'filePath') || getStringField(input, 'file_path');
+    changes = path ? [{
+      path,
+      operation: name === 'file_read' ? 'read' : name === 'file_write' ? 'write' : 'update',
+      unifiedDiff: typeof metadata?.unifiedDiff === 'string' ? metadata.unifiedDiff : undefined,
+    }] : [];
+  }
+
+  return (
+    <>
+      {(changes.length > 0 ? changes : [undefined]).map((change, index) => {
+        const file = change ? getFileChangeSummary(change) : undefined;
+        const summaryText = file ? formatToolSummary(`${file.label} file`, file.path) : getToolSummary(tool);
+        const showCounts = name !== 'file_read' && change?.unifiedDiff !== undefined;
+        return (
+          <details
+            className={cn('activity-card', 'activity-file', running && 'activity-card-live', failed && 'activity-card-error')}
+            key={`${change?.path || ''}-${index}-${running ? 'running' : failed ? 'failed' : 'settled'}`}
+            open={running ? true : undefined}
+          >
+            <summary className="tool-summary activity-summary" title={summaryText}>
+              <span className="activity-marker" aria-hidden="true">
+                {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
+              </span>
+              <ActivitySummaryText summaryText={summaryText} />
+              {showCounts && file ? (
+                <span className="file-activity-counts">
+                  (<span className="apply-patch-count-added">+{file.counts.added}</span>{' '}
+                  <span className="apply-patch-count-removed">-{file.counts.removed}</span>)
+                </span>
+              ) : null}
+              <span className="tool-summary-chevron" aria-hidden="true"><ChevronRight size={12} /></span>
+              <span className={cn('tool-summary-status', !failed && 'sr-only')} aria-label={`Tool ${status}`}>{status}</span>
+            </summary>
+            <div className="activity-detail-content">
+              {file && name !== 'file_read' && tool.result ? (
+                <>
+                  {failed ? <div className="apply-patch-error" role="alert">{tool.result.error || 'File operation failed.'}</div> : null}
+                  {file.lines.length > 0 ? <ReferenceDiffBlock lines={file.lines} /> : (
+                    <p className="tool-awaiting">No file diff available.</p>
+                  )}
+                </>
+              ) : tool.result ? (
+                <ToolRenderer isPartial={tool.inProgress} showAttachments={false} toolInput={tool.input} toolResult={tool.result} />
+              ) : (
+                <p className="tool-awaiting">Awaiting file result…</p>
+              )}
+            </div>
+          </details>
+        );
+      })}
+      {tool.result && !tool.inProgress ? <ToolImageAttachments toolResult={tool.result} /> : null}
+    </>
+  );
+};
+
 const builtinToolNames = new Set([
-  'apply_patch', 'file_edit', 'file_read', 'file_write', 'get_goal', 'glob_tool',
+  'get_goal', 'glob_tool',
   'grep_tool', 'openai_web_search', 'read_conversation', 'skill', 'todo_read',
   'todo_write', 'update_goal', 'view_image', 'web_fetch',
 ]);
 
-const toolGroupKind = (tool: ChatRenderToolCall): 'commands' | 'tools' | 'extension' => {
+const toolGroupKind = (tool: ChatRenderToolCall): 'commands' | 'tools' | 'file' | 'extension' => {
   if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
     return 'extension';
   }
   const name = normalizeToolName(tool.name);
   if (name === 'bash') return 'commands';
+  if (['apply_patch', 'file_edit', 'file_read', 'file_write'].includes(name)) return 'file';
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };
 
@@ -423,12 +482,12 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
     return null;
   }
 
-  // Preserve transcript order and keep extension-owned presentations independent.
+  // Preserve transcript order and keep files and extension-owned presentations independent.
   const groups: ChatRenderToolCall[][] = [];
   for (const tool of tools) {
     const previous = groups[groups.length - 1];
     const kind = toolGroupKind(tool);
-    if (kind !== 'extension' && previous && toolGroupKind(previous[0]) === kind) {
+    if ((kind === 'commands' || kind === 'tools') && previous && toolGroupKind(previous[0]) === kind) {
       previous.push(tool);
     } else {
       groups.push([tool]);
@@ -440,6 +499,9 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
       {groups.map((group, groupIndex) => {
         const toolCall = group[0];
         const kind = toolGroupKind(toolCall);
+        if (kind === 'file') {
+          return <FileToolActivity key={toolCall.callId || `${toolCall.name}-${groupIndex}`} tool={toolCall} />;
+        }
         const commands = kind === 'commands';
         const builtin = kind !== 'extension';
         const running = group.some((tool) => getToolActivityStatus(tool) === 'running');

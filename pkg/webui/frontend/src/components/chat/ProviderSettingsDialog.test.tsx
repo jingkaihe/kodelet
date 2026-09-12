@@ -162,6 +162,39 @@ describe('ProviderSettingsDialog', () => {
     );
   });
 
+  it('includes the authorization code field in the focus trap while Connect is disabled', async () => {
+    mockStartAnthropicOAuthLogin.mockResolvedValue({
+      id: 'anthropic_login_123',
+      status: 'pending',
+      authorizationUrl: 'https://claude.ai/oauth/authorize?test=1',
+    });
+    const visibleRects = vi.spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([new DOMRect(0, 0, 100, 44)] as unknown as DOMRectList);
+    try {
+      render(<ProviderSettingsDialog onClose={vi.fn()} />);
+      await flushPromises();
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Anthropic' }));
+      await flushPromises();
+
+      const close = screen.getByRole('button', { name: 'Close provider settings' });
+      const input = screen.getByRole('textbox', { name: 'Anthropic authorization code' });
+      expect(screen.getByRole('button', { name: 'Complete Anthropic sign-in' })).toBeDisabled();
+
+      const link = screen.getByRole('link');
+      link.focus();
+      expect(fireEvent.keyDown(link, { key: 'Tab' })).toBe(true);
+
+      close.focus();
+      fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+      expect(input).toHaveFocus();
+
+      fireEvent.keyDown(input, { key: 'Tab' });
+      expect(close).toHaveFocus();
+    } finally {
+      visibleRects.mockRestore();
+    }
+  });
+
   it('opens the Anthropic authorization link and connects with the returned code', async () => {
     mockStartAnthropicOAuthLogin.mockResolvedValue({
       id: 'anthropic_login_123',

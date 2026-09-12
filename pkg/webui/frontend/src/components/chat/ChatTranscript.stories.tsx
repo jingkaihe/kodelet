@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent } from "storybook/test";
 import { useState } from "react";
 import ChatTranscript from "./ChatTranscript";
 import { sampleChatMessages } from "../../stories/fixtures";
@@ -245,6 +246,61 @@ const terminalMessages = (state: "completed" | "running" | "failed"): ChatRender
 
 export const TerminalStyleCompleted: Story = {
 	args: { messages: terminalMessages("completed") },
+};
+
+export const MixedActivitySpacing: Story = {
+	args: {
+		messages: [{
+			role: "assistant",
+			blocks: [
+				{
+					type: "tools",
+					tools: [
+						{ callId: "spacing-todo", name: "todo_write", input: "{}", result: { toolName: "todo_write", success: true } },
+						{ callId: "spacing-bash", name: "bash", input: '{"command":"pwd"}', result: { toolName: "bash", success: true, metadata: { command: "pwd", output: "/workspace/kodelet", exitCode: 0 } } },
+					],
+				},
+				{ type: "thinking", content: "Check the spacing across tool block boundaries." },
+				{
+					type: "tools",
+					tools: [
+						{ callId: "spacing-mcp", name: "mcp__maco_code_execute", input: "{}", result: { toolName: "mcp__maco_code_execute", metadataType: "extension_tool", success: true, metadata: { toolName: "mcp__maco_code_execute", output: '{"ok":true}' } } },
+						readTranscript,
+					],
+				},
+				{ type: "tools", tools: [completedPatch] },
+				{ type: "thinking", content: "Confirm the file row spacing." },
+				{ type: "thinking", content: "Keep multiple thoughts grouped." },
+				{ type: "message", content: "Messages retain their paragraph spacing." },
+				{ type: "tools", tools: [readTranscript] },
+			],
+		}],
+	},
+	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
+		const rows = Array.from(canvasElement.querySelectorAll<HTMLDetailsElement>(".activity-stack > details"));
+		expect(rows).toHaveLength(8);
+		const gap = Number.parseFloat(getComputedStyle(rows[0].parentElement as HTMLElement).rowGap);
+		const assertActivityGaps = () => {
+			for (let index = 1; index < rows.length - 1; index += 1) {
+				const distance = rows[index].getBoundingClientRect().top - rows[index - 1].getBoundingClientRect().bottom;
+				expect(distance).toBeCloseTo(gap, 1);
+			}
+		};
+		assertActivityGaps();
+		const prose = canvasElement.querySelector(".group\\/message") as HTMLElement;
+		const paragraphGap = Number.parseFloat(getComputedStyle(canvasElement.ownerDocument.documentElement).fontSize);
+		expect(prose.getBoundingClientRect().top - rows[6].getBoundingClientRect().bottom).toBeCloseTo(paragraphGap, 1);
+		expect(rows[7].getBoundingClientRect().top - prose.getBoundingClientRect().bottom).toBeCloseTo(paragraphGap, 1);
+		for (const row of [rows[1], rows[2], rows[3], rows[5]]) {
+			const summary = row.querySelector("summary") as HTMLElement;
+			await userEvent.click(summary);
+			expect(row.open).toBe(true);
+			assertActivityGaps();
+			await userEvent.click(summary);
+			assertActivityGaps();
+		}
+	},
 };
 
 export const TerminalStyleRunning: Story = {

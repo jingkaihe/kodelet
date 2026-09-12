@@ -37,6 +37,18 @@ const lineCounts = (lines: ReferenceDiffLine[]): { added: number; removed: numbe
   removed: lines.filter((line) => line.kind === 'removed').length,
 });
 
+export const getFileChangeSummary = (change: ApplyPatchChange) => {
+  const lines = buildDiffLines(change);
+  const operation = change.movePath ? 'move' : normalizeOperation(change.operation);
+  return {
+    operation,
+    label: getOperationLabel(operation),
+    path: change.movePath ? `${change.path} → ${change.movePath}` : change.path,
+    lines,
+    counts: lineCounts(lines),
+  };
+};
+
 const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ApplyPatchMetadata;
   if (!meta) return null;
@@ -48,24 +60,21 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
       {!toolResult.success && toolResult.error ? <div className="apply-patch-error">{toolResult.error}</div> : null}
       {changes.length > 0 ? (
         changes.map((change, index) => {
-          const diffLines = buildDiffLines(change);
-          const displayPath = change.movePath ? `${change.path} → ${change.movePath}` : change.path;
-          const operation = change.movePath ? 'move' : normalizeOperation(change.operation);
-          const counts = lineCounts(diffLines);
+          const { lines, path, operation, label, counts } = getFileChangeSummary(change);
 
           return (
             <div key={`${change.path}-${change.operation}-${index}`} className="apply-patch-change">
               <div className="apply-patch-change-line">
                 <span className={`apply-patch-operation apply-patch-operation-${operation}`}>
-                  {getOperationLabel(operation)}
+                  {label}
                 </span>
-                <span className="apply-patch-path">{displayPath}</span>
+                <span className="apply-patch-path">{path}</span>
                 <span className="apply-patch-counts">
                   <span className="apply-patch-count-added">+{counts.added}</span>
                   <span className="apply-patch-count-removed">-{counts.removed}</span>
                 </span>
               </div>
-              {diffLines.length > 0 ? <ReferenceDiffBlock lines={diffLines} /> : null}
+              {lines.length > 0 ? <ReferenceDiffBlock lines={lines} /> : null}
             </div>
           );
         })
