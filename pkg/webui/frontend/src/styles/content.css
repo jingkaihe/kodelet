@@ -22,15 +22,6 @@
   padding: 0.9rem 1rem;
 }
 
-.tool-meta-label {
-  font-family: var(--font-heading);
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
-  color: #7a756b;
-}
-
 .primary-pill-button {
   display: inline-flex;
   align-items: center;
@@ -76,12 +67,6 @@ h3 {
   line-height: 1.4;
 }
 
-/* Line number styling for code blocks */
-.line-number {
-  @apply select-none mr-2;
-  color: var(--kodelet-mid-gray);
-}
-
 /* Syntax highlighting adjustments */
 pre code {
   font-family: var(--font-mono);
@@ -90,7 +75,6 @@ pre code {
 }
 
 /* Refined prose styling for markdown content */
-.prose,
 .chat-prose {
   max-width: none;
   min-width: 0;
@@ -102,27 +86,20 @@ pre code {
   word-break: break-word;
 }
 
-.prose > *:first-child,
 .chat-prose > *:first-child,
 .prose-enhanced > *:first-child {
   margin-top: 0;
 }
 
-.prose > *:last-child,
 .chat-prose > *:last-child,
 .prose-enhanced > *:last-child {
   margin-bottom: 0;
 }
 
-.prose p,
 .chat-prose p {
   margin-bottom: 0.95rem;
 }
 
-.prose h1,
-.prose h2,
-.prose h3,
-.prose h4,
 .chat-prose h1,
 .chat-prose h2,
 .chat-prose h3,
@@ -132,45 +109,36 @@ pre code {
   color: var(--kodelet-dark);
 }
 
-.prose h1,
 .chat-prose h1 {
   font-size: 1.55rem;
 }
 
-.prose h2,
 .chat-prose h2 {
   font-size: 1.34rem;
 }
 
-.prose h3,
 .chat-prose h3 {
   font-size: 1.15rem;
 }
 
-.prose ul,
-.prose ol,
 .chat-prose ul,
 .chat-prose ol {
   margin: 0.9rem 0 1rem;
   padding-left: 1.4rem;
 }
 
-.prose ul,
 .chat-prose ul {
   list-style: disc outside;
 }
 
-.prose ol,
 .chat-prose ol {
   list-style: decimal outside;
 }
 
-.prose li,
 .chat-prose li {
   margin-bottom: 0.4rem;
 }
 
-.prose blockquote,
 .chat-prose blockquote {
   margin: 1rem 0;
   border-left: 3px solid rgba(217, 119, 87, 0.32);
@@ -179,7 +147,6 @@ pre code {
   font-style: italic;
 }
 
-.prose a,
 .chat-prose a {
   color: #547ba6;
   text-decoration: underline;
@@ -189,13 +156,10 @@ pre code {
   word-break: break-word;
 }
 
-.prose a:hover,
 .chat-prose a:hover {
   color: var(--kodelet-orange);
 }
 
-.prose strong,
-.prose b,
 .chat-prose strong,
 .chat-prose b {
   font-weight: 600;
@@ -250,7 +214,6 @@ pre code {
   border-right: 0;
 }
 
-.prose pre,
 .chat-prose pre {
   background: linear-gradient(
     135deg,
@@ -266,7 +229,6 @@ pre code {
   box-shadow: var(--shadow-sm);
 }
 
-.prose code,
 .chat-prose code {
   background: var(--kodelet-light-gray);
   color: var(--kodelet-dark);
@@ -278,7 +240,6 @@ pre code {
   border: 1px solid var(--kodelet-mid-gray);
 }
 
-.prose :not(pre) > code,
 .chat-prose :not(pre) > code {
   white-space: break-spaces;
   overflow-wrap: anywhere;
@@ -287,7 +248,6 @@ pre code {
   -webkit-box-decoration-break: clone;
 }
 
-.prose pre code,
 .chat-prose pre code {
   background: transparent;
   padding: 0;

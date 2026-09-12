@@ -34,7 +34,6 @@ describe('OpenAIWebSearchRenderer', () => {
     expect(screen.getByText('https://example.com/result')).toBeInTheDocument()
     expect(screen.getAllByRole('link')).toHaveLength(3)
     expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument()
-    expect(container.querySelector('.tool-code-list')).not.toBeInTheDocument()
   })
 
   it('does not repeat find-in-page targets already shown in the activity title', () => {

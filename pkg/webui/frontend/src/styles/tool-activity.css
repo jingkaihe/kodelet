@@ -265,7 +265,7 @@
   font-family: var(--font-mono);
 }
 
-.activity-detail-content :is(.tool-kv-item, .diff-block, .grep-block, .tool-file-item, .tool-inline-code, .tool-detail-panel, .surface-panel) {
+.activity-detail-content :is(.tool-kv-item, .diff-block, .grep-block, .tool-file-item, .tool-detail-panel, .surface-panel) {
   border: 0;
   border-radius: 0;
   background: transparent;

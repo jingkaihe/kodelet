@@ -10,7 +10,6 @@
   --kodelet-light-gray: #e8e6dc;
   --kodelet-orange: #d97757;
   --kodelet-blue: #6a9bcc;
-  --kodelet-green: #788c5d;
   --kodelet-panel: rgba(245, 240, 231, 0.94);
   --font-heading: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-body: "Crimson Pro", Georgia, serif;
@@ -23,8 +22,6 @@
 
   /* Refined shadows */
   --shadow-sm: 0 1px 2px 0 rgb(20 20 19 / 0.05);
-  --shadow-lg:
-    0 10px 15px -3px rgb(20 20 19 / 0.08), 0 4px 6px -4px rgb(20 20 19 / 0.05);
 
   /* Noise texture for depth */
   --noise-texture: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");

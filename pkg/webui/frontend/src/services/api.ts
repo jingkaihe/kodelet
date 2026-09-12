@@ -13,10 +13,8 @@ import {
 	SlashCommandsResponse,
 	ApiError,
 	SteerConversationResponse,
-	Message,
 	StopConversationResponse,
 	ForkConversationResponse,
-	ToolResult,
 	UIInputResponseResult,
 	RunnerListResponse,
 	RunnerDiscoveryTarget,
@@ -438,12 +436,6 @@ class ApiService {
 		);
 	}
 
-	async getPendingSteer(id: string): Promise<Message[]> {
-		return this.request<Message[]>(`/api/conversations/${id}/steer`, {
-			method: "GET",
-		});
-	}
-
 	async stopConversation(id: string): Promise<StopConversationResponse> {
 		return this.request<StopConversationResponse>(
 			`/api/conversations/${id}/stop`,
@@ -465,15 +457,6 @@ class ApiService {
 				headers: { "X-Kodelet-Client-ID": this.clientId },
 				body: JSON.stringify(response),
 			},
-		);
-	}
-
-	async getToolResult(
-		conversationId: string,
-		toolCallId: string,
-	): Promise<ToolResult> {
-		return this.request(
-			`/api/conversations/${conversationId}/tools/${toolCallId}`,
 		);
 	}
 

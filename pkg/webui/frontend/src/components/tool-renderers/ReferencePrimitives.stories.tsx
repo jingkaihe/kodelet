@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import {
   ReferenceCodeBlock,
-  ReferenceCodeList,
   ReferenceDiffBlock,
   ReferenceFileList,
   ReferenceTerminal,
@@ -65,17 +64,6 @@ const ReferencePrimitiveGallery = () => (
             { path: 'components/chat/ChatComposer.tsx', meta: 'tsx · 8 KB' },
             { path: 'components/chat/ChatComposer.stories.tsx', meta: 'tsx · 3 KB' },
             { path: 'components/chat/ChatComposer.test.tsx', meta: 'tsx · 2 KB' },
-          ]}
-        />
-      </section>
-
-      <section className="surface-panel rounded-2xl p-4">
-        <h3 className="mb-3 text-sm font-semibold">Code list</h3>
-        <ReferenceCodeList
-          items={[
-            'ChatComposer',
-            'NewChatContextDialog',
-            'TerminalModalFrame',
           ]}
         />
       </section>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMetadata, getMetadataAny, isImageFile } from './utils';
+import { getMetadata, getMetadataAny } from './utils';
 import { ToolResult } from '../../types';
 
 describe('getMetadata', () => {
@@ -103,44 +103,5 @@ describe('getMetadataAny', () => {
     };
     const result = getMetadataAny(toolResult, ['option1', 'option2', 'option3']);
     expect(result).toBe('found');
-  });
-});
-
-describe('isImageFile', () => {
-  it('returns true for image extensions', () => {
-    expect(isImageFile('photo.png')).toBe(true);
-    expect(isImageFile('image.jpg')).toBe(true);
-    expect(isImageFile('picture.jpeg')).toBe(true);
-    expect(isImageFile('animation.gif')).toBe(true);
-    expect(isImageFile('bitmap.bmp')).toBe(true);
-    expect(isImageFile('modern.webp')).toBe(true);
-  });
-
-  it('returns false for non-image extensions', () => {
-    expect(isImageFile('document.pdf')).toBe(false);
-    expect(isImageFile('script.js')).toBe(false);
-    expect(isImageFile('data.json')).toBe(false);
-    expect(isImageFile('readme.md')).toBe(false);
-  });
-
-  it('handles case insensitive matching', () => {
-    expect(isImageFile('PHOTO.PNG')).toBe(true);
-    expect(isImageFile('Image.JPG')).toBe(true);
-    expect(isImageFile('Picture.JPEG')).toBe(true);
-  });
-
-  it('handles files with multiple dots', () => {
-    expect(isImageFile('my.photo.backup.png')).toBe(true);
-    expect(isImageFile('screenshot.2023.01.01.jpg')).toBe(true);
-  });
-
-  it('returns false for files without extensions', () => {
-    expect(isImageFile('photo')).toBe(false);
-    expect(isImageFile('image')).toBe(false);
-  });
-
-  it('returns false for partial matches', () => {
-    expect(isImageFile('photo.png.txt')).toBe(false);
-    expect(isImageFile('jpgfile')).toBe(false);
   });
 });

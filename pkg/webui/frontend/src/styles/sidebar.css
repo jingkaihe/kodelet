@@ -430,8 +430,6 @@
 .conversation-link-row.menu-open .conversation-link-more,
 .conversation-link-row.active .conversation-link-more,
 .conversation-link-more-button:focus-visible .conversation-link-more,
-.conversation-link.active .conversation-link-more,
-.conversation-link:hover .conversation-link-more,
 .conversation-link-row:hover .conversation-link-more {
   opacity: 1;
 }

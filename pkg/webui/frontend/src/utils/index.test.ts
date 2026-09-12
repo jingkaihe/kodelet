@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  formatDate,
   formatCompactRelativeTime,
   formatCost,
   copyToClipboard,
@@ -11,47 +10,10 @@ import {
   formatDuration,
   detectLanguageFromPath,
   debounce,
-  throttle,
-  deepClone,
   cn,
-  highlightSearchTerm,
   truncateText,
-  isImageFile,
-  formatTimestamp,
 } from './index';
 import { Usage } from '../types';
-
-describe('formatDate', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('returns N/A for null, undefined, or empty string', () => {
-    expect(formatDate(null)).toBe('N/A');
-    expect(formatDate(undefined)).toBe('N/A');
-    expect(formatDate('')).toBe('N/A');
-  });
-
-  it('shows relative time for dates less than 24 hours ago', () => {
-    const now = new Date('2023-01-02T12:00:00Z');
-    vi.setSystemTime(now);
-
-    const twoHoursAgo = '2023-01-02T10:00:00Z';
-    expect(formatDate(twoHoursAgo)).toMatch(/ago$/); // Should end with 'ago'
-  });
-
-  it('shows formatted date for dates more than 24 hours ago', () => {
-    const now = new Date('2023-01-10T12:00:00Z');
-    vi.setSystemTime(now);
-
-    const pastDate = '2023-01-02T10:00:00Z';
-    expect(formatDate(pastDate)).toMatch(/Jan 2, 2023/);
-  });
-});
 
 describe('formatCompactRelativeTime', () => {
   beforeEach(() => {
@@ -389,75 +351,6 @@ describe('debounce', () => {
   });
 });
 
-describe('throttle', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('limits function execution rate', () => {
-    const fn = vi.fn();
-    const throttled = throttle(fn, 100);
-
-    throttled('first');
-    expect(fn).toHaveBeenCalledWith('first');
-
-    throttled('second');
-    expect(fn).toHaveBeenCalledTimes(1);
-
-    vi.advanceTimersByTime(100);
-    throttled('third');
-    expect(fn).toHaveBeenCalledTimes(2);
-    expect(fn).toHaveBeenLastCalledWith('third');
-  });
-});
-
-describe('deepClone', () => {
-  it('clones primitive values', () => {
-    expect(deepClone(42)).toBe(42);
-    expect(deepClone('test')).toBe('test');
-    expect(deepClone(null)).toBe(null);
-  });
-
-  it('clones dates', () => {
-    const date = new Date('2023-01-01');
-    const cloned = deepClone(date);
-    expect(cloned).toEqual(date);
-    expect(cloned).not.toBe(date);
-  });
-
-  it('clones arrays', () => {
-    const arr = [1, 2, { a: 3 }];
-    const cloned = deepClone(arr);
-    expect(cloned).toEqual(arr);
-    expect(cloned).not.toBe(arr);
-    expect(cloned[2]).not.toBe(arr[2]);
-  });
-
-  it('clones objects', () => {
-    const obj = { a: 1, b: { c: 2 } };
-    const cloned = deepClone(obj);
-    expect(cloned).toEqual(obj);
-    expect(cloned).not.toBe(obj);
-    expect(cloned.b).not.toBe(obj.b);
-  });
-
-  it('does not clone inherited properties', () => {
-    const prototype = { inherited: { value: 1 } };
-    const obj = Object.assign(Object.create(prototype), {
-      own: { value: 2 },
-    }) as { own: { value: number }; inherited?: { value: number } };
-
-    const cloned = deepClone(obj);
-
-    expect(cloned).toEqual({ own: { value: 2 } });
-    expect(cloned).not.toHaveProperty('inherited');
-  });
-});
-
 describe('cn', () => {
   it('combines class names', () => {
     expect(cn('foo', 'bar')).toBe('foo bar');
@@ -472,27 +365,6 @@ describe('cn', () => {
   });
 });
 
-describe('highlightSearchTerm', () => {
-  it('returns escaped text when no search term', () => {
-    expect(highlightSearchTerm('<div>test</div>', '')).toBe('&lt;div&gt;test&lt;/div&gt;');
-  });
-
-  it('highlights search terms', () => {
-    const result = highlightSearchTerm('hello world', 'world');
-    expect(result).toContain('<mark class="bg-yellow-200 text-black">world</mark>');
-  });
-
-  it('highlights case-insensitive', () => {
-    const result = highlightSearchTerm('Hello World', 'hello');
-    expect(result).toContain('<mark class="bg-yellow-200 text-black">Hello</mark>');
-  });
-
-  it('escapes HTML before highlighting', () => {
-    const result = highlightSearchTerm('<div>test</div>', 'test');
-    expect(result).toContain('&lt;div&gt;<mark class="bg-yellow-200 text-black">test</mark>&lt;/div&gt;');
-  });
-});
-
 describe('truncateText', () => {
   it('returns original text if shorter than max length', () => {
     expect(truncateText('short', 10)).toBe('short');
@@ -500,34 +372,5 @@ describe('truncateText', () => {
 
   it('truncates and adds ellipsis for long text', () => {
     expect(truncateText('very long text here', 10)).toBe('very long ...');
-  });
-});
-
-describe('isImageFile', () => {
-  it('returns true for image extensions', () => {
-    expect(isImageFile('photo.png')).toBe(true);
-    expect(isImageFile('image.jpg')).toBe(true);
-    expect(isImageFile('picture.JPEG')).toBe(true);
-    expect(isImageFile('icon.gif')).toBe(true);
-  });
-
-  it('returns false for non-image extensions', () => {
-    expect(isImageFile('document.pdf')).toBe(false);
-    expect(isImageFile('script.js')).toBe(false);
-    expect(isImageFile('data.json')).toBe(false);
-  });
-});
-
-describe('formatTimestamp', () => {
-  it('returns empty string for falsy values', () => {
-    expect(formatTimestamp(null)).toBe('');
-    expect(formatTimestamp(undefined)).toBe('');
-    expect(formatTimestamp('')).toBe('');
-  });
-
-  it('formats timestamp to locale string', () => {
-    const timestamp = '2023-01-01T12:00:00Z';
-    const result = formatTimestamp(timestamp);
-    expect(result).toMatch(/0?1\/0?1\/2023/);
   });
 });

@@ -64,7 +64,7 @@ export default defineConfig({
             },
             {
               name: 'utils-vendor',
-              test: /node_modules[\\/](date-fns|clsx)[\\/]/,
+              test: /node_modules[\\/]date-fns[\\/]/,
               priority: 20
             }
           ]

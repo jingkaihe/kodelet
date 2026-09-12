@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { fn } from 'storybook/test';
 import ChatMessageFrame from './ChatMessageFrame';
 
 const meta = {
@@ -36,13 +35,10 @@ export const AssistantMessage: Story = {
     copyText: '',
     role: 'assistant',
     children: (
-      <div className="space-y-3">
-        <p className="text-sm text-kodelet-dark">
+      <div className="chat-prose max-w-none text-kodelet-dark">
+        <p>
           The transcript can now compose this frame around assistant blocks.
         </p>
-        <button className="composer-capsule" onClick={fn()} type="button">
-          Inline action
-        </button>
       </div>
     ),
   },

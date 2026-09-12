@@ -128,26 +128,6 @@ export const ReferenceCodeBlock: React.FC<ReferenceCodeBlockProps> = ({
   </pre>
 );
 
-interface ReferenceCodeListProps {
-  items: string[];
-}
-
-export const ReferenceCodeList: React.FC<ReferenceCodeListProps> = ({ items }) => {
-  if (items.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="tool-code-list">
-      {items.map((item) => (
-        <code className="tool-inline-code" key={item}>
-          {item}
-        </code>
-      ))}
-    </div>
-  );
-};
-
 export const truncateLines = (text: string, maxLines = 60): string => {
   const lines = text.split('\n');
   if (lines.length <= maxLines) {

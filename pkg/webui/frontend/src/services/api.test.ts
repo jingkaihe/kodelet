@@ -5,7 +5,6 @@ import {
 	Conversation,
 	CWDHintsResponse,
 	GitDiffResponse,
-	ToolResult,
 } from "../types";
 
 // Mock fetch globally
@@ -1049,29 +1048,6 @@ describe("ApiService", () => {
 		});
 	});
 
-	describe("getToolResult", () => {
-		it("fetches tool result", async () => {
-			const mockToolResult: ToolResult = {
-				toolName: "test-tool",
-				success: true,
-				timestamp: "2023-01-01T00:00:00Z",
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockToolResult,
-			});
-
-			const result = await apiService.getToolResult("conv-123", "tool-123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/tools/tool-123",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockToolResult);
-		});
-	});
-
 	describe("getGitDiff", () => {
 		it("fetches git diff for the selected cwd", async () => {
 			const mockGitDiff: GitDiffResponse = {
@@ -1235,23 +1211,6 @@ describe("ApiService", () => {
 				configurable: true,
 				value: originalLocation,
 			});
-		});
-	});
-
-	describe("getPendingSteer", () => {
-		it("fetches pending steering messages for a conversation", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => [{ role: "user", content: "Queued guidance" }],
-			});
-
-			const result = await apiService.getPendingSteer("conv-123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/steer",
-				expect.objectContaining({ method: "GET" }),
-			);
-			expect(result).toEqual([{ role: "user", content: "Queued guidance" }]);
 		});
 	});
 

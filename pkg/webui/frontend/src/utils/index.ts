@@ -1,6 +1,6 @@
 // Utility functions for Kodelet Web UI
 
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import type { Runner, Usage } from '../types';
 
 const formatCompactNumber = (value: number): string => {
@@ -8,23 +8,6 @@ const formatCompactNumber = (value: number): string => {
     notation: value >= 1000 ? 'compact' : 'standard',
     maximumFractionDigits: value >= 1000 ? 1 : 0,
   }).format(value);
-};
-
-// Date formatting utility
-export const formatDate = (dateString: string | null | undefined): string => {
-  if (!dateString) return 'N/A';
-
-  const date = new Date(dateString);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-
-  // If less than a day, show relative time
-  if (diff < 24 * 60 * 60 * 1000) {
-    return formatDistanceToNow(date, { addSuffix: true });
-  }
-
-  // Otherwise show formatted date
-  return format(date, 'MMM d, yyyy h:mm a');
 };
 
 export const formatCompactRelativeTime = (dateString: string | null | undefined): string => {
@@ -60,18 +43,6 @@ export const formatCost = (usage: Usage | null | undefined): string => {
     currency: 'USD',
     minimumFractionDigits: 4
   }).format(total);
-};
-
-export const formatTokenUsage = (usage: Usage | null | undefined): string => {
-  if (!usage) return '0 tokens';
-
-  const total =
-    (usage.inputTokens || 0) +
-    (usage.outputTokens || 0) +
-    (usage.cacheCreationInputTokens || 0) +
-    (usage.cacheReadInputTokens || 0);
-
-  return `${formatCompactNumber(total)} tokens`;
 };
 
 export const formatContextWindow = (usage: Usage | null | undefined): string | null => {
@@ -306,52 +277,9 @@ export const debounce = <T extends unknown[]>(
   return debounced;
 };
 
-// Throttle utility
-export const throttle = <T extends unknown[]>(
-  func: (...args: T) => void,
-  delay: number
-): ((...args: T) => void) => {
-  let lastCall = 0;
-  return (...args: T) => {
-    const now = Date.now();
-    if (now - lastCall >= delay) {
-      lastCall = now;
-      func(...args);
-    }
-  };
-};
-
-// Deep clone utility
-export const deepClone = <T>(obj: T): T => {
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (obj instanceof Date) return new Date(obj.getTime()) as T;
-  if (Array.isArray(obj)) return obj.map(item => deepClone(item)) as T;
-  if (obj instanceof Object) {
-    const cloned: Record<string, unknown> = {};
-    for (const key of Object.keys(obj)) {
-      cloned[key] = deepClone((obj as Record<string, unknown>)[key]);
-    }
-    return cloned as T;
-  }
-  return obj;
-};
-
 // Class name utility (similar to clsx)
 export const cn = (...inputs: (string | undefined | null | boolean)[]): string => {
   return inputs.filter(Boolean).join(' ');
-};
-
-// Highlight search terms in text
-export const highlightSearchTerm = (text: string, searchTerm: string): string => {
-  if (!searchTerm || !text) return escapeHtml(text);
-
-  try {
-    const escaped = escapeHtml(text);
-    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return escaped.replace(regex, '<mark class="bg-yellow-200 text-black">$1</mark>');
-  } catch {
-    return escapeHtml(text);
-  }
 };
 
 // Truncate text utility
@@ -368,16 +296,4 @@ export const truncateMiddle = (text: string, maxLength: number): string => {
   const front = Math.ceil(keep / 2);
   const back = Math.floor(keep / 2);
   return `${text.slice(0, front)}…${text.slice(text.length - back)}`;
-};
-
-// Check if image file
-export const isImageFile = (path: string): boolean => {
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
-  return imageExts.some(ext => path.toLowerCase().endsWith(ext));
-};
-
-// Format timestamp
-export const formatTimestamp = (timestamp: string | null | undefined): string => {
-  if (!timestamp) return '';
-  return new Date(timestamp).toLocaleString();
 };

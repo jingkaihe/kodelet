@@ -801,22 +801,3 @@ export interface TaskRunSnapshot {
   omittedFailed?: number;
   omittedRunning?: number;
 }
-
-// Component props
-export interface ConversationListProps {
-  conversations: Conversation[];
-  loading: boolean;
-  error: string | null;
-  hasMore: boolean;
-  onLoadMore: () => void;
-  onSearch: (filters: SearchFilters) => void;
-  onDelete: (conversationId: string) => void;
-}
-
-export interface ConversationViewProps {
-  conversation: Conversation;
-  loading: boolean;
-  error: string | null;
-  onExport: () => void;
-  onDelete: () => void;
-}
