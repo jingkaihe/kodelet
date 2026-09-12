@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.6.11-beta
+
+Added a shared lowercase Kodelet wordmark to the Web UI sidebar and authentication pages, plus an SVG favicon that loads before authentication.
+
+Fixed authentication page grid sizing to keep content within the page width.
+
+Refreshed the README with clearer onboarding, daemon-backed terminal and browser workflows, remote runners, and customization and documentation links.
+
 ## 0.6.10-beta
 
 Refreshed the Web UI with a compact, TUI-inspired layout across chat messages, the composer, sidebar, conversation search, dialogs, and authentication screens, plus a consistent welcome message for empty chats.
