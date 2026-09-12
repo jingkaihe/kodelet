@@ -2,11 +2,9 @@
 
 **Your tools. Your models. Your agent.**
 
-Kodelet is an open-source AI agent that works with your files, tools, and machines, not just your code. Use it to build software, investigate failures, turn notes into plans, and automate repeatable work. Extend it with the specialist tools and expertise your work needs.
+[Kodelet](https://kodelet.com/) is an open-source coding agent built for software engineering and the work around it. Use it to understand a codebase, implement and verify changes, investigate failures, and automate repeatable work. Extend it with specialist tools and expertise to take it beyond coding.
 
 Start a task in your terminal, follow it in your browser, or work through an ACP-compatible editor. You choose the model, the machine doing the work, and the capabilities available to the agent.
-
-[Website and demos](https://kodelet.com/) · [User manual](docs/MANUAL.md) · [TypeScript SDK](sdk/README.md)
 
 ## Why Kodelet?
 
@@ -14,7 +12,6 @@ Start a task in your terminal, follow it in your browser, or work through an ACP
 - **Your terminal. Another machine.** Use the built-in runner for local work, or connect a runner on another machine to work with its files, dependencies, and environment. Your client does not need to be where the work happens.
 - **Bring the tools you rely on.** Skills, recipes, and executable extensions add expertise, repeatable workflows, and new tools. Plugins package them for reuse, including capabilities beyond coding, such as image generation and integrations with external services.
 - **Pick the model for the job.** Use Anthropic Claude, OpenAI, or an OpenAI-compatible endpoint with your own credentials. Choose a configured model profile and reasoning effort before starting a conversation.
-- **Give longer work a clear objective.** Set a persistent `/goal`, steer active work as requirements change, and resume saved conversations. Goals stay with the conversation across resume and context compaction.
 
 ## Get started
 
@@ -67,34 +64,24 @@ Then ask for a change, investigate a problem, or work through a plan together. K
 ### Pick up in your browser
 
 ```bash
-kodelet server start
 kodelet server url --open
 ```
 
-Terminal chat starts the local daemon automatically; `server start` also lets you start it without opening chat. Both interfaces share that daemon and its saved conversations. Exiting terminal chat leaves work running; use `/stop` when you want to cancel it.
+This starts the local daemon if needed and opens the Web UI. Terminal chat and the browser share that daemon and its saved conversations. Exiting terminal chat leaves work running; use `/stop` when you want to cancel it.
 
 ## Put it to work
 
-Use interactive chat for ongoing work, or `kodelet run` for focused tasks and shell workflows:
+Use `kodelet run` for one-off tasks or as part of a shell pipeline:
 
 ```bash
-# Implement and verify a change
-kodelet run "Fix the failing parser test, add a regression test, and run the parser test suite."
+# Run a task directly
+kodelet run "Fix the failing tests and verify the changes."
 
-# Investigate an operational problem
-kodelet run "Read the logs in ./logs, explain the likely cause of the failures, and suggest next checks. Do not change files."
-
-# Work with documents, not just code
-kodelet run "Turn the notes in ./notes into a project brief with decisions, open questions, and next steps."
-
-# Bring existing shell output into the conversation
+# Pipe in context from another command
 git diff main | kodelet run "Review these changes for correctness and missing tests."
-
-# Give a multi-step task a persistent objective
-kodelet run "/goal Finish the migration, update the documentation, and verify the tests pass."
 ```
 
-Use `kodelet acp` to connect an ACP-compatible editor, or the [TypeScript SDK](sdk/README.md) to create, resume, and stream agent sessions in your own application. Git helpers (`kodelet commit` and `kodelet pr`) handle commit and pull request workflows, and [image inputs](docs/MANUAL.md#image-input-support) let supported models work with screenshots, diagrams, and mockups.
+Add `--result-only` to output just the final response for use in scripts.
 
 ## Make it yours
 
@@ -118,6 +105,9 @@ With remote runners, install workspace skills, recipes, and extensions on the ru
 - [Remote runners](docs/MANUAL.md#workspace-bound-runners): work on another machine's workspace.
 - [Sample configuration](config.sample.yaml): model profiles, runner settings, and permissions.
 - [TypeScript SDK](sdk/README.md): build applications and extensions around Kodelet.
+- [Python SDK](https://github.com/jingkaihe/kodelet-python-sdk/blob/main/README.md): run agent sessions and write extensions in Python.
+- [Skills collection](https://github.com/jingkaihe/skills/blob/main/README.md): reusable skills for specialist tools and workflows.
+- [Subagent extension](https://github.com/jingkaihe/kodelet-subagent/blob/main/README.md): delegate tasks to background agents you can monitor, steer, and resume.
 
 ## Development
 
