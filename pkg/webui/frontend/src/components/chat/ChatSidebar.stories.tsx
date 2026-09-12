@@ -53,12 +53,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const ConversationSearchStory = (
-	args: Pick<ComponentProps<typeof ChatSidebar>, "onSelectConversation">,
+	args: Pick<ComponentProps<typeof ChatSidebar>, "conversations" | "onSelectConversation">,
 ) => {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [cwdFilter, setCwdFilter] = useState("");
 	const normalizedSearch = searchTerm.trim().toLowerCase();
-	const conversations = sampleConversations.filter((conversation) => {
+	const conversations = args.conversations.filter((conversation) => {
 		if (cwdFilter && conversation.cwd !== cwdFilter) {
 			return false;
 		}
@@ -115,6 +115,17 @@ export const SingleChildConversation: Story = {
 };
 
 export const ConversationSearchModal: Story = {
+	render: (args) => <ConversationSearchStory {...args} />,
+};
+
+export const ConversationSearchLongHistory: Story = {
+	args: {
+		conversations: Array.from({ length: 40 }, (_, index) => ({
+			...sampleConversations[index % sampleConversations.length],
+			id: `20260912T183848-${String(index).padStart(16, "0")}`,
+			summary: `${index + 1}. Review the conversation search layout, keyboard navigation, and workspace filtering on desktop and mobile`,
+		})),
+	},
 	render: (args) => <ConversationSearchStory {...args} />,
 };
 

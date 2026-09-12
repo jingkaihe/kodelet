@@ -314,7 +314,7 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 			<div
 				aria-labelledby="conversation-search-title"
 				aria-modal="true"
-				className="conversation-search-dialog surface-panel"
+				className="conversation-search-dialog"
 				data-testid="conversation-search-dialog"
 				id="conversation-search-dialog"
 				ref={dialogRef}
