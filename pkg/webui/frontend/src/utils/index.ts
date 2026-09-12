@@ -3,13 +3,6 @@
 import { format } from 'date-fns';
 import type { Runner, Usage } from '../types';
 
-const formatCompactNumber = (value: number): string => {
-  return new Intl.NumberFormat('en-US', {
-    notation: value >= 1000 ? 'compact' : 'standard',
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-  }).format(value);
-};
-
 export const formatCompactRelativeTime = (dateString: string | null | undefined): string => {
   if (!dateString) return '—';
 
@@ -43,18 +36,6 @@ export const formatCost = (usage: Usage | null | undefined): string => {
     currency: 'USD',
     minimumFractionDigits: 4
   }).format(total);
-};
-
-export const formatContextWindow = (usage: Usage | null | undefined): string | null => {
-  if (!usage?.currentContextWindow || !usage?.maxContextWindow) {
-    return null;
-  }
-
-  const current = usage.currentContextWindow;
-  const max = usage.maxContextWindow;
-  const percentage = Math.max(0, Math.min(100, Math.round((current / max) * 100)));
-
-  return `${formatCompactNumber(current)}/${formatCompactNumber(max)} (${percentage}%) context`;
 };
 
 export const formatRunnerStatus = (

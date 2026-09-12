@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
+import { ChevronDown, GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import ChatComposer from '../components/chat/ChatComposer';
 import ChatSidebar, {
@@ -44,7 +44,6 @@ import {
   cn,
   debounce,
   formatCompactRelativeTime,
-  formatContextWindow,
   formatCost,
   formatRunnerStatus,
   showToast,
@@ -3066,79 +3065,65 @@ const ChatPage: React.FC = () => {
       ? 'Steer'
       : 'Send';
   const stopActionLabel = canStopActiveConversation ? 'Stop' : 'Starting…';
-  const composerMetaText = useMemo(() => {
-    const parts: string[] = [];
+  const composerMeta = useMemo(() => {
+    const groups: Array<{ label: string; value: string }> = [];
+    const details: Array<{ label: string; value: string }> = [];
     if (currentRunnerID) {
       const runnerName =
         currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
-      parts.push(`runner:${runnerName} (${formatRunnerStatus(currentRunner)})`);
+      const runnerStatus = formatRunnerStatus(currentRunner);
+      const runnerParts = [runnerName, runnerStatus];
+      details.push({ label: 'Runner', value: runnerName }, { label: 'Status', value: runnerStatus });
       if (currentEnvironmentProfile) {
-        parts.push(`env:${currentEnvironmentProfile}`);
+        runnerParts.push(`env ${currentEnvironmentProfile}`);
+        details.push({ label: 'Runner profile', value: currentEnvironmentProfile });
       }
+      groups.push({ label: 'Runner', value: runnerParts.join(' · ') });
     }
     if (!conversation) {
-      return parts.join(', ');
+      return { groups, details };
     }
 
-    const contextWindow = formatContextWindow(conversation.usage);
-
-    if (contextWindow) {
-      parts.push(contextWindow);
+    const usage = conversation.usage;
+    const compactNumber = Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+    const exactNumber = Intl.NumberFormat('en-US');
+    const usageParts: string[] = [];
+    if (usage?.currentContextWindow !== undefined && usage.maxContextWindow && usage.maxContextWindow > 0) {
+      const percentage = Math.max(0, Math.min(100, Math.round((usage.currentContextWindow / usage.maxContextWindow) * 100)));
+      usageParts.push(`ctx ${percentage}%`);
+      details.push({
+        label: 'Context window',
+        value: `${exactNumber.format(usage.currentContextWindow)} / ${exactNumber.format(usage.maxContextWindow)} tokens (${percentage}%)`,
+      });
     }
 
-    const inputTokens = conversation.usage?.inputTokens || 0;
-    const outputTokens = conversation.usage?.outputTokens || 0;
-    const cacheReadTokens = conversation.usage?.cacheReadInputTokens || 0;
-    const cacheWriteTokens = conversation.usage?.cacheCreationInputTokens || 0;
-    const tokenParts: string[] = [];
-
-    if (inputTokens > 0) {
-      tokenParts.push(
-        `in ${Intl.NumberFormat('en-US', {
-          notation: inputTokens >= 1000 ? 'compact' : 'standard',
-          maximumFractionDigits: inputTokens >= 1000 ? 1 : 0,
-        }).format(inputTokens)}`
-      );
+    for (const [label, shortLabel, tokens] of [
+      ['Input tokens', 'in', usage?.inputTokens],
+      ['Output tokens', 'out', usage?.outputTokens],
+      ['Cache read tokens', 'cache', usage?.cacheReadInputTokens],
+      ['Cache write tokens', 'cache write', usage?.cacheCreationInputTokens],
+    ] as const) {
+      if (tokens && tokens > 0) {
+        usageParts.push(`${shortLabel} ${compactNumber.format(tokens)}`);
+        details.push({ label, value: exactNumber.format(tokens) });
+      }
+    }
+    if (usageParts.length > 0) {
+      groups.push({ label: 'Usage', value: usageParts.join(' · ') });
     }
 
-    if (outputTokens > 0) {
-      tokenParts.push(
-        `out ${Intl.NumberFormat('en-US', {
-          notation: outputTokens >= 1000 ? 'compact' : 'standard',
-          maximumFractionDigits: outputTokens >= 1000 ? 1 : 0,
-        }).format(outputTokens)}`
-      );
-    }
-
-    if (cacheReadTokens > 0) {
-      tokenParts.push(
-        `cr ${Intl.NumberFormat('en-US', {
-          notation: cacheReadTokens >= 1000 ? 'compact' : 'standard',
-          maximumFractionDigits: cacheReadTokens >= 1000 ? 1 : 0,
-        }).format(cacheReadTokens)}`
-      );
-    }
-
-    if (cacheWriteTokens > 0) {
-      tokenParts.push(
-        `cw ${Intl.NumberFormat('en-US', {
-          notation: cacheWriteTokens >= 1000 ? 'compact' : 'standard',
-          maximumFractionDigits: cacheWriteTokens >= 1000 ? 1 : 0,
-        }).format(cacheWriteTokens)}`
-      );
-    }
-
-    if (tokenParts.length > 0) {
-      parts.push(tokenParts.join(', '));
-    }
-
-    parts.push(formatCost(conversation.usage));
+    const totalCost = (usage?.inputCost || 0) + (usage?.outputCost || 0) +
+      (usage?.cacheCreationCost || 0) + (usage?.cacheReadCost || 0);
+    const costParts = [totalCost > 0 && totalCost < 0.01
+      ? '<$0.01'
+      : Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalCost)];
+    details.push({ label: 'Total cost', value: formatCost(usage) });
 
     if (conversation.updatedAt) {
-      parts.push(formatCompactRelativeTime(conversation.updatedAt));
+      costParts.push(formatCompactRelativeTime(conversation.updatedAt));
     }
-
-    return parts.join(', ');
+    groups.push({ label: 'Cost and time', value: costParts.join(' · ') });
+    return { groups, details };
   }, [conversation, currentEnvironmentProfile, currentRunner, currentRunnerID, statusTick]);
   const pendingSteerMessages = conversation?.pendingSteer || [];
 
@@ -3509,16 +3494,32 @@ const ChatPage: React.FC = () => {
                   isStreaming={currentConversationIsStreaming}
                   messages={messages}
                 />
-                {composerMetaText ? (
+                {composerMeta.groups.length > 0 ? (
                   <div className="transcript-meta-strip-shell">
                     <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
-                      <p
-                        className="transcript-meta-strip"
-                        data-testid="transcript-meta-strip"
-                        title={composerMetaText}
-                      >
-                        {composerMetaText}
-                      </p>
+                      <details className="transcript-meta" key={conversationId || 'new-chat'}>
+                        <summary
+                          aria-label="Conversation statistics"
+                          className="transcript-meta-strip"
+                          data-testid="transcript-meta-strip"
+                          title="Show detailed conversation statistics"
+                        >
+                          <span className="transcript-meta-groups">
+                            {composerMeta.groups.map(({ label, value }) => (
+                              <span key={label}>{value}</span>
+                            ))}
+                          </span>
+                          <ChevronDown aria-hidden="true" className="transcript-meta-chevron" strokeWidth={1.6} />
+                        </summary>
+                        <dl className="transcript-meta-details" data-testid="transcript-meta-details">
+                          {composerMeta.details.map(({ label, value }) => (
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd>{value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </details>
                     </div>
                   </div>
                 ) : null}

@@ -739,7 +739,7 @@ describe('ChatPage', () => {
 
         expect(mockGetRunners).toHaveBeenCalledTimes(index + 2);
         expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
-          `runner:kodelet-gpu (${status})`
+          `kodelet-gpu · ${status}`
         );
         expect(selection.toString()).toBe(selectedText);
         expect(selection.anchorNode).toBe(startNode);
@@ -2476,12 +2476,12 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
     await waitFor(() =>
       expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
-        'runner:kodelet (2 active)'
+        'kodelet · 2 active'
       )
     );
-    expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('env:gpu');
+    expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('env gpu');
     expect(screen.getByTestId('transcript-meta-strip')).not.toHaveTextContent(
-      'runner:kodelet (idle)'
+      'kodelet · idle'
     );
     expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('runner:kodelet');
     expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('env:gpu');
@@ -2841,7 +2841,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
     await waitFor(() =>
       expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
-        'runner:kodelet (1 active)'
+        'kodelet · 1 active'
       )
     );
     await waitFor(() => expect(streamListener).not.toBeNull());
@@ -4828,7 +4828,7 @@ describe('ChatPage', () => {
     });
   });
 
-  it('shows compact usage metadata below the transcript when available', async () => {
+  it('shows compact statistics with expandable exact usage and cost', async () => {
     routeParams = { id: 'conv-123' };
     const updatedAt = new Date(Date.now() - 3 * 60 * 1000).toISOString();
     mockGetConversation.mockResolvedValue({
@@ -4850,10 +4850,10 @@ describe('ChatPage', () => {
         outputTokens: 340,
         cacheReadInputTokens: 8000,
         cacheCreationInputTokens: 2200,
-        inputCost: 0,
-        outputCost: 0,
+        inputCost: 4,
+        outputCost: 2,
         cacheCreationCost: 0,
-        cacheReadCost: 0,
+        cacheReadCost: 2.2509,
       },
     });
 
@@ -4862,14 +4862,29 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
     const meta = screen.getByTestId('transcript-meta-strip');
-    expect(meta).toHaveTextContent('14.2K/272K (5%) context');
+    expect(meta).toHaveAttribute('aria-label', 'Conversation statistics');
+    expect(meta).toHaveTextContent('ctx 5%');
     expect(meta).toHaveTextContent('in 1.2K');
     expect(meta).toHaveTextContent('out 340');
-    expect(meta).toHaveTextContent('cr 8K');
-    expect(meta).toHaveTextContent('cw 2.2K');
-    expect(meta).toHaveTextContent('$0.0000');
-    expect(meta.textContent).toContain(', in 1.2K, out 340, cr 8K, cw 2.2K, $0.0000,');
+    expect(meta).toHaveTextContent('cache 8K');
+    expect(meta).toHaveTextContent('cache write 2.2K');
+    expect(meta).toHaveTextContent('$8.25');
+    expect(meta.textContent).toContain('ctx 5% · in 1.2K · out 340 · cache 8K · cache write 2.2K');
     expect(meta.textContent).toMatch(/\d+m ago|just now/);
+
+    const details = screen.getByTestId('transcript-meta-details');
+    expect(meta.closest('details')).not.toHaveAttribute('open');
+    expect(details).not.toBeVisible();
+    expect(meta).not.toHaveTextContent('$8.2509');
+    fireEvent.click(meta);
+    expect(details).toBeVisible();
+    expect(details).toHaveTextContent('14,200 / 272,000 tokens (5%)');
+    expect(details).toHaveTextContent('1,200');
+    expect(details).toHaveTextContent('8,000');
+    expect(details).toHaveTextContent('2,200');
+    expect(details).toHaveTextContent('$8.2509');
+    fireEvent.click(meta);
+    expect(details).not.toBeVisible();
   });
 
   it('updates compact usage metadata when a streamed usage event arrives', async () => {
@@ -4913,6 +4928,9 @@ describe('ChatPage', () => {
     expect(streamListeners).toHaveLength(1);
 
     expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('in 100');
+    expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('$0.00');
+    fireEvent.click(screen.getByTestId('transcript-meta-strip'));
+    expect(screen.getByTestId('transcript-meta-details')).toBeVisible();
 
     await act(async () => {
       streamListeners[0]?.({
@@ -4934,11 +4952,15 @@ describe('ChatPage', () => {
 
     await waitFor(() => {
       const meta = screen.getByTestId('transcript-meta-strip');
-      expect(meta).toHaveTextContent('2.4K/272K (1%) context');
+      expect(meta).toHaveTextContent('ctx 1%');
       expect(meta).toHaveTextContent('in 100');
       expect(meta).toHaveTextContent('out 140');
-      expect(meta).toHaveTextContent('cr 50');
-      expect(meta).toHaveTextContent('$0.0003');
+      expect(meta).toHaveTextContent('cache 50');
+      expect(meta).toHaveTextContent('<$0.01');
+      const details = screen.getByTestId('transcript-meta-details');
+      expect(details).toBeVisible();
+      expect(details).toHaveTextContent('2,400 / 272,000 tokens (1%)');
+      expect(details).toHaveTextContent('$0.0003');
     });
 
     expect(mockStreamConversation).toHaveBeenCalledTimes(1);
