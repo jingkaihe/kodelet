@@ -39,6 +39,9 @@ describe('authentication approval pages', () => {
   it('keeps signed-out users on a public confirmation page until they continue', () => {
     render(<SignedOutPage />);
 
+    const brand = screen.getByRole('img', { name: 'Kodelet' });
+    expect(brand).toHaveTextContent('kodelet.');
+    expect(brand.querySelector('img')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Signed out' })).toBeInTheDocument();
     expect(screen.getByText('Your Kodelet session has ended.')).toBeInTheDocument();
     expect(screen.getByText('Your identity provider may still be signed in.')).toBeInTheDocument();

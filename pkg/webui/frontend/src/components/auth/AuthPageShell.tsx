@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { type ClipboardEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import type { AuthPrincipal } from '../../types';
+import KodeletBrand from '../KodeletBrand';
 
 type AuthNoticeTone = 'info' | 'warning' | 'error' | 'success';
 
@@ -74,9 +75,7 @@ export function AuthPageShell({
     <div className="auth-page">
       <main className="auth-page-shell">
         <div className="auth-app-bar">
-          <div className="auth-brand" role="img" aria-label="Kodelet">
-            Kodelet
-          </div>
+          <KodeletBrand />
           {principalLoading ? (
             <span className="auth-identity-chip">Checking session…</span>
           ) : identity ? (

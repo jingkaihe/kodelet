@@ -278,6 +278,14 @@ describe('ChatSidebar provider settings', () => {
 });
 
 describe('ChatSidebar conversation actions', () => {
+  it('shows only the lowercase wordmark with an accessible sidebar label', () => {
+    renderSidebar();
+
+    const brand = screen.getByRole('img', { name: 'Kodelet conversations' });
+    expect(brand).toHaveTextContent('kodelet.');
+    expect(brand.querySelector('img')).not.toBeInTheDocument();
+  });
+
   it('delegates search to a dialog trigger in the header', () => {
     const onSearch = vi.fn();
     render(

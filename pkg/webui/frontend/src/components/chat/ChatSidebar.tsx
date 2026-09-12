@@ -11,6 +11,7 @@ import {
 import React from 'react';
 import type { AuthPrincipal, Conversation } from '../../types';
 import { cn, truncateText } from '../../utils';
+import KodeletBrand from '../KodeletBrand';
 import Spinner from '../Spinner';
 
 const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
@@ -739,9 +740,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   return (
     <aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-4 py-4 lg:border-b-0">
       <div className="sidebar-header">
-        <div className="sidebar-brand" role="img" aria-label="Kodelet conversations">
-          Kodelet
-        </div>
+        <KodeletBrand label="Kodelet conversations" />
 
         <div className="sidebar-header-actions">
           <button

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/logo.svg" width="40" height="40" alt="">
+  <img src="pkg/webui/frontend/src/assets/logo.svg" width="40" height="40" alt="">
 </p>
 
 <h1 align="center">Kodelet</h1>

@@ -131,3 +131,21 @@ h6 {
   background: var(--kodelet-panel);
   box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
 }
+
+/* Website-inspired wordmark, shared by the sidebar and authentication pages. */
+.kodelet-brand {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  white-space: nowrap;
+  color: var(--kodelet-dark);
+}
+
+.kodelet-brand-dot {
+  color: var(--kodelet-orange);
+}

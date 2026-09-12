@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -38,6 +39,23 @@ func TestHandlerRejectsNonReadMethods(t *testing.T) {
 
 	assert.Equal(t, http.StatusMethodNotAllowed, response.Code)
 	assert.Equal(t, "GET, HEAD", response.Header().Get("Allow"))
+}
+
+func TestHandlerServesBrandFavicon(t *testing.T) {
+	handler, err := NewHandler()
+	require.NoError(t, err)
+
+	icon := regexp.MustCompile(`rel="icon"[^>]*href="([^"]+)"`).FindSubmatch(handler.indexContent)
+	require.Len(t, icon, 2)
+	path := string(icon[1])
+	require.True(t, handler.IsPublicPath(path), "favicon must load before authentication")
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Header().Get("Content-Type"), "image/svg+xml")
+	assert.Contains(t, response.Body.String(), `viewBox="0 0 64 64"`)
 }
 
 func TestHandlerComposesWithControlPlaneRoutesAndAuthentication(t *testing.T) {
