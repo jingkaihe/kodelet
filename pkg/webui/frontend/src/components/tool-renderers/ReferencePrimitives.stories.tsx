@@ -55,7 +55,7 @@ const ReferencePrimitiveGallery = () => (
 
       <section className="surface-panel rounded-2xl p-4">
         <h3 className="mb-3 text-sm font-semibold">Terminal output</h3>
-        <ReferenceTerminal output={'npm run storybook:build\n---\nStorybook build completed successfully'} />
+        <ReferenceTerminal output={'npm run storybook:build\n---\n\u001b[32m✓ Storybook build completed successfully\u001b[0m\n\u001b[2mElapsed: 1.4s\u001b[22m'} />
       </section>
 
       <section className="surface-panel rounded-2xl p-4">

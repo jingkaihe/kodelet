@@ -16,12 +16,47 @@
 }
 
 .tool-terminal {
+  --ansi-black: #18140f;
+  --ansi-red: #df7c5e;
+  --ansi-green: #a8bd82;
+  --ansi-yellow: #d8bb73;
+  --ansi-blue: #83a6c9;
+  --ansi-magenta: #bf9bc6;
+  --ansi-cyan: #86b9b6;
+  --ansi-white: #ded5c4;
+  --ansi-bright-black: #8c8272;
+  --ansi-bright-red: #f29b80;
+  --ansi-bright-green: #bed49a;
+  --ansi-bright-yellow: #ebd08b;
+  --ansi-bright-blue: #9dbde0;
+  --ansi-bright-magenta: #d6b4db;
+  --ansi-bright-cyan: #a2d1cd;
+  --ansi-bright-white: #faf4e8;
   background: rgba(23, 23, 20, 0.94);
   color: #d7e7c5;
   border-radius: 0.55rem;
   border: 1px solid rgba(20, 20, 19, 0.1);
   overflow: hidden;
   box-shadow: none;
+}
+
+.activity-detail-content .tool-terminal {
+  --ansi-black: #302d27;
+  --ansi-red: #b13d3d;
+  --ansi-green: #437a2c;
+  --ansi-yellow: #94660d;
+  --ansi-blue: #3163a7;
+  --ansi-magenta: #9a468c;
+  --ansi-cyan: #087f8c;
+  --ansi-white: #635e55;
+  --ansi-bright-black: #777166;
+  --ansi-bright-red: #c14545;
+  --ansi-bright-green: #527f28;
+  --ansi-bright-yellow: #9c700a;
+  --ansi-bright-blue: #4076c3;
+  --ansi-bright-magenta: #ad559d;
+  --ansi-bright-cyan: #0c8793;
+  --ansi-bright-white: #38362f;
 }
 
 .tool-terminal-body {

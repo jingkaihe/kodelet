@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BashRenderer from './BashRenderer';
+import { ReferenceTerminal } from './reference';
 import { BashMetadata, ToolResult } from '../../types';
 import * as utils from '../../utils';
 
@@ -179,5 +180,218 @@ describe('BashRenderer', () => {
     expect(container.querySelector('.tool-terminal-body pre')?.innerHTML).toContain(
       '&lt;script&gt;'
     );
+  });
+});
+
+describe('ReferenceTerminal ANSI output', () => {
+  it('renders basic and bright colors with the terminal theme palette', () => {
+    const { container } = render(
+      <ReferenceTerminal output={'\x1b[32mPassed\x1b[31mFailed\x1b[91mBright failure\x1b[30;46m RUN \x1b[0m'} />
+    );
+
+    expect(screen.getByText('Passed')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('Failed')).toHaveStyle({ color: 'var(--ansi-red)' });
+    expect(screen.getByText('Bright failure')).toHaveStyle({ color: 'var(--ansi-bright-red)' });
+    expect(screen.getByText('RUN')).toHaveStyle({
+      color: 'var(--ansi-black)',
+      backgroundColor: 'var(--ansi-cyan)',
+    });
+    expect(container.textContent).not.toContain('\x1b');
+    expect(container.textContent).not.toContain('[32m');
+  });
+
+  it('renders indexed, grayscale, and truecolor foregrounds and backgrounds', () => {
+    render(
+      <ReferenceTerminal output={[
+        '\x1b[38;5;196mIndexed red',
+        '\x1b[0;48;5;244mGray background',
+        '\x1b[0;38;2;12;34;56;48;2;210;220;230mTruecolor',
+        '\x1b[0m',
+      ].join('')} />
+    );
+
+    expect(screen.getByText('Indexed red')).toHaveStyle({ color: 'rgb(255, 0, 0)' });
+    expect(screen.getByText('Gray background')).toHaveStyle({ backgroundColor: 'rgb(128, 128, 128)' });
+    expect(screen.getByText('Truecolor')).toHaveStyle({
+      color: 'rgb(12, 34, 56)',
+      backgroundColor: 'rgb(210, 220, 230)',
+    });
+  });
+
+  it('combines decorations and resets only the requested attributes', () => {
+    render(
+      <ReferenceTerminal output={[
+        '\x1b[32;1;2;3;4;9mDecorated',
+        '\x1b[22mNormal intensity',
+        '\x1b[23;24mStrike only',
+        '\x1b[29mColor only',
+        '\x1b[0m',
+      ].join('')} />
+    );
+
+    const decorated = screen.getByText('Decorated');
+    expect(decorated).toHaveStyle({ color: 'var(--ansi-green)', fontWeight: 700, opacity: 0.7, fontStyle: 'italic' });
+    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain('underline');
+    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain('line-through');
+
+    const normalIntensity = screen.getByText('Normal intensity');
+    expect(normalIntensity.style.fontWeight).toBe('');
+    expect(normalIntensity.style.opacity).toBe('');
+    expect(normalIntensity).toHaveStyle({ color: 'var(--ansi-green)', fontStyle: 'italic' });
+    expect(normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration).toContain('underline');
+    expect(normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration).toContain('line-through');
+
+    const strikeOnly = screen.getByText('Strike only');
+    expect(strikeOnly.style.fontStyle).toBe('');
+    expect(strikeOnly.style.textDecorationLine || strikeOnly.style.textDecoration).toBe('line-through');
+
+    const colorOnly = screen.getByText('Color only');
+    expect(colorOnly).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(colorOnly.style.textDecorationLine || colorOnly.style.textDecoration).toBe('');
+  });
+
+  it('restores inherited defaults with foreground, background, and full resets', () => {
+    render(
+      <ReferenceTerminal output={[
+        '\x1b[1;31;46mStyled',
+        '\x1b[39mDefault foreground',
+        '\x1b[49mDefault background',
+        '\x1b[0mFully reset',
+        '\x1b[1;38;2;12;34;56;48;2;210;220;230mRGB styled',
+        '\x1b[mShort reset',
+      ].join('')} />
+    );
+
+    const foregroundReset = screen.getByText('Default foreground');
+    expect(foregroundReset.style.color).toBe('');
+    expect(foregroundReset).toHaveStyle({ backgroundColor: 'var(--ansi-cyan)', fontWeight: 700 });
+
+    const backgroundReset = screen.getByText('Default background');
+    expect(backgroundReset.style.color).toBe('');
+    expect(backgroundReset.style.backgroundColor).toBe('');
+    expect(backgroundReset).toHaveStyle({ fontWeight: 700 });
+
+    for (const text of ['Fully reset', 'Short reset']) {
+      const reset = screen.getByText(text);
+      expect(reset.style.color).toBe('');
+      expect(reset.style.backgroundColor).toBe('');
+      expect(reset.style.fontWeight).toBe('');
+    }
+  });
+
+  it('preserves colors across newlines, whitespace, and blank terminal lines', () => {
+    const { container } = render(
+      <ReferenceTerminal output={'\x1b[32mFirst line\n\n  Second line\x1b[0m\nPlain line'} />
+    );
+    const lines = container.querySelectorAll('.tool-terminal-line');
+
+    expect(lines).toHaveLength(4);
+    expect(lines[0].textContent).toBe('First line');
+    expect(lines[1].textContent).toBe('\u00a0');
+    expect(lines[2].textContent).toBe('  Second line');
+    expect(lines[3].textContent).toBe('Plain line');
+    expect(screen.getByText('First line')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('Second line')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('Plain line').style.color).toBe('');
+  });
+
+  it('does not leak unterminated styles into another terminal component', () => {
+    render(
+      <>
+        <ReferenceTerminal output={'\x1b[1;31mFirst terminal'} />
+        <ReferenceTerminal output="Independent terminal" />
+      </>
+    );
+
+    expect(screen.getByText('First terminal')).toHaveStyle({ color: 'var(--ansi-red)', fontWeight: 700 });
+    const independent = screen.getByText('Independent terminal');
+    expect(independent.style.color).toBe('');
+    expect(independent.style.fontWeight).toBe('');
+  });
+
+  it('reparses each output snapshot without retaining the previous final style', () => {
+    const { rerender } = render(<ReferenceTerminal output={'\x1b[1;31mOld failure'} />);
+
+    rerender(<ReferenceTerminal output={'Plain prefix\x1b[32mNew success\x1b[0m'} />);
+
+    expect(screen.queryByText('Old failure')).not.toBeInTheDocument();
+    expect(screen.getByText('Plain prefix').style.color).toBe('');
+    expect(screen.getByText('Plain prefix').style.fontWeight).toBe('');
+    expect(screen.getByText('New success')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('New success').style.fontWeight).toBe('');
+  });
+
+  it('keeps incomplete ANSI sequences invisible until an accumulated update completes them', () => {
+    const prefix = '\x1b[32mWorking';
+    const { container, rerender } = render(<ReferenceTerminal output={prefix} />);
+
+    for (const suffix of ['\x1b', '\x1b[', '\x1b[3', '\x1b[38;2;10;']) {
+      rerender(<ReferenceTerminal output={prefix + suffix} />);
+
+      expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('Working');
+      expect(screen.getByText('Working')).toHaveStyle({ color: 'var(--ansi-green)' });
+    }
+
+    rerender(<ReferenceTerminal output={`${prefix}\x1b[31mFailed\x1b[0m`} />);
+
+    expect(screen.getByText('Working')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('Failed')).toHaveStyle({ color: 'var(--ansi-red)' });
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('WorkingFailed');
+  });
+
+  it('ignores OSC hyperlinks, titles, clipboard controls, and incomplete OSC payloads', () => {
+    const output = [
+      '\x1b]0;private title\x07',
+      '\x1b]52;c;c2VjcmV0\x1b\\',
+      '\x1b[32m',
+      '\x1b]8;;javascript:alert(1)\x07',
+      'Safe link label',
+      '\x1b]8;;\x1b\\',
+      '\x1b[0m',
+    ].join('');
+    const { container, rerender } = render(<ReferenceTerminal output={output} />);
+
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('Safe link label');
+    expect(screen.getByText('Safe link label')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(container.querySelector('a, [href]')).not.toBeInTheDocument();
+
+    rerender(<ReferenceTerminal output={`${output}\x1b]52;c;unfinished clipboard payload`} />);
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('Safe link label');
+  });
+
+  it('ignores cursor and erase controls without stripping literal bracket text', () => {
+    const { container } = render(
+      <ReferenceTerminal output={'\x1b[?25l\x1b[2J\x1b[H\x1b[2K\x1b[32mProgress\x1b[1G\x1b[0m [32m is literal\x1b[?25h'} />
+    );
+
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('Progress [32m is literal');
+    expect(screen.getByText('Progress')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.getByText('[32m is literal').style.color).toBe('');
+  });
+
+  it('renders colored HTML and attribute payloads as safe literal text', () => {
+    const html = '<script>alert("xss")</script><img src=x onerror="alert(1)">';
+    const attributes = '" style="color:red" onmouseover="alert(2)"><svg onload="alert(3)"> & text';
+    const { container } = render(
+      <ReferenceTerminal output={`\x1b[31m${html}\x1b[0m${attributes}`} />
+    );
+
+    expect(screen.getByText(html)).toHaveStyle({ color: 'var(--ansi-red)' });
+    expect(screen.getByText(attributes)).toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe(html + attributes);
+    expect(container.querySelector('script, img, svg, [onerror], [onload], [onmouseover]')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal-body pre')?.innerHTML).toContain('&lt;script&gt;');
+  });
+
+  it('retains the 120-line limit and omitted-line indicator with ANSI output', () => {
+    const output = Array.from({ length: 123 }, (_, index) => `\x1b[32mLine ${index + 1}\x1b[0m`).join('\n');
+    const { container } = render(<ReferenceTerminal output={output} />);
+
+    expect(container.querySelectorAll('.tool-terminal-line')).toHaveLength(121);
+    expect(screen.getByText('Line 120')).toHaveStyle({ color: 'var(--ansi-green)' });
+    expect(screen.queryByText('Line 121', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('Line 123', { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText('... (3 more lines)')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('\x1b');
   });
 });

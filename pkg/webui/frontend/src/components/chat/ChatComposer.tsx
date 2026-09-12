@@ -196,15 +196,15 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 		<div className="composer-dock sticky bottom-0 z-10 shrink-0 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:py-3 lg:pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
 			<div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
 				{streamError ? (
-					<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
+					<div className="composer-error">
 						{streamError}
 					</div>
 				) : null}
 
 				<div
 					className={cn(
-						"surface-panel w-full rounded-[1.45rem] p-2",
-						dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
+						"composer-surface w-full p-2",
+						dragActive && "is-drag-active",
 					)}
 					onDragLeave={onDragLeave}
 					onDragOver={onDragOver}
@@ -225,16 +225,16 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 							{attachments.map((attachment) => (
 								<div
 									key={attachment.id}
-									className="relative overflow-hidden rounded-2xl border border-black/8 bg-kodelet-light/80 p-2"
+									className="relative overflow-hidden rounded-sm border border-black/10 bg-kodelet-light/80 p-2"
 								>
 									<img
 										alt={attachment.name}
-										className="h-20 w-20 rounded-xl object-cover"
+										className="h-20 w-20 object-cover"
 										src={attachment.previewUrl}
 									/>
 									<button
 										aria-label={`Remove ${attachment.name}`}
-										className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/8 bg-white/92 text-xs font-heading font-semibold text-kodelet-dark"
+										className="composer-attachment-remove"
 										onClick={() => onRemoveAttachment(attachment.id)}
 										type="button"
 									>

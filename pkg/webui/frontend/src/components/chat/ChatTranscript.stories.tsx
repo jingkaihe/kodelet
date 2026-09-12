@@ -255,6 +255,46 @@ export const TerminalStyleFailed: Story = {
 	args: { messages: terminalMessages("failed") },
 };
 
+export const TerminalColors: Story = {
+	args: {
+		isStreaming: true,
+		messages: [{
+			role: "assistant",
+			blocks: [{
+				type: "tools",
+				tools: [{
+					callId: "terminal-colors",
+					name: "bash",
+					input: JSON.stringify({ command: "mise run frontend-test", description: "Check transcript behavior" }),
+					inProgress: true,
+					result: {
+						toolName: "bash",
+						success: true,
+						metadata: {
+							command: "mise run frontend-test",
+							output: [
+								"\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.11\u001b[39m",
+								"\u001b[90m/workspace/kodelet/pkg/webui/frontend\u001b[39m",
+								"",
+								" \u001b[32m✓\u001b[39m ChatTranscript.test.tsx \u001b[2m(39 tests)\u001b[22m \u001b[33m407ms\u001b[39m",
+								" \u001b[32m✓\u001b[39m ChatToolActivity.test.tsx \u001b[2m(44 tests)\u001b[22m \u001b[33m449ms\u001b[39m",
+								"",
+								"\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m2 passed\u001b[39m\u001b[22m \u001b[90m(2)\u001b[39m",
+								"\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m83 passed\u001b[39m\u001b[22m \u001b[90m(83)\u001b[39m",
+								"\u001b[2m   Duration \u001b[22m 1.20s",
+								"",
+								"\u001b[31mRed\u001b[0m · \u001b[32mGreen\u001b[0m · \u001b[33mYellow\u001b[0m · \u001b[34mBlue\u001b[0m · \u001b[35mMagenta\u001b[0m · \u001b[36mCyan\u001b[0m",
+								"\u001b[38;5;166m256-color orange\u001b[0m · \u001b[38;2;128;64;160mTruecolor purple\u001b[0m",
+								"\u001b[1mBold\u001b[22m · \u001b[3mItalic\u001b[23m · \u001b[4mUnderline\u001b[24m · \u001b[9mStrikethrough\u001b[29m",
+							].join("\n"),
+						},
+					},
+				}],
+			}],
+		}],
+	},
+};
+
 export const TerminalStyleLifecycle: Story = {
 	args: { isStreaming: true, messages: terminalMessages("running") },
 	render: function Render(args) {

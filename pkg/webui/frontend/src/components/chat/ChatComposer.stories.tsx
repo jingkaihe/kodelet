@@ -2,8 +2,12 @@ import React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 import ChatComposer from "./ChatComposer";
+import ChatSidebar from "./ChatSidebar";
+import ChatTranscript from "./ChatTranscript";
 import {
 	sampleAttachment,
+	sampleChatMessages,
+	sampleConversations,
 	sampleSlashCommands,
 } from "../../stories/fixtures";
 
@@ -115,4 +119,62 @@ export const ErrorWithAttachment: Story = {
 		streamError: "Failed to send message",
 		submitDisabled: false,
 	},
+};
+
+export const InWorkspace: Story = {
+	args: {
+		...SteeringActiveConversation.args,
+		draft: "",
+		placeholder: "Steer the active conversation…",
+		submitDisabled: true,
+	},
+	render: (args) => (
+		<div className="flex h-dvh">
+			<div className="hidden w-80 shrink-0 border-r border-black/10 lg:block">
+				<ChatSidebar
+					activeConversationId="conv-active"
+					authPrincipal={{
+						id: "https://issuer.example.com|jingkai-he",
+						issuer: "https://issuer.example.com",
+						subject: "jingkai-he",
+						name: "Jingkai He",
+						roles: ["user"],
+					}}
+					conversations={[
+						...sampleConversations,
+						{
+							...sampleConversations[0],
+							id: "child-review",
+							summary: "Review sidebar changes",
+							isRunning: true,
+							metadata: { parent_conversation_id: "conv-active" },
+						},
+					]}
+					loading={false}
+					onDeleteConversation={fn()}
+					onForkConversation={fn()}
+					onHide={fn()}
+					onNewChat={fn()}
+					onSearch={fn()}
+					onSelectConversation={fn()}
+				/>
+			</div>
+			<main className="chat-main-panel flex min-w-0 flex-1 flex-col overflow-hidden">
+				<div className="chat-main-scroll min-h-0 flex-1 overflow-y-auto">
+					<ChatTranscript
+						emptyStateTitle="Good afternoon"
+						isStreaming={false}
+						messages={[
+							{
+								role: "user",
+								content: "Please make the composer and sidebar match the transcript.",
+							},
+							sampleChatMessages[1],
+						]}
+					/>
+				</div>
+				<InteractiveComposer {...args} />
+			</main>
+		</div>
+	),
 };

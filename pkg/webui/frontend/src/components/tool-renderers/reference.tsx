@@ -1,4 +1,5 @@
 import React from 'react';
+import Anser from 'anser';
 import { marked } from 'marked';
 import type { ExtensionToolMetadata, ToolPresentation, ToolResult } from '../../types';
 import { cn, detectLanguageFromPath, escapeHtml, formatFileSize, formatDuration } from '../../utils';
@@ -295,27 +296,75 @@ export const highlightPattern = (text: string, pattern: string): string => {
   }
 };
 
-export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
-  const escapedOutput = output
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+// Only SGR styling belongs in a transcript. Ignore cursor commands and OSC/DCS
+// payloads (titles, hyperlinks, clipboard data), including incomplete updates.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal protocol bytes
+const terminalControlSequence = /\u001b(?:\[[0-?]*[ -/]*[@-~]?|[\]PX^_][\s\S]*?(?:\u0007|\u001b\\|$)|[ -/]*[@-~]?)/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI SGR sequence
+const terminalSGR = /^\u001b\[[\d;]*m$/;
 
-  const lines = truncateLines(escapedOutput, 120)
-    .split('\n')
-    .map((line) => (
-      `<div class="${line.trim() === '---' ? 'tool-terminal-line tool-terminal-separator' : 'tool-terminal-line'}">${line || '&nbsp;'}</div>`
-    ))
-    .join('');
+const terminalColor = (color: string, truecolor: string): string | undefined => {
+  if (!color) return undefined;
+  if (color === 'ansi-truecolor') return `rgb(${truecolor})`;
+  if (!color.startsWith('ansi-palette-')) return `var(--${color})`;
+
+  const index = Number(color.slice('ansi-palette-'.length));
+  if (index >= 232) {
+    const gray = 8 + (index - 232) * 10;
+    return `rgb(${gray}, ${gray}, ${gray})`;
+  }
+  const levels = [0, 95, 135, 175, 215, 255];
+  const cube = index - 16;
+  return `rgb(${levels[Math.floor(cube / 36)]}, ${levels[Math.floor(cube / 6) % 6]}, ${levels[cube % 6]})`;
+};
+
+const terminalTextStyle = (entry: Anser.AnserJsonEntry): React.CSSProperties => ({
+  color: terminalColor(entry.fg, entry.fg_truecolor),
+  backgroundColor: terminalColor(entry.bg, entry.bg_truecolor),
+  fontWeight: entry.decorations.includes('bold') ? 700 : undefined,
+  opacity: entry.decorations.includes('dim') ? 0.7 : undefined,
+  fontStyle: entry.decorations.includes('italic') ? 'italic' : undefined,
+  textDecorationLine: [
+    entry.decorations.includes('underline') ? 'underline' : '',
+    entry.decorations.includes('strikethrough') ? 'line-through' : '',
+  ].filter(Boolean).join(' ') || undefined,
+  visibility: entry.decorations.includes('hidden') ? 'hidden' : undefined,
+});
+
+export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
+  const lines = React.useMemo(() => {
+    const text = output
+      .split('\u009b').join('\u001b[')
+      .replace(terminalControlSequence, (sequence) => terminalSGR.test(sequence) ? sequence : '')
+      .replace(/\r/g, '');
+    // Each update contains accumulated output, so parsing starts fresh. Styles
+    // carry across newlines, but never leak into another command or rerender.
+    const entries = Anser.ansiToJson(truncateLines(text, 120), { use_classes: true, remove_empty: true });
+    const result: Array<{ text: string; content: React.ReactNode[] }> = [{ text: '', content: [] }];
+    entries.forEach((entry, entryIndex) => {
+      const style = terminalTextStyle(entry);
+      entry.content.split('\n').forEach((content, lineIndex) => {
+        if (lineIndex > 0) result.push({ text: '', content: [] });
+        const line = result[result.length - 1];
+        line.text += content;
+        if (content) {
+          line.content.push(<span key={`${entryIndex}-${lineIndex}`} style={style}>{content}</span>);
+        }
+      });
+    });
+    return result;
+  }, [output]);
 
   return (
-    <div
-      className="tool-terminal"
-      dangerouslySetInnerHTML={{
-        __html:
-          `<div class="tool-terminal-body"><pre>${lines}</pre></div>`,
-      }}
-    />
+    <div className="tool-terminal">
+      <div className="tool-terminal-body">
+        <pre>{lines.map((line, index) => (
+          <div key={index} className={cn('tool-terminal-line', line.text.trim() === '---' && 'tool-terminal-separator')}>
+            {line.content.length ? line.content : '\u00a0'}
+          </div>
+        ))}</pre>
+      </div>
+    </div>
   );
 };
 

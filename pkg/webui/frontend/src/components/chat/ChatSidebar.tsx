@@ -733,7 +733,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	);
 
 	return (
-		<aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-6 py-6 lg:border-b-0">
+		<aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-4 py-4 lg:border-b-0">
 			<div className="sidebar-header">
 				<div className="sidebar-brand" aria-label="Kodelet conversations">
 					Kodelet
@@ -777,7 +777,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 					type="button"
 				>
 					<SquarePen aria-hidden="true" className="sidebar-action-icon" strokeWidth={1.9} />
-					<span className="sidebar-action-label">New Chat</span>
+					<span className="sidebar-action-label">New chat</span>
 				</button>
 
 				<div className="sidebar-section-title">Recents</div>
