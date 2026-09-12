@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.6.10-beta
+
+Refreshed the Web UI with a compact, TUI-inspired layout across chat messages, the composer, sidebar, conversation search, dialogs, and authentication screens, plus a consistent welcome message for empty chats.
+
+Grouped consecutive commands and built-in tools into collapsible transcript activity summaries, with clearer completion and failure markers, grouped thoughts, and font-independent animated dot spinners while preserving separate extension tool presentations.
+
+Added per-file transcript activity for reads, writes, edits, and patches, with expandable diffs, rename paths, addition/removal counts, and file operation errors.
+
+Added ANSI colors and text styling to command output in the Web UI, including 256-color and truecolor support, while filtering non-styling terminal control sequences.
+
+Made conversation footer statistics compact and expandable, with detailed runner status, environment profile, context usage, token counts, and cost.
+
+Removed obsolete frontend components, utilities, styles, configuration, and unused dependencies.
+
 ## 0.6.9-beta
 
 Added parent conversation IDs across ACP, the TypeScript SDK, daemon, and runners, supporting fresh child sessions and child forks with nested grouping in the Web UI sidebar and native TUI conversation picker. Parent relationships persist across resumes and cancelled turns.
