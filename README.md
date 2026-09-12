@@ -1,4 +1,8 @@
-# Kodelet
+<p align="center">
+  <img src=".github/logo.svg" width="40" height="40" alt="">
+</p>
+
+<h1 align="center">Kodelet</h1>
 
 **Your tools. Your models. Your agent.**
 
