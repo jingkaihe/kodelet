@@ -1,8 +1,14 @@
-import React from 'react';
 import Anser from 'anser';
 import { marked } from 'marked';
+import React from 'react';
 import type { ExtensionToolMetadata, ToolPresentation, ToolResult } from '../../types';
-import { cn, detectLanguageFromPath, escapeHtml, formatFileSize, formatDuration } from '../../utils';
+import {
+  cn,
+  detectLanguageFromPath,
+  escapeHtml,
+  formatDuration,
+  formatFileSize,
+} from '../../utils';
 
 const MAX_TOOL_PRESENTATION_SUMMARY_LENGTH = 160;
 const MAX_TOOL_PRESENTATION_BODY_LENGTH = 102400;
@@ -119,10 +125,7 @@ interface ReferenceCodeBlockProps {
   language?: string;
 }
 
-export const ReferenceCodeBlock: React.FC<ReferenceCodeBlockProps> = ({
-  content,
-  language,
-}) => (
+export const ReferenceCodeBlock: React.FC<ReferenceCodeBlockProps> = ({ content, language }) => (
   <pre className="tool-code-block">
     <code className={language ? `language-${language}` : undefined}>{content}</code>
   </pre>
@@ -239,10 +242,7 @@ export const ReferenceDiffBlock: React.FC<{ lines: ReferenceDiffLine[] }> = ({ l
 
         return (
           <div
-            className={cn(
-              'diff-line',
-              line.kind !== 'context' && `diff-line-${line.kind}`
-            )}
+            className={cn('diff-line', line.kind !== 'context' && `diff-line-${line.kind}`)}
             key={`${line.kind}-${index}`}
             style={{
               gridTemplateColumns: `${oldWidth}ch ${newWidth}ch 1.2rem minmax(0, 1fr)`,
@@ -259,27 +259,32 @@ export const ReferenceDiffBlock: React.FC<{ lines: ReferenceDiffLine[] }> = ({ l
   );
 };
 
-export const highlightPattern = (text: string, pattern: string): string => {
-  const escapedText = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+export const highlightPattern = (text: string, pattern: string): React.ReactNode => {
   if (!pattern) {
-    return escapedText;
+    return text;
   }
 
-  try {
-    const regex = new RegExp(`(${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return escapedText.replace(regex, '<mark class="grep-mark">$1</mark>');
-  } catch {
-    return escapedText;
+  const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  const parts: React.ReactNode[] = [];
+  let offset = 0;
+  for (const match of text.matchAll(regex)) {
+    parts.push(
+      text.slice(offset, match.index),
+      <mark className="grep-mark" key={match.index}>
+        {match[0]}
+      </mark>
+    );
+    offset = match.index + match[0].length;
   }
+  parts.push(text.slice(offset));
+  return parts;
 };
 
 // Only SGR styling belongs in a transcript. Ignore cursor commands and OSC/DCS
 // payloads (titles, hyperlinks, clipboard data), including incomplete updates.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal protocol bytes
-const terminalControlSequence = /\u001b(?:\[[0-?]*[ -/]*[@-~]?|[\]PX^_][\s\S]*?(?:\u0007|\u001b\\|$)|[ -/]*[@-~]?)/g;
+const terminalControlSequence =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal protocol bytes
+  /\u001b(?:\[[0-?]*[ -/]*[@-~]?|[\]PX^_][\s\S]*?(?:\u0007|\u001b\\|$)|[ -/]*[@-~]?)/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI SGR sequence
 const terminalSGR = /^\u001b\[[\d;]*m$/;
 
@@ -304,22 +309,29 @@ const terminalTextStyle = (entry: Anser.AnserJsonEntry): React.CSSProperties => 
   fontWeight: entry.decorations.includes('bold') ? 700 : undefined,
   opacity: entry.decorations.includes('dim') ? 0.7 : undefined,
   fontStyle: entry.decorations.includes('italic') ? 'italic' : undefined,
-  textDecorationLine: [
-    entry.decorations.includes('underline') ? 'underline' : '',
-    entry.decorations.includes('strikethrough') ? 'line-through' : '',
-  ].filter(Boolean).join(' ') || undefined,
+  textDecorationLine:
+    [
+      entry.decorations.includes('underline') ? 'underline' : '',
+      entry.decorations.includes('strikethrough') ? 'line-through' : '',
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined,
   visibility: entry.decorations.includes('hidden') ? 'hidden' : undefined,
 });
 
 export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
   const lines = React.useMemo(() => {
     const text = output
-      .split('\u009b').join('\u001b[')
-      .replace(terminalControlSequence, (sequence) => terminalSGR.test(sequence) ? sequence : '')
+      .split('\u009b')
+      .join('\u001b[')
+      .replace(terminalControlSequence, (sequence) => (terminalSGR.test(sequence) ? sequence : ''))
       .replace(/\r/g, '');
     // Each update contains accumulated output, so parsing starts fresh. Styles
     // carry across newlines, but never leak into another command or rerender.
-    const entries = Anser.ansiToJson(truncateLines(text, 120), { use_classes: true, remove_empty: true });
+    const entries = Anser.ansiToJson(truncateLines(text, 120), {
+      use_classes: true,
+      remove_empty: true,
+    });
     const result: Array<{ text: string; content: React.ReactNode[] }> = [{ text: '', content: [] }];
     entries.forEach((entry, entryIndex) => {
       const style = terminalTextStyle(entry);
@@ -328,7 +340,12 @@ export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
         const line = result[result.length - 1];
         line.text += content;
         if (content) {
-          line.content.push(<span key={`${entryIndex}-${lineIndex}`} style={style}>{content}</span>);
+          line.content.push(
+            // biome-ignore lint/suspicious/noArrayIndexKey: ANSI spans are stateless positional segments of one parsed terminal snapshot, not reorderable records.
+            <span key={`${entryIndex}-${lineIndex}`} style={style}>
+              {content}
+            </span>
+          );
         }
       });
     });
@@ -338,11 +355,20 @@ export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
   return (
     <div className="tool-terminal">
       <div className="tool-terminal-body">
-        <pre>{lines.map((line, index) => (
-          <div key={index} className={cn('tool-terminal-line', line.text.trim() === '---' && 'tool-terminal-separator')}>
-            {line.content.length ? line.content : '\u00a0'}
-          </div>
-        ))}</pre>
+        <pre>
+          {lines.map((line, index) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: Terminal rows are stateless fixed positions in accumulated output and may have identical text.
+              key={index}
+              className={cn(
+                'tool-terminal-line',
+                line.text.trim() === '---' && 'tool-terminal-separator'
+              )}
+            >
+              {line.content.length ? line.content : '\u00a0'}
+            </div>
+          ))}
+        </pre>
       </div>
     </div>
   );
@@ -364,14 +390,19 @@ export const ReferenceFileList: React.FC<ReferenceFileListProps> = ({ items }) =
 );
 
 export const renderMarkdown = (content?: string | null): string =>
-  content ? ((marked.parse(content) as string) || '') : '';
+  content ? (marked.parse(content) as string) || '' : '';
 
 const safeMarkdownRenderer = new marked.Renderer();
 const defaultMarkdownRenderer = new marked.Renderer();
 
 const decodeUrlCodePoint = (code: string, radix: number): string => {
   const value = Number.parseInt(code, radix);
-  if (!Number.isInteger(value) || value < 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 0x10ffff ||
+    (value >= 0xd800 && value <= 0xdfff)
+  ) {
     return '';
   }
   return String.fromCodePoint(value);
@@ -419,7 +450,7 @@ safeMarkdownRenderer.image = (href, title, text) =>
   isSafeMarkdownUrl(href) ? defaultMarkdownRenderer.image(href, title, text) : escapeHtml(text);
 
 export const renderSafeMarkdown = (content?: string | null): string =>
-  content ? ((marked.parse(content, { renderer: safeMarkdownRenderer }) as string) || '') : '';
+  content ? (marked.parse(content, { renderer: safeMarkdownRenderer }) as string) || '' : '';
 
 export const formatReferenceSize = (value?: number | null): string => {
   if (value === null || value === undefined) {

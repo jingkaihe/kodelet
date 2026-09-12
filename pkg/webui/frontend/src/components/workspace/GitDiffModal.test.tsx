@@ -221,7 +221,9 @@ describe('GitDiffModal', () => {
     expect(container.querySelectorAll('.workspace-diff-file')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Expand nested' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Expand child' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /nested\/child\/file\.txt/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /nested\/child\/file\.txt/ })
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand conflict.txt' })).toBeInTheDocument();
     expect(screen.getByText('+4')).toBeInTheDocument();
 
@@ -339,7 +341,9 @@ describe('GitDiffModal', () => {
     expect(screen.getByRole('button', { name: 'Copy diff' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand all file diffs' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh diff' })).toBeInTheDocument();
-    expect(screen.getByTestId('git-diff-panel')).toHaveAttribute('role', 'complementary');
+    expect(screen.getByRole('complementary', { name: 'Changes' })).toBe(
+      screen.getByTestId('git-diff-panel')
+    );
     expect(screen.queryByTestId('git-diff-modal-backdrop')).not.toBeInTheDocument();
     expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText(/Uncommitted changes|Working tree clean/)).not.toBeInTheDocument();
@@ -386,17 +390,20 @@ describe('GitDiffModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand one.txt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand two.txt' }));
 
-    const addedContents = Array.from(container.querySelectorAll('.diff-line-added .diff-content'))
-      .map((element) => element.textContent);
-    const removedContents = Array.from(container.querySelectorAll('.diff-line-removed .diff-content'))
-      .map((element) => element.textContent);
+    const addedContents = Array.from(
+      container.querySelectorAll('.diff-line-added .diff-content')
+    ).map((element) => element.textContent);
+    const removedContents = Array.from(
+      container.querySelectorAll('.diff-line-removed .diff-content')
+    ).map((element) => element.textContent);
 
     expect(addedContents).toEqual(['new one', 'new two']);
     expect(removedContents).toEqual(['old one', 'old two']);
   });
 
   it('copies the full diff and refreshes from the toolbar actions', () => {
-    const diff = 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new';
+    const diff =
+      'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new';
     const onRefresh = vi.fn();
 
     render(

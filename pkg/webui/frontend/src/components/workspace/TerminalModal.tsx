@@ -1,25 +1,26 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FitAddon, Ghostty, Terminal } from 'ghostty-web';
 import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
+import type React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import apiService from '../../services/api';
 import type {
   TerminalClientMessage,
   TerminalExitEvent,
   TerminalServerEvent,
   WorkspaceTarget,
 } from '../../types';
-import apiService from '../../services/api';
 import TerminalModalFrame, { type TerminalStatusVariant } from './TerminalModalFrame';
 import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
   getTerminalPopOutTargetKey,
   isTerminalPopOutMessage,
-  readTerminalPopOutRecordForTarget,
   readTerminalPopOutRecordById,
-  terminalPopOutMessageMatchesTarget,
+  readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_HEARTBEAT_INTERVAL,
   TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
   TERMINAL_POP_OUT_STORAGE_KEY,
+  terminalPopOutMessageMatchesTarget,
 } from './terminalPopOut';
 
 interface TerminalModalProps {
@@ -30,7 +31,8 @@ interface TerminalModalProps {
   allowPopOut?: boolean;
 }
 
-const FALLBACK_TERMINAL_FONT_FAMILY = '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
+const FALLBACK_TERMINAL_FONT_FAMILY =
+  '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
 const TERMINAL_BOTTOM_RESERVED_ROWS = 1;
 const TERMINAL_FONT_SIZE = 13;
 const SGR_MOUSE_MODE = 1006;
@@ -42,7 +44,8 @@ const WHEEL_PIXEL_FALLBACK = 33;
 const POP_OUT_CLOSED_POLL_INTERVAL = 250;
 const POP_OUT_NAVIGATION_GRACE_PERIOD = 15000;
 const REMOTE_TERMINAL_RECONNECT_DELAY = 500;
-const TERMINAL_POP_OUT_WINDOW_FEATURES = 'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no';
+const TERMINAL_POP_OUT_WINDOW_FEATURES =
+  'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no';
 
 let ghosttyLoadPromise: Promise<Ghostty> | null = null;
 let activeTerminalPopOutWindow: Window | null = null;
@@ -109,19 +112,15 @@ const getActiveTerminalPopOutWindow = (target?: WorkspaceTarget) => {
   if (activeTerminalPopOutWindow?.closed) {
     clearActiveTerminalPopOutWindow();
   } else if (activeTerminalPopOutWindow) {
-    if (
-      isExpectedTerminalPopOutWindow(
-        activeTerminalPopOutWindow,
-        activeTerminalPopOutTargetKey
-      )
-    ) {
+    if (isExpectedTerminalPopOutWindow(activeTerminalPopOutWindow, activeTerminalPopOutTargetKey)) {
       activeTerminalPopOutPendingUntil = 0;
     } else if (Date.now() >= activeTerminalPopOutPendingUntil) {
       clearActiveTerminalPopOutWindow();
     }
   }
 
-  return target === undefined || activeTerminalPopOutTargetKey === getTerminalPopOutTargetKey(target)
+  return target === undefined ||
+    activeTerminalPopOutTargetKey === getTerminalPopOutTargetKey(target)
     ? activeTerminalPopOutWindow
     : null;
 };
@@ -220,8 +219,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   allowPopOut = true,
 }) => {
   const popOutTargetKey = getTerminalPopOutTargetKey(target);
-  const popOutEligible =
-    allowPopOut && (target.kind === 'local' || Boolean(target.conversationId));
+  const popOutEligible = allowPopOut && (target.kind === 'local' || Boolean(target.conversationId));
   const terminalConnectionKey =
     target.kind === 'runner' ? `runner:${target.runnerId}` : `local:${target.cwd || ''}`;
   const targetRef = useRef(target);
@@ -253,7 +251,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     }
 
     const proposedDimensions = fitAddon.proposeDimensions();
-    if (!proposedDimensions || Number.isNaN(proposedDimensions.cols) || Number.isNaN(proposedDimensions.rows)) {
+    if (
+      !proposedDimensions ||
+      Number.isNaN(proposedDimensions.cols) ||
+      Number.isNaN(proposedDimensions.rows)
+    ) {
       return false;
     }
 
@@ -276,7 +278,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     }
     return statusText === 'Connected' ? '' : statusText;
   }, [connectionError, exitCode, statusText]);
-  const statusVariant: TerminalStatusVariant = connectionError ? 'error' : exitCode !== null ? 'idle' : 'live';
+  const statusVariant: TerminalStatusVariant = connectionError
+    ? 'error'
+    : exitCode !== null
+      ? 'idle'
+      : 'live';
 
   useEffect(() => {
     if (!allowPopOut) {
@@ -284,6 +290,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     }
   }, [allowPopOut]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(reconnectAttempt): Retry events must restart the connection lifecycle.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(terminalConnectionKey): Reconnect when the target identity changes; targetRef supplies its latest metadata.
   useEffect(() => {
     if (!open || popOutActive || !terminalHostRef.current) {
       return undefined;
@@ -302,9 +310,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     const pendingAnimationFrames: number[] = [];
 
     const resolvedMonoFontFamily =
-      window.getComputedStyle(document.documentElement)
-        .getPropertyValue('--font-mono')
-        .trim() || FALLBACK_TERMINAL_FONT_FAMILY;
+      window.getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() ||
+      FALLBACK_TERMINAL_FONT_FAMILY;
 
     setStatusText('Connecting…');
     setConnectionError(null);
@@ -354,7 +361,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       sendMessage({ type: 'input', data });
     };
 
-    const writeTerminalOutput = (targetTerminal: Terminal, data: Uint8Array, callback?: () => void) => {
+    const writeTerminalOutput = (
+      targetTerminal: Terminal,
+      data: Uint8Array,
+      callback?: () => void
+    ) => {
       targetTerminal.write(data, callback);
       drainTerminalResponses(targetTerminal, sendTerminalInput);
     };
@@ -537,7 +548,9 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
             }, REMOTE_TERMINAL_RECONNECT_DELAY);
             return;
           }
-          setStatusText((current) => (current.startsWith('Exited with code') ? current : 'Disconnected'));
+          setStatusText((current) =>
+            current.startsWith('Exited with code') ? current : 'Disconnected'
+          );
         });
 
         socket.addEventListener('error', () => {
@@ -596,8 +609,16 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           }
 
           const rect = canvas.getBoundingClientRect();
-          const col = clamp(Math.floor((event.clientX - rect.left) / metrics.width) + 1, 1, terminal.cols);
-          const row = clamp(Math.floor((event.clientY - rect.top) / metrics.height) + 1, 1, terminal.rows);
+          const col = clamp(
+            Math.floor((event.clientX - rect.left) / metrics.width) + 1,
+            1,
+            terminal.cols
+          );
+          const row = clamp(
+            Math.floor((event.clientY - rect.top) / metrics.height) + 1,
+            1,
+            terminal.rows
+          );
           const button = getSGRWheelButton(event) + getSGRMouseModifiers(event);
 
           event.preventDefault();
@@ -608,9 +629,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
         handleWindowResize = () => sendResize();
         window.addEventListener('resize', handleWindowResize);
-        resizeObserver = typeof ResizeObserver === 'undefined'
-          ? null
-          : new ResizeObserver(() => sendResize());
+        resizeObserver =
+          typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => sendResize());
         if (resizeObserver) {
           resizeObserver.observe(terminalHostRef.current);
         }
@@ -681,17 +701,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       if (!isTerminalPopOutMessage(event.data)) {
         return;
       }
-      if (
-        event.data.type === 'active' &&
-        terminalPopOutMessageMatchesTarget(event.data, target)
-      ) {
+      if (event.data.type === 'active' && terminalPopOutMessageMatchesTarget(event.data, target)) {
         setPopOutActive(true);
         return;
       }
-      if (
-        event.data.type === 'closing' &&
-        terminalPopOutMessageMatchesTarget(event.data, target)
-      ) {
+      if (event.data.type === 'closing' && terminalPopOutMessageMatchesTarget(event.data, target)) {
         const closingId = event.data.id;
         const closingRecord = readTerminalPopOutRecordById(closingId);
         channel?.postMessage({ type: 'probe' });
@@ -730,10 +744,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           TERMINAL_POP_OUT_HEARTBEAT_INTERVAL
         )
       : null;
-    const pollWindow = window.setInterval(
-      syncPopOutState,
-      POP_OUT_CLOSED_POLL_INTERVAL
-    );
+    const pollWindow = window.setInterval(syncPopOutState, POP_OUT_CLOSED_POLL_INTERVAL);
     window.addEventListener('focus', syncPopOutState);
     window.addEventListener('storage', handleStorage);
 
@@ -790,11 +801,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     const persistedPopOut = readTerminalPopOutRecordForTarget(target);
     if (persistedPopOut) {
       const persistedTarget = persistedPopOut.target;
-      const existingPopOut = window.open(
-        '',
-        'kodelet-terminal',
-        TERMINAL_POP_OUT_WINDOW_FEATURES
-      );
+      const existingPopOut = window.open('', 'kodelet-terminal', TERMINAL_POP_OUT_WINDOW_FEATURES);
       if (existingPopOut) {
         const alreadyShowingTerminal = isExpectedTerminalPopOutWindow(
           existingPopOut,

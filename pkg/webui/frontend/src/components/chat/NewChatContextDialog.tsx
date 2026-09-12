@@ -1,5 +1,5 @@
-import React from 'react';
 import { ArrowRight, ChevronDown, FolderOpen, X } from 'lucide-react';
+import React from 'react';
 import type { ChatProfileOption, CWDHint, Runner } from '../../types';
 import { cn, formatRunnerStatus } from '../../utils';
 
@@ -62,29 +62,37 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
   ) => {
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
     const selectedRunnerAvailable = Boolean(
-      runnerIdDraft && selectedRunner?.connected &&
+      runnerIdDraft &&
+        selectedRunner?.connected &&
         (selectedRunner.status === 'idle' ||
           (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
     );
-    const directorySuggestions = cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-      <div
-        className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-        data-testid="cwd-suggestions"
-      >
-        {cwdSuggestions.map((suggestion, index) => (
-          <button
-            className={cn('composer-cwd-suggestion', index === cwdSuggestionIndex && 'is-active')}
-            data-testid={`cwd-suggestion-${index}`}
-            key={suggestion.path}
-            onClick={() => onSelectCwdSuggestion(suggestion.path)}
-            onMouseDown={(event) => event.preventDefault()}
-            type="button"
-          >
-            <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
-          </button>
-        ))}
-      </div>
-    ) : null;
+    const directorySuggestions =
+      cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+        <div
+          aria-label="Working directory suggestions"
+          className="composer-cwd-suggestions composer-cwd-suggestions-inline"
+          data-testid="cwd-suggestions"
+          id="new-chat-cwd-suggestions"
+          role="listbox"
+        >
+          {cwdSuggestions.map((suggestion, index) => (
+            <button
+              aria-selected={index === cwdSuggestionIndex}
+              className={cn('composer-cwd-suggestion', index === cwdSuggestionIndex && 'is-active')}
+              data-testid={`cwd-suggestion-${index}`}
+              id={`new-chat-cwd-suggestion-${index}`}
+              key={suggestion.path}
+              onClick={() => onSelectCwdSuggestion(suggestion.path)}
+              onMouseDown={(event) => event.preventDefault()}
+              role="option"
+              type="button"
+            >
+              <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
+            </button>
+          ))}
+        </div>
+      ) : null;
     return (
       <div className="new-chat-dialog-backdrop new-chat-context-backdrop">
         <div
@@ -222,7 +230,15 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                           strokeWidth={1.6}
                         />
                         <input
+                          aria-activedescendant={
+                            directorySuggestions && cwdSuggestions[cwdSuggestionIndex]
+                              ? `new-chat-cwd-suggestion-${cwdSuggestionIndex}`
+                              : undefined
+                          }
                           aria-autocomplete="list"
+                          aria-controls={
+                            directorySuggestions ? 'new-chat-cwd-suggestions' : undefined
+                          }
                           aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
                           aria-label="Working directory"
                           autoCapitalize="off"
@@ -237,6 +253,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                           onKeyDown={onCwdInputKeyDown}
                           placeholder={selectedRunner.workspace.path}
                           ref={cwdInputRef}
+                          role="combobox"
                           spellCheck={false}
                           type="text"
                           value={cwdQuery}
@@ -267,16 +284,13 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                   </div>
                 </>
               ) : (
-                <div
-                  className="new-chat-field new-chat-field-wide new-chat-workspace-card"
-                  role="status"
-                >
+                <output className="new-chat-field new-chat-field-wide new-chat-workspace-card">
                   <span className="new-chat-field-label">Workspace runner required</span>
                   <span className="new-chat-recent-workspace-parent">
-                    The control-plane workspace is disabled. Select an available workspace runner
-                    to start this chat.
+                    The control-plane workspace is disabled. Select an available workspace runner to
+                    start this chat.
                   </span>
-                </div>
+                </output>
               )}
             </div>
           </div>

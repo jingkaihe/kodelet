@@ -1,44 +1,23 @@
-import React, { useMemo } from 'react';
 import { Check, ChevronRight, SquareSlash } from 'lucide-react';
-import { marked } from 'marked';
-import type {
-  ChatAssistantBlock,
-  ChatRenderMessage,
-  ContentBlock,
-} from '../../types';
+import React, { useMemo } from 'react';
+import type { ChatAssistantBlock, ChatRenderMessage, ContentBlock } from '../../types';
+import { escapeHtml } from '../../utils';
 import Spinner from '../Spinner';
+import { renderSafeMarkdown } from '../tool-renderers/reference';
+import { CopyButton } from '../tool-renderers/shared';
 import ChatMessageFrame from './ChatMessageFrame';
 import ChatStreamingIndicator from './ChatStreamingIndicator';
 import ChatToolActivity from './ChatToolActivity';
-import { CopyButton } from '../tool-renderers/shared';
 
-const renderer = new marked.Renderer();
-const defaultRenderer = new marked.Renderer();
-
-renderer.link = (href, title, text) => {
-  const renderedLink = defaultRenderer.link(href, title, text);
-  if (!renderedLink.startsWith('<a ')) {
-    return renderedLink;
-  }
-
-  return renderedLink.replace('<a ', '<a class="chat-markdown-link" ');
-};
-
-renderer.list = (body, ordered, start) => {
-  const tag = ordered ? 'ol' : 'ul';
-  const startAttribute = ordered && typeof start === 'number' && start !== 1 ? ` start="${start}"` : '';
-  return `<${tag} class="chat-markdown-list"${startAttribute}>\n${body}</${tag}>\n`;
-};
-
-renderer.table = (header, body) => {
-  const renderedTable = defaultRenderer
-    .table(header, body)
-    .replace('<table>', '<table class="chat-markdown-table">');
-
-  return `<div class="chat-markdown-table-shell">\n${renderedTable}</div>\n`;
-};
-
-const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
+const parseMarkdown = (content: string): string =>
+  renderSafeMarkdown(content)
+    .replace(/<a /g, '<a class="chat-markdown-link" ')
+    .replace(/<(ol|ul)(?=[ >])/g, '<$1 class="chat-markdown-list"')
+    .replace(
+      /<table>/g,
+      '<div class="chat-markdown-table-shell">\n<table class="chat-markdown-table">'
+    )
+    .replace(/<\/table>/g, '</table></div>');
 
 const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
 
@@ -62,15 +41,28 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
       }
 
       if (block.type === 'image') {
-        const imageUrl = block.source?.data && block.source?.media_type
-          ? `data:${block.source.media_type};base64,${block.source.data}`
-          : block.image_url?.url;
+        const imageUrl =
+          block.source?.data && block.source?.media_type
+            ? `data:${block.source.media_type};base64,${block.source.data}`
+            : block.image_url?.url;
         if (!imageUrl) {
           return '';
         }
+        try {
+          const protocol = new URL(imageUrl, window.location.href).protocol;
+          if (
+            !['http:', 'https:', 'file:', 'blob:'].includes(protocol) &&
+            !/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z\d+/=\s]+$/i.test(imageUrl)
+          ) {
+            return '';
+          }
+        } catch {
+          return '';
+        }
+        const escapedImageUrl = escapeHtml(imageUrl).replace(/"/g, '&quot;');
         return [
           '<figure class="chat-uploaded-image">',
-          `<img src="${imageUrl}" alt="Uploaded content" class="chat-uploaded-image-media" loading="lazy" />`,
+          `<img src="${escapedImageUrl}" alt="Uploaded content" class="chat-uploaded-image-media" loading="lazy" />`,
           '</figure>',
         ].join('');
       }
@@ -88,6 +80,7 @@ interface MarkdownContentProps {
 const MarkdownContent = React.memo(({ html, className }: MarkdownContentProps) => {
   // Stream events clone messages; keep unchanged HTML stable to preserve text selection.
   const markup = useMemo(() => ({ __html: html }), [html]);
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: Only renderContent supplies HTML: Markdown escapes raw HTML and rejects unsafe URLs; uploaded image URLs are validated and attribute-escaped.
   return <div className={className} dangerouslySetInnerHTML={markup} />;
 });
 
@@ -102,11 +95,7 @@ const renderThinkingContent = (content: string) => {
   const hasThinkingContent = extractContentText(content).trim().length > 0;
 
   if (!hasThinkingContent) {
-    return (
-      <p className="text-sm italic text-kodelet-blue/80">
-        Reasoning complete.
-      </p>
-    );
+    return <p className="text-sm italic text-kodelet-blue/80">Reasoning complete.</p>;
   }
 
   return (
@@ -133,11 +122,14 @@ const renderCompletedThinkingGroup = (
           <span className="tool-summary-text" title={summaryText}>
             <span className="tool-summary-label">{summaryText}</span>
           </span>
-          <span className="tool-summary-chevron" aria-hidden="true"><ChevronRight size={12} /></span>
+          <span className="tool-summary-chevron" aria-hidden="true">
+            <ChevronRight size={12} />
+          </span>
         </summary>
         <div className="activity-detail-content thinking-group-content">
           {thinkingBlocks.map((thinkingBlock, index) => (
-            <section className="thinking-group-item" key={`thought-${index}`}>
+            // biome-ignore lint/suspicious/noArrayIndexKey: Completed thoughts are append-only chronological blocks with no IDs; positional identity preserves text selection across stream clones.
+            <section className="thinking-group-item" key={index}>
               {renderThinkingContent(thinkingBlock.content)}
             </section>
           ))}
@@ -181,7 +173,12 @@ const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): 
 
 const renderSlashCommandCard = (text: string, type: 'slash-command' | 'goal' = 'slash-command') => (
   <div className={`slash-command-card slash-command-card-${type}`} data-testid="slash-command-card">
-    <SquareSlash aria-hidden="true" className="slash-command-card-icon" size={14} strokeWidth={2.2} />
+    <SquareSlash
+      aria-hidden="true"
+      className="slash-command-card-icon"
+      size={14}
+      strokeWidth={2.2}
+    />
     <code className="slash-command-card-command">{text.trim()}</code>
   </div>
 );
@@ -239,10 +236,7 @@ interface ChatTranscriptProps {
   isStreaming: boolean;
 }
 
-const ChatTranscript: React.FC<ChatTranscriptProps> = ({
-  messages,
-  isStreaming,
-}) => {
+const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }) => {
   const assistantTurnCount = useMemo(
     () => messages.filter((message) => message.role === 'assistant').length,
     [messages]
@@ -269,7 +263,9 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
             lookaheadIndex += 1;
           }
 
-          renderedBlocks.push(renderCompletedThinkingGroup(thinkingBlocks, `thinking-${blockIndex}`));
+          renderedBlocks.push(
+            renderCompletedThinkingGroup(thinkingBlocks, `thinking-${blockIndex}`)
+          );
           blockIndex = lookaheadIndex - 1;
           continue;
         }
@@ -277,9 +273,8 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
         const hasThinkingContent = extractContentText(block.content).trim().length > 0;
         renderedBlocks.push(
           <div key={`thinking-${blockIndex}`} className="activity-stack activity-stack-thinking">
-            <div
-              className="activity-card activity-card-thinking activity-card-live"
-              role="status"
+            <output
+              className="activity-card activity-card-thinking activity-card-live block"
               aria-live="polite"
             >
               <div className="tool-summary activity-summary activity-summary-static">
@@ -293,7 +288,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   {renderThinkingContent(block.content)}
                 </div>
               ) : null}
-            </div>
+            </output>
           </div>
         );
         continue;
@@ -304,9 +299,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
           continue;
         }
 
-        renderedBlocks.push(
-          <ChatToolActivity key={`tools-${blockIndex}`} tools={block.tools} />
-        );
+        renderedBlocks.push(<ChatToolActivity key={`tools-${blockIndex}`} tools={block.tools} />);
         continue;
       }
 
@@ -314,10 +307,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
       renderedBlocks.push(
         <div key={`message-${blockIndex}`} className="group/message relative">
           {copyText.trim() ? (
-            <CopyButton
-              className={assistantMessageCopyButtonClassName}
-              content={copyText}
-            />
+            <CopyButton className={assistantMessageCopyButtonClassName} content={copyText} />
           ) : null}
           <MarkdownContent
             className="chat-prose max-w-none pr-12 text-kodelet-dark"
@@ -333,9 +323,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   if (messages.length === 0) {
     return (
       <div className="chat-empty-state">
-        <h1 className="chat-empty-state-title">
-          Hello! What would you like me to work on?
-        </h1>
+        <h1 className="chat-empty-state-title">Hello! What would you like me to work on?</h1>
       </div>
     );
   }
@@ -344,21 +332,21 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
     <div className="mx-auto w-full max-w-5xl space-y-4 px-3 pb-6 pt-16 sm:space-y-5 sm:px-4 md:px-8 lg:py-6">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
-        const isActiveStreamingAssistant =
-          !isUser && isStreaming && index === messages.length - 1;
+        const isActiveStreamingAssistant = !isUser && isStreaming && index === messages.length - 1;
         const hasVisibleInProgressBlock =
           isActiveStreamingAssistant &&
           (message.blocks || []).some(
             (block) =>
               ((block.type === 'thinking' || block.type === 'message') && block.inProgress) ||
-              (block.type === 'tools' && block.tools.some((toolCall) => toolCall.inProgress || !toolCall.result))
+              (block.type === 'tools' &&
+                block.tools.some((toolCall) => toolCall.inProgress || !toolCall.result))
           );
 
         return (
           <ChatMessageFrame
             copyText={isUser ? getMessageBlockCopyText(message.content) : undefined}
             key={`${message.role}-${index}`}
-            role={message.role}
+            messageRole={message.role}
           >
             {isUser ? (
               <div className="space-y-3">{renderUserContent(message.content)}</div>

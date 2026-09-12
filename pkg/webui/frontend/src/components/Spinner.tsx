@@ -20,13 +20,13 @@ export const useSpinnerFrame = <TFrame,>(
 ): { frame: TFrame; frameIndex: number } => {
   const [frameIndex, setFrameIndex] = React.useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(resetKey): A new turn intentionally restarts the animation even when the preset is unchanged.
   React.useEffect(() => {
     setFrameIndex(0);
 
     if (
       preset.frames.length < 2 ||
-      (typeof window !== 'undefined' &&
-        window.matchMedia?.(REDUCED_MOTION_MEDIA_QUERY).matches)
+      (typeof window !== 'undefined' && window.matchMedia?.(REDUCED_MOTION_MEDIA_QUERY).matches)
     ) {
       return undefined;
     }

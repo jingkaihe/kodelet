@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import apiService from '../services/api';
-import type { ApprovalStatus, AuthPrincipal, UserLoginAuthorization } from '../types';
 import {
   ApprovalCodeForm,
   AuthDetailList,
@@ -8,6 +6,8 @@ import {
   AuthPageShell,
   formatAuthTimestamp,
 } from '../components/auth/AuthPageShell';
+import apiService from '../services/api';
+import type { ApprovalStatus, AuthPrincipal, UserLoginAuthorization } from '../types';
 
 const statusCopy = (status: ApprovalStatus): string => {
   switch (status) {
@@ -99,9 +99,7 @@ export function UserLoginPageView({
       {principal && !authorization && !completionStatus ? (
         <>
           {!error ? (
-            <AuthNotice tone="warning">
-              Only use a code from your own Kodelet client.
-            </AuthNotice>
+            <AuthNotice tone="warning">Only use a code from your own Kodelet client.</AuthNotice>
           ) : null}
           <ApprovalCodeForm
             busy={busy}
@@ -116,9 +114,7 @@ export function UserLoginPageView({
 
       {principal && authorization ? (
         <div className="auth-request-review">
-          <AuthNotice tone="warning">
-            Only approve a sign-in you started.
-          </AuthNotice>
+          <AuthNotice tone="warning">Only approve a sign-in you started.</AuthNotice>
           <AuthDetailList
             items={[
               { label: 'Code', value: authorization.userCode, mono: true },
@@ -133,7 +129,12 @@ export function UserLoginPageView({
           />
           {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
           <div className="auth-decision-actions">
-            <button className="auth-secondary-button" disabled={busy} onClick={onReset} type="button">
+            <button
+              className="auth-secondary-button"
+              disabled={busy}
+              onClick={onReset}
+              type="button"
+            >
               Use a different code
             </button>
             {authorization.status === 'pending' ? (
@@ -224,11 +225,14 @@ export default function UserLoginPage() {
         setPrincipal(null);
       }
       setError(
-        lookupError && typeof lookupError === 'object' && 'status' in lookupError && Number(lookupError.status) === 404
+        lookupError &&
+          typeof lookupError === 'object' &&
+          'status' in lookupError &&
+          Number(lookupError.status) === 404
           ? 'Code not found.'
           : lookupError instanceof Error
             ? lookupError.message
-            : 'Unable to find that sign-in request.',
+            : 'Unable to find that sign-in request.'
       );
     } finally {
       setActiveAction(null);
@@ -242,10 +246,7 @@ export default function UserLoginPage() {
     setActiveAction(decision);
     setError('');
     try {
-      const response = await apiService.submitUserLoginDecision(
-        authorization.userCode,
-        decision,
-      );
+      const response = await apiService.submitUserLoginDecision(authorization.userCode, decision);
       setAuthorization(null);
       setCompletionStatus(response.status);
       setMessage(response.message || statusCopy(response.status));
@@ -260,7 +261,7 @@ export default function UserLoginPage() {
       setError(
         decisionError instanceof Error
           ? decisionError.message
-          : 'Unable to process the sign-in request.',
+          : 'Unable to process the sign-in request.'
       );
     } finally {
       setActiveAction(null);

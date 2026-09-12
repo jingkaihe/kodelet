@@ -10,108 +10,110 @@ import {
   writeTerminalPopOutRecord,
 } from './terminalPopOut';
 
-const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(() => {
-  class HoistedMockFitAddon {
-    fit = vi.fn();
-    proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
-  }
+const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(
+  () => {
+    class HoistedMockFitAddon {
+      fit = vi.fn();
+      proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
+    }
 
-  type MockDataHandler = (data: string) => void;
-  type MockResizeHandler = (size: { rows: number; cols: number }) => void;
-  type MockReadResponse = () => string | null;
+    type MockDataHandler = (data: string) => void;
+    type MockResizeHandler = (size: { rows: number; cols: number }) => void;
+    type MockReadResponse = () => string | null;
 
-  class HoistedMockTerminal {
-    static instances: HoistedMockTerminal[] = [];
+    class HoistedMockTerminal {
+      static instances: HoistedMockTerminal[] = [];
 
-    rows = 24;
-    cols = 80;
-    write = vi.fn((_: Uint8Array, callback?: () => void) => {
-      this.dataHandler?.('parser-response');
-      callback?.();
-    });
-    writeln = vi.fn();
-    loadAddon = vi.fn();
-    open = vi.fn();
-    focus = vi.fn();
-    resize = vi.fn((cols: number, rows: number) => {
-      this.cols = cols;
-      this.rows = rows;
-    });
-    dispose = vi.fn();
-    attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
-      this.customKeyEventHandler = handler;
-    });
-    attachCustomWheelEventHandler = vi.fn((handler: (event: WheelEvent) => boolean) => {
-      this.customWheelEventHandler = handler;
-    });
-    hasSelection = vi.fn(() => false);
-    renderer = {
-      getCanvas: vi.fn(() => ({
-        getBoundingClientRect: () => ({
-          bottom: 505,
-          height: 500,
-          left: 5,
-          right: 805,
-          top: 5,
-          width: 800,
-          x: 5,
-          y: 5,
-          toJSON: () => ({}),
-        }),
-      })),
-      getMetrics: vi.fn(() => ({ width: 10, height: 20, baseline: 16 })),
-      remeasureFont: vi.fn(),
+      rows = 24;
+      cols = 80;
+      write = vi.fn((_: Uint8Array, callback?: () => void) => {
+        this.dataHandler?.('parser-response');
+        callback?.();
+      });
+      writeln = vi.fn();
+      loadAddon = vi.fn();
+      open = vi.fn();
+      focus = vi.fn();
+      resize = vi.fn((cols: number, rows: number) => {
+        this.cols = cols;
+        this.rows = rows;
+      });
+      dispose = vi.fn();
+      attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
+        this.customKeyEventHandler = handler;
+      });
+      attachCustomWheelEventHandler = vi.fn((handler: (event: WheelEvent) => boolean) => {
+        this.customWheelEventHandler = handler;
+      });
+      hasSelection = vi.fn(() => false);
+      renderer = {
+        getCanvas: vi.fn(() => ({
+          getBoundingClientRect: () => ({
+            bottom: 505,
+            height: 500,
+            left: 5,
+            right: 805,
+            top: 5,
+            width: 800,
+            x: 5,
+            y: 5,
+            toJSON: () => ({}),
+          }),
+        })),
+        getMetrics: vi.fn(() => ({ width: 10, height: 20, baseline: 16 })),
+        remeasureFont: vi.fn(),
+      };
+      wasmTerm = {
+        getMode: vi.fn(() => true),
+        hasMouseTracking: vi.fn(() => true),
+        isAlternateScreen: vi.fn(() => true),
+        readResponse: vi.fn<MockReadResponse>(() => null),
+      };
+
+      private dataHandler?: MockDataHandler;
+      private resizeHandler?: MockResizeHandler;
+      private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
+      private customWheelEventHandler?: (event: WheelEvent) => boolean;
+
+      constructor() {
+        HoistedMockTerminal.instances.push(this);
+      }
+
+      onData(handler: MockDataHandler) {
+        this.dataHandler = handler;
+        return { dispose: vi.fn() };
+      }
+
+      onResize(handler: MockResizeHandler) {
+        this.resizeHandler = handler;
+        return { dispose: vi.fn() };
+      }
+
+      emitData(data: string) {
+        this.dataHandler?.(data);
+      }
+
+      emitResize(rows: number, cols: number) {
+        this.resizeHandler?.({ rows, cols });
+      }
+
+      handleKey(event: KeyboardEvent) {
+        return this.customKeyEventHandler?.(event);
+      }
+
+      handleWheel(event: WheelEvent) {
+        return this.customWheelEventHandler?.(event);
+      }
+    }
+
+    return {
+      MockFitAddon: HoistedMockFitAddon,
+      MockGhosttyLoad: vi.fn(() => Promise.resolve({})),
+      MockTerminal: HoistedMockTerminal,
+      createTerminalWebSocketMock: vi.fn(),
     };
-    wasmTerm = {
-      getMode: vi.fn(() => true),
-      hasMouseTracking: vi.fn(() => true),
-      isAlternateScreen: vi.fn(() => true),
-      readResponse: vi.fn<MockReadResponse>(() => null),
-    };
-
-    private dataHandler?: MockDataHandler;
-    private resizeHandler?: MockResizeHandler;
-    private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
-    private customWheelEventHandler?: (event: WheelEvent) => boolean;
-
-    constructor() {
-      HoistedMockTerminal.instances.push(this);
-    }
-
-    onData(handler: MockDataHandler) {
-      this.dataHandler = handler;
-      return { dispose: vi.fn() };
-    }
-
-    onResize(handler: MockResizeHandler) {
-      this.resizeHandler = handler;
-      return { dispose: vi.fn() };
-    }
-
-    emitData(data: string) {
-      this.dataHandler?.(data);
-    }
-
-    emitResize(rows: number, cols: number) {
-      this.resizeHandler?.({ rows, cols });
-    }
-
-    handleKey(event: KeyboardEvent) {
-      return this.customKeyEventHandler?.(event);
-    }
-
-    handleWheel(event: WheelEvent) {
-      return this.customWheelEventHandler?.(event);
-    }
   }
-
-  return {
-    MockFitAddon: HoistedMockFitAddon,
-    MockGhosttyLoad: vi.fn(() => Promise.resolve({})),
-    MockTerminal: HoistedMockTerminal,
-    createTerminalWebSocketMock: vi.fn(),
-  };
-});
+);
 
 vi.mock('../../services/api', () => ({
   default: {
@@ -171,11 +173,21 @@ describe('TerminalModal', () => {
 
     act(() => {
       socket.emit('open');
-      socket.emit('message', { data: JSON.stringify({ type: 'ready', cwd: '/tmp/project', name: 'bash', git: false, pid: 123 }) });
+      socket.emit('message', {
+        data: JSON.stringify({
+          type: 'ready',
+          cwd: '/tmp/project',
+          name: 'bash',
+          git: false,
+          pid: 123,
+        }),
+      });
       socket.emit('message', { data: new ArrayBuffer(8) });
     });
 
-    expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'parser-response' }));
+    expect(socket.send).not.toHaveBeenCalledWith(
+      JSON.stringify({ type: 'input', data: 'parser-response' })
+    );
 
     act(() => {
       socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
@@ -207,7 +219,9 @@ describe('TerminalModal', () => {
     });
 
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x1b[1;1R' }));
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x1b]4;0;rgb:00/00/00\x1b\\' }));
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'input', data: '\x1b]4;0;rgb:00/00/00\x1b\\' })
+    );
   });
 
   it('reserves bottom space when fitting the terminal panel', async () => {
@@ -281,7 +295,9 @@ describe('TerminalModal', () => {
         cols: 80,
       })
     );
-    expect(screen.queryByRole('button', { name: 'Open terminal in new window' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open terminal in new window' })
+    ).not.toBeInTheDocument();
   });
 
   it('recognizes an existing runner pop-out before conversation affinity is established', () => {
@@ -292,9 +308,7 @@ describe('TerminalModal', () => {
         href: 'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-a',
       },
     };
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popOutWindow as unknown as Window);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     writeTerminalPopOutRecord({
       id: 'runner-pop-out',
       target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
@@ -312,7 +326,9 @@ describe('TerminalModal', () => {
     );
 
     expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open terminal in new window' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open terminal in new window' })
+    ).not.toBeInTheDocument();
     act(() => {
       screen.getByRole('button', { name: 'Focus pop-out' }).click();
     });
@@ -405,9 +421,7 @@ describe('TerminalModal', () => {
   it('reconnects a remote terminal without changing its runner target', async () => {
     const firstSocket = new MockWebSocket();
     const secondSocket = new MockWebSocket();
-    createTerminalWebSocketMock
-      .mockReturnValueOnce(firstSocket)
-      .mockReturnValueOnce(secondSocket);
+    createTerminalWebSocketMock.mockReturnValueOnce(firstSocket).mockReturnValueOnce(secondSocket);
 
     render(
       <TerminalModal
@@ -458,10 +472,12 @@ describe('TerminalModal', () => {
     render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
-    screen.getByTestId('terminal-host').dispatchEvent(new KeyboardEvent('keydown', {
-      bubbles: true,
-      key: 'Escape',
-    }));
+    screen.getByTestId('terminal-host').dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        key: 'Escape',
+      })
+    );
 
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -515,7 +531,9 @@ describe('TerminalModal', () => {
     });
 
     expect(terminal.handleWheel(event)).toBe(true);
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x1b[<65;3;3M' }));
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'input', data: '\x1b[<65;3;3M' })
+    );
   });
 
   it('leaves normal terminal scrollback handling to ghostty-web', async () => {
@@ -580,9 +598,7 @@ describe('TerminalModal', () => {
         href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
       },
     };
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popOutWindow as unknown as Window);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     createTerminalWebSocketMock
       .mockReturnValueOnce(firstSocket)
       .mockReturnValueOnce(restoredSocket);
@@ -622,9 +638,7 @@ describe('TerminalModal', () => {
       firstSocket.emit('error');
     });
 
-    expect(restoredTerminal.writeln).not.toHaveBeenCalledWith(
-      '\r\n[process exited with code 7]'
-    );
+    expect(restoredTerminal.writeln).not.toHaveBeenCalledWith('\r\n[process exited with code 7]');
     expect(screen.queryByText('Disconnected')).not.toBeInTheDocument();
     expect(screen.queryByText('Terminal connection failed')).not.toBeInTheDocument();
 
@@ -639,12 +653,12 @@ describe('TerminalModal', () => {
     };
     writeTerminalPopOutRecord(record);
 
-    expect(
-      JSON.parse(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY) || 'null')
-    ).toEqual({
-      records: [record],
-      version: 2,
-    });
+    expect(JSON.parse(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY) || 'null')).toEqual(
+      {
+        records: [record],
+        version: 2,
+      }
+    );
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
 
@@ -744,9 +758,7 @@ describe('TerminalModal', () => {
         href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
       },
     };
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popOutWindow as unknown as Window);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     const record: TerminalPopOutRecord = {
       id: 'other-tab-pop-out',
       target: localTarget,
@@ -779,9 +791,7 @@ describe('TerminalModal', () => {
       focus: vi.fn(),
       location: { href: 'about:blank' },
     };
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popOutWindow as unknown as Window);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     writeTerminalPopOutRecord({
       id: 'missing-pop-out',
       target: localTarget,
@@ -794,9 +804,7 @@ describe('TerminalModal', () => {
       screen.getByRole('button', { name: 'Focus pop-out' }).click();
     });
 
-    expect(popOutWindow.location.href).toBe(
-      'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject'
-    );
+    expect(popOutWindow.location.href).toBe('http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject');
     expect(popOutWindow.focus).toHaveBeenCalledTimes(1);
     expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
 
@@ -814,9 +822,7 @@ describe('TerminalModal', () => {
         href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
       },
     };
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popOutWindow as unknown as Window);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     createTerminalWebSocketMock
       .mockReturnValueOnce(firstSocket)
       .mockReturnValueOnce(restoredSocket);
@@ -846,5 +852,4 @@ describe('TerminalModal', () => {
     popOutWindow.closed = true;
     openSpy.mockRestore();
   });
-
 });

@@ -1,4 +1,4 @@
-import { ToolResult } from '../../types';
+import type { ToolResult } from '../../types';
 
 // Helper functions for tool renderers
 export const getMetadata = (toolResult: ToolResult, ...paths: string[]): unknown => {

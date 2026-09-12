@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import UserLoginPage from './UserLoginPage';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { formatApprovalCode } from '../components/auth/AuthPageShell';
 import RunnerEnrollmentPage from './RunnerEnrollmentPage';
 import SignedOutPage from './SignedOutPage';
-import { formatApprovalCode } from '../components/auth/AuthPageShell';
+import UserLoginPage from './UserLoginPage';
 
 const apiMocks = vi.hoisted(() => ({
   getUserLoginPrincipal: vi.fn(),
@@ -44,7 +44,7 @@ describe('authentication approval pages', () => {
     expect(screen.getByText('Your identity provider may still be signed in.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Sign in' }).querySelector('svg')).toHaveClass(
-      'lucide-log-in',
+      'lucide-log-in'
     );
   });
 
@@ -72,9 +72,7 @@ describe('authentication approval pages', () => {
 
     expect(await screen.findByText('Signed in as user@example.com')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Client sign-in' })).toBeInTheDocument();
-    expect(
-      screen.getByText('Only use a code from your own Kodelet client.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Only use a code from your own Kodelet client.')).toBeInTheDocument();
 
     const signInCode = screen.getByLabelText('Sign-in code');
     await user.click(signInCode);
@@ -83,27 +81,19 @@ describe('authentication approval pages', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
 
     expect(await screen.findByText('linux/amd64')).toBeInTheDocument();
-    expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(
-      1,
-      'ABCD-EFGH',
-      'lookup',
-    );
+    expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(1, 'ABCD-EFGH', 'lookup');
 
     await user.click(screen.getByRole('button', { name: 'Approve sign-in' }));
 
     expect(
-      await screen.findByText('Sign-in approved. You can return to the Kodelet client.'),
+      await screen.findByText('Sign-in approved. You can return to the Kodelet client.')
     ).toBeInTheDocument();
-    expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(
-      2,
-      'ABCD-EFGH',
-      'approve',
-    );
+    expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(2, 'ABCD-EFGH', 'approve');
   });
 
   it('hides sign-in controls when the approval context is unavailable', async () => {
     apiMocks.getUserLoginPrincipal.mockRejectedValueOnce(
-      Object.assign(new Error('OIDC authentication required'), { status: 401 }),
+      Object.assign(new Error('OIDC authentication required'), { status: 401 })
     );
 
     render(<UserLoginPage />);
@@ -132,7 +122,7 @@ describe('authentication approval pages', () => {
         () =>
           new Promise((resolve) => {
             completeDenial = resolve;
-          }),
+          })
       );
 
     render(<UserLoginPage />);
@@ -196,19 +186,17 @@ describe('authentication approval pages', () => {
         2,
         'WXYZ-2345',
         'approve',
-        true,
+        true
       );
     });
     expect(
-      await screen.findByText(
-        'Runner enrollment approved. You can return to the runner terminal.',
-      ),
+      await screen.findByText('Runner enrollment approved. You can return to the runner terminal.')
     ).toBeInTheDocument();
   });
 
   it('hides runner controls when the enrollment context is forbidden', async () => {
     apiMocks.getRunnerEnrollmentPrincipal.mockRejectedValueOnce(
-      Object.assign(new Error('insufficient permissions'), { status: 403 }),
+      Object.assign(new Error('insufficient permissions'), { status: 403 })
     );
 
     render(<RunnerEnrollmentPage />);
@@ -220,7 +208,7 @@ describe('authentication approval pages', () => {
   it('shows only the lookup error after an invalid code', async () => {
     const user = userEvent.setup();
     apiMocks.submitUserLoginDecision.mockRejectedValueOnce(
-      Object.assign(new Error('User login request not found.'), { status: 404 }),
+      Object.assign(new Error('User login request not found.'), { status: 404 })
     );
 
     render(<UserLoginPage />);
@@ -228,7 +216,7 @@ describe('authentication approval pages', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Code not found.');
     expect(
-      screen.queryByText('Only use a code from your own Kodelet client.'),
+      screen.queryByText('Only use a code from your own Kodelet client.')
     ).not.toBeInTheDocument();
   });
 
@@ -248,7 +236,7 @@ describe('authentication approval pages', () => {
         },
       })
       .mockRejectedValueOnce(
-        Object.assign(new Error('User login request is no longer pending.'), { status: 409 }),
+        Object.assign(new Error('User login request is no longer pending.'), { status: 409 })
       );
 
     render(<UserLoginPage />);
@@ -276,7 +264,7 @@ describe('authentication approval pages', () => {
         },
       })
       .mockRejectedValueOnce(
-        Object.assign(new Error('Runner enrollment request has expired.'), { status: 409 }),
+        Object.assign(new Error('Runner enrollment request has expired.'), { status: 409 })
       );
 
     render(<RunnerEnrollmentPage />);

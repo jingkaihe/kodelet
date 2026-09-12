@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { FileMetadata, ToolResult } from '../../types';
 import FileReadRenderer from './FileReadRenderer';
-import { FileMetadata, ToolResult } from '../../types';
 
 describe('FileReadRenderer', () => {
   const createToolResult = (metadata: Partial<FileMetadata>): ToolResult => ({

@@ -1,10 +1,6 @@
-import React from 'react';
-import { ToolResult, WebFetchMetadata } from '../../types';
-import {
-  formatReferenceSize,
-  ReferenceCodeBlock,
-  truncateLines,
-} from './reference';
+import type React from 'react';
+import type { ToolResult, WebFetchMetadata } from '../../types';
+import { formatReferenceSize, ReferenceCodeBlock, truncateLines } from './reference';
 
 interface WebFetchRendererProps {
   toolResult: ToolResult;

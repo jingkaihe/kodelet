@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import WebFetchRenderer from './WebFetchRenderer';
-import { ToolResult } from '../../types';
 
 describe('WebFetchRenderer', () => {
   it('uses a polished extracted-summary label and renders fetched content as escaped code', () => {
@@ -16,7 +16,8 @@ describe('WebFetchRenderer', () => {
         size: 3072,
         savedPath: '/tmp/example-news.md',
         prompt: 'Extract the top stories',
-        content: '## Top stories\n\n<img src=x onerror=alert(1)>\n\n[Story one](javascript:alert(1))',
+        content:
+          '## Top stories\n\n<img src=x onerror=alert(1)>\n\n[Story one](javascript:alert(1))',
       },
     };
 
@@ -34,7 +35,9 @@ describe('WebFetchRenderer', () => {
     expect(container.querySelector('.tool-kv-grid')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Top stories' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Story one' })).not.toBeInTheDocument();
-    expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('.tool-compact-markdown.web-fetch-content')
+    ).not.toBeInTheDocument();
     expect(container.querySelector('.web-fetch-code-preview')).toBeInTheDocument();
     expect(container.querySelector('.tool-code-block')).toBeInTheDocument();
     expect(container.querySelector('img')).not.toBeInTheDocument();

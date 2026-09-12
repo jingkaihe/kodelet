@@ -10,13 +10,7 @@ const baseRequest = {
 
 describe('UIInputDialog', () => {
   it('renders the question-focused prompt without extra labels', async () => {
-    render(
-      <UIInputDialog
-        request={baseRequest}
-        onCancel={vi.fn()}
-        onSubmit={vi.fn()}
-      />
-    );
+    render(<UIInputDialog request={baseRequest} onCancel={vi.fn()} onSubmit={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: 'What is your birthday?' })).toBeInTheDocument();
     expect(screen.queryByText('Extension prompt')).not.toBeInTheDocument();
@@ -29,13 +23,7 @@ describe('UIInputDialog', () => {
   it('submits entered text and allows dismissal', () => {
     const onCancel = vi.fn();
     const onSubmit = vi.fn();
-    render(
-      <UIInputDialog
-        request={baseRequest}
-        onCancel={onCancel}
-        onSubmit={onSubmit}
-      />
-    );
+    render(<UIInputDialog request={baseRequest} onCancel={onCancel} onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByTestId('ui-input-response'), {
       target: { value: 'January 1, 1990' },
@@ -45,6 +33,29 @@ describe('UIInputDialog', () => {
 
     expect(onSubmit).toHaveBeenCalledWith('January 1, 1990');
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets and refocuses a new request even when its defaults are unchanged', async () => {
+    const onCancel = vi.fn();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <UIInputDialog request={baseRequest} onCancel={onCancel} onSubmit={onSubmit} />
+    );
+    const input = screen.getByTestId('ui-input-response');
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.change(input, { target: { value: 'Previous answer' } });
+    screen.getByRole('button', { name: 'Cancel' }).focus();
+
+    rerender(
+      <UIInputDialog
+        request={{ ...baseRequest, id: 'input-2' }}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(input).toHaveValue('');
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it('disables submit for required empty answers', () => {
@@ -105,13 +116,7 @@ describe('UIInputDialog', () => {
 
   it('dismisses the active dialog with Escape', async () => {
     const onCancel = vi.fn();
-    render(
-      <UIInputDialog
-        request={baseRequest}
-        onCancel={onCancel}
-        onSubmit={vi.fn()}
-      />
-    );
+    render(<UIInputDialog request={baseRequest} onCancel={onCancel} onSubmit={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
     fireEvent.keyDown(screen.getByTestId('ui-input-response'), { key: 'Escape' });
@@ -122,21 +127,12 @@ describe('UIInputDialog', () => {
   it('does not send a second dismissal while a response is submitting', async () => {
     const onCancel = vi.fn();
     const { rerender } = render(
-      <UIInputDialog
-        request={baseRequest}
-        onCancel={onCancel}
-        onSubmit={vi.fn()}
-      />
+      <UIInputDialog request={baseRequest} onCancel={onCancel} onSubmit={vi.fn()} />
     );
 
     await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
     rerender(
-      <UIInputDialog
-        request={baseRequest}
-        submitting
-        onCancel={onCancel}
-        onSubmit={vi.fn()}
-      />
+      <UIInputDialog request={baseRequest} submitting onCancel={onCancel} onSubmit={vi.fn()} />
     );
     fireEvent.keyDown(screen.getByTestId('ui-input-response'), { key: 'Escape' });
 

@@ -1,9 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { sampleBashToolResult, sampleFileReadToolResult } from '../../stories/fixtures';
 import type { ChatRenderToolCall } from '../../types';
-import {
-  sampleBashToolResult,
-  sampleFileReadToolResult,
-} from '../../stories/fixtures';
 import ChatToolActivity from './ChatToolActivity';
 
 const successfulTools: ChatRenderToolCall[] = [
@@ -81,7 +78,8 @@ const patchAndSearchTools: ChatRenderToolCall[] = [
           {
             path: 'pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
             operation: 'update',
-            unifiedDiff: '@@ -10 +10,2 @@\n-const tools = groupTools(calls);\n+const tools = groupActivities(calls);\n+renderFileActivities(tools);\n',
+            unifiedDiff:
+              '@@ -10 +10,2 @@\n-const tools = groupTools(calls);\n+const tools = groupActivities(calls);\n+renderFileActivities(tools);\n',
           },
           {
             path: 'pkg/webui/frontend/src/components/chat/ChatToolActivity.tsx',
@@ -173,15 +171,29 @@ export const FileOperations: Story = {
     tools: [
       successfulTools[1],
       {
-        callId: 'write-1', name: 'file_write', input: '{"file_path":"notes.md"}',
-        result: { toolName: 'file_write', success: true, metadata: {
-          filePath: 'notes.md', unifiedDiff: '@@ -0,0 +1 @@\n+# Notes\n',
-        } },
+        callId: 'write-1',
+        name: 'file_write',
+        input: '{"file_path":"notes.md"}',
+        result: {
+          toolName: 'file_write',
+          success: true,
+          metadata: {
+            filePath: 'notes.md',
+            unifiedDiff: '@@ -0,0 +1 @@\n+# Notes\n',
+          },
+        },
       },
       patchAndSearchTools[0],
       {
-        callId: 'edit-failed', name: 'file_edit', input: '{"file_path":"config.yaml"}',
-        result: { toolName: 'file_edit', success: false, error: 'The text to replace was not found.', metadata: { filePath: 'config.yaml' } },
+        callId: 'edit-failed',
+        name: 'file_edit',
+        input: '{"file_path":"config.yaml"}',
+        result: {
+          toolName: 'file_edit',
+          success: false,
+          error: 'The text to replace was not found.',
+          metadata: { filePath: 'config.yaml' },
+        },
       },
       { callId: 'read-pending', name: 'file_read', input: '{"file_path":"AGENTS.md"}' },
     ],

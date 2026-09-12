@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import FallbackRenderer from './FallbackRenderer';
-import { ToolResult } from '../../types';
 
 describe('FallbackRenderer', () => {
-  const createToolResult = (toolName: string, metadata: Record<string, unknown> | null | undefined): ToolResult => ({
+  const createToolResult = (
+    toolName: string,
+    metadata: Record<string, unknown> | null | undefined
+  ): ToolResult => ({
     toolName,
     success: true,
     error: undefined,
@@ -22,6 +25,7 @@ describe('FallbackRenderer', () => {
     const toolResult = createToolResult('test-tool', {});
     render(<FallbackRenderer toolResult={toolResult} />);
     expect(screen.getByText('Show raw data')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show raw data' })).toHaveAttribute('type', 'button');
   });
 
   it('reveals raw JSON when button is clicked', () => {

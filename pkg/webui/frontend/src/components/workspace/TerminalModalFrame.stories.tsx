@@ -5,8 +5,7 @@ import TerminalModalFrame from './TerminalModalFrame';
 const terminalPreview = (
   <pre className="m-0 whitespace-pre-wrap font-mono text-[0.78rem] leading-5 text-[#f4eee3]">
     <span className="text-[#a6bf79]">$</span> npm run storybook:build{'\n'}
-    vite v6.4.2 building for production...{'\n'}
-    ✓ 2252 modules transformed.{'\n'}
+    vite v6.4.2 building for production...{'\n'}✓ 2252 modules transformed.{'\n'}
     Storybook build completed successfully
   </pre>
 );

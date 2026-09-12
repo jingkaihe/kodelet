@@ -1,8 +1,8 @@
-import type React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import NewChatContextDialog from './NewChatContextDialog';
 import { sampleCwdHints, sampleProfiles } from '../../stories/fixtures';
+import NewChatContextDialog from './NewChatContextDialog';
 
 const renderDialog = (
   overrides: Partial<React.ComponentProps<typeof NewChatContextDialog>> = {}
@@ -17,15 +17,17 @@ const renderDialog = (
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
-    runners: [{
-      id: 'runner-1',
-      host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
-      workspace: { path: '/workspace/kodelet', name: 'kodelet' },
-      manifestChanged: false,
-      status: 'idle',
-      connected: true,
-      generation: 1,
-    }],
+    runners: [
+      {
+        id: 'runner-1',
+        host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
+        workspace: { path: '/workspace/kodelet', name: 'kodelet' },
+        manifestChanged: false,
+        status: 'idle',
+        connected: true,
+        generation: 1,
+      },
+    ],
     runnerIdDraft: 'runner-1',
     environmentProfileDraft: '',
     onCancel: vi.fn(),
@@ -81,6 +83,30 @@ describe('NewChatContextDialog', () => {
     );
   });
 
+  it('exposes the directory autocomplete and its active suggestion to assistive technology', () => {
+    const props = renderDialog();
+    const input = screen.getByRole('combobox', { name: 'Working directory' });
+    const suggestions = screen.getByRole('listbox', { name: 'Working directory suggestions' });
+    const activeSuggestion = screen.getByTestId('cwd-suggestion-0');
+
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+    expect(input).toHaveAttribute('aria-controls', suggestions.id);
+    expect(input).toHaveAttribute('aria-activedescendant', activeSuggestion.id);
+    expect(activeSuggestion).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(props.onCwdInputKeyDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reference hidden directory suggestions', () => {
+    renderDialog({ cwdSuggestionsOpen: false });
+    const input = screen.getByRole('combobox', { name: 'Working directory' });
+
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(input).not.toHaveAttribute('aria-controls');
+    expect(input).not.toHaveAttribute('aria-activedescendant');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
   it('keeps dialog actions external', () => {
     const props = renderDialog();
 
@@ -102,7 +128,9 @@ describe('NewChatContextDialog', () => {
     renderDialog({ runnerIdDraft: '' });
 
     expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
-    expect(screen.queryByRole('option', { name: 'Local control-plane workspace' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Local control-plane workspace' })
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId('cwd-input')).not.toBeInTheDocument();
     expect(screen.getByText('Workspace runner required')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();

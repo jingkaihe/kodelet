@@ -33,8 +33,12 @@
 }
 
 .composer-dock {
-  background:
-    linear-gradient(180deg, rgba(244, 239, 229, 0), rgba(244, 239, 229, 0.94) 24%, rgba(244, 239, 229, 0.98));
+  background: linear-gradient(
+    180deg,
+    rgba(244, 239, 229, 0),
+    rgba(244, 239, 229, 0.94) 24%,
+    rgba(244, 239, 229, 0.98)
+  );
   backdrop-filter: blur(10px);
 }
 
@@ -208,8 +212,7 @@
   padding: 0.65rem;
   border-radius: 1.1rem;
   border: 1px solid rgba(20, 20, 19, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(250, 249, 245, 0.96) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(250, 249, 245, 0.96) 100%);
   box-shadow: 0 10px 24px rgba(20, 20, 19, 0.08);
 }
 

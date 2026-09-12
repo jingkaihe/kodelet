@@ -41,10 +41,10 @@ const ChatStreamingIndicator = ({ assistantTurnCount }: ChatStreamingIndicatorPr
   );
 
   return (
-    <div className="chat-streaming-indicator" aria-label="Kodelet is working">
+    <output className="chat-streaming-indicator" aria-label="Kodelet is working">
       <Spinner className="chat-streaming-spinner" resetKey={assistantTurnCount} />
       <span className="chat-streaming-label">{streamingMessage}</span>
-    </div>
+    </output>
   );
 };
 

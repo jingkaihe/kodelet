@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import FileWriteRenderer from './FileWriteRenderer';
-import { ToolResult } from '../../types';
 
 describe('FileWriteRenderer', () => {
   const createToolResult = (
@@ -26,7 +26,8 @@ describe('FileWriteRenderer', () => {
       filePath: '/src/app.js',
       size: 1536,
       language: 'javascript',
-      unifiedDiff: '--- /dev/null\n+++ /src/app.js\n@@ -0,0 +1,2 @@\n+const x = 1;\n+const y = 2;\n',
+      unifiedDiff:
+        '--- /dev/null\n+++ /src/app.js\n@@ -0,0 +1,2 @@\n+const x = 1;\n+const y = 2;\n',
     });
 
     const { container } = render(<FileWriteRenderer toolResult={toolResult} />);
@@ -73,7 +74,10 @@ describe('FileWriteRenderer', () => {
     expect(container.querySelector('.tool-code-block')).not.toBeInTheDocument();
   });
 
-  it.each(['', undefined])('renders no diff or legacy content fallback for unifiedDiff %s', (unifiedDiff) => {
+  it.each([
+    '',
+    undefined,
+  ])('renders no diff or legacy content fallback for unifiedDiff %s', (unifiedDiff) => {
     const toolResult = createToolResult({
       filePath: '/test.txt',
       content: 'unchanged content',

@@ -17,7 +17,9 @@ const textForContent = (content: string | ContentBlock[]): string => {
   }
 
   return content
-    .filter((block) => block.type === 'text' || block.type === 'slash-command' || block.type === 'goal')
+    .filter(
+      (block) => block.type === 'text' || block.type === 'slash-command' || block.type === 'goal'
+    )
     .map((block) => block.text?.trim() || '')
     .filter(Boolean)
     .join('\n');
@@ -26,7 +28,8 @@ const textForContent = (content: string | ContentBlock[]): string => {
 const summaryForContent = (content: string | ContentBlock[]): string => {
   const text = textForContent(content).trim();
   const imageCount = imageCountForContent(content);
-  const imageSuffix = imageCount > 0 ? `with ${imageCount === 1 ? 'a screenshot' : `${imageCount} screenshots`}` : '';
+  const imageSuffix =
+    imageCount > 0 ? `with ${imageCount === 1 ? 'a screenshot' : `${imageCount} screenshots`}` : '';
 
   if (text && imageSuffix) {
     return `${text} · ${imageSuffix}`;
@@ -49,7 +52,10 @@ const PendingSteerList = ({ messages }: PendingSteerListProps) => {
       </div>
       <div className="pending-steer-lines">
         {messages.map((message, index) => (
-          <div className="pending-steer-line" key={`${index}-${summaryForContent(message.content)}`}>
+          <div
+            className="pending-steer-line"
+            key={`${index}-${summaryForContent(message.content)}`}
+          >
             <span className="pending-steer-prompt">↳</span>
             <code className="pending-steer-message">{summaryForContent(message.content)}</code>
           </div>

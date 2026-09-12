@@ -1,1470 +1,1412 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import apiService from "./api";
-import {
-	ConversationListResponse,
-	Conversation,
-	CWDHintsResponse,
-	GitDiffResponse,
-} from "../types";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  Conversation,
+  ConversationListResponse,
+  CWDHintsResponse,
+  GitDiffResponse,
+} from '../types';
+import apiService from './api';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 const setTestCookie = (cookie: string) => {
-	// biome-ignore lint/suspicious/noDocumentCookie: jsdom exposes cookie mutation through document.cookie.
-	document.cookie = cookie;
+  // biome-ignore lint/suspicious/noDocumentCookie: jsdom exposes cookie mutation through document.cookie.
+  document.cookie = cookie;
 };
 
-describe("ApiService", () => {
-	it.each([{}, undefined])(
-		"initializes without secure-context crypto APIs: %s",
-		async (crypto) => {
-			vi.resetModules();
-			vi.stubGlobal("crypto", crypto);
-			try {
-				const { default: client } = await import("./api");
-				mockFetch.mockResolvedValue({
-					ok: true,
-					body: new ReadableStream({
-						start(controller) {
-							controller.close();
-						},
-					}),
-					json: async () => ({}),
-				});
-				await client.streamChat(
-					{ message: "hello", conversationId: "conversation-1" },
-					{ onEvent: vi.fn() },
-				);
-				await client.respondToUIInput("conversation-1", "request-1", {
-					status: "dismissed",
-				});
-				const id = mockFetch.mock.calls[0][1].headers["X-Kodelet-Client-ID"];
-				expect(id).toMatch(/^client-.+/);
-				expect(mockFetch.mock.calls[1][1].headers["X-Kodelet-Client-ID"]).toBe(id);
-			} finally {
-				vi.unstubAllGlobals();
-				vi.resetModules();
-			}
-		},
-	);
-	it("uses one client identity for submissions, observation, and prompt replies", async () => {
-		mockFetch.mockImplementation(async () => ({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.close();
-				},
-			}),
-			json: async () => ({ success: true }),
-		}));
-		await apiService.streamChat(
-			{ message: "hello", conversationId: "conversation-1" },
-			{ onEvent: vi.fn() },
-		);
-		await apiService.streamConversation("conversation-1", { onEvent: vi.fn() });
-		await apiService.respondToUIInput("conversation-1", "request-1", {
-			status: "dismissed",
-		});
-		const identity = mockFetch.mock.calls[0][1].headers["X-Kodelet-Client-ID"];
-		expect(identity).toEqual(expect.any(String));
-		expect(identity.length).toBeGreaterThan(0);
-		expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
-			"/api/chat",
-			"/api/conversations/conversation-1/stream",
-			"/api/conversations/conversation-1/ui-input/request-1",
-		]);
-		for (const [, options] of mockFetch.mock.calls) {
-			expect(options.headers["X-Kodelet-Client-ID"]).toBe(identity);
-		}
-	});
-	beforeEach(() => {
-		mockFetch.mockClear();
-	});
-
-	afterEach(() => {
-		vi.clearAllMocks();
-		setTestCookie("kodelet_csrf=; Max-Age=0; Path=/");
-	});
-
-	describe("request method", () => {
-		it("adds default headers", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ data: "test" }),
-			});
-
-			await apiService.getConversations();
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations",
-				expect.objectContaining({
-					headers: expect.objectContaining({
-						"Content-Type": "application/json",
-					}),
-				}),
-			);
-		});
-
-		it("adds CSRF headers only to unsafe requests", async () => {
-			setTestCookie("kodelet_csrf=csrf-api; Path=/");
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ conversations: [], total: 0 }),
-				})
-				.mockResolvedValueOnce({ ok: true, status: 204 });
-
-			await apiService.getConversations();
-			await apiService.deleteConversation("conv-123");
-
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				1,
-				"/api/conversations",
-				expect.objectContaining({
-					headers: expect.not.objectContaining({
-						"X-CSRF-Token": expect.any(String),
-					}),
-				}),
-			);
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				2,
-				"/api/conversations/conv-123",
-				expect.objectContaining({
-					method: "DELETE",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-api" }),
-				}),
-			);
-		});
-
-		it("throws error for non-ok responses", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: false,
-				status: 404,
-				json: async () => ({ error: "Not found" }),
-			});
-
-			await expect(apiService.getConversation("123")).rejects.toThrow(
-				"Not found",
-			);
-		});
-
-		it("handles non-JSON error responses", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: false,
-				status: 500,
-				json: async () => {
-					throw new Error("Invalid JSON");
-				},
-			});
-
-			await expect(apiService.getConversation("123")).rejects.toThrow(
-				"HTTP 500",
-			);
-		});
-
-		it("preserves the HTTP status on API errors", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: false,
-				status: 409,
-				json: async () => ({ error: "Request is no longer pending" }),
-			});
-
-			await expect(apiService.getConversation("stale")).rejects.toMatchObject({
-				message: "Request is no longer pending",
-				status: 409,
-			});
-		});
-	});
-
-	describe("authentication approvals", () => {
-		it("loads the authenticated principal", async () => {
-			const principal = {
-				id: "issuer|subject",
-				email: "user@example.com",
-				roles: ["user"],
-			};
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => principal,
-			});
-
-			await expect(apiService.getAuthPrincipal()).resolves.toEqual(principal);
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/auth/me",
-				expect.objectContaining({
-					headers: expect.objectContaining({
-						"Content-Type": "application/json",
-					}),
-				}),
-			);
-		});
-
-		it("loads the user sign-in approval context", async () => {
-			const principal = {
-				id: "issuer|subject",
-				email: "user@example.com",
-				roles: ["user"],
-			};
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => principal,
-			});
-
-			await expect(apiService.getUserLoginPrincipal()).resolves.toEqual(
-				principal,
-			);
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/auth/v1/device/context",
-				expect.any(Object),
-			);
-		});
-
-		it("loads the runner enrollment approval context", async () => {
-			const principal = {
-				id: "issuer|subject",
-				email: "admin@example.com",
-				roles: ["runner-admin"],
-			};
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => principal,
-			});
-
-			await expect(apiService.getRunnerEnrollmentPrincipal()).resolves.toEqual(
-				principal,
-			);
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/runner/v1/enrollment/context",
-				expect.any(Object),
-			);
-		});
-
-		it("posts user sign-in decisions with the CSRF cookie", async () => {
-			setTestCookie("kodelet_csrf=csrf-user; Path=/");
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ status: "pending" }),
-			});
-
-			await apiService.submitUserLoginDecision("ABCD-EFGH", "lookup");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/auth/v1/device/decision",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-user" }),
-					body: JSON.stringify({
-						userCode: "ABCD-EFGH",
-						decision: "lookup",
-						csrfToken: "csrf-user",
-					}),
-				}),
-			);
-		});
-
-		it("posts runner approval replacement intent with the CSRF cookie", async () => {
-			setTestCookie("kodelet_csrf=csrf-runner; Path=/");
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ status: "approved" }),
-			});
-
-			await apiService.submitRunnerEnrollmentDecision(
-				"WXYZ-2345",
-				"approve",
-				true,
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/runner/v1/enrollment/decision",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-runner" }),
-					body: JSON.stringify({
-						userCode: "WXYZ-2345",
-						decision: "approve",
-						csrfToken: "csrf-runner",
-						replace: true,
-					}),
-				}),
-			);
-		});
-	});
-
-	describe("Codex provider authentication", () => {
-		it("loads the ChatGPT subscription connection status", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ provider: "codex", connected: true }),
-			});
-
-			await expect(apiService.getCodexProviderStatus()).resolves.toEqual({
-				provider: "codex",
-				connected: true,
-			});
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/codex",
-				expect.any(Object),
-			);
-		});
-
-		it("starts and polls device login with CSRF protection", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			const login = {
-				id: "codex_login_123",
-				status: "pending",
-				verificationUrl: "https://auth.openai.com/codex/device",
-				userCode: "ABCD-EFGH",
-			};
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => login,
-				})
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => ({ ...login, status: "connected" }),
-				});
-
-			await expect(apiService.startCodexDeviceLogin()).resolves.toEqual(login);
-			await expect(
-				apiService.getCodexDeviceLogin(login.id),
-			).resolves.toMatchObject({
-				status: "connected",
-			});
-
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				1,
-				"/api/providers/codex/device-login",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				2,
-				"/api/providers/codex/device-login/codex_login_123",
-				expect.any(Object),
-			);
-		});
-
-		it("cancels pending device login", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
-
-			await apiService.cancelCodexDeviceLogin("codex_login_123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/codex/device-login/codex_login_123",
-				expect.objectContaining({
-					method: "DELETE",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-		});
-	});
-
-	describe("GitHub Copilot provider authentication", () => {
-		it("loads the GitHub Copilot subscription connection status", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ provider: "copilot", connected: true }),
-			});
-
-			await expect(apiService.getCopilotProviderStatus()).resolves.toEqual({
-				provider: "copilot",
-				connected: true,
-			});
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/copilot",
-				expect.any(Object),
-			);
-		});
-
-		it("starts and polls device login with CSRF protection", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			const login = {
-				id: "copilot_login_123",
-				status: "pending",
-				verificationUrl: "https://github.com/login/device",
-				userCode: "ABCD-EFGH",
-			};
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => login,
-				})
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => ({ ...login, status: "connected" }),
-				});
-
-			await expect(apiService.startCopilotDeviceLogin()).resolves.toEqual(
-				login,
-			);
-			await expect(
-				apiService.getCopilotDeviceLogin(login.id),
-			).resolves.toMatchObject({
-				status: "connected",
-			});
-
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				1,
-				"/api/providers/copilot/device-login",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				2,
-				"/api/providers/copilot/device-login/copilot_login_123",
-				expect.any(Object),
-			);
-		});
-
-		it("cancels pending device login", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
-
-			await apiService.cancelCopilotDeviceLogin("copilot_login_123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/copilot/device-login/copilot_login_123",
-				expect.objectContaining({
-					method: "DELETE",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-		});
-	});
-
-	describe("getConversations", () => {
-		it("fetches conversations without filters", async () => {
-			const mockResponse: ConversationListResponse = {
-				conversations: [],
-				hasMore: false,
-				total: 0,
-				limit: 25,
-				offset: 0,
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			const result = await apiService.getConversations();
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockResponse);
-		});
-
-		it("applies search filters", async () => {
-			const mockResponse: ConversationListResponse = {
-				conversations: [],
-				hasMore: false,
-				total: 0,
-				limit: 25,
-				offset: 0,
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			await apiService.getConversations({
-				searchTerm: "test",
-				cwd: "~/workspace/kodelet",
-				sortBy: "created",
-				sortOrder: "desc",
-				limit: 10,
-				offset: 20,
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations?search=test&cwd=%7E%2Fworkspace%2Fkodelet&sortBy=created&sortOrder=desc&limit=10&offset=20",
-				expect.any(Object),
-			);
-		});
-
-		it("omits undefined filter values", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ conversations: [], total: 0 }),
-			});
-
-			await apiService.getConversations({
-				searchTerm: "test",
-				sortBy: undefined,
-				limit: undefined,
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations?search=test",
-				expect.any(Object),
-			);
-		});
-
-		it("hydrates platform and api_mode from metadata", async () => {
-			const mockResponse: ConversationListResponse = {
-				conversations: [
-					{
-						id: "conv-1",
-						createdAt: "2023-01-01T00:00:00Z",
-						updatedAt: "2023-01-02T00:00:00Z",
-						messageCount: 3,
-						provider: "OpenAI",
-						metadata: {
-							platform: "fireworks",
-							api_mode: "chat_completions",
-						},
-					},
-				],
-				hasMore: false,
-				total: 1,
-				limit: 25,
-				offset: 0,
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			const result = await apiService.getConversations();
-
-			expect(result.conversations[0].platform).toBe("fireworks");
-			expect(result.conversations[0].api_mode).toBe("chat_completions");
-		});
-	});
-
-	describe("Anthropic provider authentication", () => {
-		it("loads the Anthropic subscription connection status", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ provider: "anthropic", connected: true }),
-			});
-
-			await expect(apiService.getAnthropicProviderStatus()).resolves.toEqual({
-				provider: "anthropic",
-				connected: true,
-			});
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/anthropic",
-				expect.any(Object),
-			);
-		});
-
-		it("starts and completes OAuth login with CSRF protection", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			const login = {
-				id: "anthropic_login_123",
-				status: "pending",
-				authorizationUrl: "https://claude.ai/oauth/authorize?test=1",
-			};
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => login,
-				})
-				.mockResolvedValueOnce({
-					ok: true,
-					status: 200,
-					json: async () => ({ ...login, status: "connected" }),
-				});
-
-			await expect(apiService.startAnthropicOAuthLogin()).resolves.toEqual(
-				login,
-			);
-			await expect(
-				apiService.completeAnthropicOAuthLogin(login.id, "code#state"),
-			).resolves.toMatchObject({ status: "connected" });
-
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				1,
-				"/api/providers/anthropic/oauth-login",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-			expect(mockFetch).toHaveBeenNthCalledWith(
-				2,
-				"/api/providers/anthropic/oauth-login/anthropic_login_123/complete",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-					body: JSON.stringify({ code: "code#state" }),
-				}),
-			);
-		});
-
-		it("cancels a pending OAuth login", async () => {
-			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
-			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
-
-			await apiService.cancelAnthropicOAuthLogin("anthropic_login_123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/providers/anthropic/oauth-login/anthropic_login_123",
-				expect.objectContaining({
-					method: "DELETE",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
-				}),
-			);
-		});
-	});
-
-	describe("stopConversation", () => {
-		it("posts to the conversation stop endpoint", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					success: true,
-					conversation_id: "conv-123",
-					stopped: true,
-				}),
-			});
-
-			const result = await apiService.stopConversation("conv-123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/stop",
-				expect.objectContaining({ method: "POST" }),
-			);
-			expect(result).toEqual({
-				success: true,
-				conversation_id: "conv-123",
-				stopped: true,
-			});
-		});
-	});
-
-	describe("getConversation", () => {
-		it("fetches a single conversation", async () => {
-			const mockConversation: Conversation = {
-				id: "123",
-				messages: [],
-				toolResults: {},
-				usage: {},
-				createdAt: "2023-01-01T00:00:00Z",
-				updatedAt: "2023-01-01T00:00:00Z",
-				messageCount: 0,
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockConversation,
-			});
-
-			const result = await apiService.getConversation("123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/123",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockConversation);
-		});
-	});
-
-	describe("getRunners", () => {
-		it("fetches registered runners", async () => {
-			const runners = [
-				{
-					id: "runner-1",
-					host: {
-						instanceId: "host-1",
-						hostname: "worker",
-						os: "linux",
-						arch: "amd64",
-					},
-					workspace: { path: "/workspace/project", name: "project" },
-					manifestChanged: false,
-					status: "idle",
-					connected: true,
-					generation: 1,
-				},
-			];
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ runners }),
-			});
-
-			const result = await apiService.getRunners();
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/runners",
-				expect.any(Object),
-			);
-			expect(result.runners).toEqual(runners);
-		});
-	});
-
-	describe("getChatSettings", () => {
-		it("fetches chat settings", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					currentProfile: "work",
-					defaultCWD: "/workspace/default",
-					profiles: [{ name: "default", scope: "built-in" }],
-					reasoningEffort: "high",
-					reasoningEffortOptions: ["low", "medium", "high"],
-				}),
-			});
-
-			const result = await apiService.getChatSettings();
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/settings",
-				expect.any(Object),
-			);
-			expect(result.currentProfile).toBe("work");
-			expect(result.defaultCWD).toBe("/workspace/default");
-			expect(result.reasoningEffort).toBe("high");
-		});
-
-		it("fetches reasoning settings for a selected profile", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					currentProfile: "anthropic",
-					profiles: [],
-					reasoningEffort: "max",
-					reasoningEffortOptions: ["medium", "high", "max"],
-				}),
-			});
-
-			const result = await apiService.getChatSettings("anthropic");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/settings?profile=anthropic",
-				expect.any(Object),
-			);
-			expect(result.reasoningEffortOptions).toEqual(["medium", "high", "max"]);
-		});
-
-		it.each([undefined, "code-search"])("targets runner profile discovery (%s)", async (profile) => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ profiles: [] }),
-			});
-
-			await apiService.getChatSettings(profile, "runner/one");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				`/api/chat/settings?${profile ? "profile=code-search&" : ""}runnerId=runner%2Fone`,
-				expect.any(Object),
-			);
-		});
-	});
-
-	describe.each([
-		{ method: "getSlashCommands", endpoint: "slash-commands", queryKey: "cwd" },
-		{ method: "getCWDHints", endpoint: "cwd-suggestions", queryKey: "q" },
-	] as const)("$method model profile discovery", ({ method, endpoint, queryKey }) => {
-		it.each([
-			{ runnerId: undefined, profile: "work" },
-			{ runnerId: undefined, profile: "default" },
-			{ runnerId: "runner-1", profile: "work" },
-			{ runnerId: "runner-1", profile: "default" },
-		])("forwards $profile to the intended workspace ($runnerId)", async (target) => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({}),
-			});
-
-			await apiService[method]("/workspace/project", target);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				`/api/chat/${endpoint}?${queryKey}=%2Fworkspace%2Fproject${target.runnerId ? "&runnerId=runner-1" : ""}&profile=${target.profile}`,
-				expect.any(Object),
-			);
-		});
-
-		it.each([undefined, "", "   "])("omits a blank model profile (%s)", async (profile) => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({}),
-			});
-
-			await apiService[method]("", {
-				runnerId: "runner-1",
-				environmentProfile: "",
-				profile,
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				`/api/chat/${endpoint}?runnerId=runner-1&environmentProfile=`,
-				expect.any(Object),
-			);
-		});
-
-		it.each(["work", "default"])("omits %s for a persisted conversation", async (profile) => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({}),
-			});
-
-			await apiService[method]("", {
-				runnerId: "runner-1",
-				conversationId: "conv-1",
-				environmentProfile: "review",
-				profile,
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				`/api/chat/${endpoint}?runnerId=runner-1&conversationId=conv-1&environmentProfile=review`,
-				expect.any(Object),
-			);
-		});
-	});
-
-	describe("getSlashCommands", () => {
-		it("uses durable conversation affinity for runner command discovery", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ commands: [] }),
-			});
-			await apiService.getSlashCommands(undefined, {
-				runnerId: "runner-1",
-				conversationId: "conv-1",
-				environmentProfile: "",
-			});
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/slash-commands?runnerId=runner-1&conversationId=conv-1&environmentProfile=",
-				expect.any(Object),
-			);
-		});
-
-		it("fetches available slash commands", async () => {
-			const mockResponse = {
-				commands: [
-					{
-						name: "init",
-						description: "Initialise project",
-						hint: "additional instructions (optional)",
-						placeholder: "/init additional instructions (optional)",
-					},
-				],
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			const result = await apiService.getSlashCommands();
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/slash-commands",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockResponse);
-		});
-
-		it("fetches slash commands for a cwd", async () => {
-			const mockResponse = { commands: [] };
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			const result = await apiService.getSlashCommands("/workspace/project");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/slash-commands?cwd=%2Fworkspace%2Fproject",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockResponse);
-		});
-	});
-
-	describe("getCWDHints", () => {
-		it("targets directory discovery at the selected runner and profile", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ hints: [] }),
-			});
-			await apiService.getCWDHints("~/project", {
-				runnerId: "runner-1",
-				environmentProfile: "review",
-			});
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/cwd-suggestions?q=%7E%2Fproject&runnerId=runner-1&environmentProfile=review",
-				expect.any(Object),
-			);
-		});
-
-		it("fetches cwd suggestions", async () => {
-			const mockResponse: CWDHintsResponse = {
-				baseDir: "/workspace",
-				query: "/workspace/ko",
-				hints: [{ path: "/workspace/kodelet" }],
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockResponse,
-			});
-
-			const result = await apiService.getCWDHints("/workspace/ko");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat/cwd-suggestions?q=%2Fworkspace%2Fko",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockResponse);
-		});
-	});
-
-	describe("deleteConversation", () => {
-		it("sends DELETE request and handles no-content responses", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 204,
-			});
-
-			await apiService.deleteConversation("123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/123",
-				expect.objectContaining({
-					method: "DELETE",
-				}),
-			);
-		});
-	});
-
-	describe("forkConversation", () => {
-		it("posts to the conversation fork endpoint", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({ success: true, conversation_id: "conv-456" }),
-			});
-
-			const result = await apiService.forkConversation("conv-123");
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/fork",
-				expect.objectContaining({ method: "POST" }),
-			);
-			expect(result).toEqual({ success: true, conversation_id: "conv-456" });
-		});
-	});
-
-	describe("steerConversation", () => {
-		it("queues steering for an existing conversation", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					success: true,
-					conversation_id: "conv-123",
-					queued: true,
-				}),
-			});
-
-			const result = await apiService.steerConversation(
-				"conv-123",
-				"Please focus on tests",
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/steer",
-				expect.objectContaining({
-					method: "POST",
-					body: JSON.stringify({ message: "Please focus on tests" }),
-				}),
-			);
-			expect(result).toEqual({
-				success: true,
-				conversation_id: "conv-123",
-				queued: true,
-			});
-		});
-
-		it("includes image content in steering requests", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					success: true,
-					conversation_id: "conv-123",
-					queued: false,
-				}),
-			});
-
-			await apiService.steerConversation("conv-123", "Use this screenshot", [
-				{ type: "text", text: "Use this screenshot" },
-				{
-					type: "image",
-					source: {
-						data: "aGVsbG8=",
-						media_type: "image/png",
-					},
-				},
-			]);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/steer",
-				expect.objectContaining({
-					method: "POST",
-					body: JSON.stringify({
-						message: "Use this screenshot",
-						content: [
-							{ type: "text", text: "Use this screenshot" },
-							{
-								type: "image",
-								source: {
-									data: "aGVsbG8=",
-									media_type: "image/png",
-								},
-							},
-						],
-					}),
-				}),
-			);
-		});
-	});
-
-	describe("getGitDiff", () => {
-		it("fetches git diff for the selected cwd", async () => {
-			const mockGitDiff: GitDiffResponse = {
-				cwd: "/workspace/project",
-				diff: "diff --git a/file b/file",
-				has_diff: true,
-				git_root: "/workspace/project",
-				exit_code: 0,
-			};
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => mockGitDiff,
-			});
-
-			const result = await apiService.getGitDiff({
-				kind: "local",
-				cwd: "/workspace/project",
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/git/diff?cwd=%2Fworkspace%2Fproject",
-				expect.any(Object),
-			);
-			expect(result).toEqual(mockGitDiff);
-		});
-
-		it("fetches git diff for a remote runner conversation", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					cwd: "/runner/project",
-					diff: "",
-					has_diff: false,
-					exit_code: 0,
-				}),
-			});
-
-			await apiService.getGitDiff({
-				kind: "runner",
-				runnerId: "runner-1",
-				conversationId: "conv-123",
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/git/diff?runnerId=runner-1&conversationId=conv-123",
-				expect.any(Object),
-			);
-		});
-
-		it("fetches git diff directly from a selected runner", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					cwd: "/runner/project",
-					diff: "",
-					has_diff: false,
-					exit_code: 0,
-				}),
-			});
-
-			await apiService.getGitDiff({ kind: "runner", runnerId: "runner-1" });
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/git/diff?runnerId=runner-1",
-				expect.any(Object),
-			);
-		});
-	});
-
-	describe("createTerminalWebSocket", () => {
-		it("creates a websocket using the current host and query params", () => {
-			const originalLocation = window.location;
-			const websocketSpy = vi.fn();
-
-			// @ts-expect-error test shim
-			global.WebSocket = websocketSpy;
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: {
-					protocol: "http:",
-					host: "localhost:3000",
-				},
-			});
-
-			apiService.createTerminalWebSocket({
-				target: { kind: "local", cwd: "/workspace/project" },
-				rows: 24,
-				cols: 80,
-			});
-
-			expect(websocketSpy).toHaveBeenCalledWith(
-				"ws://localhost:3000/api/terminal/ws?cwd=%2Fworkspace%2Fproject&rows=24&cols=80",
-			);
-
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: originalLocation,
-			});
-		});
-
-		it("creates a websocket for a remote runner conversation", () => {
-			const originalLocation = window.location;
-			const websocketSpy = vi.fn();
-
-			// @ts-expect-error test shim
-			global.WebSocket = websocketSpy;
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: {
-					protocol: "https:",
-					host: "kodelet.example",
-				},
-			});
-
-			apiService.createTerminalWebSocket({
-				target: {
-					kind: "runner",
-					runnerId: "runner-1",
-					conversationId: "conv-123",
-				},
-				rows: 30,
-				cols: 120,
-			});
-
-			expect(websocketSpy).toHaveBeenCalledWith(
-				"wss://kodelet.example/api/terminal/ws?runnerId=runner-1&conversationId=conv-123&rows=30&cols=120",
-			);
-
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: originalLocation,
-			});
-		});
-
-		it("creates a websocket directly for a selected runner", () => {
-			const originalLocation = window.location;
-			const websocketSpy = vi.fn();
-
-			// @ts-expect-error test shim
-			global.WebSocket = websocketSpy;
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: {
-					protocol: "https:",
-					host: "kodelet.example",
-				},
-			});
-
-			apiService.createTerminalWebSocket({
-				target: { kind: "runner", runnerId: "runner-1" },
-				rows: 30,
-				cols: 120,
-			});
-
-			expect(websocketSpy).toHaveBeenCalledWith(
-				"wss://kodelet.example/api/terminal/ws?runnerId=runner-1&rows=30&cols=120",
-			);
-
-			Object.defineProperty(window, "location", {
-				configurable: true,
-				value: originalLocation,
-			});
-		});
-	});
-
-	describe("respondToUIInput", () => {
-		it("posts extension UI input responses", async () => {
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ success: true }),
-			});
-
-			const result = await apiService.respondToUIInput("conv-123", "input-1", {
-				status: "submitted",
-				value: "2",
-			});
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations/conv-123/ui-input/input-1",
-				expect.objectContaining({
-					method: "POST",
-					body: JSON.stringify({ status: "submitted", value: "2" }),
-				}),
-			);
-			expect(result).toEqual({ success: true });
-		});
-	});
-
-	describe("streamChat", () => {
-		it.each([
-			"run",
-			"observer",
-		])("dismisses pending %s prompts on stream loss without stopping execution", async (mode) => {
-			const onEvent = vi.fn();
-			const encoder = new TextEncoder();
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'{"kind":"ui-input-request","ui_input":{"id":"request-1","title":"Pending"}}\n',
-							),
-						);
-						controller.close();
-					},
-				}),
-			});
-			if (mode === "run") {
-				await apiService.streamChat(
-					{ message: "hello", conversationId: "conversation-1" },
-					{ onEvent },
-				);
-			} else {
-				await apiService.streamConversation("conversation-1", { onEvent });
-			}
-			expect(onEvent).toHaveBeenLastCalledWith({
-				kind: "ui-request-end",
-				conversation_id: "conversation-1",
-				ui_request_id: "request-1",
-			});
-			expect(mockFetch).toHaveBeenCalledTimes(1);
-		});
-
-		it("dismisses prompts when an attached stream is malformed", async () => {
-			const onEvent = vi.fn();
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'{"kind":"ui-confirm-request","ui_confirm":{"id":"confirm-1","title":"Pending"}}\nnot-json\n',
-							),
-						);
-						controller.close();
-					},
-				}),
-			});
-			await expect(
-				apiService.streamConversation("conversation-1", { onEvent }),
-			).rejects.toThrow();
-			expect(onEvent).toHaveBeenLastCalledWith({
-				kind: "ui-request-end",
-				conversation_id: "conversation-1",
-				ui_request_id: "confirm-1",
-			});
-			expect(mockFetch).toHaveBeenCalledTimes(1);
-		});
-
-		it("streams newline-delimited chat events", async () => {
-			setTestCookie("kodelet_csrf=csrf-stream; Path=/");
-			const onEvent = vi.fn();
-			const encoder = new TextEncoder();
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n',
-							),
-						);
-						controller.close();
-					},
-				}),
-			});
-
-			await apiService.streamChat(
-				{
-					message: "hello",
-				},
-				{ onEvent },
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat",
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-stream" }),
-					body: JSON.stringify({ message: "hello" }),
-				}),
-			);
-			expect(onEvent).toHaveBeenNthCalledWith(1, {
-				kind: "conversation",
-				conversation_id: "conv-123",
-			});
-			expect(onEvent).toHaveBeenNthCalledWith(2, {
-				kind: "done",
-				conversation_id: "conv-123",
-			});
-		});
-
-		it("sends multimodal content blocks when provided", async () => {
-			const encoder = new TextEncoder();
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(encoder.encode('{"kind":"done"}\n'));
-						controller.close();
-					},
-				}),
-			});
-
-			await apiService.streamChat(
-				{
-					message: "describe this image",
-					content: [
-						{ type: "text", text: "describe this image" },
-						{
-							type: "image",
-							source: {
-								data: "aGVsbG8=",
-								media_type: "image/png",
-							},
-						},
-					],
-				},
-				{ onEvent: vi.fn() },
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat",
-				expect.objectContaining({
-					method: "POST",
-					body: JSON.stringify({
-						message: "describe this image",
-						content: [
-							{ type: "text", text: "describe this image" },
-							{
-								type: "image",
-								source: {
-									data: "aGVsbG8=",
-									media_type: "image/png",
-								},
-							},
-						],
-					}),
-				}),
-			);
-		});
-
-		it("sends profile and reasoning effort when provided", async () => {
-			const encoder = new TextEncoder();
-			const stream = new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							'{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n',
-						),
-					);
-					controller.close();
-				},
-			});
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: stream,
-			});
-
-			await apiService.streamChat(
-				{
-					message: "hello",
-					profile: "anthropic",
-					reasoningEffort: "high",
-				},
-				{
-					onEvent: vi.fn(),
-				},
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat",
-				expect.objectContaining({
-					body: JSON.stringify({
-						message: "hello",
-						profile: "anthropic",
-						reasoningEffort: "high",
-					}),
-				}),
-			);
-		});
-
-		it("sends cwd when provided", async () => {
-			const encoder = new TextEncoder();
-			const stream = new ReadableStream({
-				start(controller) {
-					controller.enqueue(encoder.encode('{"kind":"done"}\n'));
-					controller.close();
-				},
-			});
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				body: stream,
-			});
-
-			await apiService.streamChat(
-				{
-					message: "hello",
-					cwd: "/workspace/project",
-				},
-				{
-					onEvent: vi.fn(),
-				},
-			);
-
-			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/chat",
-				expect.objectContaining({
-					body: JSON.stringify({ message: "hello", cwd: "/workspace/project" }),
-				}),
-			);
-		});
-	});
+describe('ApiService', () => {
+  it.each([{}, undefined])('initializes without secure-context crypto APIs: %s', async (crypto) => {
+    vi.resetModules();
+    vi.stubGlobal('crypto', crypto);
+    try {
+      const { default: client } = await import('./api');
+      mockFetch.mockResolvedValue({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        json: async () => ({}),
+      });
+      await client.streamChat(
+        { message: 'hello', conversationId: 'conversation-1' },
+        { onEvent: vi.fn() }
+      );
+      await client.respondToUIInput('conversation-1', 'request-1', {
+        status: 'dismissed',
+      });
+      const id = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
+      expect(id).toMatch(/^client-.+/);
+      expect(mockFetch.mock.calls[1][1].headers['X-Kodelet-Client-ID']).toBe(id);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+  it('uses one client identity for submissions, observation, and prompt replies', async () => {
+    mockFetch.mockImplementation(async () => ({
+      ok: true,
+      body: new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      json: async () => ({ success: true }),
+    }));
+    await apiService.streamChat(
+      { message: 'hello', conversationId: 'conversation-1' },
+      { onEvent: vi.fn() }
+    );
+    await apiService.streamConversation('conversation-1', { onEvent: vi.fn() });
+    await apiService.respondToUIInput('conversation-1', 'request-1', {
+      status: 'dismissed',
+    });
+    const identity = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
+    expect(identity).toEqual(expect.any(String));
+    expect(identity.length).toBeGreaterThan(0);
+    expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/chat',
+      '/api/conversations/conversation-1/stream',
+      '/api/conversations/conversation-1/ui-input/request-1',
+    ]);
+    for (const [, options] of mockFetch.mock.calls) {
+      expect(options.headers['X-Kodelet-Client-ID']).toBe(identity);
+    }
+  });
+  beforeEach(() => {
+    mockFetch.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    setTestCookie('kodelet_csrf=; Max-Age=0; Path=/');
+  });
+
+  describe('request method', () => {
+    it('adds default headers', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: 'test' }),
+      });
+
+      await apiService.getConversations();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
+        })
+      );
+    });
+
+    it('adds CSRF headers only to unsafe requests', async () => {
+      setTestCookie('kodelet_csrf=csrf-api; Path=/');
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ conversations: [], total: 0 }),
+        })
+        .mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await apiService.getConversations();
+      await apiService.deleteConversation('conv-123');
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        '/api/conversations',
+        expect.objectContaining({
+          headers: expect.not.objectContaining({
+            'X-CSRF-Token': expect.any(String),
+          }),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        '/api/conversations/conv-123',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-api' }),
+        })
+      );
+    });
+
+    it('throws error for non-ok responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Not found' }),
+      });
+
+      await expect(apiService.getConversation('123')).rejects.toThrow('Not found');
+    });
+
+    it('handles non-JSON error responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => {
+          throw new Error('Invalid JSON');
+        },
+      });
+
+      await expect(apiService.getConversation('123')).rejects.toThrow('HTTP 500');
+    });
+
+    it('preserves the HTTP status on API errors', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'Request is no longer pending' }),
+      });
+
+      await expect(apiService.getConversation('stale')).rejects.toMatchObject({
+        message: 'Request is no longer pending',
+        status: 409,
+      });
+    });
+  });
+
+  describe('authentication approvals', () => {
+    it('loads the authenticated principal', async () => {
+      const principal = {
+        id: 'issuer|subject',
+        email: 'user@example.com',
+        roles: ['user'],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => principal,
+      });
+
+      await expect(apiService.getAuthPrincipal()).resolves.toEqual(principal);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/auth/me',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
+        })
+      );
+    });
+
+    it('loads the user sign-in approval context', async () => {
+      const principal = {
+        id: 'issuer|subject',
+        email: 'user@example.com',
+        roles: ['user'],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => principal,
+      });
+
+      await expect(apiService.getUserLoginPrincipal()).resolves.toEqual(principal);
+      expect(mockFetch).toHaveBeenCalledWith('/api/auth/v1/device/context', expect.any(Object));
+    });
+
+    it('loads the runner enrollment approval context', async () => {
+      const principal = {
+        id: 'issuer|subject',
+        email: 'admin@example.com',
+        roles: ['runner-admin'],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => principal,
+      });
+
+      await expect(apiService.getRunnerEnrollmentPrincipal()).resolves.toEqual(principal);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/runner/v1/enrollment/context',
+        expect.any(Object)
+      );
+    });
+
+    it('posts user sign-in decisions with the CSRF cookie', async () => {
+      setTestCookie('kodelet_csrf=csrf-user; Path=/');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'pending' }),
+      });
+
+      await apiService.submitUserLoginDecision('ABCD-EFGH', 'lookup');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/auth/v1/device/decision',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-user' }),
+          body: JSON.stringify({
+            userCode: 'ABCD-EFGH',
+            decision: 'lookup',
+            csrfToken: 'csrf-user',
+          }),
+        })
+      );
+    });
+
+    it('posts runner approval replacement intent with the CSRF cookie', async () => {
+      setTestCookie('kodelet_csrf=csrf-runner; Path=/');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'approved' }),
+      });
+
+      await apiService.submitRunnerEnrollmentDecision('WXYZ-2345', 'approve', true);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/runner/v1/enrollment/decision',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-runner' }),
+          body: JSON.stringify({
+            userCode: 'WXYZ-2345',
+            decision: 'approve',
+            csrfToken: 'csrf-runner',
+            replace: true,
+          }),
+        })
+      );
+    });
+  });
+
+  describe('Codex provider authentication', () => {
+    it('loads the ChatGPT subscription connection status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: 'codex', connected: true }),
+      });
+
+      await expect(apiService.getCodexProviderStatus()).resolves.toEqual({
+        provider: 'codex',
+        connected: true,
+      });
+      expect(mockFetch).toHaveBeenCalledWith('/api/providers/codex', expect.any(Object));
+    });
+
+    it('starts and polls device login with CSRF protection', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      const login = {
+        id: 'codex_login_123',
+        status: 'pending',
+        verificationUrl: 'https://auth.openai.com/codex/device',
+        userCode: 'ABCD-EFGH',
+      };
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => login,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...login, status: 'connected' }),
+        });
+
+      await expect(apiService.startCodexDeviceLogin()).resolves.toEqual(login);
+      await expect(apiService.getCodexDeviceLogin(login.id)).resolves.toMatchObject({
+        status: 'connected',
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        '/api/providers/codex/device-login',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        '/api/providers/codex/device-login/codex_login_123',
+        expect.any(Object)
+      );
+    });
+
+    it('cancels pending device login', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await apiService.cancelCodexDeviceLogin('codex_login_123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/providers/codex/device-login/codex_login_123',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+    });
+  });
+
+  describe('GitHub Copilot provider authentication', () => {
+    it('loads the GitHub Copilot subscription connection status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: 'copilot', connected: true }),
+      });
+
+      await expect(apiService.getCopilotProviderStatus()).resolves.toEqual({
+        provider: 'copilot',
+        connected: true,
+      });
+      expect(mockFetch).toHaveBeenCalledWith('/api/providers/copilot', expect.any(Object));
+    });
+
+    it('starts and polls device login with CSRF protection', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      const login = {
+        id: 'copilot_login_123',
+        status: 'pending',
+        verificationUrl: 'https://github.com/login/device',
+        userCode: 'ABCD-EFGH',
+      };
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => login,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...login, status: 'connected' }),
+        });
+
+      await expect(apiService.startCopilotDeviceLogin()).resolves.toEqual(login);
+      await expect(apiService.getCopilotDeviceLogin(login.id)).resolves.toMatchObject({
+        status: 'connected',
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        '/api/providers/copilot/device-login',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        '/api/providers/copilot/device-login/copilot_login_123',
+        expect.any(Object)
+      );
+    });
+
+    it('cancels pending device login', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await apiService.cancelCopilotDeviceLogin('copilot_login_123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/providers/copilot/device-login/copilot_login_123',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+    });
+  });
+
+  describe('getConversations', () => {
+    it('fetches conversations without filters', async () => {
+      const mockResponse: ConversationListResponse = {
+        conversations: [],
+        hasMore: false,
+        total: 0,
+        limit: 25,
+        offset: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getConversations();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/conversations', expect.any(Object));
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('applies search filters', async () => {
+      const mockResponse: ConversationListResponse = {
+        conversations: [],
+        hasMore: false,
+        total: 0,
+        limit: 25,
+        offset: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      await apiService.getConversations({
+        searchTerm: 'test',
+        cwd: '~/workspace/kodelet',
+        sortBy: 'created',
+        sortOrder: 'desc',
+        limit: 10,
+        offset: 20,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations?search=test&cwd=%7E%2Fworkspace%2Fkodelet&sortBy=created&sortOrder=desc&limit=10&offset=20',
+        expect.any(Object)
+      );
+    });
+
+    it('omits undefined filter values', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ conversations: [], total: 0 }),
+      });
+
+      await apiService.getConversations({
+        searchTerm: 'test',
+        sortBy: undefined,
+        limit: undefined,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/conversations?search=test', expect.any(Object));
+    });
+
+    it('hydrates platform and api_mode from metadata', async () => {
+      const mockResponse: ConversationListResponse = {
+        conversations: [
+          {
+            id: 'conv-1',
+            createdAt: '2023-01-01T00:00:00Z',
+            updatedAt: '2023-01-02T00:00:00Z',
+            messageCount: 3,
+            provider: 'OpenAI',
+            metadata: {
+              platform: 'fireworks',
+              api_mode: 'chat_completions',
+            },
+          },
+        ],
+        hasMore: false,
+        total: 1,
+        limit: 25,
+        offset: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getConversations();
+
+      expect(result.conversations[0].platform).toBe('fireworks');
+      expect(result.conversations[0].api_mode).toBe('chat_completions');
+    });
+  });
+
+  describe('Anthropic provider authentication', () => {
+    it('loads the Anthropic subscription connection status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: 'anthropic', connected: true }),
+      });
+
+      await expect(apiService.getAnthropicProviderStatus()).resolves.toEqual({
+        provider: 'anthropic',
+        connected: true,
+      });
+      expect(mockFetch).toHaveBeenCalledWith('/api/providers/anthropic', expect.any(Object));
+    });
+
+    it('starts and completes OAuth login with CSRF protection', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      const login = {
+        id: 'anthropic_login_123',
+        status: 'pending',
+        authorizationUrl: 'https://claude.ai/oauth/authorize?test=1',
+      };
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => login,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...login, status: 'connected' }),
+        });
+
+      await expect(apiService.startAnthropicOAuthLogin()).resolves.toEqual(login);
+      await expect(
+        apiService.completeAnthropicOAuthLogin(login.id, 'code#state')
+      ).resolves.toMatchObject({ status: 'connected' });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        '/api/providers/anthropic/oauth-login',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        '/api/providers/anthropic/oauth-login/anthropic_login_123/complete',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+          body: JSON.stringify({ code: 'code#state' }),
+        })
+      );
+    });
+
+    it('cancels a pending OAuth login', async () => {
+      setTestCookie('kodelet_csrf=csrf-provider; Path=/');
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await apiService.cancelAnthropicOAuthLogin('anthropic_login_123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/providers/anthropic/oauth-login/anthropic_login_123',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-provider' }),
+        })
+      );
+    });
+  });
+
+  describe('stopConversation', () => {
+    it('posts to the conversation stop endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          conversation_id: 'conv-123',
+          stopped: true,
+        }),
+      });
+
+      const result = await apiService.stopConversation('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/stop',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual({
+        success: true,
+        conversation_id: 'conv-123',
+        stopped: true,
+      });
+    });
+  });
+
+  describe('getConversation', () => {
+    it('fetches a single conversation', async () => {
+      const mockConversation: Conversation = {
+        id: '123',
+        messages: [],
+        toolResults: {},
+        usage: {},
+        createdAt: '2023-01-01T00:00:00Z',
+        updatedAt: '2023-01-01T00:00:00Z',
+        messageCount: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockConversation,
+      });
+
+      const result = await apiService.getConversation('123');
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/conversations/123', expect.any(Object));
+      expect(result).toEqual(mockConversation);
+    });
+  });
+
+  describe('getRunners', () => {
+    it('fetches registered runners', async () => {
+      const runners = [
+        {
+          id: 'runner-1',
+          host: {
+            instanceId: 'host-1',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/workspace/project', name: 'project' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          generation: 1,
+        },
+      ];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ runners }),
+      });
+
+      const result = await apiService.getRunners();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/runners', expect.any(Object));
+      expect(result.runners).toEqual(runners);
+    });
+  });
+
+  describe('getChatSettings', () => {
+    it('fetches chat settings', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          currentProfile: 'work',
+          defaultCWD: '/workspace/default',
+          profiles: [{ name: 'default', scope: 'built-in' }],
+          reasoningEffort: 'high',
+          reasoningEffortOptions: ['low', 'medium', 'high'],
+        }),
+      });
+
+      const result = await apiService.getChatSettings();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/chat/settings', expect.any(Object));
+      expect(result.currentProfile).toBe('work');
+      expect(result.defaultCWD).toBe('/workspace/default');
+      expect(result.reasoningEffort).toBe('high');
+    });
+
+    it('fetches reasoning settings for a selected profile', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          currentProfile: 'anthropic',
+          profiles: [],
+          reasoningEffort: 'max',
+          reasoningEffortOptions: ['medium', 'high', 'max'],
+        }),
+      });
+
+      const result = await apiService.getChatSettings('anthropic');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/settings?profile=anthropic',
+        expect.any(Object)
+      );
+      expect(result.reasoningEffortOptions).toEqual(['medium', 'high', 'max']);
+    });
+
+    it.each([
+      undefined,
+      'code-search',
+    ])('targets runner profile discovery (%s)', async (profile) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ profiles: [] }),
+      });
+
+      await apiService.getChatSettings(profile, 'runner/one');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/chat/settings?${profile ? 'profile=code-search&' : ''}runnerId=runner%2Fone`,
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe.each([
+    { method: 'getSlashCommands', endpoint: 'slash-commands', queryKey: 'cwd' },
+    { method: 'getCWDHints', endpoint: 'cwd-suggestions', queryKey: 'q' },
+  ] as const)('$method model profile discovery', ({ method, endpoint, queryKey }) => {
+    it.each([
+      { runnerId: undefined, profile: 'work' },
+      { runnerId: undefined, profile: 'default' },
+      { runnerId: 'runner-1', profile: 'work' },
+      { runnerId: 'runner-1', profile: 'default' },
+    ])('forwards $profile to the intended workspace ($runnerId)', async (target) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+
+      await apiService[method]('/workspace/project', target);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/chat/${endpoint}?${queryKey}=%2Fworkspace%2Fproject${target.runnerId ? '&runnerId=runner-1' : ''}&profile=${target.profile}`,
+        expect.any(Object)
+      );
+    });
+
+    it.each([undefined, '', '   '])('omits a blank model profile (%s)', async (profile) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+
+      await apiService[method]('', {
+        runnerId: 'runner-1',
+        environmentProfile: '',
+        profile,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/chat/${endpoint}?runnerId=runner-1&environmentProfile=`,
+        expect.any(Object)
+      );
+    });
+
+    it.each(['work', 'default'])('omits %s for a persisted conversation', async (profile) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+
+      await apiService[method]('', {
+        runnerId: 'runner-1',
+        conversationId: 'conv-1',
+        environmentProfile: 'review',
+        profile,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/chat/${endpoint}?runnerId=runner-1&conversationId=conv-1&environmentProfile=review`,
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe('getSlashCommands', () => {
+    it('uses durable conversation affinity for runner command discovery', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ commands: [] }),
+      });
+      await apiService.getSlashCommands(undefined, {
+        runnerId: 'runner-1',
+        conversationId: 'conv-1',
+        environmentProfile: '',
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/slash-commands?runnerId=runner-1&conversationId=conv-1&environmentProfile=',
+        expect.any(Object)
+      );
+    });
+
+    it('fetches available slash commands', async () => {
+      const mockResponse = {
+        commands: [
+          {
+            name: 'init',
+            description: 'Initialise project',
+            hint: 'additional instructions (optional)',
+            placeholder: '/init additional instructions (optional)',
+          },
+        ],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getSlashCommands();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/chat/slash-commands', expect.any(Object));
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('fetches slash commands for a cwd', async () => {
+      const mockResponse = { commands: [] };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getSlashCommands('/workspace/project');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/slash-commands?cwd=%2Fworkspace%2Fproject',
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('getCWDHints', () => {
+    it('targets directory discovery at the selected runner and profile', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ hints: [] }),
+      });
+      await apiService.getCWDHints('~/project', {
+        runnerId: 'runner-1',
+        environmentProfile: 'review',
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/cwd-suggestions?q=%7E%2Fproject&runnerId=runner-1&environmentProfile=review',
+        expect.any(Object)
+      );
+    });
+
+    it('fetches cwd suggestions', async () => {
+      const mockResponse: CWDHintsResponse = {
+        baseDir: '/workspace',
+        query: '/workspace/ko',
+        hints: [{ path: '/workspace/kodelet' }],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getCWDHints('/workspace/ko');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat/cwd-suggestions?q=%2Fworkspace%2Fko',
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('deleteConversation', () => {
+    it('sends DELETE request and handles no-content responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
+
+      await apiService.deleteConversation('123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/123',
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
+  });
+
+  describe('forkConversation', () => {
+    it('posts to the conversation fork endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, conversation_id: 'conv-456' }),
+      });
+
+      const result = await apiService.forkConversation('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/fork',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual({ success: true, conversation_id: 'conv-456' });
+    });
+  });
+
+  describe('steerConversation', () => {
+    it('queues steering for an existing conversation', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          conversation_id: 'conv-123',
+          queued: true,
+        }),
+      });
+
+      const result = await apiService.steerConversation('conv-123', 'Please focus on tests');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ message: 'Please focus on tests' }),
+        })
+      );
+      expect(result).toEqual({
+        success: true,
+        conversation_id: 'conv-123',
+        queued: true,
+      });
+    });
+
+    it('includes image content in steering requests', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          conversation_id: 'conv-123',
+          queued: false,
+        }),
+      });
+
+      await apiService.steerConversation('conv-123', 'Use this screenshot', [
+        { type: 'text', text: 'Use this screenshot' },
+        {
+          type: 'image',
+          source: {
+            data: 'aGVsbG8=',
+            media_type: 'image/png',
+          },
+        },
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            message: 'Use this screenshot',
+            content: [
+              { type: 'text', text: 'Use this screenshot' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          }),
+        })
+      );
+    });
+  });
+
+  describe('getGitDiff', () => {
+    it('fetches git diff for the selected cwd', async () => {
+      const mockGitDiff: GitDiffResponse = {
+        cwd: '/workspace/project',
+        diff: 'diff --git a/file b/file',
+        has_diff: true,
+        git_root: '/workspace/project',
+        exit_code: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockGitDiff,
+      });
+
+      const result = await apiService.getGitDiff({
+        kind: 'local',
+        cwd: '/workspace/project',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/git/diff?cwd=%2Fworkspace%2Fproject',
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockGitDiff);
+    });
+
+    it('fetches git diff for a remote runner conversation', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          cwd: '/runner/project',
+          diff: '',
+          has_diff: false,
+          exit_code: 0,
+        }),
+      });
+
+      await apiService.getGitDiff({
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-123',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/git/diff?runnerId=runner-1&conversationId=conv-123',
+        expect.any(Object)
+      );
+    });
+
+    it('fetches git diff directly from a selected runner', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          cwd: '/runner/project',
+          diff: '',
+          has_diff: false,
+          exit_code: 0,
+        }),
+      });
+
+      await apiService.getGitDiff({ kind: 'runner', runnerId: 'runner-1' });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/git/diff?runnerId=runner-1', expect.any(Object));
+    });
+  });
+
+  describe('createTerminalWebSocket', () => {
+    it('creates a websocket using the current host and query params', () => {
+      const originalLocation = window.location;
+      const websocketSpy = vi.fn();
+
+      // @ts-expect-error test shim
+      global.WebSocket = websocketSpy;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          protocol: 'http:',
+          host: 'localhost:3000',
+        },
+      });
+
+      apiService.createTerminalWebSocket({
+        target: { kind: 'local', cwd: '/workspace/project' },
+        rows: 24,
+        cols: 80,
+      });
+
+      expect(websocketSpy).toHaveBeenCalledWith(
+        'ws://localhost:3000/api/terminal/ws?cwd=%2Fworkspace%2Fproject&rows=24&cols=80'
+      );
+
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+
+    it('creates a websocket for a remote runner conversation', () => {
+      const originalLocation = window.location;
+      const websocketSpy = vi.fn();
+
+      // @ts-expect-error test shim
+      global.WebSocket = websocketSpy;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          protocol: 'https:',
+          host: 'kodelet.example',
+        },
+      });
+
+      apiService.createTerminalWebSocket({
+        target: {
+          kind: 'runner',
+          runnerId: 'runner-1',
+          conversationId: 'conv-123',
+        },
+        rows: 30,
+        cols: 120,
+      });
+
+      expect(websocketSpy).toHaveBeenCalledWith(
+        'wss://kodelet.example/api/terminal/ws?runnerId=runner-1&conversationId=conv-123&rows=30&cols=120'
+      );
+
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+
+    it('creates a websocket directly for a selected runner', () => {
+      const originalLocation = window.location;
+      const websocketSpy = vi.fn();
+
+      // @ts-expect-error test shim
+      global.WebSocket = websocketSpy;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          protocol: 'https:',
+          host: 'kodelet.example',
+        },
+      });
+
+      apiService.createTerminalWebSocket({
+        target: { kind: 'runner', runnerId: 'runner-1' },
+        rows: 30,
+        cols: 120,
+      });
+
+      expect(websocketSpy).toHaveBeenCalledWith(
+        'wss://kodelet.example/api/terminal/ws?runnerId=runner-1&rows=30&cols=120'
+      );
+
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+  });
+
+  describe('respondToUIInput', () => {
+    it('posts extension UI input responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+      const result = await apiService.respondToUIInput('conv-123', 'input-1', {
+        status: 'submitted',
+        value: '2',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/ui-input/input-1',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ status: 'submitted', value: '2' }),
+        })
+      );
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('streamChat', () => {
+    it.each([
+      'run',
+      'observer',
+    ])('dismisses pending %s prompts on stream loss without stopping execution', async (mode) => {
+      const onEvent = vi.fn();
+      const encoder = new TextEncoder();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                '{"kind":"ui-input-request","ui_input":{"id":"request-1","title":"Pending"}}\n'
+              )
+            );
+            controller.close();
+          },
+        }),
+      });
+      if (mode === 'run') {
+        await apiService.streamChat(
+          { message: 'hello', conversationId: 'conversation-1' },
+          { onEvent }
+        );
+      } else {
+        await apiService.streamConversation('conversation-1', { onEvent });
+      }
+      expect(onEvent).toHaveBeenLastCalledWith({
+        kind: 'ui-request-end',
+        conversation_id: 'conversation-1',
+        ui_request_id: 'request-1',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('dismisses prompts when an attached stream is malformed', async () => {
+      const onEvent = vi.fn();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                '{"kind":"ui-confirm-request","ui_confirm":{"id":"confirm-1","title":"Pending"}}\nnot-json\n'
+              )
+            );
+            controller.close();
+          },
+        }),
+      });
+      await expect(apiService.streamConversation('conversation-1', { onEvent })).rejects.toThrow();
+      expect(onEvent).toHaveBeenLastCalledWith({
+        kind: 'ui-request-end',
+        conversation_id: 'conversation-1',
+        ui_request_id: 'confirm-1',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('streams newline-delimited chat events', async () => {
+      setTestCookie('kodelet_csrf=csrf-stream; Path=/');
+      const onEvent = vi.fn();
+      const encoder = new TextEncoder();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
+              )
+            );
+            controller.close();
+          },
+        }),
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'hello',
+        },
+        { onEvent }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-stream' }),
+          body: JSON.stringify({ message: 'hello' }),
+        })
+      );
+      expect(onEvent).toHaveBeenNthCalledWith(1, {
+        kind: 'conversation',
+        conversation_id: 'conv-123',
+      });
+      expect(onEvent).toHaveBeenNthCalledWith(2, {
+        kind: 'done',
+        conversation_id: 'conv-123',
+      });
+    });
+
+    it('sends multimodal content blocks when provided', async () => {
+      const encoder = new TextEncoder();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"kind":"done"}\n'));
+            controller.close();
+          },
+        }),
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'describe this image',
+          content: [
+            { type: 'text', text: 'describe this image' },
+            {
+              type: 'image',
+              source: {
+                data: 'aGVsbG8=',
+                media_type: 'image/png',
+              },
+            },
+          ],
+        },
+        { onEvent: vi.fn() }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            message: 'describe this image',
+            content: [
+              { type: 'text', text: 'describe this image' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          }),
+        })
+      );
+    });
+
+    it('sends profile and reasoning effort when provided', async () => {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
+            )
+          );
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: stream,
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'hello',
+          profile: 'anthropic',
+          reasoningEffort: 'high',
+        },
+        {
+          onEvent: vi.fn(),
+        }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          body: JSON.stringify({
+            message: 'hello',
+            profile: 'anthropic',
+            reasoningEffort: 'high',
+          }),
+        })
+      );
+    });
+
+    it('sends cwd when provided', async () => {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"kind":"done"}\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: stream,
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'hello',
+          cwd: '/workspace/project',
+        },
+        {
+          onEvent: vi.fn(),
+        }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          body: JSON.stringify({ message: 'hello', cwd: '/workspace/project' }),
+        })
+      );
+    });
+  });
 });

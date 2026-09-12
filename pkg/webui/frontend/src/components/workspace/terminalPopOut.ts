@@ -74,9 +74,7 @@ const isTerminalPopOutRecord = (value: unknown): value is TerminalPopOutRecord =
   return (
     typeof record.id === 'string' &&
     isWorkspaceTarget(record.target) &&
-    (record.state === undefined ||
-      record.state === 'active' ||
-      record.state === 'closing') &&
+    (record.state === undefined || record.state === 'active' || record.state === 'closing') &&
     typeof record.updatedAt === 'number' &&
     Number.isFinite(record.updatedAt)
   );
@@ -169,9 +167,7 @@ export const writeTerminalPopOutRecord = (record: TerminalPopOutRecord): void =>
 };
 
 export const clearTerminalPopOutRecord = (id: string): void => {
-  writeTerminalPopOutRecords(
-    readTerminalPopOutRecords().filter((record) => record.id !== id)
-  );
+  writeTerminalPopOutRecords(readTerminalPopOutRecords().filter((record) => record.id !== id));
 };
 
 export const createTerminalPopOutChannel = (): BroadcastChannel | null => {

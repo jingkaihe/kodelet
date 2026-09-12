@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { GlobMetadata, ToolResult } from '../../types';
 import GlobRenderer from './GlobRenderer';
-import { GlobMetadata, ToolResult } from '../../types';
 
 describe('GlobRenderer', () => {
   const createToolResult = (metadata: Partial<GlobMetadata>): ToolResult => ({
@@ -13,7 +13,9 @@ describe('GlobRenderer', () => {
 
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
-    const { container } = render(<GlobRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
+    const { container } = render(
+      <GlobRenderer toolResult={{ ...toolResult, metadata: undefined }} />
+    );
     expect(container.firstChild).toBeNull();
   });
 

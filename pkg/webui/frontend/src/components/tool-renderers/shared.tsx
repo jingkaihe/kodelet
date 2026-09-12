@@ -1,5 +1,5 @@
-import React from 'react';
 import { Copy, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import type React from 'react';
 import { copyToClipboard, escapeUrl } from '../../utils';
 
 // Shared components for tool renderers
@@ -9,16 +9,14 @@ interface CopyButtonProps {
   className?: string;
 }
 
-export const CopyButton: React.FC<CopyButtonProps> = ({
-  content,
-  className = ''
-}) => {
+export const CopyButton: React.FC<CopyButtonProps> = ({ content, className = '' }) => {
   const handleCopy = () => {
     copyToClipboard(content);
   };
 
   return (
     <button
+      type="button"
       className={`panel-action-button ${className}`.trim()}
       onClick={handleCopy}
       title="Copy to clipboard"
@@ -33,15 +31,19 @@ type JsonObjectOrArray = Record<string, unknown> | unknown[];
 
 export const safeStringify = (obj: unknown): string => {
   const seen = new WeakSet();
-  return JSON.stringify(obj, (_key, val) => {
-    if (val != null && typeof val === 'object') {
-      if (seen.has(val)) {
-        return '[Circular]';
+  return JSON.stringify(
+    obj,
+    (_key, val) => {
+      if (val != null && typeof val === 'object') {
+        if (seen.has(val)) {
+          return '[Circular]';
+        }
+        seen.add(val);
       }
-      seen.add(val);
-    }
-    return val;
-  }, 2);
+      return val;
+    },
+    2
+  );
 };
 
 export interface FormattedJson {

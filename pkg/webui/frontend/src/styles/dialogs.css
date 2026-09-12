@@ -1093,7 +1093,9 @@
   font-weight: 400;
   letter-spacing: normal;
   box-shadow: none;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
 }
 
 .provider-settings-dialog .panel-action-button:hover:not(:disabled) {

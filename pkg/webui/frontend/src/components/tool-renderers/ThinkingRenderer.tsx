@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { ToolResult, ThinkingMetadata } from '../../types';
 import { marked } from 'marked';
+import type React from 'react';
+import { useState } from 'react';
+import type { ThinkingMetadata, ToolResult } from '../../types';
+import { renderSafeMarkdown } from './reference';
 
 interface ThinkingRendererProps {
   toolResult: ToolResult;
@@ -14,7 +16,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
   const formatThoughtContent = (thought: string): string => {
     if (!thought) return '';
     marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(thought);
+    return renderSafeMarkdown(thought);
   };
 
   return (
@@ -22,10 +24,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
       <div className="quiet-tool-line">
         <span className="quiet-tool-emphasis">internal</span>
         {!showThought && (
-          <button
-            onClick={() => setShowThought(true)}
-            className="tool-action-link"
-          >
+          <button type="button" onClick={() => setShowThought(true)} className="tool-action-link">
             Show thinking
           </button>
         )}
@@ -34,6 +33,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
       {showThought && (
         <div
           className="tool-detail-panel prose-enhanced max-h-64 overflow-y-auto text-sm italic"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: formatThoughtContent uses renderSafeMarkdown to escape HTML and reject unsafe URLs.
           dangerouslySetInnerHTML={{ __html: formatThoughtContent(meta.thought) }}
         />
       )}

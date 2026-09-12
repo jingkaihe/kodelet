@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { SkillMetadata, ToolResult } from '../../types';
 import SkillRenderer from './SkillRenderer';
-import { ToolResult, SkillMetadata } from '../../types';
 
 describe('SkillRenderer', () => {
   const createToolResult = (metadata: SkillMetadata | null | undefined): ToolResult => ({
@@ -64,6 +64,8 @@ describe('SkillRenderer', () => {
 
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
 
-    expect(screen.getByText('/home/user/very/long/path/to/kodelet/skills/test-skill')).toBeInTheDocument();
+    expect(
+      screen.getByText('/home/user/very/long/path/to/kodelet/skills/test-skill')
+    ).toBeInTheDocument();
   });
 });

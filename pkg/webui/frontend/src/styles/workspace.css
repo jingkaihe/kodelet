@@ -518,7 +518,7 @@
   outline-offset: -2px;
 }
 
-.workspace-terminal-host[contenteditable='true'] {
+.workspace-terminal-host[contenteditable="true"] {
   outline: none;
 }
 
@@ -544,11 +544,8 @@
 }
 
 .terminal-popout-page .workspace-terminal-host {
-  padding:
-    calc(1.15rem + env(safe-area-inset-top))
-    calc(1rem + env(safe-area-inset-right))
-    calc(1rem + env(safe-area-inset-bottom))
-    calc(1.45rem + env(safe-area-inset-left));
+  padding: calc(1.15rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right))
+    calc(1rem + env(safe-area-inset-bottom)) calc(1.45rem + env(safe-area-inset-left));
 }
 
 @media (max-width: 1180px) {
@@ -726,10 +723,7 @@
   }
 
   .terminal-popout-page .workspace-terminal-host {
-    padding:
-      calc(0.8rem + env(safe-area-inset-top))
-      calc(0.65rem + env(safe-area-inset-right))
-      calc(0.65rem + env(safe-area-inset-bottom))
-      calc(0.8rem + env(safe-area-inset-left));
+    padding: calc(0.8rem + env(safe-area-inset-top)) calc(0.65rem + env(safe-area-inset-right))
+      calc(0.65rem + env(safe-area-inset-bottom)) calc(0.8rem + env(safe-area-inset-left));
   }
 }

@@ -18,9 +18,7 @@ const TerminalPage = () => {
   const cwdLabel = params.get('cwd') ?? '';
   const runnerId = params.get('runnerId')?.trim() || undefined;
   const conversationId = params.get('conversationId')?.trim() || undefined;
-  const [resolvedRunnerId, setResolvedRunnerId] = useState(
-    conversationId ? undefined : runnerId
-  );
+  const [resolvedRunnerId, setResolvedRunnerId] = useState(conversationId ? undefined : runnerId);
   const [targetError, setTargetError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -111,10 +109,7 @@ const TerminalPage = () => {
       active = true;
       unloading = false;
       announce();
-      heartbeat = window.setInterval(
-        announce,
-        TERMINAL_POP_OUT_HEARTBEAT_INTERVAL
-      );
+      heartbeat = window.setInterval(announce, TERMINAL_POP_OUT_HEARTBEAT_INTERVAL);
     };
 
     const deactivate = (clearRecord: boolean) => {

@@ -21,7 +21,7 @@ describe('ChatMessageFrame', () => {
 
   it('renders user message chrome and copy action', () => {
     render(
-      <ChatMessageFrame copyText="copy me" role="user">
+      <ChatMessageFrame copyText="copy me" messageRole="user">
         <p>User content</p>
       </ChatMessageFrame>
     );
@@ -35,7 +35,7 @@ describe('ChatMessageFrame', () => {
 
   it('renders assistant message chrome without a panel-level copy action', () => {
     render(
-      <ChatMessageFrame copyText="assistant copy" role="assistant">
+      <ChatMessageFrame copyText="assistant copy" messageRole="assistant">
         <p>Assistant content</p>
       </ChatMessageFrame>
     );

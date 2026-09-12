@@ -25,10 +25,12 @@ describe('ChatTranscript', () => {
   it('renders the TUI welcome message for an empty conversation', () => {
     render(<ChatTranscript isStreaming={false} messages={[]} />);
 
-    expect(screen.getByRole('heading', {
-      level: 1,
-      name: 'Hello! What would you like me to work on?',
-    })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        level: 1,
+        name: 'Hello! What would you like me to work on?',
+      })
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Ask kodelet to inspect the repo/)).not.toBeInTheDocument();
   });
 
@@ -161,9 +163,7 @@ describe('ChatTranscript', () => {
     const paragraphs = container.querySelectorAll('details .chat-prose p');
 
     expect(paragraphs).toHaveLength(3);
-    expect(paragraphs[0]?.textContent).toBe(
-      'I can use sentence case and prettify the tool names.'
-    );
+    expect(paragraphs[0]?.textContent).toBe('I can use sentence case and prettify the tool names.');
     expect(paragraphs[1]?.textContent).toBe('Improving tool text clarity');
     expect(paragraphs[2]?.textContent).toBe('I should focus on the essence.');
   });
@@ -248,10 +248,7 @@ describe('ChatTranscript', () => {
 
     expect(table).toHaveClass('chat-markdown-table');
     expect(table.parentElement).toHaveClass('chat-markdown-table-shell');
-    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute(
-      'align',
-      'left'
-    );
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('align', 'left');
     expect(screen.getByRole('cell', { name: '2' })).toHaveAttribute('align', 'right');
   });
 
@@ -279,6 +276,37 @@ describe('ChatTranscript', () => {
     expect(link).toBeInTheDocument();
     expect(link).toHaveClass('chat-markdown-link');
     expect(link).toHaveAttribute('href', longURL);
+  });
+
+  it('escapes raw HTML and rejects unsafe Markdown URLs in user and assistant content', () => {
+    const content = [
+      '<img src="x" onerror="alert(1)">',
+      '',
+      '[Unsafe link](javascript:alert%281%29)',
+      '',
+      '[Encoded link](java&#x73;cript:alert%281%29)',
+      '',
+      '![Unsafe image](javascript:alert%281%29)',
+      '',
+      '[Safe link](https://example.com)',
+    ].join('\n');
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          { role: 'user', content },
+          { role: 'assistant', blocks: [{ type: 'message', content }] },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('img, script, [onerror]')).not.toBeInTheDocument();
+    expect(screen.getAllByText('<img src="x" onerror="alert(1)">')).toHaveLength(2);
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+    for (const link of screen.getAllByRole('link', { name: 'Safe link' })) {
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      expect(link).toHaveClass('chat-markdown-link');
+    }
   });
 
   it('auto-collapses a thinking block when streaming finishes', () => {
@@ -459,12 +487,34 @@ describe('ChatTranscript', () => {
   });
 
   it('does not show a fallback working indicator alongside streamed tool output', () => {
-    render(<ChatTranscript isStreaming={true} messages={[{
-      role: 'assistant', blocks: [{ type: 'tools', tools: [{
-        callId: 'bash-1', name: 'bash', input: '{"command":"npm test"}', inProgress: true,
-        result: { toolName: 'bash', success: true, metadata: { command: 'npm test', output: 'Tests in progress' } },
-      }] }],
-    }]} />);
+    render(
+      <ChatTranscript
+        isStreaming={true}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"npm test"}',
+                    inProgress: true,
+                    result: {
+                      toolName: 'bash',
+                      success: true,
+                      metadata: { command: 'npm test', output: 'Tests in progress' },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    );
 
     expect(screen.getByText('Running 1 command')).toBeVisible();
     expect(screen.getByText('Tests in progress')).toBeVisible();
@@ -499,6 +549,35 @@ describe('ChatTranscript', () => {
       'data:image/png;base64,aGVsbG8='
     );
     expect(container.querySelector('.chat-uploaded-image-media')).toBeInTheDocument();
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'http://[',
+  ])('rejects unsafe or invalid uploaded image URLs: %s', (url) => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[{ role: 'user', content: [{ type: 'image', image_url: { url } }] }]}
+      />
+    );
+
+    expect(screen.queryByAltText('Uploaded content')).not.toBeInTheDocument();
+  });
+
+  it('escapes uploaded image URL attributes without changing the URL', () => {
+    const url = 'https://example.com/image.png?x=" onerror="alert(1)&y=2';
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[{ role: 'user', content: [{ type: 'image', image_url: { url } }] }]}
+      />
+    );
+
+    const image = screen.getByAltText('Uploaded content');
+    expect(image).toHaveAttribute('src', url);
+    expect(image).not.toHaveAttribute('onerror');
   });
 
   it('renders slash commands as compact command cards', () => {
@@ -687,13 +766,13 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByText('Web search: kodelet web ui')).toBeInTheDocument()
-    expect(screen.getAllByText('kodelet web ui')).toHaveLength(1)
-    expect(screen.queryByText('Tools (1)')).not.toBeInTheDocument()
-    expect(container.querySelectorAll('details')).toHaveLength(1)
-  })
+    expect(screen.getByText('Web search: kodelet web ui')).toBeInTheDocument();
+    expect(screen.getAllByText('kodelet web ui')).toHaveLength(1);
+    expect(screen.queryByText('Tools (1)')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+  });
 
   it('shows the searched or opened target for native OpenAI search actions', () => {
     render(
@@ -725,11 +804,11 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByText('Open page: https://example.com/story')).toBeInTheDocument()
-    expect(screen.getAllByText('https://example.com/story')).toHaveLength(1)
-  })
+    expect(screen.getByText('Open page: https://example.com/story')).toBeInTheDocument();
+    expect(screen.getAllByText('https://example.com/story')).toHaveLength(1);
+  });
 
   it('makes missing OpenAI open-page URLs explicit', () => {
     render(
@@ -761,10 +840,10 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByText('Open page: URL unavailable')).toBeInTheDocument()
-  })
+    expect(screen.getByText('Open page: URL unavailable')).toBeInTheDocument();
+  });
 
   it('keeps live bash and other builtin tools in separate compact groups', () => {
     const { container } = render(
@@ -780,12 +859,14 @@ describe('ChatTranscript', () => {
                   {
                     callId: 'bash-1',
                     name: 'bash',
-                    input: '{"command":"rg -n \\"ChatTranscript\\" pkg/webui/frontend/src","timeout":30,"description":"Search transcript component"}',
+                    input:
+                      '{"command":"rg -n \\"ChatTranscript\\" pkg/webui/frontend/src","timeout":30,"description":"Search transcript component"}',
                   },
                   {
                     callId: 'read-1',
                     name: 'file_read',
-                    input: '{"file_path":"/home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx","offset":1,"line_limit":200}',
+                    input:
+                      '{"file_path":"/home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx","offset":1,"line_limit":200}',
                   },
                 ],
               },
@@ -793,20 +874,20 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByText('Running 1 command')).toBeVisible()
-    expect(screen.queryByText('Running 1 tool')).not.toBeInTheDocument()
-    expect(screen.getByText('$ rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeVisible()
+    expect(screen.getByText('Running 1 command')).toBeVisible();
+    expect(screen.queryByText('Running 1 tool')).not.toBeInTheDocument();
+    expect(screen.getByText('$ rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeVisible();
     expect(
       screen.getByText(
         'Read file: /home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx'
       )
-    ).toBeInTheDocument()
-    expect(screen.queryByText('Tools (2)')).not.toBeInTheDocument()
-    expect(container.querySelectorAll('details')).toHaveLength(2)
-    expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout')
-  })
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Tools (2)')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('details')).toHaveLength(2);
+    expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout');
+  });
 
   it('uses shared TUI spinners and groups developer tools without semantic icons', () => {
     const { container } = render(
@@ -827,7 +908,8 @@ describe('ChatTranscript', () => {
                   {
                     callId: 'patch-1',
                     name: 'apply_patch',
-                    input: '{"input":"*** Begin Patch\\n*** Update File: README.md\\n*** End Patch"}',
+                    input:
+                      '{"input":"*** Begin Patch\\n*** Update File: README.md\\n*** End Patch"}',
                   },
                   {
                     callId: 'skill-1',
@@ -840,17 +922,19 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByText('Running 1 command')).toBeVisible()
-    expect(screen.getByText('Running 1 tool')).toBeVisible()
-    expect(screen.getByText('Edit file: README.md')).toBeVisible()
-    expect(container.querySelectorAll('details')).toHaveLength(3)
-    expect(container.querySelector('details details')).not.toBeInTheDocument()
-    expect(container.querySelectorAll('summary .spinner-glyph')).toHaveLength(3)
-    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument()
-    expect(screen.getAllByLabelText('Tool running')).toHaveLength(3)
-  })
+    expect(screen.getByText('Running 1 command')).toBeVisible();
+    expect(screen.getByText('Running 1 tool')).toBeVisible();
+    expect(screen.getByText('Edit file: README.md')).toBeVisible();
+    expect(container.querySelectorAll('details')).toHaveLength(3);
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('summary .spinner-glyph')).toHaveLength(3);
+    expect(
+      container.querySelector('.tool-summary-text svg, .tool-summary-icon')
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Tool running')).toHaveLength(3);
+  });
 
   it('uses the shared spinner as the running command marker', () => {
     const { container } = render(
@@ -874,16 +958,18 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByLabelText('Tool running')).toHaveTextContent('running')
-    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
-    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾')
-    expect(container.querySelector('.tool-summary-text svg, .tool-summary-icon')).not.toBeInTheDocument()
-  })
+    expect(screen.getByLabelText('Tool running')).toHaveTextContent('running');
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
+    expect(container.querySelector('summary .spinner-glyph')).toHaveTextContent('⣾');
+    expect(
+      container.querySelector('.tool-summary-text svg, .tool-summary-icon')
+    ).not.toBeInTheDocument();
+  });
 
   it('keeps long running tool input previews compact', () => {
-    const longPrompt = 'x'.repeat(700)
+    const longPrompt = 'x'.repeat(700);
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -905,12 +991,12 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(container.querySelector('.running-tool-input-preview')).toBeInTheDocument()
-    expect(screen.getByText(/more characters/)).toBeInTheDocument()
-    expect(screen.queryByText(longPrompt)).not.toBeInTheDocument()
-  })
+    expect(container.querySelector('.running-tool-input-preview')).toBeInTheDocument();
+    expect(screen.getByText(/more characters/)).toBeInTheDocument();
+    expect(screen.queryByText(longPrompt)).not.toBeInTheDocument();
+  });
 
   it('uses bash duration as the completed activity status', () => {
     const { container } = render(
@@ -945,12 +1031,12 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms')
-    expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument()
-    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
-  })
+    expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms');
+    expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument();
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
+  });
 
   it('uses failed status for unsuccessful bash results with duration metadata', () => {
     const { container } = render(
@@ -985,21 +1071,26 @@ describe('ChatTranscript', () => {
           },
         ]}
       />
-    )
+    );
 
-    expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed')
-    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
-    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open')
-    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument()
-    expect(container.querySelector('summary')).toHaveTextContent('1 failed')
-    expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument()
-  })
+    expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed');
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
+    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
+    expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
+    expect(container.querySelector('summary')).toHaveTextContent('1 failed');
+    expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument();
+  });
 
   it('renders plain role labels without avatars or rounded-card utilities', () => {
-    const { container } = render(<ChatTranscript isStreaming={false} messages={[
-      { role: 'user', content: 'Inspect the repository.' },
-      { role: 'assistant', blocks: [{ type: 'message', content: 'I will read the files.' }] },
-    ]} />);
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          { role: 'user', content: 'Inspect the repository.' },
+          { role: 'assistant', blocks: [{ type: 'message', content: 'I will read the files.' }] },
+        ]}
+      />
+    );
 
     expect(screen.getByText('You')).toBeVisible();
     expect(screen.getByText('Kodelet')).toBeVisible();
@@ -1013,21 +1104,41 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.message-avatar')).not.toBeInTheDocument();
   });
 
-  it.each(['message', 'thinking'] as const)('does not merge command or builtin groups across a %s block', (type) => {
+  it.each([
+    'message',
+    'thinking',
+  ] as const)('does not merge command or builtin groups across a %s block', (type) => {
     const toolsBlock = (suffix: string, name: string): ChatAssistantBlock => ({
       type: 'tools',
-      tools: [{
-        callId: `${name}-${suffix}`, name,
-        input: JSON.stringify(name === 'bash' ? { command: `echo ${suffix}` } : { file_path: `${suffix}.md` }),
-        result: { toolName: name, success: true },
-      }],
-    });
-    const { container } = render(<ChatTranscript isStreaming={false} messages={[{
-      role: 'assistant', blocks: [
-        toolsBlock('first', 'bash'), { type, content: 'Between commands' }, toolsBlock('second', 'bash'),
-        toolsBlock('first', 'file_read'), { type, content: 'Between tools' }, toolsBlock('second', 'file_read'),
+      tools: [
+        {
+          callId: `${name}-${suffix}`,
+          name,
+          input: JSON.stringify(
+            name === 'bash' ? { command: `echo ${suffix}` } : { file_path: `${suffix}.md` }
+          ),
+          result: { toolName: name, success: true },
+        },
       ],
-    }]} />);
+    });
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              toolsBlock('first', 'bash'),
+              { type, content: 'Between commands' },
+              toolsBlock('second', 'bash'),
+              toolsBlock('first', 'file_read'),
+              { type, content: 'Between tools' },
+              toolsBlock('second', 'file_read'),
+            ],
+          },
+        ]}
+      />
+    );
 
     expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
     expect(screen.getByText('Read file: first.md')).toBeVisible();
@@ -1040,17 +1151,28 @@ describe('ChatTranscript', () => {
 
   it('does not merge command or thought groups across conversation turns', () => {
     const assistant: ChatRenderMessage = {
-      role: 'assistant', blocks: [
+      role: 'assistant',
+      blocks: [
         { type: 'thinking', content: 'Inspecting the repository' },
-        { type: 'tools', tools: [{
-          callId: 'bash-1', name: 'bash', input: '{"command":"pwd"}',
-          result: { toolName: 'bash', success: true },
-        }] },
+        {
+          type: 'tools',
+          tools: [
+            {
+              callId: 'bash-1',
+              name: 'bash',
+              input: '{"command":"pwd"}',
+              result: { toolName: 'bash', success: true },
+            },
+          ],
+        },
       ],
     };
-    const { container } = render(<ChatTranscript isStreaming={false} messages={[
-      assistant, { role: 'user', content: 'Please check again.' }, { ...assistant },
-    ]} />);
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[assistant, { role: 'user', content: 'Please check again.' }, { ...assistant }]}
+      />
+    );
 
     expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
     expect(screen.getAllByText('Had 1 thought')).toHaveLength(2);
@@ -1061,21 +1183,32 @@ describe('ChatTranscript', () => {
 
   it('preserves a manually expanded thought while another block streams', async () => {
     const user = userEvent.setup();
-    const messages: ChatRenderMessage[] = [{
-      role: 'assistant', blocks: [
-        { type: 'thinking', content: 'Completed reasoning' },
-        { type: 'message', content: 'Working', inProgress: true },
-      ],
-    }];
-    const { container, rerender } = render(<ChatTranscript isStreaming={true} messages={messages} />);
+    const messages: ChatRenderMessage[] = [
+      {
+        role: 'assistant',
+        blocks: [
+          { type: 'thinking', content: 'Completed reasoning' },
+          { type: 'message', content: 'Working', inProgress: true },
+        ],
+      },
+    ];
+    const { container, rerender } = render(
+      <ChatTranscript isStreaming={true} messages={messages} />
+    );
 
     await user.click(screen.getByText('Had 1 thought'));
     const thoughts = container.querySelector('details');
     expect(thoughts).toHaveAttribute('open');
 
-    rerender(<ChatTranscript isStreaming={true} messages={applyChatStreamEvent(messages, {
-      kind: 'text-delta', delta: ' on the implementation',
-    })} />);
+    rerender(
+      <ChatTranscript
+        isStreaming={true}
+        messages={applyChatStreamEvent(messages, {
+          kind: 'text-delta',
+          delta: ' on the implementation',
+        })}
+      />
+    );
 
     expect(container.querySelector('details')).toBe(thoughts);
     expect(thoughts).toHaveAttribute('open');

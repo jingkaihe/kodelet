@@ -1,8 +1,8 @@
-import React from 'react';
-import { ToolResult } from '../types';
+import type React from 'react';
+import type { ToolResult } from '../types';
 import FallbackRenderer from './tool-renderers/FallbackRenderer';
-import { getToolRendererRegistration } from './tool-renderers/registry';
 import { normalizeToolName } from './tool-renderers/reference';
+import { getToolRendererRegistration } from './tool-renderers/registry';
 import ToolImageAttachments from './tool-renderers/ToolImageAttachments';
 
 interface ToolRendererProps {

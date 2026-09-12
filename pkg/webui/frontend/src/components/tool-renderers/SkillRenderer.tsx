@@ -1,5 +1,5 @@
-import React from 'react';
-import { ToolResult, SkillMetadata } from '../../types';
+import type React from 'react';
+import type { SkillMetadata, ToolResult } from '../../types';
 
 interface SkillRendererProps {
   toolResult: ToolResult;

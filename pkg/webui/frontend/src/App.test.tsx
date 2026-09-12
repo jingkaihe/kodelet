@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import TerminalPage from './pages/TerminalPage';
 import {
   readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_STORAGE_KEY,
 } from './components/workspace/terminalPopOut';
+import TerminalPage from './pages/TerminalPage';
 import type { WorkspaceTarget } from './types';
 
 const mockGetConversation = vi.fn();
@@ -33,13 +33,7 @@ vi.mock('./pages/SignedOutPage', () => ({
 }));
 
 vi.mock('./components/workspace/TerminalModal', () => ({
-  default: ({
-    cwdLabel,
-    target,
-  }: {
-    cwdLabel: string;
-    target: WorkspaceTarget;
-  }) => (
+  default: ({ cwdLabel, target }: { cwdLabel: string; target: WorkspaceTarget }) => (
     <div
       data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
       data-cwd-label={cwdLabel}
@@ -185,10 +179,7 @@ describe('TerminalPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Resolving remote terminal…');
     const terminal = await screen.findByTestId('terminal-modal');
     expect(mockGetConversation).toHaveBeenCalledWith('conv-123');
-    expect(terminal).toHaveAttribute(
-      'data-conversation-id',
-      'conv-123'
-    );
+    expect(terminal).toHaveAttribute('data-conversation-id', 'conv-123');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
     expect(terminal).toHaveAttribute('data-cwd-label', '');

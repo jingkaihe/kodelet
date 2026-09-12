@@ -1,51 +1,48 @@
-import { useState, type ComponentProps } from "react";
-import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, userEvent, within } from "storybook/test";
-import ChatSidebar, {
-	ChatSidebarCollapsedRail,
-	ConversationSearchDialog,
-} from "./ChatSidebar";
-import { sampleConversations } from "../../stories/fixtures";
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { type ComponentProps, useState } from 'react';
+import { fn, userEvent, within } from 'storybook/test';
+import { sampleConversations } from '../../stories/fixtures';
+import ChatSidebar, { ChatSidebarCollapsedRail, ConversationSearchDialog } from './ChatSidebar';
 
 const conversationSearchCwdOptions = [
-	"/home/jingkaihe/workspace/kodelet",
-	"/home/jingkaihe/workspace/plugins",
+  '/home/jingkaihe/workspace/kodelet',
+  '/home/jingkaihe/workspace/plugins',
 ];
 
 const meta = {
-	title: "Chat/ChatSidebar",
-	component: ChatSidebar,
-	parameters: {
-		layout: "fullscreen",
-	},
-	decorators: [
-		(Story) => (
-			<div className="h-screen max-w-[360px]">
-				<Story />
-			</div>
-		),
-	],
-	args: {
-		activeConversationId: "conv-active",
-		authPrincipal: {
-			id: "https://issuer.example.com|jingkai-he",
-			issuer: "https://issuer.example.com",
-			subject: "jingkai-he",
-			name: "Jingkai He",
-			email: "jingkai@example.com",
-			roles: ["user"],
-		},
-		conversations: sampleConversations,
-		disabled: false,
-		loading: false,
-		onDeleteConversation: fn(),
-		onForkConversation: fn(),
-		onHide: fn(),
-		onNewChat: fn(),
-		onSearch: fn(),
-		onSelectConversation: fn(),
-		searchActive: false,
-	},
+  title: 'Chat/ChatSidebar',
+  component: ChatSidebar,
+  parameters: {
+    layout: 'fullscreen',
+  },
+  decorators: [
+    (Story) => (
+      <div className="h-screen max-w-[360px]">
+        <Story />
+      </div>
+    ),
+  ],
+  args: {
+    activeConversationId: 'conv-active',
+    authPrincipal: {
+      id: 'https://issuer.example.com|jingkai-he',
+      issuer: 'https://issuer.example.com',
+      subject: 'jingkai-he',
+      name: 'Jingkai He',
+      email: 'jingkai@example.com',
+      roles: ['user'],
+    },
+    conversations: sampleConversations,
+    disabled: false,
+    loading: false,
+    onDeleteConversation: fn(),
+    onForkConversation: fn(),
+    onHide: fn(),
+    onNewChat: fn(),
+    onSearch: fn(),
+    onSelectConversation: fn(),
+    searchActive: false,
+  },
 } satisfies Meta<typeof ChatSidebar>;
 
 export default meta;
@@ -53,135 +50,157 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const ConversationSearchStory = (
-	args: Pick<ComponentProps<typeof ChatSidebar>, "conversations" | "onSelectConversation">,
+  args: Pick<ComponentProps<typeof ChatSidebar>, 'conversations' | 'onSelectConversation'>
 ) => {
-	const [searchTerm, setSearchTerm] = useState("");
-	const [cwdFilter, setCwdFilter] = useState("");
-	const normalizedSearch = searchTerm.trim().toLowerCase();
-	const conversations = args.conversations.filter((conversation) => {
-		if (cwdFilter && conversation.cwd !== cwdFilter) {
-			return false;
-		}
+  const [searchTerm, setSearchTerm] = useState('');
+  const [cwdFilter, setCwdFilter] = useState('');
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const conversations = args.conversations.filter((conversation) => {
+    if (cwdFilter && conversation.cwd !== cwdFilter) {
+      return false;
+    }
 
-		if (!normalizedSearch) {
-			return true;
-		}
+    if (!normalizedSearch) {
+      return true;
+    }
 
-		return [
-			conversation.id,
-			conversation.summary,
-			conversation.preview,
-			conversation.firstMessage,
-			conversation.cwd,
-		].some((value) => value?.toLowerCase().includes(normalizedSearch));
-	});
+    return [
+      conversation.id,
+      conversation.summary,
+      conversation.preview,
+      conversation.firstMessage,
+      conversation.cwd,
+    ].some((value) => value?.toLowerCase().includes(normalizedSearch));
+  });
 
-	return (
-		<ConversationSearchDialog
-			conversations={conversations}
-			cwdFilter={cwdFilter}
-			cwdOptions={conversationSearchCwdOptions}
-			loading={false}
-			onClose={fn()}
-			onCwdFilterChange={setCwdFilter}
-			onSearchTermChange={setSearchTerm}
-			onSelectConversation={args.onSelectConversation}
-			searchTerm={searchTerm}
-		/>
-	);
+  return (
+    <ConversationSearchDialog
+      conversations={conversations}
+      cwdFilter={cwdFilter}
+      cwdOptions={conversationSearchCwdOptions}
+      loading={false}
+      onClose={fn()}
+      onCwdFilterChange={setCwdFilter}
+      onSearchTermChange={setSearchTerm}
+      onSelectConversation={args.onSelectConversation}
+      searchTerm={searchTerm}
+    />
+  );
 };
 
 export const GroupedConversations: Story = {};
 
 export const ChildConversations: Story = {
-	args: {
-		activeConversationId: "child-review",
-		conversations: [
-			{ ...sampleConversations[0], id: "child-review", summary: "Review sidebar changes", isRunning: true, metadata: { parent_conversation_id: "conv-active" } },
-			{ ...sampleConversations[0], id: "child-tests", summary: "Check keyboard navigation", metadata: { parent_conversation_id: "child-review" } },
-			{ ...sampleConversations[0], id: "child-search", summary: "Find conversation metadata", metadata: { parent_conversation_id: "conv-active" } },
-			...sampleConversations,
-		],
-	},
+  args: {
+    activeConversationId: 'child-review',
+    conversations: [
+      {
+        ...sampleConversations[0],
+        id: 'child-review',
+        summary: 'Review sidebar changes',
+        isRunning: true,
+        metadata: { parent_conversation_id: 'conv-active' },
+      },
+      {
+        ...sampleConversations[0],
+        id: 'child-tests',
+        summary: 'Check keyboard navigation',
+        metadata: { parent_conversation_id: 'child-review' },
+      },
+      {
+        ...sampleConversations[0],
+        id: 'child-search',
+        summary: 'Find conversation metadata',
+        metadata: { parent_conversation_id: 'conv-active' },
+      },
+      ...sampleConversations,
+    ],
+  },
 };
 
 export const SingleChildConversation: Story = {
-	args: {
-		conversations: [
-			{ ...sampleConversations[0], summary: "Ask subagent how many cores and RAM this machine has", isRunning: true },
-			{ ...sampleConversations[0], id: "child-inspect", summary: "Inspect this local machine using read-only shell commands", isRunning: true, metadata: { parent_conversation_id: "conv-active" } },
-		],
-	},
+  args: {
+    conversations: [
+      {
+        ...sampleConversations[0],
+        summary: 'Ask subagent how many cores and RAM this machine has',
+        isRunning: true,
+      },
+      {
+        ...sampleConversations[0],
+        id: 'child-inspect',
+        summary: 'Inspect this local machine using read-only shell commands',
+        isRunning: true,
+        metadata: { parent_conversation_id: 'conv-active' },
+      },
+    ],
+  },
 };
 
 export const ConversationSearchModal: Story = {
-	render: (args) => <ConversationSearchStory {...args} />,
+  render: (args) => <ConversationSearchStory {...args} />,
 };
 
 export const ConversationSearchLongHistory: Story = {
-	args: {
-		conversations: Array.from({ length: 40 }, (_, index) => ({
-			...sampleConversations[index % sampleConversations.length],
-			id: `20260912T183848-${String(index).padStart(16, "0")}`,
-			summary: `${index + 1}. Review the conversation search layout, keyboard navigation, and workspace filtering on desktop and mobile`,
-		})),
-	},
-	render: (args) => <ConversationSearchStory {...args} />,
+  args: {
+    conversations: Array.from({ length: 40 }, (_, index) => ({
+      ...sampleConversations[index % sampleConversations.length],
+      id: `20260912T183848-${String(index).padStart(16, '0')}`,
+      summary: `${index + 1}. Review the conversation search layout, keyboard navigation, and workspace filtering on desktop and mobile`,
+    })),
+  },
+  render: (args) => <ConversationSearchStory {...args} />,
 };
 
 export const CollapsedRail: Story = {
-	render: (args) => (
-		<ChatSidebarCollapsedRail
-			disabled={args.disabled}
-			onNewChat={args.onNewChat}
-			onOpen={() => args.onHide?.()}
-			onSearch={args.onSearch}
-			searchActive={true}
-		/>
-	),
+  render: (args) => (
+    <ChatSidebarCollapsedRail
+      disabled={args.disabled}
+      onNewChat={args.onNewChat}
+      onOpen={() => args.onHide?.()}
+      onSearch={args.onSearch}
+      searchActive={true}
+    />
+  ),
 };
 
 export const AccountMenuOpen: Story = {
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const accountButton = canvas.getByRole("button", {
-			name: "Jingkai He account menu",
-		});
-		await userEvent.click(accountButton);
-		accountButton.blur();
-	},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const accountButton = canvas.getByRole('button', {
+      name: 'Jingkai He account menu',
+    });
+    await userEvent.click(accountButton);
+    accountButton.blur();
+  },
 };
 
 export const WithoutOIDCSession: Story = {
-	args: {
-		authPrincipal: null,
-	},
+  args: {
+    authPrincipal: null,
+  },
 };
 
 export const RunningConversation: Story = {
-	args: {
-		conversations: sampleConversations.map((conversation) =>
-			conversation.id === "conv-active"
-				? { ...conversation, isRunning: true }
-				: conversation,
-		),
-	},
+  args: {
+    conversations: sampleConversations.map((conversation) =>
+      conversation.id === 'conv-active' ? { ...conversation, isRunning: true } : conversation
+    ),
+  },
 };
 
 export const Loading: Story = {
-	args: {
-		conversations: [],
-		loading: true,
-	},
+  args: {
+    conversations: [],
+    loading: true,
+  },
 };
 
 export const DisabledDuringStartup: Story = {
-	args: {
-		disabled: true,
-		conversations: sampleConversations.map((conversation) =>
-			conversation.id === "conv-active"
-				? { ...conversation, isRunning: true }
-				: conversation,
-		),
-	},
+  args: {
+    disabled: true,
+    conversations: sampleConversations.map((conversation) =>
+      conversation.id === 'conv-active' ? { ...conversation, isRunning: true } : conversation
+    ),
+  },
 };

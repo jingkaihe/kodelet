@@ -1,5 +1,5 @@
-import React from 'react';
-import { ExtensionToolMetadata, ToolRenderProps } from '../../types';
+import type React from 'react';
+import type { ExtensionToolMetadata, ToolRenderProps } from '../../types';
 import {
   formatReferenceDuration,
   getExtensionToolPresentation,
@@ -46,6 +46,7 @@ const ExtensionToolRenderer: React.FC<ToolRenderProps> = ({ toolResult, toolInpu
           hasPresentationBody && presentation.format === 'markdown' ? (
             <div
               className="tool-compact-markdown extension-presentation-body"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: renderSafeMarkdown escapes raw HTML and rejects unsafe link and image URLs.
               dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(body) }}
             />
           ) : hasPresentationBody ? (

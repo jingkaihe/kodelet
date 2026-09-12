@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ToolResult } from '../../types';
+import type { ExtensionToolMetadata, TaskRunSnapshot, ToolResult } from '../../types';
 import ExtensionToolRenderer from './ExtensionToolRenderer';
 
 describe('ExtensionToolRenderer', () => {
@@ -292,7 +292,26 @@ describe('ExtensionToolRenderer', () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByText('10 done · 2 running · 1m 10s')).toBeInTheDocument();
 
-    rerender(<ExtensionToolRenderer toolResult={toolResult} />);
+    const metadata = toolResult.metadata as ExtensionToolMetadata;
+    const snapshot = metadata.data?.taskRun as TaskRunSnapshot;
+    const updatedResult: ToolResult = {
+      ...toolResult,
+      metadata: {
+        ...metadata,
+        data: { ...metadata.data, taskRun: { ...snapshot, revision: 8, elapsedMs: 75000 } },
+      },
+    };
+    rerender(<ExtensionToolRenderer isPartial toolResult={updatedResult} />);
+    expect(screen.getByText('10 done · 2 running · 1m 15s')).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByText('10 done · 2 running · 1m 16s')).toBeInTheDocument();
+
+    rerender(<ExtensionToolRenderer isPartial toolResult={{ ...updatedResult }} />);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByText('10 done · 2 running · 1m 17s')).toBeInTheDocument();
+
+    rerender(<ExtensionToolRenderer toolResult={updatedResult} />);
     expect(vi.getTimerCount()).toBe(0);
   });
 

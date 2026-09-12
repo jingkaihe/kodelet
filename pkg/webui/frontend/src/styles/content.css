@@ -215,11 +215,7 @@ pre code {
 }
 
 .chat-prose pre {
-  background: linear-gradient(
-    135deg,
-    var(--kodelet-light-gray) 0%,
-    var(--kodelet-light) 100%
-  );
+  background: linear-gradient(135deg, var(--kodelet-light-gray) 0%, var(--kodelet-light) 100%);
   color: var(--kodelet-dark);
   border-radius: 6px;
   padding: 0.875rem;

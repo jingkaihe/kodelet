@@ -1,6 +1,5 @@
-
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router';
+import { Route, BrowserRouter as Router, Routes } from 'react-router';
 
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const TerminalPage = lazy(() => import('./pages/TerminalPage'));
@@ -22,19 +21,19 @@ function App() {
       const followsVisualViewport = Math.abs((viewport?.scale ?? 1) - 1) < 0.01;
       app.style.setProperty(
         '--app-viewport-top',
-        `${followsVisualViewport ? viewport?.offsetTop ?? 0 : 0}px`
+        `${followsVisualViewport ? (viewport?.offsetTop ?? 0) : 0}px`
       );
       app.style.setProperty(
         '--app-viewport-left',
-        `${followsVisualViewport ? viewport?.offsetLeft ?? 0 : 0}px`
+        `${followsVisualViewport ? (viewport?.offsetLeft ?? 0) : 0}px`
       );
       app.style.setProperty(
         '--app-viewport-width',
-        `${followsVisualViewport ? viewport?.width ?? window.innerWidth : window.innerWidth}px`
+        `${followsVisualViewport ? (viewport?.width ?? window.innerWidth) : window.innerWidth}px`
       );
       app.style.setProperty(
         '--app-viewport-height',
-        `${followsVisualViewport ? viewport?.height ?? window.innerHeight : window.innerHeight}px`
+        `${followsVisualViewport ? (viewport?.height ?? window.innerHeight) : window.innerHeight}px`
       );
     };
 
@@ -53,7 +52,7 @@ function App() {
   return (
     <Router>
       <div className="app-viewport h-full min-h-0 overflow-hidden" ref={appRef}>
-        <Suspense fallback={<div className="app-loading" role="status">Loading Kodelet…</div>}>
+        <Suspense fallback={<output className="app-loading">Loading Kodelet…</output>}>
           <Routes>
             <Route path="/" element={<ChatPage />} />
             <Route path="/c/:id" element={<ChatPage />} />

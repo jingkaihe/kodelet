@@ -1,10 +1,4 @@
 import { useEffect, useState } from 'react';
-import apiService from '../services/api';
-import type {
-  ApprovalStatus,
-  AuthPrincipal,
-  RunnerEnrollmentAuthorization,
-} from '../types';
 import {
   ApprovalCodeForm,
   AuthDetailList,
@@ -12,6 +6,8 @@ import {
   AuthPageShell,
   formatAuthTimestamp,
 } from '../components/auth/AuthPageShell';
+import apiService from '../services/api';
+import type { ApprovalStatus, AuthPrincipal, RunnerEnrollmentAuthorization } from '../types';
 
 const statusCopy = (status: ApprovalStatus): string => {
   switch (status) {
@@ -108,9 +104,7 @@ export function RunnerEnrollmentPageView({
       {principal && !enrollment && !completionStatus ? (
         <>
           {!error ? (
-            <AuthNotice tone="warning">
-              Only use a code from a runner you control.
-            </AuthNotice>
+            <AuthNotice tone="warning">Only use a code from a runner you control.</AuthNotice>
           ) : null}
           <ApprovalCodeForm
             busy={busy}
@@ -125,9 +119,7 @@ export function RunnerEnrollmentPageView({
 
       {principal && enrollment ? (
         <div className="auth-request-review">
-          <AuthNotice tone="warning">
-            Only approve a runner you control.
-          </AuthNotice>
+          <AuthNotice tone="warning">Only approve a runner you control.</AuthNotice>
           <AuthDetailList
             items={[
               { label: 'Code', value: enrollment.userCode, mono: true },
@@ -157,7 +149,12 @@ export function RunnerEnrollmentPageView({
           ) : null}
           {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
           <div className="auth-decision-actions">
-            <button className="auth-secondary-button" disabled={busy} onClick={onReset} type="button">
+            <button
+              className="auth-secondary-button"
+              disabled={busy}
+              onClick={onReset}
+              type="button"
+            >
               Use a different code
             </button>
             {enrollment.status === 'pending' ? (
@@ -250,11 +247,14 @@ export default function RunnerEnrollmentPage() {
         setPrincipal(null);
       }
       setError(
-        lookupError && typeof lookupError === 'object' && 'status' in lookupError && Number(lookupError.status) === 404
+        lookupError &&
+          typeof lookupError === 'object' &&
+          'status' in lookupError &&
+          Number(lookupError.status) === 404
           ? 'Code not found.'
           : lookupError instanceof Error
             ? lookupError.message
-            : 'Unable to find that runner enrollment.',
+            : 'Unable to find that runner enrollment.'
       );
     } finally {
       setActiveAction(null);
@@ -271,7 +271,7 @@ export default function RunnerEnrollmentPage() {
       const response = await apiService.submitRunnerEnrollmentDecision(
         enrollment.userCode,
         decision,
-        decision === 'approve' && replaceConfirmed,
+        decision === 'approve' && replaceConfirmed
       );
       setEnrollment(null);
       setCompletionStatus(response.status);
@@ -288,7 +288,7 @@ export default function RunnerEnrollmentPage() {
       setError(
         decisionError instanceof Error
           ? decisionError.message
-          : 'Unable to process the runner enrollment.',
+          : 'Unable to process the runner enrollment.'
       );
     } finally {
       setActiveAction(null);

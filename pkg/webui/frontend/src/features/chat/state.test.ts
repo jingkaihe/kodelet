@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyChatStreamEvent, conversationToChatMessages } from './state';
 import type { ChatRenderMessage, Conversation } from '../../types';
+import { applyChatStreamEvent, conversationToChatMessages } from './state';
 
 describe('conversationToChatMessages', () => {
   it('converts assistant thinking, tool calls, and content into ordered blocks', () => {

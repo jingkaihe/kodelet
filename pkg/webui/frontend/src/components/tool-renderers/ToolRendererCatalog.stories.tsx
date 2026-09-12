@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import ToolRenderer from '../ToolRenderer';
-import type { ToolResult } from '../../types';
 import { sampleBashToolResult, sampleFileReadToolResult } from '../../stories/fixtures';
+import type { ToolResult } from '../../types';
+import ToolRenderer from '../ToolRenderer';
 
 interface ToolExample {
   title: string;

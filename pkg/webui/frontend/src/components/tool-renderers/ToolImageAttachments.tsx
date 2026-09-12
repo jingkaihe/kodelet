@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
+import type React from 'react';
+import { useState } from 'react';
 import type { ToolAttachment, ToolResult } from '../../types';
 
 // Build a same-origin URL from the server-issued code. Never fetch extension
@@ -47,9 +48,11 @@ const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }>
           />
         </a>
       ) : (
-        <p className="quiet-tool-warning" role="status">
-          {attachment.error ? `Image unavailable: ${attachment.error}` : 'Image preview unavailable.'}
-        </p>
+        <output className="quiet-tool-warning">
+          {attachment.error
+            ? `Image unavailable: ${attachment.error}`
+            : 'Image preview unavailable.'}
+        </output>
       )}
       {url ? (
         <figcaption className="tool-image-actions">

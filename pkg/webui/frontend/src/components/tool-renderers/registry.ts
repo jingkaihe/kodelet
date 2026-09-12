@@ -10,11 +10,11 @@ import GlobRenderer from './GlobRenderer';
 import GrepRenderer from './GrepRenderer';
 import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import ReadConversationRenderer from './ReadConversationRenderer';
+import { normalizeToolName } from './reference';
 import SkillRenderer from './SkillRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
 import ViewImageRenderer from './ViewImageRenderer';
 import WebFetchRenderer from './WebFetchRenderer';
-import { normalizeToolName } from './reference';
 
 export interface ToolRendererRegistration {
   component: ComponentType<ToolRenderProps>;

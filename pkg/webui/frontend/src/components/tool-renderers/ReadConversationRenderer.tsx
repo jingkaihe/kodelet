@@ -1,6 +1,6 @@
-import React from 'react';
-import { ReadConversationMetadata, ToolResult } from '../../types';
-import { renderMarkdown } from './reference';
+import type React from 'react';
+import type { ReadConversationMetadata, ToolResult } from '../../types';
+import { renderSafeMarkdown } from './reference';
 
 interface ReadConversationRendererProps {
   toolResult: ToolResult;
@@ -66,7 +66,8 @@ const ReadConversationRenderer: React.FC<ReadConversationRendererProps> = ({ too
       {content ? (
         <div
           className="tool-compact-markdown read-conversation-summary"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: renderSafeMarkdown escapes raw HTML and rejects unsafe link and image URLs.
+          dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(content) }}
         />
       ) : (
         <div className="quiet-tool-empty">No conversation summary returned.</div>

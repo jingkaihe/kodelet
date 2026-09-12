@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import { getMetadata, getMetadataAny } from './utils';
-import { ToolResult } from '../../types';
 
 describe('getMetadata', () => {
   const mockToolResult: ToolResult = {
@@ -11,12 +11,12 @@ describe('getMetadata', () => {
     metadata: {
       level1: {
         level2: {
-          level3: 'deep value'
+          level3: 'deep value',
         },
-        simple: 'simple value'
+        simple: 'simple value',
       },
-      topLevel: 'top value'
-    }
+      topLevel: 'top value',
+    },
   };
 
   it('retrieves top-level metadata', () => {
@@ -47,7 +47,7 @@ describe('getMetadata', () => {
   it('handles null metadata', () => {
     const nullResult: ToolResult = {
       ...mockToolResult,
-      metadata: undefined
+      metadata: undefined,
     };
     const result = getMetadata(nullResult, 'any');
     expect(result).toBeNull();
@@ -56,7 +56,7 @@ describe('getMetadata', () => {
   it('handles undefined metadata', () => {
     const undefinedResult: ToolResult = {
       ...mockToolResult,
-      metadata: undefined
+      metadata: undefined,
     };
     const result = getMetadata(undefinedResult, 'any');
     expect(result).toBeNull();
@@ -72,9 +72,9 @@ describe('getMetadataAny', () => {
     metadata: {
       option1: 'value1',
       nested: {
-        option2: 'value2'
-      }
-    }
+        option2: 'value2',
+      },
+    },
   };
 
   it('returns first found value', () => {
@@ -98,8 +98,8 @@ describe('getMetadataAny', () => {
       metadata: {
         option1: null,
         option2: undefined,
-        option3: 'found'
-      }
+        option3: 'found',
+      },
     };
     const result = getMetadataAny(toolResult, ['option1', 'option2', 'option3']);
     expect(result).toBe('found');

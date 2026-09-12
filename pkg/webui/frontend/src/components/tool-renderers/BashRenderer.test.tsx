@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BashMetadata, ToolResult } from '../../types';
+import * as utils from '../../utils';
 import BashRenderer from './BashRenderer';
 import { ReferenceTerminal } from './reference';
-import { BashMetadata, ToolResult } from '../../types';
-import * as utils from '../../utils';
 
 vi.mock('../../utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils')>();
@@ -186,7 +186,9 @@ describe('BashRenderer', () => {
 describe('ReferenceTerminal ANSI output', () => {
   it('renders basic and bright colors with the terminal theme palette', () => {
     const { container } = render(
-      <ReferenceTerminal output={'\x1b[32mPassed\x1b[31mFailed\x1b[91mBright failure\x1b[30;46m RUN \x1b[0m'} />
+      <ReferenceTerminal
+        output={'\x1b[32mPassed\x1b[31mFailed\x1b[91mBright failure\x1b[30;46m RUN \x1b[0m'}
+      />
     );
 
     expect(screen.getByText('Passed')).toHaveStyle({ color: 'var(--ansi-green)' });
@@ -202,16 +204,20 @@ describe('ReferenceTerminal ANSI output', () => {
 
   it('renders indexed, grayscale, and truecolor foregrounds and backgrounds', () => {
     render(
-      <ReferenceTerminal output={[
-        '\x1b[38;5;196mIndexed red',
-        '\x1b[0;48;5;244mGray background',
-        '\x1b[0;38;2;12;34;56;48;2;210;220;230mTruecolor',
-        '\x1b[0m',
-      ].join('')} />
+      <ReferenceTerminal
+        output={[
+          '\x1b[38;5;196mIndexed red',
+          '\x1b[0;48;5;244mGray background',
+          '\x1b[0;38;2;12;34;56;48;2;210;220;230mTruecolor',
+          '\x1b[0m',
+        ].join('')}
+      />
     );
 
     expect(screen.getByText('Indexed red')).toHaveStyle({ color: 'rgb(255, 0, 0)' });
-    expect(screen.getByText('Gray background')).toHaveStyle({ backgroundColor: 'rgb(128, 128, 128)' });
+    expect(screen.getByText('Gray background')).toHaveStyle({
+      backgroundColor: 'rgb(128, 128, 128)',
+    });
     expect(screen.getByText('Truecolor')).toHaveStyle({
       color: 'rgb(12, 34, 56)',
       backgroundColor: 'rgb(210, 220, 230)',
@@ -220,30 +226,47 @@ describe('ReferenceTerminal ANSI output', () => {
 
   it('combines decorations and resets only the requested attributes', () => {
     render(
-      <ReferenceTerminal output={[
-        '\x1b[32;1;2;3;4;9mDecorated',
-        '\x1b[22mNormal intensity',
-        '\x1b[23;24mStrike only',
-        '\x1b[29mColor only',
-        '\x1b[0m',
-      ].join('')} />
+      <ReferenceTerminal
+        output={[
+          '\x1b[32;1;2;3;4;9mDecorated',
+          '\x1b[22mNormal intensity',
+          '\x1b[23;24mStrike only',
+          '\x1b[29mColor only',
+          '\x1b[0m',
+        ].join('')}
+      />
     );
 
     const decorated = screen.getByText('Decorated');
-    expect(decorated).toHaveStyle({ color: 'var(--ansi-green)', fontWeight: 700, opacity: 0.7, fontStyle: 'italic' });
-    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain('underline');
-    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain('line-through');
+    expect(decorated).toHaveStyle({
+      color: 'var(--ansi-green)',
+      fontWeight: 700,
+      opacity: 0.7,
+      fontStyle: 'italic',
+    });
+    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain(
+      'underline'
+    );
+    expect(decorated.style.textDecorationLine || decorated.style.textDecoration).toContain(
+      'line-through'
+    );
 
     const normalIntensity = screen.getByText('Normal intensity');
     expect(normalIntensity.style.fontWeight).toBe('');
     expect(normalIntensity.style.opacity).toBe('');
     expect(normalIntensity).toHaveStyle({ color: 'var(--ansi-green)', fontStyle: 'italic' });
-    expect(normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration).toContain('underline');
-    expect(normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration).toContain('line-through');
+    expect(
+      normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration
+    ).toContain('underline');
+    expect(
+      normalIntensity.style.textDecorationLine || normalIntensity.style.textDecoration
+    ).toContain('line-through');
 
     const strikeOnly = screen.getByText('Strike only');
     expect(strikeOnly.style.fontStyle).toBe('');
-    expect(strikeOnly.style.textDecorationLine || strikeOnly.style.textDecoration).toBe('line-through');
+    expect(strikeOnly.style.textDecorationLine || strikeOnly.style.textDecoration).toBe(
+      'line-through'
+    );
 
     const colorOnly = screen.getByText('Color only');
     expect(colorOnly).toHaveStyle({ color: 'var(--ansi-green)' });
@@ -252,14 +275,16 @@ describe('ReferenceTerminal ANSI output', () => {
 
   it('restores inherited defaults with foreground, background, and full resets', () => {
     render(
-      <ReferenceTerminal output={[
-        '\x1b[1;31;46mStyled',
-        '\x1b[39mDefault foreground',
-        '\x1b[49mDefault background',
-        '\x1b[0mFully reset',
-        '\x1b[1;38;2;12;34;56;48;2;210;220;230mRGB styled',
-        '\x1b[mShort reset',
-      ].join('')} />
+      <ReferenceTerminal
+        output={[
+          '\x1b[1;31;46mStyled',
+          '\x1b[39mDefault foreground',
+          '\x1b[49mDefault background',
+          '\x1b[0mFully reset',
+          '\x1b[1;38;2;12;34;56;48;2;210;220;230mRGB styled',
+          '\x1b[mShort reset',
+        ].join('')}
+      />
     );
 
     const foregroundReset = screen.getByText('Default foreground');
@@ -303,7 +328,10 @@ describe('ReferenceTerminal ANSI output', () => {
       </>
     );
 
-    expect(screen.getByText('First terminal')).toHaveStyle({ color: 'var(--ansi-red)', fontWeight: 700 });
+    expect(screen.getByText('First terminal')).toHaveStyle({
+      color: 'var(--ansi-red)',
+      fontWeight: 700,
+    });
     const independent = screen.getByText('Independent terminal');
     expect(independent.style.color).toBe('');
     expect(independent.style.fontWeight).toBe('');
@@ -361,10 +389,16 @@ describe('ReferenceTerminal ANSI output', () => {
 
   it('ignores cursor and erase controls without stripping literal bracket text', () => {
     const { container } = render(
-      <ReferenceTerminal output={'\x1b[?25l\x1b[2J\x1b[H\x1b[2K\x1b[32mProgress\x1b[1G\x1b[0m [32m is literal\x1b[?25h'} />
+      <ReferenceTerminal
+        output={
+          '\x1b[?25l\x1b[2J\x1b[H\x1b[2K\x1b[32mProgress\x1b[1G\x1b[0m [32m is literal\x1b[?25h'
+        }
+      />
     );
 
-    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe('Progress [32m is literal');
+    expect(container.querySelector('.tool-terminal-body')?.textContent).toBe(
+      'Progress [32m is literal'
+    );
     expect(screen.getByText('Progress')).toHaveStyle({ color: 'var(--ansi-green)' });
     expect(screen.getByText('[32m is literal').style.color).toBe('');
   });
@@ -379,12 +413,19 @@ describe('ReferenceTerminal ANSI output', () => {
     expect(screen.getByText(html)).toHaveStyle({ color: 'var(--ansi-red)' });
     expect(screen.getByText(attributes)).toBeInTheDocument();
     expect(container.querySelector('.tool-terminal-body')?.textContent).toBe(html + attributes);
-    expect(container.querySelector('script, img, svg, [onerror], [onload], [onmouseover]')).not.toBeInTheDocument();
-    expect(container.querySelector('.tool-terminal-body pre')?.innerHTML).toContain('&lt;script&gt;');
+    expect(
+      container.querySelector('script, img, svg, [onerror], [onload], [onmouseover]')
+    ).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal-body pre')?.innerHTML).toContain(
+      '&lt;script&gt;'
+    );
   });
 
   it('retains the 120-line limit and omitted-line indicator with ANSI output', () => {
-    const output = Array.from({ length: 123 }, (_, index) => `\x1b[32mLine ${index + 1}\x1b[0m`).join('\n');
+    const output = Array.from(
+      { length: 123 },
+      (_, index) => `\x1b[32mLine ${index + 1}\x1b[0m`
+    ).join('\n');
     const { container } = render(<ReferenceTerminal output={output} />);
 
     expect(container.querySelectorAll('.tool-terminal-line')).toHaveLength(121);

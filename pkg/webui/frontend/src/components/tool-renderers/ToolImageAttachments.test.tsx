@@ -57,16 +57,25 @@ describe('ToolImageAttachments', () => {
     await user.tab();
     expect(screen.getByRole('link', { name: `Open full-size image: ${image.alt}` })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole('link', { name: `Open full size in a new tab: ${image.alt}` })).toHaveFocus();
+    expect(
+      screen.getByRole('link', { name: `Open full size in a new tab: ${image.alt}` })
+    ).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('link', { name: `Download image: ${image.alt}` })).toHaveFocus();
   });
 
   it('renders all attached images and uses the filename as alternate text when needed', () => {
-    render(<ToolImageAttachments toolResult={{
-      ...result,
-      attachments: [image, { ...image, artifactId: 'art_second', shortCode: 'second', alt: '' }],
-    }} />);
+    render(
+      <ToolImageAttachments
+        toolResult={{
+          ...result,
+          attachments: [
+            image,
+            { ...image, artifactId: 'art_second', shortCode: 'second', alt: '' },
+          ],
+        }}
+      />
+    );
 
     expect(screen.getAllByRole('img')).toHaveLength(2);
     expect(screen.getByRole('img', { name: 'chart.png' })).toHaveAttribute('src', '/i/second');
@@ -83,22 +92,31 @@ describe('ToolImageAttachments', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Image preview unavailable.');
+    expect(screen.getByRole('status').tagName).toBe('OUTPUT');
   });
 
   it('ignores arbitrary view URLs and fetches only the registered image route', () => {
-    render(<ToolImageAttachments toolResult={{
-      ...result,
-      attachments: [{ ...image, viewUrl: 'javascript:alert(1)' }],
-    }} />);
+    render(
+      <ToolImageAttachments
+        toolResult={{
+          ...result,
+          attachments: [{ ...image, viewUrl: 'javascript:alert(1)' }],
+        }}
+      />
+    );
 
     expect(screen.getByRole('img')).toHaveAttribute('src', '/i/public_image-code');
   });
 
   it('shows an upload failure without trying to fetch the image', () => {
-    render(<ToolImageAttachments toolResult={{
-      ...result,
-      attachments: [{ type: 'image', error: 'Upload interrupted' }],
-    }} />);
+    render(
+      <ToolImageAttachments
+        toolResult={{
+          ...result,
+          attachments: [{ type: 'image', error: 'Upload interrupted' }],
+        }}
+      />
+    );
 
     expect(screen.getByRole('status')).toHaveTextContent('Image unavailable: Upload interrupted');
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
@@ -110,6 +128,8 @@ describe('ToolImageAttachments', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Image preview unavailable.');
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: `Open full size in a new tab: ${image.alt}` })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: `Open full size in a new tab: ${image.alt}` })
+    ).toBeInTheDocument();
   });
 });

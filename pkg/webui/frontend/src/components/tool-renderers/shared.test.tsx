@@ -1,12 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import {
-  CopyButton,
-  ExternalLink,
-  formatJsonObjectOrArray,
-  safeStringify,
-} from './shared';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import * as utils from '../../utils';
+import { CopyButton, ExternalLink, formatJsonObjectOrArray, safeStringify } from './shared';
 
 // Mock utils
 vi.mock('../../utils', async () => {
@@ -25,6 +20,7 @@ describe('CopyButton', () => {
     const button = screen.getByRole('button', { name: 'Copy to clipboard' });
     expect(button).toBeInTheDocument();
     expect(button).toHaveClass('panel-action-button');
+    expect(button).toHaveAttribute('type', 'button');
   });
 
   it('calls copyToClipboard when clicked', () => {
@@ -46,11 +42,7 @@ describe('CopyButton', () => {
 
 describe('ExternalLink', () => {
   it('renders link with children', () => {
-    render(
-      <ExternalLink href="https://example.com">
-        Example Link
-      </ExternalLink>
-    );
+    render(<ExternalLink href="https://example.com">Example Link</ExternalLink>);
 
     const link = screen.getByRole('link', { name: 'Open in new tab' });
     expect(link).toHaveAttribute('href', 'https://example.com');
@@ -73,11 +65,7 @@ describe('ExternalLink', () => {
   it('handles invalid URL', () => {
     vi.mocked(utils.escapeUrl).mockReturnValueOnce('#');
 
-    render(
-      <ExternalLink href="javascript:alert(1)">
-        Bad Link
-      </ExternalLink>
-    );
+    render(<ExternalLink href="javascript:alert(1)">Bad Link</ExternalLink>);
 
     expect(screen.getByText('Invalid URL')).toBeInTheDocument();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
@@ -86,11 +74,7 @@ describe('ExternalLink', () => {
   it('uses escaped URL', () => {
     vi.mocked(utils.escapeUrl).mockReturnValueOnce('https://safe-url.com');
 
-    render(
-      <ExternalLink href="https://example.com">
-        Link
-      </ExternalLink>
-    );
+    render(<ExternalLink href="https://example.com">Link</ExternalLink>);
 
     const link = screen.getByRole('link');
     expect(link).toHaveAttribute('href', 'https://safe-url.com');
@@ -109,9 +93,7 @@ describe('safeStringify', () => {
 
 describe('formatJsonObjectOrArray', () => {
   it('formats valid JSON objects and arrays', () => {
-    expect(formatJsonObjectOrArray('{"key":"value"}')?.formatted).toBe(
-      '{\n  "key": "value"\n}'
-    );
+    expect(formatJsonObjectOrArray('{"key":"value"}')?.formatted).toBe('{\n  "key": "value"\n}');
     expect(formatJsonObjectOrArray('[1,2]')?.formatted).toBe('[\n  1,\n  2\n]');
   });
 

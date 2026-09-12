@@ -1,7 +1,7 @@
-import React from 'react';
-import { ToolResult, ViewImageMetadata } from '../../types';
-import { getMetadataAny } from './utils';
+import type React from 'react';
+import type { ToolResult, ViewImageMetadata } from '../../types';
 import { ReferenceToolKVGrid } from './reference';
+import { getMetadataAny } from './utils';
 
 interface ViewImageRendererProps {
   toolResult: ToolResult;

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import FileEditRenderer from './FileEditRenderer';
-import { ToolResult } from '../../types';
 
 describe('FileEditRenderer', () => {
   const createToolResult = (

@@ -12,9 +12,7 @@ const SharedPrimitiveGallery = () => (
       <section className="surface-panel rounded-2xl p-4">
         <h3 className="mb-3 text-sm font-semibold">External link</h3>
         <div className="space-y-2 text-sm">
-          <ExternalLink href="https://storybook.js.org/docs">
-            Storybook documentation
-          </ExternalLink>
+          <ExternalLink href="https://storybook.js.org/docs">Storybook documentation</ExternalLink>
           <div>
             <ExternalLink href="javascript:alert(1)">Blocked unsafe URL</ExternalLink>
           </div>

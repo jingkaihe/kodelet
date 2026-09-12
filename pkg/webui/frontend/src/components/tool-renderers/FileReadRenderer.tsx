@@ -1,5 +1,5 @@
-import React from 'react';
-import { ToolResult, FileMetadata } from '../../types';
+import type React from 'react';
+import type { FileMetadata, ToolResult } from '../../types';
 import {
   estimateLanguageFromPath,
   ReferenceCodeBlock,

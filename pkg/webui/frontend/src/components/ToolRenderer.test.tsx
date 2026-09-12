@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../types';
 import ToolRenderer from './ToolRenderer';
-import { ToolResult } from '../types';
 
 describe('ToolRenderer', () => {
   it('uses the bash renderer for failed bash commands so output is still visible', () => {

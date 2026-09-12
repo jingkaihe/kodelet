@@ -28,13 +28,16 @@ export const formatCompactRelativeTime = (dateString: string | null | undefined)
 export const formatCost = (usage: Usage | null | undefined): string => {
   if (!usage) return '$0.00';
 
-  const total = (usage.inputCost || 0) + (usage.outputCost || 0) +
-                (usage.cacheCreationCost || 0) + (usage.cacheReadCost || 0);
+  const total =
+    (usage.inputCost || 0) +
+    (usage.outputCost || 0) +
+    (usage.cacheCreationCost || 0) +
+    (usage.cacheReadCost || 0);
 
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-    minimumFractionDigits: 4
+    minimumFractionDigits: 4,
   }).format(total);
 };
 
@@ -68,11 +71,12 @@ const fallbackCopyToClipboard = (text: string): boolean => {
 
   const selection = document.getSelection();
   const previousRanges = selection
-    ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange())
+    ? Array.from({ length: selection.rangeCount }, (_, index) =>
+        selection.getRangeAt(index).cloneRange()
+      )
     : [];
-  const activeElement = document.activeElement instanceof HTMLElement
-    ? document.activeElement
-    : null;
+  const activeElement =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   document.body.appendChild(textarea);
 
@@ -209,9 +213,8 @@ export const formatDuration = (duration: number | string): string => {
   }
 
   if (milliseconds < 1000) {
-    const roundedMilliseconds = milliseconds >= 100
-      ? Math.round(milliseconds)
-      : Math.round(milliseconds * 10) / 10;
+    const roundedMilliseconds =
+      milliseconds >= 100 ? Math.round(milliseconds) : Math.round(milliseconds * 10) / 10;
 
     return Number.isInteger(roundedMilliseconds)
       ? `${roundedMilliseconds}ms`
@@ -226,11 +229,26 @@ export const detectLanguageFromPath = (filePath: string): string => {
   if (!filePath) return '';
   const ext = filePath.split('.').pop()?.toLowerCase();
   const langMap: Record<string, string> = {
-    'js': 'javascript', 'ts': 'typescript', 'py': 'python', 'go': 'go',
-    'java': 'java', 'cpp': 'cpp', 'c': 'c', 'cs': 'csharp',
-    'php': 'php', 'rb': 'ruby', 'rs': 'rust', 'sh': 'bash',
-    'html': 'html', 'css': 'css', 'json': 'json', 'xml': 'xml',
-    'yaml': 'yaml', 'yml': 'yaml', 'md': 'markdown', 'sql': 'sql'
+    'js': 'javascript',
+    'ts': 'typescript',
+    'py': 'python',
+    'go': 'go',
+    'java': 'java',
+    'cpp': 'cpp',
+    'c': 'c',
+    'cs': 'csharp',
+    'php': 'php',
+    'rb': 'ruby',
+    'rs': 'rust',
+    'sh': 'bash',
+    'html': 'html',
+    'css': 'css',
+    'json': 'json',
+    'xml': 'xml',
+    'yaml': 'yaml',
+    'yml': 'yaml',
+    'md': 'markdown',
+    'sql': 'sql',
   };
   return langMap[ext || ''] || ext || '';
 };

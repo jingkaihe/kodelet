@@ -1,19 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Usage } from '../types';
 import {
-  formatCompactRelativeTime,
-  formatCost,
+  cn,
   copyToClipboard,
-  showToast,
+  debounce,
+  detectLanguageFromPath,
   escapeHtml,
   escapeUrl,
-  formatFileSize,
+  formatCompactRelativeTime,
+  formatCost,
   formatDuration,
-  detectLanguageFromPath,
-  debounce,
-  cn,
+  formatFileSize,
+  showToast,
   truncateText,
 } from './index';
-import { Usage } from '../types';
 
 describe('formatCompactRelativeTime', () => {
   beforeEach(() => {
@@ -201,7 +201,10 @@ describe('showToast', () => {
   });
 
   it('wraps long notification messages inside the toast body', () => {
-    showToast('Workspace extension started with a very-long-token-that-should-wrap-instead-of-overflowing-the-notification-box', 'info');
+    showToast(
+      'Workspace extension started with a very-long-token-that-should-wrap-instead-of-overflowing-the-notification-box',
+      'info'
+    );
 
     const message = document.querySelector('.toast-message');
     expect(message).toBeTruthy();
@@ -209,16 +212,24 @@ describe('showToast', () => {
   });
 
   it('renders notification title and message separately', () => {
-    showToast('Workspace extension started. Remembered bash policy: 0 allowed, 0 denied.', 'info', 'Workspace extension ready');
+    showToast(
+      'Workspace extension started. Remembered bash policy: 0 allowed, 0 denied.',
+      'info',
+      'Workspace extension ready'
+    );
 
     expect(document.querySelector('.toast-title')?.textContent).toBe('Workspace extension ready');
-    expect(document.querySelector('.toast-message')?.textContent).toContain('Remembered bash policy');
+    expect(document.querySelector('.toast-message')?.textContent).toContain(
+      'Remembered bash policy'
+    );
   });
 });
 
 describe('escapeHtml', () => {
   it('escapes HTML special characters', () => {
-    expect(escapeHtml('<div>Test & "quotes"</div>')).toBe('&lt;div&gt;Test &amp; "quotes"&lt;/div&gt;');
+    expect(escapeHtml('<div>Test & "quotes"</div>')).toBe(
+      '&lt;div&gt;Test &amp; "quotes"&lt;/div&gt;'
+    );
   });
 
   it('returns empty string for falsy values', () => {

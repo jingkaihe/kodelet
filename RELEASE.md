@@ -14,6 +14,8 @@ Made conversation footer statistics compact and expandable, with detailed runner
 
 Removed obsolete frontend components, utilities, styles, configuration, and unused dependencies.
 
+Enabled comprehensive frontend Biome checks and consistent formatting, fixing accessibility, React hook dependencies, and unsafe Markdown rendering.
+
 ## 0.6.9-beta
 
 Added parent conversation IDs across ACP, the TypeScript SDK, daemon, and runners, supporting fresh child sessions and child forks with nested grouping in the Web UI sidebar and native TUI conversation picker. Parent relationships persist across resumes and cancelled turns.

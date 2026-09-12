@@ -265,7 +265,15 @@
   font-family: var(--font-mono);
 }
 
-.activity-detail-content :is(.tool-kv-item, .diff-block, .grep-block, .tool-file-item, .tool-detail-panel, .surface-panel) {
+.activity-detail-content
+  :is(
+    .tool-kv-item,
+    .diff-block,
+    .grep-block,
+    .tool-file-item,
+    .tool-detail-panel,
+    .surface-panel
+  ) {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -318,7 +326,15 @@
   overflow-wrap: anywhere;
 }
 
-.activity-detail-content :is(.bash-tool-description, .bash-tool-badge, .quiet-tool-line, .quiet-tool-empty, .extension-presentation-body, .tool-compact-markdown) {
+.activity-detail-content
+  :is(
+    .bash-tool-description,
+    .bash-tool-badge,
+    .quiet-tool-line,
+    .quiet-tool-empty,
+    .extension-presentation-body,
+    .tool-compact-markdown
+  ) {
   font-family: var(--font-mono);
   font-size: 0.76rem;
 }
@@ -357,11 +373,7 @@
   overflow-x: auto;
   border-radius: 6px;
   border: 1px solid var(--kodelet-mid-gray);
-  background: linear-gradient(
-    135deg,
-    var(--kodelet-light-gray) 0%,
-    var(--kodelet-light) 100%
-  );
+  background: linear-gradient(135deg, var(--kodelet-light-gray) 0%, var(--kodelet-light) 100%);
   box-shadow: var(--shadow-sm);
 }
 

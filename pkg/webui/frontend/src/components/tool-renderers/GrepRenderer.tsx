@@ -1,10 +1,6 @@
-import React from 'react';
-import { ToolResult, GrepMetadata, GrepResult, GrepMatch } from '../../types';
-import {
-  highlightPattern,
-  ReferenceToolKVGrid,
-  ReferenceToolNote,
-} from './reference';
+import type React from 'react';
+import type { GrepMatch, GrepMetadata, GrepResult, ToolResult } from '../../types';
+import { highlightPattern, ReferenceToolKVGrid, ReferenceToolNote } from './reference';
 
 interface GrepRendererProps {
   toolResult: ToolResult;
@@ -53,7 +49,7 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
 
       {results.length > 0 ? (
         <div className="space-y-1">
-          {results.map((result: GrepResult, resultIndex: number) => {
+          {results.map((result: GrepResult) => {
             const file = result.filePath || 'Unknown';
             const matches: GrepMatch[] =
               result.matches && result.matches.length > 0
@@ -66,21 +62,19 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
                   ];
 
             return (
-              <div className="grep-block" key={`${file}-${resultIndex}`}>
+              <div className="grep-block" key={`${file}-${result.lineNumber ?? ''}`}>
                 <div className="grep-file-header">{file}</div>
-                {matches.slice(0, 12).map((match, index) => (
+                {matches.slice(0, 12).map((match) => (
                   <div
                     className={match.isContext ? 'grep-line context' : 'grep-line'}
-                    key={index}
+                    key={match.lineNumber}
                   >
                     <span className="grep-line-number">{match.lineNumber}</span>
-                    <span
-                      dangerouslySetInnerHTML={{
-                        __html: match.isContext
-                          ? highlightPattern(match.content, '')
-                          : highlightPattern(match.content, meta.pattern),
-                      }}
-                    />
+                    <span>
+                      {match.isContext
+                        ? match.content
+                        : highlightPattern(match.content, meta.pattern)}
+                    </span>
                   </div>
                 ))}
                 {matches.length > 12 ? (

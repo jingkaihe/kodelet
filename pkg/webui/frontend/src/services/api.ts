@@ -1,584 +1,515 @@
 // API service layer for Kodelet Web UI
 
-import {
-	ChatSettings,
-	CWDHintsResponse,
-	GitDiffResponse,
-	ChatRequest,
-	ContentBlock,
-	ChatStreamEvent,
-	Conversation,
-	ConversationListResponse,
-	SearchFilters,
-	SlashCommandsResponse,
-	ApiError,
-	SteerConversationResponse,
-	StopConversationResponse,
-	ForkConversationResponse,
-	UIInputResponseResult,
-	RunnerListResponse,
-	RunnerDiscoveryTarget,
-	AuthPrincipal,
-	UserLoginDecisionResponse,
-	RunnerEnrollmentDecisionResponse,
-	WorkspaceTarget,
-	CodexProviderStatus,
-	CodexDeviceLogin,
-	CopilotProviderStatus,
-	CopilotDeviceLogin,
-	AnthropicProviderStatus,
-	AnthropicOAuthLogin,
-} from "../types";
+import type {
+  AnthropicOAuthLogin,
+  AnthropicProviderStatus,
+  ApiError,
+  AuthPrincipal,
+  ChatRequest,
+  ChatSettings,
+  ChatStreamEvent,
+  CodexDeviceLogin,
+  CodexProviderStatus,
+  ContentBlock,
+  Conversation,
+  ConversationListResponse,
+  CopilotDeviceLogin,
+  CopilotProviderStatus,
+  CWDHintsResponse,
+  ForkConversationResponse,
+  GitDiffResponse,
+  RunnerDiscoveryTarget,
+  RunnerEnrollmentDecisionResponse,
+  RunnerListResponse,
+  SearchFilters,
+  SlashCommandsResponse,
+  SteerConversationResponse,
+  StopConversationResponse,
+  UIInputResponseResult,
+  UserLoginDecisionResponse,
+  WorkspaceTarget,
+} from '../types';
 
 class ApiService {
-	private baseUrl = "";
-	private csrfCookieName = "kodelet_csrf";
-	private csrfHeaderName = "X-CSRF-Token";
-	private clientId =
-		typeof globalThis.crypto?.randomUUID === "function"
-			? globalThis.crypto.randomUUID()
-			: `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  private baseUrl = '';
+  private csrfCookieName = 'kodelet_csrf';
+  private csrfHeaderName = 'X-CSRF-Token';
+  private clientId =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-	private async request<T>(
-		endpoint: string,
-		options: RequestInit = {},
-	): Promise<T> {
-		const { headers, ...requestOptions } = options;
-		const response = await fetch(`${this.baseUrl}${endpoint}`, {
-			...requestOptions,
-			headers: {
-				"Content-Type": "application/json",
-				...headers,
-				...this.getCSRFHeaders(requestOptions.method),
-			},
-		});
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const { headers, ...requestOptions } = options;
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      ...requestOptions,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+        ...this.getCSRFHeaders(requestOptions.method),
+      },
+    });
 
-		if (!response.ok) {
-			let error: ApiError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { error: `HTTP ${response.status}` };
-			}
-			const requestError = new Error(
-				error.error || error.message || `HTTP ${response.status}`,
-			);
-			Object.assign(requestError, { status: response.status });
-			throw requestError;
-		}
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = await response.json();
+      } catch {
+        error = { error: `HTTP ${response.status}` };
+      }
+      const requestError = new Error(error.error || error.message || `HTTP ${response.status}`);
+      Object.assign(requestError, { status: response.status });
+      throw requestError;
+    }
 
-		if (response.status === 204) {
-			return undefined as T;
-		}
+    if (response.status === 204) {
+      return undefined as T;
+    }
 
-		return response.json();
-	}
+    return response.json();
+  }
 
-	private extractStringMetadataValue(
-		metadata: unknown,
-		key: string,
-	): string | undefined {
-		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-			return undefined;
-		}
+  private extractStringMetadataValue(metadata: unknown, key: string): string | undefined {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return undefined;
+    }
 
-		const rawValue = (metadata as Record<string, unknown>)[key];
-		if (typeof rawValue !== "string") {
-			return undefined;
-		}
+    const rawValue = (metadata as Record<string, unknown>)[key];
+    if (typeof rawValue !== 'string') {
+      return undefined;
+    }
 
-		const normalized = rawValue.trim().toLowerCase();
-		return normalized || undefined;
-	}
+    const normalized = rawValue.trim().toLowerCase();
+    return normalized || undefined;
+  }
 
-	private getCSRFCookie(): string {
-		if (typeof document === "undefined") {
-			return "";
-		}
-		const prefix = `${this.csrfCookieName}=`;
-		const cookie = document.cookie
-			.split(";")
-			.map((value) => value.trim())
-			.find((value) => value.startsWith(prefix));
-		if (!cookie) {
-			return "";
-		}
-		const value = cookie.slice(prefix.length);
-		try {
-			return decodeURIComponent(value);
-		} catch {
-			return value;
-		}
-	}
+  private getCSRFCookie(): string {
+    if (typeof document === 'undefined') {
+      return '';
+    }
+    const prefix = `${this.csrfCookieName}=`;
+    const cookie = document.cookie
+      .split(';')
+      .map((value) => value.trim())
+      .find((value) => value.startsWith(prefix));
+    if (!cookie) {
+      return '';
+    }
+    const value = cookie.slice(prefix.length);
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
 
-	private getCSRFHeaders(method = "GET"): Record<string, string> {
-		switch (method.toUpperCase()) {
-			case "GET":
-			case "HEAD":
-			case "OPTIONS":
-			case "TRACE":
-				return {};
-		}
-		const token = this.getCSRFCookie();
-		return token ? { [this.csrfHeaderName]: token } : {};
-	}
+  private getCSRFHeaders(method = 'GET'): Record<string, string> {
+    switch (method.toUpperCase()) {
+      case 'GET':
+      case 'HEAD':
+      case 'OPTIONS':
+      case 'TRACE':
+        return {};
+    }
+    const token = this.getCSRFCookie();
+    return token ? { [this.csrfHeaderName]: token } : {};
+  }
 
-	async getAuthPrincipal(): Promise<AuthPrincipal> {
-		return this.request<AuthPrincipal>("/api/auth/me");
-	}
+  async getAuthPrincipal(): Promise<AuthPrincipal> {
+    return this.request<AuthPrincipal>('/api/auth/me');
+  }
 
-	async getCodexProviderStatus(): Promise<CodexProviderStatus> {
-		return this.request<CodexProviderStatus>("/api/providers/codex");
-	}
+  async getCodexProviderStatus(): Promise<CodexProviderStatus> {
+    return this.request<CodexProviderStatus>('/api/providers/codex');
+  }
 
-	async startCodexDeviceLogin(): Promise<CodexDeviceLogin> {
-		return this.request<CodexDeviceLogin>("/api/providers/codex/device-login", {
-			method: "POST",
-		});
-	}
+  async startCodexDeviceLogin(): Promise<CodexDeviceLogin> {
+    return this.request<CodexDeviceLogin>('/api/providers/codex/device-login', {
+      method: 'POST',
+    });
+  }
 
-	async getCodexDeviceLogin(id: string): Promise<CodexDeviceLogin> {
-		return this.request<CodexDeviceLogin>(
-			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
-		);
-	}
+  async getCodexDeviceLogin(id: string): Promise<CodexDeviceLogin> {
+    return this.request<CodexDeviceLogin>(
+      `/api/providers/codex/device-login/${encodeURIComponent(id)}`
+    );
+  }
 
-	async cancelCodexDeviceLogin(id: string): Promise<void> {
-		await this.request(
-			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
-			{
-				method: "DELETE",
-			},
-		);
-	}
+  async cancelCodexDeviceLogin(id: string): Promise<void> {
+    await this.request(`/api/providers/codex/device-login/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
 
-	async getCopilotProviderStatus(): Promise<CopilotProviderStatus> {
-		return this.request<CopilotProviderStatus>("/api/providers/copilot");
-	}
+  async getCopilotProviderStatus(): Promise<CopilotProviderStatus> {
+    return this.request<CopilotProviderStatus>('/api/providers/copilot');
+  }
 
-	async startCopilotDeviceLogin(): Promise<CopilotDeviceLogin> {
-		return this.request<CopilotDeviceLogin>(
-			"/api/providers/copilot/device-login",
-			{
-				method: "POST",
-			},
-		);
-	}
+  async startCopilotDeviceLogin(): Promise<CopilotDeviceLogin> {
+    return this.request<CopilotDeviceLogin>('/api/providers/copilot/device-login', {
+      method: 'POST',
+    });
+  }
 
-	async getCopilotDeviceLogin(id: string): Promise<CopilotDeviceLogin> {
-		return this.request<CopilotDeviceLogin>(
-			`/api/providers/copilot/device-login/${encodeURIComponent(id)}`,
-		);
-	}
+  async getCopilotDeviceLogin(id: string): Promise<CopilotDeviceLogin> {
+    return this.request<CopilotDeviceLogin>(
+      `/api/providers/copilot/device-login/${encodeURIComponent(id)}`
+    );
+  }
 
-	async cancelCopilotDeviceLogin(id: string): Promise<void> {
-		await this.request(
-			`/api/providers/copilot/device-login/${encodeURIComponent(id)}`,
-			{
-				method: "DELETE",
-			},
-		);
-	}
+  async cancelCopilotDeviceLogin(id: string): Promise<void> {
+    await this.request(`/api/providers/copilot/device-login/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
 
-	async getAnthropicProviderStatus(): Promise<AnthropicProviderStatus> {
-		return this.request<AnthropicProviderStatus>("/api/providers/anthropic");
-	}
+  async getAnthropicProviderStatus(): Promise<AnthropicProviderStatus> {
+    return this.request<AnthropicProviderStatus>('/api/providers/anthropic');
+  }
 
-	async startAnthropicOAuthLogin(): Promise<AnthropicOAuthLogin> {
-		return this.request<AnthropicOAuthLogin>(
-			"/api/providers/anthropic/oauth-login",
-			{
-				method: "POST",
-			},
-		);
-	}
+  async startAnthropicOAuthLogin(): Promise<AnthropicOAuthLogin> {
+    return this.request<AnthropicOAuthLogin>('/api/providers/anthropic/oauth-login', {
+      method: 'POST',
+    });
+  }
 
-	async completeAnthropicOAuthLogin(
-		id: string,
-		code: string,
-	): Promise<AnthropicOAuthLogin> {
-		return this.request<AnthropicOAuthLogin>(
-			`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}/complete`,
-			{
-				method: "POST",
-				body: JSON.stringify({ code }),
-			},
-		);
-	}
+  async completeAnthropicOAuthLogin(id: string, code: string): Promise<AnthropicOAuthLogin> {
+    return this.request<AnthropicOAuthLogin>(
+      `/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }
+    );
+  }
 
-	async cancelAnthropicOAuthLogin(id: string): Promise<void> {
-		await this.request(
-			`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}`,
-			{
-				method: "DELETE",
-			},
-		);
-	}
+  async cancelAnthropicOAuthLogin(id: string): Promise<void> {
+    await this.request(`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
 
-	async getUserLoginPrincipal(): Promise<AuthPrincipal> {
-		return this.request<AuthPrincipal>("/api/auth/v1/device/context");
-	}
+  async getUserLoginPrincipal(): Promise<AuthPrincipal> {
+    return this.request<AuthPrincipal>('/api/auth/v1/device/context');
+  }
 
-	async getRunnerEnrollmentPrincipal(): Promise<AuthPrincipal> {
-		return this.request<AuthPrincipal>("/api/runner/v1/enrollment/context");
-	}
+  async getRunnerEnrollmentPrincipal(): Promise<AuthPrincipal> {
+    return this.request<AuthPrincipal>('/api/runner/v1/enrollment/context');
+  }
 
-	async submitUserLoginDecision(
-		userCode: string,
-		decision: "lookup" | "approve" | "deny",
-	): Promise<UserLoginDecisionResponse> {
-		return this.request<UserLoginDecisionResponse>(
-			"/api/auth/v1/device/decision",
-			{
-				method: "POST",
-				body: JSON.stringify({
-					userCode,
-					decision,
-					csrfToken: this.getCSRFCookie(),
-				}),
-			},
-		);
-	}
+  async submitUserLoginDecision(
+    userCode: string,
+    decision: 'lookup' | 'approve' | 'deny'
+  ): Promise<UserLoginDecisionResponse> {
+    return this.request<UserLoginDecisionResponse>('/api/auth/v1/device/decision', {
+      method: 'POST',
+      body: JSON.stringify({
+        userCode,
+        decision,
+        csrfToken: this.getCSRFCookie(),
+      }),
+    });
+  }
 
-	async submitRunnerEnrollmentDecision(
-		userCode: string,
-		decision: "lookup" | "approve" | "deny",
-		replace = false,
-	): Promise<RunnerEnrollmentDecisionResponse> {
-		return this.request<RunnerEnrollmentDecisionResponse>(
-			"/api/runner/v1/enrollment/decision",
-			{
-				method: "POST",
-				body: JSON.stringify({
-					userCode,
-					decision,
-					csrfToken: this.getCSRFCookie(),
-					replace,
-				}),
-			},
-		);
-	}
+  async submitRunnerEnrollmentDecision(
+    userCode: string,
+    decision: 'lookup' | 'approve' | 'deny',
+    replace = false
+  ): Promise<RunnerEnrollmentDecisionResponse> {
+    return this.request<RunnerEnrollmentDecisionResponse>('/api/runner/v1/enrollment/decision', {
+      method: 'POST',
+      body: JSON.stringify({
+        userCode,
+        decision,
+        csrfToken: this.getCSRFCookie(),
+        replace,
+      }),
+    });
+  }
 
-	async getConversations(
-		filters: Partial<SearchFilters> = {},
-	): Promise<ConversationListResponse> {
-		const params = new URLSearchParams();
+  async getConversations(filters: Partial<SearchFilters> = {}): Promise<ConversationListResponse> {
+    const params = new URLSearchParams();
 
-		if (filters.searchTerm) params.append("search", filters.searchTerm);
-		if (filters.cwd) params.append("cwd", filters.cwd);
-		if (filters.sortBy) params.append("sortBy", filters.sortBy);
-		if (filters.sortOrder) params.append("sortOrder", filters.sortOrder);
-		if (filters.limit) params.append("limit", filters.limit.toString());
-		if (filters.offset) params.append("offset", filters.offset.toString());
+    if (filters.searchTerm) params.append('search', filters.searchTerm);
+    if (filters.cwd) params.append('cwd', filters.cwd);
+    if (filters.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters.sortOrder) params.append('sortOrder', filters.sortOrder);
+    if (filters.limit) params.append('limit', filters.limit.toString());
+    if (filters.offset) params.append('offset', filters.offset.toString());
 
-		const queryString = params.toString();
-		const endpoint = queryString
-			? `/api/conversations?${queryString}`
-			: "/api/conversations";
+    const queryString = params.toString();
+    const endpoint = queryString ? `/api/conversations?${queryString}` : '/api/conversations';
 
-		const response = await this.request<ConversationListResponse>(endpoint);
+    const response = await this.request<ConversationListResponse>(endpoint);
 
-		// Ensure conversations is always an array
-		if (!response.conversations || !Array.isArray(response.conversations)) {
-			response.conversations = [];
-		}
+    // Ensure conversations is always an array
+    if (!response.conversations || !Array.isArray(response.conversations)) {
+      response.conversations = [];
+    }
 
-		response.conversations = response.conversations.map((conversation) => ({
-			...conversation,
-			platform:
-				conversation.platform ??
-				this.extractStringMetadataValue(conversation.metadata, "platform"),
-			api_mode:
-				conversation.api_mode ??
-				this.extractStringMetadataValue(conversation.metadata, "api_mode"),
-		}));
+    response.conversations = response.conversations.map((conversation) => ({
+      ...conversation,
+      platform:
+        conversation.platform ?? this.extractStringMetadataValue(conversation.metadata, 'platform'),
+      api_mode:
+        conversation.api_mode ?? this.extractStringMetadataValue(conversation.metadata, 'api_mode'),
+    }));
 
-		return response;
-	}
+    return response;
+  }
 
-	async getConversation(id: string): Promise<Conversation> {
-		return this.request<Conversation>(`/api/conversations/${id}`);
-	}
+  async getConversation(id: string): Promise<Conversation> {
+    return this.request<Conversation>(`/api/conversations/${id}`);
+  }
 
-	async getRunners(): Promise<RunnerListResponse> {
-		return this.request<RunnerListResponse>("/api/runners");
-	}
+  async getRunners(): Promise<RunnerListResponse> {
+    return this.request<RunnerListResponse>('/api/runners');
+  }
 
-	async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {
-		const params = new URLSearchParams();
-		if (profile) {
-			params.append("profile", profile);
-		}
-		if (runnerId) {
-			params.append("runnerId", runnerId);
-		}
-		const suffix = params.toString();
-		return this.request<ChatSettings>(
-			`/api/chat/settings${suffix ? `?${suffix}` : ""}`,
-		);
-	}
+  async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {
+    const params = new URLSearchParams();
+    if (profile) {
+      params.append('profile', profile);
+    }
+    if (runnerId) {
+      params.append('runnerId', runnerId);
+    }
+    const suffix = params.toString();
+    return this.request<ChatSettings>(`/api/chat/settings${suffix ? `?${suffix}` : ''}`);
+  }
 
-	async getSlashCommands(
-		cwd?: string,
-		target?: RunnerDiscoveryTarget,
-	): Promise<SlashCommandsResponse> {
-		const params = new URLSearchParams();
-		if (cwd) {
-			params.append("cwd", cwd);
-		}
-		for (const [key, value] of Object.entries(target || {})) {
-			if (key === "profile" && (!value?.trim() || target?.conversationId)) continue;
-			if (value !== undefined) params.append(key, value);
-		}
-		const suffix = params.toString();
-		return this.request<SlashCommandsResponse>(
-			`/api/chat/slash-commands${suffix ? `?${suffix}` : ""}`,
-		);
-	}
+  async getSlashCommands(
+    cwd?: string,
+    target?: RunnerDiscoveryTarget
+  ): Promise<SlashCommandsResponse> {
+    const params = new URLSearchParams();
+    if (cwd) {
+      params.append('cwd', cwd);
+    }
+    for (const [key, value] of Object.entries(target || {})) {
+      if (key === 'profile' && (!value?.trim() || target?.conversationId)) continue;
+      if (value !== undefined) params.append(key, value);
+    }
+    const suffix = params.toString();
+    return this.request<SlashCommandsResponse>(
+      `/api/chat/slash-commands${suffix ? `?${suffix}` : ''}`
+    );
+  }
 
-	async getCWDHints(
-		query: string,
-		target?: RunnerDiscoveryTarget,
-	): Promise<CWDHintsResponse> {
-		const params = new URLSearchParams();
-		if (query) {
-			params.append("q", query);
-		}
-		for (const [key, value] of Object.entries(target || {})) {
-			if (key === "profile" && (!value?.trim() || target?.conversationId)) continue;
-			if (value !== undefined) params.append(key, value);
-		}
-		const suffix = params.toString();
-		return this.request<CWDHintsResponse>(
-			`/api/chat/cwd-suggestions${suffix ? `?${suffix}` : ""}`,
-		);
-	}
+  async getCWDHints(query: string, target?: RunnerDiscoveryTarget): Promise<CWDHintsResponse> {
+    const params = new URLSearchParams();
+    if (query) {
+      params.append('q', query);
+    }
+    for (const [key, value] of Object.entries(target || {})) {
+      if (key === 'profile' && (!value?.trim() || target?.conversationId)) continue;
+      if (value !== undefined) params.append(key, value);
+    }
+    const suffix = params.toString();
+    return this.request<CWDHintsResponse>(`/api/chat/cwd-suggestions${suffix ? `?${suffix}` : ''}`);
+  }
 
-	async getGitDiff(
-		target: WorkspaceTarget = { kind: "local" },
-	): Promise<GitDiffResponse> {
-		const params = new URLSearchParams();
-		if (target.kind === "local") {
-			if (target.cwd) {
-				params.append("cwd", target.cwd);
-			}
-		} else {
-			params.append("runnerId", target.runnerId);
-			if (target.conversationId) {
-				params.append("conversationId", target.conversationId);
-			}
-		}
+  async getGitDiff(target: WorkspaceTarget = { kind: 'local' }): Promise<GitDiffResponse> {
+    const params = new URLSearchParams();
+    if (target.kind === 'local') {
+      if (target.cwd) {
+        params.append('cwd', target.cwd);
+      }
+    } else {
+      params.append('runnerId', target.runnerId);
+      if (target.conversationId) {
+        params.append('conversationId', target.conversationId);
+      }
+    }
 
-		const suffix = params.toString();
-		return this.request<GitDiffResponse>(
-			`/api/git/diff${suffix ? `?${suffix}` : ""}`,
-		);
-	}
+    const suffix = params.toString();
+    return this.request<GitDiffResponse>(`/api/git/diff${suffix ? `?${suffix}` : ''}`);
+  }
 
-	createTerminalWebSocket(options: {
-		target: WorkspaceTarget;
-		rows?: number;
-		cols?: number;
-	}): WebSocket {
-		const params = new URLSearchParams();
-		if (options.target.kind === "local") {
-			if (options.target.cwd) {
-				params.append("cwd", options.target.cwd);
-			}
-		} else {
-			params.append("runnerId", options.target.runnerId);
-			if (options.target.conversationId) {
-				params.append("conversationId", options.target.conversationId);
-			}
-		}
-		if (options.rows) {
-			params.append("rows", String(options.rows));
-		}
-		if (options.cols) {
-			params.append("cols", String(options.cols));
-		}
+  createTerminalWebSocket(options: {
+    target: WorkspaceTarget;
+    rows?: number;
+    cols?: number;
+  }): WebSocket {
+    const params = new URLSearchParams();
+    if (options.target.kind === 'local') {
+      if (options.target.cwd) {
+        params.append('cwd', options.target.cwd);
+      }
+    } else {
+      params.append('runnerId', options.target.runnerId);
+      if (options.target.conversationId) {
+        params.append('conversationId', options.target.conversationId);
+      }
+    }
+    if (options.rows) {
+      params.append('rows', String(options.rows));
+    }
+    if (options.cols) {
+      params.append('cols', String(options.cols));
+    }
 
-		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-		const suffix = params.toString();
-		return new WebSocket(
-			`${protocol}//${window.location.host}/api/terminal/ws${suffix ? `?${suffix}` : ""}`,
-		);
-	}
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const suffix = params.toString();
+    return new WebSocket(
+      `${protocol}//${window.location.host}/api/terminal/ws${suffix ? `?${suffix}` : ''}`
+    );
+  }
 
-	async deleteConversation(id: string): Promise<void> {
-		await this.request(`/api/conversations/${id}`, {
-			method: "DELETE",
-		});
-	}
+  async deleteConversation(id: string): Promise<void> {
+    await this.request(`/api/conversations/${id}`, {
+      method: 'DELETE',
+    });
+  }
 
-	async forkConversation(id: string): Promise<ForkConversationResponse> {
-		return this.request<ForkConversationResponse>(
-			`/api/conversations/${id}/fork`,
-			{
-				method: "POST",
-			},
-		);
-	}
+  async forkConversation(id: string): Promise<ForkConversationResponse> {
+    return this.request<ForkConversationResponse>(`/api/conversations/${id}/fork`, {
+      method: 'POST',
+    });
+  }
 
-	async steerConversation(
-		id: string,
-		message: string,
-		content?: ContentBlock[],
-	): Promise<SteerConversationResponse> {
-		const body =
-			content && content.length > 0 ? { message, content } : { message };
-		return this.request<SteerConversationResponse>(
-			`/api/conversations/${id}/steer`,
-			{
-				method: "POST",
-				body: JSON.stringify(body),
-			},
-		);
-	}
+  async steerConversation(
+    id: string,
+    message: string,
+    content?: ContentBlock[]
+  ): Promise<SteerConversationResponse> {
+    const body = content && content.length > 0 ? { message, content } : { message };
+    return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
 
-	async stopConversation(id: string): Promise<StopConversationResponse> {
-		return this.request<StopConversationResponse>(
-			`/api/conversations/${id}/stop`,
-			{
-				method: "POST",
-			},
-		);
-	}
+  async stopConversation(id: string): Promise<StopConversationResponse> {
+    return this.request<StopConversationResponse>(`/api/conversations/${id}/stop`, {
+      method: 'POST',
+    });
+  }
 
-	async respondToUIInput(
-		conversationId: string,
-		requestId: string,
-		response: { status: "submitted" | "dismissed"; value?: string },
-	): Promise<UIInputResponseResult> {
-		return this.request<UIInputResponseResult>(
-			`/api/conversations/${conversationId}/ui-input/${requestId}`,
-			{
-				method: "POST",
-				headers: { "X-Kodelet-Client-ID": this.clientId },
-				body: JSON.stringify(response),
-			},
-		);
-	}
+  async respondToUIInput(
+    conversationId: string,
+    requestId: string,
+    response: { status: 'submitted' | 'dismissed'; value?: string }
+  ): Promise<UIInputResponseResult> {
+    return this.request<UIInputResponseResult>(
+      `/api/conversations/${conversationId}/ui-input/${requestId}`,
+      {
+        method: 'POST',
+        headers: { 'X-Kodelet-Client-ID': this.clientId },
+        body: JSON.stringify(response),
+      }
+    );
+  }
 
-	async streamChat(
-		request: ChatRequest,
-		options: {
-			signal?: AbortSignal;
-			onEvent: (event: ChatStreamEvent) => void;
-		},
-	): Promise<void> {
-		const response = await fetch("/api/chat", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"X-Kodelet-Client-ID": this.clientId,
-				...this.getCSRFHeaders("POST"),
-			},
-			body: JSON.stringify(request),
-			signal: options.signal,
-		});
-		return this.consumeChatStream(
-			response,
-			options.onEvent,
-			request.conversationId,
-		);
-	}
+  async streamChat(
+    request: ChatRequest,
+    options: {
+      signal?: AbortSignal;
+      onEvent: (event: ChatStreamEvent) => void;
+    }
+  ): Promise<void> {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Kodelet-Client-ID': this.clientId,
+        ...this.getCSRFHeaders('POST'),
+      },
+      body: JSON.stringify(request),
+      signal: options.signal,
+    });
+    return this.consumeChatStream(response, options.onEvent, request.conversationId);
+  }
 
-	async streamConversation(
-		conversationId: string,
-		options: {
-			signal?: AbortSignal;
-			onEvent: (event: ChatStreamEvent) => void;
-		},
-	): Promise<void> {
-		const response = await fetch(
-			`/api/conversations/${conversationId}/stream`,
-			{
-				method: "GET",
-				headers: {
-					"X-Kodelet-Client-ID": this.clientId,
-					"X-Kodelet-UI-Capabilities": "interactive",
-				},
-				signal: options.signal,
-			},
-		);
-		return this.consumeChatStream(response, options.onEvent, conversationId);
-	}
+  async streamConversation(
+    conversationId: string,
+    options: {
+      signal?: AbortSignal;
+      onEvent: (event: ChatStreamEvent) => void;
+    }
+  ): Promise<void> {
+    const response = await fetch(`/api/conversations/${conversationId}/stream`, {
+      method: 'GET',
+      headers: {
+        'X-Kodelet-Client-ID': this.clientId,
+        'X-Kodelet-UI-Capabilities': 'interactive',
+      },
+      signal: options.signal,
+    });
+    return this.consumeChatStream(response, options.onEvent, conversationId);
+  }
 
-	private async consumeChatStream(
-		response: Response,
-		onEvent: (event: ChatStreamEvent) => void,
-		conversationId?: string,
-	): Promise<void> {
-		if (!response.ok) {
-			let error: ApiError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { error: `HTTP ${response.status}` };
-			}
-			throw new Error(
-				error.error || error.message || `HTTP ${response.status}`,
-			);
-		}
+  private async consumeChatStream(
+    response: Response,
+    onEvent: (event: ChatStreamEvent) => void,
+    conversationId?: string
+  ): Promise<void> {
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = await response.json();
+      } catch {
+        error = { error: `HTTP ${response.status}` };
+      }
+      throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
 
-		if (!response.body) {
-			throw new Error("Streaming response body is unavailable");
-		}
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
+    }
 
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
-		const pendingPrompts = new Map<string, string | undefined>();
-		const deliver = (line: string) => {
-			const event = JSON.parse(line) as ChatStreamEvent;
-			conversationId = event.conversation_id || conversationId;
-			const id =
-				event.ui_input?.id || event.ui_confirm?.id || event.ui_select?.id;
-			if (id) pendingPrompts.set(id, conversationId);
-			if (event.kind === "ui-request-end" && event.ui_request_id) {
-				pendingPrompts.delete(event.ui_request_id);
-			}
-			onEvent(event);
-		};
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const pendingPrompts = new Map<string, string | undefined>();
+    const deliver = (line: string) => {
+      const event = JSON.parse(line) as ChatStreamEvent;
+      conversationId = event.conversation_id || conversationId;
+      const id = event.ui_input?.id || event.ui_confirm?.id || event.ui_select?.id;
+      if (id) pendingPrompts.set(id, conversationId);
+      if (event.kind === 'ui-request-end' && event.ui_request_id) {
+        pendingPrompts.delete(event.ui_request_id);
+      }
+      onEvent(event);
+    };
 
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				buffer += decoder.decode(value, { stream: !done });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
 
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (!trimmed) {
-						continue;
-					}
-					deliver(trimmed);
-				}
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            continue;
+          }
+          deliver(trimmed);
+        }
 
-				if (done) {
-					const trimmed = buffer.trim();
-					if (trimmed) {
-						deliver(trimmed);
-					}
-					return;
-				}
-			}
-		} finally {
-			// A disconnected stream loses response authority, not execution ownership.
-			for (const [id, scope] of pendingPrompts) {
-				onEvent({
-					kind: "ui-request-end",
-					conversation_id: scope,
-					ui_request_id: id,
-				});
-			}
-			await reader.cancel().catch(() => {});
-			reader.releaseLock();
-		}
-	}
+        if (done) {
+          const trimmed = buffer.trim();
+          if (trimmed) {
+            deliver(trimmed);
+          }
+          return;
+        }
+      }
+    } finally {
+      // A disconnected stream loses response authority, not execution ownership.
+      for (const [id, scope] of pendingPrompts) {
+        onEvent({
+          kind: 'ui-request-end',
+          conversation_id: scope,
+          ui_request_id: id,
+        });
+      }
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
 }
 
 export const apiService = new ApiService();

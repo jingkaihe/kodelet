@@ -15,6 +15,18 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noUnknownAtRules": {
+          "level": "error",
+          "options": {
+            "ignore": ["tailwind"]
+          }
+        }
+      }
+    }
+  },
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

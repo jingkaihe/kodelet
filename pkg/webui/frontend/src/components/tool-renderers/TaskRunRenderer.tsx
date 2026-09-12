@@ -1,14 +1,14 @@
-import React from 'react';
 import { Check, LoaderCircle, X } from 'lucide-react';
-import Spinner from '../Spinner';
+import React from 'react';
 import type {
+  ExtensionToolMetadata,
   TaskRunActivity,
   TaskRunSnapshot,
-  ExtensionToolMetadata,
   ToolRenderProps,
   ToolResult,
 } from '../../types';
 import { cn } from '../../utils';
+import Spinner from '../Spinner';
 import { ReferenceToolNote, renderSafeMarkdown } from './reference';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -99,6 +99,7 @@ const useLiveTaskRunElapsed = (
     ? JSON.stringify([snapshot.kind, snapshot.revision, snapshot.status, snapshot.elapsedMs])
     : '';
   const shouldTick = Boolean(isPartial && snapshot?.status === 'running');
+  // biome-ignore lint/correctness/useExhaustiveDependencies(sourceKey): Restart the elapsed-time baseline when a new task snapshot arrives.
   const observedAt = React.useMemo(() => Date.now(), [sourceKey]);
   const [now, setNow] = React.useState(observedAt);
 
@@ -129,7 +130,10 @@ const taskRunActivityPreview = (value?: string): string => {
   return lines[lines.length - 1] || '';
 };
 
-const ActivityMarker: React.FC<{ status: TaskRunActivity['status']; isLive: boolean }> = ({ status, isLive }) => {
+const ActivityMarker: React.FC<{ status: TaskRunActivity['status']; isLive: boolean }> = ({
+  status,
+  isLive,
+}) => {
   if (status === 'failed') {
     return <X aria-hidden="true" className="task-run-activity-marker is-failed" size={14} />;
   }
@@ -137,21 +141,17 @@ const ActivityMarker: React.FC<{ status: TaskRunActivity['status']; isLive: bool
     if (!isLive) {
       return <LoaderCircle aria-hidden="true" className="task-run-activity-marker" size={14} />;
     }
-    return (
-      <Spinner
-        aria-hidden="true"
-        className="task-run-activity-marker is-running"
-      />
-    );
+    return <Spinner aria-hidden="true" className="task-run-activity-marker is-running" />;
   }
   return <Check aria-hidden="true" className="task-run-activity-marker is-done" size={14} />;
 };
 
-const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot; isLive?: boolean }> = ({ snapshot, isLive = false }) => {
+const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot; isLive?: boolean }> = ({
+  snapshot,
+  isLive = false,
+}) => {
   const omitted = [
-    snapshot.omittedSucceeded
-      ? `+${snapshot.omittedSucceeded} earlier completed`
-      : undefined,
+    snapshot.omittedSucceeded ? `+${snapshot.omittedSucceeded} earlier completed` : undefined,
     snapshot.omittedFailed ? `+${snapshot.omittedFailed} earlier failed` : undefined,
     snapshot.omittedRunning ? `+${snapshot.omittedRunning} more running` : undefined,
   ].filter((value): value is string => Boolean(value));
@@ -228,11 +228,14 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
 
   return (
     <div className="quiet-tool-detail task-run-result">
-      {!toolResult.success && toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null}
+      {!toolResult.success && toolResult.error ? (
+        <ReferenceToolNote text={toolResult.error} />
+      ) : null}
 
       {renderedOutput ? (
         <div
           className="tool-compact-markdown task-run-response"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: renderSafeMarkdown escapes raw HTML and rejects unsafe link and image URLs.
           dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(renderedOutput) }}
         />
       ) : toolResult.success ? (

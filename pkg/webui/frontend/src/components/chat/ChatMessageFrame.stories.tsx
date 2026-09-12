@@ -9,7 +9,7 @@ const meta = {
   },
   args: {
     copyText: 'Copyable message text',
-    role: 'user',
+    messageRole: 'user',
     children: (
       <div className="chat-prose max-w-none text-kodelet-dark">
         <p>Extract this panel so message chrome can be tested in isolation.</p>
@@ -17,7 +17,7 @@ const meta = {
     ),
   },
   argTypes: {
-    role: {
+    messageRole: {
       control: 'inline-radio',
       options: ['user', 'assistant'],
     },
@@ -33,12 +33,10 @@ export const UserMessage: Story = {};
 export const AssistantMessage: Story = {
   args: {
     copyText: '',
-    role: 'assistant',
+    messageRole: 'assistant',
     children: (
       <div className="chat-prose max-w-none text-kodelet-dark">
-        <p>
-          The transcript can now compose this frame around assistant blocks.
-        </p>
+        <p>The transcript can now compose this frame around assistant blocks.</p>
       </div>
     ),
   },

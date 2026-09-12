@@ -1,5 +1,5 @@
-import { useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { type ClipboardEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import type { AuthPrincipal } from '../../types';
 
 type AuthNoticeTone = 'info' | 'warning' | 'error' | 'success';
@@ -74,7 +74,7 @@ export function AuthPageShell({
     <div className="auth-page">
       <main className="auth-page-shell">
         <div className="auth-app-bar">
-          <div className="auth-brand" aria-label="Kodelet">
+          <div className="auth-brand" role="img" aria-label="Kodelet">
             Kodelet
           </div>
           {principalLoading ? (
@@ -102,18 +102,10 @@ export function AuthPageShell({
 }
 
 export function AuthNotice({ tone, children }: AuthNoticeProps) {
-  const Icon =
-    tone === 'success'
-      ? CheckCircle2
-      : tone === 'info'
-        ? Info
-        : AlertTriangle;
+  const Icon = tone === 'success' ? CheckCircle2 : tone === 'info' ? Info : AlertTriangle;
 
   return (
-    <div
-      className={`auth-notice auth-notice-${tone}`}
-      role={tone === 'error' ? 'alert' : 'status'}
-    >
+    <div className={`auth-notice auth-notice-${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
       <Icon className="auth-notice-icon" size={18} strokeWidth={1.8} aria-hidden="true" />
       <div>{children}</div>
     </div>
@@ -181,6 +173,7 @@ export function ApprovalCodeForm({
           aria-label={label}
           autoCapitalize="characters"
           autoComplete="one-time-code"
+          // biome-ignore lint/a11y/noAutofocus: This dedicated approval form focuses its only input so the user can enter or paste the requested code.
           autoFocus
           className="auth-code-input"
           data-1p-ignore="true"
@@ -209,6 +202,7 @@ export function ApprovalCodeForm({
             return (
               <span
                 className={`auth-code-cell${character ? ' is-filled' : ''}${active ? ' is-active' : ''}`}
+                // biome-ignore lint/suspicious/noArrayIndexKey: The eight code cells have fixed positions; their characters change but the cells never reorder.
                 key={index}
               >
                 {character}
@@ -217,11 +211,7 @@ export function ApprovalCodeForm({
           })}
         </div>
       </div>
-      {busy ? (
-        <p className="auth-code-status" role="status">
-          Checking…
-        </p>
-      ) : null}
+      {busy ? <output className="auth-code-status">Checking…</output> : null}
       <button className="sr-only" disabled={!complete || busy} type="submit">
         Check code
       </button>

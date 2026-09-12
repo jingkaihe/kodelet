@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
-import { ToolResult } from '../../types';
 
 const createToolResult = (
   metadata: Record<string, unknown> | null | undefined,
@@ -32,7 +32,8 @@ describe('ApplyPatchRenderer', () => {
         {
           path: '/tmp/edit.txt',
           operation: 'update',
-          unifiedDiff: '--- /tmp/edit.txt\n+++ /tmp/edit.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n',
+          unifiedDiff:
+            '--- /tmp/edit.txt\n+++ /tmp/edit.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n',
         },
         {
           path: '/tmp/old.txt',
@@ -43,7 +44,8 @@ describe('ApplyPatchRenderer', () => {
           path: '/tmp/old-name.txt',
           movePath: '/tmp/new-name.txt',
           operation: 'update',
-          unifiedDiff: '--- /tmp/old-name.txt\n+++ /tmp/new-name.txt\n@@ -1 +1 @@\n-old name\n+new name\n',
+          unifiedDiff:
+            '--- /tmp/old-name.txt\n+++ /tmp/new-name.txt\n@@ -1 +1 @@\n-old name\n+new name\n',
         },
       ],
     });
@@ -63,18 +65,16 @@ describe('ApplyPatchRenderer', () => {
     expect(screen.getByText('Delete')).toBeInTheDocument();
     expect(screen.getByText('Move')).toBeInTheDocument();
 
-    expect(Array.from(container.querySelectorAll('.apply-patch-count-added')).map((element) => element.textContent)).toEqual([
-      '+1',
-      '+1',
-      '+0',
-      '+1',
-    ]);
-    expect(Array.from(container.querySelectorAll('.apply-patch-count-removed')).map((element) => element.textContent)).toEqual([
-      '-0',
-      '-1',
-      '-1',
-      '-1',
-    ]);
+    expect(
+      Array.from(container.querySelectorAll('.apply-patch-count-added')).map(
+        (element) => element.textContent
+      )
+    ).toEqual(['+1', '+1', '+0', '+1']);
+    expect(
+      Array.from(container.querySelectorAll('.apply-patch-count-removed')).map(
+        (element) => element.textContent
+      )
+    ).toEqual(['-0', '-1', '-1', '-1']);
 
     const firstAddedLine = container.querySelector('.diff-line-added');
     expect(firstAddedLine?.querySelectorAll('.diff-line-number')[0]).toHaveTextContent('');
@@ -136,7 +136,12 @@ describe('ApplyPatchRenderer', () => {
         {
           path: '/tmp/large.txt',
           operation: 'add',
-          unifiedDiff: ['--- /dev/null', '+++ /tmp/large.txt', '@@ -0,0 +1,20 @@', ...lines.map((line) => `+${line}`)].join('\n'),
+          unifiedDiff: [
+            '--- /dev/null',
+            '+++ /tmp/large.txt',
+            '@@ -0,0 +1,20 @@',
+            ...lines.map((line) => `+${line}`),
+          ].join('\n'),
         },
       ],
     });

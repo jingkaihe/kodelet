@@ -27,8 +27,7 @@ vi.mock('../../services/api', () => ({
     cancelCopilotDeviceLogin: (...args: unknown[]) => mockCancelCopilotDeviceLogin(...args),
     getAnthropicProviderStatus: (...args: unknown[]) => mockGetAnthropicProviderStatus(...args),
     startAnthropicOAuthLogin: (...args: unknown[]) => mockStartAnthropicOAuthLogin(...args),
-    completeAnthropicOAuthLogin: (...args: unknown[]) =>
-      mockCompleteAnthropicOAuthLogin(...args),
+    completeAnthropicOAuthLogin: (...args: unknown[]) => mockCompleteAnthropicOAuthLogin(...args),
     cancelAnthropicOAuthLogin: (...args: unknown[]) => mockCancelAnthropicOAuthLogin(...args),
   },
 }));
@@ -76,9 +75,7 @@ describe('ProviderSettingsDialog', () => {
     expect(within(anthropic).getByRole('button', { name: 'Connect Anthropic' })).toBeEnabled();
     expect(within(copilot).getByText('Use your Copilot subscription.')).toBeInTheDocument();
     expect(within(copilot).getByText('Not connected')).toBeInTheDocument();
-    expect(
-      within(copilot).getByRole('button', { name: 'Connect GitHub Copilot' })
-    ).toBeEnabled();
+    expect(within(copilot).getByRole('button', { name: 'Connect GitHub Copilot' })).toBeEnabled();
   });
 
   it('shows the GitHub device code and updates when Copilot sign-in completes', async () => {
@@ -116,9 +113,9 @@ describe('ProviderSettingsDialog', () => {
     expect(mockGetCopilotDeviceLogin).toHaveBeenCalledWith('copilot_login_123');
     const copilot = screen.getByRole('article', { name: 'GitHub Copilot' });
     expect(within(copilot).getByText('Connected')).toBeInTheDocument();
-    expect(
-      within(copilot).getByRole('button', { name: 'Reconnect GitHub Copilot' })
-    ).toHaveClass('is-reconnect');
+    expect(within(copilot).getByRole('button', { name: 'Reconnect GitHub Copilot' })).toHaveClass(
+      'is-reconnect'
+    );
   });
 
   it('shows the device code and updates when sign-in completes', async () => {
@@ -157,9 +154,44 @@ describe('ProviderSettingsDialog', () => {
 
     expect(mockGetCodexDeviceLogin).toHaveBeenCalledWith('codex_login_123');
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reconnect ChatGPT' })).toHaveClass(
-      'is-reconnect'
-    );
+    expect(screen.getByRole('button', { name: 'Reconnect ChatGPT' })).toHaveClass('is-reconnect');
+  });
+
+  it.each([
+    ['ChatGPT', mockStartCodexDeviceLogin, mockGetCodexDeviceLogin],
+    ['GitHub Copilot', mockStartCopilotDeviceLogin, mockGetCopilotDeviceLogin],
+  ] as const)('keeps one polling loop across pending %s updates', async (provider, startLogin, getLogin) => {
+    const pendingLogin = {
+      id: 'pending-login',
+      status: 'pending',
+      verificationUrl: 'https://example.com/device',
+      userCode: 'ABCD-EFGH',
+    };
+    startLogin.mockResolvedValue(pendingLogin);
+    getLogin
+      .mockResolvedValueOnce({ ...pendingLogin })
+      .mockResolvedValueOnce({ ...pendingLogin, status: 'connected' });
+    render(<ProviderSettingsDialog onClose={vi.fn()} />);
+    await flushPromises();
+    fireEvent.click(screen.getByRole('button', { name: `Connect ${provider}` }));
+    await flushPromises();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(getLogin).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Waiting for sign-in…')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(getLogin).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: `Reconnect ${provider}` })).toBeEnabled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2400);
+    });
+    expect(getLogin).toHaveBeenCalledTimes(2);
   });
 
   it('includes the authorization code field in the focus trap while Connect is disabled', async () => {
@@ -168,7 +200,8 @@ describe('ProviderSettingsDialog', () => {
       status: 'pending',
       authorizationUrl: 'https://claude.ai/oauth/authorize?test=1',
     });
-    const visibleRects = vi.spyOn(HTMLElement.prototype, 'getClientRects')
+    const visibleRects = vi
+      .spyOn(HTMLElement.prototype, 'getClientRects')
       .mockReturnValue([new DOMRect(0, 0, 100, 44)] as unknown as DOMRectList);
     try {
       render(<ProviderSettingsDialog onClose={vi.fn()} />);

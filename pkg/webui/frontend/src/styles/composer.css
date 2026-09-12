@@ -38,7 +38,9 @@
   border: 1px solid rgba(93, 83, 64, 0.2);
   border-radius: 0.25rem;
   background: rgba(250, 249, 245, 0.35);
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
 
 .composer-surface:focus-within {
@@ -429,7 +431,9 @@
   background: transparent;
   padding: 0.72rem 0.9rem;
   text-align: left;
-  transition: background-color 130ms ease, transform 130ms ease;
+  transition:
+    background-color 130ms ease,
+    transform 130ms ease;
 }
 
 .composer-slash-suggestion:last-child {

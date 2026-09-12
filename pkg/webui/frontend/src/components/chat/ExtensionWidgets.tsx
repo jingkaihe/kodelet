@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { useState, type CSSProperties } from 'react';
+import { type CSSProperties, useState } from 'react';
 import type { UIFrameLine, UIStyle, UIStyledSpan, UIWidgetEvent } from '../../types';
 
 interface ExtensionWidgetsProps {
@@ -108,7 +108,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
         const collapsed = collapsedWidgets[widget.key] === true;
 
         return (
-          <div
+          <fieldset
             aria-label={`${widget.extension_id} status`}
             className="extension-widget-frame"
             data-testid={`extension-widget-${widget.key}`}
@@ -125,10 +125,9 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
               }
               type="button"
             >
-              <div
-                className="extension-widget-line extension-widget-line-header"
-              >
+              <div className="extension-widget-line extension-widget-line-header">
                 {spansForLine(headerLine).map((span, spanIndex) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: These stateless text runs represent positional cells in a terminal frame and have no persistent IDs.
                   <span key={spanIndex} style={spanStyle(span.style)}>
                     {span.text}
                   </span>
@@ -144,6 +143,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
                     key={`${widget.frame.sequence}-${lineIndex + 1}`}
                   >
                     {spansForLine(line).map((span, spanIndex) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: These stateless text runs represent positional cells in a terminal frame and have no persistent IDs.
                       <span key={spanIndex} style={spanStyle(span.style)}>
                         {span.text}
                       </span>
@@ -152,7 +152,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
                 ))}
               </div>
             )}
-          </div>
+          </fieldset>
         );
       })}
     </section>

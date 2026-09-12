@@ -1,5 +1,5 @@
-import React from 'react';
-import { ToolResult, GlobMetadata, FileInfo } from '../../types';
+import type React from 'react';
+import type { FileInfo, GlobMetadata, ToolResult } from '../../types';
 import {
   formatReferenceSize,
   ReferenceFileList,

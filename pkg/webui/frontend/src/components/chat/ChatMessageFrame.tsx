@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import { cn } from '../../utils';
 import { CopyButton } from '../tool-renderers/shared';
 
@@ -7,7 +7,7 @@ type ChatMessageRole = 'user' | 'assistant';
 interface ChatMessageFrameProps {
   children: React.ReactNode;
   copyText?: string;
-  role: ChatMessageRole;
+  messageRole: ChatMessageRole;
 }
 
 const messageCopyButtonBaseClassName =
@@ -15,15 +15,14 @@ const messageCopyButtonBaseClassName =
 
 const userMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100`;
 
-const getRoleLabel = (role: ChatMessageRole): string =>
-  role === 'user' ? 'You' : 'Kodelet';
+const getRoleLabel = (role: ChatMessageRole): string => (role === 'user' ? 'You' : 'Kodelet');
 
 const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
   children,
   copyText = '',
-  role,
+  messageRole,
 }) => {
-  const isUser = role === 'user';
+  const isUser = messageRole === 'user';
 
   return (
     <article className="w-full">
@@ -35,14 +34,11 @@ const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
       >
         <div className="chat-message-heading">
           <p className="chat-message-role">
-            <span aria-hidden="true">{isUser ? '›' : '·'}</span> {getRoleLabel(role)}
+            <span aria-hidden="true">{isUser ? '›' : '·'}</span> {getRoleLabel(messageRole)}
           </p>
 
           {isUser && copyText.trim() ? (
-            <CopyButton
-              className={userMessageCopyButtonClassName}
-              content={copyText}
-            />
+            <CopyButton className={userMessageCopyButtonClassName} content={copyText} />
           ) : null}
         </div>
 

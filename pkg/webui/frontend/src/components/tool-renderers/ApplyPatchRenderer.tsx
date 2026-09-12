@@ -1,10 +1,6 @@
-import React from 'react';
-import { ApplyPatchChange, ApplyPatchMetadata, ToolResult } from '../../types';
-import {
-  parseUnifiedDiff,
-  ReferenceDiffBlock,
-  ReferenceDiffLine,
-} from './reference';
+import type React from 'react';
+import type { ApplyPatchChange, ApplyPatchMetadata, ToolResult } from '../../types';
+import { parseUnifiedDiff, ReferenceDiffBlock, type ReferenceDiffLine } from './reference';
 
 interface ApplyPatchRendererProps {
   toolResult: ToolResult;
@@ -57,7 +53,9 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
 
   return (
     <div className={`apply-patch-result${!toolResult.success ? ' apply-patch-result-failed' : ''}`}>
-      {!toolResult.success && toolResult.error ? <div className="apply-patch-error">{toolResult.error}</div> : null}
+      {!toolResult.success && toolResult.error ? (
+        <div className="apply-patch-error">{toolResult.error}</div>
+      ) : null}
       {changes.length > 0 ? (
         changes.map((change, index) => {
           const { lines, path, operation, label, counts } = getFileChangeSummary(change);

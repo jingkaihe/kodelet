@@ -1,5 +1,5 @@
-import React from 'react';
-import { ApplyPatchMetadata, ToolResult } from '../../types';
+import type React from 'react';
+import type { ApplyPatchMetadata, ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 
 interface FileEditMetadata {

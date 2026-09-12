@@ -1,14 +1,16 @@
-import React, {
+import { ChevronDown, GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
+import type React from 'react';
+import {
   lazy,
   Suspense,
   startTransition,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { ChevronDown, GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import ChatComposer from '../components/chat/ChatComposer';
 import ChatSidebar, {
@@ -25,11 +27,11 @@ import { applyChatStreamEvent, conversationToChatMessages } from '../features/ch
 import apiService from '../services/api';
 import type {
   AuthPrincipal,
-  CWDHint,
   ChatSettings,
   ChatStreamEvent,
   ContentBlock,
   Conversation,
+  CWDHint,
   GitDiffResponse,
   PendingImageAttachment,
   Runner,
@@ -568,7 +570,7 @@ const ChatPage: React.FC = () => {
   const desktopSidebarVisibleRef = useRef(readStoredSidebarVisible());
   const restoringDesktopSidebarRef = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
-  const sidebarShellRef = useRef<HTMLDivElement | null>(null);
+  const sidebarShellRef = useRef<HTMLElement | null>(null);
   const sidebarReturnFocusRef = useRef<HTMLElement | null>(null);
   const workspaceToolsRef = useRef<HTMLElement | null>(null);
   const cwdInputRef = useRef<HTMLInputElement | null>(null);
@@ -1008,8 +1010,9 @@ const ChatPage: React.FC = () => {
         setAuthPrincipal(null);
       });
 
+    // Bootstrap defaults once; runner-specific settings are discovered in the new-chat dialog.
     void apiService
-      .getChatSettings(undefined, selectedRunnerID || undefined)
+      .getChatSettings()
       .then((settings) => {
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
         setChatSettings(settings);
@@ -1081,6 +1084,10 @@ const ChatPage: React.FC = () => {
     return Array.from(new Set([...runningIds, ...locallyRunningConversationIds]));
   }, [conversations, locallyRunningConversationIds]);
 
+  const onStreamUIInputRequest = useEffectEvent((event: ChatStreamEvent) =>
+    handleUIInputRequest(event)
+  );
+
   useEffect(() => {
     const runningIds = new Set(runningConversationIds);
 
@@ -1124,7 +1131,7 @@ const ChatPage: React.FC = () => {
               return;
             }
 
-            if (isBlockingUIRequestEvent(event) && handleUIInputRequest(eventForConversation)) {
+            if (isBlockingUIRequestEvent(event) && onStreamUIInputRequest(eventForConversation)) {
               return;
             }
 
@@ -1197,6 +1204,7 @@ const ChatPage: React.FC = () => {
     slashCommandSuggestions,
     slashCommandSuggestionsOpen,
   ]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies(slashCommands): Refreshing the command list must reset its selected suggestion even when the draft is unchanged.
   useEffect(() => {
     setSlashCommandIndex(-1);
     setSlashSuggestionsDismissedDraft((dismissedDraft) =>
@@ -1216,6 +1224,15 @@ const ChatPage: React.FC = () => {
 
     cwdSuggestionRequestRef.current += 1;
   }, [conversationId]);
+
+  const onDismissNewChatDialog = useEffectEvent(() => {
+    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
+    cwdSuggestionSkipQueryRef.current = null;
+    requestCwdSuggestions.cancel();
+    cwdSuggestionRequestRef.current += 1;
+    setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
+    setNewChatDialogOpen(false);
+  });
 
   useEffect(() => {
     if (!newChatDialogOpen) {
@@ -1247,24 +1264,14 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
-      cwdSuggestionSkipQueryRef.current = null;
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
-      setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
-      setNewChatDialogOpen(false);
+      onDismissNewChatDialog();
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
-        cwdSuggestionSkipQueryRef.current = null;
-        requestCwdSuggestions.cancel();
-        cwdSuggestionRequestRef.current += 1;
-        setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
-        setNewChatDialogOpen(false);
+        onDismissNewChatDialog();
         return;
       }
       if (event.key !== 'Tab' || !newChatDialogRef.current) {
@@ -1587,6 +1594,7 @@ const ChatPage: React.FC = () => {
       });
   }, [conversationId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(conversationStreamVersion): Completing a submitted stream must reattach the conversation watcher even when its ID is unchanged.
   useEffect(() => {
     if (
       !conversationId ||
@@ -1619,7 +1627,7 @@ const ChatPage: React.FC = () => {
             ? event
             : { ...event, conversation_id: conversationId };
 
-          if (isBlockingUIRequestEvent(event) && handleUIInputRequest(eventForConversation)) {
+          if (isBlockingUIRequestEvent(event) && onStreamUIInputRequest(eventForConversation)) {
             sawEvent = true;
             return;
           }
@@ -1687,7 +1695,7 @@ const ChatPage: React.FC = () => {
             );
           }
 
-          if (handleUIInputRequest(eventForConversation)) {
+          if (onStreamUIInputRequest(eventForConversation)) {
             return;
           }
 
@@ -1755,6 +1763,8 @@ const ChatPage: React.FC = () => {
     shouldAutoScrollRef.current = isScrolledNearBottom(event.currentTarget);
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(messages): New transcript content triggers scrolling when the reader is following the bottom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(currentConversationIsStreaming): Starting or stopping the streaming indicator changes the transcript height.
   useEffect(() => {
     if (!shouldAutoScrollRef.current) {
       return;
@@ -1820,11 +1830,12 @@ const ChatPage: React.FC = () => {
         const requestId = cwdSuggestionRequestRef.current + 1;
         cwdSuggestionRequestRef.current = requestId;
 
-        void apiService.getCWDHints(query, {
-          runnerId: newChatRunnerDraft,
-          environmentProfile: newChatEnvironmentProfileDraft,
-          profile: newChatProfileDraft,
-        })
+        void apiService
+          .getCWDHints(query, {
+            runnerId: newChatRunnerDraft,
+            environmentProfile: newChatEnvironmentProfileDraft,
+            profile: newChatProfileDraft,
+          })
           .then((response) => {
             if (cwdSuggestionRequestRef.current !== requestId || viewedConversationIdRef.current) {
               return;
@@ -1860,7 +1871,10 @@ const ChatPage: React.FC = () => {
     setCwdSuggestionsOpen(false);
     setCwdSuggestionIndex(-1);
     const runner = runners.find((candidate) => candidate.id === newChatRunnerDraft);
-    const discoveryAvailable = newChatRunnerDraft && runner?.connected && runner.workspaceDiscovery &&
+    const discoveryAvailable =
+      newChatRunnerDraft &&
+      runner?.connected &&
+      runner.workspaceDiscovery &&
       (runner.status === 'idle' || runner.status === 'busy');
     if (!newChatDialogOpen || conversationId || !discoveryAvailable) {
       requestCwdSuggestions.cancel();
@@ -1892,7 +1906,14 @@ const ChatPage: React.FC = () => {
     cwdSuggestionSkipQueryRef.current = null;
 
     requestCwdSuggestions(cwdQuery);
-  }, [conversationId, cwdQuery, newChatRunnerDraft, newChatDialogOpen, runners, requestCwdSuggestions]);
+  }, [
+    conversationId,
+    cwdQuery,
+    newChatRunnerDraft,
+    newChatDialogOpen,
+    runners,
+    requestCwdSuggestions,
+  ]);
 
   const handleSelectConversation = (nextConversationId: string) => {
     closeMobileSidebar();
@@ -2037,6 +2058,30 @@ const ChatPage: React.FC = () => {
     setIsResizingSidebar(true);
   };
 
+  const handleSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLHRElement>) => {
+    let nextWidth: number;
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextWidth = sidebarWidth - 10;
+        break;
+      case 'ArrowRight':
+        nextWidth = sidebarWidth + 10;
+        break;
+      case 'Home':
+        nextWidth = MIN_SIDEBAR_WIDTH;
+        break;
+      case 'End':
+        nextWidth = MAX_SIDEBAR_WIDTH;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    sidebarWidthRef.current = clampSidebarWidth(nextWidth);
+    setSidebarWidth(sidebarWidthRef.current);
+  };
+
   const updatePathForStartedConversation = (streamedId: string) => {
     const nextPath = `/c/${streamedId}`;
 
@@ -2051,8 +2096,11 @@ const ChatPage: React.FC = () => {
   const handleUIInputRequest = (event: ChatStreamEvent) => {
     if (event.kind === 'ui-request-end') {
       setUIRequestDialog((current) =>
-        current && current.request.id === event.ui_request_id &&
-        current.request.conversationId === event.conversation_id ? null : current
+        current &&
+        current.request.id === event.ui_request_id &&
+        current.request.conversationId === event.conversation_id
+          ? null
+          : current
       );
       return true;
     }
@@ -2701,8 +2749,7 @@ const ChatPage: React.FC = () => {
     Boolean(conversationId) &&
     optimisticRemoteConversationRef.current?.conversationId === conversationId;
   const optimisticConversationContextEditable =
-    hasOptimisticRemoteConversation &&
-    optimisticRemoteConversationRef.current?.confirmed === false;
+    hasOptimisticRemoteConversation && optimisticRemoteConversationRef.current?.confirmed === false;
   const conversationMatchesRoute = !conversationId || conversation?.id === conversationId;
   const workspaceConversation =
     conversationMatchesRoute || isStartedConversationAwaitingLoad ? conversation : null;
@@ -2719,9 +2766,7 @@ const ChatPage: React.FC = () => {
     currentRunner?.connected && (currentRunner.status === 'idle' || currentRunner.status === 'busy')
   );
   const discoveryConversationID =
-    conversationId && !hasOptimisticRemoteConversation
-      ? conversationId
-      : undefined;
+    conversationId && !hasOptimisticRemoteConversation ? conversationId : undefined;
   const remoteWorkspaceConversationID = isRemoteConversation ? discoveryConversationID : undefined;
   const discoveryProfile = discoveryConversationID ? undefined : selectedProfile;
   const currentEnvironmentProfile = conversationId
@@ -2749,7 +2794,6 @@ const ChatPage: React.FC = () => {
     currentRunner?.workspace.path,
     currentRunnerID,
     isStartedConversationAwaitingLoad,
-    loadedConversationId,
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
@@ -2758,11 +2802,17 @@ const ChatPage: React.FC = () => {
     currentCWDLabel === currentRunner?.workspace.path ||
     Boolean(remoteWorkspaceConversationID && currentRunner?.workspaceCwd);
   const workspaceTerminalAvailable = Boolean(
-    isRemoteConversation && terminalAuthorized && runnerWorkspaceAvailable &&
-      runnerDirectoryAvailable && currentRunner?.workspaceTerminal
+    isRemoteConversation &&
+      terminalAuthorized &&
+      runnerWorkspaceAvailable &&
+      runnerDirectoryAvailable &&
+      currentRunner?.workspaceTerminal
   );
   const workspaceGitDiffAvailable = Boolean(
-    isRemoteConversation && runnerWorkspaceAvailable && runnerDirectoryAvailable && currentRunner?.workspaceGitDiff
+    isRemoteConversation &&
+      runnerWorkspaceAvailable &&
+      runnerDirectoryAvailable &&
+      currentRunner?.workspaceGitDiff
   );
   const workspaceToolsAvailable = workspaceTerminalAvailable || workspaceGitDiffAvailable;
   const workspaceTarget = useMemo<WorkspaceTarget>(
@@ -2773,10 +2823,10 @@ const ChatPage: React.FC = () => {
     }),
     [currentRunnerID, remoteWorkspaceConversationID]
   );
-  const workspaceTargetKey =
-    `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
+  const workspaceTargetKey = `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(currentRunner?.generation): A reconnected runner must rediscover commands even when its workspace is unchanged.
   useEffect(() => {
     setSlashCommands([]);
     if (!isRemoteConversation || !runnerWorkspaceAvailable || !currentRunner?.workspaceDiscovery) {
@@ -2784,15 +2834,13 @@ const ChatPage: React.FC = () => {
     }
     let cancelled = false;
 
-    void apiService.getSlashCommands(
-      remoteWorkspaceConversationID ? undefined : currentCWDLabel || undefined,
-      {
+    void apiService
+      .getSlashCommands(remoteWorkspaceConversationID ? undefined : currentCWDLabel || undefined, {
         runnerId: currentRunnerID,
         conversationId: remoteWorkspaceConversationID,
         environmentProfile: currentEnvironmentProfile,
         profile: discoveryProfile,
-      }
-    )
+      })
       .then((response) => {
         if (!cancelled) {
           setSlashCommands(response.commands || []);
@@ -2807,7 +2855,17 @@ const ChatPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentCWDLabel, isRemoteConversation, runnerWorkspaceAvailable, currentRunner?.workspaceDiscovery, currentRunner?.generation, currentRunnerID, remoteWorkspaceConversationID, currentEnvironmentProfile, discoveryProfile]);
+  }, [
+    currentCWDLabel,
+    isRemoteConversation,
+    runnerWorkspaceAvailable,
+    currentRunner?.workspaceDiscovery,
+    currentRunner?.generation,
+    currentRunnerID,
+    remoteWorkspaceConversationID,
+    currentEnvironmentProfile,
+    discoveryProfile,
+  ]);
 
   useEffect(() => {
     if (
@@ -2964,11 +3022,15 @@ const ChatPage: React.FC = () => {
       });
   };
 
+  const onDiscoverNewChatRunnerProfile = useEffectEvent((runnerId: string) => {
+    handleNewChatProfileDraftChange(newChatProfileDraft, runnerId, true);
+  });
+
   useEffect(() => {
     if (!newChatDialogOpen || !newChatRunnerDraft || !chatSettingsLoaded) {
       return;
     }
-    handleNewChatProfileDraftChange(newChatProfileDraft, newChatRunnerDraft, true);
+    onDiscoverNewChatRunnerProfile(newChatRunnerDraft);
     return () => {
       reasoningSettingsRequestRef.current += 1;
     };
@@ -2988,7 +3050,13 @@ const ChatPage: React.FC = () => {
         scope: conversationId ? 'conversation' : 'selected',
       },
     ];
-  }, [chatSettings.profiles, conversationId, currentProfileLabel, newChatDialogOpen, newChatProfileDraft]);
+  }, [
+    chatSettings.profiles,
+    conversationId,
+    currentProfileLabel,
+    newChatDialogOpen,
+    newChatProfileDraft,
+  ]);
 
   const composerContextText = useMemo(() => {
     const directoryLabel = !isRemoteConversation
@@ -3003,12 +3071,7 @@ const ChatPage: React.FC = () => {
     contextParts.push(directoryLabel);
 
     return contextParts.join(' · ');
-  }, [
-    currentCWDLabel,
-    currentProfileLabel,
-    currentReasoningEffortLabel,
-    isRemoteConversation,
-  ]);
+  }, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel, isRemoteConversation]);
 
   const hasActiveConversationTarget = Boolean(activeRunningConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget;
@@ -3047,6 +3110,7 @@ const ChatPage: React.FC = () => {
       ? 'Steer'
       : 'Send';
   const stopActionLabel = canStopActiveConversation ? 'Stop' : 'Starting…';
+  // biome-ignore lint/correctness/useExhaustiveDependencies(statusTick): The clock tick intentionally recomputes relative timestamps without new conversation data.
   const composerMeta = useMemo(() => {
     const groups: Array<{ label: string; value: string }> = [];
     const details: Array<{ label: string; value: string }> = [];
@@ -3055,7 +3119,10 @@ const ChatPage: React.FC = () => {
         currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
       const runnerStatus = formatRunnerStatus(currentRunner);
       const runnerParts = [runnerName, runnerStatus];
-      details.push({ label: 'Runner', value: runnerName }, { label: 'Status', value: runnerStatus });
+      details.push(
+        { label: 'Runner', value: runnerName },
+        { label: 'Status', value: runnerStatus }
+      );
       if (currentEnvironmentProfile) {
         runnerParts.push(`env ${currentEnvironmentProfile}`);
         details.push({ label: 'Runner profile', value: currentEnvironmentProfile });
@@ -3067,11 +3134,21 @@ const ChatPage: React.FC = () => {
     }
 
     const usage = conversation.usage;
-    const compactNumber = Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+    const compactNumber = Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    });
     const exactNumber = Intl.NumberFormat('en-US');
     const usageParts: string[] = [];
-    if (usage?.currentContextWindow !== undefined && usage.maxContextWindow && usage.maxContextWindow > 0) {
-      const percentage = Math.max(0, Math.min(100, Math.round((usage.currentContextWindow / usage.maxContextWindow) * 100)));
+    if (
+      usage?.currentContextWindow !== undefined &&
+      usage.maxContextWindow &&
+      usage.maxContextWindow > 0
+    ) {
+      const percentage = Math.max(
+        0,
+        Math.min(100, Math.round((usage.currentContextWindow / usage.maxContextWindow) * 100))
+      );
       usageParts.push(`ctx ${percentage}%`);
       details.push({
         label: 'Context window',
@@ -3094,11 +3171,16 @@ const ChatPage: React.FC = () => {
       groups.push({ label: 'Usage', value: usageParts.join(' · ') });
     }
 
-    const totalCost = (usage?.inputCost || 0) + (usage?.outputCost || 0) +
-      (usage?.cacheCreationCost || 0) + (usage?.cacheReadCost || 0);
-    const costParts = [totalCost > 0 && totalCost < 0.01
-      ? '<$0.01'
-      : Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalCost)];
+    const totalCost =
+      (usage?.inputCost || 0) +
+      (usage?.outputCost || 0) +
+      (usage?.cacheCreationCost || 0) +
+      (usage?.cacheReadCost || 0);
+    const costParts = [
+      totalCost > 0 && totalCost < 0.01
+        ? '<$0.01'
+        : Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalCost),
+    ];
     details.push({ label: 'Total cost', value: formatCost(usage) });
 
     if (conversation.updatedAt) {
@@ -3161,14 +3243,19 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  const onWorkspaceTargetChange = useEffectEvent(() => {
+    if (workspacePanelView === 'diff' && workspaceGitDiffAvailable) {
+      void fetchGitDiff();
+    }
+  });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(workspaceTargetKey): A workspace change invalidates cached diff requests; opening or refreshing the panel is handled separately.
   useEffect(() => {
     gitDiffRequestRef.current += 1;
     setGitDiff(null);
     setGitDiffError(null);
     setGitDiffLoading(false);
-    if (workspacePanelView === 'diff' && workspaceGitDiffAvailable) {
-      void fetchGitDiff();
-    }
+    onWorkspaceTargetChange();
   }, [workspaceTargetKey]);
 
   const handleToggleWorkspacePanel = () => {
@@ -3204,11 +3291,7 @@ const ChatPage: React.FC = () => {
   };
 
   const handleCommitNewChatContext = () => {
-    if (
-      reasoningSettingsLoading ||
-      !chatSettingsLoaded ||
-      !newChatRunnerDraft
-    ) {
+    if (reasoningSettingsLoading || !chatSettingsLoaded || !newChatRunnerDraft) {
       return;
     }
 
@@ -3323,9 +3406,7 @@ const ChatPage: React.FC = () => {
           onCwdInputChange={handleCwdInputChange}
           onCwdInputFocus={() => {
             cwdInputFocusedRef.current = true;
-            setCwdSuggestionsOpen(
-              cwdQuery.trim().length > 0 && cwdSuggestions.length > 0
-            );
+            setCwdSuggestionsOpen(cwdQuery.trim().length > 0 && cwdSuggestions.length > 0);
           }}
           onCwdInputKeyDown={handleCwdInputKeyDown}
           onProfileDraftChange={handleNewChatProfileDraftChange}
@@ -3383,15 +3464,15 @@ const ChatPage: React.FC = () => {
         inert={higherPriorityDialogOpen || undefined}
       >
         {sidebarVisible ? (
-          <div
+          <section
             aria-hidden={workspaceOverlayOpen || undefined}
-            aria-label={sidebarOverlayOpen ? 'Conversations' : undefined}
-            aria-modal={sidebarOverlayOpen || undefined}
+            aria-label="Conversations"
+            {...(sidebarOverlayOpen ? { role: 'dialog', 'aria-modal': true } : {})}
             className="absolute inset-y-0 left-0 z-50 w-[min(85%,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-20 lg:h-full lg:w-[var(--sidebar-width)] lg:self-start"
             data-testid="chat-sidebar-shell"
+            id="chat-sidebar"
             inert={workspaceOverlayOpen || undefined}
             ref={sidebarShellRef}
-            role={sidebarOverlayOpen ? 'dialog' : undefined}
             tabIndex={sidebarOverlayOpen ? -1 : undefined}
             style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
           >
@@ -3410,16 +3491,21 @@ const ChatPage: React.FC = () => {
               onSelectConversation={handleSelectConversation}
               searchActive={sidebarSearchOpen}
             />
-            <div
+            <hr
+              aria-controls="chat-sidebar"
               aria-label="Resize sidebar"
               aria-orientation="vertical"
-              className="sidebar-resize-edge absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize lg:block"
+              aria-valuemax={MAX_SIDEBAR_WIDTH}
+              aria-valuemin={MIN_SIDEBAR_WIDTH}
+              aria-valuenow={sidebarWidth}
+              aria-valuetext={`${sidebarWidth} pixels`}
+              className="sidebar-resize-edge absolute bottom-0 right-0 top-0 z-10 m-0 hidden h-auto translate-x-1/2 cursor-col-resize border-0 lg:block"
               data-testid="chat-sidebar-resizer"
+              onKeyDown={handleSidebarResizeKeyDown}
               onMouseDown={handleSidebarResizeStart}
-              role="separator"
-              tabIndex={-1}
+              tabIndex={0}
             />
-          </div>
+          </section>
         ) : null}
 
         {!sidebarVisible ? (
@@ -3471,10 +3557,7 @@ const ChatPage: React.FC = () => {
               </div>
             ) : (
               <>
-                <ChatTranscript
-                  isStreaming={currentConversationIsStreaming}
-                  messages={messages}
-                />
+                <ChatTranscript isStreaming={currentConversationIsStreaming} messages={messages} />
                 {composerMeta.groups.length > 0 ? (
                   <div className="transcript-meta-strip-shell">
                     <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
@@ -3490,9 +3573,16 @@ const ChatPage: React.FC = () => {
                               <span key={label}>{value}</span>
                             ))}
                           </span>
-                          <ChevronDown aria-hidden="true" className="transcript-meta-chevron" strokeWidth={1.6} />
+                          <ChevronDown
+                            aria-hidden="true"
+                            className="transcript-meta-chevron"
+                            strokeWidth={1.6}
+                          />
                         </summary>
-                        <dl className="transcript-meta-details" data-testid="transcript-meta-details">
+                        <dl
+                          className="transcript-meta-details"
+                          data-testid="transcript-meta-details"
+                        >
                           {composerMeta.details.map(({ label, value }) => (
                             <div key={label}>
                               <dt>{label}</dt>
@@ -3572,7 +3662,7 @@ const ChatPage: React.FC = () => {
         {workspaceToolsAvailable ? (
           <aside
             aria-label="Workspace tools"
-            aria-modal={workspaceOverlayOpen || undefined}
+            {...(workspaceOverlayOpen ? { role: 'dialog', 'aria-modal': true } : {})}
             className={cn(
               'workspace-tools-shell',
               workspacePanelOpen && 'is-open',
@@ -3581,7 +3671,6 @@ const ChatPage: React.FC = () => {
             data-testid="workspace-tools-shell"
             inert={sidebarOverlayOpen || undefined}
             ref={workspaceToolsRef}
-            role={workspaceOverlayOpen ? 'dialog' : undefined}
             tabIndex={workspaceOverlayOpen ? -1 : undefined}
           >
             {workspacePanelOpen ? (
@@ -3627,9 +3716,9 @@ const ChatPage: React.FC = () => {
                 <div className="workspace-tools-content">
                   <Suspense
                     fallback={
-                      <div className="workspace-modal-placeholder" role="status">
+                      <output className="workspace-modal-placeholder">
                         Loading workspace tool…
-                      </div>
+                      </output>
                     }
                   >
                     {workspacePanelView === 'terminal' ? (

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { ToolResult } from '../../types';
+import type React from 'react';
+import { useState } from 'react';
+import type { ToolResult } from '../../types';
 import { safeStringify } from './shared';
 
 interface FallbackRendererProps {
@@ -16,10 +17,7 @@ const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
       </div>
 
       {!showRaw ? (
-        <button
-          onClick={() => setShowRaw(true)}
-          className="tool-action-link"
-        >
+        <button type="button" onClick={() => setShowRaw(true)} className="tool-action-link">
           Show raw data
         </button>
       ) : (

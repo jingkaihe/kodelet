@@ -29,6 +29,22 @@ describe('Spinner', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('restarts the animation when the reset key changes', () => {
+    vi.useFakeTimers();
+    const { container, rerender } = render(<Spinner resetKey="first-turn" />);
+    const spinner = container.querySelector('.spinner-glyph');
+
+    act(() => vi.advanceTimersByTime(125));
+    expect(spinner).toHaveTextContent('⣽');
+
+    rerender(<Spinner resetKey="second-turn" />);
+    expect(spinner).toHaveTextContent('⣾');
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => vi.advanceTimersByTime(125));
+    expect(spinner).toHaveTextContent('⣽');
+  });
+
   it('stays static when reduced motion is requested', () => {
     vi.useFakeTimers();
     vi.spyOn(window, 'matchMedia').mockReturnValue({

@@ -1,14 +1,9 @@
-import React, { useMemo, useState } from 'react';
-import {
-  ChevronRight,
-  Copy,
-  FoldVertical,
-  RefreshCw,
-  UnfoldVertical,
-} from 'lucide-react';
+import { ChevronRight, Copy, FoldVertical, RefreshCw, UnfoldVertical } from 'lucide-react';
+import type React from 'react';
+import { useMemo, useState } from 'react';
+import type { GitDiffResponse } from '../../types';
 import { copyToClipboard } from '../../utils';
 import { parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
-import type { GitDiffResponse } from '../../types';
 
 interface GitDiffModalProps {
   cwdLabel?: string;
@@ -105,16 +100,12 @@ const extractPathLine = (
 
   const pathField = line.slice(prefix.length);
   const tabIndex = pathField.lastIndexOf('\t');
-  const decodedPath = decodeGitPath(
-    tabIndex >= 0 ? pathField.slice(0, tabIndex) : pathField
-  );
+  const decodedPath = decodeGitPath(tabIndex >= 0 ? pathField.slice(0, tabIndex) : pathField);
   if (decodedPath === '/dev/null') {
     return null;
   }
 
-  return stripGitPrefix && /^[ab]\//.test(decodedPath)
-    ? decodedPath.slice(2)
-    : decodedPath;
+  return stripGitPrefix && /^[ab]\//.test(decodedPath) ? decodedPath.slice(2) : decodedPath;
 };
 
 const extractHeaderPath = (line: string): string | null => {
@@ -166,11 +157,7 @@ const splitGitDiffSections = (diffText: string): GitDiffSection[] => {
   let currentSubmodule = false;
   let pendingSubmodule: PendingSubmodule | null = null;
 
-  const pushSection = (
-    lines: string[],
-    pathHint: string | null,
-    submodule: boolean
-  ) => {
+  const pushSection = (lines: string[], pathHint: string | null, submodule: boolean) => {
     if (lines.length === 0) {
       return;
     }
@@ -311,11 +298,7 @@ const normalizeSegments = (segments: string[]): string[] => {
   return normalized;
 };
 
-const makePathRelativeToCWD = (
-  repoPath: string,
-  cwd?: string,
-  gitRoot?: string
-): string => {
+const makePathRelativeToCWD = (repoPath: string, cwd?: string, gitRoot?: string): string => {
   if (!cwd || !gitRoot) {
     return repoPath;
   }
@@ -326,10 +309,7 @@ const makePathRelativeToCWD = (
     return repoPath;
   }
 
-  const targetSegments = normalizeSegments([
-    ...rootParts.segments,
-    ...repoPath.split('/'),
-  ]);
+  const targetSegments = normalizeSegments([...rootParts.segments, ...repoPath.split('/')]);
   const cwdSegments = normalizeSegments(cwdParts.segments);
   const caseInsensitive = cwdParts.root !== '/';
   let commonSegments = 0;
@@ -338,8 +318,7 @@ const makePathRelativeToCWD = (
     commonSegments < cwdSegments.length &&
     commonSegments < targetSegments.length &&
     (caseInsensitive
-      ? cwdSegments[commonSegments].toLowerCase() ===
-        targetSegments[commonSegments].toLowerCase()
+      ? cwdSegments[commonSegments].toLowerCase() === targetSegments[commonSegments].toLowerCase()
       : cwdSegments[commonSegments] === targetSegments[commonSegments])
   ) {
     commonSegments += 1;
@@ -425,11 +404,7 @@ const formatDisplayPath = (path: string): string => {
     .replace(/\n/g, '\\n');
 };
 
-const parseGitFileDiffs = (
-  diffText: string,
-  cwd?: string,
-  gitRoot?: string
-): GitFileDiff[] => {
+const parseGitFileDiffs = (diffText: string, cwd?: string, gitRoot?: string): GitFileDiff[] => {
   return splitGitDiffSections(diffText).map((section, index) => {
     const { diff } = section;
     const lines = diff.split('\n');
@@ -463,22 +438,14 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
   open,
   onRefresh,
 }) => {
-  const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(
-    () => new Set()
-  );
+  const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(() => new Set());
   const diffText = gitDiff?.diff || '';
   const fileDiffs = useMemo(
-    () =>
-      parseGitFileDiffs(
-        diffText,
-        gitDiff?.cwd || cwdLabel,
-        gitDiff?.git_root
-      ),
+    () => parseGitFileDiffs(diffText, gitDiff?.cwd || cwdLabel, gitDiff?.git_root),
     [cwdLabel, diffText, gitDiff?.cwd, gitDiff?.git_root]
   );
   const allFilesExpanded =
-    fileDiffs.length > 0 &&
-    fileDiffs.every((file) => expandedFileIds.has(file.id));
+    fileDiffs.length > 0 && fileDiffs.every((file) => expandedFileIds.has(file.id));
 
   if (!open) {
     return null;
@@ -497,22 +464,17 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
   };
 
   const toggleAllFiles = () => {
-    setExpandedFileIds(
-      allFilesExpanded
-        ? new Set()
-        : new Set(fileDiffs.map((file) => file.id))
-    );
+    setExpandedFileIds(allFilesExpanded ? new Set() : new Set(fileDiffs.map((file) => file.id)));
   };
 
   return (
-    <section
+    <aside
       aria-label="Changes"
       className="workspace-side-panel workspace-diff-panel surface-panel"
       data-testid="git-diff-panel"
-      role="complementary"
     >
       <div className="workspace-modal-body workspace-side-panel-body">
-        <div className="workspace-diff-toolbar" aria-label="Diff actions">
+        <fieldset className="workspace-diff-toolbar" aria-label="Diff actions">
           {gitDiff?.has_diff && !loading ? (
             <>
               <button
@@ -554,21 +516,21 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
               strokeWidth={1.9}
             />
           </button>
-        </div>
+        </fieldset>
 
         {error ? (
-          <div className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark" role="alert">
+          <div
+            className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark"
+            role="alert"
+          >
             {error}
           </div>
         ) : null}
 
         {gitDiff?.truncated && !loading && !error ? (
-          <div
-            className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark"
-            role="status"
-          >
+          <output className="surface-panel block rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
             Showing a partial diff because the runner output exceeded the display limit.
-          </div>
+          </output>
         ) : null}
 
         {loading ? (
@@ -581,8 +543,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
                 const displayPath = formatDisplayPath(file.path);
                 const statsId = `git-diff-file-stats-${index}`;
                 const bodyId = `git-diff-file-body-${index}`;
-                const hasStats =
-                  file.additions > 0 || file.deletions > 0 || file.status !== null;
+                const hasStats = file.additions > 0 || file.deletions > 0 || file.status !== null;
                 return (
                   <article className="workspace-diff-file" key={file.id}>
                     <button
@@ -625,10 +586,12 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
             </div>
           </div>
         ) : (
-          <div className="workspace-modal-placeholder">No working tree changes in this repository.</div>
+          <div className="workspace-modal-placeholder">
+            No working tree changes in this repository.
+          </div>
         )}
       </div>
-    </section>
+    </aside>
   );
 };
 

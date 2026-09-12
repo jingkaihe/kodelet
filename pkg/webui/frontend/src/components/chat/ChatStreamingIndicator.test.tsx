@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import ChatStreamingIndicator, {
-  STREAMING_INDICATOR_MESSAGES,
   getStreamingIndicatorMessage,
+  STREAMING_INDICATOR_MESSAGES,
 } from './ChatStreamingIndicator';
 
 describe('ChatStreamingIndicator', () => {

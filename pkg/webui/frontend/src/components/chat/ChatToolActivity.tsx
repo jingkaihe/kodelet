@@ -1,21 +1,18 @@
-import React from 'react';
 import { Check, ChevronRight, X } from 'lucide-react';
+import React from 'react';
 import type { ApplyPatchChange, ChatRenderToolCall, ToolResult } from '../../types';
 import { cn, formatDuration } from '../../utils';
 import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
 import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
-import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/ToolImageAttachments';
-import {
-  formatTaskRunElapsed,
-  getTaskRunSnapshot,
-} from '../tool-renderers/TaskRunRenderer';
 import {
   getExtensionToolPresentation,
   normalizeToolName,
   ReferenceCodeBlock,
   ReferenceDiffBlock,
 } from '../tool-renderers/reference';
+import { formatTaskRunElapsed, getTaskRunSnapshot } from '../tool-renderers/TaskRunRenderer';
+import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/ToolImageAttachments';
 
 interface ChatToolActivityProps {
   tools: ChatRenderToolCall[];
@@ -133,12 +130,18 @@ const parseApplyPatchInput = (patchInput: string): ApplyPatchChange[] => {
     }
 
     if (trimmedLine.startsWith('*** Update File: ')) {
-      changes.push({ operation: 'update', path: trimmedLine.slice('*** Update File: '.length).trim() });
+      changes.push({
+        operation: 'update',
+        path: trimmedLine.slice('*** Update File: '.length).trim(),
+      });
       return;
     }
 
     if (trimmedLine.startsWith('*** Delete File: ')) {
-      changes.push({ operation: 'delete', path: trimmedLine.slice('*** Delete File: '.length).trim() });
+      changes.push({
+        operation: 'delete',
+        path: trimmedLine.slice('*** Delete File: '.length).trim(),
+      });
       return;
     }
 
@@ -150,9 +153,7 @@ const parseApplyPatchInput = (patchInput: string): ApplyPatchChange[] => {
   return changes;
 };
 
-const getApplyPatchChanges = (
-  metadata: Record<string, unknown> | null
-): ApplyPatchChange[] => {
+const getApplyPatchChanges = (metadata: Record<string, unknown> | null): ApplyPatchChange[] => {
   const changes = metadata?.changes;
   if (!Array.isArray(changes) || changes.length === 0) {
     return [
@@ -168,9 +169,12 @@ const getApplyPatchChanges = (
 };
 
 const summarizePatchChanges = (changes: ApplyPatchChange[]): string | undefined =>
-  summarizeList(changes.map((change) =>
-    `${change.operation || 'update'} ${change.path}${change.movePath ? ` → ${change.movePath}` : ''}`
-  ));
+  summarizeList(
+    changes.map(
+      (change) =>
+        `${change.operation || 'update'} ${change.path}${change.movePath ? ` → ${change.movePath}` : ''}`
+    )
+  );
 
 const formatToolSummary = (label: string, value?: string): string => {
   if (!value) {
@@ -378,7 +382,10 @@ const ActivitySummaryText: React.FC<{
   return (
     <span className="tool-summary-text" title={summaryText}>
       {detail ? <span className="sr-only">{summaryText}</span> : null}
-      <span className={cn('tool-summary-label', detail && 'tool-summary-label-prefix')} aria-hidden={detail ? 'true' : undefined}>
+      <span
+        className={cn('tool-summary-label', detail && 'tool-summary-label-prefix')}
+        aria-hidden={detail ? 'true' : undefined}
+      >
         {detail ? `${label}:` : label}
       </span>
       {detail ? (
@@ -406,22 +413,34 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
     }
   } else {
     const path = getStringField(metadata, 'filePath') || getStringField(input, 'file_path');
-    changes = path ? [{
-      path,
-      operation: name === 'file_read' ? 'read' : name === 'file_write' ? 'write' : 'update',
-      unifiedDiff: typeof metadata?.unifiedDiff === 'string' ? metadata.unifiedDiff : undefined,
-    }] : [];
+    changes = path
+      ? [
+          {
+            path,
+            operation: name === 'file_read' ? 'read' : name === 'file_write' ? 'write' : 'update',
+            unifiedDiff:
+              typeof metadata?.unifiedDiff === 'string' ? metadata.unifiedDiff : undefined,
+          },
+        ]
+      : [];
   }
 
   return (
     <>
       {(changes.length > 0 ? changes : [undefined]).map((change, index) => {
         const file = change ? getFileChangeSummary(change) : undefined;
-        const summaryText = file ? formatToolSummary(`${file.label} file`, file.path) : getToolSummary(tool);
+        const summaryText = file
+          ? formatToolSummary(`${file.label} file`, file.path)
+          : getToolSummary(tool);
         const showCounts = name !== 'file_read' && change?.unifiedDiff !== undefined;
         return (
           <details
-            className={cn('activity-card', 'activity-file', running && 'activity-card-live', failed && 'activity-card-error')}
+            className={cn(
+              'activity-card',
+              'activity-file',
+              running && 'activity-card-live',
+              failed && 'activity-card-error'
+            )}
             key={`${change?.path || ''}-${index}-${running ? 'running' : failed ? 'failed' : 'settled'}`}
             open={running ? true : undefined}
           >
@@ -436,19 +455,37 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
                   <span className="apply-patch-count-removed">-{file.counts.removed}</span>)
                 </span>
               ) : null}
-              <span className="tool-summary-chevron" aria-hidden="true"><ChevronRight size={12} /></span>
-              <span className={cn('tool-summary-status', !failed && 'sr-only')} aria-label={`Tool ${status}`}>{status}</span>
+              <span className="tool-summary-chevron" aria-hidden="true">
+                <ChevronRight size={12} />
+              </span>
+              <output
+                className={cn('tool-summary-status', !failed && 'sr-only')}
+                aria-label={`Tool ${status}`}
+              >
+                {status}
+              </output>
             </summary>
             <div className="activity-detail-content">
               {file && name !== 'file_read' && tool.result ? (
                 <>
-                  {failed ? <div className="apply-patch-error" role="alert">{tool.result.error || 'File operation failed.'}</div> : null}
-                  {file.lines.length > 0 ? <ReferenceDiffBlock lines={file.lines} /> : (
+                  {failed ? (
+                    <div className="apply-patch-error" role="alert">
+                      {tool.result.error || 'File operation failed.'}
+                    </div>
+                  ) : null}
+                  {file.lines.length > 0 ? (
+                    <ReferenceDiffBlock lines={file.lines} />
+                  ) : (
                     <p className="tool-awaiting">No file diff available.</p>
                   )}
                 </>
               ) : tool.result ? (
-                <ToolRenderer isPartial={tool.inProgress} showAttachments={false} toolInput={tool.input} toolResult={tool.result} />
+                <ToolRenderer
+                  isPartial={tool.inProgress}
+                  showAttachments={false}
+                  toolInput={tool.input}
+                  toolResult={tool.result}
+                />
               ) : (
                 <p className="tool-awaiting">Awaiting file result…</p>
               )}
@@ -462,9 +499,17 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
 };
 
 const builtinToolNames = new Set([
-  'get_goal', 'glob_tool',
-  'grep_tool', 'openai_web_search', 'read_conversation', 'skill', 'todo_read',
-  'todo_write', 'update_goal', 'view_image', 'web_fetch',
+  'get_goal',
+  'glob_tool',
+  'grep_tool',
+  'openai_web_search',
+  'read_conversation',
+  'skill',
+  'todo_read',
+  'todo_write',
+  'update_goal',
+  'view_image',
+  'web_fetch',
 ]);
 
 const toolGroupKind = (tool: ChatRenderToolCall): 'commands' | 'tools' | 'file' | 'extension' => {
@@ -487,7 +532,11 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
   for (const tool of tools) {
     const previous = groups[groups.length - 1];
     const kind = toolGroupKind(tool);
-    if ((kind === 'commands' || kind === 'tools') && previous && toolGroupKind(previous[0]) === kind) {
+    if (
+      (kind === 'commands' || kind === 'tools') &&
+      previous &&
+      toolGroupKind(previous[0]) === kind
+    ) {
       previous.push(tool);
     } else {
       groups.push([tool]);
@@ -500,7 +549,12 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         const toolCall = group[0];
         const kind = toolGroupKind(toolCall);
         if (kind === 'file') {
-          return <FileToolActivity key={toolCall.callId || `${toolCall.name}-${groupIndex}`} tool={toolCall} />;
+          return (
+            <FileToolActivity
+              key={toolCall.callId || `${toolCall.name}-${groupIndex}`}
+              tool={toolCall}
+            />
+          );
         }
         const commands = kind === 'commands';
         const builtin = kind !== 'extension';
@@ -510,7 +564,11 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         const summaryText = builtin
           ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
           : getToolSummary(toolCall);
-        const activityStatus = running ? 'running' : failedCount ? 'failed' : getToolActivityStatus(toolCall);
+        const activityStatus = running
+          ? 'running'
+          : failedCount
+            ? 'failed'
+            : getToolActivityStatus(toolCall);
 
         return (
           <React.Fragment
@@ -535,11 +593,13 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                   <ChevronRight size={12} />
                 </span>
                 {builtin ? (
-                  failedCount > 0 ? <span className="tool-summary-status">{failedCount} failed</span> : null
+                  failedCount > 0 ? (
+                    <span className="tool-summary-status">{failedCount} failed</span>
+                  ) : null
                 ) : (
-                  <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                  <output className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
                     {activityStatus}
-                  </span>
+                  </output>
                 )}
               </summary>
 
@@ -547,16 +607,26 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 {group.map((tool, toolIndex) => {
                   const status = getToolActivityStatus(tool);
                   const input = parseToolInput(tool.input);
-                  const commandText = getStringField(input, 'command') ||
+                  const commandText =
+                    getStringField(input, 'command') ||
                     getStringField(getMetadataRecord(tool.result), 'command');
                   return (
-                    <section className={commands ? 'command-activity' : 'tool-activity'} key={tool.callId || toolIndex}>
+                    <section
+                      className={commands ? 'command-activity' : 'tool-activity'}
+                      key={tool.callId || toolIndex}
+                    >
                       {builtin ? (
                         <div className="command-activity-header">
                           {commands ? (
-                            <code className="command-activity-command">$ {commandText || 'Receiving command…'}</code>
-                          ) : <ActivitySummaryText summaryText={getToolSummary(tool)} />}
-                          <span className="tool-summary-status" aria-label={`Tool ${status}`}>{status}</span>
+                            <code className="command-activity-command">
+                              $ {commandText || 'Receiving command…'}
+                            </code>
+                          ) : (
+                            <ActivitySummaryText summaryText={getToolSummary(tool)} />
+                          )}
+                          <output className="tool-summary-status" aria-label={`Tool ${status}`}>
+                            {status}
+                          </output>
                         </div>
                       ) : null}
                       {tool.result ? (
@@ -568,14 +638,20 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                         />
                       ) : (
                         <>
-                          <p className="tool-awaiting">{commands ? 'Waiting for command output…' : 'Awaiting tool result…'}</p>
+                          <p className="tool-awaiting">
+                            {commands ? 'Waiting for command output…' : 'Awaiting tool result…'}
+                          </p>
                           {!commands && tool.input ? (
                             <div className="running-tool-input-preview">
                               <ReferenceCodeBlock
-                                content={formatToolInputPreview(normalizeToolName(tool.name) === 'apply_patch'
-                                  ? getStringField(input, 'input') || tool.input
-                                  : tool.input)}
-                                language={normalizeToolName(tool.name) === 'apply_patch' ? 'diff' : 'json'}
+                                content={formatToolInputPreview(
+                                  normalizeToolName(tool.name) === 'apply_patch'
+                                    ? getStringField(input, 'input') || tool.input
+                                    : tool.input
+                                )}
+                                language={
+                                  normalizeToolName(tool.name) === 'apply_patch' ? 'diff' : 'json'
+                                }
                               />
                             </div>
                           ) : null}
@@ -586,9 +662,11 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 })}
               </div>
             </details>
-            {group.map((tool, toolIndex) => tool.result && !tool.inProgress ? (
-              <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />
-            ) : null)}
+            {group.map((tool, toolIndex) =>
+              tool.result && !tool.inProgress ? (
+                <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />
+              ) : null
+            )}
           </React.Fragment>
         );
       })}

@@ -1,8 +1,8 @@
-import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import React from 'react';
 import { fn } from 'storybook/test';
-import NewChatContextDialog from './NewChatContextDialog';
 import { sampleCwdHints, sampleProfiles } from '../../stories/fixtures';
+import NewChatContextDialog from './NewChatContextDialog';
 
 type NewChatContextDialogStoryProps = React.ComponentProps<typeof NewChatContextDialog>;
 
@@ -72,15 +72,17 @@ const meta = {
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
-    runners: [{
-      id: 'runner-1',
-      host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
-      workspace: { path: '/home/jingkaihe/workspace/kodelet', name: 'kodelet' },
-      manifestChanged: false,
-      status: 'idle',
-      connected: true,
-      generation: 1,
-    }],
+    runners: [
+      {
+        id: 'runner-1',
+        host: { instanceId: 'host-1', hostname: 'worker', os: 'linux', arch: 'amd64' },
+        workspace: { path: '/home/jingkaihe/workspace/kodelet', name: 'kodelet' },
+        manifestChanged: false,
+        status: 'idle',
+        connected: true,
+        generation: 1,
+      },
+    ],
     runnerIdDraft: 'runner-1',
     environmentProfileDraft: '',
     onCancel: fn(),

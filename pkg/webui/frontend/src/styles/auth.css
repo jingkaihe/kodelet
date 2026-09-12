@@ -19,11 +19,8 @@
   align-content: center;
   gap: 0.75rem;
   margin: 0 auto;
-  padding:
-    max(1.5rem, env(safe-area-inset-top))
-    max(1rem, env(safe-area-inset-right))
-    max(1.25rem, env(safe-area-inset-bottom))
-    max(1rem, env(safe-area-inset-left));
+  padding: max(1.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+    max(1.25rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
 }
 
 .auth-app-bar {
@@ -201,7 +198,9 @@
   letter-spacing: 0.02em;
   line-height: 1;
   color: var(--sidebar-surface-ink);
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
 
 .auth-code-cell.is-filled {

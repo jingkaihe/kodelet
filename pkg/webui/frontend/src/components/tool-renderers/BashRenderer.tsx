@@ -1,5 +1,5 @@
-import React from 'react';
-import { ToolResult, BashMetadata } from '../../types';
+import type React from 'react';
+import type { BashMetadata, ToolResult } from '../../types';
 import { ReferenceTerminal, ReferenceToolNote } from './reference';
 import { CopyButton } from './shared';
 
