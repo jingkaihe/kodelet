@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.6.12-beta
+
+Added system-aware Gruvbox light and dark themes plus Classic light, with an accessible appearance picker, saved preferences synchronized across tabs, and consistent colors across the Web UI and workspace terminal.
+
+Added syntax highlighting and dedicated copy buttons to chat code blocks, with improved message copy controls for keyboard and touch users.
+
+Added a Web App Manifest and home-screen icons, including an Apple touch icon, that load before authentication.
+
+Kept the conversation sidebar up to date with background polling that preserves live activity and pending local conversations, pauses in hidden tabs, and backs off after failures.
+
+Improved mobile composer layout, placeholder sizing, and narrow-screen context indicators, and fixed disappearing punctuation in Chrome.
+
+Added keyboard-accessible, theme-aware new-chat dropdowns and dismissible stacked notifications that pause dismissal while hovered or focused, with clearer queued-message and extension widget styling.
+
+Matched workspace terminal palettes to the selected theme, fixed colors after reopening the terminal, and clarified connection states. Removed duplicate command failure messages and kept busy indicators active with reduced motion enabled.
+
 ## 0.6.11-beta
 
 Added a shared lowercase Kodelet wordmark to the Web UI sidebar and authentication pages, plus an SVG favicon that loads before authentication.
