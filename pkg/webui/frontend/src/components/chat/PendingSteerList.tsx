@@ -44,22 +44,23 @@ const PendingSteerList = ({ messages }: PendingSteerListProps) => {
   }
 
   return (
-    <section className="pending-steer-shell" data-testid="pending-steer-list">
-      <div className="pending-steer-header">
-        <p className="pending-steer-copy">
-          Kodelet will use this guidance as soon as it continues.
-        </p>
-      </div>
-      <div className="pending-steer-lines">
-        {messages.map((message, index) => (
-          <div
-            className="pending-steer-line"
-            key={`${index}-${summaryForContent(message.content)}`}
-          >
-            <span className="pending-steer-prompt">↳</span>
-            <code className="pending-steer-message">{summaryForContent(message.content)}</code>
-          </div>
-        ))}
+    <section
+      aria-label="Queued guidance"
+      className="pending-steer-shell mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8"
+      data-testid="pending-steer-list"
+    >
+      <div className="pending-steer-content">
+        <div className="pending-steer-header">
+          <p className="pending-steer-copy">Queued guidance</p>
+          <p className="pending-steer-hint">Applied when Kodelet continues.</p>
+        </div>
+        <ul className="pending-steer-lines">
+          {messages.map((message, index) => (
+            <li key={`${index}-${summaryForContent(message.content)}`}>
+              <p className="pending-steer-message">{summaryForContent(message.content)}</p>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );

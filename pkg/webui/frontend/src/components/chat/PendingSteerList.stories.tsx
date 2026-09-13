@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, within } from 'storybook/test';
 import { sampleAttachment } from '../../stories/fixtures';
 import PendingSteerList from './PendingSteerList';
 
@@ -7,6 +8,16 @@ const meta = {
   component: PendingSteerList,
   parameters: {
     layout: 'padded',
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    if (args.messages.length === 0) {
+      expect(canvas.queryByRole('region', { name: 'Queued guidance' })).not.toBeInTheDocument();
+      return;
+    }
+
+    const guidance = canvas.getByRole('region', { name: 'Queued guidance' });
+    expect(within(guidance).getAllByRole('listitem')).toHaveLength(args.messages.length);
   },
   args: {
     messages: [
@@ -40,6 +51,23 @@ export const LongQueuedGuidance: Story = {
           'Investigate the failed provider request, compare the installed client version with the minimum supported release, verify whether any authentication headers need to change, inspect the request-building path for model-specific behavior, confirm the migration guidance against the current SDK source, and report the required, recommended, and informational follow-up work with evidence before continuing. Include the exact error details, affected model capability checks, and any compatibility risks that should be addressed in a later cleanup.',
       },
     ],
+  },
+};
+
+export const MultilineGuidance: Story = {
+  args: {
+    messages: [
+      {
+        role: 'user',
+        content:
+          'Keep the change focused:\n- Match the transcript styling.\n- Check the mobile layout.',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const message = within(canvasElement).getByText(/Keep the change focused:/);
+    expect(message.textContent).toContain('\n- Match the transcript styling.\n');
+    expect(getComputedStyle(message).whiteSpace).toBe('pre-wrap');
   },
 };
 

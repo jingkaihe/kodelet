@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ChatSettings,
@@ -3172,9 +3172,14 @@ describe('ChatPage', () => {
       )
     );
 
-    expect(await screen.findByTestId('pending-steer-list')).toBeInTheDocument();
-    expect(screen.getByText('Focus on tests')).toBeInTheDocument();
-    expect(screen.getByTestId('pending-steer-list')).not.toHaveTextContent('You');
+    const pendingGuidance = await screen.findByRole('region', { name: 'Queued guidance' });
+    expect(
+      within(pendingGuidance).getByText('Applied when Kodelet continues.')
+    ).toBeInTheDocument();
+    const queuedMessages = within(pendingGuidance).getByRole('list');
+    expect(within(queuedMessages).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(queuedMessages).getByText('Focus on tests')).toBeInTheDocument();
+    expect(pendingGuidance).not.toHaveTextContent('You');
 
     await act(async () => {
       streamOptions?.onEvent({
