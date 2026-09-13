@@ -127,7 +127,7 @@
   grid-row: 1;
   flex: 0 1 auto;
   width: auto;
-  max-width: min(38vw, 30rem);
+  max-width: min(100%, 38vw, 30rem);
   min-width: 0;
   min-height: 2.75rem;
   align-self: start;

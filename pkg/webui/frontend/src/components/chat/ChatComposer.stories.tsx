@@ -57,6 +57,20 @@ const meta = {
       expect(Math.abs(leading.y - submit.y)).toBeLessThan(1);
       expect(Math.abs(leading.height - submit.height)).toBeLessThan(1);
 
+      const grid = (editor.parentElement as HTMLDivElement).getBoundingClientRect();
+      const context = canvas.getByTitle(args.contextText).getBoundingClientRect();
+      expect(context.left).toBeGreaterThanOrEqual(grid.left);
+      expect(context.right).toBeLessThanOrEqual(grid.right);
+      if (context.bottom > leading.top && context.top < leading.bottom) {
+        const actions = canvas
+          .getByRole('button', {
+            name: args.showStop ? args.stopActionLabel : args.submitActionLabel,
+          })
+          .getBoundingClientRect();
+        expect(context.left).toBeGreaterThanOrEqual(leading.right);
+        expect(context.right).toBeLessThanOrEqual(actions.left);
+      }
+
       if (window.matchMedia('(max-width: 600px)').matches) {
         const editorRect = editor.getBoundingClientRect();
         expect(Math.abs(editorRect.left - leading.left)).toBeLessThan(1);
@@ -239,6 +253,24 @@ export const InWorkspace: Story = {
       </main>
     </div>
   ),
+};
+
+export const NarrowWorkspace: Story = {
+  args: {
+    ...InWorkspace.args,
+  },
+  // Both side panels can leave a narrow composer even at desktop viewport widths.
+  render: (args) => (
+    <div className="chat-main-panel w-full max-w-[25rem]">
+      <InteractiveComposer {...args} />
+    </div>
+  ),
+  play: async (context) => {
+    await meta.play(context);
+    const value = within(context.canvasElement).getByTitle(context.args.contextText);
+    expect(value.scrollWidth).toBeGreaterThan(value.clientWidth);
+    expect(getComputedStyle(value).textOverflow).toBe('ellipsis');
+  },
 };
 
 export const WithExtensionFeedback: Story = {
