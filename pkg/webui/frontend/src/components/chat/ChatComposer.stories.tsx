@@ -321,13 +321,14 @@ export const WithExtensionFeedback: Story = {
     await meta.play(context);
     const canvas = within(context.canvasElement);
     const toggle = canvas.getByRole('button', { name: /Background agents/ });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(canvas.queryByText('Reviewing authentication')).not.toBeInTheDocument();
-    await userEvent.keyboard('{Enter}');
+    await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(canvas.getByText('Reviewing authentication')).toBeVisible();
+    await userEvent.keyboard('{Enter}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(canvas.queryByText('Reviewing authentication')).not.toBeInTheDocument();
     expect(canvas.queryByRole('button', { name: /Workspace ready/ })).not.toBeInTheDocument();
     showToast('Ready to help. 2 extensions connected.', 'info', 'Workspace extension ready');
   },

@@ -707,6 +707,7 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	}
 	m.rebuildExtensionWidgetOrder()
 	m.resize()
+	assert.NotContains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
 
 	updated, cmd := m.Update(keyPressWithMod('o', tea.ModCtrl))
 	m = updated.(model)
@@ -714,7 +715,7 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 
 	assert.Nil(t, cmd)
 	assert.True(t, m.entries[0].blocks[0].expanded)
-	assert.False(t, m.collapsedWidgets[widgetKey])
+	assert.True(t, m.expandedWidgets[widgetKey])
 	assert.Contains(t, content, "toggle me")
 	assert.Contains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
 
@@ -724,7 +725,7 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 
 	assert.Nil(t, cmd)
 	assert.False(t, m.entries[0].blocks[0].expanded)
-	assert.True(t, m.collapsedWidgets[widgetKey])
+	assert.False(t, m.expandedWidgets[widgetKey])
 	assert.NotContains(t, content, "toggle me")
 	assert.NotContains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
 }

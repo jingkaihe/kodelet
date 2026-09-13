@@ -110,7 +110,7 @@ func newModel(ctx context.Context, config Config) model {
 		extensionUI:         extensionUI,
 		extensionWidgets:    map[extensionUIKey]tuiExtensionWidget{},
 		widgetOrder:         []extensionUIKey{},
-		collapsedWidgets:    map[extensionUIKey]bool{},
+		expandedWidgets:     map[extensionUIKey]bool{},
 		widgetOffsets:       map[extensionWidgetOffsetKey]int{},
 		extensionSurfaces:   map[extensionUIKey]tuiExtensionSurface{},
 		nextConversationKey: 1,

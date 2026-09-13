@@ -26,7 +26,7 @@ func (m *model) toggleAllDetails() {
 	}
 	if !shouldExpand {
 		for key, widget := range m.extensionWidgets {
-			if m.extensionUIKeyVisible(key) && len(widget.frame.Lines) > 1 && m.collapsedWidgets[key] {
+			if m.extensionUIKeyVisible(key) && len(widget.frame.Lines) > 1 && !m.expandedWidgets[key] {
 				shouldExpand = true
 				break
 			}
@@ -42,17 +42,17 @@ func (m *model) toggleAllDetails() {
 			}
 		}
 	}
-	if m.collapsedWidgets == nil {
-		m.collapsedWidgets = map[extensionUIKey]bool{}
+	if m.expandedWidgets == nil {
+		m.expandedWidgets = map[extensionUIKey]bool{}
 	}
 	for key, widget := range m.extensionWidgets {
 		if !m.extensionUIKeyVisible(key) || len(widget.frame.Lines) <= 1 {
 			continue
 		}
 		if shouldExpand {
-			delete(m.collapsedWidgets, key)
+			m.expandedWidgets[key] = true
 		} else {
-			m.collapsedWidgets[key] = true
+			delete(m.expandedWidgets, key)
 		}
 	}
 	m.clampExtensionWidgetScrollOffsets()

@@ -16,6 +16,7 @@ import type {
   ChatStreamEvent,
   ConversationListResponse,
   Runner,
+  UIWidgetEvent,
   WorkspaceTarget,
 } from '../types';
 import ChatPage from './ChatPage';
@@ -2977,7 +2978,10 @@ describe('ChatPage', () => {
     expect(screen.getByText('hello from the runner')).toBeInTheDocument();
   });
 
-  it('restores persistent extension widgets from the conversation stream', async () => {
+  it.each([
+    'aboveComposer',
+    'belowComposer',
+  ])('restores %s extension widgets folded by default and preserves fold state', async (placement) => {
     routeParams = { id: 'conv-123' };
     mockGetConversation.mockResolvedValue({
       id: 'conv-123',
@@ -2992,6 +2996,29 @@ describe('ChatPage', () => {
       streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
       return new Promise(() => undefined);
     });
+    const widget: UIWidgetEvent = {
+      key: 'subagent-widget',
+      extension_id: 'subagent',
+      id: 'background-agents',
+      placement,
+      frame: {
+        sequence: 4,
+        lines: [
+          {
+            spans: [
+              { text: 'Background agents', style: { bold: true } },
+              { text: '  1 active', style: { dim: true } },
+            ],
+          },
+          {
+            spans: [
+              { text: '● Inspect authentication', style: { foreground: 'cyan' } },
+              { text: '  running', style: { foreground: '#179299', italic: true } },
+            ],
+          },
+        ],
+      },
+    };
 
     render(<ChatPage />);
 
@@ -3000,54 +3027,58 @@ describe('ChatPage', () => {
       streamListener?.({
         kind: 'ui-widgets',
         conversation_id: 'conv-123',
-        ui_widgets: [
-          {
-            key: 'subagent-widget',
-            extension_id: 'subagent',
-            id: 'background-agents',
-            placement: 'aboveComposer',
-            frame: {
-              sequence: 4,
-              lines: [
-                {
-                  spans: [
-                    { text: 'Background agents', style: { bold: true } },
-                    { text: '  1 active', style: { dim: true } },
-                  ],
-                },
-                {
-                  spans: [
-                    { text: '● Inspect authentication', style: { foreground: 'cyan' } },
-                    { text: '  running', style: { foreground: '#179299', italic: true } },
-                  ],
-                },
-              ],
-            },
-          },
-        ],
+        ui_widgets: [widget],
       });
     });
 
-    expect(screen.getByTestId('extension-widgets-aboveComposer')).toBeInTheDocument();
+    expect(screen.getByTestId(`extension-widgets-${placement}`)).toBeInTheDocument();
     expect(screen.getByTestId('extension-widget-subagent-widget')).toHaveClass(
       'extension-widget-frame'
     );
     expect(screen.getByText(/Background agents/).closest('.extension-widget-line')).toHaveClass(
       'extension-widget-line-header'
     );
-    expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
-    expect(screen.getByText(/Inspect authentication/)).toHaveStyle({ color: 'var(--tui-teal)' });
-    expect(screen.getByText('running')).toHaveStyle({ color: '#179299', fontStyle: 'italic' });
     const widgetToggle = screen.getByRole('button', { name: /Background agents/ });
-    expect(widgetToggle).toHaveAttribute('aria-expanded', 'true');
-    expect(document.getElementById(widgetToggle.getAttribute('aria-controls') || '')).toHaveClass(
-      'extension-widget-content'
-    );
-    fireEvent.click(widgetToggle);
     expect(widgetToggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText(/Inspect authentication/)).not.toBeInTheDocument();
     fireEvent.click(widgetToggle);
-    expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
+    expect(widgetToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Inspect authentication/)).toHaveStyle({ color: 'var(--tui-teal)' });
+    expect(screen.getByText('running')).toHaveStyle({ color: '#179299', fontStyle: 'italic' });
+    expect(document.getElementById(widgetToggle.getAttribute('aria-controls') || '')).toHaveClass(
+      'extension-widget-content'
+    );
+
+    for (const expanded of [true, false]) {
+      if (!expanded) {
+        widgetToggle.focus();
+        await userEvent.keyboard('{Enter}');
+      }
+      const detail = expanded ? 'Expanded widget update' : 'Collapsed widget update';
+      await act(async () => {
+        streamListener?.({
+          kind: 'ui-widget',
+          conversation_id: 'conv-123',
+          ui_widget: {
+            ...widget,
+            frame: {
+              sequence: expanded ? 5 : 6,
+              lines: [widget.frame.lines[0], detail],
+            },
+          },
+        });
+      });
+
+      expect(widgetToggle).toHaveAttribute('aria-expanded', String(expanded));
+      if (expanded) {
+        expect(screen.getByText(detail)).toBeVisible();
+      } else {
+        expect(screen.queryByText(detail)).not.toBeInTheDocument();
+      }
+    }
+    await userEvent.keyboard('{Enter}');
+    expect(widgetToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Collapsed widget update')).toBeVisible();
 
     await act(async () => {
       streamListener?.({
@@ -3058,7 +3089,7 @@ describe('ChatPage', () => {
           extension_id: 'subagent',
           generation: '0:2',
           id: 'background-agents',
-          placement: 'aboveComposer',
+          placement,
           frame: { sequence: 1, lines: ['Restarted agent generation'] },
         },
       });
@@ -3070,7 +3101,7 @@ describe('ChatPage', () => {
           extension_id: 'subagent',
           generation: '0:1',
           id: 'background-agents',
-          placement: 'aboveComposer',
+          placement,
           frame: { sequence: 5, lines: [] },
           removed: true,
         },
@@ -3096,7 +3127,7 @@ describe('ChatPage', () => {
           extension_id: 'subagent',
           generation: '0:2',
           id: 'background-agents',
-          placement: 'aboveComposer',
+          placement,
           frame: { sequence: 3, lines: [] },
           removed: true,
         },
@@ -3109,7 +3140,7 @@ describe('ChatPage', () => {
           extension_id: 'subagent',
           generation: '0:2',
           id: 'background-agents',
-          placement: 'aboveComposer',
+          placement,
           frame: { sequence: 2, lines: ['Delayed stale update'] },
         },
       });

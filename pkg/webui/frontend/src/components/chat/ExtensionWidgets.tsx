@@ -85,7 +85,7 @@ const spansForLine = (line: UIFrameLine): UIStyledSpan[] => {
 
 const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
   const id = useId();
-  const [collapsedWidgets, setCollapsedWidgets] = useState<Record<string, boolean>>({});
+  const [expandedWidgets, setExpandedWidgets] = useState<Record<string, boolean>>({});
   const placedWidgets = widgets
     .filter((widget) => (widget.placement || 'aboveComposer') === placement)
     .slice(0, MAX_RENDERED_WIDGETS);
@@ -107,7 +107,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
         );
         const headerLine = lines[0] ?? widget.id;
         const hasContent = lines.length > 1;
-        const collapsed = collapsedWidgets[widget.key] === true;
+        const expanded = expandedWidgets[widget.key] === true;
         const contentId = `${id}-${encodeURIComponent(widget.key)}`;
         const header = (
           <span className="extension-widget-line extension-widget-line-header">
@@ -130,10 +130,10 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
             {hasContent ? (
               <button
                 aria-controls={contentId}
-                aria-expanded={!collapsed}
+                aria-expanded={expanded}
                 className="extension-widget-toggle"
                 onClick={() =>
-                  setCollapsedWidgets((current) => ({
+                  setExpandedWidgets((current) => ({
                     ...current,
                     [widget.key]: current[widget.key] !== true,
                   }))
@@ -150,7 +150,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
             ) : (
               <div className="extension-widget-heading">{header}</div>
             )}
-            {hasContent && !collapsed ? (
+            {hasContent && expanded ? (
               <div className="extension-widget-content" id={contentId}>
                 {lines.slice(1).map((line, lineIndex) => (
                   <div

@@ -599,8 +599,8 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 	if m.extensionWidgets == nil {
 		m.extensionWidgets = map[extensionUIKey]tuiExtensionWidget{}
 	}
-	if m.collapsedWidgets == nil {
-		m.collapsedWidgets = map[extensionUIKey]bool{}
+	if m.expandedWidgets == nil {
+		m.expandedWidgets = map[extensionUIKey]bool{}
 	}
 	if m.extensionSurfaces == nil {
 		m.extensionSurfaces = map[extensionUIKey]tuiExtensionSurface{}
@@ -616,7 +616,7 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 		for key := range m.extensionWidgets {
 			if key.owner == owner {
 				delete(m.extensionWidgets, key)
-				delete(m.collapsedWidgets, key)
+				delete(m.expandedWidgets, key)
 				widgetOrderChanged = true
 			}
 		}
@@ -631,7 +631,7 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 		widgetOrderChanged = true
 		if mutation.remove {
 			delete(m.extensionWidgets, mutation.widget.key)
-			delete(m.collapsedWidgets, mutation.widget.key)
+			delete(m.expandedWidgets, mutation.widget.key)
 			continue
 		}
 		m.extensionWidgets[mutation.widget.key] = mutation.widget
@@ -994,7 +994,7 @@ func (m model) extensionWidgetLineCount(placement string) int {
 			continue
 		}
 		count++
-		if !m.collapsedWidgets[key] {
+		if m.expandedWidgets[key] {
 			count += len(widget.frame.Lines) - 1
 		}
 	}
@@ -1027,7 +1027,7 @@ func (m model) walkExtensionWidgetLines(placement string, visit func(extensionWi
 			continue
 		}
 		foldable := len(widget.frame.Lines) > 1
-		collapsed := foldable && m.collapsedWidgets[widget.key]
+		collapsed := foldable && !m.expandedWidgets[widget.key]
 		if !visit(extensionWidgetLine{
 			key:      widget.key,
 			line:     widget.frame.Lines[0],
@@ -1103,13 +1103,13 @@ func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
 		if !ok || !line.header {
 			return false
 		}
-		if m.collapsedWidgets == nil {
-			m.collapsedWidgets = map[extensionUIKey]bool{}
+		if m.expandedWidgets == nil {
+			m.expandedWidgets = map[extensionUIKey]bool{}
 		}
 		if line.expanded {
-			m.collapsedWidgets[line.key] = true
+			delete(m.expandedWidgets, line.key)
 		} else {
-			delete(m.collapsedWidgets, line.key)
+			m.expandedWidgets[line.key] = true
 		}
 		m.clampExtensionWidgetScrollOffsets()
 		m.resize()

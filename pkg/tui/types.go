@@ -259,7 +259,7 @@ type model struct {
 	extensionUI        *tuiExtensionUIHost
 	extensionWidgets   map[extensionUIKey]tuiExtensionWidget
 	widgetOrder        []extensionUIKey
-	collapsedWidgets   map[extensionUIKey]bool
+	expandedWidgets    map[extensionUIKey]bool
 	widgetOffsets      map[extensionWidgetOffsetKey]int
 	extensionSurfaces  map[extensionUIKey]tuiExtensionSurface
 	// extensionSurfaceOrder is both the overlay z-order and the focus stack.
