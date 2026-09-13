@@ -240,7 +240,7 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.activity-card-live')).toBeInTheDocument();
   });
 
-  it('collapses failed commands with visible failure status and expandable errors', async () => {
+  it('shows one exit status per failed command and keeps the collapsed failure count', async () => {
     const user = userEvent.setup();
     const { container } = render(
       <ChatToolActivity
@@ -268,7 +268,7 @@ describe('ChatToolActivity', () => {
 
     expect(screen.getByText('Ran 1 command')).toBeVisible();
     expect(screen.getByText('$ false')).not.toBeVisible();
-    expect(screen.getByText('Command exited with status 1.')).not.toBeVisible();
+    expect(screen.getByText('exit 1')).not.toBeVisible();
     expect(
       container.querySelector('.activity-command-group.activity-card-error')
     ).not.toHaveAttribute('open');
@@ -278,9 +278,11 @@ describe('ChatToolActivity', () => {
     await user.click(screen.getByText('Ran 1 command'));
 
     expect(screen.getByText('$ false')).toBeVisible();
-    expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed');
-    expect(screen.getByLabelText('Tool failed')).toBeVisible();
-    expect(screen.getByText('Command exited with status 1.')).toBeVisible();
+    expect(screen.queryByLabelText('Tool failed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Command exited with status 1.')).not.toBeInTheDocument();
+    expect(screen.getByText('exit 1')).toBeVisible();
+    expect(screen.getAllByText('exit 1')).toHaveLength(1);
+    expect(container.querySelector('.command-activity .tool-note')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-command-group.activity-card-error')).toHaveAttribute(
       'open'
     );
@@ -394,7 +396,7 @@ describe('ChatToolActivity', () => {
 
     expect(screen.getByText('Running 2 commands')).toBeVisible();
     expect(container.querySelector('summary')).toHaveTextContent('1 failed');
-    expect(screen.getByLabelText('Tool failed')).toBeVisible();
+    expect(screen.getByText('exit 1')).toBeVisible();
     expect(screen.getByText('failure output')).toBeVisible();
 
     rerender(<ChatToolActivity tools={[failed, bashTool('pwd')]} />);
@@ -403,12 +405,12 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
     expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
     expect(container.querySelector('summary')).toHaveTextContent('1 failed');
-    expect(screen.getByText('Command exited with status 1.')).not.toBeVisible();
+    expect(screen.getByText('exit 1')).not.toBeVisible();
     expect(screen.getByText('$ pwd')).not.toBeVisible();
 
     await user.click(screen.getByText('Ran 2 commands'));
 
-    expect(screen.getByText('Command exited with status 1.')).toBeVisible();
+    expect(screen.getByText('exit 1')).toBeVisible();
     expect(screen.getByText('failure output')).toBeVisible();
     expect(screen.getByText('$ pwd')).toBeVisible();
   });

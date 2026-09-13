@@ -100,11 +100,15 @@ describe('BashRenderer', () => {
     expect(container.querySelector('.bash-tool-badge.is-error')).toBeInTheDocument();
   });
 
-  it('renders failure details and output for unsuccessful commands', () => {
+  it.each([
+    ['Command exited with status 127', false],
+    ['Command exited with status 127.', false],
+    ['Failed to start command: permission denied', true],
+  ])('deduplicates exit status while preserving distinct error details: %s', (error, showError) => {
     const toolResult: ToolResult = {
       toolName: 'bash',
       success: false,
-      error: 'Command exited with status 127',
+      error,
       timestamp: '2023-01-01T00:00:00Z',
       metadata: {
         command: 'invalid-command',
@@ -115,7 +119,11 @@ describe('BashRenderer', () => {
 
     render(<BashRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Command exited with status 127')).toBeInTheDocument();
+    if (showError) {
+      expect(screen.getByText(error)).toBeInTheDocument();
+    } else {
+      expect(screen.queryByText(error)).not.toBeInTheDocument();
+    }
     expect(screen.getByText('command not found')).toBeInTheDocument();
     expect(screen.getByText('exit 127')).toBeInTheDocument();
   });
@@ -137,7 +145,8 @@ describe('BashRenderer', () => {
 
     expect(screen.getByText('failed')).toBeInTheDocument();
     expect(screen.queryByText('exit 0')).not.toBeInTheDocument();
-    expect(screen.getByText('Command failed without output.')).toBeInTheDocument();
+    expect(screen.getByText('Command timed out after 10 seconds')).toBeInTheDocument();
+    expect(screen.queryByText('Command failed without output.')).not.toBeInTheDocument();
   });
 
   it('shows a note when the command produces no output', () => {

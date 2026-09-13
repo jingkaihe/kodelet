@@ -38,6 +38,12 @@ const BashRenderer: React.FC<BashRendererProps> = ({
   const exitCode = meta.exitCode ?? 0;
   const isFailure = !isPartial && (!toolResult.success || exitCode !== 0);
   const hasMeaningfulExitCode = toolResult.success || exitCode !== 0;
+  const error = toolResult.error?.trim();
+  const showError =
+    !isPartial &&
+    !toolResult.success &&
+    error &&
+    (exitCode === 0 || error.replace(/\.$/, '') !== `Command exited with status ${exitCode}`);
   const statusBadgeText = isPartial
     ? 'running'
     : hasMeaningfulExitCode
@@ -45,9 +51,7 @@ const BashRenderer: React.FC<BashRendererProps> = ({
       : 'failed';
   const emptyOutputText = isPartial
     ? 'Waiting for command output…'
-    : isFailure
-      ? 'Command failed without output.'
-      : 'Command completed without output.';
+    : 'Command completed without output.';
 
   return (
     <div className="space-y-2">
@@ -75,15 +79,13 @@ const BashRenderer: React.FC<BashRendererProps> = ({
         </div>
       </div>
 
-      {!isPartial && !toolResult.success && toolResult.error ? (
-        <ReferenceToolNote text={toolResult.error} />
-      ) : null}
+      {showError ? <ReferenceToolNote text={error} /> : null}
 
       {hasOutput ? (
         <ReferenceTerminal output={meta.output || ''} />
-      ) : (
+      ) : !isFailure ? (
         <ReferenceToolNote text={emptyOutputText} />
-      )}
+      ) : null}
     </div>
   );
 };

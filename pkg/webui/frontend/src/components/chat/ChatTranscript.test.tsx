@@ -1038,7 +1038,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
   });
 
-  it('uses failed status for unsuccessful bash results with duration metadata', () => {
+  it('uses the exit code instead of duration for unsuccessful bash results', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -1073,7 +1073,8 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed');
+    expect(screen.getByText('exit 1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Tool failed')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
     expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();

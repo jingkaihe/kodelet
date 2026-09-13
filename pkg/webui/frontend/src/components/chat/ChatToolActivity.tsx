@@ -624,9 +624,11 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                           ) : (
                             <ActivitySummaryText summaryText={getToolSummary(tool)} />
                           )}
-                          <output className="tool-summary-status" aria-label={`Tool ${status}`}>
-                            {status}
-                          </output>
+                          {!(commands && tool.result?.metadata && status === 'failed') ? (
+                            <output className="tool-summary-status" aria-label={`Tool ${status}`}>
+                              {status}
+                            </output>
+                          ) : null}
                         </div>
                       ) : null}
                       {tool.result ? (
