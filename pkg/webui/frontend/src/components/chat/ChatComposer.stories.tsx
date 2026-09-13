@@ -149,6 +149,30 @@ export const SteeringActiveConversation: Story = {
   },
 };
 
+export const RepeatedPunctuation: Story = {
+  args: {
+    ...SteeringActiveConversation.args,
+    contextText: 'deep · effort:xhigh · /home/jingkaihe/workspace/kodelet',
+    draft: '',
+    placeholder: 'Steer the active conversation…',
+  },
+  play: async (context) => {
+    await meta.play(context);
+    const canvas = within(context.canvasElement);
+    const editor = canvas.getByTestId<HTMLTextAreaElement>('composer-textarea');
+    const text = '... ............ >= -> => != <= :: ';
+
+    // Type rather than assign the value so browser screenshots exercise incremental glyph painting.
+    await userEvent.type(editor, text);
+
+    expect(editor).toHaveValue(text);
+    expect(editor).toHaveFocus();
+    expect(editor.selectionStart).toBe(text.length);
+    expect(editor.selectionEnd).toBe(text.length);
+    expect(getComputedStyle(editor).fontVariantLigatures).toBe('no-contextual');
+  },
+};
+
 export const ErrorWithAttachment: Story = {
   args: {
     attachments: [sampleAttachment],

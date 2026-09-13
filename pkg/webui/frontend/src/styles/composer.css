@@ -359,6 +359,8 @@
   padding: calc((2.75rem - 1lh) / 2) 0.25rem;
   font-family: var(--font-mono);
   font-size: 0.86rem;
+  /* Keep typed punctuation literal: Chromium can mispaint JetBrains Mono's contextual ligatures. */
+  font-variant-ligatures: no-contextual;
   line-height: 1.65;
   color: var(--kodelet-dark);
   outline: none;

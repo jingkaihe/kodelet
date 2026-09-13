@@ -1,4 +1,14 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  configure,
+  fireEvent,
+  getConfig,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Profiler } from 'react';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -1028,6 +1038,62 @@ describe('ChatPage', () => {
     );
 
     window.FileReader = originalFileReader;
+  });
+
+  it.each([false, true])('preserves typed punctuation with streaming=%s', async (streaming) => {
+    const text = '... ............ >= -> => != <= :: ';
+    const user = userEvent.setup();
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      streamListener = options.onEvent;
+      return new Promise(() => undefined);
+    });
+    await renderChatWithRunner();
+    const textarea = screen.getByTestId<HTMLTextAreaElement>('composer-textarea');
+
+    if (streaming) {
+      fireEvent.change(textarea, { target: { value: 'Start working' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(streamListener).not.toBeNull());
+    }
+
+    // Let React schedule input updates normally instead of forcing an act flush per event.
+    const { eventWrapper } = getConfig();
+    configure({ eventWrapper: (callback) => callback() });
+    let streamUpdates = 0;
+    const streamTimer = streaming
+      ? window.setInterval(() => {
+          streamUpdates += 1;
+          streamListener?.({ kind: 'text-delta', delta: 'Working ' });
+        }, 1)
+      : undefined;
+    try {
+      await user.type(textarea, text);
+    } finally {
+      window.clearInterval(streamTimer);
+      configure({ eventWrapper });
+    }
+
+    expect(textarea).toHaveValue(text);
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(text.length);
+    expect(textarea.selectionEnd).toBe(text.length);
+    if (streaming) {
+      expect(streamUpdates).toBeGreaterThan(0);
+      expect(screen.getByTestId('chat-transcript-scroll')).toHaveTextContent('Working');
+    }
+
+    await user.click(screen.getByRole('button', { name: streaming ? 'Steer' : 'Send' }));
+    if (streaming) {
+      expect(mockSteerConversation).toHaveBeenCalledWith(expect.any(String), text.trim(), [
+        { type: 'text', text: text.trim() },
+      ]);
+    } else {
+      expect(mockStreamChat).toHaveBeenCalledWith(
+        expect.objectContaining({ message: text.trim() }),
+        expect.any(Object)
+      );
+    }
   });
 
   it('submits with Shift+Enter and keeps plain Enter for multiline editing', async () => {
