@@ -471,6 +471,12 @@ In the Web UI, choose a runner from **Environment**. **Runner profile** and **Wo
 
 The terminal and Git diff use the saved conversation's directory; save a custom directory or upgrade an older runner if panels are hidden. Closing a terminal panel leaves its shell running until you exit it or stop the runner. Exit unused shells if the terminal limit is reached.
 
+The Web UI terminal includes an on-screen key bar in both the workspace panel and the pop-out window, so phones and tablets do not need a physical keyboard for shortcuts. Tap **Ctrl+C**, **Ctrl+D**, **Esc**, **Tab**, or the arrow keys; swipe the key row horizontally on smaller screens. **More keys** reveals **Ctrl+Z**, **Ctrl+L**, **Ctrl+A**, **Ctrl+E**, **Ctrl+U**, **Ctrl+K**, **Ctrl+W**, and **Ctrl+R**. Tapping these buttons preserves terminal focus if you are already typing; tap the terminal itself to bring up the software keyboard.
+
+These buttons send terminal input, not browser shortcuts or clipboard commands. Their effect depends on the running shell or application: **Ctrl+C** commonly interrupts a command, **Ctrl+D** sends end-of-input and can exit a shell at an empty prompt, and **Ctrl+Z** can suspend a foreground job. Keys are unavailable while connecting, restoring the session, disconnected, or after the shell exits; when a pop-out owns the terminal, use its key bar instead.
+
+Swipe vertically inside the terminal to scroll: drag down to read older output and up to return toward the prompt. In full-screen terminal applications, swipes send scroll input to the application instead. Swiping does not open the software keyboard; tap the terminal to type. Two-finger pinch zoom remains available, and the key rows scroll horizontally independently of the terminal output.
+
 The terminal UI can start a new remote conversation with:
 
 ```bash

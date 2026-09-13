@@ -10,7 +10,10 @@ import type {
   TerminalServerEvent,
   WorkspaceTarget,
 } from '../../types';
-import TerminalModalFrame, { type TerminalStatusVariant } from './TerminalModalFrame';
+import TerminalModalFrame, {
+  type TerminalArrowDirection,
+  type TerminalStatusVariant,
+} from './TerminalModalFrame';
 import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
@@ -36,12 +39,14 @@ const FALLBACK_TERMINAL_FONT_FAMILY =
   '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
 const TERMINAL_BOTTOM_RESERVED_ROWS = 1;
 const TERMINAL_FONT_SIZE = 13;
+const APPLICATION_CURSOR_KEYS_MODE = 1;
 const SGR_MOUSE_MODE = 1006;
 const WHEEL_BUTTON_UP = 64;
 const WHEEL_BUTTON_DOWN = 65;
 const WHEEL_BUTTON_LEFT = 66;
 const WHEEL_BUTTON_RIGHT = 67;
 const WHEEL_PIXEL_FALLBACK = 33;
+const TOUCH_SCROLL_THRESHOLD = 8;
 const POP_OUT_CLOSED_POLL_INTERVAL = 250;
 const POP_OUT_NAVIGATION_GRACE_PERIOD = 15000;
 const REMOTE_TERMINAL_RECONNECT_DELAY = 500;
@@ -330,6 +335,32 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         ? 'live'
         : 'connecting';
 
+  const handleTerminalInput = useCallback(
+    (data: string) => {
+      if (
+        !open ||
+        popOutActive ||
+        statusVariant !== 'live' ||
+        suppressTerminalInputRef.current ||
+        socketRef.current?.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+
+      // Use the same onData path as typing, not paste (which may bracket control bytes).
+      terminalRef.current?.input(data, true);
+    },
+    [open, popOutActive, statusVariant]
+  );
+
+  const handleTerminalArrow = useCallback(
+    (direction: TerminalArrowDirection) => {
+      const applicationMode = terminalRef.current?.getMode(APPLICATION_CURSOR_KEYS_MODE, false);
+      handleTerminalInput(`\x1b${applicationMode ? 'O' : '['}${direction}`);
+    },
+    [handleTerminalInput]
+  );
+
   useEffect(() => {
     if (!allowPopOut) {
       setPopOutActive(false);
@@ -353,6 +384,16 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     let handleWindowResize: (() => void) | null = null;
     let reconnectTimeout: number | null = null;
     let processExited = false;
+    const terminalHost = terminalHostRef.current;
+    let touchGesture: {
+      identifier: number;
+      startX: number;
+      startY: number;
+      lastY: number;
+      pendingPixels: number;
+      scrolling: boolean;
+    } | null = null;
+    let suppressTouchFocus = false;
     const pendingTimeouts: number[] = [];
     const pendingAnimationFrames: number[] = [];
 
@@ -407,6 +448,129 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       }
       sendMessage({ type: 'input', data });
     };
+
+    const sendMouseWheelInput = (
+      button: number,
+      clientX: number,
+      clientY: number,
+      repeatCount: number
+    ) => {
+      if (
+        suppressTerminalInputRef.current ||
+        !terminal?.wasmTerm?.isAlternateScreen() ||
+        !terminal.wasmTerm.hasMouseTracking() ||
+        !terminal.wasmTerm.getMode(SGR_MOUSE_MODE, false)
+      ) {
+        return false;
+      }
+
+      const canvas = terminal.renderer?.getCanvas();
+      const metrics = terminal.renderer?.getMetrics();
+      if (!canvas || !metrics || metrics.width <= 0 || metrics.height <= 0 || repeatCount === 0) {
+        return false;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const col = clamp(Math.floor((clientX - rect.left) / metrics.width) + 1, 1, terminal.cols);
+      const row = clamp(Math.floor((clientY - rect.top) / metrics.height) + 1, 1, terminal.rows);
+      sendTerminalInput(`\x1b[<${button};${col};${row}M`.repeat(repeatCount));
+      return true;
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchGesture = null;
+      suppressTouchFocus = event.touches.length !== 1;
+      if (suppressTouchFocus || !getCurrentConnection() || terminalHost.closest('[inert]')) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      touchGesture = {
+        identifier: touch.identifier,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        lastY: touch.clientY,
+        pendingPixels: 0,
+        scrolling: false,
+      };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const connection = getCurrentConnection();
+      if (!touchGesture || !connection) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (event.touches.length !== 1 || touch.identifier !== touchGesture.identifier) {
+        touchGesture = null;
+        suppressTouchFocus = true;
+        return;
+      }
+
+      if (!touchGesture.scrolling) {
+        const deltaX = Math.abs(touch.clientX - touchGesture.startX);
+        const deltaY = Math.abs(touch.clientY - touchGesture.startY);
+        if (Math.max(deltaX, deltaY) < TOUCH_SCROLL_THRESHOLD) {
+          return;
+        }
+        suppressTouchFocus = true;
+        if (deltaX >= deltaY) {
+          touchGesture = null;
+          return;
+        }
+        touchGesture.scrolling = true;
+      }
+
+      // The canvas has no native scroll range. Claim only an actual one-finger swipe.
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      touchGesture.pendingPixels += touchGesture.lastY - touch.clientY;
+      touchGesture.lastY = touch.clientY;
+      const currentTerminal = connection.terminal;
+      const cellHeight = currentTerminal.renderer?.getMetrics().height || WHEEL_PIXEL_FALLBACK;
+      const lines = Math.trunc(touchGesture.pendingPixels / cellHeight);
+      touchGesture.pendingPixels -= lines * cellHeight;
+      if (lines === 0 || suppressTerminalInputRef.current || terminalHost.closest('[inert]')) {
+        return;
+      }
+
+      if (!currentTerminal.wasmTerm?.isAlternateScreen()) {
+        currentTerminal.scrollLines(lines);
+      } else if (!processExited && connection.socket.readyState === WebSocket.OPEN) {
+        const repeatCount = Math.min(Math.abs(lines), currentTerminal.rows);
+        if (
+          !sendMouseWheelInput(
+            lines > 0 ? WHEEL_BUTTON_DOWN : WHEEL_BUTTON_UP,
+            touch.clientX,
+            touch.clientY,
+            repeatCount
+          )
+        ) {
+          const prefix = currentTerminal.getMode(APPLICATION_CURSOR_KEYS_MODE, false) ? 'O' : '[';
+          sendTerminalInput(`\x1b${prefix}${lines > 0 ? 'B' : 'A'}`.repeat(repeatCount));
+        }
+      }
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      // Ghostty focuses its textarea on every canvas touchend, including swipes and pinches.
+      if (suppressTouchFocus) {
+        event.stopPropagation();
+        if (touchGesture?.scrolling && event.cancelable) {
+          event.preventDefault();
+        }
+      }
+      touchGesture = null;
+      if (event.touches.length === 0) {
+        suppressTouchFocus = false;
+      }
+    };
+
+    terminalHost.addEventListener('touchstart', handleTouchStart, { passive: true, capture: true });
+    terminalHost.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+    terminalHost.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
+    terminalHost.addEventListener('touchcancel', handleTouchEnd, { capture: true });
 
     const writeTerminalOutput = (
       targetTerminal: Terminal,
@@ -615,41 +779,22 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
         terminal.attachCustomWheelEventHandler((event) => {
           if (
-            suppressTerminalInputRef.current ||
-            !terminal?.wasmTerm?.isAlternateScreen() ||
-            !terminal.wasmTerm.hasMouseTracking() ||
-            !terminal.wasmTerm.getMode(SGR_MOUSE_MODE, false)
+            !sendMouseWheelInput(
+              getSGRWheelButton(event) + getSGRMouseModifiers(event),
+              event.clientX,
+              event.clientY,
+              getWheelRepeatCount(
+                event,
+                terminal?.renderer?.getMetrics().height || WHEEL_PIXEL_FALLBACK,
+                terminal?.rows || 1
+              )
+            )
           ) {
             return false;
           }
 
-          const canvas = terminal.renderer?.getCanvas();
-          const metrics = terminal.renderer?.getMetrics();
-          if (!canvas || !metrics || metrics.width <= 0 || metrics.height <= 0) {
-            return false;
-          }
-
-          const repeatCount = getWheelRepeatCount(event, metrics.height, terminal.rows);
-          if (repeatCount === 0) {
-            return false;
-          }
-
-          const rect = canvas.getBoundingClientRect();
-          const col = clamp(
-            Math.floor((event.clientX - rect.left) / metrics.width) + 1,
-            1,
-            terminal.cols
-          );
-          const row = clamp(
-            Math.floor((event.clientY - rect.top) / metrics.height) + 1,
-            1,
-            terminal.rows
-          );
-          const button = getSGRWheelButton(event) + getSGRMouseModifiers(event);
-
           event.preventDefault();
           event.stopPropagation();
-          sendTerminalInput(`\x1b[<${button};${col};${row}M`.repeat(repeatCount));
           return true;
         });
 
@@ -683,6 +828,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
     return () => {
       cancelled = true;
+      terminalHost.removeEventListener('touchstart', handleTouchStart, true);
+      terminalHost.removeEventListener('touchmove', handleTouchMove, true);
+      terminalHost.removeEventListener('touchend', handleTouchEnd, true);
+      terminalHost.removeEventListener('touchcancel', handleTouchEnd, true);
       pendingTimeouts.forEach((timeout) => {
         window.clearTimeout(timeout);
       });
@@ -895,6 +1044,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       terminalHostRef={terminalHostRef}
       onClose={onClose}
       onPopOut={popOutEligible || popOutActive ? handlePopOut : undefined}
+      onTerminalInput={handleTerminalInput}
+      onTerminalArrow={handleTerminalArrow}
     />
   );
 };

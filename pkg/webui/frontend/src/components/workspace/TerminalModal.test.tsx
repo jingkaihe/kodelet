@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ITerminalOptions } from 'ghostty-web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import foundationCSS from '../../styles/foundation.css?raw';
@@ -37,6 +37,13 @@ const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock
       loadAddon = vi.fn();
       open = vi.fn();
       focus = vi.fn();
+      input = vi.fn((data: string, wasUserInput = false) => {
+        if (wasUserInput) {
+          this.dataHandler?.(data);
+        }
+      });
+      getMode = vi.fn(() => false);
+      scrollLines = vi.fn();
       resize = vi.fn((cols: number, rows: number) => {
         this.cols = cols;
         this.rows = rows;
@@ -406,6 +413,147 @@ describe('TerminalModal', () => {
     expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-busy');
   });
 
+  it.each([
+    { target: localTarget, allowPopOut: true },
+    { target: localTarget, allowPopOut: false },
+    {
+      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' } as const,
+      allowPopOut: true,
+    },
+  ])('sends on-screen keys through the $target.kind terminal input path (pop-out allowed: $allowPopOut)', async ({
+    target,
+    allowPopOut,
+  }) => {
+    const socket = new MockWebSocket();
+    const onClose = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(
+      <TerminalModal
+        cwdLabel="/tmp/project"
+        onClose={onClose}
+        open
+        target={target}
+        allowPopOut={allowPopOut}
+      />
+    );
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+    terminal.focus.mockClear();
+    // The explicit Ctrl+C button interrupts even when there is a text selection.
+    terminal.hasSelection.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: /More keys/i }));
+
+    for (const [name, data] of [
+      [/^Ctrl\+C/, '\x03'],
+      [/^Ctrl\+D/, '\x04'],
+      [/^Esc/, '\x1b'],
+      [/^Tab/, '\t'],
+      [/^Ctrl\+Z/, '\x1a'],
+      [/^Ctrl\+L/, '\x0c'],
+      [/^Ctrl\+A/, '\x01'],
+      [/^Ctrl\+E/, '\x05'],
+      [/^Ctrl\+U/, '\x15'],
+      [/^Ctrl\+K/, '\x0b'],
+      [/^Ctrl\+W/, '\x17'],
+      [/^Ctrl\+R/, '\x12'],
+    ] as const) {
+      socket.send.mockClear();
+      terminal.input.mockClear();
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(terminal.input).toHaveBeenCalledExactlyOnceWith(data, true);
+      expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'input', data }));
+    }
+    expect(onClose).not.toHaveBeenCalled();
+    expect(terminal.focus).not.toHaveBeenCalled();
+  });
+
+  it('encodes arrow buttons using the current application cursor mode', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+
+    for (const applicationMode of [false, true, false]) {
+      terminal.getMode.mockReturnValue(applicationMode);
+      for (const [name, direction] of [
+        [/Arrow up/i, 'A'],
+        [/Arrow down/i, 'B'],
+        [/Arrow right/i, 'C'],
+        [/Arrow left/i, 'D'],
+      ] as const) {
+        socket.send.mockClear();
+        fireEvent.click(screen.getByRole('button', { name }));
+        expect(terminal.getMode).toHaveBeenLastCalledWith(1, false);
+        expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+          JSON.stringify({ type: 'input', data: `\x1b${applicationMode ? 'O' : '['}${direction}` })
+        );
+      }
+    }
+  });
+
+  it('keeps keys disabled until replay output has finished rendering', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    const interrupt = screen.getByRole('button', { name: /^Ctrl\+C/ });
+    expect(interrupt).toBeDisabled();
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    let finishWrite: (() => void) | undefined;
+    terminal.write.mockImplementation((_: Uint8Array, callback?: () => void) => {
+      finishWrite = callback;
+    });
+
+    act(() => {
+      socket.emit('message', { data: new ArrayBuffer(8) });
+      socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
+    });
+    expect(interrupt).toBeDisabled();
+    fireEvent.click(interrupt);
+    expect(terminal.input).not.toHaveBeenCalled();
+    act(() => finishWrite?.());
+    expect(interrupt).toBeEnabled();
+    fireEvent.click(interrupt);
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x03' }));
+  });
+
+  it.each(['close', 'error', 'exit'])('disables keys after terminal %s', async (event) => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+    const interrupt = screen.getByRole('button', { name: /^Ctrl\+C/ });
+    expect(interrupt).toBeEnabled();
+
+    act(() => {
+      if (event === 'exit') {
+        socket.emit('message', { data: JSON.stringify({ type: 'exit', code: 0 }) });
+      } else {
+        socket.emit(event);
+      }
+    });
+    expect(interrupt).toBeDisabled();
+    fireEvent.click(interrupt);
+    expect(MockTerminal.instances[0].input).not.toHaveBeenCalled();
+  });
+
+  it('does not send keys when the socket closes before the UI updates', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+
+    socket.readyState = 3;
+    fireEvent.click(screen.getByRole('button', { name: /^Ctrl\+C/ }));
+    expect(MockTerminal.instances[0].input).not.toHaveBeenCalled();
+  });
+
   it('drains every terminal response generated by a PTY output chunk', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
@@ -642,10 +790,15 @@ describe('TerminalModal', () => {
     );
 
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
+    act(() => firstSocket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+    const interrupt = screen.getByRole('button', { name: /^Ctrl\+C/ });
+    expect(interrupt).toBeEnabled();
     act(() => {
       firstSocket.emit('close');
     });
 
+    expect(interrupt).toBeDisabled();
+    fireEvent.click(interrupt);
     expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2), {
       timeout: 1500,
@@ -655,6 +808,14 @@ describe('TerminalModal', () => {
       rows: 23,
       cols: 80,
     });
+    expect(interrupt).toBeDisabled();
+    act(() => secondSocket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+    expect(interrupt).toBeEnabled();
+    fireEvent.click(interrupt);
+    expect(secondSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x03' }));
+    expect(firstSocket.send).not.toHaveBeenCalledWith(
+      JSON.stringify({ type: 'input', data: '\x03' })
+    );
   });
 
   it('allows ghostty-web to process terminal keystrokes', async () => {
@@ -719,6 +880,184 @@ describe('TerminalModal', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  describe('touch scrolling', () => {
+    const point = (y: number, x = 25, identifier = 1) => ({
+      identifier,
+      clientX: x,
+      clientY: y,
+    });
+    const setupTouchTerminal = async (ready = true) => {
+      const socket = new MockWebSocket();
+      createTerminalWebSocketMock.mockReturnValue(socket);
+      const result = render(
+        <TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />
+      );
+      await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+      const terminal = MockTerminal.instances[0];
+      terminal.wasmTerm.isAlternateScreen.mockReturnValue(false);
+      if (ready) {
+        act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
+      }
+      const host = screen.getByTestId('terminal-host');
+      const canvas = document.createElement('canvas');
+      host.append(canvas);
+      // Reproduce Ghostty's unconditional canvas touchend focus listener.
+      canvas.addEventListener('touchend', () => terminal.focus());
+      terminal.focus.mockClear();
+      socket.send.mockClear();
+      return { ...result, terminal, socket, host, canvas };
+    };
+
+    it('scrolls history in both directions and accumulates small movements into rows', async () => {
+      const { terminal, socket, canvas } = await setupTouchTerminal();
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      expect(fireEvent.touchMove(canvas, { touches: [point(160)] })).toBe(false);
+      expect(terminal.scrollLines).toHaveBeenLastCalledWith(-3);
+      fireEvent.touchMove(canvas, { touches: [point(164)] });
+      fireEvent.touchMove(canvas, { touches: [point(172)] });
+      expect(terminal.scrollLines).toHaveBeenCalledTimes(1);
+      fireEvent.touchMove(canvas, { touches: [point(180)] });
+      expect(terminal.scrollLines).toHaveBeenLastCalledWith(-1);
+      fireEvent.touchMove(canvas, { touches: [point(140)] });
+      expect(terminal.scrollLines).toHaveBeenLastCalledWith(2);
+      fireEvent.touchEnd(canvas, { touches: [] });
+      expect(terminal.focus).not.toHaveBeenCalled();
+      expect(socket.send).not.toHaveBeenCalled();
+    });
+
+    it('keeps tap-to-type and ignores small finger jitter', async () => {
+      const { terminal, canvas } = await setupTouchTerminal();
+      expect(fireEvent.touchStart(canvas, { touches: [point(100)] })).toBe(true);
+      expect(fireEvent.touchMove(canvas, { touches: [point(104)] })).toBe(true);
+      fireEvent.touchEnd(canvas, { touches: [] });
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+      expect(terminal.focus).toHaveBeenCalledOnce();
+    });
+
+    it('does not turn horizontal swipes or canceled gestures into scrolling or taps', async () => {
+      const { terminal, canvas } = await setupTouchTerminal();
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      expect(fireEvent.touchMove(canvas, { touches: [point(105, 100)] })).toBe(true);
+      fireEvent.touchMove(canvas, { touches: [point(200, 100)] });
+      fireEvent.touchEnd(canvas, { touches: [] });
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+      expect(terminal.focus).not.toHaveBeenCalled();
+
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      fireEvent.touchCancel(canvas, { touches: [] });
+      fireEvent.touchMove(canvas, { touches: [point(200)] });
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+    });
+
+    it('leaves pinch gestures to the browser without resuming a swipe on the remaining finger', async () => {
+      const { terminal, canvas } = await setupTouchTerminal();
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      const touches = [point(120), point(80, 80, 2)];
+      expect(fireEvent.touchStart(canvas, { touches })).toBe(true);
+      expect(fireEvent.touchMove(canvas, { touches })).toBe(true);
+      expect(fireEvent.touchEnd(canvas, { touches: [point(120)] })).toBe(true);
+      expect(fireEvent.touchMove(canvas, { touches: [point(200)] })).toBe(true);
+      expect(fireEvent.touchEnd(canvas, { touches: [] })).toBe(true);
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+      expect(terminal.focus).not.toHaveBeenCalled();
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      fireEvent.touchEnd(canvas, { touches: [] });
+      expect(terminal.focus).toHaveBeenCalledOnce();
+    });
+
+    it('routes swipes to mouse-tracking apps without duplicate input or local scrolling', async () => {
+      const { terminal, socket, canvas } = await setupTouchTerminal();
+      terminal.wasmTerm.isAlternateScreen.mockReturnValue(true);
+      fireEvent.touchStart(canvas, { touches: [point(85)] });
+      fireEvent.touchMove(canvas, { touches: [point(45)] });
+      expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+        JSON.stringify({ type: 'input', data: '\x1b[<65;3;3M'.repeat(2) })
+      );
+      fireEvent.touchMove(canvas, { touches: [point(85)] });
+      expect(socket.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ type: 'input', data: '\x1b[<64;3;5M'.repeat(2) })
+      );
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      false,
+      true,
+    ])('uses mode-aware cursor keys for apps without mouse tracking (application mode: %s)', async (applicationMode) => {
+      const { terminal, socket, canvas } = await setupTouchTerminal();
+      terminal.wasmTerm.isAlternateScreen.mockReturnValue(true);
+      terminal.wasmTerm.hasMouseTracking.mockReturnValue(false);
+      terminal.getMode.mockReturnValue(applicationMode);
+      fireEvent.touchStart(canvas, { touches: [point(85)] });
+      fireEvent.touchMove(canvas, { touches: [point(45)] });
+      expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+        JSON.stringify({ type: 'input', data: `\x1b${applicationMode ? 'O' : '['}B`.repeat(2) })
+      );
+      fireEvent.touchMove(canvas, { touches: [point(85)] });
+      expect(socket.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ type: 'input', data: `\x1b${applicationMode ? 'O' : '['}A`.repeat(2) })
+      );
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+    });
+
+    it('does not scroll or send application input during replay', async () => {
+      const { terminal, socket, canvas } = await setupTouchTerminal(false);
+      for (const alternateScreen of [false, true]) {
+        terminal.wasmTerm.isAlternateScreen.mockReturnValue(alternateScreen);
+        fireEvent.touchStart(canvas, { touches: [point(100)] });
+        fireEvent.touchMove(canvas, { touches: [point(160)] });
+        fireEvent.touchEnd(canvas, { touches: [] });
+      }
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+      expect(socket.send).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'close',
+      'exit',
+    ])('allows reading history after %s without sending input to a stopped app', async (event) => {
+      const { terminal, socket, canvas } = await setupTouchTerminal();
+      act(() => {
+        if (event === 'exit') {
+          socket.emit('message', { data: JSON.stringify({ type: 'exit', code: 0 }) });
+        } else {
+          socket.readyState = 3;
+          socket.emit('close');
+        }
+      });
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      fireEvent.touchMove(canvas, { touches: [point(160)] });
+      expect(terminal.scrollLines).toHaveBeenCalledExactlyOnceWith(-3);
+      terminal.wasmTerm.isAlternateScreen.mockReturnValue(true);
+      fireEvent.touchMove(canvas, { touches: [point(220)] });
+      expect(socket.send).not.toHaveBeenCalled();
+    });
+
+    it('keeps native key-row gestures separate and removes listeners when closed', async () => {
+      const { terminal, host, canvas, rerender } = await setupTouchTerminal();
+      const strip = screen.getByRole('group', { name: 'Terminal keys' });
+      fireEvent.touchStart(strip, { touches: [point(100)] });
+      expect(fireEvent.touchMove(strip, { touches: [point(160)] })).toBe(true);
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+
+      fireEvent.touchStart(canvas, { touches: [point(100)] });
+      const removeListener = vi.spyOn(host, 'removeEventListener');
+      rerender(
+        <TerminalModal
+          cwdLabel="/tmp/project"
+          onClose={vi.fn()}
+          open={false}
+          target={localTarget}
+        />
+      );
+      for (const event of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+        expect(removeListener).toHaveBeenCalledWith(event, expect.any(Function), true);
+      }
+      fireEvent.touchMove(canvas, { touches: [point(160)] });
+      expect(terminal.scrollLines).not.toHaveBeenCalled();
+    });
   });
 
   it('reports wheel events to mouse-tracking terminal apps', async () => {
