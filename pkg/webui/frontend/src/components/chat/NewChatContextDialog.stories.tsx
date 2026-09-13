@@ -116,3 +116,34 @@ export const Compact: Story = {
 export const RunnerRequired: Story = {
   args: { runnerIdDraft: '' },
 };
+
+export const RunnerAvailability: Story = {
+  args: {
+    cwdSuggestionsOpen: false,
+    runnerIdDraft: 'runner-1',
+    runners: [
+      meta.args.runners[0],
+      {
+        ...meta.args.runners[0],
+        id: 'runner-gpu',
+        displayName: 'GPU workspace for model experiments',
+        status: 'busy',
+        concurrentRuns: true,
+        activeRunIds: ['run-1', 'run-2'],
+      },
+      {
+        ...meta.args.runners[0],
+        id: 'runner-busy',
+        displayName: 'Build workspace',
+        status: 'busy',
+      },
+      {
+        ...meta.args.runners[0],
+        id: 'runner-offline',
+        displayName: 'Offline workspace',
+        connected: false,
+        status: 'offline',
+      },
+    ],
+  },
+};

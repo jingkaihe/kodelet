@@ -86,9 +86,19 @@ const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
   ...overrides,
 });
 
-const selectWorkspaceRunner = () => {
-  fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-1' } });
+const selectNewChatOption = (
+  label: 'Profile' | 'Reasoning effort' | 'Environment',
+  value: string
+) => {
+  fireEvent.click(screen.getByRole('combobox', { name: label }));
+  const option = within(screen.getByRole('listbox', { name: label }))
+    .getAllByRole('option')
+    .find((item) => item.dataset.value === value);
+  assert.isDefined(option, `Expected ${label} option ${value}`);
+  fireEvent.click(option);
 };
+
+const selectWorkspaceRunner = () => selectNewChatOption('Environment', 'runner-1');
 
 const renderChatWithRunner = async () => {
   const result = render(<ChatPage />);
@@ -184,9 +194,7 @@ describe('ChatPage', () => {
     const { rerender } = render(<ChatPage />);
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: runner.id },
-    });
+    selectNewChatOption('Environment', runner.id);
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../other-project' },
     });
@@ -643,9 +651,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
@@ -1310,18 +1316,17 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
     expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
-    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
-    fireEvent.change(screen.getByLabelText('Reasoning effort'), {
-      target: { value: 'high' },
-    });
+    await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toBeEnabled());
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
+    selectNewChatOption('Reasoning effort', 'high');
 
-    fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
-      target: { value: 'anthropic' },
-    });
+    selectNewChatOption('Profile', 'anthropic');
     await waitFor(() =>
       expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1')
     );
-    await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toHaveValue('high'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high')
+    );
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '/workspace/alt' },
     });
@@ -1356,14 +1361,10 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Reasoning effort'), {
-      target: { value: 'high' },
-    });
-    fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
-      target: { value: 'restricted' },
-    });
+    selectNewChatOption('Reasoning effort', 'high');
+    selectNewChatOption('Profile', 'restricted');
 
-    await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toHaveValue('low'));
+    await waitFor(() => expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('low'));
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
   });
 
@@ -1379,12 +1380,12 @@ describe('ChatPage', () => {
       profileSelect.focus();
       const settingsRequests = mockGetChatSettings.mock.calls.length;
 
-      fireEvent.change(profileSelect, { target: { value: 'anthropic' } });
+      selectNewChatOption('Profile', 'anthropic');
       await flushAsyncUpdates();
       act(() => vi.advanceTimersByTime(0));
 
       expect(profileSelect).toHaveFocus();
-      expect(profileSelect).toHaveValue('anthropic');
+      expect(profileSelect).toHaveTextContent('anthropic');
       expect(mockGetChatSettings).toHaveBeenCalledTimes(settingsRequests + 1);
       expect(mockGetChatSettings).toHaveBeenLastCalledWith('anthropic', 'runner-1');
 
@@ -1408,7 +1409,9 @@ describe('ChatPage', () => {
   ])('ignores a stale runner profile discovery %s', async (outcome) => {
     const defaults: ChatSettings = await mockGetChatSettings();
     mockGetChatSettings.mockClear();
-    mockGetRunners.mockResolvedValue({ runners: [makeRunner(), makeRunner({ id: 'runner-2' })] });
+    mockGetRunners.mockResolvedValue({
+      runners: [makeRunner(), makeRunner({ id: 'runner-2', displayName: 'second-runner' })],
+    });
     let resolveOld: (settings: ChatSettings) => void = () => {};
     let rejectOld: (error: Error) => void = () => {};
     const oldRequest = new Promise<ChatSettings>((resolve, reject) => {
@@ -1432,10 +1435,16 @@ describe('ChatPage', () => {
     selectWorkspaceRunner();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1');
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-2');
-    expect(screen.getByRole('option', { name: 'new-runner/search' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Profile' })).getByRole('option', {
+        name: 'new-runner/search',
+      })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
 
     await act(async () => {
@@ -1450,10 +1459,13 @@ describe('ChatPage', () => {
         });
       }
     });
-    expect(screen.queryByRole('option', { name: 'old-runner/search' })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'new-runner/search' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
-    expect(screen.getByLabelText('Environment')).toHaveValue('runner-2');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    const profiles = within(screen.getByRole('listbox', { name: 'Profile' }));
+    expect(profiles.queryByRole('option', { name: 'old-runner/search' })).not.toBeInTheDocument();
+    expect(profiles.getByRole('option', { name: 'new-runner/search' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
+    expect(screen.getByLabelText('Environment')).toHaveTextContent('second-runner — worker — idle');
     expect(mockGetChatSettings).toHaveBeenCalledTimes(3);
   });
 
@@ -1480,13 +1492,19 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
     await flushAsyncUpdates();
-    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: 'code-search' } });
+    selectNewChatOption('Profile', 'code-search');
     expect(mockGetChatSettings).toHaveBeenLastCalledWith('code-search', 'runner-1');
-    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
 
-    expect(screen.getByLabelText('Profile')).toHaveValue('work');
-    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
+        name: 'code-search',
+      })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     await act(async () => {
       resolveOld({
         ...defaults,
@@ -1496,9 +1514,15 @@ describe('ChatPage', () => {
         reasoningEffortOptions: ['none'],
       });
     });
-    expect(screen.getByLabelText('Profile')).toHaveValue('work');
-    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
-    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
+        name: 'code-search',
+      })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 
@@ -1526,23 +1550,29 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
     await flushAsyncUpdates();
-    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: profile } });
+    selectNewChatOption('Profile', profile);
     await flushAsyncUpdates();
-    fireEvent.change(screen.getByLabelText('Reasoning effort'), { target: { value: 'high' } });
+    selectNewChatOption('Reasoning effort', 'high');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: /effort:high/ }));
     await flushAsyncUpdates();
-    fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-2' } });
+    selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
 
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(
       expectedProfile === 'work' ? undefined : expectedProfile,
       'runner-2'
     );
-    expect(screen.getByLabelText('Profile')).toHaveValue(expectedProfile);
-    expect(screen.queryByRole('option', { name: 'code-search' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Reasoning effort')).toHaveValue('high');
+    expect(screen.getByLabelText('Profile')).toHaveTextContent(expectedProfile);
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Profile' })).queryByRole('option', {
+        name: 'code-search',
+      })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 
@@ -1557,14 +1587,12 @@ describe('ChatPage', () => {
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       selectWorkspaceRunner();
       mockGetChatSettings.mockRejectedValueOnce(new Error('profile settings unavailable'));
-      fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
-        target: { value: 'restricted' },
-      });
+      selectNewChatOption('Profile', 'restricted');
 
       await waitFor(() =>
-        expect(screen.getByTestId('new-chat-profile-select')).toHaveValue('work')
+        expect(screen.getByTestId('new-chat-profile-select')).toHaveTextContent('work')
       );
-      expect(screen.getByLabelText('Reasoning effort')).toHaveValue('medium');
+      expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
       expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -1844,6 +1872,27 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
   });
 
+  it('closes the expanded Profile on Escape before dismissing the new chat dialog', async () => {
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    const profile = screen.getByRole('combobox', { name: 'Profile' });
+    profile.focus();
+    fireEvent.click(profile);
+
+    expect(screen.getByRole('listbox', { name: 'Profile' })).toBeInTheDocument();
+    expect(profile).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(profile, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox', { name: 'Profile' })).not.toBeInTheDocument();
+    expect(profile).toHaveAttribute('aria-expanded', 'false');
+    expect(profile).toHaveFocus();
+    expect(screen.getByRole('dialog', { name: 'New chat' })).toBeInTheDocument();
+    fireEvent.keyDown(profile, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: 'New chat' })).not.toBeInTheDocument();
+  });
+
   it('selects a remote runner and sends an explicit runner-host cwd', async () => {
     mockGetRunners.mockResolvedValue({
       runners: [makeRunner()],
@@ -1854,9 +1903,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     fireEvent.change(screen.getByLabelText('Runner profile'), {
       target: { value: 'gpu' },
     });
@@ -1901,7 +1948,7 @@ describe('ChatPage', () => {
       render(<ChatPage />);
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-      fireEvent.change(screen.getByLabelText('Environment'), { target: { value: runnerId } });
+      selectNewChatOption('Environment', runnerId);
       await flushAsyncUpdates();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       await flushAsyncUpdates();
@@ -1918,7 +1965,7 @@ describe('ChatPage', () => {
         }
         fireEvent.click(contextButton);
         mockGetSlashCommands.mockClear();
-        fireEvent.change(screen.getByLabelText('Profile'), { target: { value: profile } });
+        selectNewChatOption('Profile', profile);
         await flushAsyncUpdates();
         expect(mockGetSlashCommands).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: 'Start' }));
@@ -1950,9 +1997,9 @@ describe('ChatPage', () => {
       render(<ChatPage />);
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-      fireEvent.change(screen.getByLabelText('Environment'), { target: { value: 'runner-1' } });
+      selectWorkspaceRunner();
       fireEvent.change(screen.getByLabelText('Runner profile'), { target: { value: 'review' } });
-      fireEvent.change(screen.getByLabelText('Profile'), { target: { value: profile } });
+      selectNewChatOption('Profile', profile);
       const cwdInput = screen.getByLabelText('Working directory');
       fireEvent.focus(cwdInput);
       fireEvent.change(cwdInput, { target: { value: '~/proj' } });
@@ -2014,17 +2061,22 @@ describe('ChatPage', () => {
       render(<ChatPage />);
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-      fireEvent.change(screen.getByLabelText('Environment'), { target: { value: runnerId } });
+      selectNewChatOption('Environment', runnerId);
       const cwdInput = screen.getByLabelText('Working directory');
       fireEvent.focus(cwdInput);
       fireEvent.change(cwdInput, { target: { value: 'project' } });
       await runCwdSuggestionDebounce();
       expect(resolveOldHints).toBeDefined();
-      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      if (label === 'Profile') {
+        selectNewChatOption('Profile', value);
+      } else {
+        fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      }
       await act(async () => {
         resolveOldHints?.({ hints: [{ path: '/runner/old-profile' }] });
       });
       expect(screen.queryByText('/runner/old-profile')).not.toBeInTheDocument();
+      fireEvent.focus(cwdInput);
       await runCwdSuggestionDebounce();
       expect(mockGetCWDHints).toHaveBeenLastCalledWith('project', {
         runnerId,
@@ -2097,9 +2149,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
@@ -2158,9 +2208,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -2361,9 +2409,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -2412,9 +2458,7 @@ describe('ChatPage', () => {
     await screen.findByText('No saved conversations yet.');
     await waitFor(() => expect(screen.getByTestId('sidebar-new-chat-button')).toBeEnabled());
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-1' },
-    });
+    selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
@@ -2473,7 +2517,7 @@ describe('ChatPage', () => {
   });
 
   describe('embedded runner defaults', () => {
-    const embeddedRunner = makeRunner({ id: 'runner-embedded' });
+    const embeddedRunner = makeRunner({ id: 'runner-embedded', displayName: 'embedded-runner' });
     const settings: ChatSettings = {
       currentProfile: 'work',
       profiles: [{ name: 'work', scope: 'global' }],
@@ -2523,7 +2567,7 @@ describe('ChatPage', () => {
 
       expect(screen.getByTestId('composer-textarea')).toBeDisabled();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-      expect(screen.getByLabelText('Environment')).toHaveValue('');
+      expect(screen.getByLabelText('Environment')).toHaveTextContent('Select a workspace runner');
       expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
     });
 
@@ -2538,17 +2582,23 @@ describe('ChatPage', () => {
         selectWorkspaceRunner();
         await flushAsyncUpdates();
         await act(async () => vi.advanceTimersByTimeAsync(5000));
-        expect(screen.getByLabelText('Environment')).toHaveValue('runner-1');
+        expect(screen.getByLabelText('Environment')).toHaveTextContent(
+          'kodelet-gpu — worker — idle'
+        );
 
         fireEvent.click(screen.getByRole('button', { name: 'Start' }));
         await act(async () => vi.advanceTimersByTimeAsync(5000));
         fireEvent.click(screen.getByRole('button', { name: /\/runner\/kodelet/ }));
-        expect(screen.getByLabelText('Environment')).toHaveValue('runner-1');
+        expect(screen.getByLabelText('Environment')).toHaveTextContent(
+          'kodelet-gpu — worker — idle'
+        );
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
         fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
         await flushAsyncUpdates();
-        expect(screen.getByLabelText('Environment')).toHaveValue(embeddedRunner.id);
+        expect(screen.getByLabelText('Environment')).toHaveTextContent(
+          'embedded-runner — worker — idle'
+        );
         expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
         expect(screen.getByTestId('composer-textarea')).toBeEnabled();
@@ -2589,13 +2639,17 @@ describe('ChatPage', () => {
     expect(mockGetCWDHints).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Environment' })).getByRole('option', {
+        name: 'Select a workspace runner',
+      })
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'runner-required' },
-    });
+    selectNewChatOption('Environment', 'runner-required');
     expect(screen.getByLabelText('Working directory')).toHaveValue('');
     expect(screen.getByLabelText('Working directory')).toHaveAttribute(
       'placeholder',
@@ -2615,7 +2669,7 @@ describe('ChatPage', () => {
     expect(mockGetSlashCommands).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     expect(screen.getByTestId('composer-textarea')).toBeDisabled();
-    expect(screen.getByLabelText('Environment')).toHaveValue('');
+    expect(screen.getByLabelText('Environment')).toHaveTextContent('Select a workspace runner');
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });
 

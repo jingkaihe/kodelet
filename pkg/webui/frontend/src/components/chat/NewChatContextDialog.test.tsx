@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { sampleCwdHints, sampleProfiles } from '../../stories/fixtures';
@@ -64,12 +65,13 @@ describe('NewChatContextDialog', () => {
   it('emits profile and directory changes without owning page state', () => {
     const props = renderDialog();
 
-    fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
-      target: { value: 'code-review' },
-    });
-    fireEvent.change(screen.getByTestId('new-chat-reasoning-effort-select'), {
-      target: { value: 'high' },
-    });
+    const profile = screen.getByRole('combobox', { name: 'Profile' });
+    // fireEvent does not provide the browser's implicit click-to-focus behavior.
+    fireEvent.click(profile);
+    expect(profile).toHaveFocus();
+    fireEvent.click(screen.getByRole('option', { name: 'code-review' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
+    fireEvent.click(screen.getByRole('option', { name: 'high' }));
     fireEvent.change(screen.getByTestId('cwd-input'), {
       target: { value: '/tmp/project' },
     });
@@ -125,8 +127,9 @@ describe('NewChatContextDialog', () => {
   });
 
   it('requires a workspace runner', () => {
-    renderDialog({ runnerIdDraft: '' });
+    const props = renderDialog({ runnerIdDraft: '' });
 
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
     expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
     expect(
       screen.queryByRole('option', { name: 'Local control-plane workspace' })
@@ -134,6 +137,8 @@ describe('NewChatContextDialog', () => {
     expect(screen.queryByTestId('cwd-input')).not.toBeInTheDocument();
     expect(screen.getByText('Workspace runner required')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('option', { name: 'kodelet — worker — idle' }));
+    expect(props.onRunnerDraftChange).toHaveBeenCalledWith('runner-1');
   });
 
   it('selects an available runner and accepts a runner-host cwd', () => {
@@ -170,14 +175,10 @@ describe('NewChatContextDialog', () => {
       target: { value: 'gpu' },
     });
     expect(props.onEnvironmentProfileDraftChange).toHaveBeenCalledWith('gpu');
-    fireEvent.change(screen.getByTestId('new-chat-runner-select'), {
-      target: { value: '' },
-    });
-    expect(props.onRunnerDraftChange).toHaveBeenCalledWith('');
   });
 
   it('allows concurrent busy runners but disables legacy busy and offline runners', () => {
-    renderDialog({
+    const props = renderDialog({
       runners: [
         {
           id: 'runner-busy',
@@ -230,9 +231,81 @@ describe('NewChatContextDialog', () => {
       runnerIdDraft: 'runner-busy',
     });
 
+    const environment = screen.getByRole('combobox', { name: 'Environment' });
+    fireEvent.click(environment);
     expect(screen.getByRole('option', { name: /busy — worker — 2 active/ })).toBeEnabled();
     expect(screen.getByRole('option', { name: /legacy — worker — 1 active/ })).toBeDisabled();
     expect(screen.getByRole('option', { name: /offline — worker — offline/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('option', { name: /offline — worker — offline/ }));
+    expect(props.onRunnerDraftChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(environment, { key: 'End' });
+    expect(environment).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getByRole('option', { name: /busy — worker — 2 active/ }).id
+    );
+  });
+
+  it('supports keyboard navigation, typeahead, selection, and Escape without changing the draft', async () => {
+    const user = userEvent.setup();
+    const props = renderDialog({ cwdSuggestionsOpen: false });
+    const profile = screen.getByRole('combobox', { name: 'Profile' });
+    profile.focus();
+    await user.keyboard('{ArrowDown}');
+    const menu = screen.getByRole('listbox', { name: 'Profile' });
+    const selected = within(menu).getByRole('option', { name: 'default' });
+    expect(profile).toHaveFocus();
+    expect(profile).toHaveAttribute('aria-controls', menu.id);
+    expect(profile).toHaveAttribute('aria-activedescendant', selected.id);
+    expect(selected).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{End}');
+    const options = within(menu).getAllByRole('option');
+    expect(profile).toHaveAttribute('aria-activedescendant', options[options.length - 1].id);
+    await user.keyboard('{Home}code{Enter}');
+    expect(props.onProfileDraftChange).toHaveBeenCalledWith('code-review');
+    expect(profile).toHaveFocus();
+    expect(profile).toHaveAttribute('aria-expanded', 'false');
+    expect(profile).not.toHaveAttribute('aria-activedescendant');
+    expect(profile).not.toHaveAttribute('aria-controls');
+    await user.keyboard('{ArrowDown}{ArrowDown}{Escape}');
+    expect(props.onProfileDraftChange).toHaveBeenCalledTimes(1);
+    expect(props.onCancel).not.toHaveBeenCalled();
+    expect(profile).toHaveFocus();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('dismisses on outside clicks and blur, and commits keyboard selection on Tab', async () => {
+    const user = userEvent.setup();
+    const props = renderDialog({ cwdSuggestionsOpen: false });
+    const profile = screen.getByRole('combobox', { name: 'Profile' });
+    await user.click(profile);
+    await user.click(screen.getByRole('heading', { name: 'New chat' }));
+    expect(profile).toHaveAttribute('aria-expanded', 'false');
+    await user.click(profile);
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
+    expect(screen.queryByRole('listbox', { name: 'Profile' })).not.toBeInTheDocument();
+    await user.keyboard('{End}{Tab}');
+    expect(props.onReasoningEffortDraftChange).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveFocus();
+  });
+
+  it('keeps a single reasoning option disabled and handles an empty runner list', async () => {
+    const user = userEvent.setup();
+    const props = renderDialog({
+      reasoningEffortOptions: ['none'],
+      reasoningEffortDraft: 'none',
+      runners: [],
+      runnerIdDraft: '',
+      cwdSuggestionsOpen: false,
+    });
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    const environment = screen.getByRole('combobox', { name: 'Environment' });
+    await user.click(environment);
+    await user.keyboard('{ArrowDown}{End}');
+    expect(environment).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Enter}');
+    expect(props.onRunnerDraftChange).not.toHaveBeenCalled();
   });
 });

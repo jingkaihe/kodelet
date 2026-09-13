@@ -1370,6 +1370,13 @@ const ChatPage: React.FC = () => {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // Let an expanded select dismiss its menu before dismissing the dialog.
+        if (
+          event.target instanceof Element &&
+          event.target.closest('.new-chat-select-trigger[aria-expanded="true"]')
+        ) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onDismissNewChatDialog();

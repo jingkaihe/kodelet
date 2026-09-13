@@ -1,7 +1,230 @@
-import { ArrowRight, ChevronDown, FolderOpen, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, FolderOpen, X } from 'lucide-react';
 import React from 'react';
 import type { ChatProfileOption, CWDHint, Runner } from '../../types';
 import { cn, formatRunnerStatus } from '../../utils';
+
+interface NewChatSelectProps {
+  label: string;
+  testId: string;
+  value: string;
+  options: { value: string; label: string; disabled?: boolean }[];
+  disabled?: boolean;
+  busy?: boolean;
+  wide?: boolean;
+  onChange: (value: string) => void;
+}
+
+const NewChatSelect = ({
+  label,
+  testId,
+  value,
+  options,
+  disabled,
+  busy,
+  wide,
+  onChange,
+}: NewChatSelectProps) => {
+  const id = React.useId();
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+  const searchRef = React.useRef({ text: '', time: 0 });
+  const [expanded, setExpanded] = React.useState(false);
+  const [activeValue, setActiveValue] = React.useState(value);
+  const [placement, setPlacement] = React.useState({ above: false, maxHeight: 240 });
+  const open = expanded && !disabled;
+  const enabledOptions = options.filter((option) => !option.disabled);
+  const selectedOption = options.find((option) => option.value === value);
+  const activeIndex = options.findIndex(
+    (option) => option.value === activeValue && !option.disabled
+  );
+
+  const openMenu = () => {
+    // Button clicks do not focus the trigger in every browser.
+    buttonRef.current?.focus();
+    searchRef.current = { text: '', time: 0 };
+    setActiveValue(
+      enabledOptions.find((option) => option.value === value)?.value ??
+        enabledOptions[0]?.value ??
+        ''
+    );
+    setExpanded(true);
+  };
+
+  const chooseOption = (nextValue: string) => {
+    if (enabledOptions.some((option) => option.value === nextValue) && nextValue !== value) {
+      onChange(nextValue);
+    }
+    setExpanded(false);
+  };
+
+  React.useEffect(() => {
+    if (disabled) setExpanded(false);
+  }, [disabled]);
+
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    // Keep the menu inside the dialog's scrolling panel, including on small screens.
+    const positionMenu = () => {
+      const button = buttonRef.current?.getBoundingClientRect();
+      const panel = rootRef.current?.closest('.new-chat-context-panel')?.getBoundingClientRect();
+      if (!button || !panel) return;
+      const below = Math.min(panel.bottom, window.innerHeight) - button.bottom - 8;
+      const above = button.top - Math.max(panel.top, 0) - 8;
+      const placeAbove = below < 160 && above > below;
+      setPlacement({
+        above: placeAbove,
+        maxHeight: Math.max(0, Math.min(240, placeAbove ? above : below)),
+      });
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setExpanded(false);
+    };
+    positionMenu();
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', positionMenu, true);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('resize', positionMenu);
+      window.removeEventListener('scroll', positionMenu, true);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
+
+  React.useEffect(() => {
+    if (open) {
+      document
+        .getElementById(`${id}-option-${activeIndex}`)
+        ?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [open, id, activeIndex]);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      setExpanded(false);
+      return;
+    }
+    if (event.key === 'Tab') {
+      if (open) chooseOption(activeValue);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (open) chooseOption(activeValue);
+      else openMenu();
+      return;
+    }
+    const index = enabledOptions.findIndex((option) => option.value === activeValue);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(event.key)) {
+      event.preventDefault();
+      if (open && event.altKey && event.key === 'ArrowUp') {
+        chooseOption(activeValue);
+        return;
+      }
+      if (!open) openMenu();
+      let nextIndex = index;
+      if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = enabledOptions.length - 1;
+      else if (open) {
+        const step = event.key.startsWith('Page') ? 10 : 1;
+        nextIndex += event.key.endsWith('Down') ? step : -step;
+      } else return;
+      const next = enabledOptions[Math.max(0, Math.min(enabledOptions.length - 1, nextIndex))];
+      if (next) setActiveValue(next.value);
+      return;
+    }
+    if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    if (!open) openMenu();
+    const now = Date.now();
+    const text =
+      (now - searchRef.current.time < 500 ? searchRef.current.text : '') + event.key.toLowerCase();
+    searchRef.current = { text, time: now };
+    const repeated = [...text].every((character) => character === text[0]);
+    const prefix = repeated ? text[0] : text;
+    const start = open ? Math.max(0, index + (repeated ? 1 : 0)) : 0;
+    const ordered = [...enabledOptions.slice(start), ...enabledOptions.slice(0, start)];
+    const match = ordered.find((option) => option.label.toLowerCase().startsWith(prefix));
+    if (match) setActiveValue(match.value);
+  };
+
+  return (
+    <div className={cn('new-chat-field new-chat-choice-card', wide && 'new-chat-field-wide')}>
+      <label className="new-chat-field-label" htmlFor={id}>
+        {label}
+      </label>
+      <div className={cn('new-chat-select-shell', open && 'is-open')} ref={rootRef}>
+        <button
+          aria-activedescendant={
+            open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined
+          }
+          aria-busy={busy}
+          aria-controls={open ? `${id}-listbox` : undefined}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-label={label}
+          className="new-chat-field-control new-chat-field-control-select new-chat-select-trigger"
+          data-testid={testId}
+          disabled={disabled}
+          id={id}
+          onBlur={(event) => {
+            if (!rootRef.current?.contains(event.relatedTarget as Node | null)) setExpanded(false);
+          }}
+          onClick={() => {
+            if (open) setExpanded(false);
+            else openMenu();
+          }}
+          onKeyDown={onKeyDown}
+          ref={buttonRef}
+          role="combobox"
+          type="button"
+        >
+          {selectedOption?.label ?? options[0]?.label}
+          <span className="new-chat-select-chevron" aria-hidden="true">
+            <ChevronDown className="h-4 w-4" strokeWidth={1.8} />
+          </span>
+        </button>
+        {open && (
+          <div
+            aria-label={label}
+            className={cn('new-chat-select-menu', placement.above && 'is-above')}
+            id={`${id}-listbox`}
+            role="listbox"
+            style={{ maxHeight: placement.maxHeight }}
+          >
+            {options.map((option, index) => (
+              <button
+                aria-selected={option.value === value}
+                className={cn(
+                  'new-chat-select-option',
+                  option.value === activeValue && 'is-active'
+                )}
+                data-value={option.value}
+                disabled={option.disabled}
+                id={`${id}-option-${index}`}
+                key={option.value}
+                onClick={() => {
+                  chooseOption(option.value);
+                  buttonRef.current?.focus();
+                }}
+                onMouseDown={(event) => event.preventDefault()}
+                role="option"
+                tabIndex={-1}
+                type="button"
+              >
+                <span>{option.label}</span>
+                {option.value === value && (
+                  <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface NewChatContextDialogProps {
   availableProfiles: ChatProfileOption[];
@@ -119,83 +342,44 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
 
           <div className="new-chat-context-panel" data-testid="new-chat-context-panel">
             <div className="new-chat-dialog-grid">
-              <label className="new-chat-field new-chat-choice-card">
-                <span className="new-chat-field-label">Profile</span>
-                <div className="new-chat-select-shell">
-                  <select
-                    aria-label="Profile"
-                    className="new-chat-field-control new-chat-field-control-select"
-                    data-testid="new-chat-profile-select"
-                    onChange={(event) => onProfileDraftChange(event.target.value)}
-                    value={profileDraft}
-                  >
-                    {availableProfiles.map((profile) => (
-                      <option key={profile.name} value={profile.name}>
-                        {profile.name}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="new-chat-select-chevron" aria-hidden="true">
-                    <ChevronDown className="h-4 w-4" strokeWidth={1.8} />
-                  </span>
-                </div>
-              </label>
-
-              <label className="new-chat-field new-chat-choice-card">
-                <span className="new-chat-field-label">Reasoning effort</span>
-                <div className="new-chat-select-shell">
-                  <select
-                    aria-busy={reasoningEffortLoading}
-                    aria-label="Reasoning effort"
-                    className="new-chat-field-control new-chat-field-control-select"
-                    data-testid="new-chat-reasoning-effort-select"
-                    disabled={reasoningEffortLoading || reasoningEffortOptions.length <= 1}
-                    onChange={(event) => onReasoningEffortDraftChange(event.target.value)}
-                    value={reasoningEffortDraft}
-                  >
-                    {reasoningEffortOptions.map((effort) => (
-                      <option key={effort} value={effort}>
-                        {effort}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="new-chat-select-chevron" aria-hidden="true">
-                    <ChevronDown className="h-4 w-4" strokeWidth={1.8} />
-                  </span>
-                </div>
-              </label>
-
-              <label className="new-chat-field new-chat-field-wide new-chat-choice-card">
-                <span className="new-chat-field-label">Environment</span>
-                <div className="new-chat-select-shell">
-                  <select
-                    aria-label="Environment"
-                    className="new-chat-field-control new-chat-field-control-select"
-                    data-testid="new-chat-runner-select"
-                    onChange={(event) => onRunnerDraftChange(event.target.value)}
-                    value={runnerIdDraft}
-                  >
-                    <option disabled value="">
-                      Select a workspace runner
-                    </option>
-                    {runners.map((runner) => {
-                      const available =
-                        runner.connected &&
-                        (runner.status === 'idle' ||
-                          (runner.status === 'busy' && runner.concurrentRuns));
-                      const name = runner.displayName || runner.workspace.name || runner.id;
-                      return (
-                        <option disabled={!available} key={runner.id} value={runner.id}>
-                          {name} — {runner.host.hostname} — {formatRunnerStatus(runner)}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <span className="new-chat-select-chevron" aria-hidden="true">
-                    <ChevronDown className="h-4 w-4" strokeWidth={1.8} />
-                  </span>
-                </div>
-              </label>
+              <NewChatSelect
+                label="Profile"
+                testId="new-chat-profile-select"
+                onChange={onProfileDraftChange}
+                value={profileDraft}
+                options={availableProfiles.map((profile) => ({
+                  value: profile.name,
+                  label: profile.name,
+                }))}
+              />
+              <NewChatSelect
+                label="Reasoning effort"
+                testId="new-chat-reasoning-effort-select"
+                busy={reasoningEffortLoading}
+                disabled={reasoningEffortLoading || reasoningEffortOptions.length <= 1}
+                onChange={onReasoningEffortDraftChange}
+                value={reasoningEffortDraft}
+                options={reasoningEffortOptions.map((effort) => ({ value: effort, label: effort }))}
+              />
+              <NewChatSelect
+                label="Environment"
+                testId="new-chat-runner-select"
+                onChange={onRunnerDraftChange}
+                value={runnerIdDraft}
+                wide
+                options={[
+                  { value: '', label: 'Select a workspace runner', disabled: true },
+                  ...runners.map((runner) => ({
+                    value: runner.id,
+                    label: `${runner.displayName || runner.workspace.name || runner.id} — ${runner.host.hostname} — ${formatRunnerStatus(runner)}`,
+                    disabled: !(
+                      runner.connected &&
+                      (runner.status === 'idle' ||
+                        (runner.status === 'busy' && runner.concurrentRuns))
+                    ),
+                  })),
+                ]}
+              />
 
               {selectedRunner ? (
                 <>

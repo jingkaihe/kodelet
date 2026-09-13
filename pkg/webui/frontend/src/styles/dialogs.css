@@ -320,6 +320,71 @@
   color: var(--kodelet-muted);
 }
 
+.new-chat-select-shell.is-open {
+  z-index: 2;
+}
+
+.new-chat-select-trigger {
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.new-chat-select-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  inset-inline: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 28%, transparent);
+  border-radius: 2px;
+  background: var(--kodelet-elevated);
+  color: var(--kodelet-dark);
+  scrollbar-color: var(--kodelet-mid-gray) transparent;
+  scrollbar-width: thin;
+}
+
+.new-chat-select-menu.is-above {
+  top: auto;
+  bottom: calc(100% + 0.25rem);
+}
+
+.new-chat-select-option {
+  display: flex;
+  width: 100%;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--kodelet-dark);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.new-chat-select-option[aria-selected="true"] {
+  background: color-mix(in srgb, var(--kodelet-link) 10%, var(--kodelet-elevated));
+}
+
+.new-chat-select-option.is-active:not(:disabled),
+.new-chat-select-option:hover:not(:disabled) {
+  border-color: var(--kodelet-link);
+  background: color-mix(in srgb, var(--kodelet-link) 16%, var(--kodelet-elevated));
+}
+
+.new-chat-select-option:disabled {
+  color: var(--kodelet-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .new-chat-workspace-card {
   gap: 0.42rem;
   margin-top: 0.08rem;
@@ -894,11 +959,13 @@
 
   .new-chat-field-control,
   .new-chat-context-dialog .new-chat-field-control,
+  .new-chat-select-option,
   .new-chat-context-dialog .new-chat-directory-control {
     font-size: 1rem;
   }
 
   .new-chat-context-close,
+  .new-chat-select-option,
   .new-chat-secondary-button,
   .new-chat-primary-button {
     min-height: 2.75rem;
