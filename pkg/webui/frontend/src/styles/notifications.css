@@ -1,82 +1,127 @@
-/* Toast notifications positioning */
-.toast {
+.kodelet-toasts {
   position: fixed;
-  top: 1rem;
-  right: 1rem;
+  top: calc(1rem + env(safe-area-inset-top, 0px));
+  right: calc(1rem + env(safe-area-inset-right, 0px));
   z-index: 9999;
-  width: min(28rem, calc(100vw - 2rem));
-  max-width: calc(100vw - 2rem);
-  animation: slideIn 0.3s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(
+    26rem,
+    calc(100vw - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+  );
+  max-height: calc(
+    100dvh -
+    2rem -
+    env(safe-area-inset-top, 0px) -
+    env(safe-area-inset-bottom, 0px)
+  );
+  padding: 0.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--tui-surface) transparent;
+  scrollbar-width: thin;
 }
 
-.kodelet-toast-card {
+.kodelet-toast {
+  --toast-accent: var(--tui-blue);
+  --toast-title: var(--tui-teal);
   box-sizing: border-box;
-  display: block;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: start;
+  flex-shrink: 0;
+  gap: 0.625rem;
   width: 100%;
   min-width: 0;
-  padding: 0.85rem 1rem;
-  border-radius: 16px;
-  border: 1px solid rgba(20, 20, 19, 0.08);
-  box-shadow:
-    0 16px 32px rgba(23, 21, 18, 0.12),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(12px);
-  font-family: var(--font-heading);
-  font-size: 0.88rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--toast-accent) 35%, transparent);
+  border-left: 2px solid var(--toast-accent);
+  border-radius: 0.25rem;
+  background: var(--kodelet-light);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--tui-text) 6%, transparent);
+  color: var(--tui-text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.kodelet-toast[data-type="success"] {
+  --toast-accent: var(--tui-green);
+  --toast-title: var(--tui-green);
+}
+
+.kodelet-toast[data-type="error"] {
+  --toast-accent: var(--tui-red);
+  --toast-title: var(--tui-red);
+}
+
+.kodelet-toast[data-type="neutral"] {
+  --toast-accent: var(--tui-subtext);
+  --toast-title: var(--tui-subtext);
+}
+
+.kodelet-toast .toast-marker {
+  color: var(--toast-accent);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.kodelet-toast .toast-content {
+  min-width: 0;
+}
+
+.kodelet-toast .toast-title,
+.kodelet-toast .toast-message {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.kodelet-toast .toast-title {
+  margin-bottom: 0.2rem;
+  color: var(--toast-title);
+  font-size: 0.78rem;
   font-weight: 500;
-  letter-spacing: -0.01em;
-  overflow: hidden;
-  white-space: normal;
 }
 
-.kodelet-toast-card .toast-title {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  margin-bottom: 0.15rem;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: normal;
-  color: inherit;
+.kodelet-toast .toast-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.125rem;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--tui-muted);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: normal;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
 }
 
-.kodelet-toast-card .toast-message {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: normal;
-  line-height: 1.35;
+.kodelet-toast .toast-dismiss:hover,
+.kodelet-toast .toast-dismiss:active {
+  transform: none;
+  background: color-mix(in srgb, var(--tui-surface) 25%, transparent);
+  color: var(--tui-text);
 }
 
-.kodelet-toast-card.alert-info {
-  background: rgba(244, 241, 234, 0.96);
-  color: #4a463f;
+.kodelet-toast .toast-dismiss:focus-visible {
+  outline: 2px solid var(--toast-accent);
+  outline-offset: 2px;
 }
 
-.kodelet-toast-card.alert-success {
-  background: rgba(238, 244, 234, 0.96);
-  color: #41503f;
-}
-
-.kodelet-toast-card.alert-error {
-  background: rgba(247, 236, 232, 0.97);
-  color: #8c3f34;
-}
-
-.kodelet-toast-card.alert-neutral {
-  background: rgba(243, 240, 234, 0.98);
-  color: #4d483f;
-}
-
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
+@media (any-pointer: coarse) {
+  .kodelet-toast .toast-dismiss {
+    width: 2.75rem;
+    height: 2.75rem;
   }
 }

@@ -47,55 +47,56 @@
 }
 
 .extension-widgets[data-placement="aboveComposer"] {
-  padding-bottom: 0.38rem;
+  padding-bottom: 0.25rem;
 }
 
 .extension-widgets[data-placement="belowComposer"] {
-  padding-top: 0.38rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
 .extension-widget-frame {
   min-width: 0;
-  padding: 0.18rem 1rem 0.24rem;
-  color: rgba(20, 20, 19, 0.62);
+  border-top: 1px solid var(--tui-surface);
+  padding: 0.2rem 0;
+  color: var(--tui-subtext);
 }
 
-.extension-widget-frame + .extension-widget-frame {
-  margin-top: 0.18rem;
-  padding-top: 0.48rem;
-  border-top: 1px solid rgba(20, 20, 19, 0.06);
-}
-
-.extension-widget-toggle {
+.extension-widget-toggle,
+.extension-widget-heading {
   display: flex;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   min-width: 0;
+  min-height: 2rem;
   align-items: center;
-  justify-content: flex-start;
-  gap: 0.36rem;
+  gap: 0.5rem;
   border: 0;
+  border-radius: 2px;
   background: transparent;
-  padding: 0;
-  color: inherit;
+  padding: 0.25rem 0;
+  color: var(--tui-text);
   text-align: left;
+}
+
+.extension-widget-heading {
+  padding-left: 1.3rem;
 }
 
 .extension-widget-toggle:hover,
 .extension-widget-toggle:active {
   transform: none;
+  color: var(--tui-teal);
 }
 
-.extension-widget-toggle:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.08);
+.extension-widget-frame .extension-widget-toggle:focus-visible {
+  outline: 2px solid var(--tui-teal);
+  outline-offset: 2px;
 }
 
 .extension-widget-chevron {
-  width: 0.86rem;
-  height: 0.86rem;
+  width: 0.8rem;
+  height: 0.8rem;
   flex: 0 0 auto;
-  color: rgba(20, 20, 19, 0.34);
+  color: var(--tui-muted);
   transition: transform 140ms ease;
 }
 
@@ -107,8 +108,10 @@
   max-height: 8rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-top: 0.08rem;
-  scrollbar-color: rgba(93, 83, 64, 0.22) transparent;
+  margin: 0.1rem 0 0.3rem 0.4rem;
+  border-left: 1px solid var(--tui-surface);
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  scrollbar-color: var(--tui-surface) transparent;
   scrollbar-width: thin;
 }
 
@@ -116,8 +119,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  line-height: 1.5;
+  font-size: 0.72rem;
+  line-height: 1.7;
 }
 
 .extension-widget-line + .extension-widget-line {
@@ -126,10 +129,15 @@
 
 .extension-widget-line-header {
   min-width: 0;
-  font-family: var(--font-heading);
-  font-size: 0.7rem;
-  line-height: 1.4;
-  color: rgba(20, 20, 19, 0.66);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+@media (any-pointer: coarse) {
+  .extension-widget-toggle {
+    min-height: 2.75rem;
+  }
 }
 
 .chat-message-panel {

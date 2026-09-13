@@ -165,57 +165,182 @@ describe('copyToClipboard', () => {
 
 describe('showToast', () => {
   beforeEach(() => {
-    // Clear any existing toasts before each test
+    vi.useFakeTimers();
     document.body.innerHTML = '';
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     document.body.innerHTML = '';
   });
 
-  it('creates and removes toast element', () => {
-    vi.useFakeTimers();
-
+  it('removes the toast and empty stack after three seconds', () => {
     showToast('Test message', 'success');
 
-    const toast = document.querySelector('.toast');
-    expect(toast).toBeTruthy();
-    expect(toast?.innerHTML).toContain('alert-success');
-    // Check for the actual text content, not innerHTML
-    expect(toast?.textContent).toContain('Test message');
+    const toast = document.querySelector('.kodelet-toast');
+    expect(toast).toHaveTextContent('Test message');
 
-    vi.advanceTimersByTime(3000);
+    vi.advanceTimersByTime(2999);
+    expect(toast).toBeInTheDocument();
 
-    expect(document.querySelector('.toast')).toBeFalsy();
-
-    vi.useRealTimers();
+    vi.advanceTimersByTime(1);
+    expect(toast).not.toBeInTheDocument();
+    expect(document.querySelector('.kodelet-toasts')).not.toBeInTheDocument();
   });
 
-  it('supports neutral toasts for muted feedback', () => {
-    showToast('Conversation deleted', 'neutral');
+  it.each([
+    ['info', 'i', 'status'],
+    ['success', '✓', 'status'],
+    ['error', '!', 'alert'],
+    ['neutral', '·', 'status'],
+  ] as const)('renders the %s variant with its marker and live role', (type, marker, role) => {
+    showToast('Notification message', type);
 
-    const toast = document.querySelector('.toast');
-    expect(toast).toBeTruthy();
-    expect(toast?.innerHTML).toContain('alert-neutral');
-    expect(toast?.textContent).toContain('Conversation deleted');
+    const toast = document.querySelector('.kodelet-toast');
+    expect(toast).toHaveAttribute('data-type', type);
+    expect(toast).toHaveAttribute('role', role);
+    expect(toast).toHaveAttribute('aria-atomic', 'true');
+    expect(toast?.querySelector('.toast-marker')).toHaveTextContent(marker);
+    expect(toast?.querySelector('.toast-marker')).toHaveAttribute('aria-hidden', 'true');
+    expect(toast?.querySelector('button')).toHaveAccessibleName('Dismiss notification');
   });
 
-  it('wraps long notification messages inside the toast body', () => {
-    showToast(
-      'Workspace extension started with a very-long-token-that-should-wrap-instead-of-overflowing-the-notification-box',
-      'info'
+  it('defaults to info and omits an empty title', () => {
+    showToast('Notification message', undefined, '  ');
+
+    expect(document.querySelector('.kodelet-toast')).toHaveAttribute('data-type', 'info');
+    expect(document.querySelector('.toast-title')).not.toBeInTheDocument();
+  });
+
+  it('stacks simultaneous notifications with independent expiration', () => {
+    showToast('First notification');
+    vi.advanceTimersByTime(1000);
+    showToast('Second notification');
+
+    const stack = document.querySelector('.kodelet-toasts');
+    expect(document.querySelectorAll('.kodelet-toasts')).toHaveLength(1);
+    expect(stack).toHaveAccessibleName('Notifications');
+    expect(stack?.children).toHaveLength(2);
+
+    vi.advanceTimersByTime(2000);
+    expect(stack?.children).toHaveLength(1);
+    expect(stack).toHaveTextContent('Second notification');
+    expect(stack).not.toHaveTextContent('First notification');
+
+    vi.advanceTimersByTime(1000);
+    expect(stack).not.toBeInTheDocument();
+  });
+
+  it('dismisses individual notifications and clears their timers', () => {
+    showToast('First notification');
+    showToast('Second notification');
+
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.toast-dismiss');
+    buttons[0].click();
+
+    expect(document.querySelectorAll('.kodelet-toast')).toHaveLength(1);
+    expect(document.querySelector('.kodelet-toast')).toHaveTextContent('Second notification');
+    expect(vi.getTimerCount()).toBe(1);
+
+    buttons[1].click();
+    expect(document.querySelector('.kodelet-toasts')).not.toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(0);
+
+    showToast('New notification');
+    expect(document.querySelector('.kodelet-toast')).toHaveTextContent('New notification');
+  });
+
+  it('pauses expiration while hovered and resumes the remaining time', () => {
+    showToast('Read at your own pace');
+    const toast = document.querySelector('.kodelet-toast');
+
+    vi.advanceTimersByTime(1000);
+    toast?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(10000);
+    expect(toast).toBeInTheDocument();
+
+    toast?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(1999);
+    expect(toast).toBeInTheDocument();
+    vi.advanceTimersByTime(1);
+    expect(toast).not.toBeInTheDocument();
+  });
+
+  it('pauses expiration while keyboard focus is inside the notification', () => {
+    showToast('Keyboard-accessible notification');
+    const toast = document.querySelector('.kodelet-toast');
+    const dismiss = toast?.querySelector('button');
+
+    vi.advanceTimersByTime(1000);
+    dismiss?.focus();
+    expect(dismiss).toHaveFocus();
+    vi.advanceTimersByTime(10000);
+    expect(toast).toBeInTheDocument();
+
+    dismiss?.blur();
+    vi.advanceTimersByTime(1999);
+    expect(toast).toBeInTheDocument();
+    vi.advanceTimersByTime(1);
+    expect(toast).not.toBeInTheDocument();
+  });
+
+  it('waits until both hover and focus leave before resuming expiration', () => {
+    showToast('Keep visible during interaction');
+    const toast = document.querySelector('.kodelet-toast');
+    const dismiss = toast?.querySelector('button');
+
+    vi.advanceTimersByTime(1000);
+    toast?.dispatchEvent(new MouseEvent('mouseenter'));
+    dismiss?.focus();
+    toast?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(5000);
+    expect(toast).toBeInTheDocument();
+
+    toast?.dispatchEvent(new MouseEvent('mouseenter'));
+    dismiss?.blur();
+    vi.advanceTimersByTime(5000);
+    expect(toast).toBeInTheDocument();
+
+    toast?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(2000);
+    expect(toast).not.toBeInTheDocument();
+  });
+
+  it('preserves long and multiline notification text', () => {
+    const message =
+      'Workspace extension started with a very-long-token-that-should-wrap-instead-of-overflowing-the-notification-box\nReady for the next task.';
+    showToast(message);
+
+    expect(document.querySelector('.toast-message')?.textContent).toBe(message);
+  });
+
+  it('escapes notification titles and messages as text', () => {
+    const title = '<img src=x onerror="alert(1)">';
+    const message = '<script>alert("unsafe")</script> & <b>not markup</b>';
+    showToast(message, 'info', title);
+
+    expect(document.querySelector('.toast-title')?.textContent).toBe(title);
+    expect(document.querySelector('.toast-message')?.textContent).toBe(message);
+    expect(document.querySelector('.kodelet-toast')?.querySelector('img, script, b')).toBeNull();
+  });
+
+  it('uses only the new toast markup', () => {
+    showToast('Notification message', 'success');
+
+    expect(
+      document.querySelector('.toast, .kodelet-toast-card, [class*="alert-"]')
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('.kodelet-toast')?.parentElement).toBe(
+      document.querySelector('.kodelet-toasts')
     );
-
-    const message = document.querySelector('.toast-message');
-    expect(message).toBeTruthy();
-    expect(message?.textContent).toContain('very-long-token');
   });
 
   it('renders notification title and message separately', () => {
     showToast(
       'Workspace extension started. Remembered bash policy: 0 allowed, 0 denied.',
       'info',
-      'Workspace extension ready'
+      '  Workspace extension ready  '
     );
 
     expect(document.querySelector('.toast-title')?.textContent).toBe('Workspace extension ready');

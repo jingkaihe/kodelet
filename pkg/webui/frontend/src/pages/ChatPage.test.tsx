@@ -208,6 +208,10 @@ describe('ChatPage', () => {
   };
 
   afterEach(() => {
+    // Notifications are mounted outside the React root and own their dismissal timers.
+    for (const button of screen.queryAllByRole('button', { name: 'Dismiss notification' })) {
+      button.click();
+    }
     vi.unstubAllGlobals();
   });
 
@@ -2867,7 +2871,12 @@ describe('ChatPage', () => {
                     { text: '  1 active', style: { dim: true } },
                   ],
                 },
-                '● Inspect authentication  running',
+                {
+                  spans: [
+                    { text: '● Inspect authentication', style: { foreground: 'cyan' } },
+                    { text: '  running', style: { foreground: '#179299', italic: true } },
+                  ],
+                },
               ],
             },
           },
@@ -2883,8 +2892,13 @@ describe('ChatPage', () => {
       'extension-widget-line-header'
     );
     expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
+    expect(screen.getByText(/Inspect authentication/)).toHaveStyle({ color: 'var(--tui-teal)' });
+    expect(screen.getByText('running')).toHaveStyle({ color: '#179299', fontStyle: 'italic' });
     const widgetToggle = screen.getByRole('button', { name: /Background agents/ });
     expect(widgetToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById(widgetToggle.getAttribute('aria-controls') || '')).toHaveClass(
+      'extension-widget-content'
+    );
     fireEvent.click(widgetToggle);
     expect(widgetToggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText(/Inspect authentication/)).not.toBeInTheDocument();
@@ -2920,6 +2934,14 @@ describe('ChatPage', () => {
     });
 
     expect(screen.getByText('Restarted agent generation')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Restarted agent generation' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen
+        .getByTestId('extension-widget-subagent-widget')
+        .querySelector('.extension-widget-content')
+    ).toBeNull();
 
     await act(async () => {
       streamListener?.({

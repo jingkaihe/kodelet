@@ -1,17 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import React from 'react';
-import { expect, fn, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import {
   sampleAttachment,
   sampleChatMessages,
   sampleConversations,
   sampleSlashCommands,
 } from '../../stories/fixtures';
+import type { UIWidgetEvent } from '../../types';
+import { showToast } from '../../utils';
 import ChatComposer from './ChatComposer';
 import ChatSidebar from './ChatSidebar';
 import ChatTranscript from './ChatTranscript';
+import ExtensionWidgets from './ExtensionWidgets';
 
-type ChatComposerStoryProps = React.ComponentProps<typeof ChatComposer>;
+type ChatComposerStoryProps = React.ComponentProps<typeof ChatComposer> & {
+  widgets: UIWidgetEvent[];
+};
 
 const InteractiveComposer = (args: ChatComposerStoryProps) => {
   const [draft, setDraft] = React.useState(args.draft);
@@ -94,6 +99,7 @@ const meta = {
     submitActionLabel: 'Send',
     submitDisabled: false,
     textareaDisabled: false,
+    widgets: [],
     onAttachImages: fn(),
     onContextOpen: fn(),
     onDragLeave: fn(),
@@ -107,7 +113,7 @@ const meta = {
     onStop: fn(),
     onSubmit: fn(),
   },
-} satisfies Meta<typeof ChatComposer>;
+} satisfies Meta<ChatComposerStoryProps>;
 
 export default meta;
 
@@ -203,8 +209,70 @@ export const InWorkspace: Story = {
             ]}
           />
         </div>
+        <ExtensionWidgets placement="aboveComposer" widgets={args.widgets} />
         <InteractiveComposer {...args} />
+        <ExtensionWidgets placement="belowComposer" widgets={args.widgets} />
       </main>
     </div>
   ),
+};
+
+export const WithExtensionFeedback: Story = {
+  ...InWorkspace,
+  args: {
+    ...InWorkspace.args,
+    widgets: [
+      {
+        key: 'background-agents',
+        extension_id: 'subagent',
+        id: 'background-agents',
+        frame: {
+          sequence: 1,
+          lines: [
+            {
+              spans: [
+                { text: 'Background agents', style: { bold: true } },
+                { text: '  1 active · 1 complete', style: { dim: true } },
+              ],
+            },
+            {
+              spans: [
+                { text: '› ', style: { foreground: 'cyan' } },
+                { text: 'Reviewing authentication', style: { foreground: 'cyan' } },
+                { text: '  running', style: { dim: true } },
+              ],
+            },
+            {
+              spans: [
+                { text: '✓ ', style: { foreground: 'green' } },
+                { text: 'Checking frontend tests' },
+                { text: '  complete', style: { dim: true } },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        key: 'workspace',
+        extension_id: 'workspace',
+        id: 'workspace-status',
+        placement: 'belowComposer',
+        frame: { sequence: 1, lines: ['Workspace ready · 2 extensions connected'] },
+      },
+    ],
+  },
+  play: async (context) => {
+    await meta.play(context);
+    const canvas = within(context.canvasElement);
+    const toggle = canvas.getByRole('button', { name: /Background agents/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(canvas.queryByText('Reviewing authentication')).not.toBeInTheDocument();
+    await userEvent.keyboard('{Enter}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(canvas.getByText('Reviewing authentication')).toBeVisible();
+    expect(canvas.queryByRole('button', { name: /Workspace ready/ })).not.toBeInTheDocument();
+    showToast('Ready to help. 2 extensions connected.', 'info', 'Workspace extension ready');
+  },
 };

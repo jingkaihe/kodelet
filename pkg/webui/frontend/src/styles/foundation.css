@@ -20,6 +20,18 @@
   --sidebar-surface-muted: #8d8578;
   --sidebar-stroke-strong: rgba(93, 83, 64, 0.12);
 
+  /* Extension feedback shares the Catppuccin Latte palette in pkg/tui/styles.go. */
+  --tui-text: #4c4f69;
+  --tui-subtext: #6c6f85;
+  --tui-muted: #7c7f93;
+  --tui-surface: #ccd0da;
+  --tui-blue: #1e66f5;
+  --tui-teal: #179299;
+  --tui-green: #40a02b;
+  --tui-red: #d20f39;
+  --tui-yellow: #df8e1d;
+  --tui-mauve: #8839ef;
+
   /* Refined shadows */
   --shadow-sm: 0 1px 2px 0 rgb(20 20 19 / 0.05);
 

@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { type CSSProperties, useState } from 'react';
+import { type CSSProperties, useId, useState } from 'react';
 import type { UIFrameLine, UIStyle, UIStyledSpan, UIWidgetEvent } from '../../types';
 
 interface ExtensionWidgetsProps {
@@ -8,24 +8,24 @@ interface ExtensionWidgetsProps {
 }
 
 const ANSI_COLORS: Record<string, string> = {
-  black: '#111827',
-  red: '#dc2626',
-  green: '#16a34a',
-  yellow: '#ca8a04',
-  blue: '#2563eb',
-  magenta: '#c026d3',
-  cyan: '#0891b2',
-  white: '#f9fafb',
-  gray: '#6b7280',
-  grey: '#6b7280',
-  brightBlack: '#4b5563',
-  brightRed: '#ef4444',
-  brightGreen: '#22c55e',
-  brightYellow: '#eab308',
-  brightBlue: '#3b82f6',
-  brightMagenta: '#d946ef',
-  brightCyan: '#06b6d4',
-  brightWhite: '#ffffff',
+  black: 'var(--tui-text)',
+  red: 'var(--tui-red)',
+  green: 'var(--tui-green)',
+  yellow: 'var(--tui-yellow)',
+  blue: 'var(--tui-blue)',
+  magenta: 'var(--tui-mauve)',
+  cyan: 'var(--tui-teal)',
+  white: 'var(--kodelet-light)',
+  gray: 'var(--tui-muted)',
+  grey: 'var(--tui-muted)',
+  brightBlack: 'var(--tui-subtext)',
+  brightRed: 'var(--tui-red)',
+  brightGreen: 'var(--tui-green)',
+  brightYellow: 'var(--tui-yellow)',
+  brightBlue: 'var(--tui-blue)',
+  brightMagenta: 'var(--tui-mauve)',
+  brightCyan: 'var(--tui-teal)',
+  brightWhite: 'var(--kodelet-light)',
 };
 
 const MAX_RENDERED_WIDGET_LINES = 64;
@@ -53,7 +53,7 @@ const spanStyle = (style: UIStyle | undefined): CSSProperties => {
   return {
     color: style.reverse ? background : foreground,
     backgroundColor: style.reverse ? foreground : background,
-    fontWeight: style.bold ? 700 : undefined,
+    fontWeight: style.bold ? 600 : undefined,
     fontStyle: style.italic ? 'italic' : undefined,
     opacity: style.dim ? 0.65 : undefined,
     textDecoration:
@@ -84,6 +84,7 @@ const spansForLine = (line: UIFrameLine): UIStyledSpan[] => {
 };
 
 const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
+  const id = useId();
   const [collapsedWidgets, setCollapsedWidgets] = useState<Record<string, boolean>>({});
   const placedWidgets = widgets
     .filter((widget) => (widget.placement || 'aboveComposer') === placement)
@@ -95,7 +96,7 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
   return (
     <section
       aria-label="Extension status"
-      className="extension-widgets mx-auto flex w-full max-w-5xl flex-col gap-1.5 px-3 sm:px-4 md:px-8"
+      className="extension-widgets mx-auto flex w-full max-w-5xl flex-col gap-1 px-3 sm:px-4 md:px-8"
       data-placement={placement}
       data-testid={`extension-widgets-${placement}`}
     >
@@ -105,38 +106,52 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
           MAX_RENDERED_WIDGET_LINES
         );
         const headerLine = lines[0] ?? widget.id;
+        const hasContent = lines.length > 1;
         const collapsed = collapsedWidgets[widget.key] === true;
+        const contentId = `${id}-${encodeURIComponent(widget.key)}`;
+        const header = (
+          <span className="extension-widget-line extension-widget-line-header">
+            {spansForLine(headerLine).map((span, spanIndex) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: These stateless text runs represent positional cells in a terminal frame and have no persistent IDs.
+              <span key={spanIndex} style={spanStyle(span.style)}>
+                {span.text}
+              </span>
+            ))}
+          </span>
+        );
 
         return (
-          <fieldset
+          <section
             aria-label={`${widget.extension_id} status`}
             className="extension-widget-frame"
             data-testid={`extension-widget-${widget.key}`}
             key={widget.key}
           >
-            <button
-              aria-expanded={!collapsed}
-              className="extension-widget-toggle"
-              onClick={() =>
-                setCollapsedWidgets((current) => ({
-                  ...current,
-                  [widget.key]: current[widget.key] !== true,
-                }))
-              }
-              type="button"
-            >
-              <div className="extension-widget-line extension-widget-line-header">
-                {spansForLine(headerLine).map((span, spanIndex) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: These stateless text runs represent positional cells in a terminal frame and have no persistent IDs.
-                  <span key={spanIndex} style={spanStyle(span.style)}>
-                    {span.text}
-                  </span>
-                ))}
-              </div>
-              <ChevronDown aria-hidden="true" className="extension-widget-chevron" />
-            </button>
-            {collapsed ? null : (
-              <div className="extension-widget-content">
+            {hasContent ? (
+              <button
+                aria-controls={contentId}
+                aria-expanded={!collapsed}
+                className="extension-widget-toggle"
+                onClick={() =>
+                  setCollapsedWidgets((current) => ({
+                    ...current,
+                    [widget.key]: current[widget.key] !== true,
+                  }))
+                }
+                type="button"
+              >
+                <ChevronDown
+                  aria-hidden="true"
+                  className="extension-widget-chevron"
+                  strokeWidth={1.6}
+                />
+                {header}
+              </button>
+            ) : (
+              <div className="extension-widget-heading">{header}</div>
+            )}
+            {hasContent && !collapsed ? (
+              <div className="extension-widget-content" id={contentId}>
                 {lines.slice(1).map((line, lineIndex) => (
                   <div
                     className="extension-widget-line"
@@ -151,8 +166,8 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
                   </div>
                 ))}
               </div>
-            )}
-          </fieldset>
+            ) : null}
+          </section>
         );
       })}
     </section>

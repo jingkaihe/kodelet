@@ -128,35 +128,84 @@ export const showToast = (
   type: 'info' | 'success' | 'error' | 'neutral' = 'info',
   title?: string
 ): void => {
+  const stack =
+    document.querySelector<HTMLDivElement>('.kodelet-toasts') || document.createElement('div');
+  if (!stack.isConnected) {
+    stack.className = 'kodelet-toasts';
+    stack.setAttribute('role', 'region');
+    stack.setAttribute('aria-label', 'Notifications');
+    document.body.appendChild(stack);
+  }
+
   const toast = document.createElement('div');
-  toast.className = 'toast kodelet-toast';
+  toast.className = 'kodelet-toast';
+  toast.dataset.type = type;
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-atomic', 'true');
 
-  const alertClass =
-    type === 'error'
-      ? 'error'
-      : type === 'success'
-        ? 'success'
-        : type === 'neutral'
-          ? 'neutral'
-          : 'info';
-
+  const marker = { info: 'i', success: '✓', error: '!', neutral: '·' }[type];
   const trimmedTitle = title?.trim();
   const titleMarkup = trimmedTitle
     ? `<strong class="toast-title">${escapeHtml(trimmedTitle)}</strong>`
     : '';
 
   toast.innerHTML = `
-    <div class="kodelet-toast-card alert-${alertClass}">
+    <span class="toast-marker" aria-hidden="true">${marker}</span>
+    <div class="toast-content">
       ${titleMarkup}
       <span class="toast-message">${escapeHtml(message)}</span>
     </div>
+    <button class="toast-dismiss" type="button" aria-label="Dismiss notification">
+      <span aria-hidden="true">×</span>
+    </button>
   `;
 
-  document.body.appendChild(toast);
+  let remaining = 3000;
+  let startedAt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let hovered = false;
+  let focused = false;
 
-  setTimeout(() => {
+  const dismiss = () => {
+    clearTimeout(timer);
     toast.remove();
-  }, 3000);
+    if (stack.childElementCount === 0) {
+      stack.remove();
+    }
+  };
+  const pauseDismissal = () => {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    remaining = Math.max(0, remaining - (Date.now() - startedAt));
+  };
+  const resumeDismissal = () => {
+    if (hovered || focused || timer !== undefined) return;
+    startedAt = Date.now();
+    timer = setTimeout(dismiss, remaining);
+  };
+
+  toast.querySelector('button')?.addEventListener('click', dismiss);
+  toast.addEventListener('mouseenter', () => {
+    hovered = true;
+    pauseDismissal();
+  });
+  toast.addEventListener('mouseleave', () => {
+    hovered = false;
+    resumeDismissal();
+  });
+  toast.addEventListener('focusin', () => {
+    focused = true;
+    pauseDismissal();
+  });
+  toast.addEventListener('focusout', (event) => {
+    if (event.relatedTarget instanceof Node && toast.contains(event.relatedTarget)) return;
+    focused = false;
+    resumeDismissal();
+  });
+
+  stack.appendChild(toast);
+  resumeDismissal();
 };
 
 // HTML escape utility
