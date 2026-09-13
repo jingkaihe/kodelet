@@ -104,26 +104,24 @@ func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGrou
 		toolStart:   idx,
 		toolEnd:     idx,
 		changeIndex: -1,
-		label: sanitizeExtensionTranscriptText(strings.Join(
-			renderers.ImageAttachmentLines(*tool.structured, m.serverURL), "\n",
-		)),
-		body:        joinTools([]toolCall{tool}),
 		wrapBody:    true,
 		expanded:    block.expanded || tool.expanded || tool.failed,
 		failed:      tool.failed,
-		plainHeader: true,
 	}
+	lines := renderers.ImageAttachmentLines(*tool.structured, m.serverURL)
 	if normalizedToolName(tool) == "view_image" {
-		lines := strings.Split(group.label, "\n")
 		for i, line := range lines {
 			lines[i] = strings.TrimPrefix(line, "Viewed image - ")
 		}
-		group.body = strings.Join(lines, "\n")
 		if errorText := strings.TrimSpace(tool.structured.Error); errorText != "" {
-			group.body = sanitizeExtensionTranscriptText("Error: "+errorText) + "\n" + group.body
+			lines = append([]string{"Error: " + errorText}, lines...)
 		}
 		group.label = sanitizeExtensionTranscriptText(viewImageToolLabel(tool))
-		group.plainHeader = false
+		group.body = sanitizeExtensionTranscriptText(strings.Join(lines, "\n"))
+	} else {
+		group.label = sanitizeExtensionTranscriptText(strings.Join(lines, "\n"))
+		group.body = joinTools([]toolCall{tool})
+		group.plainHeader = true
 	}
 	return group
 }

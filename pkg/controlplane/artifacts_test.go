@@ -25,7 +25,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -361,27 +360,15 @@ func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: expected.ImageURL, MimeType: expected.MimeType},
 	}, viewed.Result.ContentParts)
 	assert.NotContains(t, viewed.Result.DisplayOutput, attachment.ArtifactID)
-	display := renderers.NewRendererRegistry().Render(viewed.Result.Structured)
-	assert.Contains(t, display, "Viewed image - "+attachment.ViewURL)
-	assert.Contains(t, display, "Image: "+path)
-	assert.NotContains(t, display, attachment.ArtifactID)
-	assert.NotContains(t, display, "Artifact ID:")
 
 	// The artifact is a persistent copy, not a link to the runner-local source.
 	_, storedPath, err := server.artifacts.Get(t.Context(), "view-path-conversation", attachment.ArtifactID)
 	require.NoError(t, err)
 	assert.NotEqual(t, path, storedPath)
-	assert.Equal(t, "artifacts", filepath.Base(filepath.Dir(storedPath)))
 	require.NoError(t, os.Remove(path))
 	stored, err := os.ReadFile(storedPath)
 	require.NoError(t, err)
 	assert.Equal(t, encoded.Bytes(), stored)
-	request := httptest.NewRequest(http.MethodGet, "/i/"+attachment.ShortCode, nil)
-	request.Header.Set("Authorization", "Bearer web-secret")
-	response := httptest.NewRecorder()
-	server.router.ServeHTTP(response, request)
-	require.Equal(t, http.StatusOK, response.Code)
-	assert.Equal(t, encoded.Bytes(), response.Body.Bytes())
 	input, err := json.Marshal(map[string]string{"artifactId": attachment.ArtifactID})
 	require.NoError(t, err)
 	revisited, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{

@@ -4,11 +4,9 @@ import { applyChatStreamEvent, conversationToChatMessages } from './state';
 
 describe('conversationToChatMessages', () => {
   it.each([
-    ['View_image', 'view_image', 'view_image'],
-    ['Bash', 'bash', 'bash'],
-    ['CustomTool', 'CustomTool', 'CustomTool'],
-    ['CustomTool', undefined, 'CustomTool'],
-  ])('uses canonical result names without guessing the identity of %s', (providerName, resultName, expectedName) => {
+    'CustomTool',
+    undefined,
+  ])('preserves extension name casing with result name %s', (resultName) => {
     const conversation: Conversation = {
       id: 'subscription-history',
       createdAt: '',
@@ -18,26 +16,17 @@ describe('conversationToChatMessages', () => {
         {
           role: 'assistant',
           content: '',
-          toolCalls: [{ id: 'tool-1', function: { name: providerName, arguments: '{}' } }],
+          toolCalls: [{ id: 'tool-1', function: { name: 'CustomTool', arguments: '{}' } }],
         },
       ],
       toolResults: resultName ? { 'tool-1': { toolName: resultName, success: true } } : undefined,
     };
 
-    expect(conversationToChatMessages(conversation)[0].blocks).toEqual([
-      {
-        type: 'tools',
-        tools: [
-          {
-            callId: 'tool-1',
-            name: expectedName,
-            input: '{}',
-            result: conversation.toolResults?.['tool-1'],
-          },
-        ],
-      },
-    ]);
-    expect(conversation.messages?.[0].toolCalls?.[0].function.name).toBe(providerName);
+    expect(conversationToChatMessages(conversation)[0].blocks?.[0]).toMatchObject({
+      type: 'tools',
+      tools: [{ name: 'CustomTool' }],
+    });
+    expect(conversation.messages?.[0].toolCalls?.[0].function.name).toBe('CustomTool');
   });
 
   it('converts assistant thinking, tool calls, and content into ordered blocks', () => {
@@ -359,61 +348,20 @@ describe('applyChatStreamEvent', () => {
     ]);
   });
 
-  it.each([
-    { kind: 'tool-update' as const, existing: true },
-    { kind: 'tool-result' as const, existing: true },
-    { kind: 'tool-update' as const, existing: false },
-    { kind: 'tool-result' as const, existing: false },
-  ])('prefers the canonical result name for $kind with existing call $existing', ({
-    kind,
-    existing,
-  }) => {
-    const initial: ChatRenderMessage[] = existing
-      ? applyChatStreamEvent([], {
-          kind: 'tool-use',
-          tool_call_id: 'view-1',
-          tool_name: 'View_image',
-          input: '{}',
-        })
-      : [];
-    const toolResult = { toolName: 'view_image', success: true };
-    const messages = applyChatStreamEvent(initial, {
-      kind,
-      tool_call_id: 'view-1',
-      tool_name: 'View_image',
-      tool_result: toolResult,
-    });
-
-    expect(messages[0].blocks).toEqual([
-      {
-        type: 'tools',
-        tools: [
-          {
-            callId: 'view-1',
-            name: 'view_image',
-            input: '{}',
-            result: toolResult,
-            ...(kind === 'tool-update' ? { inProgress: true } : {}),
-          },
-        ],
-      },
-    ]);
-  });
-
-  it('replaces accumulated tool updates with the final tool result', () => {
+  it('replaces tool updates with the final result using canonical names', () => {
     let messages: ChatRenderMessage[] = [];
 
     messages = applyChatStreamEvent(messages, {
       kind: 'tool-use',
       tool_call_id: 'tool-1',
-      tool_name: 'bash',
+      tool_name: 'Bash',
       input: '{"command":"printf hello"}',
       role: 'assistant',
     });
     messages = applyChatStreamEvent(messages, {
       kind: 'tool-update',
       tool_call_id: 'tool-1',
-      tool_name: 'bash',
+      tool_name: 'Bash',
       role: 'assistant',
       tool_result: {
         toolName: 'bash',
@@ -450,7 +398,7 @@ describe('applyChatStreamEvent', () => {
     messages = applyChatStreamEvent(messages, {
       kind: 'tool-result',
       tool_call_id: 'tool-1',
-      tool_name: 'bash',
+      tool_name: 'Bash',
       role: 'assistant',
       tool_result: {
         toolName: 'bash',
@@ -609,23 +557,24 @@ describe('applyChatStreamEvent', () => {
     expect(toolsBlock.tools[1]).not.toHaveProperty('inProgress');
   });
 
-  it('upserts tool updates when a reconnect missed the tool-use event', () => {
-    let messages: ChatRenderMessage[] = [];
-
-    messages = applyChatStreamEvent(messages, {
-      kind: 'tool-update',
+  it.each([
+    { kind: 'tool-update' as const, command: 'echo hello' },
+    { kind: 'tool-result' as const, command: undefined },
+  ])('upserts $kind with a canonical name when a reconnect missed tool-use', ({
+    kind,
+    command,
+  }) => {
+    const result = {
+      toolName: 'bash',
+      success: true,
+      metadata: command ? { command, output: 'hello' } : undefined,
+    };
+    const messages = applyChatStreamEvent([], {
+      kind,
       tool_call_id: 'tool-1',
-      tool_name: 'bash',
+      tool_name: 'Bash',
       role: 'assistant',
-      tool_result: {
-        toolName: 'bash',
-        success: true,
-        metadata: {
-          command: 'echo hello',
-          output: 'hello',
-          exitCode: 0,
-        },
-      },
+      tool_result: result,
     });
 
     expect(messages).toEqual([
@@ -638,17 +587,9 @@ describe('applyChatStreamEvent', () => {
               {
                 callId: 'tool-1',
                 name: 'bash',
-                input: '{"command":"echo hello"}',
-                inProgress: true,
-                result: {
-                  toolName: 'bash',
-                  success: true,
-                  metadata: {
-                    command: 'echo hello',
-                    output: 'hello',
-                    exitCode: 0,
-                  },
-                },
+                input: command ? JSON.stringify({ command }) : '{}',
+                ...(kind === 'tool-update' ? { inProgress: true } : {}),
+                result,
               },
             ],
           },

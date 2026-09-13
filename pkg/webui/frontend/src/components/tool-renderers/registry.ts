@@ -13,7 +13,6 @@ import ReadConversationRenderer from './ReadConversationRenderer';
 import { normalizeToolName } from './reference';
 import SkillRenderer from './SkillRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
-import ViewImageRenderer from './ViewImageRenderer';
 import WebFetchRenderer from './WebFetchRenderer';
 
 export interface ToolRendererRegistration {
@@ -31,7 +30,6 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   glob_tool: { component: GlobRenderer },
   web_fetch: { component: WebFetchRenderer },
   thinking: { component: ThinkingRenderer },
-  view_image: { component: ViewImageRenderer },
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },

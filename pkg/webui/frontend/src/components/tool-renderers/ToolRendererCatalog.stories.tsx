@@ -163,22 +163,6 @@ const examples: ToolExample[] = [
     },
   },
   {
-    title: 'View image',
-    result: {
-      toolName: 'view_image',
-      success: true,
-      metadata: {
-        path: 'pkg/webui/frontend/storybook-screenshot.png',
-        mimeType: 'image/png',
-        detail: 'high',
-        imageSize: {
-          width: 1440,
-          height: 900,
-        },
-      },
-    },
-  },
-  {
     title: 'Read conversation',
     result: {
       toolName: 'read_conversation',

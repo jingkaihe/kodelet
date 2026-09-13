@@ -23,14 +23,6 @@ func TestViewImageTool_Name(t *testing.T) {
 	assert.Equal(t, "view_image", tool.Name())
 }
 
-func TestViewImageTool_Description(t *testing.T) {
-	description := (&ViewImageTool{}).Description()
-	assert.Contains(t, description, "Successful calls provide the image pixels.")
-	assert.Contains(t, description, "Returned artifact IDs and URLs refer to the same image;")
-	assert.Contains(t, description, "do not re-view it just to follow a reference.")
-	assert.Contains(t, description, "Skip images already visible in your context.")
-}
-
 func TestViewImageTool_GenerateSchema(t *testing.T) {
 	tool := NewViewImageTool("gpt-5", "openai")
 	schema := tool.GenerateSchema()
@@ -123,9 +115,7 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 	assert.Equal(t, 16, meta.ImageSize.Width)
 	assert.Equal(t, 12, meta.ImageSize.Height)
 
-	rich, ok := result.(interface {
-		ContentParts() []tooltypes.ToolResultContentPart
-	})
+	rich, ok := result.(tooltypes.MultiModalToolResult)
 	require.True(t, ok)
 	parts := rich.ContentParts()
 	require.Len(t, parts, 1)

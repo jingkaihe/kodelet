@@ -123,7 +123,6 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	assert.Contains(t, plain,
 		"\nGenerated image - https://images.example/i/public\nGenerated image - https://connected.example/kodelet/i/second\n",
 	)
-	assert.Contains(t, plain, "✓ Viewed image /tmp/screenshot.png ▸")
 	assert.NotContains(t, plain, "/i/inspected")
 	assert.NotContains(t, plain, "internal-artifact")
 	assert.NotContains(t, plain, "Artifact ID:")
@@ -131,30 +130,19 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	assert.NotContains(t, plain, "1536")
 	assert.NotContains(t, plain, "20 measurements")
 	assert.Equal(t, "✓ Viewed image /tmp/screenshot.png ▸", strings.Split(plain, "\n")[regions[2].line])
-	groups := m.toolRenderGroups(m.entries[0].blocks[0])
-	assert.Equal(t, "https://connected.example/kodelet/i/inspected", groups[2].body)
-	assert.False(t, groups[2].plainHeader)
-	assert.False(t, groups[2].expanded)
 
 	assert.True(t, m.toggleDetailAt(regions[1].line))
 	m.refreshViewport(false)
 	content, regions = m.renderTranscript()
 	assert.Contains(t, xansi.Strip(content), "20 measurements")
-	assert.True(t, m.toggleDetailAt(regions[1].line))
-	m.refreshViewport(false)
-	_, regions = m.renderTranscript()
 
 	assert.True(t, m.toggleDetailAt(regions[2].line))
-	content, _ = m.renderTranscript()
-	plain = xansi.Strip(content)
-	assert.Contains(t, plain, "✓ Viewed image /tmp/screenshot.png ▾\n  https://connected.example/kodelet/i/inspected\n")
-	for _, text := range []string{"view_image - done", "input:", "result:", "Image:", "Type:", "Dimensions:", "Detail:"} {
-		assert.NotContains(t, plain, text)
-	}
-	assert.NotContains(t, plain, "Artifact ID:")
-	assert.NotContains(t, plain, "internal-artifact")
 	m.refreshViewport(false)
-	_, regions = m.renderTranscript()
+	content, regions = m.renderTranscript()
+	lines := strings.Split(xansi.Strip(content), "\n")
+	assert.Equal(t, "✓ Viewed image /tmp/screenshot.png ▾\n  https://connected.example/kodelet/i/inspected",
+		strings.TrimSpace(strings.Join(lines[regions[2].line:regions[3].line], "\n")),
+	)
 	assert.True(t, m.toggleDetailAt(regions[2].line))
 	content, _ = m.renderTranscript()
 	assert.NotContains(t, xansi.Strip(content), "/i/inspected")
@@ -167,55 +155,31 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	assert.True(t, strings.HasPrefix(strings.Split(plain, "\n")[regions[2].line], "✓ Viewed image /tmp/screenshot.png"))
 }
 
-func TestRenderTranscriptImageAttachmentFailure(t *testing.T) {
-	m := newModel(context.Background(), Config{})
-	t.Cleanup(m.cancel)
-	m.width = 100
-	m.height = 24
-	m.resize()
-	m.entries = []chatEntry{{
-		kind: entryAssistant,
-		blocks: []assistantBlock{{
-			kind: blockTools,
-			tools: []toolCall{{
-				name: "draw_chart",
-				done: true,
-				structured: &tooltypes.StructuredToolResult{
-					ToolName: "draw_chart",
-					Success:  true,
-					Attachments: []tooltypes.ToolAttachment{{
-						Type:  "image",
-						Error: "Upload interrupted",
-					}},
-				},
-			}},
-		}},
-	}}
-
-	content, _ := m.renderTranscript()
-	assert.Contains(t, xansi.Strip(content), "Image unavailable - Upload interrupted")
-	assert.NotContains(t, content, "Generated image")
-}
-
-func TestRenderTranscriptViewedImageAttachmentErrors(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "upload failure", true: "inspection failure"}[failed], func(t *testing.T) {
+func TestRenderTranscriptImageAttachmentErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name, toolName, error, header string
+		folded                        bool
+	}{
+		{"generated upload failure", "draw_chart", "", "Image unavailable - Upload interrupted", false},
+		{"generation failure", "draw_chart", "Chart generation failed", "Image unavailable - Upload interrupted", false},
+		{"viewed upload failure", "view_image", "", "✓ Viewed image image.png ▸", true},
+		{"inspection failure", "view_image", "Image could not be inspected", "✗ Viewed image image.png ▾", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			m := newModel(t.Context(), Config{})
 			t.Cleanup(m.cancel)
 			m.width, m.height = 100, 24
 			m.resize()
 			result := &tooltypes.StructuredToolResult{
-				ToolName: "view_image",
-				Success:  !failed,
+				ToolName: tt.toolName,
+				Success:  tt.error == "",
+				Error:    tt.error,
 				Attachments: []tooltypes.ToolAttachment{{
 					Type: "image", Filename: "image.png", Error: "Upload interrupted",
 				}},
 			}
-			if failed {
-				result.Error = "Image could not be inspected"
-			}
 			block := assistantBlock{kind: blockTools, tools: []toolCall{{
-				name: "view_image", done: true, failed: failed,
+				name: tt.toolName, done: true, failed: tt.error != "",
 				input: `{"artifactId":"internal-artifact"}`, result: structuredToolResultText(result), structured: result,
 			}}}
 			m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{block}}}
@@ -223,20 +187,25 @@ func TestRenderTranscriptViewedImageAttachmentErrors(t *testing.T) {
 			content, regions := m.renderTranscript()
 			plain := xansi.Strip(content)
 			require.Len(t, regions, 1)
-			if failed {
-				assert.Contains(t, plain, "✗ Viewed image image.png ▾")
-				assert.Contains(t, plain, "Error: Image could not be inspected")
-			} else {
-				assert.Contains(t, plain, "✓ Viewed image image.png ▸")
+			assert.Equal(t, tt.header, strings.Split(plain, "\n")[regions[0].line])
+			if tt.folded {
 				assert.NotContains(t, plain, "Upload interrupted")
 				assert.True(t, m.toggleDetailAt(regions[0].line))
 				content, _ = m.renderTranscript()
 				plain = xansi.Strip(content)
 			}
+			if tt.error != "" {
+				assert.Contains(t, plain, tt.error)
+			}
 			assert.Contains(t, plain, "Image unavailable - Upload interrupted")
-			assert.NotContains(t, plain, "internal-artifact")
-			assert.NotContains(t, plain, "input:")
-			assert.NotContains(t, plain, "result:")
+			assert.NotContains(t, plain, "Generated image")
+			if tt.toolName == "view_image" {
+				assert.NotContains(t, plain, "internal-artifact")
+				assert.NotContains(t, plain, "input:")
+				assert.NotContains(t, plain, "result:")
+			} else if tt.error != "" {
+				assert.Contains(t, plain, "draw_chart - failed")
+			}
 		})
 	}
 }

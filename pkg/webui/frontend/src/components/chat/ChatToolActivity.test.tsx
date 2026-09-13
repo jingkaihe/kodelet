@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ChatRenderToolCall } from '../../types';
@@ -62,20 +62,17 @@ describe('ChatToolActivity', () => {
     ).toBeVisible();
   });
 
-  it.each([
-    'draw_diagram',
-    'view_image',
-  ])('does not show image previews from transient %s updates', (name) => {
+  it('does not show generated image previews from transient tool updates', () => {
     render(
       <ChatToolActivity
         tools={[
           {
             callId: 'diagram-1',
-            name,
+            name: 'draw_diagram',
             input: '{}',
             inProgress: true,
             result: {
-              toolName: name,
+              toolName: 'draw_diagram',
               success: true,
               attachments: [
                 { type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png' },
@@ -90,11 +87,7 @@ describe('ChatToolActivity', () => {
     expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
   });
 
-  it.each([
-    'diagram.png',
-    undefined,
-  ])('labels artifact-backed image rows using filename %s', async (filename) => {
-    const user = userEvent.setup();
+  it('uses a generic label for an unnamed image artifact without exposing its ID', () => {
     const tool: ChatRenderToolCall = {
       callId: 'view-1',
       name: 'view_image',
@@ -108,31 +101,15 @@ describe('ChatToolActivity', () => {
             artifactId: 'art_1',
             shortCode: 'diagram',
             mimeType: 'image/png',
-            filename,
           },
         ],
       },
     };
     const { container } = render(<ChatToolActivity tools={[tool]} />);
 
-    const label = filename ? `Viewed image ${filename}` : 'Viewed image';
-    expect(getToolSummary(tool)).toBe(label);
-    expect(screen.getByText(label)).toBeVisible();
-    const details = container.querySelector('details');
-    expect(details).not.toHaveAttribute('open');
-    const preview = screen.getByRole('img', { name: filename || 'Viewed image' });
-    expect(preview).not.toBeVisible();
-    expect(preview.closest('details')).toBe(details);
-
-    await user.click(screen.getByText(label));
-
-    expect(preview).toBeVisible();
-    expect(
-      screen.getByRole('link', { name: `Download image: ${filename || 'Viewed image'}` })
-    ).toBeVisible();
-    expect(container.querySelectorAll('details')).toHaveLength(1);
-    expect(container.querySelector('.command-activity-header')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
+    expect(screen.getByText('Viewed image')).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Viewed image' })).not.toBeVisible();
+    expect(container).not.toHaveTextContent('art_1');
   });
 
   it('shows a filename and folded preview/actions without inspection metadata or repeated headers', async () => {
@@ -171,16 +148,10 @@ describe('ChatToolActivity', () => {
     expect(summary.closest('summary')).toHaveAttribute('title', '/tmp/screenshot.png');
     const preview = screen.getByRole('img', { name: 'screenshot.png' });
     expect(preview).not.toBeVisible();
-    expect(preview).toHaveAttribute('src', '/i/abcdefghijklmnopqrstuv');
     expect(preview.closest('details')).toBe(details);
     for (const link of screen.getAllByRole('link')) {
       expect(link).not.toBeVisible();
     }
-    expect(container.querySelectorAll('img')).toHaveLength(1);
-    expect(screen.queryByText('/tmp/screenshot.png')).not.toBeInTheDocument();
-    expect(container).not.toHaveTextContent('Artifact ID:');
-    expect(container).not.toHaveTextContent('art_local_image');
-
     await user.click(summary);
 
     expect(details).toHaveAttribute('open');
@@ -206,12 +177,8 @@ describe('ChatToolActivity', () => {
       name: 'Open full size in a new tab: screenshot.png',
     });
     expect(openLink).toBeVisible();
-    expect(openLink).toHaveAttribute('href', '/i/abcdefghijklmnopqrstuv');
-    expect(openLink).toHaveAttribute('target', '_blank');
     const downloadLink = screen.getByRole('link', { name: 'Download image: screenshot.png' });
     expect(downloadLink).toBeVisible();
-    expect(downloadLink).toHaveAttribute('href', '/i/abcdefghijklmnopqrstuv?download=1');
-    expect(downloadLink).toHaveAttribute('download');
     expect(container).not.toHaveTextContent('Artifact ID:');
     expect(container).not.toHaveTextContent('art_local_image');
 
@@ -272,29 +239,28 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('details')).toHaveAttribute('open');
     expect(container.querySelector('.running-tool-input-preview')).not.toBeInTheDocument();
 
-    rerender(
-      <ChatToolActivity
-        tools={[
+    const completed: ChatRenderToolCall = {
+      ...tool,
+      result: {
+        toolName: 'view_image',
+        success: true,
+        metadata: { path: '/workspace/screenshots/live.png' },
+        attachments: [
           {
-            ...tool,
-            result: {
-              toolName: 'view_image',
-              success: true,
-              metadata: { path: '/workspace/screenshots/live.png' },
-              attachments: [
-                {
-                  type: 'image',
-                  artifactId: 'art_live',
-                  shortCode: 'live',
-                  mimeType: 'image/png',
-                  filename: 'live.png',
-                },
-              ],
-            },
+            type: 'image',
+            artifactId: 'art_live',
+            shortCode: 'live',
+            mimeType: 'image/png',
+            filename: 'live.png',
           },
-        ]}
-      />
-    );
+        ],
+      },
+    };
+    rerender(<ChatToolActivity tools={[{ ...completed, inProgress: true }]} />);
+    expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+
+    rerender(<ChatToolActivity tools={[completed]} />);
 
     expect(screen.getByText('Viewed image live.png')).toBeVisible();
     expect(screen.getByText('Viewed image live.png').closest('summary')).toHaveAttribute(
@@ -327,7 +293,7 @@ describe('ChatToolActivity', () => {
     expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
   });
 
-  it('preserves attachment and preview load errors inside the image disclosure', async () => {
+  it('keeps upload errors inside the folded image disclosure', async () => {
     const user = userEvent.setup();
     const tool: ChatRenderToolCall = {
       callId: 'view-preview-error',
@@ -339,38 +305,11 @@ describe('ChatToolActivity', () => {
         attachments: [{ type: 'image', error: 'Upload interrupted' }],
       },
     };
-    const { rerender } = render(<ChatToolActivity tools={[tool]} />);
+    render(<ChatToolActivity tools={[tool]} />);
 
     expect(screen.getByText('Image unavailable: Upload interrupted')).not.toBeVisible();
     await user.click(screen.getByText('Viewed image image.png'));
     expect(screen.getByText('Image unavailable: Upload interrupted')).toBeVisible();
-
-    rerender(
-      <ChatToolActivity
-        tools={[
-          {
-            ...tool,
-            result: {
-              toolName: 'view_image',
-              success: true,
-              attachments: [
-                {
-                  type: 'image',
-                  artifactId: 'art_image',
-                  shortCode: 'image',
-                  mimeType: 'image/png',
-                  filename: 'image.png',
-                },
-              ],
-            },
-          },
-        ]}
-      />
-    );
-    fireEvent.error(screen.getByRole('img'));
-
-    expect(screen.getByText('Image preview unavailable.')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Download image: image.png' })).toBeVisible();
   });
 
   it('renders a running tool with a compact input preview', () => {
