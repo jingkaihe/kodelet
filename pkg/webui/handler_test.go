@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"encoding/json"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +58,70 @@ func TestHandlerServesBrandFavicon(t *testing.T) {
 	assert.Equal(t, http.StatusOK, response.Code)
 	assert.Contains(t, response.Header().Get("Content-Type"), "image/svg+xml")
 	assert.Contains(t, response.Body.String(), `viewBox="0 0 64 64"`)
+}
+
+func TestHandlerServesHomeScreenAssets(t *testing.T) {
+	handler, err := NewHandler()
+	require.NoError(t, err)
+
+	manifestLink := regexp.MustCompile(`rel="manifest"[^>]*href="([^"]+)"`).FindSubmatch(handler.indexContent)
+	require.Len(t, manifestLink, 2)
+	manifestPath := string(manifestLink[1])
+	require.True(t, handler.IsPublicPath(manifestPath))
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, manifestPath, nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Header().Get("Content-Type"), "application/json")
+
+	var manifest struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		StartURL string `json:"start_url"`
+		Scope    string `json:"scope"`
+		Display  string `json:"display"`
+		Icons    []struct {
+			Src   string `json:"src"`
+			Sizes string `json:"sizes"`
+			Type  string `json:"type"`
+		} `json:"icons"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &manifest))
+	assert.Equal(t, "Kodelet", manifest.Name)
+	assert.Equal(t, "/", manifest.ID)
+	assert.Equal(t, "/", manifest.StartURL)
+	assert.Equal(t, "/", manifest.Scope)
+	assert.Equal(t, "standalone", manifest.Display)
+	require.Len(t, manifest.Icons, 2)
+
+	expectedSizes := map[string]int{"192x192": 192, "512x512": 512}
+	icons := make(map[string]int)
+	for _, icon := range manifest.Icons {
+		size, ok := expectedSizes[icon.Sizes]
+		require.True(t, ok, "unexpected icon size: %s", icon.Sizes)
+		assert.Equal(t, "image/png", icon.Type)
+		icons[icon.Src] = size
+		delete(expectedSizes, icon.Sizes)
+	}
+	assert.Empty(t, expectedSizes)
+
+	appleIcon := regexp.MustCompile(`rel="apple-touch-icon"[^>]*href="([^"]+)"`).FindSubmatch(handler.indexContent)
+	require.Len(t, appleIcon, 2)
+	icons[string(appleIcon[1])] = 180
+
+	for path, size := range icons {
+		t.Run(path, func(t *testing.T) {
+			require.True(t, handler.IsPublicPath(path), "home-screen icons must load before authentication")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			require.Equal(t, http.StatusOK, response.Code)
+			assert.Equal(t, "image/png", response.Header().Get("Content-Type"))
+			config, err := png.DecodeConfig(response.Body)
+			require.NoError(t, err)
+			assert.Equal(t, size, config.Width)
+			assert.Equal(t, size, config.Height)
+		})
+	}
 }
 
 func TestHandlerComposesWithControlPlaneRoutesAndAuthentication(t *testing.T) {

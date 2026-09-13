@@ -75,7 +75,10 @@ kodelet pr [--target main]       # Generate PRs
 # Development
 mise run build|test|lint|format  # Standard commands
 mise run build-dev               # Fast build (skip frontend)
+mise run frontend-icons          # Regenerate app icons (requires uv and Cairo)
 ```
+
+After editing `pkg/webui/frontend/src/assets/logo.svg`, regenerate and commit the PNGs in `pkg/webui/frontend/public/assets/`.
 
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.
 
