@@ -43,28 +43,6 @@
   color: #a63f3f;
 }
 
-.bash-copy-command {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: rgba(20, 20, 19, 0.42);
-  box-shadow: none;
-}
-
-.bash-copy-command:hover,
-.bash-copy-command:focus-visible {
-  border: 0;
-  background: transparent;
-  color: rgba(20, 20, 19, 0.72);
-  box-shadow: none;
-  transform: none;
-}
-
-.bash-copy-command svg {
-  width: 0.9rem;
-  height: 0.9rem;
-}
-
 .skill-tool-detail {
   display: grid;
   gap: 0.28rem;

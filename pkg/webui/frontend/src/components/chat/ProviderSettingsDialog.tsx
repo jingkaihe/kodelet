@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Copy, ExternalLink, X } from 'lucide-react';
+import { Check, CircleAlert, ExternalLink, X } from 'lucide-react';
 import React from 'react';
 import apiService from '../../services/api';
 import type {
@@ -9,8 +9,8 @@ import type {
   CopilotDeviceLogin,
   CopilotProviderStatus,
 } from '../../types';
-import { copyToClipboard } from '../../utils';
 import Spinner from '../Spinner';
+import { CopyButton } from '../tool-renderers/shared';
 
 const PROVIDER_DIALOG_FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -666,15 +666,11 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                       {activeDeviceLogin.userCode}
                     </output>
                   </div>
-                  <button
-                    aria-label="Copy device code"
-                    className="panel-action-button provider-device-step-action provider-device-code-copy"
-                    onClick={() => void copyToClipboard(activeDeviceLogin.userCode || '')}
-                    title="Copy device code"
-                    type="button"
-                  >
-                    <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                  </button>
+                  <CopyButton
+                    className="provider-device-step-action provider-device-code-copy"
+                    content={activeDeviceLogin.userCode || ''}
+                    label="Copy device code"
+                  />
                 </li>
               </ol>
 

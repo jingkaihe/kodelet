@@ -1,5 +1,41 @@
-@import "prismjs/themes/prism.css";
+/* Keep syntax colors quiet; code surfaces and typography belong to content.css. */
+.chat-prose .token.comment,
+.chat-prose .token.prolog,
+.chat-prose .token.doctype,
+.chat-prose .token.cdata,
+.chat-prose .token.punctuation,
+.chat-prose .token.operator {
+  color: var(--kodelet-muted);
+}
 
-code[class*="language-"] {
-  text-shadow: none;
+.chat-prose .token.keyword,
+.chat-prose .token.atrule,
+.chat-prose .token.tag {
+  color: var(--kodelet-link);
+}
+
+.chat-prose .token.string,
+.chat-prose .token.char,
+.chat-prose .token.attr-value,
+.chat-prose .token.inserted {
+  color: #4f6338;
+}
+
+.chat-prose .token.function,
+.chat-prose .token.class-name,
+.chat-prose .token.builtin,
+.chat-prose .token.attr-name {
+  color: #805a46;
+}
+
+.chat-prose .token.boolean,
+.chat-prose .token.number,
+.chat-prose .token.constant,
+.chat-prose .token.regex,
+.chat-prose .token.symbol {
+  color: #8b5269;
+}
+
+.chat-prose .token.deleted {
+  color: #a63d3d;
 }

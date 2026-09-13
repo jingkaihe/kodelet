@@ -424,7 +424,9 @@ describe('GitDiffModal', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy diff' }));
+    const copyButton = screen.getByRole('button', { name: 'Copy diff' });
+    expect(copyButton).toHaveClass('copy-button');
+    fireEvent.click(copyButton);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh diff' }));
 
     expect(copyToClipboardMock).toHaveBeenCalledWith(diff);

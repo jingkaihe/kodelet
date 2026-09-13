@@ -143,12 +143,12 @@ pre code {
   margin: 1rem 0;
   border-left: 3px solid rgba(217, 119, 87, 0.32);
   padding-left: 1rem;
-  color: rgba(20, 20, 19, 0.72);
+  color: var(--kodelet-muted);
   font-style: italic;
 }
 
 .chat-prose a {
-  color: #547ba6;
+  color: var(--kodelet-link);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.16em;
@@ -172,7 +172,7 @@ pre code {
   overflow-x: auto;
   border: 1px solid rgba(20, 20, 19, 0.12);
   border-radius: 0.6rem;
-  background: rgba(250, 249, 245, 0.36);
+  background: color-mix(in srgb, var(--kodelet-light) 36%, transparent);
   box-shadow: 0 1px 2px rgba(20, 20, 19, 0.03);
 }
 
@@ -198,8 +198,8 @@ pre code {
 }
 
 .chat-markdown-table th {
-  background: rgba(232, 230, 220, 0.55);
-  color: rgba(20, 20, 19, 0.78);
+  background: color-mix(in srgb, var(--kodelet-dark) 1.5%, var(--kodelet-light));
+  color: var(--kodelet-dark);
   font-family: var(--font-heading);
   font-size: 0.82rem;
   font-weight: 600;
@@ -215,25 +215,25 @@ pre code {
 }
 
 .chat-prose pre {
-  background: linear-gradient(135deg, var(--kodelet-light-gray) 0%, var(--kodelet-light) 100%);
+  background: color-mix(in srgb, var(--kodelet-dark) 2%, var(--kodelet-light));
   color: var(--kodelet-dark);
-  border-radius: 6px;
-  padding: 0.875rem;
+  border-radius: 0.25rem;
+  padding: 0.75rem;
   overflow-x: auto;
   margin: 0.875rem 0;
-  border: 1px solid var(--kodelet-mid-gray);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
+  box-shadow: none;
 }
 
 .chat-prose code {
-  background: var(--kodelet-light-gray);
+  background: color-mix(in srgb, var(--kodelet-dark) 2%, var(--kodelet-light));
   color: var(--kodelet-dark);
   padding: 0.12rem 0.36rem;
-  border-radius: 0.34rem;
+  border-radius: 0.2rem;
   font-size: 0.78em;
   font-family: var(--font-mono);
   line-height: 1.32;
-  border: 1px solid var(--kodelet-mid-gray);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
 }
 
 .chat-prose :not(pre) > code {
@@ -246,23 +246,40 @@ pre code {
 
 .chat-prose pre code {
   background: transparent;
+  color: var(--kodelet-dark);
   padding: 0;
   border: none;
   border-radius: 0;
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-shadow: none;
+  tab-size: 4;
   white-space: pre;
   overflow-wrap: normal;
   word-break: normal;
 }
 
-.chat-prose pre {
-  padding: 0.75rem;
+.chat-code-block {
+  position: relative;
+  min-width: 0;
+  margin: 0.875rem 0;
 }
 
-.chat-prose pre code {
-  font-size: 0.8125rem;
-  line-height: 1.5;
+.chat-code-block > pre {
+  margin: 0;
+  padding-top: 2.5rem;
+}
+
+.chat-code-copy-button {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+}
+
+@media (any-pointer: coarse) {
+  .chat-code-block > pre {
+    padding-top: 3.25rem;
+  }
 }
 
 /* Enhanced prose styling for subagent and other technical content */

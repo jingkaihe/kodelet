@@ -2,13 +2,13 @@
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 400;
-  color: #6f685e;
+  color: var(--kodelet-muted);
   margin: 1rem 0 0.55rem;
 }
 
 .chat-sidebar-surface {
   font-family: var(--font-mono);
-  background: rgba(236, 231, 221, 0.52);
+  background: var(--sidebar-surface-opaque);
 }
 
 .sidebar-header {
@@ -85,7 +85,7 @@
 
 .conversation-group-header:hover {
   color: var(--kodelet-dark);
-  background: rgba(245, 240, 231, 0.18);
+  background: color-mix(in srgb, var(--kodelet-light) 18%, transparent);
   border-color: transparent;
   box-shadow: none;
 }
@@ -103,7 +103,7 @@
   justify-content: center;
   width: 1.72rem;
   height: 1.72rem;
-  color: #756e63;
+  color: var(--kodelet-muted);
   align-self: center;
   justify-self: start;
 }
@@ -126,7 +126,7 @@
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.4;
-  color: #463f38;
+  color: var(--kodelet-dark);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -157,7 +157,7 @@
   font-size: 0.66rem;
   font-weight: 400;
   line-height: 1;
-  color: #665f54;
+  color: var(--kodelet-muted);
   align-self: center;
   justify-self: end;
 }
@@ -193,7 +193,7 @@
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 400;
-  color: #776f62;
+  color: var(--kodelet-muted);
   white-space: nowrap;
   box-shadow: none;
   transition:
@@ -206,7 +206,7 @@
 .conversation-group-more:hover {
   color: var(--kodelet-dark);
   border-color: rgba(20, 20, 19, 0.06);
-  background: rgba(244, 239, 230, 0.42);
+  background: color-mix(in srgb, var(--kodelet-light) 42%, transparent);
   box-shadow: none;
 }
 
@@ -292,7 +292,7 @@
 .conversation-orphan-label {
   margin-left: 0.4rem;
   font-size: 0.7rem;
-  color: #787268;
+  color: var(--kodelet-muted);
 }
 
 .conversation-link {
@@ -305,7 +305,7 @@
   padding: 0.5rem 0.55rem;
   border-radius: 2px;
   text-decoration: none;
-  color: #4a463f;
+  color: var(--kodelet-dark);
   transition:
     background-color 120ms ease,
     color 120ms ease,
@@ -322,23 +322,23 @@
 
 .conversation-link-row:hover .conversation-link,
 .conversation-link-row.menu-open .conversation-link {
-  background: rgba(244, 239, 230, 0.54);
+  background: color-mix(in srgb, var(--kodelet-light) 54%, transparent);
   color: var(--kodelet-dark);
   border-color: rgba(20, 20, 19, 0.045);
   box-shadow: none;
 }
 
 .conversation-link:hover {
-  background: rgba(244, 239, 230, 0.54);
+  background: color-mix(in srgb, var(--kodelet-light) 54%, transparent);
   color: var(--kodelet-dark);
   text-decoration: none;
 }
 
 .conversation-link-row.active .conversation-link,
 .conversation-link.active {
-  background: rgba(0, 132, 148, 0.055);
-  color: #006c79;
-  border-left-color: #008494;
+  background: color-mix(in srgb, var(--kodelet-link) 6%, var(--kodelet-light));
+  color: var(--kodelet-link);
+  border-left-color: var(--kodelet-link);
   box-shadow: none;
 }
 
@@ -396,7 +396,7 @@
 
 .conversation-link-more-button:hover,
 .conversation-link-row.menu-open .conversation-link-more-button {
-  background: rgba(240, 234, 224, 0.52);
+  background: color-mix(in srgb, var(--kodelet-light) 52%, transparent);
   border-color: rgba(20, 20, 19, 0.04);
   box-shadow: none;
 }
@@ -409,7 +409,7 @@
 
 .conversation-link-more {
   flex-shrink: 0;
-  color: rgba(61, 58, 53, 0.56);
+  color: var(--kodelet-muted);
   letter-spacing: 0.02em;
   font-size: 0.95rem;
   line-height: 1;
@@ -442,7 +442,7 @@
   border: 0;
   background: transparent;
   border-radius: 2px;
-  color: #3d3a35;
+  color: var(--kodelet-dark);
   font-family: var(--font-mono);
   font-size: 0.76rem;
   font-weight: 400;
@@ -451,7 +451,7 @@
 }
 
 .conversation-action-menu-item:hover {
-  background: rgba(236, 233, 225, 0.86);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 50%, transparent);
 }
 
 .conversation-action-menu-item.danger {
@@ -493,7 +493,7 @@
 .sidebar-account-trigger:hover,
 .sidebar-account-trigger[aria-expanded="true"] {
   border-color: rgba(20, 20, 19, 0.045);
-  background: rgba(244, 239, 230, 0.54);
+  background: color-mix(in srgb, var(--kodelet-light) 54%, transparent);
   color: var(--kodelet-dark);
 }
 
@@ -545,7 +545,7 @@
   background: transparent;
   padding: 0.62rem 0.72rem;
   border-radius: 2px;
-  color: #3d3a35;
+  color: var(--kodelet-dark);
   font-family: var(--font-mono);
   font-size: 0.76rem;
   font-weight: 400;
@@ -554,7 +554,7 @@
 }
 
 .sidebar-account-menu-item:hover {
-  background: rgba(236, 233, 225, 0.86);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 50%, transparent);
   color: var(--kodelet-dark);
   text-decoration: none;
 }
@@ -566,7 +566,7 @@
   justify-content: center;
   align-items: flex-start;
   border-right: 1px solid rgba(93, 83, 64, 0.08);
-  background: rgba(236, 231, 221, 0.52);
+  background: var(--sidebar-surface-opaque);
 }
 
 .sidebar-collapsed-actions {
@@ -603,7 +603,7 @@
   border-radius: 0.25rem;
   border: 1px solid transparent;
   background: transparent;
-  color: #7a7367;
+  color: var(--kodelet-muted);
   box-shadow: none;
   backdrop-filter: none;
   transition:

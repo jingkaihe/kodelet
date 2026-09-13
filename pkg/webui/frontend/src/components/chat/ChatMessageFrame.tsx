@@ -11,7 +11,7 @@ interface ChatMessageFrameProps {
 }
 
 const messageCopyButtonBaseClassName =
-  'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
+  'pointer-events-none opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
 
 const userMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100`;
 

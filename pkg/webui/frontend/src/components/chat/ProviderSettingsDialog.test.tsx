@@ -103,6 +103,7 @@ describe('ProviderSettingsDialog', () => {
       'https://github.com/login/device'
     );
     expect(screen.getByRole('button', { name: 'Copy device code' })).not.toHaveTextContent('Copy');
+    expect(screen.getByRole('button', { name: 'Copy device code' })).toHaveClass('copy-button');
 
     await act(async () => {
       vi.advanceTimersByTime(1200);

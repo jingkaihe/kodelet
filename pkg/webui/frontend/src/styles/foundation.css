@@ -2,23 +2,26 @@
    Kodelet Web UI
    ============================================ */
 
-/* Custom CSS Variables for Brand Colors */
+/* Gruvbox-inspired light surfaces, retaining Kodelet's brand accents. */
 :root {
-  --kodelet-dark: #141413;
-  --kodelet-light: #faf9f5;
-  --kodelet-mid-gray: #b0aea5;
-  --kodelet-light-gray: #e8e6dc;
+  --kodelet-dark: #3c3836;
+  --kodelet-light: #faf8ef;
+  --kodelet-mid-gray: #d5c4a1;
+  --kodelet-light-gray: #ebdbb2;
+  --kodelet-surface: #f8f5e9;
+  --kodelet-muted: #665c54;
+  --kodelet-link: #076678;
   --kodelet-orange: #d97757;
   --kodelet-blue: #6a9bcc;
-  --kodelet-panel: rgba(245, 240, 231, 0.94);
+  --kodelet-panel: color-mix(in srgb, var(--kodelet-surface) 94%, transparent);
   --font-heading: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-body: "Crimson Pro", Georgia, serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --type-body-sm: 1rem;
-  --sidebar-surface-opaque: #f4efe5;
-  --sidebar-surface-ink: #4d473f;
-  --sidebar-surface-muted: #8d8578;
-  --sidebar-stroke-strong: rgba(93, 83, 64, 0.12);
+  --sidebar-surface-opaque: var(--kodelet-surface);
+  --sidebar-surface-ink: var(--kodelet-dark);
+  --sidebar-surface-muted: var(--kodelet-muted);
+  --sidebar-stroke-strong: color-mix(in srgb, var(--kodelet-muted) 16%, transparent);
 
   /* Extension feedback shares the Catppuccin Latte palette in pkg/tui/styles.go. */
   --tui-text: #4c4f69;
@@ -64,7 +67,7 @@ body {
   font-size: var(--type-body-sm);
   line-height: 1.55;
   color: var(--kodelet-dark);
-  background: #f2ede3;
+  background: var(--kodelet-light);
   position: relative;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -82,7 +85,7 @@ body::before {
   background-image: var(--noise-texture);
   pointer-events: none;
   z-index: 0;
-  opacity: 0.18;
+  opacity: 0.08;
 }
 
 #root,
@@ -108,7 +111,7 @@ select {
 }
 
 textarea::placeholder {
-  color: rgba(20, 20, 19, 0.4);
+  color: var(--kodelet-muted);
 }
 
 summary::-webkit-details-marker {
@@ -135,7 +138,7 @@ h6 {
   line-height: 1.2;
   letter-spacing: 0.02em;
   text-transform: none;
-  color: #7a756b;
+  color: var(--kodelet-muted);
 }
 
 .surface-panel {

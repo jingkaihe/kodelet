@@ -1,5 +1,5 @@
 .chat-main-panel {
-  background: rgba(244, 239, 229, 0.78);
+  background: var(--kodelet-light);
 }
 
 .chat-empty-state {
@@ -11,7 +11,7 @@
 
 .chat-empty-state-title {
   margin: 0;
-  color: #625d52;
+  color: var(--kodelet-muted);
   font-family: var(--font-mono);
   font-size: 0.95rem;
   font-weight: 400;
@@ -35,9 +35,9 @@
 .composer-dock {
   background: linear-gradient(
     180deg,
-    rgba(244, 239, 229, 0),
-    rgba(244, 239, 229, 0.94) 24%,
-    rgba(244, 239, 229, 0.98)
+    color-mix(in srgb, var(--kodelet-light) 0%, transparent),
+    color-mix(in srgb, var(--kodelet-light) 94%, transparent) 24%,
+    var(--kodelet-light)
   );
   backdrop-filter: blur(10px);
 }
@@ -147,8 +147,8 @@
 
 .chat-message-panel-user {
   padding: 0.75rem 1rem;
-  border-left: 2px solid rgba(163, 106, 18, 0.35);
-  background: rgba(163, 106, 18, 0.035);
+  border-left: 2px solid var(--kodelet-mid-gray);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 35%, transparent);
 }
 
 .chat-message-heading {
@@ -162,14 +162,20 @@
 .chat-message-role {
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: #827a6b;
+  color: var(--kodelet-muted);
+}
+
+.chat-message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
 }
 
 .chat-message-panel .chat-prose {
   font-family: var(--font-mono);
   font-size: 0.86rem;
   line-height: 1.75;
-  color: #5c584f;
+  color: var(--kodelet-dark);
 }
 
 .chat-message-panel .chat-prose :is(h1, h2, h3, h4) {
@@ -178,7 +184,7 @@
 
 .activity-card-thinking .chat-prose {
   font-size: 0.78rem;
-  color: #81745e;
+  color: var(--kodelet-muted);
 }
 
 .chat-streaming-indicator {

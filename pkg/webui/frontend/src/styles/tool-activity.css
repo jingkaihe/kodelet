@@ -209,7 +209,7 @@
   font-size: 0.68rem;
   line-height: 1;
   letter-spacing: 0.02em;
-  color: #70695f;
+  color: var(--kodelet-muted);
 }
 
 .file-activity-counts {
@@ -235,7 +235,7 @@
   margin-bottom: 0.35rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
-  color: #565d54;
+  color: var(--kodelet-dark);
 }
 
 .command-activity-command {
@@ -250,13 +250,13 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  color: #635e55;
+  color: var(--kodelet-dark);
 }
 
 .activity-detail-content .tool-terminal-body,
 .activity-detail-content .tool-code-block {
   padding: 0.25rem 0;
-  color: #635e55;
+  color: var(--kodelet-dark);
 }
 
 .activity-detail-content .tool-code-block code {
@@ -318,7 +318,7 @@
 }
 
 .activity-detail-content :is(.quiet-tool-muted, .quiet-tool-empty, .quiet-tool-path) {
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .activity-detail-content .quiet-tool-path {
@@ -361,7 +361,7 @@
 .tool-awaiting {
   font-family: var(--font-mono);
   font-size: 0.74rem;
-  color: #6f6a5f;
+  color: var(--kodelet-muted);
 }
 
 .tool-code-block {
@@ -431,7 +431,7 @@
 .task-run-stats {
   font-family: var(--font-mono);
   font-size: 0.68rem;
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .task-run-activities {
@@ -474,11 +474,11 @@
   font-family: var(--font-mono);
   font-size: 0.71rem;
   line-height: 1.42;
-  color: rgba(20, 20, 19, 0.65);
+  color: var(--kodelet-muted);
 }
 
 .task-run-activity.is-running .task-run-activity-label {
-  color: rgba(20, 20, 19, 0.78);
+  color: var(--kodelet-dark);
 }
 
 .task-run-activity.is-failed .task-run-activity-label {
@@ -500,7 +500,7 @@
   padding-left: 1.34rem;
   font-family: var(--font-mono);
   font-size: 0.66rem;
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .task-run-response {

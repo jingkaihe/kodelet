@@ -19,7 +19,8 @@ describe('CopyButton', () => {
 
     const button = screen.getByRole('button', { name: 'Copy to clipboard' });
     expect(button).toBeInTheDocument();
-    expect(button).toHaveClass('panel-action-button');
+    expect(button).toHaveClass('copy-button');
+    expect(button).not.toHaveClass('panel-action-button');
     expect(button).toHaveAttribute('type', 'button');
   });
 
@@ -36,7 +37,13 @@ describe('CopyButton', () => {
     render(<CopyButton content="Copy me" className="custom-copy" />);
 
     const button = screen.getByRole('button', { name: 'Copy to clipboard' });
-    expect(button).toHaveClass('panel-action-button', 'custom-copy');
+    expect(button).toHaveClass('copy-button', 'custom-copy');
+  });
+
+  it('uses the supplied label for both the accessible name and tooltip', () => {
+    render(<CopyButton content="const value = 1;" label="Copy code" />);
+
+    expect(screen.getByRole('button', { name: 'Copy code' })).toHaveAttribute('title', 'Copy code');
   });
 });
 

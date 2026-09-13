@@ -7,7 +7,7 @@
   align-self: stretch;
   overflow: hidden;
   border-left: 1px solid var(--sidebar-stroke-strong);
-  background: rgba(236, 231, 221, 0.52);
+  background: var(--sidebar-surface-opaque);
   font-family: var(--font-mono);
   font-size: 0.76rem;
 }
@@ -66,7 +66,7 @@
   border-bottom: 2px solid transparent;
   border-radius: 2px 2px 0 0;
   background: transparent;
-  color: #756e63;
+  color: var(--kodelet-muted);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 400;
@@ -91,7 +91,7 @@
 }
 
 .workspace-tools-tab.is-active {
-  border-bottom-color: #756e63;
+  border-bottom-color: var(--kodelet-muted);
   background: transparent;
   color: var(--kodelet-dark);
   font-weight: 500;

@@ -199,6 +199,111 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-prose pre')).toBeNull();
   });
 
+  it('highlights fenced TypeScript and copies code separately from the full message', () => {
+    const code = '// Keep the source intact.\nconst theme: string = "warm";\n';
+    const content = `Here is the example:\n\n\`\`\`typescript\n${code}\`\`\``;
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[{ role: 'assistant', blocks: [{ type: 'message', content }] }]}
+      />
+    );
+
+    const block = container.querySelector('.chat-code-block');
+    const codeElement = block?.querySelector('pre > code');
+    const copyCode = screen.getByRole('button', { name: 'Copy code' });
+    expect(codeElement).toHaveClass('language-typescript');
+    expect(codeElement?.textContent).toBe(code);
+    expect(codeElement?.querySelector('.token.keyword')).toHaveTextContent('const');
+    expect(codeElement?.querySelector('.token.string')).toHaveTextContent('"warm"');
+    expect(block).toContainElement(copyCode);
+    expect(container.querySelector('.chat-prose')).not.toHaveClass('pr-12');
+
+    fireEvent.click(copyCode);
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith(code);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }));
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith(content);
+  });
+
+  it.each(['html', 'unknown-language', ''])('keeps %j code escaped and copyable', (language) => {
+    const code = '<img src=x onerror="alert(1)"> & <script>alert(2)</script>\n';
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[{ role: 'user', content: `\`\`\`${language}\n${code}\`\`\`` }]}
+      />
+    );
+
+    expect(container.querySelector('.chat-code-block code')?.textContent).toBe(code);
+    expect(container.querySelector('img, script, [onerror]')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    expect(copyToClipboardMock).toHaveBeenCalledWith(code);
+  });
+
+  it('updates code copy targets as fences stream and removes stale buttons', () => {
+    const messages = (content: string): ChatRenderMessage[] => [
+      { role: 'assistant', blocks: [{ type: 'message', content, inProgress: true }] },
+    ];
+    const { container, rerender } = render(
+      <ChatTranscript isStreaming messages={messages('```ts\nconst value =')} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith('const value =\n');
+
+    rerender(
+      <ChatTranscript
+        isStreaming
+        messages={messages('```ts\nconst value = 42;\n```\n\n```text\nsecond block\n```')}
+      />
+    );
+    const buttons = screen.getAllByRole('button', { name: 'Copy code' });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith('const value = 42;\n');
+    fireEvent.click(buttons[1]);
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith('second block\n');
+    expect(container.querySelector('.token.number')).toHaveTextContent('42');
+
+    rerender(<ChatTranscript isStreaming={false} messages={messages('No code now.')} />);
+    expect(screen.queryByRole('button', { name: 'Copy code' })).not.toBeInTheDocument();
+    expect(container.querySelector('.chat-code-block')).not.toBeInTheDocument();
+  });
+
+  it('preserves highlighted code and selection when unrelated blocks update', () => {
+    const messages: ChatRenderMessage[] = [
+      {
+        role: 'assistant',
+        blocks: [
+          { type: 'message', content: '```ts\nconst value = "warm";\n```' },
+          { type: 'message', content: 'Working', inProgress: true },
+        ],
+      },
+    ];
+    const { container, rerender } = render(<ChatTranscript isStreaming messages={messages} />);
+    const node = container.querySelector('.token.string')?.firstChild;
+    const selection = window.getSelection();
+    assert(node);
+    assert(selection);
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    try {
+      rerender(
+        <ChatTranscript
+          isStreaming
+          messages={applyChatStreamEvent(messages, { kind: 'text-delta', delta: ' on it.' })}
+        />
+      );
+      expect(container.querySelector('.token.string')?.firstChild).toBe(node);
+      expect(selection.toString()).toBe('"warm"');
+      expect(screen.getAllByRole('button', { name: 'Copy code' })).toHaveLength(1);
+    } finally {
+      selection.removeAllRanges();
+    }
+  });
+
   it('renders markdown lists from asterisk markers', () => {
     const { container } = render(
       <ChatTranscript

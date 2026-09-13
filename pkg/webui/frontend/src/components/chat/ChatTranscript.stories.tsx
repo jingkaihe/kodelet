@@ -38,6 +38,87 @@ type Story = StoryObj<typeof meta>;
 
 export const WithToolActivity: Story = {};
 
+export const CodeBlocks: Story = {
+  args: {
+    messages: [
+      { role: 'user', content: 'Show me a code example with a quieter background.' },
+      {
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'message',
+            content: [
+              'Inline values like `theme.background` and `#faf8ef` stay quiet alongside prose.',
+              '',
+              '| Element | Value |',
+              '| --- | --- |',
+              '| Main background | `#faf8ef` — warm off-white |',
+              '| Main text | `#3c3836` — warm charcoal |',
+              '| Links | `#076678` — deep teal |',
+              '',
+              'Code blocks align with the transcript. Each block has its own copy action.',
+              '',
+              '```typescript',
+              '// A warm, understated palette for the chat workspace.',
+              'interface Theme {',
+              '  background: string;',
+              '  accent: string;',
+              '}',
+              '',
+              'const theme: Theme = {',
+              '  background: "#faf8ef",',
+              '  accent: "#076678",',
+              '};',
+              '',
+              'function renderMessage(content: string, isActive = false) {',
+              '  return { content: content.trim(), color: isActive ? theme.accent : "#3c3836" };',
+              '}',
+              '```',
+              '',
+              'Long lines scroll inside the block without shifting its edges or copy button.',
+              '',
+              '```text',
+              'mise exec -- npm --prefix pkg/webui/frontend run test:run -- src/components/chat/ChatTranscript.test.tsx src/components/tool-renderers/shared.test.tsx',
+              '```',
+            ].join('\n'),
+          },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await canvasElement.ownerDocument.fonts.ready;
+    const prose = canvasElement.querySelector('.chat-message-panel-assistant .chat-prose');
+    const blocks = canvasElement.querySelectorAll('.chat-code-block');
+    expect(blocks).toHaveLength(2);
+    expect(canvasElement.querySelector('.token.keyword')).toHaveTextContent('interface');
+    if (!prose) throw new Error('Assistant prose was not rendered');
+    const inlineCode = prose.querySelector('p code');
+    const blockCode = prose.querySelector('pre');
+    if (!inlineCode || !blockCode) throw new Error('Inline or fenced code was not rendered');
+    expect(getComputedStyle(inlineCode).backgroundColor).toBe(
+      getComputedStyle(blockCode).backgroundColor
+    );
+    expect(getComputedStyle(inlineCode).borderColor).toBe(getComputedStyle(blockCode).borderColor);
+    expect(prose.querySelectorAll('tbody code')).toHaveLength(3);
+    const proseRect = prose.getBoundingClientRect();
+    for (const block of blocks) {
+      const rect = block.getBoundingClientRect();
+      const button = block.querySelector<HTMLButtonElement>('.copy-button');
+      const pre = block.querySelector('pre');
+      if (!button || !pre) throw new Error('Code block or copy button was not rendered');
+      const buttonRect = button.getBoundingClientRect();
+      expect(Math.abs(rect.left - proseRect.left)).toBeLessThan(1);
+      expect(Math.abs(rect.right - proseRect.right)).toBeLessThan(1);
+      expect(buttonRect.right).toBeLessThan(rect.right);
+      expect(buttonRect.top).toBeGreaterThan(rect.top);
+      expect(getComputedStyle(button).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(button).borderRadius).toBe('4px');
+      expect(getComputedStyle(pre).backgroundImage).toBe('none');
+    }
+  },
+};
+
 export const EmptyState: Story = {
   args: {
     messages: [],

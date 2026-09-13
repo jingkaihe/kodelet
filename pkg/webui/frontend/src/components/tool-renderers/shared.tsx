@@ -7,9 +7,14 @@ import { copyToClipboard, escapeUrl } from '../../utils';
 interface CopyButtonProps {
   content: string;
   className?: string;
+  label?: string;
 }
 
-export const CopyButton: React.FC<CopyButtonProps> = ({ content, className = '' }) => {
+export const CopyButton: React.FC<CopyButtonProps> = ({
+  content,
+  className = '',
+  label = 'Copy to clipboard',
+}) => {
   const handleCopy = () => {
     copyToClipboard(content);
   };
@@ -17,10 +22,10 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ content, className = '' 
   return (
     <button
       type="button"
-      className={`panel-action-button ${className}`.trim()}
+      className={`copy-button ${className}`.trim()}
       onClick={handleCopy}
-      title="Copy to clipboard"
-      aria-label="Copy to clipboard"
+      title={label}
+      aria-label={label}
     >
       <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
     </button>

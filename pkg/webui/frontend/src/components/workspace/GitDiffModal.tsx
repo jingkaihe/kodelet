@@ -1,9 +1,9 @@
-import { ChevronRight, Copy, FoldVertical, RefreshCw, UnfoldVertical } from 'lucide-react';
+import { ChevronRight, FoldVertical, RefreshCw, UnfoldVertical } from 'lucide-react';
 import type React from 'react';
 import { useMemo, useState } from 'react';
 import type { GitDiffResponse } from '../../types';
-import { copyToClipboard } from '../../utils';
 import { parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
+import { CopyButton } from '../tool-renderers/shared';
 
 interface GitDiffModalProps {
   cwdLabel?: string;
@@ -491,15 +491,11 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
                   <UnfoldVertical aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
                 )}
               </button>
-              <button
-                aria-label="Copy diff"
+              <CopyButton
                 className="workspace-diff-icon-button"
-                onClick={() => void copyToClipboard(diffText)}
-                title="Copy diff"
-                type="button"
-              >
-                <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-              </button>
+                content={diffText}
+                label="Copy diff"
+              />
             </>
           ) : null}
           <button

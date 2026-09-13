@@ -1,5 +1,15 @@
 import { Check, ChevronRight, SquareSlash } from 'lucide-react';
-import React, { useMemo } from 'react';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-yaml';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ChatAssistantBlock, ChatRenderMessage, ContentBlock } from '../../types';
 import { escapeHtml } from '../../utils';
 import Spinner from '../Spinner';
@@ -9,6 +19,9 @@ import ChatMessageFrame from './ChatMessageFrame';
 import ChatStreamingIndicator from './ChatStreamingIndicator';
 import ChatToolActivity from './ChatToolActivity';
 
+// Highlight only changed message HTML, never the entire document during streaming.
+Prism.manual = true;
+
 const parseMarkdown = (content: string): string =>
   renderSafeMarkdown(content)
     .replace(/<a /g, '<a class="chat-markdown-link" ')
@@ -17,7 +30,9 @@ const parseMarkdown = (content: string): string =>
       /<table>/g,
       '<div class="chat-markdown-table-shell">\n<table class="chat-markdown-table">'
     )
-    .replace(/<\/table>/g, '</table></div>');
+    .replace(/<\/table>/g, '</table></div>')
+    .replace(/<pre>/g, '<div class="chat-code-block"><pre>')
+    .replace(/<\/pre>/g, '</pre></div>');
 
 const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
 
@@ -80,8 +95,38 @@ interface MarkdownContentProps {
 const MarkdownContent = React.memo(({ html, className }: MarkdownContentProps) => {
   // Stream events clone messages; keep unchanged HTML stable to preserve text selection.
   const markup = useMemo(() => ({ __html: html }), [html]);
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: Only renderContent supplies HTML: Markdown escapes raw HTML and rejects unsafe URLs; uploaded image URLs are validated and attribute-escaped.
-  return <div className={className} dangerouslySetInnerHTML={markup} />;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [codeBlocks, setCodeBlocks] = useState<Array<{ element: Element; content: string }>>([]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(html): New HTML replaces the DOM nodes that need highlighting and copy portals.
+  useLayoutEffect(() => {
+    const blocks = Array.from(contentRef.current?.querySelectorAll('.chat-code-block') || []);
+    const nextCodeBlocks = blocks.map((element) => {
+      const code = element.querySelector<HTMLElement>('pre > code');
+      const language = code?.className.match(/\blanguage-([\w-]+)\b/i)?.[1].toLowerCase();
+      if (code && language && typeof Prism.languages[language] === 'object') {
+        Prism.highlightElement(code);
+      }
+      return { element, content: code?.textContent || '' };
+    });
+    setCodeBlocks((current) =>
+      current.length || nextCodeBlocks.length ? nextCodeBlocks : current
+    );
+  }, [html]);
+
+  return (
+    <>
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: Only renderContent supplies HTML: Markdown escapes raw HTML and rejects unsafe URLs; uploaded image URLs are validated and attribute-escaped. */}
+      <div ref={contentRef} className={className} dangerouslySetInnerHTML={markup} />
+      {codeBlocks.map(({ element, content }, index) =>
+        createPortal(
+          <CopyButton className="chat-code-copy-button" content={content} label="Copy code" />,
+          element,
+          String(index)
+        )
+      )}
+    </>
+  );
 });
 
 const normalizeThinkingMarkdown = (content: string): string =>
@@ -227,9 +272,9 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
 };
 
 const messageCopyButtonBaseClassName =
-  'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
+  'pointer-events-none opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
 
-const assistantMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} absolute right-0 top-0 z-10 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100`;
+const assistantMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100`;
 
 interface ChatTranscriptProps {
   messages: ChatRenderMessage[];
@@ -306,13 +351,15 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
       const copyText = getMessageBlockCopyText(block.content);
       renderedBlocks.push(
         <div key={`message-${blockIndex}`} className="group/message relative">
-          {copyText.trim() ? (
-            <CopyButton className={assistantMessageCopyButtonClassName} content={copyText} />
-          ) : null}
           <MarkdownContent
-            className="chat-prose max-w-none pr-12 text-kodelet-dark"
+            className="chat-prose max-w-none text-kodelet-dark"
             html={renderContent(block.content)}
           />
+          {copyText.trim() ? (
+            <div className="chat-message-actions">
+              <CopyButton className={assistantMessageCopyButtonClassName} content={copyText} />
+            </div>
+          ) : null}
         </div>
       );
     }
