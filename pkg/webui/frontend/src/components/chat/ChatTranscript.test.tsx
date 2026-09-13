@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyChatStreamEvent } from '../../features/chat/state';
@@ -304,8 +304,11 @@ describe('ChatTranscript', () => {
     }
   });
 
-  it('renders markdown lists from asterisk markers', () => {
-    const { container } = render(
+  it.each([
+    ['unordered', '* first item\n* second item', 'UL'],
+    ['ordered', '1. first item\n2. second item', 'OL'],
+  ])('renders %s markdown lists', (_, content, tagName) => {
+    render(
       <ChatTranscript
         isStreaming={false}
         messages={[
@@ -314,7 +317,7 @@ describe('ChatTranscript', () => {
             blocks: [
               {
                 type: 'message',
-                content: '* first item\n* second item',
+                content,
               },
             ],
           },
@@ -322,12 +325,14 @@ describe('ChatTranscript', () => {
       />
     );
 
-    const list = container.querySelector('.chat-prose ul');
+    const list = screen.getByRole('list');
 
-    expect(list).toBeInTheDocument();
-    expect(list).toHaveClass('chat-markdown-list');
-    expect(screen.getByText('first item')).toBeInTheDocument();
-    expect(screen.getByText('second item')).toBeInTheDocument();
+    expect(list.tagName).toBe(tagName);
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['first item', 'second item']);
   });
 
   it('renders markdown tables inside the bordered table surface', () => {
@@ -379,7 +384,7 @@ describe('ChatTranscript', () => {
     const link = container.querySelector('.chat-prose a');
 
     expect(link).toBeInTheDocument();
-    expect(link).toHaveClass('chat-markdown-link');
+    expect(link).toHaveTextContent(longURL);
     expect(link).toHaveAttribute('href', longURL);
   });
 
@@ -410,7 +415,6 @@ describe('ChatTranscript', () => {
     expect(screen.getAllByRole('link')).toHaveLength(2);
     for (const link of screen.getAllByRole('link', { name: 'Safe link' })) {
       expect(link).toHaveAttribute('href', 'https://example.com');
-      expect(link).toHaveClass('chat-markdown-link');
     }
   });
 

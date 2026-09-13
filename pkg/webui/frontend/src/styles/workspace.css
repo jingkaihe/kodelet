@@ -135,12 +135,7 @@
 }
 
 .workspace-modal-scroll-region {
-  max-height: min(66vh, 44rem);
   overflow: auto;
-  border-radius: 2px;
-  border: 1px solid var(--sidebar-stroke-strong);
-  background: color-mix(in srgb, var(--kodelet-elevated) 35%, transparent);
-  padding: 0.85rem;
 }
 
 .workspace-side-panel .workspace-modal-scroll-region {
@@ -546,18 +541,6 @@
 .terminal-popout-page .workspace-terminal-host {
   padding: calc(1.15rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right))
     calc(1rem + env(safe-area-inset-bottom)) calc(1.45rem + env(safe-area-inset-left));
-}
-
-@media (max-width: 1180px) {
-  .workspace-tools-shell.is-open {
-    flex-basis: calc(clamp(26rem, 42vw, 34rem) + 3.25rem);
-    width: calc(clamp(26rem, 42vw, 34rem) + 3.25rem);
-    max-width: calc(50vw + 3.25rem);
-  }
-
-  .workspace-tools-dock {
-    width: clamp(26rem, 42vw, 34rem);
-  }
 }
 
 @media (max-width: 1180px) {

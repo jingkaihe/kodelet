@@ -79,8 +79,6 @@ pre code {
   max-width: none;
   min-width: 0;
   color: var(--kodelet-dark);
-  font-family: var(--font-body);
-  font-size: 0.98rem;
   line-height: 1.75;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -105,7 +103,6 @@ pre code {
 .chat-prose h3,
 .chat-prose h4 {
   margin: 1.35rem 0 0.65rem;
-  font-family: var(--font-heading);
   color: var(--kodelet-dark);
 }
 
@@ -220,7 +217,6 @@ pre code {
   border-radius: 0.25rem;
   padding: 0.75rem;
   overflow-x: auto;
-  margin: 0.875rem 0;
   border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
   box-shadow: none;
 }

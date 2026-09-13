@@ -24,8 +24,6 @@ Prism.manual = true;
 
 const parseMarkdown = (content: string): string =>
   renderSafeMarkdown(content)
-    .replace(/<a /g, '<a class="chat-markdown-link" ')
-    .replace(/<(ol|ul)(?=[ >])/g, '<$1 class="chat-markdown-list"')
     .replace(
       /<table>/g,
       '<div class="chat-markdown-table-shell">\n<table class="chat-markdown-table">'

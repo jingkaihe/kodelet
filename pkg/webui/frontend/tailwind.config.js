@@ -17,7 +17,6 @@ export default {
           'light-gray': 'rgb(var(--kodelet-light-gray-rgb) / <alpha-value>)',
           'orange': 'rgb(var(--kodelet-orange-rgb) / <alpha-value>)',
           'blue': 'rgb(var(--kodelet-blue-rgb) / <alpha-value>)',
-          'green': 'rgb(var(--kodelet-green-rgb) / <alpha-value>)',
         },
       },
     },

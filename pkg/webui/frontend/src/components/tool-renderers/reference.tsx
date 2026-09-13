@@ -389,9 +389,6 @@ export const ReferenceFileList: React.FC<ReferenceFileListProps> = ({ items }) =
   </div>
 );
 
-export const renderMarkdown = (content?: string | null): string =>
-  content ? (marked.parse(content) as string) || '' : '';
-
 const safeMarkdownRenderer = new marked.Renderer();
 const defaultMarkdownRenderer = new marked.Renderer();
 

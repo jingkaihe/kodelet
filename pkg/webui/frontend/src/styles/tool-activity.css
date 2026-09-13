@@ -307,12 +307,6 @@
   font-family: var(--font-mono);
 }
 
-.activity-detail-content .bash-tool-badge {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
 .activity-detail-content .bash-tool-brief {
   justify-content: flex-start;
 }

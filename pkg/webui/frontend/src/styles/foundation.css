@@ -12,7 +12,6 @@
   --kodelet-light-gray-rgb: 235 219 178;
   --kodelet-orange-rgb: 217 119 87;
   --kodelet-blue-rgb: 106 155 204;
-  --kodelet-green-rgb: 120 140 93;
   --kodelet-dark: rgb(var(--kodelet-dark-rgb));
   --kodelet-light: rgb(var(--kodelet-light-rgb));
   --kodelet-mid-gray: rgb(var(--kodelet-mid-gray-rgb));
@@ -80,7 +79,6 @@
   --kodelet-light-gray-rgb: 80 73 69;
   --kodelet-orange-rgb: 254 128 25;
   --kodelet-blue-rgb: 131 165 152;
-  --kodelet-green-rgb: 184 187 38;
   --kodelet-surface: #252525;
   --kodelet-muted: #bdae93;
   --kodelet-link: #8ec07c;
