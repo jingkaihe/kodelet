@@ -443,6 +443,21 @@ describe('ApiService', () => {
       expect(result).toEqual(mockResponse);
     });
 
+    it('forwards cancellation for background conversation refreshes', async () => {
+      const controller = new AbortController();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ conversations: [], total: 0 }),
+      });
+
+      await apiService.getConversations({ limit: 100 }, controller.signal);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations?limit=100',
+        expect.objectContaining({ signal: controller.signal })
+      );
+    });
+
     it('applies search filters', async () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],

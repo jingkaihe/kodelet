@@ -227,7 +227,10 @@ class ApiService {
     });
   }
 
-  async getConversations(filters: Partial<SearchFilters> = {}): Promise<ConversationListResponse> {
+  async getConversations(
+    filters: Partial<SearchFilters> = {},
+    signal?: AbortSignal
+  ): Promise<ConversationListResponse> {
     const params = new URLSearchParams();
 
     if (filters.searchTerm) params.append('search', filters.searchTerm);
@@ -240,7 +243,7 @@ class ApiService {
     const queryString = params.toString();
     const endpoint = queryString ? `/api/conversations?${queryString}` : '/api/conversations';
 
-    const response = await this.request<ConversationListResponse>(endpoint);
+    const response = await this.request<ConversationListResponse>(endpoint, { signal });
 
     // Ensure conversations is always an array
     if (!response.conversations || !Array.isArray(response.conversations)) {

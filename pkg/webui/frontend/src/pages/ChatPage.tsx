@@ -144,6 +144,8 @@ const OVERLAY_FOCUSABLE_SELECTOR = [
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SIDEBAR_CONVERSATION_LIMIT = 100;
+const CONVERSATION_POLL_INTERVAL_MS = 5000;
+const CONVERSATION_POLL_MAX_DELAY_MS = 30000;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 type UIRequestDialogState =
@@ -544,7 +546,8 @@ const ChatPage: React.FC = () => {
   const cwdSuggestionRequestRef = useRef(0);
   const gitDiffRequestRef = useRef(0);
   const workspaceTargetKeyRef = useRef('');
-  const conversationListRequestRef = useRef(0);
+  const conversationListControllerRef = useRef<AbortController | null>(null);
+  const conversationListRunningUpdatesRef = useRef<Record<string, boolean>>({});
   const conversationSearchRequestRef = useRef(0);
   const conversationSearchTermRef = useRef('');
   const conversationCWDFilterRef = useRef('');
@@ -677,6 +680,8 @@ const ChatPage: React.FC = () => {
         return;
       }
 
+      // Preserve live transitions when an older list snapshot arrives.
+      conversationListRunningUpdatesRef.current[id] = isRunning;
       setLocallyRunningConversationIds((currentIds) => {
         if (isRunning) {
           return currentIds.includes(id) ? currentIds : [...currentIds, id];
@@ -754,23 +759,60 @@ const ChatPage: React.FC = () => {
     [clearRunningConversation]
   );
 
-  const refreshConversations = useCallback(async () => {
-    const requestId = conversationListRequestRef.current + 1;
-    conversationListRequestRef.current = requestId;
+  const refreshConversations = useCallback(async ({ silent = false } = {}) => {
+    if (silent && conversationListControllerRef.current) {
+      return true;
+    }
 
-    setSidebarLoading(true);
+    // Explicit refreshes take precedence over an older background snapshot.
+    conversationListControllerRef.current?.abort();
+    const controller = new AbortController();
+    conversationListControllerRef.current = controller;
+    const runningUpdates: Record<string, boolean> = {};
+    conversationListRunningUpdatesRef.current = runningUpdates;
+
+    if (!silent) {
+      setSidebarLoading(true);
+    }
     try {
-      const response = await apiService.getConversations({
-        limit: SIDEBAR_CONVERSATION_LIMIT,
-        sortBy: 'updated',
-        sortOrder: 'desc',
-      });
-      if (conversationListRequestRef.current !== requestId) {
-        return;
+      const response = await apiService.getConversations(
+        {
+          limit: SIDEBAR_CONVERSATION_LIMIT,
+          sortBy: 'updated',
+          sortOrder: 'desc',
+        },
+        controller.signal
+      );
+      if (controller.signal.aborted) {
+        return true;
       }
 
       const nextConversations = response.conversations || [];
-      setConversations(nextConversations);
+      setConversations((currentConversations) => {
+        const listedIds = new Set(nextConversations.map((conversation) => conversation.id));
+        const optimisticConversation = optimisticRemoteConversationRef.current;
+        // Keep new local sends, including failed attempts still available for retry.
+        const pendingConversations = currentConversations.filter(
+          (conversation) =>
+            !listedIds.has(conversation.id) &&
+            (sendControllersRef.current[conversation.id] ||
+              (optimisticConversation?.conversationId === conversation.id &&
+                !optimisticConversation.confirmed))
+        );
+        const mergedConversations = [
+          ...pendingConversations,
+          ...nextConversations.map((conversation) => {
+            const isRunning = sendControllersRef.current[conversation.id]
+              ? true
+              : runningUpdates[conversation.id];
+            return isRunning === undefined ? conversation : { ...conversation, isRunning };
+          }),
+        ];
+        // Keep the same array for unchanged snapshots: no tree rebuild or subscription churn.
+        return JSON.stringify(currentConversations) === JSON.stringify(mergedConversations)
+          ? currentConversations
+          : mergedConversations;
+      });
       setConversationTotal(response.total ?? nextConversations.length);
       const responseCWDs = (
         response.cwds?.length
@@ -779,14 +821,26 @@ const ChatPage: React.FC = () => {
       )
         .map((cwd) => cwd?.trim())
         .filter((cwd): cwd is string => Boolean(cwd));
-      setConversationCWDOptions(Array.from(new Set(responseCWDs)));
+      const nextCWDs = Array.from(new Set(responseCWDs));
+      setConversationCWDOptions((currentCWDs) =>
+        currentCWDs.length === nextCWDs.length &&
+        currentCWDs.every((cwd, index) => cwd === nextCWDs[index])
+          ? currentCWDs
+          : nextCWDs
+      );
+      return true;
     } catch (error) {
-      if (conversationListRequestRef.current === requestId) {
+      if (!controller.signal.aborted) {
         console.error('Failed to load conversations', error);
+        return false;
       }
+      return true;
     } finally {
-      if (conversationListRequestRef.current === requestId) {
-        setSidebarLoading(false);
+      if (conversationListControllerRef.current === controller) {
+        conversationListControllerRef.current = null;
+        if (!silent) {
+          setSidebarLoading(false);
+        }
       }
     }
   }, []);
@@ -999,7 +1053,54 @@ const ChatPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    void refreshConversations();
+    let disposed = false;
+    let pending = false;
+    let refreshQueued = false;
+    let timer: number | undefined;
+    let delay = CONVERSATION_POLL_INTERVAL_MS;
+
+    const refresh = async (silent = true) => {
+      if (disposed || pending || (silent && document.visibilityState === 'hidden')) {
+        return;
+      }
+
+      pending = true;
+      refreshQueued = false;
+      const succeeded = await refreshConversations({ silent });
+      pending = false;
+      delay = succeeded
+        ? CONVERSATION_POLL_INTERVAL_MS
+        : Math.min(delay * 2, CONVERSATION_POLL_MAX_DELAY_MS);
+      if (!disposed && document.visibilityState !== 'hidden') {
+        if (refreshQueued) {
+          void refresh();
+        } else {
+          timer = window.setTimeout(() => void refresh(), delay);
+        }
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      window.clearTimeout(timer);
+      if (document.visibilityState !== 'hidden') {
+        delay = CONVERSATION_POLL_INTERVAL_MS;
+        refreshQueued = pending;
+        void refresh();
+      }
+    };
+
+    void refresh(false);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      conversationListControllerRef.current?.abort();
+      conversationListControllerRef.current = null;
+    };
+  }, [refreshConversations]);
+
+  useEffect(() => {
     void refreshRunners();
 
     void apiService
@@ -1039,7 +1140,7 @@ const ChatPage: React.FC = () => {
     }, 5000);
 
     return () => window.clearInterval(runnerRefresh);
-  }, [refreshConversations, refreshRunners]);
+  }, [refreshRunners]);
 
   const defaultRunner = runners.find((runner) => runner.id === chatSettings.defaultRunnerId);
   const defaultRunnerID =

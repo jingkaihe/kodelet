@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Profiler } from 'react';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ChatSettings,
@@ -2191,6 +2192,13 @@ describe('ChatPage', () => {
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
 
+    const row = screen.getByTestId(`conversation-row-${preallocatedId}`);
+    const listRequests = mockGetConversations.mock.calls.length;
+    fireEvent(document, new Event('visibilitychange'));
+    await flushAsyncUpdates();
+    expect(mockGetConversations).toHaveBeenCalledTimes(listRequests + 1);
+    expect(screen.getByTestId(`conversation-row-${preallocatedId}`)).toBe(row);
+
     const contextButton = document.querySelector<HTMLButtonElement>(
       'button.composer-inline-context'
     );
@@ -2218,6 +2226,13 @@ describe('ChatPage', () => {
         cwd: '../corrected-project',
       })
     );
+    const retryRow = screen.getByTestId(`conversation-row-${preallocatedId}`);
+    fireEvent(document, new Event('visibilitychange'));
+    await flushAsyncUpdates();
+    expect(screen.getByTestId(`conversation-row-${preallocatedId}`)).toBe(retryRow);
+    expect(
+      screen.getByTestId(`conversation-running-indicator-${preallocatedId}`)
+    ).toBeInTheDocument();
   });
 
   it('locks optimistic context after the server confirms the conversation', async () => {
@@ -3511,86 +3526,285 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('conversation-running-indicator-conv-456')).not.toBeInTheDocument();
   });
 
-  it('shows running indicators from the conversation list after refresh', async () => {
-    mockGetConversations.mockResolvedValue({
-      conversations: [
-        {
-          id: 'conv-123',
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-03T00:00:00Z',
-          messageCount: 1,
-          summary: 'Running task',
-          isRunning: true,
-        },
-        {
-          id: 'conv-456',
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-02T00:00:00Z',
-          messageCount: 1,
-          summary: 'Idle task',
-        },
-      ],
-      hasMore: false,
-      total: 2,
-      limit: 40,
-      offset: 0,
-    });
-    mockStreamConversation.mockImplementation(async () => new Promise(() => undefined));
-
-    render(<ChatPage />);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBeInTheDocument()
-    );
-    expect(screen.queryByTestId('conversation-running-indicator-conv-456')).not.toBeInTheDocument();
-    expect(mockStreamConversation).toHaveBeenCalledWith('conv-123', expect.any(Object));
-  });
-
-  it('clears a background running indicator when the stream finishes', async () => {
-    mockGetConversations.mockResolvedValue({
-      conversations: [
-        {
-          id: 'conv-123',
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-03T00:00:00Z',
-          messageCount: 1,
-          summary: 'Running task',
-          isRunning: true,
-        },
-      ],
-      hasMore: false,
+  describe('sidebar polling', () => {
+    const conversation = {
+      id: 'conv-123',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-02T00:00:00Z',
+      messageCount: 1,
+      summary: 'Running task',
+      cwd: '/runner/kodelet',
+      isRunning: true,
+    };
+    const response: ConversationListResponse = {
+      conversations: [conversation],
       total: 1,
-      limit: 40,
+      hasMore: false,
+      limit: 100,
       offset: 0,
+      cwds: ['/runner/kodelet'],
+    };
+
+    beforeEach(() => {
+      mockGetConversations.mockReset().mockResolvedValue(response);
+      mockStreamConversation.mockImplementation(async () => new Promise(() => undefined));
     });
-    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null = null;
-    mockStreamConversation.mockImplementation(
-      async (_conversationId, options) =>
-        new Promise<void>(() => {
-          streamOptions = options as {
-            onEvent: (event: ChatStreamEvent) => void;
-          };
-        })
-    );
 
-    render(<ChatPage />);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBeInTheDocument()
-    );
-
-    await act(async () => {
-      streamOptions?.onEvent({
-        kind: 'done',
-        conversation_id: 'conv-123',
+    it('discovers external conversations and nested subagents without reloading the transcript', async () => {
+      vi.useFakeTimers();
+      routeParams = { id: conversation.id };
+      mockGetConversation.mockResolvedValue({
+        ...conversation,
+        messages: [{ role: 'assistant', content: 'Keep this transcript intact.' }],
       });
+      mockGetConversations.mockResolvedValueOnce(response).mockResolvedValue({
+        ...response,
+        total: 3,
+        conversations: [
+          { ...conversation, id: 'conv-external', summary: 'Task from another browser' },
+          {
+            ...conversation,
+            id: 'conv-child',
+            summary: 'New subagent',
+            parentConversationId: conversation.id,
+          },
+          conversation,
+        ],
+      });
+
+      try {
+        render(<ChatPage />);
+        await flushAsyncUpdates();
+        const transcript = screen.getByText('Keep this transcript intact.');
+        const selectedRow = screen.getByTestId('conversation-row-conv-123');
+
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        const externalRow = screen.getByTestId('conversation-row-conv-external');
+        const childRow = screen.getByTestId('conversation-row-conv-child');
+        expect(externalRow).toHaveAttribute('data-depth', '0');
+        expect(childRow).toHaveAttribute('data-depth', '1');
+        expect(screen.getByTestId('conversation-row-conv-123')).toBe(selectedRow);
+        expect(selectedRow).toHaveClass('active');
+        expect(screen.getByText('Keep this transcript intact.')).toBe(transcript);
+        expect(mockGetConversation).toHaveBeenCalledTimes(1);
+        expect(mockNavigate).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
-    await waitFor(() =>
-      expect(
-        screen.queryByTestId('conversation-running-indicator-conv-123')
-      ).not.toBeInTheDocument()
-    );
+    it('keeps unchanged polls silent without committing renders or restarting spinners and streams', async () => {
+      vi.useFakeTimers();
+      const intervalSpy = vi.spyOn(window, 'setInterval');
+      const onRender = vi.fn();
+      const pendingPoll = {
+        resolve: null as ((value: ConversationListResponse) => void) | null,
+      };
+      mockGetConversations.mockResolvedValueOnce(response).mockImplementationOnce(
+        () =>
+          new Promise<ConversationListResponse>((resolve) => {
+            pendingPoll.resolve = resolve;
+          })
+      );
+
+      try {
+        render(
+          <Profiler id="chat" onRender={onRender}>
+            <ChatPage />
+          </Profiler>
+        );
+        await flushAsyncUpdates();
+        const indicator = screen.getByTestId('conversation-running-indicator-conv-123');
+        const spinner = indicator.querySelector('.spinner-glyph');
+        expect(spinner).not.toBeNull();
+        const list = screen.getByTestId('chat-sidebar-shell').querySelector('.conversation-list');
+        const subscriptionSignal = mockStreamConversation.mock.calls[0][1].signal as AbortSignal;
+        const intervalCount = intervalSpy.mock.calls.length;
+
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(2);
+        expect(list).toHaveAttribute('aria-busy', 'false');
+        onRender.mockClear();
+
+        await act(async () => {
+          pendingPoll.resolve?.({
+            ...response,
+            conversations: [{ ...conversation }],
+            cwds: [...(response.cwds || [])],
+          });
+        });
+
+        expect(onRender).not.toHaveBeenCalled();
+        expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBe(indicator);
+        expect(indicator.querySelector('.spinner-glyph')).toBe(spinner);
+        expect(intervalSpy).toHaveBeenCalledTimes(intervalCount);
+        expect(mockStreamConversation).toHaveBeenCalledTimes(1);
+        expect(subscriptionSignal.aborted).toBe(false);
+      } finally {
+        intervalSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('queues visibility refreshes without overlapping polls and aborts superseded or unmounted requests', async () => {
+      vi.useFakeTimers();
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const pendingPoll = {
+        resolve: null as ((value: ConversationListResponse) => void) | null,
+      };
+      mockGetConversations.mockResolvedValueOnce(response).mockImplementation(
+        () =>
+          new Promise<ConversationListResponse>((resolve) => {
+            pendingPoll.resolve = resolve;
+          })
+      );
+
+      try {
+        const { unmount } = render(<ChatPage />);
+        await flushAsyncUpdates();
+
+        visibility.mockReturnValue('hidden');
+        fireEvent(document, new Event('visibilitychange'));
+        await act(async () => vi.advanceTimersByTimeAsync(15000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(1);
+
+        visibility.mockReturnValue('visible');
+        fireEvent(document, new Event('visibilitychange'));
+        await flushAsyncUpdates();
+        expect(mockGetConversations).toHaveBeenCalledTimes(2);
+        visibility.mockReturnValue('hidden');
+        fireEvent(document, new Event('visibilitychange'));
+        visibility.mockReturnValue('visible');
+        fireEvent(document, new Event('visibilitychange'));
+        await act(async () => vi.advanceTimersByTimeAsync(10000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(2);
+
+        await act(async () => pendingPoll.resolve?.(response));
+        expect(mockGetConversations).toHaveBeenCalledTimes(3);
+        const pollSignal = mockGetConversations.mock.calls[2][1] as AbortSignal;
+        const settlePoll = pendingPoll.resolve;
+        fireEvent.click(screen.getByRole('button', { name: 'More actions for Running task' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+        await flushAsyncUpdates();
+        expect(mockGetConversations).toHaveBeenCalledTimes(4);
+        expect(pollSignal.aborted).toBe(true);
+        const signal = mockGetConversations.mock.calls[3][1] as AbortSignal;
+        unmount();
+        expect(signal.aborted).toBe(true);
+        await act(async () => settlePoll?.(response));
+        fireEvent(document, new Event('visibilitychange'));
+        await act(async () => vi.advanceTimersByTimeAsync(15000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(4);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        visibility.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('retains the list after a transient failure and resets the polling delay after recovery', async () => {
+      vi.useFakeTimers();
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockGetConversations
+        .mockResolvedValueOnce(response)
+        .mockRejectedValueOnce(new Error('Temporarily offline'))
+        .mockResolvedValue({
+          ...response,
+          conversations: [{ ...conversation, summary: 'Recovered task' }],
+        });
+
+      try {
+        render(<ChatPage />);
+        await flushAsyncUpdates();
+        const row = screen.getByTestId('conversation-row-conv-123');
+
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(row).toHaveTextContent('Running task');
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(2);
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(row).toHaveTextContent('Recovered task');
+
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(mockGetConversations).toHaveBeenCalledTimes(4);
+      } finally {
+        consoleError.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('discovers new rows without overwriting newer stream running states during a poll', async () => {
+      vi.useFakeTimers();
+      routeParams = { id: conversation.id };
+      const idleConversation = { ...conversation, isRunning: false };
+      const initialResponse = {
+        ...response,
+        total: 2,
+        conversations: [idleConversation, { ...conversation, id: 'conv-background' }],
+      };
+      const pendingPoll = {
+        resolve: null as ((value: ConversationListResponse) => void) | null,
+      };
+      const subscriptions: Record<string, { onEvent: (event: ChatStreamEvent) => void }> = {};
+      mockGetConversations.mockResolvedValueOnce(initialResponse).mockImplementationOnce(
+        () =>
+          new Promise<ConversationListResponse>((resolve) => {
+            pendingPoll.resolve = resolve;
+          })
+      );
+      mockGetConversation.mockResolvedValue({ ...idleConversation, messages: [], toolResults: {} });
+      mockStreamConversation.mockImplementation(async (id, options) => {
+        subscriptions[id] = options;
+        return new Promise(() => undefined);
+      });
+
+      try {
+        render(<ChatPage />);
+        await flushAsyncUpdates();
+        expect(
+          screen.getByTestId('conversation-running-indicator-conv-background')
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByTestId('conversation-running-indicator-conv-123')
+        ).not.toBeInTheDocument();
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+
+        await act(async () => {
+          subscriptions['conv-background'].onEvent({
+            kind: 'done',
+            conversation_id: 'conv-background',
+          });
+          subscriptions['conv-123'].onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+        });
+        expect(
+          screen.queryByTestId('conversation-running-indicator-conv-background')
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBeInTheDocument();
+
+        await act(async () => {
+          pendingPoll.resolve?.({
+            ...initialResponse,
+            total: 3,
+            conversations: [
+              ...initialResponse.conversations,
+              { ...idleConversation, id: 'conv-unrelated', summary: 'Another new task' },
+            ],
+          });
+        });
+        expect(screen.getByTestId('conversation-row-conv-unrelated')).toHaveTextContent(
+          'Another new task'
+        );
+        expect(
+          screen.queryByTestId('conversation-running-indicator-conv-background')
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId('conversation-running-indicator-conv-123')).toBeInTheDocument();
+        expect(mockStreamConversation).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('closes conversation search when a blocking UI request arrives', async () => {
@@ -4583,11 +4797,14 @@ describe('ChatPage', () => {
       render(<ChatPage />);
       await flushAsyncUpdates();
 
-      expect(mockGetConversations).toHaveBeenCalledWith({
-        limit: 100,
-        sortBy: 'updated',
-        sortOrder: 'desc',
-      });
+      expect(mockGetConversations).toHaveBeenCalledWith(
+        {
+          limit: 100,
+          sortBy: 'updated',
+          sortOrder: 'desc',
+        },
+        expect.any(AbortSignal)
+      );
 
       fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
       expect(screen.getByRole('dialog', { name: 'Search conversations' })).toBeInTheDocument();

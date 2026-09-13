@@ -805,7 +805,10 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 const minimumVisibleCount = minimumConversationCount(group, activeConversationId);
                 const visibleCount = visibleConversationCount(
                   group,
-                  visibleGroupCounts[group.key] ?? minimumVisibleCount
+                  Math.max(
+                    visibleGroupCounts[group.key] ?? minimumVisibleCount,
+                    minimumVisibleCount
+                  )
                 );
                 const remainingCount = group.conversations.length - visibleCount;
                 const moreVisibleCount = visibleConversationCount(
