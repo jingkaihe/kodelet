@@ -16,6 +16,12 @@ Added keyboard-accessible, theme-aware new-chat dropdowns and dismissible stacke
 
 Matched workspace terminal palettes to the selected theme, fixed colors after reopening the terminal, and clarified connection states. Removed duplicate command failure messages and kept busy indicators active with reduced motion enabled.
 
+Added on-screen shortcut keys and touch scrolling to workspace and pop-out terminals, while preserving tap-to-type and pinch zoom.
+
+Made locally viewed images persist as reusable artifacts, preserved artifact IDs alongside model-visible image content, and added clearer collapsible image results in the Web UI and TUI.
+
+Made multi-line extension widgets start folded above and below the composer in both UIs, preserving the chosen fold state across updates.
+
 ## 0.6.11-beta
 
 Added a shared lowercase Kodelet wordmark to the Web UI sidebar and authentication pages, plus an SVG favicon that loads before authentication.

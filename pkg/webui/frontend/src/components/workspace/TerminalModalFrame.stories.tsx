@@ -49,10 +49,22 @@ export const Mobile: Story = {
   play: async ({ canvasElement }) => {
     await canvasElement.ownerDocument.fonts.ready;
     const canvas = within(canvasElement);
+    if (
+      !canvasElement.ownerDocument.defaultView?.matchMedia('(hover: none) and (pointer: coarse)')
+        .matches
+    ) {
+      expect(canvas.getByText('Ctrl+C')).not.toBeVisible();
+      expect(canvas.getByText('Ctrl+D')).not.toBeVisible();
+      expect(canvas.getByText('More keys')).not.toBeVisible();
+      expect(canvas.queryByRole('group', { name: 'Terminal keys' })).not.toBeInTheDocument();
+      return;
+    }
+
     const toggle = canvas.getByRole('button', { name: 'More keys' });
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(canvas.getByRole('button', { name: 'Ctrl+C' })).toBeVisible();
+    expect(canvas.getByRole('button', { name: 'Ctrl+D' })).toBeVisible();
 
     const panel = canvas.getByTestId('terminal-panel');
     expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);

@@ -460,7 +460,7 @@
 }
 
 .workspace-terminal-controls {
-  display: flex;
+  display: none;
   flex: 0 0 auto;
   flex-direction: column;
   min-width: 0;
@@ -468,6 +468,13 @@
   padding: 0.35rem;
   border-top: 1px solid color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
   background: var(--terminal-background);
+}
+
+/* Show shortcut helpers for touch-primary devices, not narrow desktop windows. */
+@media (hover: none) and (pointer: coarse) {
+  .workspace-terminal-controls {
+    display: flex;
+  }
 }
 
 .workspace-terminal-controls-row {
