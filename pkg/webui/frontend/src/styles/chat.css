@@ -192,12 +192,12 @@
   align-items: center;
   gap: 0.7rem;
   padding: 0.12rem 0;
-  color: rgba(20, 20, 19, 0.64);
+  color: var(--kodelet-muted);
 }
 
 .chat-streaming-spinner {
   font-size: 1.12rem;
-  color: rgba(87, 82, 73, 0.74);
+  color: var(--kodelet-muted);
 }
 
 .chat-streaming-label {
@@ -207,7 +207,7 @@
   font-size: 0.78rem;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: rgba(20, 20, 19, 0.68);
+  color: var(--kodelet-muted);
 }
 
 .thinking-group-content {
@@ -217,7 +217,7 @@
 
 .thinking-group-item + .thinking-group-item {
   padding-top: 0.95rem;
-  border-top: 1px solid rgba(20, 20, 19, 0.06);
+  border-top: 1px solid color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
 }
 
 .chat-uploaded-image {
@@ -231,8 +231,8 @@
   max-height: 24rem;
   object-fit: contain;
   border-radius: 0.25rem;
-  border: 1px solid rgba(20, 20, 19, 0.08);
-  background: rgba(232, 230, 220, 0.42);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 42%, transparent);
 }
 
 .slash-command-card {
@@ -245,12 +245,12 @@
   font-family: var(--font-heading);
   font-size: 0.78rem;
   font-weight: 500;
-  color: rgba(20, 20, 19, 0.66);
+  color: var(--kodelet-muted);
 }
 
 .slash-command-card-icon {
   flex-shrink: 0;
-  color: rgba(20, 20, 19, 0.58);
+  color: var(--kodelet-muted);
   transform: translateY(-0.02rem);
 }
 
@@ -265,7 +265,7 @@
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 500;
-  color: rgba(20, 20, 19, 0.52);
+  color: var(--kodelet-muted);
 }
 
 .slash-command-card-goal {

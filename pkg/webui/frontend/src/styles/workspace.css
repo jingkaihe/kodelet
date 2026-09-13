@@ -80,13 +80,13 @@
 }
 
 .workspace-tools-tab:hover {
-  background: rgba(93, 83, 64, 0.04);
+  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
   color: var(--kodelet-dark);
 }
 
 .workspace-tools-shell .workspace-tools-toggle:focus-visible,
 .workspace-tools-tab:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
@@ -139,7 +139,7 @@
   overflow: auto;
   border-radius: 2px;
   border: 1px solid var(--sidebar-stroke-strong);
-  background: rgba(250, 249, 245, 0.35);
+  background: color-mix(in srgb, var(--kodelet-elevated) 35%, transparent);
   padding: 0.85rem;
 }
 
@@ -176,7 +176,7 @@
   border-radius: 0.25rem;
   border: 1px solid var(--sidebar-stroke-strong);
   background: transparent;
-  color: #756e63;
+  color: var(--kodelet-muted);
   transition:
     color 140ms ease,
     background-color 140ms ease,
@@ -195,8 +195,8 @@
 }
 
 .workspace-diff-icon-button:hover:not(:disabled) {
-  border-color: rgba(93, 83, 64, 0.17);
-  background: rgba(93, 83, 64, 0.06);
+  border-color: color-mix(in srgb, var(--kodelet-muted) 17%, transparent);
+  background: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
   color: var(--kodelet-dark);
 }
 
@@ -206,13 +206,13 @@
 }
 
 .workspace-diff-icon-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
 .workspace-diff-panel .surface-panel {
   border-radius: 2px;
-  background: rgba(250, 249, 245, 0.35);
+  background: color-mix(in srgb, var(--kodelet-elevated) 35%, transparent);
   padding: 0.6rem 0.75rem;
   font-size: 0.76rem;
   box-shadow: none;
@@ -229,7 +229,7 @@
   overflow: hidden;
   border: 1px solid var(--sidebar-stroke-strong);
   border-radius: 2px;
-  background: rgba(250, 249, 245, 0.35);
+  background: color-mix(in srgb, var(--kodelet-elevated) 35%, transparent);
 }
 
 .workspace-diff-file-toggle {
@@ -250,22 +250,22 @@
 }
 
 .workspace-diff-file-toggle:hover {
-  background: rgba(93, 83, 64, 0.04);
+  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
 }
 
 .workspace-diff-file-toggle[aria-expanded="true"] {
-  background: rgba(93, 83, 64, 0.06);
+  background: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
 }
 
 .workspace-diff-file-toggle:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
 .workspace-diff-file-chevron {
   width: 1rem;
   height: 1rem;
-  color: rgba(20, 20, 19, 0.5);
+  color: var(--kodelet-muted);
   transition: transform 140ms ease;
 }
 
@@ -295,27 +295,27 @@
 }
 
 .workspace-diff-stat-added {
-  color: #58723d;
+  color: var(--kodelet-success);
 }
 
 .workspace-diff-stat-removed {
-  color: #9a4545;
+  color: var(--kodelet-error);
 }
 
 .workspace-diff-stat-status {
-  color: rgba(20, 20, 19, 0.72);
+  color: var(--kodelet-muted);
   font-family: var(--font-mono);
   font-weight: 400;
 }
 
 .workspace-diff-file-body {
-  border-top: 1px solid rgba(93, 83, 64, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--kodelet-muted) 8%, transparent);
 }
 
 .workspace-diff-file-body .diff-block {
   border: 0;
   border-radius: 0;
-  background: rgba(247, 243, 235, 0.38);
+  background: color-mix(in srgb, var(--kodelet-surface) 38%, transparent);
 }
 
 .workspace-diff-panel .diff-line {
@@ -337,7 +337,7 @@
   border-radius: 2px;
   border: 1px dashed var(--sidebar-stroke-strong);
   background: transparent;
-  color: rgba(20, 20, 19, 0.6);
+  color: var(--kodelet-muted);
   font-family: var(--font-mono);
   font-size: 0.76rem;
   text-align: center;

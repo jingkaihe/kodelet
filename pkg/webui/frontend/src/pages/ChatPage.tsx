@@ -1486,6 +1486,10 @@ const ChatPage: React.FC = () => {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && sidebarOverlayOpen) {
+        // Let a nested menu handle Escape before dismissing the entire drawer.
+        if (event.target instanceof Element && event.target.closest('[role="menu"]')) {
+          return;
+        }
         event.preventDefault();
         setSidebarVisible(false);
         return;

@@ -23,7 +23,7 @@ const diffLines = parseUnifiedDiff(
 );
 
 const ReferencePrimitiveGallery = () => (
-  <div className="min-h-screen bg-[rgba(244,239,229,0.78)] px-5 py-6">
+  <div className="min-h-screen bg-kodelet-light px-5 py-6">
     <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-2">
       <section className="surface-panel rounded-2xl p-4">
         <h3 className="mb-3 text-sm font-semibold">Key/value grid</h3>

@@ -12,6 +12,7 @@
 }
 
 .sidebar-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -48,7 +49,7 @@
 
 .sidebar-action-link:hover:not(:disabled) {
   color: var(--kodelet-dark);
-  background: rgba(93, 83, 64, 0.06);
+  background: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
 }
 
 .sidebar-action-link:disabled {
@@ -168,7 +169,7 @@
   gap: 0.12rem;
   margin-left: 0.86rem;
   padding: 0.08rem 0 0.1rem 0.5rem;
-  border-left: 1px solid rgba(186, 178, 163, 0.42);
+  border-left: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 42%, transparent);
 }
 
 .conversation-group-controls {
@@ -205,7 +206,7 @@
 
 .conversation-group-more:hover {
   color: var(--kodelet-dark);
-  border-color: rgba(20, 20, 19, 0.06);
+  border-color: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
   background: color-mix(in srgb, var(--kodelet-light) 42%, transparent);
   box-shadow: none;
 }
@@ -254,7 +255,7 @@
   flex: 0 0 auto;
   margin-left: 0.5rem;
   margin-right: -0.36rem;
-  color: rgba(117, 110, 99, 0.3);
+  color: color-mix(in srgb, var(--kodelet-muted) 30%, transparent);
 }
 
 .conversation-ancestor,
@@ -324,7 +325,7 @@
 .conversation-link-row.menu-open .conversation-link {
   background: color-mix(in srgb, var(--kodelet-light) 54%, transparent);
   color: var(--kodelet-dark);
-  border-color: rgba(20, 20, 19, 0.045);
+  border-color: color-mix(in srgb, var(--kodelet-dark) 4.5%, transparent);
   box-shadow: none;
 }
 
@@ -364,7 +365,7 @@
   width: 1.08rem;
   height: 1.08rem;
   margin-left: 0.18rem;
-  color: #008494;
+  color: var(--kodelet-link);
 }
 
 .conversation-running-spinner {
@@ -397,7 +398,7 @@
 .conversation-link-more-button:hover,
 .conversation-link-row.menu-open .conversation-link-more-button {
   background: color-mix(in srgb, var(--kodelet-light) 52%, transparent);
-  border-color: rgba(20, 20, 19, 0.04);
+  border-color: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
   box-shadow: none;
 }
 
@@ -455,7 +456,7 @@
 }
 
 .conversation-action-menu-item.danger {
-  color: #9d3b33;
+  color: var(--kodelet-error);
 }
 
 .conversation-action-menu-item:disabled {
@@ -468,7 +469,7 @@
   flex-shrink: 0;
   margin-top: 0.35rem;
   padding-top: 0.8rem;
-  border-top: 1px solid rgba(93, 83, 64, 0.1);
+  border-top: 1px solid color-mix(in srgb, var(--kodelet-muted) 10%, transparent);
 }
 
 .sidebar-account-trigger {
@@ -492,7 +493,7 @@
 
 .sidebar-account-trigger:hover,
 .sidebar-account-trigger[aria-expanded="true"] {
-  border-color: rgba(20, 20, 19, 0.045);
+  border-color: color-mix(in srgb, var(--kodelet-dark) 4.5%, transparent);
   background: color-mix(in srgb, var(--kodelet-light) 54%, transparent);
   color: var(--kodelet-dark);
 }
@@ -560,12 +561,13 @@
 }
 
 .sidebar-collapsed-rail {
+  z-index: 20;
   width: 2.75rem;
   min-height: 100vh;
   flex-shrink: 0;
   justify-content: center;
   align-items: flex-start;
-  border-right: 1px solid rgba(93, 83, 64, 0.08);
+  border-right: 1px solid color-mix(in srgb, var(--kodelet-muted) 8%, transparent);
   background: var(--sidebar-surface-opaque);
 }
 
@@ -591,7 +593,7 @@
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
-  background: rgba(93, 83, 64, 0.16);
+  background: var(--sidebar-stroke-strong);
 }
 
 .sidebar-toggle-button {
@@ -621,7 +623,7 @@
 }
 
 .sidebar-toggle-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
 }
 
@@ -637,8 +639,8 @@
 
 .sidebar-search-toggle[aria-expanded="true"],
 .sidebar-collapsed-action.is-active {
-  background: rgba(0, 132, 148, 0.06);
-  color: #008494;
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
+  color: var(--kodelet-link);
 }
 
 @media (min-width: 1024px) {
@@ -673,7 +675,7 @@
 }
 
 .chat-sidebar-surface :is(button, a):focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 

@@ -1,5 +1,5 @@
 .activity-stack {
-  --activity-color: #087f8c;
+  --activity-color: var(--kodelet-link);
   position: relative;
   display: grid;
   min-width: 0;
@@ -86,11 +86,11 @@
 }
 
 .activity-card-thinking {
-  --activity-color: #a36a12;
+  --activity-color: var(--kodelet-warning);
 }
 
 .activity-card-error {
-  --activity-color: #a63d3d;
+  --activity-color: var(--kodelet-error);
 }
 
 .activity-detail-content {
@@ -392,7 +392,7 @@
   max-height: 24rem;
   overflow: auto;
   padding: 0.72rem;
-  background: rgba(247, 243, 235, 0.58);
+  background: color-mix(in srgb, var(--kodelet-surface) 58%, transparent);
   box-shadow: none;
 }
 
@@ -450,17 +450,17 @@
 
 .task-run-activity-marker {
   margin-top: 0.08rem;
-  color: rgba(74, 122, 88, 0.82);
+  color: var(--kodelet-success);
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
 
 .task-run-activity-marker.is-running {
-  color: #c79643;
+  color: var(--kodelet-warning);
 }
 
 .task-run-activity-marker.is-failed {
-  color: #b04a4a;
+  color: var(--kodelet-error);
 }
 
 .task-run-activity-copy {
@@ -482,7 +482,7 @@
 }
 
 .task-run-activity.is-failed .task-run-activity-label {
-  color: #8d3e3e;
+  color: var(--kodelet-error);
 }
 
 .task-run-activity-preview {
@@ -492,7 +492,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.66rem;
-  color: rgba(141, 62, 62, 0.72);
+  color: var(--kodelet-error);
 }
 
 .task-run-omitted,
@@ -508,7 +508,7 @@
 }
 
 .task-run-history {
-  border-top: 1px solid rgba(20, 20, 19, 0.055);
+  border-top: 1px solid color-mix(in srgb, var(--kodelet-dark) 5.5%, transparent);
   padding-top: 0.5rem;
 }
 
@@ -519,7 +519,7 @@
   font-family: var(--font-heading);
   font-size: 0.7rem;
   font-weight: 600;
-  color: rgba(84, 123, 166, 0.86);
+  color: var(--kodelet-blue);
 }
 
 .task-run-history > summary:hover {

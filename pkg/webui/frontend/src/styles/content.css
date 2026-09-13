@@ -12,12 +12,12 @@
 }
 
 .tool-action-link:hover {
-  color: #547ba6;
+  color: color-mix(in srgb, var(--kodelet-blue) 85%, var(--kodelet-dark));
 }
 
 .tool-detail-panel {
   border-radius: 1rem;
-  border: 1px solid rgba(20, 20, 19, 0.08);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
   background: var(--kodelet-panel);
   padding: 0.9rem 1rem;
 }
@@ -34,7 +34,7 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: none;
-  color: white;
+  color: var(--kodelet-on-accent);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
     0 10px 26px rgba(20, 20, 19, 0.12);
@@ -141,7 +141,7 @@ pre code {
 
 .chat-prose blockquote {
   margin: 1rem 0;
-  border-left: 3px solid rgba(217, 119, 87, 0.32);
+  border-left: 3px solid color-mix(in srgb, var(--kodelet-orange) 32%, transparent);
   padding-left: 1rem;
   color: var(--kodelet-muted);
   font-style: italic;
@@ -170,7 +170,7 @@ pre code {
   max-width: 100%;
   margin: 1rem 0;
   overflow-x: auto;
-  border: 1px solid rgba(20, 20, 19, 0.12);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 12%, transparent);
   border-radius: 0.6rem;
   background: color-mix(in srgb, var(--kodelet-light) 36%, transparent);
   box-shadow: 0 1px 2px rgba(20, 20, 19, 0.03);
@@ -187,8 +187,8 @@ pre code {
 .chat-markdown-table th,
 .chat-markdown-table td {
   padding: 0.52rem 0.68rem;
-  border-right: 1px solid rgba(20, 20, 19, 0.1);
-  border-bottom: 1px solid rgba(20, 20, 19, 0.1);
+  border-right: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
   vertical-align: top;
 }
 
@@ -325,14 +325,14 @@ pre code {
 }
 
 .prose-enhanced code {
-  background-color: rgba(232, 230, 220, 0.72);
+  background-color: color-mix(in srgb, var(--kodelet-light-gray) 72%, transparent);
   color: var(--kodelet-dark);
   padding: 0.1rem 0.34rem;
   border-radius: 0.32rem;
   font-size: 0.78em;
   font-family: var(--font-mono);
   line-height: 1.32;
-  border: 1px solid rgba(176, 174, 165, 0.22);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 22%, transparent);
 }
 
 .prose-enhanced :not(pre) > code {
@@ -344,13 +344,13 @@ pre code {
 }
 
 .prose-enhanced pre {
-  background-color: rgba(232, 230, 220, 0.45);
+  background-color: color-mix(in srgb, var(--kodelet-light-gray) 45%, transparent);
   color: var(--kodelet-dark);
   border-radius: 0.5rem;
   padding: 1rem;
   margin: 1rem 0;
   overflow-x: auto;
-  border: 1px solid rgba(176, 174, 165, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 20%, transparent);
 }
 
 .prose-enhanced pre code {
@@ -384,11 +384,11 @@ pre code {
 }
 
 .prose-enhanced blockquote {
-  border-left: 3px solid rgba(217, 119, 87, 0.32);
+  border-left: 3px solid color-mix(in srgb, var(--kodelet-orange) 32%, transparent);
   margin: 1rem 0;
   padding-left: 1rem;
   font-style: italic;
-  color: rgba(20, 20, 19, 0.72);
+  color: var(--kodelet-muted);
 }
 
 .prose-enhanced table {

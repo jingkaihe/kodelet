@@ -10,11 +10,11 @@
   font-size: 0.82rem;
   font-weight: 500;
   line-height: 1.45;
-  color: rgba(20, 20, 19, 0.68);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .bash-tool-description.is-muted {
-  color: rgba(20, 20, 19, 0.44);
+  color: var(--kodelet-muted);
 }
 
 .bash-tool-actions {
@@ -32,15 +32,15 @@
   font-size: 0.72rem;
   font-weight: 650;
   line-height: 1.2;
-  color: #6f6a5f;
+  color: var(--kodelet-muted);
 }
 
 .bash-tool-badge.is-success {
-  color: #5f7247;
+  color: var(--kodelet-success);
 }
 
 .bash-tool-badge.is-error {
-  color: #a63f3f;
+  color: var(--kodelet-error);
 }
 
 .skill-tool-detail {
@@ -64,14 +64,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 650;
-  color: rgba(20, 20, 19, 0.64);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .skill-tool-loaded {
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 0.66rem;
-  color: rgba(122, 117, 107, 0.58);
+  color: var(--kodelet-muted);
 }
 
 .skill-tool-path {
@@ -82,7 +82,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.73rem;
-  color: rgba(20, 20, 19, 0.7);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .quiet-tool-detail {
@@ -101,12 +101,12 @@
   font-family: var(--font-heading);
   font-size: 0.76rem;
   line-height: 1.35;
-  color: rgba(20, 20, 19, 0.66);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .quiet-tool-emphasis {
   font-weight: 650;
-  color: rgba(20, 20, 19, 0.64);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .quiet-tool-muted {
@@ -114,7 +114,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(122, 117, 107, 0.68);
+  color: var(--kodelet-muted);
 }
 
 .quiet-tool-muted.mono,
@@ -124,7 +124,7 @@
 
 .quiet-tool-warning {
   font-weight: 650;
-  color: #a63f3f;
+  color: var(--kodelet-error);
 }
 
 .quiet-tool-path {
@@ -134,20 +134,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.73rem;
-  color: rgba(20, 20, 19, 0.68);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .quiet-tool-empty {
   font-family: var(--font-heading);
   font-size: 0.76rem;
-  color: rgba(20, 20, 19, 0.52);
+  color: var(--kodelet-muted);
 }
 
 .quiet-tool-section-title {
   font-family: var(--font-heading);
   font-size: 0.75rem;
   font-weight: 650;
-  color: rgba(20, 20, 19, 0.62);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .extension-presentation-detail {
@@ -157,7 +157,7 @@
 .extension-presentation-body {
   max-height: 26rem;
   overflow: auto;
-  color: rgba(20, 20, 19, 0.72);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
   font-family: var(--font-body);
   font-size: 0.82rem;
   line-height: 1.56;
@@ -186,13 +186,13 @@
   max-width: 100%;
   font-size: 0.76rem;
   line-height: 1.42;
-  color: rgba(20, 20, 19, 0.62);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .read-conversation-goal span:first-child {
   font-family: var(--font-heading);
   font-weight: 650;
-  color: rgba(122, 117, 107, 0.66);
+  color: var(--kodelet-muted);
 }
 
 .read-conversation-goal span:last-child {
@@ -204,10 +204,10 @@
   max-height: 26rem;
   overflow: auto;
   padding: 0.72rem 0.78rem;
-  border: 1px solid rgba(176, 174, 165, 0.16);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 16%, transparent);
   border-radius: 0.58rem;
-  background: rgba(247, 243, 235, 0.38);
-  color: rgba(20, 20, 19, 0.72);
+  background: color-mix(in srgb, var(--kodelet-surface) 38%, transparent);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
   font-family: var(--font-body);
   font-size: 0.82rem;
   line-height: 1.56;
@@ -236,7 +236,7 @@
   margin: 0.72rem 0 0.34rem;
   font-family: var(--font-heading);
   font-weight: 650;
-  color: rgba(20, 20, 19, 0.72);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .tool-compact-markdown h1,
@@ -270,7 +270,7 @@
 }
 
 .tool-compact-markdown a {
-  color: #547ba6;
+  color: var(--kodelet-blue);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.16em;
@@ -284,9 +284,9 @@
 
 .tool-compact-markdown code {
   padding: 0.08rem 0.28rem;
-  border: 1px solid rgba(176, 174, 165, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 20%, transparent);
   border-radius: 0.28rem;
-  background: rgba(232, 230, 220, 0.48);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 48%, transparent);
   font-family: var(--font-mono);
   font-size: 0.75em;
 }
@@ -296,9 +296,9 @@
   overflow: auto;
   margin: 0.6rem 0;
   padding: 0.62rem;
-  border: 1px solid rgba(176, 174, 165, 0.18);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 18%, transparent);
   border-radius: 0.46rem;
-  background: rgba(232, 230, 220, 0.38);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 38%, transparent);
 }
 
 .tool-compact-markdown pre code {
@@ -316,17 +316,17 @@
 }
 
 .apply-patch-result-failed {
-  border-left: 2px solid rgba(166, 63, 63, 0.36);
+  border-left: 2px solid color-mix(in srgb, var(--kodelet-error) 36%, transparent);
   padding-left: 0.72rem;
 }
 
 .apply-patch-error {
   border-radius: 10px;
-  background: rgba(191, 63, 63, 0.08);
+  background: color-mix(in srgb, var(--kodelet-error) 8%, transparent);
   padding: 0.46rem 0.62rem;
   font-family: var(--font-heading);
   font-size: 0.76rem;
-  color: #8d3e3e;
+  color: var(--kodelet-error);
 }
 
 .apply-patch-change {
@@ -349,23 +349,23 @@
   font-family: var(--font-mono);
   font-size: 0.66rem;
   font-weight: 600;
-  color: rgba(122, 117, 107, 0.7);
+  color: var(--kodelet-muted);
 }
 
 .apply-patch-operation-add {
-  color: #5f7247;
+  color: var(--kodelet-success);
 }
 
 .apply-patch-operation-update {
-  color: #537aa5;
+  color: var(--kodelet-blue);
 }
 
 .apply-patch-operation-delete {
-  color: #a63f3f;
+  color: var(--kodelet-error);
 }
 
 .apply-patch-operation-move {
-  color: #8b6a2b;
+  color: var(--kodelet-warning);
 }
 
 .apply-patch-path {
@@ -375,7 +375,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.73rem;
-  color: rgba(20, 20, 19, 0.68);
+  color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
 .apply-patch-counts {
@@ -388,17 +388,17 @@
 }
 
 .apply-patch-count-added {
-  color: #5f7247;
+  color: var(--kodelet-success);
 }
 
 .apply-patch-count-removed {
-  color: #a63f3f;
+  color: var(--kodelet-error);
 }
 
 .apply-patch-empty {
   font-family: var(--font-heading);
   font-size: 0.76rem;
-  color: rgba(20, 20, 19, 0.52);
+  color: var(--kodelet-muted);
 }
 
 .tool-kv-grid {
@@ -412,8 +412,8 @@
 
 .tool-kv-item {
   min-width: 0;
-  background: rgba(232, 230, 220, 0.42);
-  border: 1px solid rgba(176, 174, 165, 0.18);
+  background: color-mix(in srgb, var(--kodelet-light-gray) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kodelet-mid-gray) 18%, transparent);
   border-radius: 8px;
   padding: 0.45rem 0.6rem;
 }
@@ -424,7 +424,7 @@
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: #7a756b;
+  color: var(--kodelet-muted);
   margin-bottom: 0.18rem;
 }
 
@@ -441,11 +441,11 @@
 }
 
 .tool-note {
-  background: rgba(250, 249, 245, 0.95);
+  background: color-mix(in srgb, var(--kodelet-light) 95%, transparent);
   border-left: 3px solid var(--kodelet-orange);
   border-radius: 6px;
   padding: 0.55rem 0.7rem;
   margin: 0.45rem 0;
   font-size: 0.83rem;
-  color: #5f5a50;
+  color: var(--kodelet-muted);
 }

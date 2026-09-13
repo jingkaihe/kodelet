@@ -39,7 +39,7 @@
   border-left: 2px solid var(--toast-accent);
   border-radius: 0.25rem;
   background: var(--kodelet-light);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--tui-text) 6%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   color: var(--tui-text);
   font-family: var(--font-mono);
   font-size: 0.75rem;

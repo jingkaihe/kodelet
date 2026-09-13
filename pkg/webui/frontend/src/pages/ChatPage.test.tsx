@@ -499,6 +499,15 @@ describe('ChatPage', () => {
     expect(screen.getByRole('dialog', { name: 'Conversations' })).toBeInTheDocument();
     expect(screen.getByTestId('chat-sidebar-shell')).toHaveAttribute('tabindex', '-1');
     expect(screen.getByTestId('sidebar-hide-button')).toBeEnabled();
+    await waitFor(() => expect(screen.getByTestId('sidebar-hide-button')).toHaveFocus());
+    const themePicker = screen.getByRole('button', { name: 'Choose theme' });
+    fireEvent.click(themePicker);
+    const selectedTheme = screen.getByRole('menuitemradio', { checked: true });
+    expect(selectedTheme).toHaveFocus();
+    fireEvent.keyDown(selectedTheme, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: 'Color theme' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Conversations' })).toBeInTheDocument();
+    expect(themePicker).toHaveFocus();
     fireEvent.click(screen.getByTestId('sidebar-hide-button'));
     await waitFor(() => expect(screen.getByTestId('sidebar-attached-toggle-mobile')).toHaveFocus());
     fireEvent.click(screen.getByTestId('sidebar-attached-toggle-mobile'));

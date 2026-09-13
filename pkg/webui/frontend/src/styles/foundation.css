@@ -2,17 +2,34 @@
    Kodelet Web UI
    ============================================ */
 
-/* Gruvbox-inspired light surfaces, retaining Kodelet's brand accents. */
+/* Palettes change colors only; typography and component geometry stay shared.
+   Keep DaisyUI's semantic colors in tailwind.config.js in sync. */
 :root {
-  --kodelet-dark: #3c3836;
-  --kodelet-light: #faf8ef;
-  --kodelet-mid-gray: #d5c4a1;
-  --kodelet-light-gray: #ebdbb2;
+  color-scheme: light;
+  --kodelet-dark-rgb: 60 56 54;
+  --kodelet-light-rgb: 250 248 239;
+  --kodelet-mid-gray-rgb: 213 196 161;
+  --kodelet-light-gray-rgb: 235 219 178;
+  --kodelet-orange-rgb: 217 119 87;
+  --kodelet-blue-rgb: 106 155 204;
+  --kodelet-green-rgb: 120 140 93;
+  --kodelet-dark: rgb(var(--kodelet-dark-rgb));
+  --kodelet-light: rgb(var(--kodelet-light-rgb));
+  --kodelet-mid-gray: rgb(var(--kodelet-mid-gray-rgb));
+  --kodelet-light-gray: rgb(var(--kodelet-light-gray-rgb));
+  --kodelet-orange: rgb(var(--kodelet-orange-rgb));
+  --kodelet-blue: rgb(var(--kodelet-blue-rgb));
   --kodelet-surface: #f8f5e9;
   --kodelet-muted: #665c54;
   --kodelet-link: #076678;
-  --kodelet-orange: #d97757;
-  --kodelet-blue: #6a9bcc;
+  --kodelet-success: #5f7247;
+  --kodelet-error: #a63d3d;
+  --kodelet-warning: #a36a12;
+  --kodelet-elevated: #faf8ef;
+  --kodelet-on-accent: #faf8ef;
+  --kodelet-syntax-string: #4f6338;
+  --kodelet-syntax-type: #805a46;
+  --kodelet-syntax-number: #8b5269;
   --kodelet-panel: color-mix(in srgb, var(--kodelet-surface) 94%, transparent);
   --font-heading: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-body: "Crimson Pro", Georgia, serif;
@@ -40,6 +57,52 @@
 
   /* Noise texture for depth */
   --noise-texture: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="kodelet-classic"] {
+  --kodelet-dark-rgb: 20 20 19;
+  --kodelet-light-rgb: 250 249 245;
+  --kodelet-mid-gray-rgb: 176 174 165;
+  --kodelet-light-gray-rgb: 232 230 220;
+  --kodelet-surface: #f4efe5;
+  --kodelet-muted: #71695e;
+  --kodelet-link: #00758a;
+  --kodelet-elevated: #faf9f5;
+  --kodelet-on-accent: #faf9f5;
+  --sidebar-surface-ink: #4d473f;
+}
+
+:root[data-theme="gruvbox-dark"] {
+  color-scheme: dark;
+  --kodelet-dark-rgb: 235 219 178;
+  --kodelet-light-rgb: 40 40 40;
+  --kodelet-mid-gray-rgb: 102 92 84;
+  --kodelet-light-gray-rgb: 80 73 69;
+  --kodelet-orange-rgb: 254 128 25;
+  --kodelet-blue-rgb: 131 165 152;
+  --kodelet-green-rgb: 184 187 38;
+  --kodelet-surface: #252525;
+  --kodelet-muted: #bdae93;
+  --kodelet-link: #8ec07c;
+  --kodelet-success: #b8bb26;
+  /* A lighter Gruvbox red keeps small error text legible on tinted surfaces. */
+  --kodelet-error: #fb7160;
+  --kodelet-warning: #fabd2f;
+  --kodelet-elevated: #32302f;
+  --kodelet-on-accent: #282828;
+  --kodelet-syntax-string: #b8bb26;
+  --kodelet-syntax-type: #fabd2f;
+  --kodelet-syntax-number: #d3869b;
+  --tui-text: #ebdbb2;
+  --tui-subtext: #bdae93;
+  --tui-muted: #a89984;
+  --tui-surface: #504945;
+  --tui-blue: #83a598;
+  --tui-teal: #8ec07c;
+  --tui-green: #b8bb26;
+  --tui-red: var(--kodelet-error);
+  --tui-yellow: #fabd2f;
+  --tui-mauve: #d3869b;
 }
 
 html,
@@ -142,7 +205,7 @@ h6 {
 }
 
 .surface-panel {
-  border: 1px solid rgba(20, 20, 19, 0.08);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
   background: var(--kodelet-panel);
   box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
 }

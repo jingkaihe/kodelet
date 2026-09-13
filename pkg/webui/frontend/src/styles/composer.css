@@ -4,8 +4,8 @@
   justify-content: center;
   gap: 0.35rem;
   border-radius: 9999px;
-  border: 1px solid rgba(20, 20, 19, 0.1);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
+  background: color-mix(in srgb, var(--kodelet-elevated) 82%, transparent);
   padding: 0.45rem 0.9rem;
   font-family: var(--font-heading);
   font-size: 0.72rem;
@@ -22,9 +22,9 @@
 }
 
 .panel-action-button:hover {
-  border-color: rgba(217, 119, 87, 0.24);
+  border-color: color-mix(in srgb, var(--kodelet-orange) 24%, transparent);
   color: var(--kodelet-orange);
-  background: rgba(255, 255, 255, 0.96);
+  background: color-mix(in srgb, var(--kodelet-elevated) 96%, transparent);
   box-shadow: 0 10px 24px rgba(20, 20, 19, 0.08);
 }
 
@@ -72,7 +72,7 @@
 }
 
 .composer-surface {
-  border: 1px solid rgba(93, 83, 64, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   border-radius: 0.25rem;
   background: color-mix(in srgb, var(--kodelet-surface) 45%, transparent);
   transition:
@@ -81,22 +81,22 @@
 }
 
 .composer-surface:focus-within {
-  border-color: rgba(0, 132, 148, 0.5);
+  border-color: color-mix(in srgb, var(--kodelet-link) 50%, transparent);
 }
 
 .composer-surface.is-drag-active {
-  border-color: #008494;
-  background: rgba(0, 132, 148, 0.06);
+  border-color: var(--kodelet-link);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
 }
 
 .composer-error {
   margin-bottom: 0.75rem;
-  border-left: 2px solid #a63d3d;
+  border-left: 2px solid var(--kodelet-error);
   padding: 0.4rem 0.75rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.6;
-  color: #a63d3d;
+  color: var(--kodelet-error);
   overflow-wrap: anywhere;
 }
 
@@ -109,7 +109,7 @@
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  border: 1px solid rgba(93, 83, 64, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   border-radius: 2px;
   background: var(--kodelet-light);
   color: var(--sidebar-surface-ink);
@@ -117,7 +117,7 @@
 
 .composer-attachment-remove:focus-visible,
 .composer-slash-suggestion:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
@@ -151,7 +151,7 @@
   grid-row: 2;
   height: 1px;
   margin: 0 0.25rem;
-  background: rgba(20, 20, 19, 0.08);
+  background: color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
 }
 
 .composer-inline-context {
@@ -172,7 +172,7 @@
 }
 
 .composer-inline-context:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
 }
 
@@ -247,7 +247,7 @@
 }
 
 .transcript-meta-strip:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
 }
 
@@ -302,7 +302,7 @@
 }
 
 .pending-steer-content {
-  border-left: 2px solid rgba(93, 83, 64, 0.2);
+  border-left: 2px solid color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   padding: 0.5rem 1rem;
 }
 
@@ -413,7 +413,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   border-radius: 2px;
-  border: 1px solid rgba(20, 20, 19, 0.1);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
   background: var(--sidebar-surface-opaque);
 }
 
@@ -422,17 +422,17 @@
 }
 
 .composer-slash-suggestions::-webkit-scrollbar-track {
-  background: rgba(20, 20, 19, 0.04);
+  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
   border-radius: 999px;
 }
 
 .composer-slash-suggestions::-webkit-scrollbar-thumb {
-  background: rgba(77, 116, 160, 0.32);
+  background: color-mix(in srgb, var(--kodelet-blue) 32%, transparent);
   border-radius: 999px;
 }
 
 .composer-slash-suggestions::-webkit-scrollbar-thumb:hover {
-  background: rgba(77, 116, 160, 0.46);
+  background: color-mix(in srgb, var(--kodelet-blue) 46%, transparent);
 }
 
 .composer-slash-suggestion {
@@ -441,7 +441,7 @@
   grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
   gap: 0.25rem 0.85rem;
   border: 0;
-  border-bottom: 1px solid rgba(20, 20, 19, 0.06);
+  border-bottom: 1px solid color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
   background: transparent;
   padding: 0.72rem 0.9rem;
   text-align: left;
@@ -456,14 +456,14 @@
 
 .composer-slash-suggestion:hover,
 .composer-slash-suggestion.is-active {
-  background: rgba(0, 132, 148, 0.06);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
 }
 
 .composer-slash-suggestion-command {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 600;
-  color: #008494;
+  color: var(--kodelet-link);
 }
 
 .composer-slash-suggestion-description {
@@ -473,7 +473,7 @@
   font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 400;
-  color: rgba(20, 20, 19, 0.78);
+  color: color-mix(in srgb, var(--kodelet-dark) 78%, transparent);
 }
 
 .composer-slash-suggestion-hint {
@@ -483,7 +483,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.68rem;
-  color: rgba(20, 20, 19, 0.48);
+  color: var(--kodelet-muted);
 }
 
 .composer-slash-usage-hint {
@@ -491,7 +491,7 @@
   align-items: center;
   gap: 0.42rem;
   margin: -0.05rem 0.7rem 0;
-  color: #7d786d;
+  color: var(--kodelet-muted);
 }
 
 .composer-slash-usage-label {
@@ -510,7 +510,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: rgba(20, 20, 19, 0.5);
+  color: var(--kodelet-muted);
 }
 
 .composer-icon-button {
@@ -522,7 +522,7 @@
   border-radius: 0.25rem;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(20, 20, 19, 0.58);
+  color: var(--kodelet-muted);
   box-shadow: none;
   transition:
     transform 140ms ease,
@@ -535,22 +535,22 @@
 .composer-icon-button:hover:not(:disabled) {
   transform: none;
   border-color: transparent;
-  background: rgba(20, 20, 19, 0.045);
-  color: rgba(20, 20, 19, 0.82);
+  background: color-mix(in srgb, var(--kodelet-dark) 4.5%, transparent);
+  color: var(--kodelet-dark);
   box-shadow: none;
 }
 
 .composer-icon-button.is-active {
-  border-color: rgba(0, 132, 148, 0.25);
-  background: rgba(0, 132, 148, 0.06);
-  color: #008494;
+  border-color: color-mix(in srgb, var(--kodelet-link) 25%, transparent);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
+  color: var(--kodelet-link);
 }
 
 .composer-icon-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
   border-color: transparent;
-  background: rgba(0, 132, 148, 0.06);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
   box-shadow: none;
 }
 
@@ -585,11 +585,11 @@
 }
 
 .composer-action-icon-button:hover:not(:disabled) {
-  background: rgba(93, 83, 64, 0.08);
+  background: color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
 }
 
 .composer-action-icon-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
 }
 
@@ -602,7 +602,7 @@
 .composer-action-icon-button-ready {
   border-color: var(--sidebar-surface-ink);
   background: var(--sidebar-surface-ink);
-  color: var(--kodelet-light);
+  color: var(--kodelet-on-accent);
 }
 
 .composer-action-icon-button-ready:hover:not(:disabled) {
@@ -617,26 +617,26 @@
 }
 
 .composer-action-icon-button-disabled {
-  border-color: rgba(93, 83, 64, 0.14);
-  color: #756e63;
+  border-color: color-mix(in srgb, var(--kodelet-muted) 14%, transparent);
+  color: var(--kodelet-muted);
   opacity: 0.62;
 }
 
 .composer-action-icon-button-stop {
-  border-color: rgba(169, 84, 79, 0.2);
-  background: rgba(169, 84, 79, 0.04);
-  color: #a9544f;
+  border-color: color-mix(in srgb, var(--kodelet-error) 20%, transparent);
+  background: color-mix(in srgb, var(--kodelet-error) 4%, transparent);
+  color: var(--kodelet-error);
   box-shadow: none;
 }
 
 .composer-action-icon-button-stop:hover:not(:disabled) {
-  background: rgba(169, 84, 79, 0.1);
-  color: #994743;
+  background: color-mix(in srgb, var(--kodelet-error) 10%, transparent);
+  color: color-mix(in srgb, var(--kodelet-error) 90%, var(--kodelet-dark));
   box-shadow: none;
 }
 
 .composer-action-icon-button-stop:focus-visible {
-  outline-color: #a9544f;
+  outline-color: var(--kodelet-error);
   box-shadow: none;
 }
 
@@ -789,8 +789,8 @@
   flex-direction: column;
   overflow-y: auto;
   border-radius: 1rem;
-  border: 1px solid rgba(20, 20, 19, 0.1);
-  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid color-mix(in srgb, var(--kodelet-dark) 10%, transparent);
+  background: color-mix(in srgb, var(--kodelet-elevated) 98%, transparent);
   box-shadow: 0 18px 36px rgba(20, 20, 19, 0.12);
 }
 
@@ -800,7 +800,7 @@
   min-width: 100%;
   max-width: 100%;
   max-height: 14rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--kodelet-elevated) 72%, transparent);
 }
 
 .composer-cwd-suggestion {
@@ -814,7 +814,7 @@
 
 .composer-cwd-suggestion:hover,
 .composer-cwd-suggestion.is-active {
-  background: rgba(217, 119, 87, 0.08);
+  background: color-mix(in srgb, var(--kodelet-orange) 8%, transparent);
 }
 
 .composer-cwd-suggestion-path {

@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './styles/index.css';
+import { initializeTheme } from './theme';
+
+const cleanupTheme = initializeTheme();
+import.meta.hot?.dispose(cleanupTheme);
 
 const rootElement = document.getElementById('root');
 

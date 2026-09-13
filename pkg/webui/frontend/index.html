@@ -1,11 +1,31 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="kodelet" style="color-scheme: light;">
+<html lang="en" data-theme="kodelet">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Kodelet</title>
     <meta name="description" content="Kodelet conversation management interface" />
-    <meta name="theme-color" content="#faf9f5" />
+    <meta name="theme-color" content="#faf8ef" />
+    <!-- Apply the saved palette before styles paint; keep IDs/key in sync with src/theme.ts. -->
+    <script>
+      (() => {
+        let preference = 'system';
+        try {
+          const saved = localStorage.getItem('kodelet.theme');
+          if (['system', 'kodelet', 'kodelet-classic', 'gruvbox-dark'].includes(saved)) {
+            preference = saved;
+          }
+        } catch { /* Storage is optional. */ }
+        const theme = preference === 'system'
+          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'gruvbox-dark' : 'kodelet')
+          : preference;
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content = {
+          kodelet: '#faf8ef', 'kodelet-classic': '#faf9f5', 'gruvbox-dark': '#282828',
+        }[theme];
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
     <link rel="manifest" href="/assets/manifest.json" />

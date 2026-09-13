@@ -9,7 +9,7 @@
   overscroll-behavior-y: contain;
   font-family: var(--font-mono);
   color: var(--sidebar-surface-ink);
-  background: rgba(244, 239, 229, 0.78);
+  background: var(--kodelet-light);
 }
 
 .auth-page-shell {
@@ -39,16 +39,16 @@
   padding: 0.2rem 0;
   font-size: 0.7rem;
   line-height: 1.5;
-  color: #756e63;
+  color: var(--kodelet-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .auth-card {
   overflow: hidden;
-  border: 1px solid rgba(93, 83, 64, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   border-radius: 0.25rem;
-  background: rgba(250, 249, 245, 0.35);
+  background: color-mix(in srgb, var(--kodelet-elevated) 35%, transparent);
   padding: 0;
 }
 
@@ -72,7 +72,7 @@
   margin: 0.28rem 0 0;
   font-size: 0.78rem;
   line-height: 1.6;
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .auth-card-content,
@@ -106,19 +106,19 @@
 }
 
 .auth-notice-info {
-  color: #087f8c;
+  color: var(--kodelet-link);
 }
 
 .auth-notice-warning {
-  color: #94660d;
+  color: var(--kodelet-warning);
 }
 
 .auth-notice-error {
-  color: #a63d3d;
+  color: var(--kodelet-error);
 }
 
 .auth-notice-success {
-  color: #437a2c;
+  color: var(--kodelet-success);
 }
 
 .auth-code-form {
@@ -155,7 +155,7 @@
 }
 
 .auth-code-input:focus-visible + .auth-code-cells {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 3px;
 }
 
@@ -180,7 +180,7 @@
   aspect-ratio: 1;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(93, 83, 64, 0.2);
+  border: 1px solid color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   border-radius: 2px;
   background: transparent;
   font-family: var(--font-mono);
@@ -195,13 +195,13 @@
 }
 
 .auth-code-cell.is-filled {
-  border-color: rgba(93, 83, 64, 0.3);
-  background: rgba(93, 83, 64, 0.04);
+  border-color: color-mix(in srgb, var(--kodelet-muted) 30%, transparent);
+  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
 }
 
 .auth-code-cell.is-active {
-  border-color: #008494;
-  background: rgba(0, 132, 148, 0.06);
+  border-color: var(--kodelet-link);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
 }
 
 .auth-code-control[aria-busy="true"] .auth-code-cells {
@@ -211,7 +211,7 @@
 .auth-code-status {
   margin: 0;
   font-size: 0.72rem;
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .auth-primary-button,
@@ -236,48 +236,48 @@
 
 .auth-primary-button {
   min-width: 5rem;
-  border: 1px solid rgba(0, 132, 148, 0.25);
-  background: rgba(0, 132, 148, 0.06);
-  color: #087f8c;
+  border: 1px solid color-mix(in srgb, var(--kodelet-link) 25%, transparent);
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
+  color: var(--kodelet-link);
 }
 
 .auth-primary-button:hover:not(:disabled) {
-  border-color: rgba(0, 132, 148, 0.5);
-  background: rgba(0, 132, 148, 0.1);
+  border-color: color-mix(in srgb, var(--kodelet-link) 50%, transparent);
+  background: color-mix(in srgb, var(--kodelet-link) 10%, transparent);
 }
 
 .auth-secondary-button {
   border: 1px solid transparent;
   background: transparent;
-  color: #6f685e;
+  color: var(--kodelet-muted);
 }
 
 .auth-secondary-button:hover:not(:disabled) {
   border-color: var(--sidebar-stroke-strong);
-  background: rgba(93, 83, 64, 0.04);
+  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
   color: var(--kodelet-dark);
 }
 
 .auth-danger-button {
   border: 1px solid transparent;
   background: transparent;
-  color: #a63d3d;
+  color: var(--kodelet-error);
 }
 
 .auth-danger-button:hover:not(:disabled) {
-  border-color: rgba(168, 71, 57, 0.2);
-  background: rgba(168, 71, 57, 0.07);
+  border-color: color-mix(in srgb, var(--kodelet-error) 20%, transparent);
+  background: color-mix(in srgb, var(--kodelet-error) 7%, transparent);
 }
 
 .auth-primary-button:focus-visible,
 .auth-secondary-button:focus-visible,
 .auth-danger-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: 2px;
 }
 
 .auth-danger-button:focus-visible {
-  outline-color: #a63d3d;
+  outline-color: var(--kodelet-error);
 }
 
 .auth-primary-button:disabled,
@@ -308,7 +308,7 @@
 
 .auth-detail-row dt {
   font-size: 0.72rem;
-  color: #756e63;
+  color: var(--kodelet-muted);
 }
 
 .auth-detail-row dd {
@@ -330,24 +330,24 @@
   gap: 0.62rem;
   align-items: start;
   border: 0;
-  border-left: 2px solid rgba(168, 71, 57, 0.5);
+  border-left: 2px solid color-mix(in srgb, var(--kodelet-error) 50%, transparent);
   border-radius: 0;
-  background: rgba(168, 71, 57, 0.055);
+  background: color-mix(in srgb, var(--kodelet-error) 5.5%, transparent);
   padding: 0.64rem 0.72rem;
   font-size: 0.75rem;
   line-height: 1.6;
-  color: #75483f;
+  color: var(--kodelet-error);
 }
 
 .auth-replacement-confirmation input {
   width: 1rem;
   height: 1rem;
   margin-top: 0.12rem;
-  accent-color: #a84739;
+  accent-color: var(--kodelet-error);
 }
 
 .auth-replacement-confirmation input:focus-visible {
-  outline: 2px solid #a63d3d;
+  outline: 2px solid var(--kodelet-error);
   outline-offset: 3px;
 }
 

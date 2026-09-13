@@ -13,6 +13,7 @@ import type { AuthPrincipal, Conversation } from '../../types';
 import { cn, truncateText } from '../../utils';
 import KodeletBrand from '../KodeletBrand';
 import Spinner from '../Spinner';
+import ThemePicker from '../ThemePicker';
 
 const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
 const VISIBLE_CONVERSATIONS_STEP = 10;
@@ -90,6 +91,7 @@ export const ChatSidebarCollapsedRail: React.FC<ChatSidebarCollapsedRailProps> =
       >
         <PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
       </button>
+      <ThemePicker />
       <button
         aria-controls="conversation-search-dialog"
         aria-expanded={searchActive}
@@ -738,11 +740,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   );
 
   return (
-    <aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-4 py-4 lg:border-b-0">
+    <aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-kodelet-dark/[0.08] px-4 py-4 lg:border-b-0">
       <div className="sidebar-header">
         <KodeletBrand label="Kodelet conversations" />
 
         <div className="sidebar-header-actions">
+          <ThemePicker />
           <button
             aria-controls="conversation-search-dialog"
             aria-expanded={searchActive}

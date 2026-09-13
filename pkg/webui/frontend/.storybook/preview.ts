@@ -1,5 +1,9 @@
 import type { Preview } from '@storybook/react-vite';
 import '../src/styles/index.css';
+import { initializeTheme } from '../src/theme';
+
+const cleanupTheme = initializeTheme();
+import.meta.hot?.dispose(cleanupTheme);
 
 const preview: Preview = {
   parameters: {

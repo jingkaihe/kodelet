@@ -90,6 +90,12 @@ const ConversationSearchStory = (
 
 export const GroupedConversations: Story = {};
 
+export const ThemeMenuOpen: Story = {
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose theme' }));
+  },
+};
+
 export const ChildConversations: Story = {
   args: {
     activeConversationId: 'child-review',
