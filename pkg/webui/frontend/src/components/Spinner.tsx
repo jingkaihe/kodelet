@@ -7,11 +7,14 @@ const LOW_POWER_SPINNER_INTERVAL_MS = 125;
 export interface SpinnerPreset<TFrame> {
   frames: readonly [TFrame, ...TFrame[]];
   intervalMs: number;
+  reducedMotionIntervalMs?: number;
 }
 
 export const TUI_DOT_SPINNER = {
   frames: ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'],
   intervalMs: LOW_POWER_SPINNER_INTERVAL_MS,
+  // Keep the small busy indicator consistent; decorative text presets stay static.
+  reducedMotionIntervalMs: LOW_POWER_SPINNER_INTERVAL_MS,
 } satisfies SpinnerPreset<string>;
 
 export const useSpinnerFrame = <TFrame,>(
@@ -24,19 +27,31 @@ export const useSpinnerFrame = <TFrame,>(
   React.useEffect(() => {
     setFrameIndex(0);
 
-    if (
-      preset.frames.length < 2 ||
-      (typeof window !== 'undefined' && window.matchMedia?.(REDUCED_MOTION_MEDIA_QUERY).matches)
-    ) {
+    if (preset.frames.length < 2) {
       return undefined;
     }
 
-    const intervalId = window.setInterval(() => {
-      setFrameIndex((currentFrame) => (currentFrame + 1) % preset.frames.length);
-    }, preset.intervalMs);
+    const motionPreference = window.matchMedia?.(REDUCED_MOTION_MEDIA_QUERY);
+    let intervalId: number | undefined;
+    const updateInterval = () => {
+      window.clearInterval(intervalId);
+      const intervalMs = motionPreference?.matches
+        ? preset.reducedMotionIntervalMs
+        : preset.intervalMs;
+      if (intervalMs === undefined) return;
 
-    return () => window.clearInterval(intervalId);
-  }, [preset.frames, preset.intervalMs, resetKey]);
+      intervalId = window.setInterval(() => {
+        setFrameIndex((currentFrame) => (currentFrame + 1) % preset.frames.length);
+      }, intervalMs);
+    };
+
+    updateInterval();
+    motionPreference?.addEventListener('change', updateInterval);
+    return () => {
+      window.clearInterval(intervalId);
+      motionPreference?.removeEventListener('change', updateInterval);
+    };
+  }, [preset.frames, preset.intervalMs, preset.reducedMotionIntervalMs, resetKey]);
 
   const normalizedFrameIndex = frameIndex % preset.frames.length;
   return {

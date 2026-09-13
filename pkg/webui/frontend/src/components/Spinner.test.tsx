@@ -45,15 +45,82 @@ describe('Spinner', () => {
     expect(spinner).toHaveTextContent('⣽');
   });
 
-  it('stays static when reduced motion is requested', () => {
+  it('keeps the same busy cadence when reduced motion is requested', () => {
     vi.useFakeTimers();
-    vi.spyOn(window, 'matchMedia').mockReturnValue({
-      matches: true,
-    } as MediaQueryList);
+    const motionPreference = Object.assign(new EventTarget(), { matches: true });
+    vi.spyOn(window, 'matchMedia').mockReturnValue(motionPreference as MediaQueryList);
 
-    const { container } = render(<Spinner />);
+    const { container, unmount } = render(<Spinner />);
+    const spinner = container.querySelector('.spinner-glyph');
 
-    expect(container.querySelector('.spinner-glyph')).toHaveTextContent('⣾');
+    act(() => vi.advanceTimersByTime(124));
+    expect(spinner).toHaveTextContent('⣾');
+    expect(spinner?.querySelector('circle')).toHaveAttribute('opacity', '0.15');
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(spinner).toHaveTextContent('⣽');
+    expect(spinner?.querySelector('circle')).toHaveAttribute('opacity', '1');
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('adapts to motion preference changes and cleans up its listener and timer', () => {
+    vi.useFakeTimers();
+    const motionPreference = Object.assign(new EventTarget(), { matches: true });
+    vi.spyOn(window, 'matchMedia').mockReturnValue(motionPreference as MediaQueryList);
+    const removeListener = vi.spyOn(motionPreference, 'removeEventListener');
+    const { container, unmount } = render(<Spinner />);
+    const spinner = container.querySelector('.spinner-glyph');
+
+    act(() => {
+      motionPreference.matches = false;
+      motionPreference.dispatchEvent(new Event('change'));
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(125));
+    expect(spinner).toHaveTextContent('⣽');
+
+    act(() => {
+      motionPreference.matches = true;
+      motionPreference.dispatchEvent(new Event('change'));
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(124));
+    expect(spinner).toHaveTextContent('⣽');
+    act(() => vi.advanceTimersByTime(1));
+    expect(spinner).toHaveTextContent('⣻');
+
+    unmount();
+    expect(removeListener).toHaveBeenCalledWith('change', expect.any(Function));
+    expect(vi.getTimerCount()).toBe(0);
+    motionPreference.dispatchEvent(new Event('change'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps presets without a reduced-motion cadence static until motion is enabled', () => {
+    vi.useFakeTimers();
+    const motionPreference = Object.assign(new EventTarget(), { matches: true });
+    vi.spyOn(window, 'matchMedia').mockReturnValue(motionPreference as MediaQueryList);
+    const { container } = render(<Spinner preset={{ frames: ['a', 'b'], intervalMs: 100 }} />);
+    const spinner = container.querySelector('.spinner-glyph');
+
+    expect(spinner).toHaveTextContent('a');
+    expect(vi.getTimerCount()).toBe(0);
+
+    act(() => {
+      motionPreference.matches = false;
+      motionPreference.dispatchEvent(new Event('change'));
+    });
+    act(() => vi.advanceTimersByTime(100));
+    expect(spinner).toHaveTextContent('b');
+
+    act(() => {
+      motionPreference.matches = true;
+      motionPreference.dispatchEvent(new Event('change'));
+      vi.advanceTimersByTime(1000);
+    });
+    expect(spinner).toHaveTextContent('b');
     expect(vi.getTimerCount()).toBe(0);
   });
 });
