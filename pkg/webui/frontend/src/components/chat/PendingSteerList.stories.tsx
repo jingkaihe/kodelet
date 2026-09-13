@@ -12,11 +12,13 @@ const meta = {
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement);
     if (args.messages.length === 0) {
-      expect(canvas.queryByRole('region', { name: 'Queued guidance' })).not.toBeInTheDocument();
+      expect(canvas.queryByRole('region', { name: /^Queued messages?$/ })).not.toBeInTheDocument();
       return;
     }
 
-    const guidance = canvas.getByRole('region', { name: 'Queued guidance' });
+    const label = args.messages.length === 1 ? 'Queued message' : 'Queued messages';
+    const guidance = canvas.getByRole('region', { name: label });
+    expect(within(guidance).getByText(label)).toBeInTheDocument();
     expect(within(guidance).getAllByRole('listitem')).toHaveLength(args.messages.length);
   },
   args: {

@@ -43,17 +43,16 @@ const PendingSteerList = ({ messages }: PendingSteerListProps) => {
     return null;
   }
 
+  const label = messages.length === 1 ? 'Queued message' : 'Queued messages';
+
   return (
     <section
-      aria-label="Queued guidance"
+      aria-label={label}
       className="pending-steer-shell mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8"
       data-testid="pending-steer-list"
     >
       <div className="pending-steer-content">
-        <div className="pending-steer-header">
-          <p className="pending-steer-copy">Queued guidance</p>
-          <p className="pending-steer-hint">Applied when Kodelet continues.</p>
-        </div>
+        <p className="pending-steer-copy">{label}</p>
         <ul className="pending-steer-lines">
           {messages.map((message, index) => (
             <li key={`${index}-${summaryForContent(message.content)}`}>

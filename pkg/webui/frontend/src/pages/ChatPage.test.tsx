@@ -3172,10 +3172,8 @@ describe('ChatPage', () => {
       )
     );
 
-    const pendingGuidance = await screen.findByRole('region', { name: 'Queued guidance' });
-    expect(
-      within(pendingGuidance).getByText('Applied when Kodelet continues.')
-    ).toBeInTheDocument();
+    const pendingGuidance = await screen.findByRole('region', { name: 'Queued message' });
+    expect(within(pendingGuidance).getByText('Queued message')).toBeInTheDocument();
     const queuedMessages = within(pendingGuidance).getByRole('list');
     expect(within(queuedMessages).getAllByRole('listitem')).toHaveLength(1);
     expect(within(queuedMessages).getByText('Focus on tests')).toBeInTheDocument();

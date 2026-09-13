@@ -269,26 +269,12 @@
   padding: 0.5rem 1rem;
 }
 
-.pending-steer-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem 0.75rem;
-}
-
 .pending-steer-copy {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   line-height: 1.5;
   color: #827a6b;
-}
-
-.pending-steer-hint {
-  margin: 0;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: #756e63;
 }
 
 .pending-steer-lines {
