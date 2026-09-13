@@ -3,8 +3,8 @@ import { fn } from 'storybook/test';
 import TerminalModalFrame from './TerminalModalFrame';
 
 const terminalPreview = (
-  <pre className="m-0 whitespace-pre-wrap font-mono text-[0.78rem] leading-5 text-[#f4eee3]">
-    <span className="text-[#a6bf79]">$</span> npm run storybook:build{'\n'}
+  <pre className="m-0 whitespace-pre-wrap font-mono text-[0.78rem] leading-5 text-[var(--terminal-foreground)]">
+    <span className="text-[var(--terminal-green)]">$</span> npm run storybook:build{'\n'}
     vite v6.4.2 building for production...{'\n'}✓ 2252 modules transformed.{'\n'}
     Storybook build completed successfully
   </pre>
@@ -13,12 +13,19 @@ const terminalPreview = (
 const meta = {
   title: 'Workspace/TerminalPanelFrame',
   component: TerminalModalFrame,
+  decorators: [
+    (Story) => (
+      <div className="flex h-full min-h-0">
+        <Story />
+      </div>
+    ),
+  ],
   parameters: {
     layout: 'fullscreen',
   },
   args: {
     children: terminalPreview,
-    currentStatus: 'Connected',
+    currentStatus: '',
     cwdLabel: '/home/jingkaihe/workspace/kodelet',
     statusVariant: 'live',
     onClose: fn(),
@@ -33,7 +40,9 @@ export const Connected: Story = {};
 
 export const Connecting: Story = {
   args: {
-    currentStatus: 'Connecting…',
+    children: undefined,
+    currentStatus: 'Connecting',
+    statusVariant: 'connecting',
   },
 };
 

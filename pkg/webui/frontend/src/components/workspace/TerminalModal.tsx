@@ -1,8 +1,9 @@
-import { FitAddon, Ghostty, Terminal } from 'ghostty-web';
+import { FitAddon, Ghostty, type ITheme, Terminal } from 'ghostty-web';
 import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import apiService from '../../services/api';
+import { subscribeTheme } from '../../theme';
 import type {
   TerminalClientMessage,
   TerminalExitEvent,
@@ -47,7 +48,51 @@ const REMOTE_TERMINAL_RECONNECT_DELAY = 500;
 const TERMINAL_POP_OUT_WINDOW_FEATURES =
   'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no';
 
-let ghosttyLoadPromise: Promise<Ghostty> | null = null;
+const TERMINAL_THEME_TOKENS = {
+  background: '--terminal-background',
+  foreground: '--terminal-foreground',
+  cursor: '--terminal-cursor',
+  cursorAccent: '--terminal-background',
+  selectionBackground: '--terminal-selection-background',
+  selectionForeground: '--terminal-foreground',
+  black: '--terminal-black',
+  red: '--terminal-red',
+  green: '--terminal-green',
+  yellow: '--terminal-yellow',
+  blue: '--terminal-blue',
+  magenta: '--terminal-magenta',
+  cyan: '--terminal-cyan',
+  white: '--terminal-white',
+  brightBlack: '--terminal-bright-black',
+  brightRed: '--terminal-bright-red',
+  brightGreen: '--terminal-bright-green',
+  brightYellow: '--terminal-bright-yellow',
+  brightBlue: '--terminal-bright-blue',
+  brightMagenta: '--terminal-bright-magenta',
+  brightCyan: '--terminal-bright-cyan',
+  brightWhite: '--terminal-bright-white',
+} satisfies Record<keyof ITheme, string>;
+
+const getTerminalTheme = (): ITheme => {
+  const styles = window.getComputedStyle(document.documentElement);
+  return Object.fromEntries(
+    Object.entries(TERMINAL_THEME_TOKENS).map(([key, token]) => {
+      const color = styles.getPropertyValue(token).trim();
+      // Ghostty's WASM config parser cannot read CSS's space-separated rgb() syntax.
+      const rgb = color.match(/^rgb\((\d+)[,\s]+(\d+)[,\s]+(\d+)\)$/);
+      return [
+        key,
+        rgb
+          ? `#${rgb
+              .slice(1)
+              .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+              .join('')}`
+          : color,
+      ];
+    })
+  );
+};
+
 let activeTerminalPopOutWindow: Window | null = null;
 let activeTerminalPopOutTargetKey = '';
 let activeTerminalPopOutPendingUntil = 0;
@@ -123,11 +168,6 @@ const getActiveTerminalPopOutWindow = (target?: WorkspaceTarget) => {
     activeTerminalPopOutTargetKey === getTerminalPopOutTargetKey(target)
     ? activeTerminalPopOutWindow
     : null;
-};
-
-const loadGhostty = () => {
-  ghosttyLoadPromise ??= Ghostty.load(ghosttyWasmUrl);
-  return ghosttyLoadPromise;
 };
 
 const loadTerminalFont = async (fontFamily: string) => {
@@ -218,6 +258,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   onClose,
   allowPopOut = true,
 }) => {
+  const resolvedTheme = useSyncExternalStore(
+    subscribeTheme,
+    () => document.documentElement.dataset.theme
+  );
   const popOutTargetKey = getTerminalPopOutTargetKey(target);
   const popOutEligible = allowPopOut && (target.kind === 'local' || Boolean(target.conversationId));
   const terminalConnectionKey =
@@ -280,9 +324,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   }, [connectionError, exitCode, statusText]);
   const statusVariant: TerminalStatusVariant = connectionError
     ? 'error'
-    : exitCode !== null
+    : exitCode !== null || statusText === 'Disconnected'
       ? 'idle'
-      : 'live';
+      : statusText === 'Connected'
+        ? 'live'
+        : 'connecting';
 
   useEffect(() => {
     if (!allowPopOut) {
@@ -292,6 +338,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(reconnectAttempt): Retry events must restart the connection lifecycle.
   // biome-ignore lint/correctness/useExhaustiveDependencies(terminalConnectionKey): Reconnect when the target identity changes; targetRef supplies its latest metadata.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(resolvedTheme): Ghostty cannot update live palettes; rebuild the view and replay the persistent PTY, as Comet does.
   useEffect(() => {
     if (!open || popOutActive || !terminalHostRef.current) {
       return undefined;
@@ -407,7 +454,9 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       pendingTimeouts.push(timeout);
     };
 
-    void Promise.all([loadGhostty(), loadTerminalFont(resolvedMonoFontFamily)])
+    // Reusing this Ghostty build's WASM instance after disposal corrupts ANSI palette indices.
+    // Each view needs fresh WASM state; the browser can still cache the module download.
+    void Promise.all([Ghostty.load(ghosttyWasmUrl), loadTerminalFont(resolvedMonoFontFamily)])
       .then(([ghostty]) => {
         if (cancelled || !terminalHostRef.current) {
           return;
@@ -422,30 +471,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           fontFamily: resolvedMonoFontFamily,
           fontSize: TERMINAL_FONT_SIZE,
           scrollback: 5000,
-          theme: {
-            background: '#18140f',
-            foreground: '#f4eee3',
-            cursor: '#d97757',
-            cursorAccent: '#171512',
-            selectionBackground: '#624733',
-            selectionForeground: '#fffaf1',
-            black: '#171512',
-            red: '#df7c5e',
-            green: '#8ea267',
-            yellow: '#cfb37a',
-            blue: '#7eabd8',
-            magenta: '#b795b9',
-            cyan: '#87b7b1',
-            white: '#efe6d7',
-            brightBlack: '#635b4f',
-            brightRed: '#f29b80',
-            brightGreen: '#a6bf79',
-            brightYellow: '#e7c98d',
-            brightBlue: '#99c0e6',
-            brightMagenta: '#cfadd0',
-            brightCyan: '#a5d0ca',
-            brightWhite: '#fffaf1',
-          },
+          theme: getTerminalTheme(),
         });
         const fitAddon = new FitAddon();
 
@@ -682,7 +708,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       }
       fitAddonRef.current = null;
     };
-  }, [fitTerminalToPanel, open, popOutActive, reconnectAttempt, terminalConnectionKey]);
+  }, [
+    fitTerminalToPanel,
+    open,
+    popOutActive,
+    reconnectAttempt,
+    terminalConnectionKey,
+    resolvedTheme,
+  ]);
 
   useEffect(() => {
     if (!allowPopOut) {

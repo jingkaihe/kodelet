@@ -347,12 +347,12 @@
 .workspace-terminal-panel {
   display: flex;
   flex-direction: column;
-  color: var(--kodelet-dark);
+  color: var(--terminal-foreground);
 }
 
 .workspace-terminal-panel.workspace-side-panel {
-  background: #18140f;
-  border: 1px solid rgba(93, 83, 64, 0.16);
+  background: var(--terminal-background);
+  border: 1px solid color-mix(in srgb, var(--terminal-foreground) 16%, transparent);
   border-radius: 0.25rem;
   overflow: hidden;
   box-shadow: none;
@@ -371,26 +371,26 @@
   width: 0.58rem;
   height: 0.58rem;
   border-radius: 999px;
-  background: rgba(20, 20, 19, 0.28);
+  background: var(--kodelet-muted);
 }
 
 .workspace-terminal-status-dot.is-live {
-  background: #7fbc63;
+  background: var(--kodelet-success);
 }
 
 .workspace-terminal-status-dot.is-error {
-  background: #d97757;
+  background: var(--kodelet-error);
 }
 
 .workspace-terminal-status-dot.is-idle {
-  background: #b0aea5;
+  background: var(--kodelet-muted);
 }
 
 .workspace-terminal-status-text {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 400;
-  color: rgba(244, 238, 227, 0.72);
+  color: var(--kodelet-muted);
 }
 
 .workspace-terminal-shell {
@@ -402,7 +402,7 @@
   overflow: hidden;
   border-radius: 0;
   border: 0;
-  background: #18140f;
+  background: var(--terminal-background);
   box-shadow: none;
 }
 
@@ -423,9 +423,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 0.25rem;
-  border: 1px solid rgba(244, 238, 227, 0.12);
+  border: 1px solid color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
   background: transparent;
-  color: rgba(244, 238, 227, 0.58);
+  color: var(--kodelet-muted);
   transition:
     color 140ms ease,
     background-color 140ms ease,
@@ -433,15 +433,15 @@
 }
 
 .workspace-terminal-icon-button:hover {
-  border-color: rgba(244, 238, 227, 0.14);
-  background: rgba(244, 238, 227, 0.08);
-  color: #fffaf1;
+  border-color: color-mix(in srgb, var(--terminal-foreground) 24%, transparent);
+  background: color-mix(in srgb, var(--terminal-foreground) 8%, transparent);
+  color: var(--terminal-foreground);
 }
 
 .workspace-terminal-icon-button:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
-  color: #fffaf1;
+  color: var(--terminal-foreground);
 }
 
 .workspace-terminal-host {
@@ -454,12 +454,28 @@
   min-height: 0;
   overflow: hidden;
   padding: 0.12rem 0 0 0.7rem;
-  background: #18140f;
+  background: var(--terminal-background);
 }
 
 .workspace-terminal-host.is-pop-out-active {
   pointer-events: none;
   opacity: 0.18;
+}
+
+.workspace-terminal-host.is-connecting canvas {
+  opacity: 0;
+}
+
+.workspace-terminal-connecting {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--kodelet-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 400;
+  pointer-events: none;
 }
 
 .workspace-terminal-popout-shield {
@@ -472,8 +488,8 @@
   flex-direction: column;
   gap: 0.48rem;
   padding: 1.5rem;
-  background: rgba(24, 20, 15, 0.96);
-  color: rgba(244, 238, 227, 0.92);
+  background: color-mix(in srgb, var(--terminal-background) 96%, transparent);
+  color: var(--terminal-foreground);
   text-align: center;
 }
 
@@ -487,33 +503,35 @@
   width: 1.45rem;
   height: 1.45rem;
   margin-bottom: 0.15rem;
-  color: rgba(244, 238, 227, 0.72);
+  color: var(--kodelet-muted);
 }
 
 .workspace-terminal-popout-focus {
   min-height: 2.35rem;
   margin-top: 0.3rem;
-  border: 1px solid rgba(244, 238, 227, 0.16);
+  border: 1px solid color-mix(in srgb, var(--terminal-foreground) 16%, transparent);
   border-radius: 0.25rem;
   background: transparent;
   padding: 0.52rem 0.85rem;
-  color: rgba(255, 250, 241, 0.92);
+  color: var(--terminal-foreground);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 400;
 }
 
 .workspace-terminal-popout-focus:hover {
-  border-color: rgba(244, 238, 227, 0.24);
-  background: rgba(244, 238, 227, 0.14);
+  border-color: color-mix(in srgb, var(--terminal-foreground) 24%, transparent);
+  background: color-mix(in srgb, var(--terminal-foreground) 8%, transparent);
 }
 
 .workspace-terminal-popout-focus:focus-visible {
-  outline: 2px solid #008494;
+  outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
 .workspace-terminal-host[contenteditable="true"] {
+  /* Ghostty draws its own cursor on the canvas; keep the native edit caret hidden. */
+  caret-color: transparent;
   outline: none;
 }
 
@@ -530,7 +548,7 @@
   min-height: 0;
   overflow: hidden;
   overscroll-behavior: none;
-  background: #18140f;
+  background: var(--terminal-background);
 }
 
 .terminal-popout-page .workspace-terminal-panel.workspace-side-panel {
@@ -641,8 +659,8 @@
   }
 
   .workspace-terminal-icon-button {
-    background: rgba(244, 238, 227, 0.025);
-    color: rgba(244, 238, 227, 0.58);
+    background: color-mix(in srgb, var(--terminal-foreground) 3%, transparent);
+    color: var(--kodelet-muted);
     opacity: 1;
   }
 

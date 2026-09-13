@@ -2,7 +2,7 @@ import { ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { cn } from '../../utils';
 
-export type TerminalStatusVariant = 'live' | 'idle' | 'error';
+export type TerminalStatusVariant = 'live' | 'connecting' | 'idle' | 'error';
 
 interface TerminalModalFrameProps {
   children?: React.ReactNode;
@@ -28,7 +28,7 @@ const TerminalModalFrame: React.FC<TerminalModalFrameProps> = ({
     className="workspace-side-panel workspace-terminal-panel surface-panel"
     data-testid="terminal-panel"
   >
-    {currentStatus && !popOutActive ? (
+    {currentStatus && !popOutActive && statusVariant !== 'connecting' ? (
       <div className="workspace-terminal-status-bar">
         <span
           className={cn(
@@ -59,14 +59,22 @@ const TerminalModalFrame: React.FC<TerminalModalFrameProps> = ({
         </fieldset>
       ) : null}
       <div
+        aria-busy={(statusVariant === 'connecting' && !popOutActive) || undefined}
         aria-disabled={popOutActive || undefined}
-        className={cn('workspace-terminal-host', popOutActive && 'is-pop-out-active')}
+        className={cn(
+          'workspace-terminal-host',
+          popOutActive && 'is-pop-out-active',
+          statusVariant === 'connecting' && !popOutActive && 'is-connecting'
+        )}
         data-testid="terminal-host"
         inert={popOutActive || undefined}
         ref={terminalHostRef}
       >
         {children}
       </div>
+      {statusVariant === 'connecting' && !popOutActive ? (
+        <output className="workspace-terminal-connecting">Connecting</output>
+      ) : null}
       {popOutActive ? (
         <output className="workspace-terminal-popout-shield">
           <ExternalLink

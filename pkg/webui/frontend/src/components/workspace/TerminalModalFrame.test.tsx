@@ -5,7 +5,7 @@ import TerminalModalFrame from './TerminalModalFrame';
 
 const renderFrame = (overrides: Partial<React.ComponentProps<typeof TerminalModalFrame>> = {}) => {
   const props: React.ComponentProps<typeof TerminalModalFrame> = {
-    currentStatus: 'Connected',
+    currentStatus: '',
     cwdLabel: '/tmp/project',
     statusVariant: 'live',
     onClose: vi.fn(),
@@ -23,7 +23,7 @@ describe('TerminalModalFrame', () => {
 
     expect(screen.queryByRole('heading', { name: 'Terminal' })).not.toBeInTheDocument();
     expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByText('terminal preview')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Terminal' })).toBe(
       screen.getByTestId('terminal-panel')
@@ -39,6 +39,24 @@ describe('TerminalModalFrame', () => {
 
     expect(screen.getByText('Terminal connection failed')).toBeInTheDocument();
     expect(container.querySelector('.workspace-terminal-status-dot')).toHaveClass('is-error');
+  });
+
+  it('centers a quiet connection message without replacing the terminal host', () => {
+    const { container, rerender, props } = renderFrame({
+      currentStatus: 'Restoring session…',
+      statusVariant: 'connecting',
+    });
+    const host = screen.getByTestId('terminal-host');
+    expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
+    expect(screen.getByRole('status')).toHaveClass('workspace-terminal-connecting');
+    expect(host).toHaveAttribute('aria-busy', 'true');
+    expect(host).toHaveClass('is-connecting');
+    expect(container.querySelector('.workspace-terminal-status-bar')).not.toBeInTheDocument();
+    rerender(<TerminalModalFrame {...props} currentStatus="" statusVariant="live" />);
+    expect(screen.getByTestId('terminal-host')).toBe(host);
+    expect(host).not.toHaveAttribute('aria-busy');
+    expect(host).not.toHaveClass('is-connecting');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('renders an optional pop-out action', () => {
@@ -58,11 +76,13 @@ describe('TerminalModalFrame', () => {
       currentStatus: 'Open in pop-out window',
       onPopOut,
       popOutActive: true,
-      statusVariant: 'idle',
+      statusVariant: 'connecting',
     });
 
     expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByTestId('terminal-host')).toHaveAttribute('inert');
+    expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-busy');
+    expect(screen.queryByText('Connecting')).not.toBeInTheDocument();
     expect(screen.queryByText('Open in pop-out window')).not.toBeInTheDocument();
     expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
     expect(screen.queryByText('Close that window to resume here.')).not.toBeInTheDocument();

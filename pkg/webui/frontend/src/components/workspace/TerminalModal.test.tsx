@@ -1,5 +1,8 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ITerminalOptions } from 'ghostty-web';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import foundationCSS from '../../styles/foundation.css?raw';
+import { initializeTheme, setTheme, THEME_STORAGE_KEY, THEMES } from '../../theme';
 import TerminalModal from './TerminalModal';
 import {
   clearTerminalPopOutRecord,
@@ -75,7 +78,7 @@ const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock
       private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
       private customWheelEventHandler?: (event: WheelEvent) => boolean;
 
-      constructor() {
+      constructor(public options: ITerminalOptions) {
         HoistedMockTerminal.instances.push(this);
       }
 
@@ -157,9 +160,210 @@ const localTarget = { kind: 'local', cwd: '/tmp/project' } as const;
 describe('TerminalModal', () => {
   beforeEach(() => {
     MockTerminal.instances = [];
+    MockGhosttyLoad.mockClear();
     createTerminalWebSocketMock.mockReset();
     window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
     window.sessionStorage.clear();
+  });
+
+  describe('theme integration', () => {
+    let stylesheet: HTMLStyleElement;
+    let cleanupTheme: () => void;
+    let systemAppearance: MediaQueryList;
+
+    beforeEach(() => {
+      stylesheet = document.createElement('style');
+      stylesheet.textContent = foundationCSS;
+      document.head.append(stylesheet);
+      // JSDOM exposes custom properties but does not resolve var() references.
+      const getComputedStyle = window.getComputedStyle.bind(window);
+      vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+        const styles = getComputedStyle(element);
+        if (element === document.documentElement) {
+          const getPropertyValue = styles.getPropertyValue.bind(styles);
+          const resolve = (token: string): string =>
+            getPropertyValue(token).replace(/var\((--[\w-]+)\)/g, (_, name) => resolve(name));
+          styles.getPropertyValue = resolve;
+        }
+        return styles;
+      });
+      systemAppearance = Object.assign(new EventTarget(), {
+        matches: false,
+        media: '(prefers-color-scheme: dark)',
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      });
+      vi.spyOn(window, 'matchMedia').mockReturnValue(systemAppearance);
+      localStorage.removeItem(THEME_STORAGE_KEY);
+      cleanupTheme = initializeTheme();
+    });
+
+    afterEach(() => {
+      cleanupTheme();
+      stylesheet.remove();
+      vi.restoreAllMocks();
+      localStorage.removeItem(THEME_STORAGE_KEY);
+      document.documentElement.dataset.theme = 'kodelet';
+      delete document.documentElement.dataset.themePreference;
+    });
+
+    it.each(THEMES)('opens with the complete $label palette and existing mono font', async ({
+      id,
+      background,
+      foreground,
+    }) => {
+      setTheme(id);
+      createTerminalWebSocketMock.mockReturnValue(new MockWebSocket());
+      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+      const { options } = MockTerminal.instances[0];
+      expect(MockGhosttyLoad).toHaveBeenCalledOnce();
+      expect(options.ghostty).toBe(await MockGhosttyLoad.mock.results[0].value);
+      expect(options.theme).toMatchObject({
+        background,
+        foreground,
+        cursor: foreground,
+        cursorAccent: background,
+        selectionForeground: foreground,
+      });
+      expect(Object.keys(options.theme ?? {})).toHaveLength(22);
+      for (const color of Object.values(options.theme ?? {})) {
+        expect(color).toMatch(/^#[\da-f]{6}$/);
+      }
+      expect(options.fontFamily).toBe('"JetBrains Mono", "SFMono-Regular", Consolas, monospace');
+      expect(options.fontSize).toBe(13);
+    });
+
+    it.each([
+      localTarget,
+      { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' } as const,
+    ])('replays the same $kind PTY target with fresh WASM for each palette without rewriting truecolor output', async (target) => {
+      const sockets: MockWebSocket[] = [];
+      createTerminalWebSocketMock.mockImplementation(() => {
+        const socket = new MockWebSocket();
+        sockets.push(socket);
+        return socket;
+      });
+      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={target} />);
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+      // Explicit RGB that coincides with the initial default foreground must be replayed unchanged.
+      const encoded = new TextEncoder().encode('\x1b[38;2;60;56;54mtruecolor\x1b[0m\r\n');
+      const output = new Uint8Array(new ArrayBuffer(encoded.length));
+      output.set(encoded);
+      for (const [index, { id, background, foreground }] of [
+        THEMES[1],
+        THEMES[2],
+        THEMES[0],
+      ].entries()) {
+        const previousTerminal = MockTerminal.instances[index];
+        act(() => setTheme(id));
+        await waitFor(() => expect(MockTerminal.instances).toHaveLength(index + 2));
+        const terminal = MockTerminal.instances[index + 1];
+        const socket = sockets[index + 1];
+        expect(MockGhosttyLoad).toHaveBeenCalledTimes(index + 2);
+        expect(terminal.options.ghostty).toBe(await MockGhosttyLoad.mock.results[index + 1].value);
+        expect(terminal.options.ghostty).not.toBe(previousTerminal.options.ghostty);
+        expect(previousTerminal.dispose).toHaveBeenCalledOnce();
+        expect(sockets[index].close).toHaveBeenCalledOnce();
+        expect(terminal.options.theme).toMatchObject({ background, foreground });
+        expect(createTerminalWebSocketMock).toHaveBeenLastCalledWith({
+          target,
+          rows: 23,
+          cols: 80,
+        });
+        act(() => {
+          socket.emit('message', { data: output.buffer });
+          terminal.emitData('ignored-during-replay');
+          sockets[index].emit('message', { data: JSON.stringify({ type: 'exit', code: 7 }) });
+        });
+        expect(terminal.write).toHaveBeenCalledWith(output, expect.any(Function));
+        expect(socket.send).not.toHaveBeenCalledWith(
+          JSON.stringify({ type: 'input', data: 'parser-response' })
+        );
+        expect(socket.send).not.toHaveBeenCalledWith(
+          JSON.stringify({ type: 'input', data: 'ignored-during-replay' })
+        );
+        expect(terminal.writeln).not.toHaveBeenCalled();
+        act(() => {
+          socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
+          terminal.emitData('ls\n');
+        });
+        expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'ls\n' }));
+      }
+      expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('rebuilds for resolved system and cross-window theme changes but not equivalent preferences', async () => {
+      createTerminalWebSocketMock.mockImplementation(() => new MockWebSocket());
+      render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+      act(() => setTheme('kodelet'));
+      act(() => setTheme('system'));
+      expect(MockTerminal.instances).toHaveLength(1);
+      act(() => {
+        Object.defineProperty(systemAppearance, 'matches', { value: true, configurable: true });
+        systemAppearance.dispatchEvent(new Event('change'));
+      });
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(2));
+      expect(MockTerminal.instances[1].options.theme?.background).toBe(THEMES[1].background);
+      act(() =>
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key: THEME_STORAGE_KEY,
+            newValue: 'kodelet-classic',
+            storageArea: localStorage,
+          })
+        )
+      );
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(3));
+      expect(MockTerminal.instances[2].options.theme?.background).toBe(THEMES[2].background);
+      act(() =>
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key: THEME_STORAGE_KEY,
+            newValue: null,
+            storageArea: localStorage,
+          })
+        )
+      );
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(4));
+      expect(MockTerminal.instances[3].options.theme?.background).toBe(THEMES[1].background);
+      expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(4);
+    });
+
+    it.each([
+      'close',
+      'unmount',
+    ])('does not reopen a terminal after %s and cleans up subscriptions on unmount', async (action) => {
+      const removeListener = vi.spyOn(window, 'removeEventListener');
+      createTerminalWebSocketMock.mockReturnValue(new MockWebSocket());
+      const { rerender, unmount } = render(
+        <TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />
+      );
+      await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+      const terminal = MockTerminal.instances[0];
+      if (action === 'close') {
+        rerender(
+          <TerminalModal
+            cwdLabel="/tmp/project"
+            onClose={vi.fn()}
+            open={false}
+            target={localTarget}
+          />
+        );
+      } else {
+        unmount();
+      }
+      act(() => setTheme('gruvbox-dark'));
+      expect(terminal.dispose).toHaveBeenCalledOnce();
+      expect(MockTerminal.instances).toHaveLength(1);
+      expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1);
+      expect(terminal.options.theme?.background).toBe(THEMES[0].background);
+      unmount();
+      expect(removeListener).toHaveBeenCalledWith('kodelet:theme-change', expect.any(Function));
+    });
   });
 
   it('suppresses parser-generated input until replay completes', async () => {
@@ -168,6 +372,7 @@ describe('TerminalModal', () => {
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
 
+    expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
 
@@ -188,6 +393,8 @@ describe('TerminalModal', () => {
     expect(socket.send).not.toHaveBeenCalledWith(
       JSON.stringify({ type: 'input', data: 'parser-response' })
     );
+    expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
+    expect(screen.queryByText('Restoring session…')).not.toBeInTheDocument();
 
     act(() => {
       socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
@@ -195,6 +402,8 @@ describe('TerminalModal', () => {
     });
 
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'ls\n' }));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-busy');
   });
 
   it('drains every terminal response generated by a PTY output chunk', async () => {
@@ -437,7 +646,7 @@ describe('TerminalModal', () => {
       firstSocket.emit('close');
     });
 
-    expect(screen.getByText('Reconnecting…')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/^Connecting$/);
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2), {
       timeout: 1500,
     });

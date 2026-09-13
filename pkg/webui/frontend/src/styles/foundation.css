@@ -39,6 +39,28 @@
   --sidebar-surface-muted: var(--kodelet-muted);
   --sidebar-stroke-strong: color-mix(in srgb, var(--kodelet-muted) 16%, transparent);
 
+  /* Shared by the Ghostty canvas, terminal chrome, and Storybook previews. */
+  --terminal-background: var(--kodelet-light);
+  --terminal-foreground: var(--kodelet-dark);
+  --terminal-cursor: var(--kodelet-dark);
+  --terminal-selection-background: var(--kodelet-light-gray);
+  --terminal-black: #282828;
+  --terminal-red: #9d0006;
+  --terminal-green: #79740e;
+  --terminal-yellow: #b57614;
+  --terminal-blue: #076678;
+  --terminal-magenta: #8f3f71;
+  --terminal-cyan: #427b58;
+  --terminal-white: #a89984;
+  --terminal-bright-black: #928374;
+  --terminal-bright-red: #cc241d;
+  --terminal-bright-green: #98971a;
+  --terminal-bright-yellow: #d79921;
+  --terminal-bright-blue: #458588;
+  --terminal-bright-magenta: #b16286;
+  --terminal-bright-cyan: #689d6a;
+  --terminal-bright-white: #f9f5d7;
+
   /* Extension feedback shares the Catppuccin Latte palette in pkg/tui/styles.go. */
   --tui-text: #4c4f69;
   --tui-subtext: #6c6f85;
@@ -69,6 +91,22 @@
   --kodelet-elevated: #faf9f5;
   --kodelet-on-accent: #faf9f5;
   --sidebar-surface-ink: #4d473f;
+  --terminal-black: #171512;
+  --terminal-red: #a63d3d;
+  --terminal-green: #4f6338;
+  --terminal-yellow: #a36a12;
+  --terminal-blue: #35678f;
+  --terminal-magenta: #8b5269;
+  --terminal-cyan: #00758a;
+  --terminal-white: #b0aea5;
+  --terminal-bright-black: #71695e;
+  --terminal-bright-red: #bd503b;
+  --terminal-bright-green: #5f7247;
+  --terminal-bright-yellow: #b58025;
+  --terminal-bright-blue: #447fab;
+  --terminal-bright-magenta: #a3698d;
+  --terminal-bright-cyan: #008494;
+  --terminal-bright-white: #fffaf1;
 }
 
 :root[data-theme="gruvbox-dark"] {
@@ -101,6 +139,22 @@
   --tui-red: var(--kodelet-error);
   --tui-yellow: #fabd2f;
   --tui-mauve: #d3869b;
+  --terminal-black: #1d2021;
+  --terminal-red: #cc241d;
+  --terminal-green: #98971a;
+  --terminal-yellow: #d79921;
+  --terminal-blue: #458588;
+  --terminal-magenta: #b16286;
+  --terminal-cyan: #689d6a;
+  --terminal-white: #a89984;
+  --terminal-bright-black: #928374;
+  --terminal-bright-red: #fb4934;
+  --terminal-bright-green: #b8bb26;
+  --terminal-bright-yellow: #fabd2f;
+  --terminal-bright-blue: #83a598;
+  --terminal-bright-magenta: #d3869b;
+  --terminal-bright-cyan: #8ec07c;
+  --terminal-bright-white: #fbf1c7;
 }
 
 html,
@@ -115,7 +169,7 @@ body,
 html.terminal-popout-active,
 body.terminal-popout-active {
   overscroll-behavior: none;
-  background: #18140f;
+  background: var(--terminal-background);
 }
 
 body.terminal-popout-active::before {
