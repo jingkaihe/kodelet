@@ -7,18 +7,18 @@ export const THEMES = [
     foreground: '#3c3836',
   },
   {
-    id: 'kodelet-classic',
-    label: 'Classic light',
-    background: '#faf9f5',
-    surface: '#f4efe5',
-    foreground: '#141413',
-  },
-  {
     id: 'gruvbox-dark',
     label: 'Gruvbox dark',
     background: '#282828',
     surface: '#252525',
     foreground: '#ebdbb2',
+  },
+  {
+    id: 'kodelet-classic',
+    label: 'Classic light',
+    background: '#faf9f5',
+    surface: '#f4efe5',
+    foreground: '#141413',
   },
 ] as const;
 

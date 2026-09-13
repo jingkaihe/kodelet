@@ -24,7 +24,12 @@ describe('ThemePicker', () => {
     const trigger = screen.getByRole('button', { name: 'Choose theme' });
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4);
+    expect(screen.getAllByRole('menuitemradio').map((option) => option.textContent)).toEqual([
+      'System',
+      'Gruvbox light',
+      'Gruvbox dark',
+      'Classic light',
+    ]);
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.getByRole('menuitemradio', { name: 'Gruvbox light' })).toBeInTheDocument();
     expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute(
@@ -47,12 +52,12 @@ describe('ThemePicker', () => {
     await user.keyboard('{Enter}');
     expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveFocus();
     await user.keyboard('{ArrowUp}');
-    expect(screen.getByRole('menuitemradio', { name: 'Gruvbox dark' })).toHaveFocus();
-    await user.keyboard('{Home}{ArrowDown}{ArrowDown}');
     expect(screen.getByRole('menuitemradio', { name: 'Classic light' })).toHaveFocus();
+    await user.keyboard('{Home}{ArrowDown}{ArrowDown}');
+    expect(screen.getByRole('menuitemradio', { name: 'Gruvbox dark' })).toHaveFocus();
     expect(document.documentElement).toHaveAttribute('data-theme', 'kodelet');
     await user.keyboard('{End}{Enter}');
-    expect(document.documentElement).toHaveAttribute('data-theme', 'gruvbox-dark');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'kodelet-classic');
     await user.keyboard('{Enter}{Escape}');
     expect(trigger).toHaveFocus();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
