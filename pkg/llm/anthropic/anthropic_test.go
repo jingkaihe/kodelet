@@ -340,6 +340,33 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 	assert.Contains(t, block.OfToolResult.Content[0].OfText.Text, "boom")
 }
 
+func TestAnthropicToolResultBlockPreservesArtifactIDAndImage(t *testing.T) {
+	const descriptor = "Artifact ID: art_test"
+	const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	result := fakeAnthropicMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: descriptor},
+		parts: []tooltypes.ToolResultContentPart{
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: descriptor},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64," + imageBase64, MimeType: "image/png"},
+		},
+	}
+	assert.Equal(t, tooltypes.StringifyToolResult(descriptor, ""), result.AssistantFacing())
+
+	block := anthropicToolResultBlock("call_view_image", result)
+
+	require.NotNil(t, block.OfToolResult)
+	assert.Equal(t, "call_view_image", block.OfToolResult.ToolUseID)
+	assert.False(t, block.OfToolResult.IsError.Value)
+	require.Len(t, block.OfToolResult.Content, 2)
+	require.NotNil(t, block.OfToolResult.Content[0].OfText)
+	assert.Equal(t, descriptor, block.OfToolResult.Content[0].OfText.Text)
+	require.NotNil(t, block.OfToolResult.Content[1].OfImage)
+	source := block.OfToolResult.Content[1].OfImage.Source.OfBase64
+	require.NotNil(t, source)
+	assert.Equal(t, imageBase64, source.Data)
+	assert.Equal(t, anthropic.Base64ImageSourceMediaTypeImagePNG, source.MediaType)
+}
+
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing(anthropic.ModelClaudeSonnet5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing("claude-sonnet-5-latest"))

@@ -20,6 +20,10 @@
   padding: 0 0.58rem 0.58rem 2.05rem;
 }
 
+.activity-image .tool-image-attachments {
+  padding: 0;
+}
+
 .tool-image-attachment {
   width: min(100%, 34rem);
   margin: 0;

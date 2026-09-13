@@ -23,6 +23,14 @@ func TestViewImageTool_Name(t *testing.T) {
 	assert.Equal(t, "view_image", tool.Name())
 }
 
+func TestViewImageTool_Description(t *testing.T) {
+	description := (&ViewImageTool{}).Description()
+	assert.Contains(t, description, "Successful calls provide the image pixels.")
+	assert.Contains(t, description, "Returned artifact IDs and URLs refer to the same image;")
+	assert.Contains(t, description, "do not re-view it just to follow a reference.")
+	assert.Contains(t, description, "Skip images already visible in your context.")
+}
+
 func TestViewImageTool_GenerateSchema(t *testing.T) {
 	tool := NewViewImageTool("gpt-5", "openai")
 	schema := tool.GenerateSchema()
@@ -106,10 +114,12 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 	structured := result.StructuredData()
 	assert.Equal(t, "view_image", structured.ToolName)
 	assert.True(t, structured.Success)
+	assert.Equal(t, []tooltypes.ToolAttachment{{Type: "image", Path: imagePath}}, structured.Attachments)
 
 	var meta tooltypes.ViewImageMetadata
 	require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &meta))
 	assert.Equal(t, imagePath, meta.Path)
+	assert.Empty(t, meta.ArtifactID, "the runner assigns the artifact ID after saving the attachment")
 	assert.Equal(t, 16, meta.ImageSize.Width)
 	assert.Equal(t, 12, meta.ImageSize.Height)
 
@@ -121,6 +131,16 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 	require.Len(t, parts, 1)
 	assert.Equal(t, tooltypes.ToolResultContentPartTypeImage, parts[0].Type)
 	assert.Contains(t, parts[0].ImageURL, "data:image/png;base64,")
+	assert.Empty(t, parts[0].ArtifactID)
+
+	for _, path := range []string{imagePath, "file://" + imagePath} {
+		input, err := json.Marshal(ViewImageInput{Path: path})
+		require.NoError(t, err)
+		result := tool.Execute(ctx, state, string(input))
+		require.False(t, result.IsError(), result.GetError())
+		assert.Equal(t, structured.Attachments, result.StructuredData().Attachments)
+		assert.Equal(t, parts, result.(tooltypes.MultiModalToolResult).ContentParts())
+	}
 }
 
 func TestViewImageTool_Artifact(t *testing.T) {

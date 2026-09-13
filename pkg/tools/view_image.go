@@ -75,7 +75,7 @@ func (r *ViewImageToolResult) ContentParts() []tooltypes.ToolResultContentPart {
 	if r.data == nil || r.base.Error != "" {
 		return nil
 	}
-	if r.attachment != nil {
+	if r.attachment != nil && r.attachment.ArtifactID != "" {
 		return []tooltypes.ToolResultContentPart{{
 			Type:       tooltypes.ToolResultContentPartTypeImage,
 			ArtifactID: r.attachment.ArtifactID,
@@ -121,7 +121,11 @@ func (t *ViewImageTool) Description() string {
 	if vision.SupportsViewImageOriginalDetail(t.model) {
 		detailText = "The optional `detail` field is available for this model and supports only `original`. Use it when high-fidelity image perception or precise localization is needed. Original resolution is preserved within safe image limits; oversized images are proportionally downscaled."
 	}
-	return "View an image from a local filepath supplied by the user, or an artifactId returned by a tool in this conversation. Supply exactly one of path or artifactId. Do not inspect an image already visible in the model's conversation context; a user-interface attachment alone does not make its pixels visible to the model.\n\n" + detailText
+	return `View an image using exactly one of: a user-supplied local path or a tool-returned artifactId.
+
+Successful calls provide the image pixels. Returned artifact IDs and URLs refer to the same image; do not re-view it just to follow a reference. Skip images already visible in your context.
+
+` + detailText
 }
 
 func (t *ViewImageTool) ValidateInput(state tooltypes.State, parameters string) error {
@@ -218,6 +222,10 @@ func (t *ViewImageTool) Execute(ctx context.Context, state tooltypes.State, para
 	return &ViewImageToolResult{
 		base: tooltypes.BaseToolResult{Result: result.Assistant},
 		data: result,
+		attachment: &tooltypes.ToolAttachment{
+			Type: "image",
+			Path: result.Path,
+		},
 	}
 }
 

@@ -50,6 +50,24 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	m.width = 140
 	m.height = 40
 	m.resize()
+	viewed := &tooltypes.StructuredToolResult{
+		ToolName: "view_image",
+		Success:  true,
+		Metadata: &tooltypes.ViewImageMetadata{
+			Path:       "/tmp/screenshot.png",
+			ArtifactID: "internal-artifact-1",
+			MimeType:   "image/png",
+			Detail:     "original",
+			ImageSize:  tooltypes.ImageDimensions{Width: 1536, Height: 1024},
+		},
+		Attachments: []tooltypes.ToolAttachment{{
+			Type:       "image",
+			ArtifactID: "internal-artifact-1",
+			ShortCode:  "inspected",
+			ViewURL:    "/i/inspected",
+			MimeType:   "image/png",
+		}},
+	}
 	m.entries = []chatEntry{{
 		kind: entryAssistant,
 		blocks: []assistantBlock{{
@@ -83,18 +101,11 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 					},
 				},
 				{
-					name: "view_image",
-					done: true,
-					structured: &tooltypes.StructuredToolResult{
-						ToolName: "view_image",
-						Success:  true,
-						Attachments: []tooltypes.ToolAttachment{{
-							Type:       "image",
-							ArtifactID: "internal-artifact-1",
-							ShortCode:  "public",
-							ViewURL:    "https://images.example/i/public",
-						}},
-					},
+					name:       "view_image",
+					input:      `{"path":"/tmp/screenshot.png"}`,
+					done:       true,
+					result:     structuredToolResultText(viewed),
+					structured: viewed,
 				},
 				{
 					name:   "glob_tool",
@@ -112,23 +123,48 @@ func TestRenderTranscriptImageAttachments(t *testing.T) {
 	assert.Contains(t, plain,
 		"\nGenerated image - https://images.example/i/public\nGenerated image - https://connected.example/kodelet/i/second\n",
 	)
-	assert.Contains(t, plain, "\nViewed image - https://images.example/i/public\n")
+	assert.Contains(t, plain, "✓ Viewed image /tmp/screenshot.png ▸")
+	assert.NotContains(t, plain, "/i/inspected")
 	assert.NotContains(t, plain, "internal-artifact")
+	assert.NotContains(t, plain, "Artifact ID:")
 	assert.NotContains(t, plain, "chart.png")
 	assert.NotContains(t, plain, "1536")
 	assert.NotContains(t, plain, "20 measurements")
-	assert.Equal(t, "Viewed image - https://images.example/i/public", strings.Split(plain, "\n")[regions[2].line])
+	assert.Equal(t, "✓ Viewed image /tmp/screenshot.png ▸", strings.Split(plain, "\n")[regions[2].line])
+	groups := m.toolRenderGroups(m.entries[0].blocks[0])
+	assert.Equal(t, "https://connected.example/kodelet/i/inspected", groups[2].body)
+	assert.False(t, groups[2].plainHeader)
+	assert.False(t, groups[2].expanded)
 
 	assert.True(t, m.toggleDetailAt(regions[1].line))
-	content, _ = m.renderTranscript()
+	m.refreshViewport(false)
+	content, regions = m.renderTranscript()
 	assert.Contains(t, xansi.Strip(content), "20 measurements")
+	assert.True(t, m.toggleDetailAt(regions[1].line))
+	m.refreshViewport(false)
+	_, regions = m.renderTranscript()
+
+	assert.True(t, m.toggleDetailAt(regions[2].line))
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "✓ Viewed image /tmp/screenshot.png ▾\n  https://connected.example/kodelet/i/inspected\n")
+	for _, text := range []string{"view_image - done", "input:", "result:", "Image:", "Type:", "Dimensions:", "Detail:"} {
+		assert.NotContains(t, plain, text)
+	}
+	assert.NotContains(t, plain, "Artifact ID:")
+	assert.NotContains(t, plain, "internal-artifact")
+	m.refreshViewport(false)
+	_, regions = m.renderTranscript()
+	assert.True(t, m.toggleDetailAt(regions[2].line))
+	content, _ = m.renderTranscript()
+	assert.NotContains(t, xansi.Strip(content), "/i/inspected")
 
 	m.width = 32
 	m.resize()
 	content, regions = m.renderTranscript()
 	plain = xansi.Strip(content)
 	assert.Contains(t, strings.ReplaceAll(plain, "\n", ""), "https://connected.example/kodelet/i/second")
-	assert.True(t, strings.HasPrefix(strings.Split(plain, "\n")[regions[2].line], "Viewed image - "))
+	assert.True(t, strings.HasPrefix(strings.Split(plain, "\n")[regions[2].line], "✓ Viewed image /tmp/screenshot.png"))
 }
 
 func TestRenderTranscriptImageAttachmentFailure(t *testing.T) {
@@ -159,6 +195,50 @@ func TestRenderTranscriptImageAttachmentFailure(t *testing.T) {
 	content, _ := m.renderTranscript()
 	assert.Contains(t, xansi.Strip(content), "Image unavailable - Upload interrupted")
 	assert.NotContains(t, content, "Generated image")
+}
+
+func TestRenderTranscriptViewedImageAttachmentErrors(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "upload failure", true: "inspection failure"}[failed], func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width, m.height = 100, 24
+			m.resize()
+			result := &tooltypes.StructuredToolResult{
+				ToolName: "view_image",
+				Success:  !failed,
+				Attachments: []tooltypes.ToolAttachment{{
+					Type: "image", Filename: "image.png", Error: "Upload interrupted",
+				}},
+			}
+			if failed {
+				result.Error = "Image could not be inspected"
+			}
+			block := assistantBlock{kind: blockTools, tools: []toolCall{{
+				name: "view_image", done: true, failed: failed,
+				input: `{"artifactId":"internal-artifact"}`, result: structuredToolResultText(result), structured: result,
+			}}}
+			m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{block}}}
+			m.refreshViewport(true)
+			content, regions := m.renderTranscript()
+			plain := xansi.Strip(content)
+			require.Len(t, regions, 1)
+			if failed {
+				assert.Contains(t, plain, "✗ Viewed image image.png ▾")
+				assert.Contains(t, plain, "Error: Image could not be inspected")
+			} else {
+				assert.Contains(t, plain, "✓ Viewed image image.png ▸")
+				assert.NotContains(t, plain, "Upload interrupted")
+				assert.True(t, m.toggleDetailAt(regions[0].line))
+				content, _ = m.renderTranscript()
+				plain = xansi.Strip(content)
+			}
+			assert.Contains(t, plain, "Image unavailable - Upload interrupted")
+			assert.NotContains(t, plain, "internal-artifact")
+			assert.NotContains(t, plain, "input:")
+			assert.NotContains(t, plain, "result:")
+		})
+	}
 }
 
 func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
@@ -626,6 +706,30 @@ func TestDedicatedBuiltinToolLabels(t *testing.T) {
 			name: "view image metadata",
 			tool: toolCall{structured: &tooltypes.StructuredToolResult{Metadata: &tooltypes.ViewImageMetadata{Path: "/tmp/image.png"}}},
 			want: "Viewed image /tmp/image.png",
+		},
+		{
+			name: "view image input path before attachment filename",
+			tool: toolCall{name: "view_image", input: `{"path":"path/to/image.png"}`, structured: &tooltypes.StructuredToolResult{
+				ToolName: "view_image", Attachments: []tooltypes.ToolAttachment{{Type: "image", Filename: "image.png"}},
+			}},
+			want: "Viewed image path/to/image.png",
+		},
+		{
+			name: "view image artifact filename",
+			tool: toolCall{name: "view_image", input: `{"artifactId":"internal-artifact"}`, structured: &tooltypes.StructuredToolResult{
+				ToolName: "view_image", Attachments: []tooltypes.ToolAttachment{
+					{Type: "text", Filename: "not-an-image.txt"},
+					{Type: "image", Filename: "screenshot.png"},
+				},
+			}},
+			want: "Viewed image screenshot.png",
+		},
+		{
+			name: "view image unnamed artifact",
+			tool: toolCall{name: "view_image", input: `{"artifactId":"internal-artifact"}`, structured: &tooltypes.StructuredToolResult{
+				ToolName: "view_image", Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "internal-artifact"}},
+			}},
+			want: "Viewed image",
 		},
 		{
 			name: "skill metadata",

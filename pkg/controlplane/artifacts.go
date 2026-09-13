@@ -167,6 +167,24 @@ func (c artifactController) normalizeAttachments(ctx context.Context, result *ru
 			if err == nil && attachment.Type == "image" {
 				stored.Alt = attachment.Alt
 				attachments[i] = stored
+				if result.Structured.ToolName == "view_image" {
+					var metadata tooltypes.ViewImageMetadata
+					if tooltypes.ExtractMetadata(result.Structured.Metadata, &metadata) {
+						metadata.ArtifactID = stored.ArtifactID
+						result.Structured.Metadata = &metadata
+					}
+					if len(result.ContentParts) > 0 {
+						// Multimodal providers use content parts instead of AssistantFacing.
+						// Keep the handle beside the pixels, out of UI display output.
+						text := "Artifact ID: " + stored.ArtifactID
+						result.AssistantFacing = tooltypes.StringifyToolResult(text, "")
+						result.ContentParts = append([]tooltypes.ToolResultContentPart{{
+							Type: tooltypes.ToolResultContentPartTypeText,
+							Text: text,
+						}}, result.ContentParts...)
+						continue
+					}
+				}
 				hint := fmt.Sprintf(
 					"\n\nImage artifact: %s (%dx%d, %s).",
 					stored.ArtifactID,

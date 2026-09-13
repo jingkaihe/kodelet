@@ -291,6 +291,32 @@ func TestBuildStoredFunctionCallOutputKeepsAssistantSummary(t *testing.T) {
 	assert.Contains(t, string(rawOutput), `"image_url":"data:image/png;base64,aGVsbG8="`)
 }
 
+func TestBuildStoredFunctionCallOutputPreservesArtifactIDAndImage(t *testing.T) {
+	const descriptor = "Artifact ID: art_test"
+	const imageURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	result := fakeMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: descriptor},
+		parts: []tooltypes.ToolResultContentPart{
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: descriptor},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: imageURL, MimeType: "image/png", Detail: "original"},
+		},
+	}
+	assert.Equal(t, tooltypes.StringifyToolResult(descriptor, ""), result.AssistantFacing())
+
+	output, storedOutput, rawOutput := buildStoredFunctionCallOutput(result)
+
+	assert.False(t, output.OfString.Valid(), "the text fallback must not replace the multimodal output")
+	items := output.OfResponseFunctionCallOutputItemArray
+	require.Len(t, items, 2)
+	require.NotNil(t, items[0].OfInputText)
+	assert.Equal(t, descriptor, items[0].OfInputText.Text)
+	require.NotNil(t, items[1].OfInputImage)
+	assert.Equal(t, imageURL, items[1].OfInputImage.ImageURL.Value)
+	assert.Equal(t, responses.ResponseInputImageContentDetailOriginal, items[1].OfInputImage.Detail)
+	assert.Equal(t, tooltypes.StringifyToolResult(descriptor, ""), storedOutput)
+	assert.JSONEq(t, `[{"type":"input_text","text":"Artifact ID: art_test"},{"type":"input_image","image_url":"`+imageURL+`","detail":"original"}]`, string(rawOutput))
+}
+
 func TestStructuredResultToolResultMethods(t *testing.T) {
 	structured := tooltypes.StructuredToolResult{
 		ToolName: "unknown_for_fallback",

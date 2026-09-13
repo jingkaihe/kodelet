@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyChatStreamEvent } from '../../features/chat/state';
+import { applyChatStreamEvent, conversationToChatMessages } from '../../features/chat/state';
 import type { ChatAssistantBlock, ChatRenderMessage, ChatStreamEvent } from '../../types';
 import ChatTranscript from './ChatTranscript';
 
@@ -20,6 +20,84 @@ vi.mock('../../utils', async (importOriginal) => {
 describe('ChatTranscript', () => {
   beforeEach(() => {
     copyToClipboardMock.mockReset();
+  });
+
+  it('renders capitalized Anthropic history calls as folded inspections rather than generated images', async () => {
+    const user = userEvent.setup();
+    const filename = 'transcript-ansi-colors-dark.png';
+    const path = `/workspace/${filename}`;
+    const attachment = {
+      type: 'image' as const,
+      artifactId: 'art_image',
+      shortCode: 'inspected_image',
+      filename,
+      mimeType: 'image/png',
+    };
+    const messages = conversationToChatMessages({
+      id: 'anthropic-view-image-history',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 2,
+      provider: 'anthropic',
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'view-path',
+              function: { name: 'View_image', arguments: JSON.stringify({ path }) },
+            },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'view-artifact',
+              function: {
+                name: 'View_image',
+                arguments: '{"artifactId":"art_image","detail":"original"}',
+              },
+            },
+          ],
+        },
+      ],
+      toolResults: {
+        'view-path': {
+          toolName: 'view_image',
+          metadataType: 'view_image',
+          success: true,
+          metadata: { path },
+          attachments: [attachment],
+        },
+        'view-artifact': {
+          toolName: 'view_image',
+          metadataType: 'view_image',
+          success: true,
+          metadata: { path: '', artifactId: 'art_image', detail: 'original' },
+          attachments: [attachment],
+        },
+      },
+    });
+    const { container } = render(<ChatTranscript isStreaming={false} messages={messages} />);
+    const labels = screen.getAllByText(`Viewed image ${filename}`);
+    expect(labels).toHaveLength(2);
+    expect(screen.queryByText('Generated image')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ran 2 tools')).not.toBeInTheDocument();
+    const previews = screen.getAllByRole('img', { name: filename });
+    expect(previews).toHaveLength(2);
+    for (const preview of previews) {
+      expect(preview).not.toBeVisible();
+      expect(preview.closest('details')).not.toHaveAttribute('open');
+    }
+
+    await user.click(labels[0]);
+
+    expect(previews[0]).toBeVisible();
+    expect(previews[1]).not.toBeVisible();
+    expect(container).not.toHaveTextContent('Artifact ID:');
   });
 
   it('renders the TUI welcome message for an empty conversation', () => {

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ChatRenderToolCall } from '../../types';
@@ -62,17 +62,20 @@ describe('ChatToolActivity', () => {
     ).toBeVisible();
   });
 
-  it('does not show image previews from transient tool updates', () => {
+  it.each([
+    'draw_diagram',
+    'view_image',
+  ])('does not show image previews from transient %s updates', (name) => {
     render(
       <ChatToolActivity
         tools={[
           {
             callId: 'diagram-1',
-            name: 'draw_diagram',
+            name,
             input: '{}',
             inProgress: true,
             result: {
-              toolName: 'draw_diagram',
+              toolName: name,
               success: true,
               attachments: [
                 { type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png' },
@@ -87,7 +90,11 @@ describe('ChatToolActivity', () => {
     expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
   });
 
-  it('uses an inspected image label for artifact-backed view_image results', () => {
+  it.each([
+    'diagram.png',
+    undefined,
+  ])('labels artifact-backed image rows using filename %s', async (filename) => {
+    const user = userEvent.setup();
     const tool: ChatRenderToolCall = {
       callId: 'view-1',
       name: 'view_image',
@@ -96,14 +103,274 @@ describe('ChatToolActivity', () => {
         toolName: 'view_image',
         success: true,
         attachments: [
-          { type: 'image', artifactId: 'art_1', shortCode: 'diagram', mimeType: 'image/png' },
+          {
+            type: 'image',
+            artifactId: 'art_1',
+            shortCode: 'diagram',
+            mimeType: 'image/png',
+            filename,
+          },
         ],
       },
     };
-    render(<ChatToolActivity tools={[tool]} />);
+    const { container } = render(<ChatToolActivity tools={[tool]} />);
 
-    expect(getToolSummary(tool)).toBe('Viewed image');
-    expect(screen.getByRole('img', { name: 'Viewed image' })).toBeVisible();
+    const label = filename ? `Viewed image ${filename}` : 'Viewed image';
+    expect(getToolSummary(tool)).toBe(label);
+    expect(screen.getByText(label)).toBeVisible();
+    const details = container.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    const preview = screen.getByRole('img', { name: filename || 'Viewed image' });
+    expect(preview).not.toBeVisible();
+    expect(preview.closest('details')).toBe(details);
+
+    await user.click(screen.getByText(label));
+
+    expect(preview).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: `Download image: ${filename || 'Viewed image'}` })
+    ).toBeVisible();
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(container.querySelector('.command-activity-header')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
+  });
+
+  it('shows a filename and folded preview/actions without inspection metadata or repeated headers', async () => {
+    const user = userEvent.setup();
+    const tool: ChatRenderToolCall = {
+      callId: 'view-local-1',
+      name: 'view_image',
+      input: '{"path":"/tmp/screenshot.png"}',
+      result: {
+        toolName: 'view_image',
+        success: true,
+        metadata: {
+          path: '/tmp/screenshot.png',
+          artifactId: 'art_local_image',
+          mimeType: 'image/png',
+          imageSize: { width: 1536, height: 1024 },
+          detail: 'original',
+        },
+        attachments: [
+          {
+            type: 'image',
+            artifactId: 'art_local_image',
+            shortCode: 'abcdefghijklmnopqrstuv',
+            mimeType: 'image/png',
+            filename: 'screenshot.png',
+          },
+        ],
+      },
+    };
+    const { container } = render(<ChatToolActivity tools={[tool]} />);
+
+    const details = container.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    const summary = screen.getByText('Viewed image screenshot.png');
+    expect(summary).toBeVisible();
+    expect(summary.closest('summary')).toHaveAttribute('title', '/tmp/screenshot.png');
+    const preview = screen.getByRole('img', { name: 'screenshot.png' });
+    expect(preview).not.toBeVisible();
+    expect(preview).toHaveAttribute('src', '/i/abcdefghijklmnopqrstuv');
+    expect(preview.closest('details')).toBe(details);
+    for (const link of screen.getAllByRole('link')) {
+      expect(link).not.toBeVisible();
+    }
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(screen.queryByText('/tmp/screenshot.png')).not.toBeInTheDocument();
+    expect(container).not.toHaveTextContent('Artifact ID:');
+    expect(container).not.toHaveTextContent('art_local_image');
+
+    await user.click(summary);
+
+    expect(details).toHaveAttribute('open');
+    expect(screen.getAllByText('Viewed image screenshot.png')).toHaveLength(1);
+    expect(container.querySelector('.command-activity-header')).not.toBeInTheDocument();
+    for (const text of [
+      'Ran 1 tool',
+      'Viewed image',
+      'image inspected',
+      'image/png',
+      'Dimensions',
+      '1536 x 1024',
+      'Detail',
+      'original',
+      '/tmp/screenshot.png',
+    ]) {
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    }
+    expect(screen.getByLabelText('Tool done')).toHaveClass('sr-only');
+    expect(preview).toBeVisible();
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    const openLink = screen.getByRole('link', {
+      name: 'Open full size in a new tab: screenshot.png',
+    });
+    expect(openLink).toBeVisible();
+    expect(openLink).toHaveAttribute('href', '/i/abcdefghijklmnopqrstuv');
+    expect(openLink).toHaveAttribute('target', '_blank');
+    const downloadLink = screen.getByRole('link', { name: 'Download image: screenshot.png' });
+    expect(downloadLink).toBeVisible();
+    expect(downloadLink).toHaveAttribute('href', '/i/abcdefghijklmnopqrstuv?download=1');
+    expect(downloadLink).toHaveAttribute('download');
+    expect(container).not.toHaveTextContent('Artifact ID:');
+    expect(container).not.toHaveTextContent('art_local_image');
+
+    await user.click(summary);
+
+    expect(details).not.toHaveAttribute('open');
+    expect(preview).not.toBeVisible();
+    expect(openLink).not.toBeVisible();
+    expect(downloadLink).not.toBeVisible();
+  });
+
+  it('keeps image rows independent of neighboring builtins and other image inspections', () => {
+    const builtin: ChatRenderToolCall = {
+      callId: 'glob-before',
+      name: 'glob_tool',
+      input: '{}',
+      result: { toolName: 'glob_tool', success: true },
+    };
+    const image: ChatRenderToolCall = {
+      callId: 'image-first',
+      name: 'view_image',
+      input: '{"path":"/tmp/first.png"}',
+      result: { toolName: 'view_image', success: true },
+    };
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          builtin,
+          image,
+          { ...image, callId: 'image-second', input: '{"path":"/tmp/second.png"}' },
+          { ...builtin, callId: 'glob-after' },
+        ]}
+      />
+    );
+
+    const rows = container.querySelectorAll('details');
+    expect(rows).toHaveLength(4);
+    expect(container.querySelector('details details')).not.toBeInTheDocument();
+    expect(
+      Array.from(rows, (row) => row.querySelector('summary .tool-summary-label')?.textContent)
+    ).toEqual(['Ran 1 tool', 'Viewed image first.png', 'Viewed image second.png', 'Ran 1 tool']);
+    for (const row of rows) expect(row).not.toHaveAttribute('open');
+  });
+
+  it('shows the filename while inspecting and folds its preview on completion', () => {
+    const tool: ChatRenderToolCall = {
+      callId: 'view-live',
+      name: 'view_image',
+      input: '{"path":"screenshots/live.png"}',
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[tool]} />);
+
+    expect(screen.getByText('Viewing image live.png')).toBeVisible();
+    expect(screen.getByText('Viewing image live.png').closest('summary')).toHaveAttribute(
+      'title',
+      'screenshots/live.png'
+    );
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('.running-tool-input-preview')).not.toBeInTheDocument();
+
+    rerender(
+      <ChatToolActivity
+        tools={[
+          {
+            ...tool,
+            result: {
+              toolName: 'view_image',
+              success: true,
+              metadata: { path: '/workspace/screenshots/live.png' },
+              attachments: [
+                {
+                  type: 'image',
+                  artifactId: 'art_live',
+                  shortCode: 'live',
+                  mimeType: 'image/png',
+                  filename: 'live.png',
+                },
+              ],
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Viewed image live.png')).toBeVisible();
+    expect(screen.getByText('Viewed image live.png').closest('summary')).toHaveAttribute(
+      'title',
+      '/workspace/screenshots/live.png'
+    );
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(screen.getByRole('img', { name: 'live.png' })).not.toBeVisible();
+  });
+
+  it('keeps inspection errors visible without the generic tool wrapper', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'view-error',
+            name: 'view_image',
+            input: '{"path":"/tmp/missing.png"}',
+            result: { toolName: 'view_image', success: false, error: 'Image file not found.' },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Failed to view image missing.png')).toBeVisible();
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(screen.getByRole('alert')).toHaveTextContent('Image file not found.');
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
+  });
+
+  it('preserves attachment and preview load errors inside the image disclosure', async () => {
+    const user = userEvent.setup();
+    const tool: ChatRenderToolCall = {
+      callId: 'view-preview-error',
+      name: 'view_image',
+      input: '{"path":"/tmp/image.png"}',
+      result: {
+        toolName: 'view_image',
+        success: true,
+        attachments: [{ type: 'image', error: 'Upload interrupted' }],
+      },
+    };
+    const { rerender } = render(<ChatToolActivity tools={[tool]} />);
+
+    expect(screen.getByText('Image unavailable: Upload interrupted')).not.toBeVisible();
+    await user.click(screen.getByText('Viewed image image.png'));
+    expect(screen.getByText('Image unavailable: Upload interrupted')).toBeVisible();
+
+    rerender(
+      <ChatToolActivity
+        tools={[
+          {
+            ...tool,
+            result: {
+              toolName: 'view_image',
+              success: true,
+              attachments: [
+                {
+                  type: 'image',
+                  artifactId: 'art_image',
+                  shortCode: 'image',
+                  mimeType: 'image/png',
+                  filename: 'image.png',
+                },
+              ],
+            },
+          },
+        ]}
+      />
+    );
+    fireEvent.error(screen.getByRole('img'));
+
+    expect(screen.getByText('Image preview unavailable.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Download image: image.png' })).toBeVisible();
   });
 
   it('renders a running tool with a compact input preview', () => {
@@ -1025,7 +1292,6 @@ describe('ChatToolActivity', () => {
     'todo_write',
     'glob_tool',
     'grep_tool',
-    'view_image',
     'openai_web_search',
     'web_fetch',
     'read_conversation',

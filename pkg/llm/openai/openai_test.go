@@ -151,10 +151,20 @@ func TestExtractMessagesWithImageOnlyMultiContent(t *testing.T) {
 }
 
 func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *testing.T) {
+	const descriptor = "Artifact ID: art_test"
+	const imageURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	result := fakeOpenAIMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: descriptor},
+		parts: []tooltypes.ToolResultContentPart{
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: descriptor},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: imageURL, MimeType: "image/png", Detail: "original"},
+		},
+	}
+	assert.Equal(t, tooltypes.StringifyToolResult(descriptor, ""), result.AssistantFacing())
 	toolResults := []openai.ChatCompletionMessage{
 		{
 			Role:       openai.ChatMessageRoleTool,
-			Content:    "<result>image analyzed</result>",
+			Content:    result.AssistantFacing(),
 			ToolCallID: "call_view_image",
 		},
 		{
@@ -164,24 +174,24 @@ func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *test
 		},
 	}
 
-	followupParts := openAIChatFollowupImageParts([]tooltypes.ToolResultContentPart{
-		{
-			Type:     tooltypes.ToolResultContentPartTypeImage,
-			ImageURL: "data:image/png;base64,aGVsbG8=",
-			Detail:   "original",
-		},
-	})
+	followupParts := openAIChatFollowupImageParts(result.ContentParts())
 
 	messages := openAIChatToolResultMessages(toolResults, followupParts)
 	require.Len(t, messages, 3)
 
 	assert.Equal(t, openai.ChatMessageRoleTool, messages[0].Role)
 	assert.Equal(t, "call_view_image", messages[0].ToolCallID)
+	assert.Equal(t, tooltypes.StringifyToolResult(descriptor, ""), messages[0].Content)
+	assert.Empty(t, messages[0].MultiContent)
 	assert.Equal(t, openai.ChatMessageRoleTool, messages[1].Role)
 	assert.Equal(t, "call_file_read", messages[1].ToolCallID)
 	assert.Equal(t, openai.ChatMessageRoleUser, messages[2].Role)
+	assert.Empty(t, messages[2].Content)
 	require.Len(t, messages[2].MultiContent, 1)
 	assert.Equal(t, openai.ChatMessagePartTypeImageURL, messages[2].MultiContent[0].Type)
+	assert.Empty(t, messages[2].MultiContent[0].Text, "the artifact descriptor must not be duplicated in the image follow-up")
+	require.NotNil(t, messages[2].MultiContent[0].ImageURL)
+	assert.Equal(t, imageURL, messages[2].MultiContent[0].ImageURL.URL)
 	assert.Equal(t, openai.ImageURLDetailHigh, messages[2].MultiContent[0].ImageURL.Detail)
 }
 
@@ -1716,6 +1726,15 @@ func newTestOpenAIExchangeThread(client *openai.Client, config llm.Config) *Thre
 }
 
 type testOpenAITool struct{ name string }
+
+type fakeOpenAIMultiModalToolResult struct {
+	tooltypes.BaseToolResult
+	parts []tooltypes.ToolResultContentPart
+}
+
+func (r fakeOpenAIMultiModalToolResult) ContentParts() []tooltypes.ToolResultContentPart {
+	return r.parts
+}
 
 func (t *testOpenAITool) GenerateSchema() *jsonschema.Schema {
 	return jsonschema.Reflect(map[string]any{})

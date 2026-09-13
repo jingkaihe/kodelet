@@ -3,6 +3,43 @@ import type { ChatRenderMessage, Conversation } from '../../types';
 import { applyChatStreamEvent, conversationToChatMessages } from './state';
 
 describe('conversationToChatMessages', () => {
+  it.each([
+    ['View_image', 'view_image', 'view_image'],
+    ['Bash', 'bash', 'bash'],
+    ['CustomTool', 'CustomTool', 'CustomTool'],
+    ['CustomTool', undefined, 'CustomTool'],
+  ])('uses canonical result names without guessing the identity of %s', (providerName, resultName, expectedName) => {
+    const conversation: Conversation = {
+      id: 'subscription-history',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 1,
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'tool-1', function: { name: providerName, arguments: '{}' } }],
+        },
+      ],
+      toolResults: resultName ? { 'tool-1': { toolName: resultName, success: true } } : undefined,
+    };
+
+    expect(conversationToChatMessages(conversation)[0].blocks).toEqual([
+      {
+        type: 'tools',
+        tools: [
+          {
+            callId: 'tool-1',
+            name: expectedName,
+            input: '{}',
+            result: conversation.toolResults?.['tool-1'],
+          },
+        ],
+      },
+    ]);
+    expect(conversation.messages?.[0].toolCalls?.[0].function.name).toBe(providerName);
+  });
+
   it('converts assistant thinking, tool calls, and content into ordered blocks', () => {
     const conversation: Conversation = {
       id: 'conv-123',
@@ -318,6 +355,47 @@ describe('applyChatStreamEvent', () => {
         type: 'message',
         content: 'All set.',
         inProgress: false,
+      },
+    ]);
+  });
+
+  it.each([
+    { kind: 'tool-update' as const, existing: true },
+    { kind: 'tool-result' as const, existing: true },
+    { kind: 'tool-update' as const, existing: false },
+    { kind: 'tool-result' as const, existing: false },
+  ])('prefers the canonical result name for $kind with existing call $existing', ({
+    kind,
+    existing,
+  }) => {
+    const initial: ChatRenderMessage[] = existing
+      ? applyChatStreamEvent([], {
+          kind: 'tool-use',
+          tool_call_id: 'view-1',
+          tool_name: 'View_image',
+          input: '{}',
+        })
+      : [];
+    const toolResult = { toolName: 'view_image', success: true };
+    const messages = applyChatStreamEvent(initial, {
+      kind,
+      tool_call_id: 'view-1',
+      tool_name: 'View_image',
+      tool_result: toolResult,
+    });
+
+    expect(messages[0].blocks).toEqual([
+      {
+        type: 'tools',
+        tools: [
+          {
+            callId: 'view-1',
+            name: 'view_image',
+            input: '{}',
+            result: toolResult,
+            ...(kind === 'tool-update' ? { inProgress: true } : {}),
+          },
+        ],
       },
     ]);
   });

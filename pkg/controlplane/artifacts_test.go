@@ -25,9 +25,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/vision"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -147,12 +149,17 @@ func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Empty(t, viewed.Result.Error)
-	require.Len(t, viewed.Result.ContentParts, 1)
-	assert.True(t, strings.HasPrefix(viewed.Result.ContentParts[0].ImageURL, "data:image/png;base64,"))
-	assert.Empty(t, viewed.Result.ContentParts[0].ArtifactID, "artifact bytes must be resolved before provider conversion")
+	require.Len(t, viewed.Result.ContentParts, 2)
+	assert.Equal(t, tooltypes.ToolResultContentPart{
+		Type: tooltypes.ToolResultContentPartTypeText,
+		Text: "Artifact ID: " + attachment.ArtifactID,
+	}, viewed.Result.ContentParts[0])
+	assert.True(t, strings.HasPrefix(viewed.Result.ContentParts[1].ImageURL, "data:image/png;base64,"))
+	assert.Empty(t, viewed.Result.ContentParts[1].ArtifactID, "artifact bytes must be resolved before provider conversion")
 	require.Len(t, viewed.Result.Structured.Attachments, 1)
 	assert.Equal(t, attachment.ArtifactID, viewed.Result.Structured.Attachments[0].ArtifactID)
-	assert.Contains(t, viewed.Result.AssistantFacing, "Image URL: "+attachment.ViewURL)
+	assert.Equal(t, tooltypes.StringifyToolResult("Artifact ID: "+attachment.ArtifactID, ""), viewed.Result.AssistantFacing)
+	assert.NotContains(t, viewed.Result.DisplayOutput, "Artifact ID:")
 	_, err = server.runnerRegistry.OpenRun(t.Context(), runnerID, protocol.RunOpenParams{
 		RunID:          "other-image-run",
 		ConversationID: "other-image-conversation",
@@ -285,6 +292,119 @@ func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 	actual, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	assert.Equal(t, encoded.Bytes(), actual)
+}
+
+func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
+	config := embeddedRunnerTestConfig(t)
+	config.PublicBaseURL = "https://images.example"
+	var encoded bytes.Buffer
+	require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 32, 24))))
+	path := filepath.Join(config.EmbeddedRunner.Workspace, "screenshot.png")
+	vanishingPath := filepath.Join(config.EmbeddedRunner.Workspace, "vanishing.png")
+	for _, source := range []string{path, vanishingPath} {
+		require.NoError(t, os.WriteFile(source, encoded.Bytes(), 0o600))
+	}
+	expected, err := vision.MakeViewImageResult(path, "", "gpt-4.1", "openai")
+	require.NoError(t, err)
+	config.EmbeddedRunner.ServiceOptions.EnvironmentFactory = func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+		local := agentenv.NewLocalEnvironment(cwd, runtime)
+		return &embeddedTestEnvironment{
+			Environment: local,
+			execute: func(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+				execution, err := local.ExecuteTool(ctx, request, updates)
+				if err == nil && request.Input == `{"path":"vanishing.png"}` {
+					// Losing the source after inspection must not lose the model's pixels.
+					err = os.Remove(vanishingPath)
+				}
+				return execution, err
+			},
+		}
+	}
+	server, _, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool {
+		return server.EmbeddedRunnerStatus().Ready
+	}, 5*time.Second, 10*time.Millisecond)
+	_, err = server.runnerRegistry.OpenRun(t.Context(), server.EmbeddedRunnerStatus().RunnerID, protocol.RunOpenParams{
+		RunID:          "view-path-run",
+		ConversationID: "view-path-conversation",
+	})
+	require.NoError(t, err)
+	controller := artifactController{
+		RemoteController: server.runnerRegistry,
+		server:           server,
+		conversationID:   "view-path-conversation",
+		config:           llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+	}
+	viewed, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+		RunID:      "view-path-run",
+		ToolCallID: "view-path",
+		Name:       "view_image",
+		Input:      json.RawMessage(`{"path":"screenshot.png"}`),
+	}, nil)
+	require.NoError(t, err)
+	require.Empty(t, viewed.Result.Error)
+	require.True(t, viewed.Result.Structured.Success)
+	require.Len(t, viewed.Result.Structured.Attachments, 1)
+	attachment := viewed.Result.Structured.Attachments[0]
+	require.Empty(t, attachment.Error)
+	require.NotEmpty(t, attachment.ArtifactID)
+	assert.Empty(t, attachment.Path)
+	assert.Equal(t, config.PublicBaseURL+"/i/"+attachment.ShortCode, attachment.ViewURL)
+	var metadata tooltypes.ViewImageMetadata
+	require.True(t, tooltypes.ExtractMetadata(viewed.Result.Structured.Metadata, &metadata))
+	assert.Equal(t, path, metadata.Path)
+	assert.Equal(t, attachment.ArtifactID, metadata.ArtifactID)
+	assert.Equal(t, tooltypes.ImageDimensions{Width: expected.Width, Height: expected.Height}, metadata.ImageSize)
+	assert.Equal(t, tooltypes.StringifyToolResult("Artifact ID: "+attachment.ArtifactID, ""), viewed.Result.AssistantFacing)
+	assert.Equal(t, []tooltypes.ToolResultContentPart{
+		{Type: tooltypes.ToolResultContentPartTypeText, Text: "Artifact ID: " + attachment.ArtifactID},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: expected.ImageURL, MimeType: expected.MimeType},
+	}, viewed.Result.ContentParts)
+	assert.NotContains(t, viewed.Result.DisplayOutput, attachment.ArtifactID)
+	display := renderers.NewRendererRegistry().Render(viewed.Result.Structured)
+	assert.Contains(t, display, "Viewed image - "+attachment.ViewURL)
+	assert.Contains(t, display, "Image: "+path)
+	assert.NotContains(t, display, attachment.ArtifactID)
+	assert.NotContains(t, display, "Artifact ID:")
+
+	// The artifact is a persistent copy, not a link to the runner-local source.
+	_, storedPath, err := server.artifacts.Get(t.Context(), "view-path-conversation", attachment.ArtifactID)
+	require.NoError(t, err)
+	assert.NotEqual(t, path, storedPath)
+	assert.Equal(t, "artifacts", filepath.Base(filepath.Dir(storedPath)))
+	require.NoError(t, os.Remove(path))
+	stored, err := os.ReadFile(storedPath)
+	require.NoError(t, err)
+	assert.Equal(t, encoded.Bytes(), stored)
+	request := httptest.NewRequest(http.MethodGet, "/i/"+attachment.ShortCode, nil)
+	request.Header.Set("Authorization", "Bearer web-secret")
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Equal(t, encoded.Bytes(), response.Body.Bytes())
+	input, err := json.Marshal(map[string]string{"artifactId": attachment.ArtifactID})
+	require.NoError(t, err)
+	revisited, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+		RunID: "view-path-run", ToolCallID: "revisit", Name: "view_image", Input: input,
+	}, nil)
+	require.NoError(t, err)
+	require.Empty(t, revisited.Result.Error)
+	assert.Equal(t, viewed.Result.ContentParts, revisited.Result.ContentParts)
+	assert.Equal(t, viewed.Result.Structured.Attachments, revisited.Result.Structured.Attachments)
+
+	failedUpload, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+		RunID: "view-path-run", ToolCallID: "vanishing", Name: "view_image", Input: json.RawMessage(`{"path":"vanishing.png"}`),
+	}, nil)
+	require.NoError(t, err)
+	require.Empty(t, failedUpload.Result.Error)
+	assert.True(t, failedUpload.Result.Structured.Success)
+	require.Len(t, failedUpload.Result.Structured.Attachments, 1)
+	assert.NotEmpty(t, failedUpload.Result.Structured.Attachments[0].Error)
+	assert.Empty(t, failedUpload.Result.Structured.Attachments[0].ArtifactID)
+	assert.Contains(t, failedUpload.Result.AssistantFacing, "Image attachment could not be saved")
+	assert.NotContains(t, failedUpload.Result.AssistantFacing, "Artifact ID:")
+	assert.Equal(t, viewed.Result.ContentParts[1:], failedUpload.Result.ContentParts)
+	require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), "view-path-run", protocol.RunStatusSucceeded, nil))
 }
 
 func TestImageArtifactUploadCancellationInterruptsStalledBody(t *testing.T) {

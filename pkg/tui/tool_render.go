@@ -100,7 +100,7 @@ func isImageAttachmentTool(tool toolCall) bool {
 
 func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
-	return toolRenderGroup{
+	group := toolRenderGroup{
 		toolStart:   idx,
 		toolEnd:     idx,
 		changeIndex: -1,
@@ -113,6 +113,19 @@ func (m model) buildImageToolGroup(block assistantBlock, idx int) toolRenderGrou
 		failed:      tool.failed,
 		plainHeader: true,
 	}
+	if normalizedToolName(tool) == "view_image" {
+		lines := strings.Split(group.label, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimPrefix(line, "Viewed image - ")
+		}
+		group.body = strings.Join(lines, "\n")
+		if errorText := strings.TrimSpace(tool.structured.Error); errorText != "" {
+			group.body = sanitizeExtensionTranscriptText("Error: "+errorText) + "\n" + group.body
+		}
+		group.label = sanitizeExtensionTranscriptText(viewImageToolLabel(tool))
+		group.plainHeader = false
+	}
+	return group
 }
 
 func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
@@ -757,6 +770,13 @@ func viewImageToolLabel(tool toolCall) string {
 	}
 	if path := stringField(toolInputFields(tool.input), "path"); path != "" {
 		return fmt.Sprintf("Viewed image %s", path)
+	}
+	if tool.structured != nil {
+		for _, attachment := range tool.structured.Attachments {
+			if attachment.Type == "image" && strings.TrimSpace(attachment.Filename) != "" {
+				return fmt.Sprintf("Viewed image %s", attachment.Filename)
+			}
+		}
 	}
 	return "Viewed image"
 }

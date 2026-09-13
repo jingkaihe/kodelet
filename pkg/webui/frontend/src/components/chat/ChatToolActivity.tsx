@@ -219,6 +219,10 @@ const getFallbackToolLabel = (toolName: string): string =>
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
 
+const getViewImagePath = (tool: ChatRenderToolCall): string | undefined =>
+  getStringField(getMetadataRecord(tool.result), 'path') ||
+  getStringField(parseToolInput(tool.input), 'path');
+
 export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const input = parseToolInput(toolCall.input);
@@ -227,11 +231,23 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   if (presentation) {
     return presentation.summary;
   }
+  if (normalizedToolName === 'view_image') {
+    const image = toolCall.result?.attachments?.find((attachment) => attachment.type === 'image');
+    const filename = (getViewImagePath(toolCall) || image?.filename?.trim())?.split('/').pop();
+    const status = getToolActivityStatus(toolCall);
+    const label =
+      status === 'running'
+        ? 'Viewing image'
+        : status === 'failed'
+          ? 'Failed to view image'
+          : 'Viewed image';
+    return filename ? `${label} ${filename}` : label;
+  }
   const images = toolCall.result?.attachments?.filter(
     (attachment) => attachment.type === 'image' && imageAttachmentURL(attachment)
   );
   if (!toolCall.inProgress && images?.length) {
-    return `${normalizedToolName === 'view_image' ? 'Viewed' : 'Generated'} ${images.length === 1 ? 'image' : 'images'}`;
+    return `Generated ${images.length === 1 ? 'image' : 'images'}`;
   }
   const taskRun = getTaskRunSnapshot(toolCall.result);
   if (taskRun) {
@@ -292,12 +308,6 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
       return formatToolSummary(
         'Fetch URL',
         getStringField(input, 'url') || getStringField(metadata, 'url')
-      );
-
-    case 'view_image':
-      return formatToolSummary(
-        'View image',
-        getStringField(input, 'path') || getStringField(metadata, 'path')
       );
 
     case 'openai_web_search':
@@ -498,6 +508,49 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
   );
 };
 
+const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
+  const status = getToolActivityStatus(tool);
+  const running = status === 'running';
+  const failed = status === 'failed';
+  const summary = getToolSummary(tool);
+
+  return (
+    <details
+      className={cn(
+        'activity-card',
+        'activity-image',
+        running && 'activity-card-live',
+        failed && 'activity-card-error'
+      )}
+      key={status}
+      open={running || failed ? true : undefined}
+    >
+      <summary className="tool-summary activity-summary" title={getViewImagePath(tool) || summary}>
+        <span className="activity-marker" aria-hidden="true">
+          {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
+        </span>
+        <span className="tool-summary-text">
+          <span className="tool-summary-label">{summary}</span>
+        </span>
+        <span className="tool-summary-chevron" aria-hidden="true">
+          <ChevronRight size={12} />
+        </span>
+        <output className="sr-only" aria-label={`Tool ${status}`}>
+          {status}
+        </output>
+      </summary>
+      <div className="activity-detail-content">
+        {failed ? (
+          <div className="quiet-tool-warning" role="alert">
+            {tool.result?.error || 'Image inspection failed.'}
+          </div>
+        ) : null}
+        {tool.result && !running ? <ToolImageAttachments toolResult={tool.result} /> : null}
+      </div>
+    </details>
+  );
+};
+
 const builtinToolNames = new Set([
   'get_goal',
   'glob_tool',
@@ -508,16 +561,18 @@ const builtinToolNames = new Set([
   'todo_read',
   'todo_write',
   'update_goal',
-  'view_image',
   'web_fetch',
 ]);
 
-const toolGroupKind = (tool: ChatRenderToolCall): 'commands' | 'tools' | 'file' | 'extension' => {
+const toolGroupKind = (
+  tool: ChatRenderToolCall
+): 'commands' | 'tools' | 'file' | 'image' | 'extension' => {
   if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
     return 'extension';
   }
   const name = normalizeToolName(tool.name);
   if (name === 'bash') return 'commands';
+  if (name === 'view_image') return 'image';
   if (['apply_patch', 'file_edit', 'file_read', 'file_write'].includes(name)) return 'file';
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };
@@ -527,7 +582,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
     return null;
   }
 
-  // Preserve transcript order and keep files and extension-owned presentations independent.
+  // Preserve transcript order and keep files, images, and extension presentations independent.
   const groups: ChatRenderToolCall[][] = [];
   for (const tool of tools) {
     const previous = groups[groups.length - 1];
@@ -551,6 +606,14 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         if (kind === 'file') {
           return (
             <FileToolActivity
+              key={toolCall.callId || `${toolCall.name}-${groupIndex}`}
+              tool={toolCall}
+            />
+          );
+        }
+        if (kind === 'image') {
+          return (
+            <ImageToolActivity
               key={toolCall.callId || `${toolCall.name}-${groupIndex}`}
               tool={toolCall}
             />

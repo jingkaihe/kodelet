@@ -149,7 +149,7 @@ const applyToolResultEvent = (
         }
 
         tool.result = event.tool_result;
-        tool.name = event.tool_name || event.tool_result?.toolName || tool.name;
+        tool.name = event.tool_result?.toolName || event.tool_name || tool.name;
         if (inProgress) {
           tool.inProgress = true;
         } else {
@@ -171,7 +171,7 @@ const applyToolResultEvent = (
       : undefined;
   const tool: ChatRenderToolCall = {
     callId: event.tool_call_id || '',
-    name: event.tool_name || event.tool_result?.toolName || 'unknown',
+    name: event.tool_result?.toolName || event.tool_name || 'unknown',
     input: event.input || (command ? JSON.stringify({ command }) : '{}'),
     result: event.tool_result,
   };
@@ -229,7 +229,12 @@ export const conversationToChatMessages = (
         type: 'tools',
         tools: toolCalls.map((toolCall) => ({
           callId: toolCall.id,
-          name: toolCall.function?.name || 'unknown',
+          // Subscription providers may capitalize names in stored tool calls.
+          // The structured result identifies the tool that actually executed.
+          name:
+            conversation.toolResults?.[toolCall.id]?.toolName ||
+            toolCall.function?.name ||
+            'unknown',
           input: toolCall.function?.arguments || '{}',
           result: conversation.toolResults?.[toolCall.id],
         })),
