@@ -76,19 +76,12 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   const [multiline, setMultiline] = React.useState(() => draft.includes('\n'));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(contextText): Context text changes the available editor width and must trigger layout measurement.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(placeholder): The empty editor must resize when its placeholder changes or wraps.
   // biome-ignore lint/correctness/useExhaustiveDependencies(showStop): Showing the stop control changes the available editor width and must trigger layout measurement.
   const syncEditorLayout = React.useCallback(() => {
     const controlGrid = controlGridRef.current;
     const editor = textareaRef.current;
     if (!controlGrid || !editor) {
-      return;
-    }
-
-    if (draft.length === 0) {
-      controlGrid.classList.remove('is-multiline');
-      editor.style.height = '';
-      editor.style.overflowY = '';
-      setMultiline(false);
       return;
     }
 
@@ -135,7 +128,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     }
 
     setMultiline((currentValue) => (currentValue === nextMultiline ? currentValue : nextMultiline));
-  }, [contextText, draft, showStop]);
+  }, [contextText, draft, placeholder, showStop]);
 
   React.useLayoutEffect(() => {
     syncEditorLayout();

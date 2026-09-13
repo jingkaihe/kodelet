@@ -671,10 +671,38 @@
 }
 
 @media (max-width: 600px) {
-  .composer-editor {
+  .composer-control-grid {
+    row-gap: 0.25rem;
+  }
+
+  .composer-control-grid .composer-editor {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 2.75rem;
     max-height: 9rem;
+    padding: calc((2.75rem - 1lh) / 2) 0.25rem;
     font-size: 1rem;
     line-height: 1.5;
+  }
+
+  .composer-control-grid .composer-leading-actions,
+  .composer-control-grid .composer-status-actions {
+    grid-row: 2;
+    align-self: center;
+  }
+
+  .composer-control-grid .composer-context-cluster {
+    grid-column: 2;
+    grid-row: 2;
+    width: auto;
+    align-self: center;
+    justify-self: stretch;
+    justify-content: flex-start;
+    padding: 0 0.25rem;
+  }
+
+  .composer-footer-divider {
+    display: none;
   }
 
   .composer-leading-actions,
@@ -708,7 +736,7 @@
     padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
   }
 
-  .composer-editor {
+  .composer-control-grid .composer-editor {
     max-height: 7rem;
   }
 }

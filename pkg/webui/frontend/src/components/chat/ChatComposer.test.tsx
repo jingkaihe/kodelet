@@ -117,6 +117,36 @@ describe('ChatComposer', () => {
     expect(textarea.style.overflowY).toBe('');
   });
 
+  it('fits a wrapped empty placeholder and shrinks when it fits on one line again', () => {
+    const composer = renderComposer({ draft: '', placeholder: 'Steer the active conversation…' });
+    const textarea = screen.getByTestId('composer-textarea');
+    let scrollHeight = 68;
+    Object.defineProperties(textarea, {
+      clientHeight: { configurable: true, value: 44 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+    });
+    const computedStyles = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      minHeight: '44px',
+      maxHeight: '144px',
+    } as CSSStyleDeclaration);
+
+    try {
+      fireEvent(window, new Event('resize'));
+
+      expect(textarea.parentElement).toHaveClass('is-multiline');
+      expect(textarea.style.height).toBe('68px');
+      expect(textarea.style.overflowY).toBe('hidden');
+
+      scrollHeight = 44;
+      composer.rerenderComposer({ draft: '', placeholder: 'Ask anything…' });
+
+      expect(textarea.parentElement).not.toHaveClass('is-multiline');
+      expect(textarea.style.height).toBe('44px');
+    } finally {
+      computedStyles.mockRestore();
+    }
+  });
+
   it('renders and emits the compact stop action', () => {
     const props = renderComposer({ canStop: true, showStop: true });
     const stopButton = screen.getByLabelText('Stop');

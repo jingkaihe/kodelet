@@ -52,7 +52,16 @@ const meta = {
       expect(Math.abs(leading.y - submit.y)).toBeLessThan(1);
       expect(Math.abs(leading.height - submit.height)).toBeLessThan(1);
 
-      if (!editor.parentElement?.classList.contains('is-multiline')) {
+      if (window.matchMedia('(max-width: 600px)').matches) {
+        const editorRect = editor.getBoundingClientRect();
+        expect(Math.abs(editorRect.left - leading.left)).toBeLessThan(1);
+        expect(Math.abs(editorRect.right - submit.right)).toBeLessThan(1);
+        expect(editorRect.bottom).toBeLessThanOrEqual(submit.top);
+        expect(leading.height).toBeGreaterThanOrEqual(44);
+        if (!args.draft) {
+          expect(editor.scrollHeight).toBeLessThanOrEqual(editor.clientHeight + 1);
+        }
+      } else if (!editor.parentElement?.classList.contains('is-multiline')) {
         const styles = getComputedStyle(editor);
         const textCenter =
           editor.getBoundingClientRect().top +
