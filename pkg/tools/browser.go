@@ -35,7 +35,7 @@ func NewBrowserTool(controller BrowserController) *BrowserTool {
 // BrowserInput describes an operation on the current workspace's shared page.
 type BrowserInput struct {
 	Action     string `json:"action" jsonschema:"enum=open,enum=navigate,enum=evaluate,enum=screenshot,enum=stop,description=Operation on the workspace browser shared with the Web UI"`
-	URL        string `json:"url,omitempty" jsonschema:"description=HTTP or HTTPS URL for navigate. localhost refers to the runner. about:blank is also allowed."`
+	URL        string `json:"url,omitempty" jsonschema:"description=HTTP or HTTPS URL for navigate. Use localhost to access local HTTP services. Navigation does not wait for application readiness."`
 	Expression string `json:"expression,omitempty" jsonschema:"description=JavaScript expression for evaluate. Can inspect the DOM or interact with the page. Promises are awaited."`
 	Path       string `json:"path,omitempty" jsonschema:"description=New PNG output path for screenshot, relative to the workspace or absolute. Existing files are not overwritten."`
 	SessionID  string `json:"sessionId,omitempty" jsonschema:"description=Session ID returned by open; required for explicit stop."`
@@ -46,11 +46,14 @@ func (*BrowserTool) Name() string { return "browser" }
 func (*BrowserTool) GenerateSchema() *jsonschema.Schema { return GenerateSchema[BrowserInput]() }
 
 func (*BrowserTool) Description() string {
-	return `Control the runner's workspace browser, shared with the human's Browser panel.
+	return `Use the shared browser to collaborate visually with the human: show your work, demonstrate an issue, inspect the page they are discussing, or capture screenshots for feedback. You both see and interact with the same live page.
 
-open lazily starts or reattaches to the browser and returns its sessionId. navigate opens an HTTP/HTTPS URL (localhost is on the runner), but does not wait for application readiness; use evaluate to check the DOM. evaluate runs JavaScript, awaits promises, and returns its value; it can inspect or interact with elements. screenshot saves a new PNG and returns its image. stop requires the sessionId from open and closes the shared browser for everyone.
+Prefer dedicated browser automation tools, such as Playwright, when available, for automated testing, repetitive interactions, or multi-step workflows that do not need the shared page. Do not assume those tools share this session.
 
-The browser is a development profile separate from the user's personal browser. Do not navigate away or stop a browser the human is inspecting without reason. Agent completion/cancellation does not close the shared session. Start the application's dev server separately using the terminal or bash. This tool does not publish the application to the internet.`
+Notes:
+- Use localhost to access local HTTP services. Use evaluate for readiness checks, focused inspection, and small interactions.
+- Leave the result open for the human to review unless asked to close it.
+- This is a development browser, separate from the human’s personal browser. Start app servers separately using terminal or bash; this tool does not publish apps to the internet.`
 }
 
 func (*BrowserTool) ValidateInput(_ tooltypes.State, parameters string) error {
