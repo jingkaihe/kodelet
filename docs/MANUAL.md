@@ -479,26 +479,31 @@ Swipe vertically inside the terminal to scroll: drag down to read older output a
 
 The **Browser** workspace tab lets you test a web app running on your runner. It is available to users with `terminal` or `admin` access when enabled on both the runner and server.
 
-Install Chrome/Chromium on the runner and set its executable in the runner's environment before starting it. For the built-in runner, use the server process's environment instead:
-
-```bash
-export KODELET_BROWSER_EXECUTABLE=/opt/chrome/chrome
-```
-
-Enable access in the server's user configuration:
+Install Chrome/Chromium on the runner and configure it in that host's `~/.kodelet/config.yaml` (or `KODELET_CONFIG_FILE`). Enable access separately on the server:
 
 ```yaml
+browser:
+  executable: /opt/chrome/chrome
+  idle_timeout: 15m
+
 serve:
   browser_enabled: true
 ```
 
-Alternatively, use `kodelet serve --browser-enabled`. Restart the affected server or runner after changing these settings.
+Or use CLI flags for the built-in or standalone runner:
+
+```bash
+kodelet serve --browser-enabled --browser-executable /opt/chrome/chrome
+kodelet runner start --browser-executable /opt/chrome/chrome
+```
+
+Both commands also accept `--browser-idle-timeout` and `--browser-devtools-dir`. Precedence: flags → non-empty `KODELET_BROWSER_*` variables → trusted YAML → defaults. These are runner-host settings, not repository/profile overrides. Use `--browser-executable=""` to disable launching. Restart the affected process to apply changes (`kodelet server restart` for the local daemon).
 
 Start your app in the terminal, open **Browser**, and enter its address, such as `http://localhost:1234/abc`. Here, `localhost` is the runner host. The panel provides navigation, mouse/keyboard input, JavaScript dialogs, a console, network requests, and basic element inspection. Press **F6** to return to the address bar.
 
-The browser starts on demand and is shared with agents in that workspace. Closing the panel or finishing a run leaves it running. Use **Stop workspace browser** to close it, or let it expire after 15 minutes disconnected and unused. Set `KODELET_BROWSER_IDLE_TIMEOUT` to change that duration. Browser profiles are temporary; use development accounts.
+The browser starts on demand and is shared with agents in that workspace. Closing the panel or finishing a run leaves it running. Use **Stop workspace browser** to close it, or let it expire after 15 minutes disconnected and unused. Set `browser.idle_timeout` to a positive duration to change that. Browser profiles are temporary; use development accounts.
 
-For full **DevTools**, optionally set `KODELET_BROWSER_DEVTOOLS_DIR` on the runner to a trusted, compatible compiled frontend containing `inspector.html`. Kodelet does not install Chrome or DevTools for you.
+For full **DevTools**, optionally set `browser.devtools_dir` to a trusted, compatible compiled frontend containing `inspector.html`. Kodelet does not install Chrome or DevTools for you.
 
 Agents can navigate, evaluate JavaScript, and take screenshots through the `browser` tool, including from the TUI; the TUI has no graphical browser panel. App startup, Procfile/compose support, and public URL sharing are not included.
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/jingkaihe/kodelet/pkg/binaries"
+	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -54,6 +55,7 @@ type ServeConfig struct {
 	SkipAuth             bool
 	EmbeddedRunner       bool
 	BrowserEnabled       bool
+	Browser              browser.Config
 	RunnerWorkspace      string
 	RunnerSettings       map[string]any
 	CORSOrigins          []string
@@ -145,6 +147,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().Bool("disable-control-plane-workspace", true, "Deprecated and ignored; use --embedded-runner=false to run without a built-in runner")
 	cmd.Flags().Bool("embedded-runner", defaults.EmbeddedRunner, "Run tools and access files on this machine using a built-in runner")
 	cmd.Flags().Bool("browser-enabled", defaults.BrowserEnabled, "Allow runner browser sessions and tools for users with terminal access (requires a browser-enabled runner)")
+	addRunnerBrowserFlags(cmd)
 	cmd.Flags().String("runner-workspace", defaults.RunnerWorkspace, "Default working directory for the built-in runner (default: startup directory)")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
@@ -242,6 +245,13 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if corsOrigins, err := cmd.Flags().GetStringSlice("cors-origins"); err == nil && cmd.Flags().Changed("cors-origins") {
 		config.CORSOrigins = corsOrigins
+	}
+	if config.EmbeddedRunner {
+		browserConfig, err := runnerBrowserConfigFromFlags(cmd)
+		config.Browser = browserConfig
+		if err != nil && config.ConfigError == nil {
+			config.ConfigError = err
+		}
 	}
 	llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 	if err != nil {
@@ -591,14 +601,10 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to load the built-in runner's settings")
 		}
-		browserConfig, err := runnerBrowserConfigFromEnvironment()
-		if err != nil {
-			return nil, err
-		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
 			Workspace:      workspace,
 			Settings:       config.RunnerSettings,
-			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader, Browser: browserConfig},
+			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader, Browser: config.Browser},
 		}
 	}
 	if err := serverConfig.Validate(); err != nil {

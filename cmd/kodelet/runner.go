@@ -17,6 +17,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -37,6 +38,8 @@ type runnerStartConfig struct {
 	Server      string
 	AuthToken   string
 	DisplayName string
+	Browser     browser.Config
+	ConfigError error
 }
 
 type runnerEnrollConfig struct {
@@ -132,6 +135,7 @@ func init() {
 	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Server URL")
 	runnerStartCmd.Flags().String("auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
 	runnerStartCmd.Flags().String("name", "", "Display name for this runner")
+	addRunnerBrowserFlags(runnerStartCmd)
 	runnerEnrollCmd.Flags().String("server", defaultRunnerServer, "Server URL")
 	runnerEnrollCmd.Flags().String("name", "", "Display name for this runner")
 	runnerEnrollCmd.Flags().Bool("replace", false, "Replace an existing local runner credential after browser approval")
@@ -150,10 +154,13 @@ func init() {
 func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	displayName, _ := cmd.Flags().GetString("name")
+	browserConfig, err := runnerBrowserConfigFromFlags(cmd)
 	return runnerStartConfig{
 		Server:      server,
 		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
 		DisplayName: displayName,
+		Browser:     browserConfig,
+		ConfigError: err,
 	}
 }
 
@@ -183,6 +190,9 @@ func runnerQueryConfigFromFlags(cmd *cobra.Command) runnerQueryConfig {
 }
 
 func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
+	if config.ConfigError != nil {
+		return config.ConfigError
+	}
 	workspace, err := os.Getwd()
 	if err != nil {
 		return errors.Wrap(err, "failed to determine current workspace")
@@ -194,10 +204,6 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err != nil {
 		return err
 	}
-	browserConfig, err := runnerBrowserConfigFromEnvironment()
-	if err != nil {
-		return err
-	}
 
 	var registered bool
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
@@ -205,7 +211,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 		AuthToken:      config.AuthToken,
 		Workspace:      workspace,
 		DisplayName:    config.DisplayName,
-		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader, Browser: browserConfig},
+		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader, Browser: config.Browser},
 		OnRegistered: func(result protocol.RegisterResult) {
 			if registered {
 				presenter.Success(fmt.Sprintf("Runner reconnected as %s", result.RunnerID))
@@ -234,16 +240,56 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	return nil
 }
 
-// Browser installation and lifetime are host settings, never workspace/model overrides.
-func runnerBrowserConfigFromEnvironment() (browser.Config, error) {
-	config := browser.Config{
-		Executable:  strings.TrimSpace(os.Getenv("KODELET_BROWSER_EXECUTABLE")),
-		DevToolsDir: strings.TrimSpace(os.Getenv("KODELET_BROWSER_DEVTOOLS_DIR")),
+func addRunnerBrowserFlags(cmd *cobra.Command) {
+	cmd.Flags().String("browser-executable", "", "Installed Chrome/Chromium executable or PATH name for the runner (or KODELET_BROWSER_EXECUTABLE; empty disables launching)")
+	cmd.Flags().String("browser-devtools-dir", "", "Trusted compiled DevTools frontend directory for the runner (or KODELET_BROWSER_DEVTOOLS_DIR)")
+	cmd.Flags().Duration("browser-idle-timeout", 15*time.Minute, "Idle timeout for unattached runner browser sessions (or KODELET_BROWSER_IDLE_TIMEOUT)")
+}
+
+// Browser installation and lifetime are trusted host settings, never workspace/model overrides.
+// Explicit flags override the existing environment variables, then trusted YAML.
+func runnerBrowserConfigFromFlags(cmd *cobra.Command) (browser.Config, error) {
+	var trusted struct {
+		Executable  string `mapstructure:"executable"`
+		DevToolsDir string `mapstructure:"devtools_dir"`
+		IdleTimeout string `mapstructure:"idle_timeout"`
 	}
-	if raw := strings.TrimSpace(os.Getenv("KODELET_BROWSER_IDLE_TIMEOUT")); raw != "" {
-		duration, err := time.ParseDuration(raw)
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:      &trusted,
+		TagName:     "mapstructure",
+		ErrorUnused: true,
+	})
+	if err != nil {
+		return browser.Config{}, errors.Wrap(err, "failed to initialize trusted browser configuration decoder")
+	}
+	if err := decoder.Decode(viper.Get("browser")); err != nil {
+		return browser.Config{}, errors.Wrap(err, "failed to decode trusted browser configuration")
+	}
+	for _, setting := range []struct {
+		name  string
+		value *string
+	}{
+		{"executable", &trusted.Executable},
+		{"devtools_dir", &trusted.DevToolsDir},
+		{"idle_timeout", &trusted.IdleTimeout},
+	} {
+		if value := strings.TrimSpace(os.Getenv("KODELET_BROWSER_" + strings.ToUpper(setting.name))); value != "" {
+			*setting.value = value
+		}
+		flag := "browser-" + strings.ReplaceAll(setting.name, "_", "-")
+		if cmd.Flags().Changed(flag) {
+			*setting.value = cmd.Flags().Lookup(flag).Value.String()
+		}
+		*setting.value = strings.TrimSpace(*setting.value)
+	}
+	config := browser.Config{
+		Executable:  trusted.Executable,
+		DevToolsDir: trusted.DevToolsDir,
+	}
+	if trusted.IdleTimeout != "" {
+		duration, err := time.ParseDuration(trusted.IdleTimeout)
 		if err != nil || duration <= 0 {
-			return browser.Config{}, errors.New("KODELET_BROWSER_IDLE_TIMEOUT must be a positive duration, for example 15m")
+			return browser.Config{}, errors.New("browser.idle_timeout (--browser-idle-timeout / KODELET_BROWSER_IDLE_TIMEOUT) must be a positive duration, for example 15m")
 		}
 		config.IdleTimeout = duration
 	}

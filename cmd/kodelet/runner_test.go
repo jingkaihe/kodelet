@@ -14,10 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,27 +44,91 @@ func TestNormalizeRunnerAPIBaseURL(t *testing.T) {
 	require.ErrorContains(t, err, "only scheme, host")
 }
 
-func TestRunnerBrowserConfigFromEnvironment(t *testing.T) {
-	t.Setenv("KODELET_BROWSER_EXECUTABLE", "")
-	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", "")
-	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "")
-	config, err := runnerBrowserConfigFromEnvironment()
-	require.NoError(t, err)
-	assert.Empty(t, config.Executable, "browser support is opt-in")
-	assert.Zero(t, config.IdleTimeout, "the manager supplies the default")
-
-	t.Setenv("KODELET_BROWSER_EXECUTABLE", " /opt/browser/chrome ")
-	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", " /opt/browser/devtools ")
-	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", " 5m ")
-	config, err = runnerBrowserConfigFromEnvironment()
-	require.NoError(t, err)
-	assert.Equal(t, "/opt/browser/chrome", config.Executable)
-	assert.Equal(t, "/opt/browser/devtools", config.DevToolsDir)
-	assert.Equal(t, 5*time.Minute, config.IdleTimeout)
-	for _, raw := range []string{"nope", "0", "-1m"} {
-		t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", raw)
-		_, err = runnerBrowserConfigFromEnvironment()
-		assert.ErrorContains(t, err, "positive duration")
+func TestRunnerBrowserConfigPrecedence(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	viper.SetConfigType("yaml")
+	const yamlConfig = "browser:\n  executable: ' /yaml/chrome '\n  devtools_dir: ' /yaml/devtools '\n  idle_timeout: ' 7m '\n"
+	yamlBrowser := browser.Config{Executable: "/yaml/chrome", DevToolsDir: "/yaml/devtools", IdleTimeout: 7 * time.Minute}
+	for _, test := range []struct {
+		name        string
+		yaml        string
+		environment map[string]string
+		flags       []string
+		want        browser.Config
+		wantErr     string
+	}{
+		{name: "defaults"},
+		{name: "trusted YAML", yaml: yamlConfig, want: yamlBrowser},
+		{
+			name:        "environment without YAML",
+			environment: map[string]string{"EXECUTABLE": "/env/chrome", "DEVTOOLS_DIR": "/env/devtools", "IDLE_TIMEOUT": "5m"},
+			want:        browser.Config{Executable: "/env/chrome", DevToolsDir: "/env/devtools", IdleTimeout: 5 * time.Minute},
+		},
+		{
+			name: "environment overrides YAML", yaml: yamlConfig,
+			environment: map[string]string{"EXECUTABLE": " /env/chrome ", "DEVTOOLS_DIR": " /env/devtools ", "IDLE_TIMEOUT": " 5m "},
+			want:        browser.Config{Executable: "/env/chrome", DevToolsDir: "/env/devtools", IdleTimeout: 5 * time.Minute},
+		},
+		{
+			name: "flags override environment and YAML", yaml: yamlConfig,
+			environment: map[string]string{"EXECUTABLE": "/env/chrome", "DEVTOOLS_DIR": "/env/devtools", "IDLE_TIMEOUT": "invalid"},
+			flags:       []string{"--browser-executable", " /flag/chrome ", "--browser-devtools-dir", " /flag/devtools ", "--browser-idle-timeout", "3m"},
+			want:        browser.Config{Executable: "/flag/chrome", DevToolsDir: "/flag/devtools", IdleTimeout: 3 * time.Minute},
+		},
+		{
+			name: "partial flag override", yaml: yamlConfig,
+			flags: []string{"--browser-executable", "chromium"},
+			want:  browser.Config{Executable: "chromium", DevToolsDir: "/yaml/devtools", IdleTimeout: 7 * time.Minute},
+		},
+		{
+			name: "explicit empty paths override environment and YAML", yaml: yamlConfig,
+			environment: map[string]string{"EXECUTABLE": "/env/chrome", "DEVTOOLS_DIR": "/env/devtools"},
+			flags:       []string{"--browser-executable=", "--browser-devtools-dir="},
+			want:        browser.Config{IdleTimeout: 7 * time.Minute},
+		},
+		{
+			name: "blank environment preserves YAML", yaml: yamlConfig,
+			environment: map[string]string{"EXECUTABLE": " ", "DEVTOOLS_DIR": " ", "IDLE_TIMEOUT": " "},
+			want:        yamlBrowser,
+		},
+		{name: "invalid YAML duration", yaml: "browser:\n  idle_timeout: nope\n", wantErr: "positive duration"},
+		{name: "zero YAML duration", yaml: "browser:\n  idle_timeout: 0s\n", wantErr: "positive duration"},
+		{name: "negative YAML duration", yaml: "browser:\n  idle_timeout: -1m\n", wantErr: "positive duration"},
+		{name: "unknown YAML key", yaml: "browser:\n  executabl: /chrome\n", wantErr: "trusted browser configuration"},
+		{name: "wrong YAML type", yaml: "browser:\n  executable: 123\n", wantErr: "trusted browser configuration"},
+		{name: "invalid environment duration", environment: map[string]string{"IDLE_TIMEOUT": "nope"}, wantErr: "positive duration"},
+		{name: "zero flag duration", flags: []string{"--browser-idle-timeout=0"}, wantErr: "positive duration"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.NoError(t, viper.ReadConfig(strings.NewReader(test.yaml)))
+			for _, key := range []string{"EXECUTABLE", "DEVTOOLS_DIR", "IDLE_TIMEOUT"} {
+				t.Setenv("KODELET_BROWSER_"+key, test.environment[key])
+			}
+			cmd := &cobra.Command{Use: "start"}
+			cmd.Flags().String("server", defaultRunnerServer, "")
+			cmd.Flags().String("auth-token", "", "")
+			cmd.Flags().String("name", "", "")
+			addRunnerBrowserFlags(cmd)
+			require.NoError(t, cmd.ParseFlags(test.flags))
+			config := runnerStartConfigFromFlags(cmd)
+			if test.wantErr != "" {
+				require.ErrorContains(t, config.ConfigError, test.wantErr)
+				assert.ErrorContains(t, runRunnerStart(t.Context(), config), test.wantErr)
+				return
+			}
+			require.NoError(t, config.ConfigError)
+			assert.Equal(t, test.want, config.Browser)
+		})
+	}
+	for _, cmd := range []*cobra.Command{serveCmd, runnerStartCmd} {
+		for _, flag := range []string{"browser-executable", "browser-devtools-dir", "browser-idle-timeout"} {
+			assert.NotNil(t, cmd.Flags().Lookup(flag), "%s registers %s", cmd.CommandPath(), flag)
+		}
 	}
 }
 
@@ -76,11 +142,10 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 	startCmd.Flags().String("server", defaultRunnerServer, "")
 	startCmd.Flags().String("auth-token", "", "")
 	startCmd.Flags().String("name", "workspace", "")
-	assert.Equal(t, runnerStartConfig{
-		Server:      defaultRunnerServer,
-		AuthToken:   "runner-secret",
-		DisplayName: "workspace",
-	}, runnerStartConfigFromFlags(startCmd))
+	startConfig := runnerStartConfigFromFlags(startCmd)
+	assert.Equal(t, defaultRunnerServer, startConfig.Server)
+	assert.Equal(t, "runner-secret", startConfig.AuthToken)
+	assert.Equal(t, "workspace", startConfig.DisplayName)
 
 	enrollCmd := &cobra.Command{Use: "enroll"}
 	enrollCmd.Flags().String("server", defaultRunnerServer, "")

@@ -326,6 +326,9 @@ func TestLoadConfigFilesMergesTrustedOverrideWithoutRepositorySettings(t *testin
 	globalConfig := `
 server: https://global.example/control
 profile: global-profile
+browser:
+  executable: /global/chrome
+  idle_timeout: 7m
 serve:
   web_auth_mode: oidc
   public_base_url: https://global.example/images
@@ -337,6 +340,9 @@ serve:
 	repositoryConfig := `
 model: repo-model
 server: https://repo.example/control
+browser:
+  executable: /repo/chrome
+  devtools_dir: /repo/devtools
 serve.web_auth_mode: none
 serve:
   web_auth_mode: none
@@ -354,7 +360,7 @@ extensions:
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte(repositoryConfig), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
-	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","serve":{"runner_auth_mode":"enrollment"},"extensions":{"local_dir":"/tmp/sdk-extensions"}}`), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","browser":{"executable":"/override/chrome"},"serve":{"runner_auth_mode":"enrollment"},"extensions":{"local_dir":"/tmp/sdk-extensions"}}`), 0o644))
 	t.Setenv(configFileEnv, configPath)
 	t.Setenv(configFileModeEnv, configFileModeMerge)
 
@@ -364,6 +370,9 @@ extensions:
 	assert.Equal(t, "default-model", viper.GetString("model"))
 	assert.Equal(t, "https://global.example/control", viper.GetString("server"))
 	assert.Equal(t, "global-profile", viper.GetString("profile"))
+	assert.Equal(t, "/override/chrome", viper.GetString("browser.executable"))
+	assert.Equal(t, "7m", viper.GetString("browser.idle_timeout"))
+	assert.Empty(t, viper.GetString("browser.devtools_dir"), "repository browser settings are not trusted")
 	assert.Equal(t, "/tmp/sdk-extensions", viper.GetString("extensions.local_dir"))
 	assert.Equal(t, "oidc", viper.GetString("serve.web_auth_mode"))
 	assert.Equal(t, "https://global.example/images", viper.GetString("serve.public_base_url"))
@@ -431,6 +440,8 @@ func TestLoadConfigFilesDoesNotTrustRepositoryControlPlaneSettings(t *testing.T)
 	t.Chdir(t.TempDir())
 	repositoryConfig := `
 SeRvEr: https://repo.example/control
+BrOwSeR:
+  executable: /repo/chrome
 SeRvE:
   host: 0.0.0.0
   web_auth_mode: none
@@ -461,6 +472,7 @@ extensions:
 	assert.False(t, configured)
 	assert.Empty(t, viper.GetString("server"))
 	assert.Empty(t, viper.GetStringMap("serve"))
+	assert.Empty(t, viper.GetStringMap("browser"))
 	assert.Empty(t, viper.GetString("provider"))
 	assert.Empty(t, viper.GetString("model"))
 	assert.Empty(t, viper.GetStringMap("openai"))
