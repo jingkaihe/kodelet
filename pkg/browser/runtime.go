@@ -49,11 +49,18 @@ type Config struct {
 	IdleTimeout time.Duration
 }
 
+// Scope isolates a conversation's browser in one canonical working directory.
+type Scope struct {
+	ConversationID string
+	CWD            string
+}
+
 // Info identifies one immutable browser session. DevTools indicates a configured frontend directory.
 type Info struct {
-	SessionID string `json:"sessionId"`
-	CWD       string `json:"cwd"`
-	DevTools  bool   `json:"devTools"`
+	SessionID      string `json:"sessionId"`
+	ConversationID string `json:"conversationId"`
+	CWD            string `json:"cwd"`
+	DevTools       bool   `json:"devTools"`
 }
 
 // AssetChunk is a bounded portion of one trusted DevTools frontend file.
@@ -63,14 +70,14 @@ type AssetChunk struct {
 	EOF         bool   `json:"eof"`
 }
 
-// Manager owns at most four workspace sessions, independently of individual agent runs.
+// Manager owns at most four conversation sessions, independently of individual agent runs.
 // Call Close at runner shutdown. Connections must be released even if their socket has already closed.
 type Manager struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	config    Config
 	mu        sync.Mutex
-	sessions  map[string]*session
+	sessions  map[Scope]*session
 	closed    bool
 	closeOnce sync.Once
 	closeErr  error
@@ -110,7 +117,7 @@ func NewManager(ctx context.Context, config Config) *Manager {
 	if config.IdleTimeout <= 0 {
 		config.IdleTimeout = defaultIdleTimeout
 	}
-	m := &Manager{ctx: ctx, cancel: cancel, config: config, sessions: make(map[string]*session)}
+	m := &Manager{ctx: ctx, cancel: cancel, config: config, sessions: make(map[Scope]*session)}
 	go func() {
 		<-ctx.Done()
 		_ = m.Close()
@@ -123,14 +130,14 @@ func (m *Manager) Enabled() bool {
 	return m.config.Executable != ""
 }
 
-// Open opens or reuses a workspace session. Concurrent opens share one startup.
+// Open opens or reuses a conversation session. Concurrent opens within a scope share one startup.
 // Canceling the initiating request during startup tears down that startup; after success,
 // request cancellation does not affect the browser lifetime.
-func (m *Manager) Open(ctx context.Context, cwd string) (Info, error) {
+func (m *Manager) Open(ctx context.Context, scope Scope) (Info, error) {
 	if !m.Enabled() {
 		return Info{}, errors.New("browser is disabled: configure an external Chrome executable")
 	}
-	cwd, err := canonicalCWD(cwd)
+	scope, err := canonicalScope(scope)
 	if err != nil {
 		return Info{}, err
 	}
@@ -146,7 +153,7 @@ func (m *Manager) Open(ctx context.Context, cwd string) (Info, error) {
 			m.mu.Unlock()
 			return Info{}, errors.New("browser manager is closed")
 		}
-		s := m.sessions[cwd]
+		s := m.sessions[scope]
 		if s != nil && s.ctx.Err() != nil {
 			m.mu.Unlock()
 			select {
@@ -160,16 +167,16 @@ func (m *Manager) Open(ctx context.Context, cwd string) (Info, error) {
 		if created {
 			if len(m.sessions) >= maxSessions {
 				m.mu.Unlock()
-				return Info{}, errors.New("browser session limit reached (four workspaces); stop an unused session")
+				return Info{}, errors.New("browser session limit reached (four conversation sessions); stop an unused session")
 			}
 			sessionCtx, sessionCancel := context.WithCancel(m.ctx)
 			s = &session{
-				info: Info{SessionID: rand.Text(), CWD: cwd, DevTools: m.config.DevToolsDir != ""},
+				info: Info{SessionID: rand.Text(), ConversationID: scope.ConversationID, CWD: scope.CWD, DevTools: m.config.DevToolsDir != ""},
 				ctx:  sessionCtx, cancel: sessionCancel,
 				ready: make(chan struct{}), done: make(chan struct{}),
 				connections: make(map[*websocket.Conn]struct{}), lastUsed: time.Now(),
 			}
-			m.sessions[cwd] = s
+			m.sessions[scope] = s
 			go m.run(ctx, s)
 		}
 		s.lastUsed = time.Now()
@@ -206,13 +213,13 @@ func (m *Manager) Open(ctx context.Context, cwd string) (Info, error) {
 // Connect attaches to an existing page target, never creating a session for a stale ID.
 // The idempotent release function closes the socket and releases its idle-timeout lease.
 // Canceling ctx, stopping the session, or closing the manager also closes the socket.
-func (m *Manager) Connect(ctx context.Context, cwd, sessionID string) (*websocket.Conn, func(), error) {
-	cwd, err := canonicalCWD(cwd)
+func (m *Manager) Connect(ctx context.Context, scope Scope, sessionID string) (*websocket.Conn, func(), error) {
+	scope, err := canonicalScope(scope)
 	if err != nil {
 		return nil, nil, err
 	}
 	m.mu.Lock()
-	s := m.sessions[cwd]
+	s := m.sessions[scope]
 	if m.closed || s == nil || sessionID == "" || s.info.SessionID != sessionID || s.ctx.Err() != nil {
 		m.mu.Unlock()
 		return nil, nil, errors.New("browser session is unavailable or stale")
@@ -288,13 +295,13 @@ func (m *Manager) Connect(ctx context.Context, cwd, sessionID string) (*websocke
 }
 
 // Stop closes one exact session and all of its attached sockets. Stale IDs cannot stop replacements.
-func (m *Manager) Stop(cwd, sessionID string) error {
-	cwd, err := canonicalCWD(cwd)
+func (m *Manager) Stop(scope Scope, sessionID string) error {
+	scope, err := canonicalScope(scope)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
-	s := m.sessions[cwd]
+	s := m.sessions[scope]
 	if s == nil || sessionID == "" || s.info.SessionID != sessionID {
 		m.mu.Unlock()
 		return errors.New("browser session is unavailable or stale")
@@ -328,7 +335,7 @@ func (m *Manager) Close() error {
 // Command opens or reuses a session and sends one CDP command over its own page connection.
 // It returns the command's result (not the envelope), ignoring events and unrelated response IDs.
 // Methods are not allowlisted: authorization belongs to the caller, as it does for Connect.
-func (m *Manager) Command(ctx context.Context, cwd, method string, params json.RawMessage) (json.RawMessage, error) {
+func (m *Manager) Command(ctx context.Context, scope Scope, method string, params json.RawMessage) (json.RawMessage, error) {
 	domain, name, found := strings.Cut(method, ".")
 	if !found || domain == "" || name == "" || strings.ContainsAny(method, " \t\n\r") {
 		return nil, errors.New("browser command requires a CDP Domain.method")
@@ -353,11 +360,11 @@ func (m *Manager) Command(ctx context.Context, cwd, method string, params json.R
 	}
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	info, err := m.Open(ctx, cwd)
+	info, err := m.Open(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
-	conn, release, err := m.Connect(ctx, info.CWD, info.SessionID)
+	conn, release, err := m.Connect(ctx, scope, info.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +417,7 @@ func (m *Manager) run(openCtx context.Context, s *session) {
 			s.startErr = errors.Wrapf(s.startErr, "failed to start Chrome; stderr: %s", s.stderr.String())
 		}
 		m.mu.Lock()
-		delete(m.sessions, s.info.CWD)
+		delete(m.sessions, Scope{ConversationID: s.info.ConversationID, CWD: s.info.CWD})
 		m.mu.Unlock()
 		if !started {
 			close(s.ready)
@@ -453,6 +460,19 @@ func (m *Manager) run(openCtx context.Context, s *session) {
 			}
 		}
 	}
+}
+
+func canonicalScope(scope Scope) (Scope, error) {
+	scope.ConversationID = strings.TrimSpace(scope.ConversationID)
+	if scope.ConversationID == "" {
+		return Scope{}, errors.New("browser conversation ID is required")
+	}
+	cwd, err := canonicalCWD(scope.CWD)
+	if err != nil {
+		return Scope{}, err
+	}
+	scope.CWD = cwd
+	return scope, nil
 }
 
 func canonicalCWD(cwd string) (string, error) {

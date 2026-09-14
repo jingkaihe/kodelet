@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { ChatRenderToolCall } from '../../types';
+import type { BrowserMetadata, ChatRenderToolCall, ToolResult } from '../../types';
 import ChatToolActivity, {
   formatToolInputPreview,
   getToolActivityStatus,
@@ -87,19 +87,23 @@ describe('ChatToolActivity', () => {
     expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
   });
 
-  it('renders browser screenshots with view_image metadata as folded image inspections', async () => {
+  const browserTool = (
+    metadata: BrowserMetadata,
+    result: Partial<ToolResult> = {}
+  ): ChatRenderToolCall => ({
+    callId: metadata.action,
+    name: 'browser',
+    input: JSON.stringify(metadata),
+    result: { toolName: 'browser', metadataType: 'browser', success: true, metadata, ...result },
+  });
+
+  it('folds browser screenshots on completion and reveals their path and image exactly once', async () => {
     const user = userEvent.setup();
-    const filename = 'kodelet-command-alignment-20260914.png';
+    const filename = 'page.png';
     const path = `/tmp/${filename}`;
-    const tool: ChatRenderToolCall = {
-      callId: 'browser-screenshot',
-      name: 'browser',
-      input: JSON.stringify({ action: 'screenshot', path }),
-      result: {
-        toolName: 'browser',
-        metadataType: 'view_image',
-        success: true,
-        metadata: { path, mimeType: 'image/png', imageSize: { width: 536, height: 680 } },
+    const tool = browserTool(
+      { action: 'screenshot', path, output: `Viewed image ${path}` },
+      {
         attachments: [
           {
             type: 'image',
@@ -109,26 +113,153 @@ describe('ChatToolActivity', () => {
             mimeType: 'image/png',
           },
         ],
-      },
-    };
-    const { container } = render(<ChatToolActivity tools={[tool]} />);
+      }
+    );
+    tool.input = JSON.stringify({ action: 'screenshot', path: filename });
+    const { container, rerender } = render(
+      <ChatToolActivity tools={[{ ...tool, result: undefined }]} />
+    );
+    expect(screen.getByText(`Browser: Screenshot ${filename}`)).toBeInTheDocument();
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    rerender(<ChatToolActivity tools={[{ ...tool, inProgress: true }]} />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    rerender(<ChatToolActivity tools={[tool]} />);
 
-    const summary = screen.getByText(`Viewed image ${filename}`);
-    expect(summary).toBeVisible();
-    expect(summary.closest('summary')).toHaveAttribute('title', path);
+    expect(container.querySelector('summary')).toHaveAttribute(
+      'title',
+      `Browser: Screenshot ${path}`
+    );
     expect(screen.queryByText('Generated image')).not.toBeInTheDocument();
+    expect(screen.queryByText(`Viewed image ${path}`)).not.toBeInTheDocument();
     const details = container.querySelector('details');
-    expect(details).toHaveClass('activity-image');
     expect(details).not.toHaveAttribute('open');
     const preview = screen.getByRole('img', { name: filename });
     expect(preview.closest('details')).toBe(details);
     expect(preview).not.toBeVisible();
 
-    await user.click(summary);
+    await user.click(screen.getByText(`Screenshot ${path}`));
 
     expect(preview).toBeVisible();
+    expect(screen.getByText(path)).toBeVisible();
     expect(screen.getAllByRole('img')).toHaveLength(1);
     expect(screen.getByRole('link', { name: `Download image: ${filename}` })).toBeVisible();
+  });
+
+  it('renders browser JavaScript and results through pending, successful and failed calls', async () => {
+    const user = userEvent.setup();
+    const expression = '(() => {\n  return "<script>not executable</script>";\n})()';
+    const output = '{"result":{"value":"<script>not executable</script>"}}';
+    const tool = browserTool({ action: 'evaluate', expression, output });
+    const { container, rerender } = render(
+      <ChatToolActivity tools={[{ ...tool, result: undefined }]} />
+    );
+    expect(container.querySelector('summary')).toHaveAttribute('title', 'Browser: Run code');
+    expect(screen.getByLabelText('Tool running')).toHaveTextContent('running');
+    expect(container.querySelector('code.language-javascript')?.textContent).toBe(expression);
+    expect(container.querySelector('code.language-javascript')).toBeVisible();
+    expect(container.querySelector('code.language-json')).not.toBeInTheDocument();
+    expect(screen.getByText('Awaiting browser result…')).toBeVisible();
+
+    rerender(<ChatToolActivity tools={[{ ...tool, input: '{}' }]} />);
+    expect(screen.getByLabelText('Tool done')).toHaveTextContent('done');
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(container.querySelector('code.language-javascript')).not.toBeVisible();
+    expect(container.querySelector('code.language-json')).not.toBeVisible();
+    await user.click(screen.getByText('Run code'));
+    expect(container.querySelector('code.language-javascript')).toBeVisible();
+    expect(container.querySelector('code.language-javascript')?.textContent).toBe(expression);
+    expect(container.querySelector('code.language-json')?.textContent).toBe(
+      JSON.stringify(JSON.parse(output), null, 2)
+    );
+    expect(container.querySelector('script')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
+
+    // Exercise both tool failures and transport/admission failures without metadata.
+    const error = '<img src=x onerror=alert(1)> Browser action failed';
+    for (const metadata of [
+      { action: 'evaluate', expression: 'missing()', output: 'diagnostic output' },
+      undefined,
+    ]) {
+      const failed = browserTool(
+        { action: 'evaluate', expression, output: 'forged input output' },
+        { success: false, error, metadata, metadataType: metadata ? 'browser' : undefined }
+      );
+      rerender(<ChatToolActivity tools={[failed]} />);
+      expect(container.querySelector('summary')).toHaveAttribute('title', 'Browser: Run code');
+      expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed');
+      expect(container.querySelector('details')).toHaveAttribute('open');
+      expect(container.querySelector('code.language-javascript')?.textContent).toBe(
+        metadata?.expression || expression
+      );
+      expect(container.querySelector('code.language-javascript')).toBeVisible();
+      expect(screen.getByRole('alert').textContent).toBe(error);
+      expect(screen.getByRole('alert')).toBeVisible();
+      if (metadata) {
+        expect(screen.getByText('diagnostic output')).toBeVisible();
+      } else {
+        expect(screen.queryByText('diagnostic output')).not.toBeInTheDocument();
+      }
+      expect(screen.queryByText('forged input output')).not.toBeInTheDocument();
+      expect(container.querySelector('img')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument();
+    }
+  });
+
+  it('keeps browser action rows through completion, preferring result metadata over input', async () => {
+    const user = userEvent.setup();
+    const builtin: ChatRenderToolCall = {
+      callId: 'glob-before',
+      name: 'glob_tool',
+      input: '{}',
+      result: { toolName: 'glob_tool', success: true },
+    };
+    const sessionId = 'opaque-session';
+    const tools = [
+      builtin,
+      browserTool({ action: 'open', sessionId, output: JSON.stringify({ sessionId }) }),
+      browserTool({
+        action: 'navigate',
+        url: 'http://localhost:3000',
+        output: '{"frameId":"page-frame"}',
+      }),
+      browserTool({ action: 'stop', sessionId, output: 'Conversation browser stopped.' }),
+      { ...builtin, callId: 'glob-after' },
+    ];
+    const { container, rerender } = render(<ChatToolActivity tools={[]} />);
+    for (const done of [false, true]) {
+      const calls = tools.map((tool) => {
+        if (tool.name !== 'browser') return tool;
+        return done ? { ...tool, input: '{"action":"ignored"}' } : { ...tool, result: undefined };
+      });
+      rerender(<ChatToolActivity tools={calls} />);
+      expect(Array.from(container.querySelectorAll('summary'), (row) => row.title)).toEqual([
+        'Ran 1 tool',
+        'Browser: Open',
+        'Browser: Go to http://localhost:3000',
+        'Browser: Stop',
+        'Ran 1 tool',
+      ]);
+    }
+
+    const rows = container.querySelectorAll('details');
+    expect(rows).toHaveLength(5);
+    for (const row of rows) expect(row).not.toHaveAttribute('open');
+    expect(rows[1].querySelector('summary')).not.toHaveTextContent(sessionId);
+
+    await user.click(screen.getByText('Open'));
+    expect(rows[1].querySelector('code')?.textContent).toBe(JSON.stringify({ sessionId }, null, 2));
+    expect(rows[1].querySelector('code')).toBeVisible();
+    expect(rows[2].querySelector('code')).not.toBeVisible();
+    await user.click(screen.getByText('Go to http://localhost:3000'));
+    expect(rows[2].querySelector('code')?.textContent).toBe('{\n  "frameId": "page-frame"\n}');
+    expect(rows[2].querySelector('code')).toBeVisible();
+    await user.click(screen.getByText('Stop'));
+    expect(screen.getByText('Conversation browser stopped.')).toBeVisible();
+    expect(screen.getByText(sessionId)).toBeVisible();
+    expect(getToolSummary({ callId: 'partial', name: 'browser', input: '{"action":' })).toBe(
+      'Browser'
+    );
   });
 
   it('uses a generic label for an unnamed image artifact without exposing its ID', () => {

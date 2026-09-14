@@ -6,6 +6,7 @@ import type {
   ApiError,
   AuthPrincipal,
   BrowserSession,
+  BrowserTarget,
   ChatRequest,
   ChatSettings,
   ChatStreamEvent,
@@ -360,16 +361,15 @@ class ApiService {
     );
   }
 
-  async openBrowserSession(target: WorkspaceTarget, signal?: AbortSignal): Promise<BrowserSession> {
-    const params = new URLSearchParams();
-    if (target.kind === 'local') {
-      if (target.cwd) params.set('cwd', target.cwd);
-    } else {
-      params.set('runnerId', target.runnerId);
-      if (target.conversationId) params.set('conversationId', target.conversationId);
+  async openBrowserSession(target: BrowserTarget, signal?: AbortSignal): Promise<BrowserSession> {
+    if (!target.runnerId || !target.conversationId) {
+      throw new Error('A runner and conversation are required to open a browser');
     }
-    const suffix = params.toString();
-    return this.request<BrowserSession>(`/api/browser/session${suffix ? `?${suffix}` : ''}`, {
+    const params = new URLSearchParams({
+      runnerId: target.runnerId,
+      conversationId: target.conversationId,
+    });
+    return this.request<BrowserSession>(`/api/browser/session?${params}`, {
       method: 'POST',
       signal,
     });

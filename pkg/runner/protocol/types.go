@@ -609,17 +609,19 @@ type WorkspaceGitDiffResult struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// WorkspaceBrowserParams identifies a browser session in one runner directory.
+// WorkspaceBrowserParams identifies a conversation's browser session in one runner directory.
 type WorkspaceBrowserParams struct {
-	CWD       string `json:"cwd,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	ConversationID string `json:"conversationId"`
+	CWD            string `json:"cwd,omitempty"`
+	SessionID      string `json:"sessionId,omitempty"`
 }
 
 // WorkspaceBrowserConnectParams authorizes one outbound streaming attachment.
 type WorkspaceBrowserConnectParams struct {
-	CWD        string `json:"cwd,omitempty"`
-	SessionID  string `json:"sessionId"`
-	RelayToken string `json:"relayToken"`
+	ConversationID string `json:"conversationId"`
+	CWD            string `json:"cwd,omitempty"`
+	SessionID      string `json:"sessionId"`
+	RelayToken     string `json:"relayToken"`
 }
 
 // WorkspaceBrowserAssetParams reads a bounded chunk of operator-installed DevTools assets.

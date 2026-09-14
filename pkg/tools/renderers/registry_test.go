@@ -1,6 +1,7 @@
 package renderers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,36 @@ func TestRendererRegistry_ExtensionToolMetadata(t *testing.T) {
 
 	assert.Contains(t, output, "Extension Tool: get_weather (weather)")
 	assert.Contains(t, output, "Cloudy, 18C")
+}
+
+func TestRendererRegistry_BrowserActionsRetainOutputAndErrors(t *testing.T) {
+	registry := NewRendererRegistry()
+	for _, tc := range []struct {
+		name, error string
+		meta        tools.BrowserMetadata
+		want        string
+	}{
+		{"open", "", tools.BrowserMetadata{Action: "open", Output: `{"sessionId":"session-1"}`}, "Browser: Open\n\n" + `{"sessionId":"session-1"}`},
+		{"navigate", "", tools.BrowserMetadata{Action: "navigate", URL: "http://localhost:1234", Output: `{"frameId":"page"}`}, "Browser: Go to http://localhost:1234\n\n" + `{"frameId":"page"}`},
+		{"evaluate", "", tools.BrowserMetadata{Action: "evaluate", Expression: "const title = document.title;\ntitle", Output: "Page ready"}, "Browser: Run code\n\nconst title = document.title;\ntitle\n\nPage ready"},
+		{"evaluation failure", "ReferenceError", tools.BrowserMetadata{Action: "evaluate", Expression: "missing()", Output: "partial output"}, "Browser: Run code\n\nmissing()\n\npartial output\n\nError: ReferenceError"},
+		{"stop", "", tools.BrowserMetadata{Action: "stop", SessionID: "session-1", Output: "Conversation browser stopped."}, "Browser: Stop\n\nSession: session-1\n\nConversation browser stopped."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tools.StructuredToolResult{ToolName: "browser", Success: tc.error == "", Error: tc.error, Metadata: tc.meta}
+			assert.Equal(t, tc.want, registry.Render(result))
+		})
+	}
+	result := tools.StructuredToolResult{
+		ToolName: "browser", Success: true,
+		Metadata:    tools.BrowserMetadata{Action: "screenshot", Path: "/workspace/page.png", Output: "Viewed image page.png"},
+		Attachments: []tools.ToolAttachment{{Type: "image", ArtifactID: "internal-artifact", ShortCode: "screenshot", ViewURL: "https://kodelet.example/i/screenshot"}},
+	}
+	output := registry.Render(result)
+	assert.Contains(t, output, "Browser: Screenshot /workspace/page.png")
+	assert.Equal(t, 1, strings.Count(output, "https://kodelet.example/i/screenshot"))
+	assert.NotContains(t, output, "Viewed image")
+	assert.NotContains(t, output, "internal-artifact")
 }
 
 func TestRendererRegistry_ExtensionToolPresentation(t *testing.T) {

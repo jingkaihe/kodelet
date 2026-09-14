@@ -18,6 +18,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -68,6 +70,7 @@ func TestBrowserRunnerHelperProcess(t *testing.T) {
 
 func fakeBrowserExecutable(t *testing.T) string {
 	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	wrapper := filepath.Join(t.TempDir(), "chrome")
@@ -78,6 +81,7 @@ func fakeBrowserExecutable(t *testing.T) string {
 
 func TestBrowserRunnerLifecycleAndRelaySurviveRequestCompletion(t *testing.T) {
 	workspace := t.TempDir()
+	scope := browser.Scope{ConversationID: "conversation", CWD: workspace}
 	remote := make(chan *websocket.Conn, 1)
 	relayDone := make(chan struct{})
 	defer close(relayDone)
@@ -100,14 +104,21 @@ func TestBrowserRunnerLifecycleAndRelaySurviveRequestCompletion(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, service.Close()) })
 	service.Attach(&recordingPeer{})
-	opened, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{}`))
+	opened, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"conversationId":"conversation"}`))
 	require.Nil(t, rpcErr)
 	info := opened.(browser.Info)
 	assert.Equal(t, workspace, info.CWD)
+	assert.Equal(t, scope.ConversationID, info.ConversationID)
+	for _, conversationID := range []string{"", "other-conversation"} {
+		err := service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{
+			ConversationID: conversationID, CWD: workspace, SessionID: info.SessionID, RelayToken: strings.Repeat("a", 43),
+		})
+		require.Error(t, err, "connect must reject missing or mismatched conversation identity")
+	}
 
 	requestCtx, cancel := context.WithCancel(t.Context())
 	require.NoError(t, service.connectBrowser(requestCtx, protocol.WorkspaceBrowserConnectParams{
-		CWD: workspace, SessionID: info.SessionID, RelayToken: strings.Repeat("a", 43),
+		ConversationID: scope.ConversationID, CWD: workspace, SessionID: info.SessionID, RelayToken: strings.Repeat("a", 43),
 	}))
 	cancel() // Completion of the control RPC must not close the streaming attachment.
 	var conn *websocket.Conn
@@ -132,11 +143,11 @@ func TestBrowserRunnerLifecycleAndRelaySurviveRequestCompletion(t *testing.T) {
 		defer service.mu.Unlock()
 		return len(service.browserRelays) == 0
 	}, time.Second, time.Millisecond)
-	reattached, err := service.BrowserManager().Open(t.Context(), workspace)
+	reattached, err := service.BrowserManager().Open(t.Context(), scope)
 	require.NoError(t, err)
-	assert.Equal(t, info.SessionID, reattached.SessionID, "connection loss must not kill the workspace browser")
+	assert.Equal(t, info.SessionID, reattached.SessionID, "connection loss must not kill the conversation browser")
 	require.NoError(t, service.Close())
-	_, err = service.BrowserManager().Open(t.Context(), workspace)
+	_, err = service.BrowserManager().Open(t.Context(), scope)
 	assert.Error(t, err)
 }
 
@@ -157,8 +168,13 @@ func TestBrowserRunnerDispatchAndValidation(t *testing.T) {
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserStop, json.RawMessage(`{}`))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "session ID")
-	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"cwd":"/no/such/runner-directory"}`))
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"conversationId":"conversation","cwd":"/no/such/runner-directory"}`))
 	require.NotNil(t, rpcErr)
+	for _, input := range []string{`{}`, `{"conversationId":" "}`} {
+		_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(input))
+		require.NotNil(t, rpcErr)
+		assert.Contains(t, rpcErr.Message, "conversation ID")
+	}
 	chunk, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserAsset, json.RawMessage(`{"path":"inspector.html","offset":0}`))
 	require.Nil(t, rpcErr)
 	assert.Equal(t, []byte("<!doctype html>"), chunk.(browser.AssetChunk).Data)
@@ -166,19 +182,76 @@ func TestBrowserRunnerDispatchAndValidation(t *testing.T) {
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserAsset, json.RawMessage(`{"path":"../private","offset":0}`))
 	require.NotNil(t, rpcErr)
 
-	opened, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{}`))
+	opened, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"conversationId":"conversation"}`))
 	require.Nil(t, rpcErr)
 	info := opened.(browser.Info)
-	data, err := json.Marshal(protocol.WorkspaceBrowserParams{CWD: workspace, SessionID: info.SessionID})
+	assert.Equal(t, "conversation", info.ConversationID)
+	otherOpened, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"conversationId":"other-conversation"}`))
+	require.Nil(t, rpcErr)
+	other := otherOpened.(browser.Info)
+	assert.NotEqual(t, info.SessionID, other.SessionID)
+	for _, conversationID := range []string{"", "other-conversation"} {
+		data, err := json.Marshal(protocol.WorkspaceBrowserParams{ConversationID: conversationID, CWD: workspace, SessionID: info.SessionID})
+		require.NoError(t, err)
+		_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserStop, data)
+		require.NotNil(t, rpcErr, "stop must reject missing or mismatched conversation identity")
+	}
+	data, err := json.Marshal(protocol.WorkspaceBrowserParams{ConversationID: info.ConversationID, CWD: workspace, SessionID: info.SessionID})
 	require.NoError(t, err)
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserStop, data)
 	require.Nil(t, rpcErr)
-	_, _, err = service.BrowserManager().Connect(t.Context(), workspace, info.SessionID)
+	_, _, err = service.BrowserManager().Connect(t.Context(), browser.Scope{ConversationID: info.ConversationID, CWD: workspace}, info.SessionID)
 	assert.Error(t, err)
+	reattached, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{"conversationId":"other-conversation"}`))
+	require.Nil(t, rpcErr)
+	assert.Equal(t, other, reattached, "stopping one conversation must leave the other session intact")
 	require.NoError(t, service.Close())
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceBrowserOpen, json.RawMessage(`{}`))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "closed")
+}
+
+func TestBrowserRunnerToolAndUIShareOnlyConversationSessionAcrossRuns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	workspace := t.TempDir()
+	service := newRegisteredTestService(t, workspace, ServiceOptions{
+		Browser: browser.Config{Executable: fakeBrowserExecutable(t)},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{}, nil
+		},
+	})
+	sessions := make(map[string]browser.Info)
+	for i, conversationID := range []string{"conversation", "other", "conversation"} {
+		runID := fmt.Sprintf("run-%d", i)
+		callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+			RunID: runID, ConversationID: conversationID,
+			Agent:   protocol.AgentDescriptor{Provider: "openai", Model: "gpt-4o"},
+			Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true)},
+		})
+		// executeTool must inject the run's trusted context without caller help.
+		result, err := service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{
+			RunID: runID, ToolCallID: "browser-open", Name: "browser",
+			Input: json.RawMessage(`{"action":"open","conversationId":"forged","cwd":"/forged"}`),
+		})
+		require.NoError(t, err)
+		require.True(t, result.Result.Structured.Success, result.Result.Error)
+		var info browser.Info
+		require.NoError(t, json.Unmarshal([]byte(result.Result.DisplayOutput), &info))
+		assert.Equal(t, conversationID, info.ConversationID)
+		assert.Equal(t, workspace, info.CWD)
+		if previous, ok := sessions[conversationID]; ok {
+			assert.Equal(t, previous, info, "a later run in the same conversation must reuse its browser")
+		} else {
+			for _, previous := range sessions {
+				assert.NotEqual(t, previous.SessionID, info.SessionID, "separate conversations must not share a browser")
+			}
+			sessions[conversationID] = info
+		}
+		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
+		human := callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: conversationID})
+		assert.Equal(t, info, human, "the human must retain the same session after agent completion")
+	}
 }
 
 func TestBrowserRunnerDisabledAndFactoryOptIn(t *testing.T) {
@@ -227,9 +300,9 @@ func TestBrowserRunnerRelayRejectsInvalidTicketAndEndpoint(t *testing.T) {
 	defer service.Close()
 	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{})
 	assert.ErrorContains(t, err, "ticket")
-	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{SessionID: "session", RelayToken: strings.Repeat("t", 43)})
+	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{ConversationID: "conversation", SessionID: "session", RelayToken: strings.Repeat("t", 43)})
 	assert.ErrorContains(t, err, "relay server")
 	service.artifactBaseURL = "http://public.example"
-	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{SessionID: "session", RelayToken: strings.Repeat("t", 43)})
+	err = service.connectBrowser(t.Context(), protocol.WorkspaceBrowserConnectParams{ConversationID: "conversation", SessionID: "session", RelayToken: strings.Repeat("t", 43)})
 	assert.ErrorContains(t, err, "require https")
 }

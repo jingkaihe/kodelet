@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -326,6 +327,103 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(content, "Ran 1 tool"))
 	assert.NotContains(t, content, "Ran 2 tools")
 	require.Len(t, regions, 8)
+}
+
+func TestBrowserDetailsRetainJavaScriptOutputAndFailures(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 120, 40
+	m.resize()
+	expression := "(() => {\n  const title = document.title;\n  return title;\n})()"
+	input, err := json.Marshal(map[string]string{"action": "evaluate", "expression": expression})
+	require.NoError(t, err)
+	tool := toolCall{name: "browser", input: string(input)}
+	block := assistantBlock{kind: blockTools, tools: []toolCall{tool}}
+	groups := m.toolRenderGroups(block)
+	require.Len(t, groups, 1)
+	assert.True(t, groups[0].markdownBody)
+	assert.Contains(t, groups[0].body, "```javascript\n"+expression)
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{block}}}
+	content, _ := m.renderTranscript()
+	assert.Contains(t, xansi.Strip(content), "Browser: Run code… ▾")
+	assert.Contains(t, xansi.Strip(content), "  const title = document.title;")
+	assert.NotContains(t, content, "```javascript")
+	assert.NotContains(t, content, `"expression":`)
+
+	tool.done = true
+	tool.input = `{"action":"navigate","url":"http://stale.invalid"}`
+	tool.structured = &tooltypes.StructuredToolResult{
+		ToolName: "browser", Success: true,
+		Metadata: tooltypes.BrowserMetadata{Action: "evaluate", Expression: expression, Output: `{"value":"Page ready"}`},
+	}
+	tool.result = structuredToolResultText(tool.structured)
+	m.entries[0].blocks[0].tools[0] = tool
+	content, _ = m.renderTranscript()
+	assert.Equal(t, "✓ Browser: Run code ▸", strings.TrimSpace(xansi.Strip(content)), "completed metadata wins over input and details start collapsed")
+	m.entries[0].blocks[0].tools[0].expanded = true
+	content, _ = m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Contains(t, plain, "const title = document.title;")
+	assert.Equal(t, 1, strings.Count(plain, `{"value":"Page ready"}`))
+	assert.NotContains(t, plain, "input:")
+	assert.NotContains(t, plain, "Tool Result")
+
+	tool.failed = true
+	tool.structured.Success = false
+	tool.structured.Error = "JavaScript evaluation failed: \x1b[2JReferenceError"
+	m.entries[0].blocks[0].tools[0] = tool
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "✗ Browser: Run code ▾")
+	assert.Contains(t, plain, "const title = document.title;")
+	assert.Contains(t, plain, "Page ready")
+	assert.Contains(t, plain, "Error: JavaScript evaluation failed: ReferenceError")
+	assert.NotContains(t, content, "\x1b[2J")
+
+	m.entries[0].blocks[0].tools[0] = toolCall{
+		name: "browser", input: `{"action":"stop","sessionId":"session-1"}`,
+		done: true, failed: true, result: "Runner \x1b[2Jdisconnected",
+	}
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "✗ Browser: Stop ▾")
+	assert.Contains(t, plain, "Session: session-1")
+	assert.Contains(t, plain, "Error: Runner disconnected")
+	assert.NotContains(t, content, "\x1b[2J")
+}
+
+func TestBrowserScreenshotKeepsItsActionAndOneImageURL(t *testing.T) {
+	m := newModel(t.Context(), Config{ServerURL: "https://connected.example/kodelet"})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 140, 40
+	m.resize()
+	result := &tooltypes.StructuredToolResult{
+		ToolName: "browser", Success: true,
+		Metadata:    tooltypes.BrowserMetadata{Action: "screenshot", Path: "/workspace/page.png", Output: "Viewed image page.png"},
+		Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "internal-artifact", ShortCode: "screenshot", ViewURL: "/i/screenshot"}},
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{
+		{name: "grep_tool", done: true},
+		{name: "browser", input: `{"action":"screenshot","path":"page.png"}`, done: true, structured: result, result: structuredToolResultText(result)},
+		{name: "browser", input: `{"action":"open"}`, done: true, structured: &tooltypes.StructuredToolResult{ToolName: "browser", Success: true, Metadata: tooltypes.BrowserMetadata{Action: "open"}}},
+		{name: "glob_tool", done: true},
+	}}}}}
+	m.refreshViewport(true)
+	content, regions := m.renderTranscript()
+	plain := xansi.Strip(content)
+	require.Len(t, regions, 4)
+	assert.Contains(t, plain, "✓ Browser: Screenshot /workspace/page.png ▸")
+	assert.Contains(t, plain, "✓ Browser: Open ▸")
+	assert.Equal(t, 2, strings.Count(plain, "Ran 1 tool"))
+	assert.NotContains(t, plain, "/i/screenshot")
+	assert.True(t, m.toggleDetailAt(regions[1].line))
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Equal(t, 1, strings.Count(plain, "https://connected.example/kodelet/i/screenshot"))
+	assert.NotContains(t, plain, "Viewed image")
+	assert.NotContains(t, plain, "Generated image")
+	assert.NotContains(t, plain, "internal-artifact")
+	assert.NotContains(t, plain, "input:")
 }
 
 func TestRenderTranscriptUsesGenericExtensionPresentation(t *testing.T) {

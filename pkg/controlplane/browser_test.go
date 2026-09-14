@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,12 +29,16 @@ func newBrowserAPITestServer(t *testing.T) (*Server, protocol.RegisterResult, *r
 	t.Helper()
 	s := newRunnerTestServer(t, "")
 	s.config.BrowserEnabled = true
+	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return nil, convtypes.ErrConversationNotFound
+	}}
 	s.router = mux.NewRouter()
 	s.setupRoutes()
 	link := newRunnerAPITestLink()
-	link.call = func(_ context.Context, method string, _ any, result any) error {
+	link.call = func(_ context.Context, method string, raw any, result any) error {
 		if method == protocol.MethodWorkspaceBrowserOpen {
-			*result.(*browser.Info) = browser.Info{SessionID: "session-1", CWD: "/workspace", DevTools: true}
+			params := raw.(protocol.WorkspaceBrowserParams)
+			*result.(*browser.Info) = browser.Info{SessionID: "session-" + params.ConversationID, ConversationID: params.ConversationID, CWD: params.CWD, DevTools: true}
 		}
 		return nil
 	}
@@ -50,9 +55,9 @@ func newBrowserAPITestServer(t *testing.T) (*Server, protocol.RegisterResult, *r
 	return s, registration, link
 }
 
-func openBrowserTestHandle(t *testing.T, s *Server, registration protocol.RegisterResult, owner string) *browserHandle {
+func openBrowserTestHandle(t *testing.T, s *Server, registration protocol.RegisterResult, owner, conversationID string) *browserHandle {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID, nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId="+conversationID, nil)
 	r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal(owner)))
 	w := httptest.NewRecorder()
 	s.requireBrowser(s.handleBrowserOpen)(w, r)
@@ -74,11 +79,17 @@ func browserRequest(t *testing.T, method string, handle *browserHandle, owner st
 }
 
 func TestBrowserHandlesOwnershipStopAndExpiry(t *testing.T) {
-	s, registration, _ := newBrowserAPITestServer(t)
-	a := openBrowserTestHandle(t, s, registration, "alice")
-	assert.Same(t, a, openBrowserTestHandle(t, s, registration, "alice"))
-	b := openBrowserTestHandle(t, s, registration, "bob")
+	s, registration, link := newBrowserAPITestServer(t)
+	a := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
+	assert.Same(t, a, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"))
+	b := openBrowserTestHandle(t, s, registration, "bob", "conversation-1")
 	assert.NotEqual(t, a.ID, b.ID)
+	other := openBrowserTestHandle(t, s, registration, "alice", "conversation-2")
+	assert.Equal(t, a.CWD, other.CWD)
+	assert.NotEqual(t, a.SessionID, other.SessionID)
+	otherAttachment, err := s.newBrowserAttachment(t.Context(), other)
+	require.NoError(t, err)
+	t.Cleanup(func() { s.releaseBrowserAttachment(otherAttachment) })
 
 	w := httptest.NewRecorder()
 	assert.Nil(t, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, a, "bob")))
@@ -92,16 +103,71 @@ func TestBrowserHandlesOwnershipStopAndExpiry(t *testing.T) {
 	s.expireBrowserHandle(a)
 	assert.NotContains(t, s.browserHandles, a.ID)
 
-	a = openBrowserTestHandle(t, s, registration, "alice")
+	a = openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
 	attachment, err = s.newBrowserAttachment(t.Context(), b)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.releaseBrowserAttachment(attachment) })
+	link.call = func(_ context.Context, method string, raw any, _ any) error {
+		assert.Equal(t, protocol.MethodWorkspaceBrowserStop, method)
+		assert.Equal(t, protocol.WorkspaceBrowserParams{ConversationID: "conversation-1", CWD: a.CWD, SessionID: a.SessionID}, raw)
+		return nil
+	}
 	w = httptest.NewRecorder()
 	s.requireBrowser(s.handleBrowserStop)(w, browserRequest(t, http.MethodDelete, a, "alice"))
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, s.browserHandles, "stop invalidates all handles for the shared runner session")
-	assert.Empty(t, s.browserTickets)
+	assert.Equal(t, map[string]*browserHandle{other.ID: other}, s.browserHandles, "stop affects all viewers of this conversation, but not another conversation")
+	assert.Len(t, s.browserTickets, 1)
 	assert.Error(t, attachment.ctx.Err())
+	assert.NoError(t, otherAttachment.ctx.Err())
+}
+
+func TestBrowserRequiresConversationScope(t *testing.T) {
+	for _, test := range []struct {
+		name, query string
+		saved       bool
+		storeErr    error
+		want        int
+	}{
+		{name: "missing conversation", want: http.StatusBadRequest},
+		{name: "invalid conversation", query: "&conversationId=..", want: http.StatusBadRequest},
+		{name: "draft cannot override directory", query: "&conversationId=draft&cwd=/other", want: http.StatusBadRequest},
+		{name: "saved conversation cannot bypass affinity", query: "&conversationId=saved", saved: true, want: http.StatusBadRequest},
+		{name: "store failure is not a draft", query: "&conversationId=draft", storeErr: errors.New("store unavailable"), want: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, registration, link := newBrowserAPITestServer(t)
+			if test.saved || test.storeErr != nil {
+				s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+					return &conversations.GetConversationResponse{CWD: "/workspace"}, test.storeErr
+				}}
+			}
+			link.call = func(context.Context, string, any, any) error {
+				assert.Fail(t, "invalid scope must not reach the runner")
+				return nil
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+test.query, nil)
+			r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("alice")))
+			w := httptest.NewRecorder()
+			s.handleBrowserOpen(w, r)
+			assert.Equal(t, test.want, w.Code, w.Body.String())
+			assert.Empty(t, s.browserHandles)
+		})
+	}
+	for _, returnedID := range []string{"", "another-conversation"} {
+		t.Run("runner returned scope "+returnedID, func(t *testing.T) {
+			s, registration, link := newBrowserAPITestServer(t)
+			link.call = func(_ context.Context, _ string, _ any, result any) error {
+				*result.(*browser.Info) = browser.Info{SessionID: "session", ConversationID: returnedID, CWD: "/workspace"}
+				return nil
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId=draft", nil)
+			r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("alice")))
+			w := httptest.NewRecorder()
+			s.handleBrowserOpen(w, r)
+			assert.Equal(t, http.StatusBadGateway, w.Code)
+			assert.Empty(t, s.browserHandles, "never expose another conversation's or an older unscoped browser")
+		})
+	}
 }
 
 func TestBrowserCapabilityRequiresServerAndPrincipalPermission(t *testing.T) {
@@ -166,7 +232,7 @@ func TestBrowserOIDCRequiresRoleAndCSRF(t *testing.T) {
 		{"authorized", terminal, csrf, http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID, nil)
+			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId=conversation-1", nil)
 			if test.token != "" {
 				r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: test.token})
 			}
@@ -213,7 +279,7 @@ func TestBrowserOriginIsExplicitAndTrusted(t *testing.T) {
 
 func TestBrowserRelayTicketsSingleUseExpiryAndGeneration(t *testing.T) {
 	s, registration, _ := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "alice")
+	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
 	for _, test := range []string{"single use", "expired", "canceled", "stale generation"} {
 		t.Run(test, func(t *testing.T) {
 			a, err := s.newBrowserAttachment(t.Context(), handle)
@@ -249,22 +315,41 @@ func TestBrowserRelayTicketsSingleUseExpiryAndGeneration(t *testing.T) {
 	assert.Empty(t, s.browserHandles)
 }
 
-func TestBrowserRevalidatesConversationDirectory(t *testing.T) {
+func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
 	s, registration, _ := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "alice")
-	handle.conversationID = "conversation-1"
+	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
 	require.NoError(t, s.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), handle.conversationID, registration.RunnerID, ""))
-	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
-		return &conversations.GetConversationResponse{CWD: "/different"}, nil
-	}}
+	// The first turn reserves affinity before its conversation record is saved.
+	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"))
 	w := httptest.NewRecorder()
+	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
+	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1", nil)
+	target, targetErr := s.resolveBrowserTarget(r)
+	require.Nil(t, targetErr)
+	assert.Equal(t, registration.RunnerID, target.Runner.ID, "a reserved draft must not fall back to another default runner")
+	assert.Equal(t, handle.CWD, target.CWD)
+	for _, query := range []string{"&runnerId=another-runner", "&cwd=/different"} {
+		r = httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1"+query, nil)
+		_, targetErr = s.resolveBrowserTarget(r)
+		require.NotNil(t, targetErr)
+		assert.Equal(t, http.StatusBadRequest, targetErr.status)
+	}
+	cwd := "/workspace"
+	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{CWD: cwd}, nil
+	}}
+	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"), "saving the draft retains its browser")
+	w = httptest.NewRecorder()
+	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
+	cwd = "/different"
+	w = httptest.NewRecorder()
 	assert.Nil(t, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
 func TestBrowserAttachmentLimitAndShutdown(t *testing.T) {
 	s, registration, _ := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "alice")
+	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
 	var attachments []*browserAttachment
 	for range maxBrowserAttachments {
 		a, err := s.newBrowserAttachment(t.Context(), handle)
@@ -286,7 +371,7 @@ func TestBrowserAttachmentLimitAndShutdown(t *testing.T) {
 
 func TestBrowserDevToolsAssetsStreamBoundedChunks(t *testing.T) {
 	s, registration, link := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "alice")
+	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
 	calls := 0
 	link.call = func(_ context.Context, method string, raw any, result any) error {
 		assert.Equal(t, protocol.MethodWorkspaceBrowserAsset, method)
@@ -317,7 +402,7 @@ func TestBrowserDevToolsAssetsStreamBoundedChunks(t *testing.T) {
 
 func TestBrowserCDPUsesIndependentStreamingConnection(t *testing.T) {
 	s, registration, link := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "anonymous")
+	handle := openBrowserTestHandle(t, s, registration, "anonymous", "conversation-1")
 	server := httptest.NewServer(s.router)
 	t.Cleanup(server.Close)
 	remoteClosed := make(chan struct{})
@@ -327,6 +412,7 @@ func TestBrowserCDPUsesIndependentStreamingConnection(t *testing.T) {
 			return nil
 		}
 		params := raw.(protocol.WorkspaceBrowserConnectParams)
+		assert.Equal(t, handle.conversationID, params.ConversationID)
 		assert.Equal(t, handle.CWD, params.CWD)
 		assert.Equal(t, handle.SessionID, params.SessionID)
 		conn, response, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+protocol.BrowserRelayEndpoint,
@@ -395,7 +481,7 @@ func TestBrowserCDPUsesIndependentStreamingConnection(t *testing.T) {
 		defer s.browserMu.Unlock()
 		return len(handle.attachments) == 0 && len(s.browserTickets) == 0
 	}, time.Second, time.Millisecond)
-	assert.Contains(t, s.browserHandles, handle.ID, "detaching does not stop the workspace browser")
+	assert.Contains(t, s.browserHandles, handle.ID, "detaching does not stop the conversation browser")
 }
 
 // This fixture uses temporary auth storage and a fake runner echoing CDP over
@@ -419,7 +505,8 @@ func newBrowserAuthTestFixture(t *testing.T) *browserAuthTestFixture {
 	link.call = func(ctx context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceBrowserOpen:
-			*result.(*browser.Info) = browser.Info{SessionID: "retained-runner-session", CWD: "/workspace"}
+			request := params.(protocol.WorkspaceBrowserParams)
+			*result.(*browser.Info) = browser.Info{SessionID: "retained-runner-session", ConversationID: request.ConversationID, CWD: request.CWD}
 		case protocol.MethodWorkspaceBrowserStop:
 			f.stops.Add(1)
 		case protocol.MethodWorkspaceBrowserConnect:
@@ -480,7 +567,7 @@ func (f *browserAuthTestFixture) request(t *testing.T, method, path string, head
 
 func (f *browserAuthTestFixture) open(t *testing.T, headers http.Header) browserHandle {
 	t.Helper()
-	response := f.request(t, http.MethodPost, "/api/browser/session?runnerId="+f.registration.RunnerID, headers)
+	response := f.request(t, http.MethodPost, "/api/browser/session?runnerId="+f.registration.RunnerID+"&conversationId=conversation-1", headers)
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	var handle browserHandle
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&handle))
@@ -583,7 +670,7 @@ func TestBrowserOIDCLogoutClosesOnlyOriginatingSession(t *testing.T) {
 	reopened := f.open(t, freshAuth)
 	assert.Equal(t, handle.SessionID, reopened.SessionID)
 	f.dial(t, reopened, freshAuth)
-	response = f.request(t, http.MethodPost, "/api/browser/session?runnerId="+f.registration.RunnerID, firstAuth)
+	response = f.request(t, http.MethodPost, "/api/browser/session?runnerId="+f.registration.RunnerID+"&conversationId=conversation-1", firstAuth)
 	assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -759,9 +846,9 @@ func TestBrowserRealChromeRelay(t *testing.T) {
 		t.Cleanup(func() { _ = response.Body.Close() })
 		return response
 	}
-	open := func() browserHandle {
+	open := func(conversationID string) browserHandle {
 		t.Helper()
-		response := request(http.MethodPost, "/api/browser/session")
+		response := request(http.MethodPost, "/api/browser/session?conversationId="+conversationID)
 		var body struct {
 			ID        string `json:"id"`
 			SessionID string `json:"sessionId"`
@@ -784,12 +871,12 @@ func TestBrowserRealChromeRelay(t *testing.T) {
 		t.Cleanup(func() { _ = conn.Close() })
 		return conn
 	}
-	first := open()
+	first := open("conversation-1")
 	require.Equal(t, config.EmbeddedRunner.Workspace, first.CWD)
 	conn := dial(first)
 	var commandID int
 	var frames []json.RawMessage
-	command := func(method string, params any) json.RawMessage {
+	command := func(conn *websocket.Conn, method string, params any) json.RawMessage {
 		t.Helper()
 		commandID++
 		require.NoError(t, conn.SetWriteDeadline(time.Now().Add(10*time.Second)))
@@ -813,14 +900,14 @@ func TestBrowserRealChromeRelay(t *testing.T) {
 			}
 		}
 	}
-	command("Page.enable", map[string]any{})
-	command("Page.navigate", map[string]any{"url": app.URL})
-	evaluated := command("Runtime.evaluate", map[string]any{
+	command(conn, "Page.enable", map[string]any{})
+	command(conn, "Page.navigate", map[string]any{"url": app.URL})
+	evaluated := command(conn, "Runtime.evaluate", map[string]any{
 		"expression":   `new Promise(resolve => { const poll = () => { const h = document.querySelector('#app'); if (h) { window.kodeletBrowserSmoke = 42; resolve(h.textContent); } else { setTimeout(poll, 10); } }; poll(); })`,
 		"awaitPromise": true, "returnByValue": true,
 	})
 	assert.Contains(t, string(evaluated), "Browser ready")
-	command("Page.startScreencast", map[string]any{"format": "jpeg", "quality": 50, "maxWidth": 640, "maxHeight": 480})
+	command(conn, "Page.startScreencast", map[string]any{"format": "jpeg", "quality": 50, "maxWidth": 640, "maxHeight": 480})
 	for len(frames) == 0 {
 		var event struct {
 			Method string          `json:"method"`
@@ -837,14 +924,23 @@ func TestBrowserRealChromeRelay(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(frames[0], &frame))
 	assert.NotEmpty(t, frame.Data)
-	command("Page.screencastFrameAck", map[string]any{"sessionId": frame.SessionID})
-	command("Page.stopScreencast", map[string]any{})
+	command(conn, "Page.screencastFrameAck", map[string]any{"sessionId": frame.SessionID})
+	command(conn, "Page.stopScreencast", map[string]any{})
 	require.NoError(t, conn.Close())
-	second := open()
+	second := open("conversation-1")
 	assert.Equal(t, first.SessionID, second.SessionID)
 	conn = dial(second)
-	evaluated = command("Runtime.evaluate", map[string]any{"expression": "window.kodeletBrowserSmoke", "returnByValue": true})
+	evaluated = command(conn, "Runtime.evaluate", map[string]any{"expression": "window.kodeletBrowserSmoke", "returnByValue": true})
 	assert.Contains(t, string(evaluated), `"value":42`)
+	other := open("conversation-2")
+	assert.Equal(t, first.CWD, other.CWD)
+	assert.NotEqual(t, first.SessionID, other.SessionID)
+	otherConn := dial(other)
+	evaluated = command(otherConn, "Runtime.evaluate", map[string]any{
+		"expression": `({url: location.href, marker: typeof window.kodeletBrowserSmoke})`, "returnByValue": true,
+	})
+	assert.Contains(t, string(evaluated), `"url":"about:blank"`)
+	assert.Contains(t, string(evaluated), `"marker":"undefined"`)
 	response := request(http.MethodDelete, "/api/browser/"+second.ID)
 	assert.Equal(t, http.StatusNoContent, response.StatusCode)
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
@@ -855,6 +951,10 @@ func TestBrowserRealChromeRelay(t *testing.T) {
 			break
 		}
 	}
+	evaluated = command(otherConn, "Runtime.evaluate", map[string]any{"expression": "6 * 7", "returnByValue": true})
+	assert.Contains(t, string(evaluated), `"value":42`, "stopping one conversation leaves another usable")
+	response = request(http.MethodDelete, "/api/browser/"+other.ID)
+	assert.Equal(t, http.StatusNoContent, response.StatusCode)
 	s.browserMu.Lock()
 	assert.Empty(t, s.browserHandles)
 	s.browserMu.Unlock()

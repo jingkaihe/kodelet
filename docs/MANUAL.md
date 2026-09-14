@@ -501,7 +501,7 @@ Both commands also accept `--browser-idle-timeout` and `--browser-devtools-dir`.
 
 Start your app in the terminal, open **Browser**, and enter its address, such as `http://localhost:1234/abc`. Here, `localhost` is the runner host. The panel provides navigation, mouse/keyboard input, JavaScript dialogs, a console, network requests, and basic element inspection. Press **F6** to return to the address bar.
 
-The browser starts on demand and is shared with agents in that workspace. Closing the panel or finishing a run leaves it running. Use **Stop workspace browser** to close it, or let it expire after 15 minutes disconnected and unused. Set `browser.idle_timeout` to a positive duration to change that. Browser profiles are temporary; use development accounts.
+Each conversation has its own browser, shared between you and its agent. It starts on demand; closing the panel or finishing a run leaves it running. Use **Stop conversation browser** to close it, or let it expire after 15 minutes disconnected and unused. Set `browser.idle_timeout` to a positive duration to change that. Browser profiles are temporary; use development accounts.
 
 For full **DevTools**, optionally set `browser.devtools_dir` to a trusted, compatible compiled frontend containing `inspector.html`. Kodelet does not install Chrome or DevTools for you.
 

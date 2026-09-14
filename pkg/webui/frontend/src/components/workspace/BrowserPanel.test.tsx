@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
-import type { BrowserSession, WorkspaceTarget } from '../../types';
+import type { BrowserSession, BrowserTarget } from '../../types';
 import BrowserPanel from './BrowserPanel';
 
 type Command = { id: number; method: string; params: Record<string, unknown> };
@@ -43,7 +43,7 @@ class BrowserSocket extends EventTarget {
   }
 }
 
-const target: WorkspaceTarget = { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-1' };
+const target: BrowserTarget = { runnerId: 'runner-1', conversationId: 'conv-1' };
 const session: BrowserSession = {
   id: 'handle-1',
   sessionId: 'chrome-1',
@@ -567,7 +567,7 @@ describe('BrowserPanel', () => {
   it('keeps the connection available when stopping is rejected', async () => {
     const { socket } = await open();
     vi.mocked(apiService.stopBrowserSession).mockRejectedValue(new Error('Permission denied'));
-    fireEvent.click(screen.getByRole('button', { name: 'Stop workspace browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop conversation browser' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
     expect(socket.close).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Remote browser input')).toBeEnabled();
@@ -673,7 +673,7 @@ describe('BrowserPanel', () => {
     await act(async () =>
       sockets[1].event('Page.javascriptDialogOpening', { type: 'alert', message: 'Agent dialog' })
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Stop workspace browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop conversation browser' }));
     await screen.findByText('Browser stopped');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(apiService.stopBrowserSession).toHaveBeenCalledWith('handle-1');

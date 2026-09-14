@@ -3,7 +3,7 @@ import type React from 'react';
 import { useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import apiService from '../../services/api';
 import { BrowserCDP } from '../../services/browser';
-import type { BrowserSession, WorkspaceTarget } from '../../types';
+import type { BrowserSession, BrowserTarget } from '../../types';
 import { cn } from '../../utils';
 
 type RemoteObject = {
@@ -47,7 +47,7 @@ const modifiers = (event: {
   (event.metaKey ? 4 : 0) |
   (event.shiftKey ? 8 : 0);
 
-const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
+const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
   const helpID = useId();
   const [session, setSession] = useState<BrowserSession | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
@@ -615,11 +615,11 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
           Go
         </button>
         <button
-          aria-label="Stop workspace browser"
+          aria-label="Stop conversation browser"
           className="workspace-terminal-icon-button"
           disabled={!session || stopping}
           onClick={() => void stop()}
-          title="Stop the shared workspace browser, including agent access"
+          title="Stop the conversation browser, including agent access"
           type="button"
         >
           <Square aria-hidden="true" size={14} />

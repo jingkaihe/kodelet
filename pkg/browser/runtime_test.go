@@ -74,6 +74,7 @@ func TestBrowserHelperProcess(t *testing.T) {
 		if string(mode) == "redirect" {
 			redirect, err := os.ReadFile("browser-test-redirect")
 			require.NoError(t, err)
+			_, _ = fmt.Fprintln(os.Stderr, "sending Chrome target discovery redirect")
 			http.Redirect(w, r, string(redirect), http.StatusFound)
 			return
 		}
@@ -153,7 +154,7 @@ func testManager(t *testing.T, config Config) *Manager {
 func openedSession(t *testing.T, m *Manager, info Info) *session {
 	t.Helper()
 	m.mu.Lock()
-	s := m.sessions[info.CWD]
+	s := m.sessions[Scope{ConversationID: info.ConversationID, CWD: info.CWD}]
 	m.mu.Unlock()
 	require.NotNil(t, s)
 	<-s.ready
@@ -183,42 +184,65 @@ func assertSocketClosed(t *testing.T, conn *websocket.Conn) {
 }
 
 func TestDisabledAndInvalidConfiguration(t *testing.T) {
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
 	m := testManager(t, Config{})
 	assert.False(t, m.Enabled())
 	assert.Equal(t, 15*time.Minute, m.config.IdleTimeout)
-	_, err := m.Open(t.Context(), t.TempDir())
+	_, err := m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "disabled")
 	assert.Empty(t, m.sessions)
 
 	m = testManager(t, Config{Executable: filepath.Join(t.TempDir(), "missing-chrome")})
 	assert.True(t, m.Enabled())
-	_, err = m.Open(t.Context(), t.TempDir())
+	_, err = m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "executable was not found")
 	for _, cwd := range []string{"", filepath.Join(t.TempDir(), "missing"), os.Args[0]} {
-		_, err := m.Open(t.Context(), cwd)
+		_, err := m.Open(t.Context(), Scope{ConversationID: scope.ConversationID, CWD: cwd})
 		require.Error(t, err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = m.Open(ctx, t.TempDir())
+	_, err = m.Open(ctx, scope)
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoError(t, m.Close())
-	_, err = m.Open(t.Context(), t.TempDir())
+	_, err = m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "closed")
 }
 
-func TestOpenReusesCanonicalWorkspaceAndRequestLifetime(t *testing.T) {
+func TestMissingScopeCannotLaunchOrAttach(t *testing.T) {
+	config, profiles := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	for _, scope := range []Scope{{}, {CWD: t.TempDir()}, {ConversationID: " \t", CWD: t.TempDir()}, {ConversationID: "conversation"}} {
+		_, err := m.Open(t.Context(), scope)
+		require.Error(t, err)
+		_, err = m.Command(t.Context(), scope, "Runtime.evaluate", nil)
+		require.Error(t, err)
+		conn, release, err := m.Connect(t.Context(), scope, "session")
+		require.Error(t, err)
+		assert.Nil(t, conn)
+		assert.Nil(t, release)
+		require.Error(t, m.Stop(scope, "session"))
+	}
+	assert.Empty(t, m.sessions)
+	files, err := os.ReadDir(profiles)
+	require.NoError(t, err)
+	assert.Empty(t, files, "missing scope must never launch Chrome or create a profile")
+}
+
+func TestOpenReusesCanonicalConversationAndRequestLifetime(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	config.DevToolsDir = t.TempDir()
 	m := testManager(t, config)
 	assert.Empty(t, m.sessions, "manager construction must be lazy")
 	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
 	alias := filepath.Join(t.TempDir(), "alias")
 	require.NoError(t, os.Symlink(cwd, alias))
 	ctx, cancel := context.WithCancel(t.Context())
-	info, err := m.Open(ctx, cwd)
+	info, err := m.Open(ctx, scope)
 	require.NoError(t, err)
 	cancel()
+	assert.Equal(t, scope.ConversationID, info.ConversationID)
 	assert.True(t, info.DevTools)
 	s := openedSession(t, m, info)
 	assert.NotEqual(t, cwd, s.profile)
@@ -234,7 +258,7 @@ func TestOpenReusesCanonicalWorkspaceAndRequestLifetime(t *testing.T) {
 	pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
 	require.NoError(t, err)
 	assert.Equal(t, s.cmd.Process.Pid, pgid)
-	got, err := m.Open(t.Context(), alias)
+	got, err := m.Open(t.Context(), Scope{ConversationID: scope.ConversationID, CWD: alias})
 	require.NoError(t, err)
 	assert.Equal(t, info, got)
 	require.NoError(t, m.Close())
@@ -246,7 +270,7 @@ func TestOpenReusesCanonicalWorkspaceAndRequestLifetime(t *testing.T) {
 func TestConcurrentOpenAndSessionLimit(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
-	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
 	type result struct {
 		info Info
 		err  error
@@ -254,7 +278,7 @@ func TestConcurrentOpenAndSessionLimit(t *testing.T) {
 	results := make(chan result, 12)
 	for range cap(results) {
 		go func() {
-			info, err := m.Open(t.Context(), cwd)
+			info, err := m.Open(t.Context(), scope)
 			results <- result{info, err}
 		}()
 	}
@@ -265,47 +289,84 @@ func TestConcurrentOpenAndSessionLimit(t *testing.T) {
 		require.NoError(t, got.err)
 		assert.Equal(t, first.info, got.info)
 	}
-	for range maxSessions - 1 {
-		_, err := m.Open(t.Context(), t.TempDir())
+	for i := range maxSessions - 1 {
+		_, err := m.Open(t.Context(), Scope{ConversationID: fmt.Sprintf("other-%d", i), CWD: scope.CWD})
 		require.NoError(t, err)
 	}
-	_, err := m.Open(t.Context(), t.TempDir())
+	_, err := m.Open(t.Context(), Scope{ConversationID: "over-limit", CWD: scope.CWD})
 	require.ErrorContains(t, err, "limit reached")
-	require.NoError(t, m.Stop(cwd, first.info.SessionID))
-	replacement, err := m.Open(t.Context(), cwd)
+	require.NoError(t, m.Stop(scope, first.info.SessionID))
+	replacement, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.NotEqual(t, first.info.SessionID, replacement.SessionID)
-	require.ErrorContains(t, m.Stop(cwd, first.info.SessionID), "stale")
-	conn, release, err := m.Connect(t.Context(), cwd, first.info.SessionID)
+	require.ErrorContains(t, m.Stop(scope, first.info.SessionID), "stale")
+	conn, release, err := m.Connect(t.Context(), scope, first.info.SessionID)
 	require.ErrorContains(t, err, "stale")
 	assert.Nil(t, conn)
 	assert.Nil(t, release)
-	got, err := m.Open(t.Context(), cwd)
+	got, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.Equal(t, replacement, got)
+}
+
+func TestConversationIsolationAndCrossScopeFencing(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	firstScope := Scope{ConversationID: "first", CWD: t.TempDir()}
+	first, err := m.Open(t.Context(), firstScope)
+	require.NoError(t, err)
+	firstSession := openedSession(t, m, first)
+	for _, otherScope := range []Scope{
+		{ConversationID: "second", CWD: firstScope.CWD},
+		{ConversationID: firstScope.ConversationID, CWD: t.TempDir()},
+	} {
+		other, err := m.Open(t.Context(), otherScope)
+		require.NoError(t, err)
+		otherSession := openedSession(t, m, other)
+		assert.NotEqual(t, first.SessionID, other.SessionID)
+		assert.NotEqual(t, firstSession.profile, otherSession.profile)
+		assert.NotEqual(t, firstSession.wsURL, otherSession.wsURL)
+		for _, mismatch := range []struct {
+			scope Scope
+			id    string
+		}{{firstScope, other.SessionID}, {otherScope, first.SessionID}, {Scope{CWD: firstScope.CWD}, first.SessionID}} {
+			conn, release, err := m.Connect(t.Context(), mismatch.scope, mismatch.id)
+			require.Error(t, err)
+			assert.Nil(t, conn)
+			assert.Nil(t, release)
+			require.Error(t, m.Stop(mismatch.scope, mismatch.id))
+		}
+		require.NoError(t, m.Stop(otherScope, other.SessionID))
+		waitSessionDone(t, otherSession)
+		_, err = m.Command(t.Context(), firstScope, "Runtime.evaluate", nil)
+		require.NoError(t, err, "stopping another scope must not stop this conversation")
+		got, err := m.Open(t.Context(), firstScope)
+		require.NoError(t, err)
+		assert.Equal(t, first, got)
+	}
 }
 
 func TestAttachmentsReleaseCancellationAndStop(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
-	cwd := t.TempDir()
-	_, _, err := m.Connect(t.Context(), cwd, "stale")
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	_, _, err := m.Connect(t.Context(), scope, "stale")
 	require.ErrorContains(t, err, "stale")
 	assert.Empty(t, m.sessions, "connecting must never create a browser")
-	info, err := m.Open(t.Context(), cwd)
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	s := openedSession(t, m, info)
-	first, releaseFirst, err := m.Connect(t.Context(), cwd, info.SessionID)
+	first, releaseFirst, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	defer releaseFirst()
 	ctx, cancel := context.WithCancel(t.Context())
-	second, releaseSecond, err := m.Connect(ctx, cwd, info.SessionID)
+	second, releaseSecond, err := m.Connect(ctx, scope, info.SessionID)
 	require.NoError(t, err)
 	defer releaseSecond()
 	releaseFirst()
 	releaseFirst()
 	assertSocketClosed(t, first)
-	got, err := m.Open(t.Context(), cwd)
+	got, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.Equal(t, info, got, "one detach must not close the shared session")
 	cancel()
@@ -314,13 +375,13 @@ func TestAttachmentsReleaseCancellationAndStop(t *testing.T) {
 	m.mu.Lock()
 	assert.Zero(t, s.attachments)
 	m.mu.Unlock()
-	third, releaseThird, err := m.Connect(t.Context(), cwd, info.SessionID)
+	third, releaseThird, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	defer releaseThird()
-	require.NoError(t, m.Stop(cwd, info.SessionID))
+	require.NoError(t, m.Stop(scope, info.SessionID))
 	assertSocketClosed(t, third)
 	waitSessionDone(t, s)
-	_, _, err = m.Connect(t.Context(), cwd, info.SessionID)
+	_, _, err = m.Connect(t.Context(), scope, info.SessionID)
 	require.ErrorContains(t, err, "stale")
 	assert.Empty(t, m.sessions)
 }
@@ -329,17 +390,18 @@ func TestUnattachedIdleCleanup(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	config.IdleTimeout = 100 * time.Millisecond
 	m := testManager(t, config)
-	info, err := m.Open(t.Context(), t.TempDir())
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	s := openedSession(t, m, info)
-	_, release, err := m.Connect(t.Context(), info.CWD, info.SessionID)
+	_, release, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	defer release()
 	time.Sleep(3 * config.IdleTimeout)
 	assert.NoError(t, s.ctx.Err(), "an attached session must not idle out")
 	release()
 	waitSessionDone(t, s)
-	got, err := m.Open(t.Context(), info.CWD)
+	got, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.NotEqual(t, info.SessionID, got.SessionID)
 }
@@ -348,7 +410,8 @@ func TestCanceledAttachmentInterruptsStalledUpgrade(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
 	cwd := t.TempDir()
-	info, err := m.Open(t.Context(), cwd)
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	s := openedSession(t, m, info)
 	stall := filepath.Join(cwd, "browser-test-stall-upgrade")
@@ -357,7 +420,7 @@ func TestCanceledAttachmentInterruptsStalledUpgrade(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, release, err := m.Connect(ctx, cwd, info.SessionID)
+		_, release, err := m.Connect(ctx, scope, info.SessionID)
 		if release != nil {
 			release()
 		}
@@ -379,21 +442,22 @@ func TestCanceledAttachmentInterruptsStalledUpgrade(t *testing.T) {
 	m.mu.Unlock()
 	assert.NoError(t, s.ctx.Err())
 	require.NoError(t, os.Remove(stall))
-	_, release, err := m.Connect(t.Context(), cwd, info.SessionID)
+	_, release, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	release()
 }
 
-func TestStartupDoesNotBlockOtherWorkspacesAndCanBeCanceled(t *testing.T) {
+func TestStartupDoesNotBlockOtherConversationsAndCanBeCanceled(t *testing.T) {
 	config, profiles := fakeBrowserConfig(t)
 	m := testManager(t, config)
 	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-mode"), []byte("wait"), 0o600))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := m.Open(ctx, cwd)
+		_, err := m.Open(ctx, scope)
 		result <- err
 	}()
 	require.Eventually(t, func() bool {
@@ -402,19 +466,20 @@ func TestStartupDoesNotBlockOtherWorkspacesAndCanBeCanceled(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	otherCtx, otherCancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer otherCancel()
-	other, err := m.Open(otherCtx, t.TempDir())
+	otherScope := Scope{ConversationID: "other", CWD: t.TempDir()}
+	other, err := m.Open(otherCtx, otherScope)
 	require.NoError(t, err)
-	canonical, err := canonicalCWD(cwd)
+	canonical, err := canonicalScope(scope)
 	require.NoError(t, err)
 	m.mu.Lock()
 	s := m.sessions[canonical]
 	m.mu.Unlock()
 	require.NotNil(t, s)
-	_, _, err = m.Connect(t.Context(), cwd, s.info.SessionID)
+	_, _, err = m.Connect(t.Context(), scope, s.info.SessionID)
 	require.ErrorContains(t, err, "still starting")
 	waitCtx, waitCancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer waitCancel()
-	_, err = m.Open(waitCtx, cwd)
+	_, err = m.Open(waitCtx, scope)
 	require.Error(t, err)
 	assert.NoError(t, s.ctx.Err(), "canceling a waiting opener must not cancel the initiating request")
 	cancel()
@@ -422,7 +487,7 @@ func TestStartupDoesNotBlockOtherWorkspacesAndCanBeCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorContains(t, err, "Chrome is waiting for test startup readiness")
 	waitSessionDone(t, s)
-	got, err := m.Open(t.Context(), other.CWD)
+	got, err := m.Open(t.Context(), otherScope)
 	require.NoError(t, err)
 	assert.Equal(t, other, got)
 }
@@ -431,10 +496,11 @@ func TestCloseDuringStartup(t *testing.T) {
 	config, profiles := fakeBrowserConfig(t)
 	m := testManager(t, config)
 	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-mode"), []byte("wait"), 0o600))
 	result := make(chan error, 1)
 	go func() {
-		_, err := m.Open(t.Context(), cwd)
+		_, err := m.Open(t.Context(), scope)
 		result <- err
 	}()
 	require.Eventually(t, func() bool {
@@ -452,8 +518,9 @@ func TestStartupErrorsAreBoundedAndCleanProfiles(t *testing.T) {
 	config, profiles := fakeBrowserConfig(t)
 	m := testManager(t, config)
 	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-mode"), []byte("stderr"), 0o600))
-	_, err := m.Open(t.Context(), cwd)
+	_, err := m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "Chrome cannot start: test sandbox failure")
 	assert.Less(t, len(err.Error()), maxStderrBytes+1024)
 	files, err := filepath.Glob(filepath.Join(profiles, "kodelet-browser-*"))
@@ -463,7 +530,7 @@ func TestStartupErrorsAreBoundedAndCleanProfiles(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "bad-interpreter")
 	require.NoError(t, os.WriteFile(executable, []byte("#!/does-not-exist\n"), 0o700))
 	m = testManager(t, Config{Executable: executable})
-	_, err = m.Open(t.Context(), cwd)
+	_, err = m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "failed to launch")
 	files, err = filepath.Glob(filepath.Join(profiles, "kodelet-browser-*"))
 	require.NoError(t, err)
@@ -483,13 +550,27 @@ func TestStartupDiscoveryDoesNotFollowRedirects(t *testing.T) {
 	}))
 	defer other.Close()
 	cwd := t.TempDir()
+	scope, err := canonicalScope(Scope{ConversationID: "conversation", CWD: cwd})
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-mode"), []byte("redirect"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-redirect"), []byte(other.URL), 0o600))
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	_, err := m.Open(ctx, cwd)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.ErrorContains(t, err, "must not redirect")
+	result := make(chan error, 1)
+	go func() {
+		_, err := m.Open(ctx, scope)
+		result <- err
+	}()
+	// A retry proves an earlier redirect response was processed, without depending
+	// on which discovery error happens to be last when cancellation races a request.
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		s := m.sessions[scope]
+		return s != nil && strings.Count(s.stderr.String(), "sending Chrome target discovery redirect") >= 2
+	}, 3*time.Second, 10*time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-result, context.Canceled)
 	assert.Empty(t, redirected)
 	files, err := filepath.Glob(filepath.Join(profiles, "kodelet-browser-*"))
 	require.NoError(t, err)
@@ -502,17 +583,18 @@ func TestCrashRecoveryAndParentCancellation(t *testing.T) {
 	defer cancel()
 	m := NewManager(ctx, config)
 	t.Cleanup(func() { assert.NoError(t, m.Close()) })
-	info, err := m.Open(t.Context(), t.TempDir())
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	s := openedSession(t, m, info)
-	conn, release, err := m.Connect(t.Context(), info.CWD, info.SessionID)
+	conn, release, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	defer release()
 	require.NoError(t, s.cmd.Process.Kill())
 	// Assert disconnection immediately, not just after cleanup or an idle timeout.
 	assertSocketClosed(t, conn)
 	waitSessionDone(t, s)
-	replacement, err := m.Open(t.Context(), info.CWD)
+	replacement, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.NotEqual(t, info.SessionID, replacement.SessionID)
 	s = openedSession(t, m, replacement)
@@ -525,8 +607,9 @@ func TestStopKillsBrowserProcessGroup(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
 	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: cwd}
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "browser-test-mode"), []byte("descendant"), 0o600))
-	info, err := m.Open(t.Context(), cwd)
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	s := openedSession(t, m, info)
 	var address []byte
@@ -537,7 +620,7 @@ func TestStopKillsBrowserProcessGroup(t *testing.T) {
 	conn, err := net.DialTimeout("tcp", string(address), time.Second)
 	require.NoError(t, err)
 	defer conn.Close()
-	require.NoError(t, m.Stop(cwd, info.SessionID))
+	require.NoError(t, m.Stop(scope, info.SessionID))
 	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 	_, err = conn.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "the descendant must close even though it ignores SIGTERM")
@@ -547,21 +630,21 @@ func TestStopKillsBrowserProcessGroup(t *testing.T) {
 func TestCommandCorrelatesResponsesOnIndependentConnections(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
-	cwd := t.TempDir()
-	info, err := m.Open(t.Context(), cwd)
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	info, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
-	ui, release, err := m.Connect(t.Context(), cwd, info.SessionID)
+	ui, release, err := m.Connect(t.Context(), scope, info.SessionID)
 	require.NoError(t, err)
 	defer release()
 	for _, method := range []string{"Runtime.evaluate", "Page.navigate", "Browser.getVersion", "Target.getTargets"} {
-		result, err := m.Command(t.Context(), cwd, method, json.RawMessage(`{"value":42}`))
+		result, err := m.Command(t.Context(), scope, method, json.RawMessage(`{"value":42}`))
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"method":"`+method+`","params":{"value":42}}`, string(result))
 	}
 	var wg sync.WaitGroup
 	for range 6 {
 		wg.Go(func() {
-			result, err := m.Command(t.Context(), cwd, "Runtime.evaluate", nil)
+			result, err := m.Command(t.Context(), scope, "Runtime.evaluate", nil)
 			assert.NoError(t, err)
 			assert.JSONEq(t, `{"method":"Runtime.evaluate","params":null}`, string(result))
 		})
@@ -574,7 +657,7 @@ func TestCommandCorrelatesResponsesOnIndependentConnections(t *testing.T) {
 	require.NoError(t, ui.WriteJSON(map[string]any{"id": 99, "method": "Runtime.evaluate"}))
 	_, _, err = ui.ReadMessage()
 	require.NoError(t, err, "commands must not consume or close the UI connection")
-	got, err := m.Open(t.Context(), cwd)
+	got, err := m.Open(t.Context(), scope)
 	require.NoError(t, err)
 	assert.Equal(t, info, got)
 }
@@ -582,13 +665,13 @@ func TestCommandCorrelatesResponsesOnIndependentConnections(t *testing.T) {
 func TestCommandFailuresAndBounds(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)
-	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
 	for _, method := range []string{"", "Runtime", ".evaluate", "Runtime.", "Runtime. evaluate"} {
-		_, err := m.Command(t.Context(), cwd, method, nil)
+		_, err := m.Command(t.Context(), scope, method, nil)
 		require.Error(t, err)
 	}
 	for _, params := range []json.RawMessage{[]byte("[]"), []byte("null"), []byte("{"), []byte(strings.Repeat("x", maxCDPMessageBytes+1))} {
-		_, err := m.Command(t.Context(), cwd, "Runtime.evaluate", params)
+		_, err := m.Command(t.Context(), scope, "Runtime.evaluate", params)
 		require.Error(t, err)
 	}
 	assert.Empty(t, m.sessions, "invalid requests must not launch a browser")
@@ -599,14 +682,14 @@ func TestCommandFailuresAndBounds(t *testing.T) {
 		{"Test.large", "read limit exceeded"},
 		{"Test.disconnect", "failed to read"},
 	} {
-		_, err := m.Command(t.Context(), cwd, tc.method, nil)
+		_, err := m.Command(t.Context(), scope, tc.method, nil)
 		require.ErrorContains(t, err, tc.message)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	_, err := m.Command(ctx, cwd, "Test.hang", nil)
+	_, err := m.Command(ctx, scope, "Test.hang", nil)
 	require.Error(t, err)
-	result, err := m.Command(t.Context(), cwd, "Runtime.evaluate", nil)
+	result, err := m.Command(t.Context(), scope, "Runtime.evaluate", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, result, "a canceled command must not stop the browser")
 }
@@ -755,16 +838,16 @@ func TestRealBrowserSmoke(t *testing.T) {
 		_, _ = io.WriteString(w, "<!doctype html><title>Kodelet isolated browser test</title>")
 	}))
 	defer app.Close()
-	cwd := t.TempDir()
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
 	params, err := json.Marshal(map[string]string{"url": app.URL})
 	require.NoError(t, err)
-	_, err = m.Command(t.Context(), cwd, "Page.navigate", params)
+	_, err = m.Command(t.Context(), scope, "Page.navigate", params)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		result, err := m.Command(t.Context(), cwd, "Runtime.evaluate", json.RawMessage(`{"expression":"document.title","returnByValue":true}`))
+		result, err := m.Command(t.Context(), scope, "Runtime.evaluate", json.RawMessage(`{"expression":"document.title","returnByValue":true}`))
 		return err == nil && strings.Contains(string(result), "Kodelet isolated browser test")
 	}, 5*time.Second, 50*time.Millisecond)
-	result, err := m.Command(t.Context(), cwd, "Page.captureScreenshot", nil)
+	result, err := m.Command(t.Context(), scope, "Page.captureScreenshot", nil)
 	require.NoError(t, err)
 	var screenshot struct {
 		Data string `json:"data"`

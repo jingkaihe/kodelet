@@ -35,6 +35,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("apply_patch", &ApplyPatchRenderer{})
 
 	registry.Register("bash", &BashRenderer{})
+	registry.Register("browser", &BrowserRenderer{})
 	registry.Register("grep_tool", &GrepRenderer{})
 	registry.Register("glob_tool", &GlobRenderer{})
 	registry.Register("view_image", &ViewImageRenderer{})

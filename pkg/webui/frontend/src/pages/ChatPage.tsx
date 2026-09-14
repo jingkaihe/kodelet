@@ -35,6 +35,7 @@ import { applyChatStreamEvent, conversationToChatMessages } from '../features/ch
 import apiService from '../services/api';
 import type {
   AuthPrincipal,
+  BrowserTarget,
   ChatSettings,
   ChatStreamEvent,
   ContentBlock,
@@ -492,6 +493,7 @@ const ChatPage: React.FC = () => {
   const [extensionWidgets, setExtensionWidgets] = useState<Record<string, UIWidgetEvent>>({});
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
+  const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
   const [chatSettings, setChatSettings] = useState<ChatSettings>({
     profiles: [],
     reasoningEffort: DEFAULT_REASONING_EFFORT,
@@ -1344,6 +1346,10 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     viewedConversationIdRef.current = conversationId;
     routerConversationIdRef.current = conversationId;
+    // Once this draft has its route, reserve a new identity for returning to new chat.
+    setDraftConversationId((draftId) =>
+      draftId === conversationId ? generateConversationId() : draftId
+    );
   }, [conversationId]);
 
   useEffect(() => {
@@ -2019,6 +2025,7 @@ const ChatPage: React.FC = () => {
     setConversation(null);
     optimisticRemoteConversationRef.current = null;
     setActiveConversationId(null);
+    setDraftConversationId(generateConversationId());
     setMessages([]);
     extensionWidgetRevisionRef.current = null;
     extensionWidgetSnapshotRevisionRef.current = null;
@@ -2525,7 +2532,7 @@ const ChatPage: React.FC = () => {
         content: initialUserContent,
       },
     ]);
-    const targetConversationId = conversationId || generateConversationId();
+    const targetConversationId = conversationId || draftConversationId;
     const isNewConversation = !conversationId;
     const existingOptimisticRemoteConversation =
       conversationId && optimisticRemoteConversationRef.current?.conversationId === conversationId
@@ -3067,7 +3074,7 @@ const ChatPage: React.FC = () => {
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
-  // Before affinity is persisted, runner-wide panels can only address its startup directory.
+  // Before affinity is persisted, workspace tools can only address the runner's startup directory.
   const runnerDirectoryAvailable =
     currentCWDLabel === currentRunner?.workspace.path ||
     Boolean(remoteWorkspaceConversationID && currentRunner?.workspaceCwd);
@@ -3167,6 +3174,13 @@ const ChatPage: React.FC = () => {
   );
   const workspaceTargetKey = `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
+
+  const browserConversationId = conversationId || draftConversationId;
+  const browserTarget = useMemo<BrowserTarget>(
+    () => ({ runnerId: currentRunnerID, conversationId: browserConversationId }),
+    [currentRunnerID, browserConversationId]
+  );
+  const browserTargetKey = `runner:${currentRunnerID}:conversation:${browserConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(currentRunner?.generation): A reconnected runner must rediscover commands even when its workspace is unchanged.
   useEffect(() => {
@@ -4119,7 +4133,7 @@ const ChatPage: React.FC = () => {
                         target={workspaceTarget}
                       />
                     ) : workspacePanelView === 'browser' ? (
-                      <BrowserPanel key={workspaceTargetKey} target={workspaceTarget} />
+                      <BrowserPanel key={browserTargetKey} target={browserTarget} />
                     ) : (
                       <GitDiffModal
                         error={gitDiffError}

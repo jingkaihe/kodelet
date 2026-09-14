@@ -58,13 +58,14 @@ func (s *Service) handleBrowserRequest(ctx context.Context, method string, raw j
 	if err != nil {
 		return rpcResult(nil, err)
 	}
+	scope := browser.Scope{ConversationID: params.ConversationID, CWD: cwd}
 	if method == protocol.MethodWorkspaceBrowserStop {
 		if strings.TrimSpace(params.SessionID) == "" {
 			return rpcResult(nil, errors.New("browser session ID is required"))
 		}
-		return rpcResult(struct{}{}, s.browserManager.Stop(cwd, params.SessionID))
+		return rpcResult(struct{}{}, s.browserManager.Stop(scope, params.SessionID))
 	}
-	info, err := s.browserManager.Open(ctx, cwd)
+	info, err := s.browserManager.Open(ctx, scope)
 	return rpcResult(info, err)
 }
 
@@ -103,7 +104,7 @@ func (s *Service) connectBrowser(ctx context.Context, params protocol.WorkspaceB
 	defer stopCancellation()
 	stopRequestCancellation := context.AfterFunc(connectCtx, cancel)
 	defer stopRequestCancellation()
-	cdp, release, err := s.browserManager.Connect(relayCtx, cwd, params.SessionID)
+	cdp, release, err := s.browserManager.Connect(relayCtx, browser.Scope{ConversationID: params.ConversationID, CWD: cwd}, params.SessionID)
 	if err != nil {
 		return err
 	}

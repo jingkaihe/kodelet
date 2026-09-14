@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  BrowserTarget,
   Conversation,
   ConversationListResponse,
   CWDHintsResponse,
   GitDiffResponse,
-  WorkspaceTarget,
 } from '../types';
 import apiService from './api';
 
@@ -1079,18 +1079,11 @@ describe('ApiService', () => {
   });
 
   describe('browser sessions', () => {
-    it.each<{ target: WorkspaceTarget; query: string }>([
-      {
-        target: { kind: 'local', cwd: '/workspace/project' },
-        query: '?cwd=%2Fworkspace%2Fproject',
-      },
-      { target: { kind: 'local' }, query: '' },
-      { target: { kind: 'runner', runnerId: 'runner-1' }, query: '?runnerId=runner-1' },
-      {
-        target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-1' },
-        query: '?runnerId=runner-1&conversationId=conv-1',
-      },
-    ])('opens a CSRF-protected session for $target', async ({ target, query }) => {
+    it('opens a CSRF-protected session with explicit runner and conversation identities', async () => {
+      const target: BrowserTarget = {
+        runnerId: 'runner/1',
+        conversationId: '20260914T000000-0123456789abcdef',
+      };
       const session = {
         id: 'handle-1',
         sessionId: 'session-1',
@@ -1102,13 +1095,27 @@ describe('ApiService', () => {
       const signal = new AbortController().signal;
       expect(await apiService.openBrowserSession(target, signal)).toEqual(session);
       expect(mockFetch).toHaveBeenCalledWith(
-        `/api/browser/session${query}`,
+        '/api/browser/session?runnerId=runner%2F1&conversationId=20260914T000000-0123456789abcdef',
         expect.objectContaining({
           method: 'POST',
           signal,
           headers: expect.objectContaining({ 'X-CSRF-Token': 'browser-csrf' }),
         })
       );
+    });
+
+    it('never falls back to a runner-wide or local browser when identity is missing', async () => {
+      for (const target of [
+        { runnerId: 'runner-1', conversationId: '' },
+        { runnerId: '', conversationId: 'conv-1' },
+        { kind: 'runner', runnerId: 'runner-1' },
+        { kind: 'local', cwd: '/workspace/project' },
+      ]) {
+        await expect(apiService.openBrowserSession(target as BrowserTarget)).rejects.toThrow(
+          'A runner and conversation are required'
+        );
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('stops the explicit session through the CSRF-protected API', async () => {

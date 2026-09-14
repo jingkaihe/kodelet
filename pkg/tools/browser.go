@@ -17,11 +17,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// BrowserController is the runner-owned browser resource shared with the Web UI.
+// BrowserController is the runner-owned browser resource shared with the conversation's Web UI.
 type BrowserController interface {
-	Open(context.Context, string) (browser.Info, error)
-	Command(context.Context, string, string, json.RawMessage) (json.RawMessage, error)
-	Stop(string, string) error
+	Open(context.Context, browser.Scope) (browser.Info, error)
+	Command(context.Context, browser.Scope, string, json.RawMessage) (json.RawMessage, error)
+	Stop(browser.Scope, string) error
 }
 
 // BrowserTool is installed only in environments with an explicitly enabled browser.
@@ -32,9 +32,9 @@ func NewBrowserTool(controller BrowserController) *BrowserTool {
 	return &BrowserTool{controller: controller}
 }
 
-// BrowserInput describes an operation on the current workspace's shared page.
+// BrowserInput describes an operation on the current conversation's shared page.
 type BrowserInput struct {
-	Action     string `json:"action" jsonschema:"enum=open,enum=navigate,enum=evaluate,enum=screenshot,enum=stop,description=Operation on the workspace browser shared with the Web UI"`
+	Action     string `json:"action" jsonschema:"enum=open,enum=navigate,enum=evaluate,enum=screenshot,enum=stop,description=Operation on the conversation browser shared with the human within this conversation"`
 	URL        string `json:"url,omitempty" jsonschema:"description=HTTP or HTTPS URL for navigate. Use localhost to access local HTTP services. Navigation does not wait for application readiness."`
 	Expression string `json:"expression,omitempty" jsonschema:"description=JavaScript expression for evaluate. Can inspect the DOM or interact with the page. Promises are awaited."`
 	Path       string `json:"path,omitempty" jsonschema:"description=New PNG output path for screenshot, relative to the workspace or absolute. Existing files are not overwritten."`
@@ -89,11 +89,31 @@ func (*BrowserTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	return nil
 }
 
-type browserToolResult struct{ tooltypes.ToolResult }
+type browserToolResult struct {
+	tooltypes.ToolResult
+	input BrowserInput
+}
 
 func (r browserToolResult) StructuredData() tooltypes.StructuredToolResult {
 	data := r.ToolResult.StructuredData()
 	data.ToolName = "browser"
+	metadata := tooltypes.BrowserMetadata{
+		Action: r.input.Action, URL: r.input.URL, Expression: r.input.Expression,
+		Path: r.input.Path, SessionID: r.input.SessionID, Output: r.GetResult(),
+	}
+	if r.input.Action == "open" && data.Success {
+		var info browser.Info
+		if json.Unmarshal([]byte(metadata.Output), &info) == nil {
+			metadata.SessionID = info.SessionID
+		}
+	}
+	if r.input.Action == "screenshot" {
+		var image tooltypes.ViewImageMetadata
+		if tooltypes.ExtractMetadata(data.Metadata, &image) && image.Path != "" {
+			metadata.Path = image.Path
+		}
+	}
+	data.Metadata = metadata
 	return data
 }
 
@@ -109,7 +129,9 @@ func (t *BrowserTool) Execute(ctx context.Context, state tooltypes.State, parame
 	if err != nil {
 		result = tooltypes.BaseToolResult{Error: err.Error()}
 	}
-	return browserToolResult{result}
+	var input BrowserInput
+	_ = json.Unmarshal([]byte(parameters), &input)
+	return browserToolResult{ToolResult: result, input: input}
 }
 
 func (t *BrowserTool) execute(ctx context.Context, state tooltypes.State, parameters string) (tooltypes.ToolResult, error) {
@@ -126,8 +148,12 @@ func (t *BrowserTool) execute(ctx context.Context, state tooltypes.State, parame
 		return nil, errors.Wrap(err, "invalid browser input")
 	}
 	cwd := state.WorkingDirectory()
+	scope := browser.Scope{ConversationID: ToolContextFromContext(ctx).ConversationID, CWD: cwd}
+	if scope.ConversationID == "" {
+		return nil, errors.New("browser requires a conversation context")
+	}
 	if input.Action == "open" {
-		info, err := t.controller.Open(ctx, cwd)
+		info, err := t.controller.Open(ctx, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -135,10 +161,10 @@ func (t *BrowserTool) execute(ctx context.Context, state tooltypes.State, parame
 		return tooltypes.BaseToolResult{Result: string(data)}, err
 	}
 	if input.Action == "stop" {
-		if err := t.controller.Stop(cwd, input.SessionID); err != nil {
+		if err := t.controller.Stop(scope, input.SessionID); err != nil {
 			return nil, err
 		}
-		return tooltypes.BaseToolResult{Result: "Workspace browser stopped."}, nil
+		return tooltypes.BaseToolResult{Result: "Conversation browser stopped."}, nil
 	}
 	var method string
 	var params any
@@ -154,7 +180,7 @@ func (t *BrowserTool) execute(ctx context.Context, state tooltypes.State, parame
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to encode browser command")
 	}
-	response, err := t.controller.Command(ctx, cwd, method, payload)
+	response, err := t.controller.Command(ctx, scope, method, payload)
 	if err != nil {
 		return nil, err
 	}

@@ -100,25 +100,6 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 	}
 }
 
-func TestMetadataTypeRegistry_Completeness(t *testing.T) {
-	// Test that the registry contains all expected metadata types
-	expectedTypes := []string{
-		"file_read", "file_write", "file_edit", "apply_patch",
-		"grep_tool", "glob_tool", "bash",
-		"view_image",
-		"openai_web_search",
-		"web_fetch", "read_conversation", "get_goal", "update_goal", "extension_tool",
-		"skill", "blocked",
-	}
-
-	for _, typeName := range expectedTypes {
-		assert.Contains(t, metadataTypeRegistry, typeName)
-	}
-
-	// Verify registry size matches expected
-	assert.Equal(t, len(expectedTypes), len(metadataTypeRegistry))
-}
-
 func TestAllMetadataToolTypes(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -134,6 +115,7 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"BashMetadata", BashMetadata{}, "bash"},
 		{"ExtensionToolMetadata", ExtensionToolMetadata{}, "extension_tool"},
 		{"ViewImageMetadata", ViewImageMetadata{}, "view_image"},
+		{"BrowserMetadata", BrowserMetadata{}, "browser"},
 		{"WebFetchMetadata", WebFetchMetadata{}, "web_fetch"},
 		{"OpenAIWebSearchMetadata", OpenAIWebSearchMetadata{}, "openai_web_search"},
 		{"ReadConversationMetadata", ReadConversationMetadata{}, "read_conversation"},
@@ -143,6 +125,7 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"BlockedMetadata", BlockedMetadata{}, "blocked"},
 	}
 
+	assert.Len(t, metadataTypeRegistry, len(tests), "every registered metadata type must be covered")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, tt.metadata.ToolType())

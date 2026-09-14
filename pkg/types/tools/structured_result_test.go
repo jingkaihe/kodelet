@@ -61,6 +61,16 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			},
 		},
 		{
+			name: "BrowserMetadata",
+			result: StructuredToolResult{
+				ToolName: "browser",
+				Success:  true,
+				Metadata: BrowserMetadata{
+					Action: "evaluate", Expression: "(() => {\n  return document.title;\n})()", Output: `{"result":{"value":"Example"}}`,
+				},
+			},
+		},
+		{
 			name: "GrepMetadata",
 			result: StructuredToolResult{
 				ToolName:  "grep_tool",
@@ -174,6 +184,9 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 				assert.NotNil(t, unmarshaled.Metadata, "Expected metadata")
 				// Check that ToolType matches
 				assert.Equal(t, tt.result.Metadata.ToolType(), unmarshaled.Metadata.ToolType(), "Metadata type mismatch")
+				if metadata, ok := tt.result.Metadata.(BrowserMetadata); ok {
+					assert.Equal(t, metadata, unmarshaled.Metadata, "code and output must survive JSON serialization")
+				}
 
 				// IMPORTANT: After unmarshaling, metadata is always a value type, not a pointer
 				metaType := reflect.TypeOf(unmarshaled.Metadata)

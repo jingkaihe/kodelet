@@ -5,6 +5,7 @@ import { cn, formatDuration } from '../../utils';
 import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
 import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
+import BrowserRenderer, { getBrowserMetadata } from '../tool-renderers/BrowserRenderer';
 import {
   getExtensionToolPresentation,
   normalizeToolName,
@@ -227,6 +228,23 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const input = parseToolInput(toolCall.input);
   const metadata = getMetadataRecord(toolCall.result);
+  if (normalizedToolName === 'browser' || toolCall.result?.metadataType === 'browser') {
+    const browser = getBrowserMetadata(toolCall.result, toolCall.input);
+    switch (browser.action) {
+      case 'open':
+        return 'Browser: Open';
+      case 'navigate':
+        return formatToolSummary('Browser', `Go to${browser.url ? ` ${browser.url}` : ''}`);
+      case 'screenshot':
+        return formatToolSummary('Browser', `Screenshot${browser.path ? ` ${browser.path}` : ''}`);
+      case 'evaluate':
+        return 'Browser: Run code';
+      case 'stop':
+        return 'Browser: Stop';
+      default:
+        return formatToolSummary('Browser', browser.action);
+    }
+  }
   const presentation = getExtensionToolPresentation(toolCall.result);
   if (presentation) {
     return presentation.summary;
@@ -566,11 +584,12 @@ const builtinToolNames = new Set([
 
 const toolGroupKind = (
   tool: ChatRenderToolCall
-): 'commands' | 'tools' | 'file' | 'image' | 'extension' => {
+): 'commands' | 'tools' | 'file' | 'image' | 'browser' | 'extension' => {
+  const name = normalizeToolName(tool.name);
+  if (name === 'browser' || tool.result?.metadataType === 'browser') return 'browser';
   if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
     return 'extension';
   }
-  const name = normalizeToolName(tool.name);
   if (name === 'bash') return 'commands';
   if (name === 'view_image' || tool.result?.metadataType === 'view_image') return 'image';
   if (['apply_patch', 'file_edit', 'file_read', 'file_write'].includes(name)) return 'file';
@@ -620,7 +639,8 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
           );
         }
         const commands = kind === 'commands';
-        const builtin = kind !== 'extension';
+        const browser = kind === 'browser';
+        const builtin = commands || kind === 'tools';
         const running = group.some((tool) => getToolActivityStatus(tool) === 'running');
         const failedCount = group.filter((tool) => getToolActivityStatus(tool) === 'failed').length;
         const noun = commands ? 'command' : 'tool';
@@ -642,10 +662,11 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 'activity-card',
                 commands && 'activity-command-group',
                 kind === 'tools' && 'activity-tool-group',
+                browser && 'activity-browser',
                 running && 'activity-card-live',
                 failedCount > 0 && 'activity-card-error'
               )}
-              open={running ? true : undefined}
+              open={running || (browser && failedCount > 0) ? true : undefined}
             >
               <summary className="tool-summary activity-summary" title={summaryText}>
                 <span className="activity-marker" aria-hidden="true">
@@ -694,10 +715,16 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                           ) : null}
                         </div>
                       ) : null}
-                      {tool.result ? (
+                      {browser && !tool.result?.metadata ? (
+                        <BrowserRenderer
+                          isPartial={tool.inProgress}
+                          toolInput={tool.input}
+                          toolResult={tool.result}
+                        />
+                      ) : tool.result ? (
                         <ToolRenderer
                           isPartial={tool.inProgress}
-                          showAttachments={false}
+                          showAttachments={browser}
                           toolInput={tool.input}
                           toolResult={tool.result}
                         />
@@ -728,7 +755,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
               </div>
             </details>
             {group.map((tool, toolIndex) =>
-              tool.result && !tool.inProgress ? (
+              !browser && tool.result && !tool.inProgress ? (
                 <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />
               ) : null
             )}

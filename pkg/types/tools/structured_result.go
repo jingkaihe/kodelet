@@ -67,6 +67,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"extension_tool": reflect.TypeOf(ExtensionToolMetadata{}),
 
 	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
+	"browser":           reflect.TypeOf(BrowserMetadata{}),
 	"openai_web_search": reflect.TypeOf(OpenAIWebSearchMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
 	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
@@ -306,6 +307,20 @@ type ImageDimensions struct {
 
 // ToolType returns the tool type identifier for view_image operations.
 func (m ViewImageMetadata) ToolType() string { return "view_image" }
+
+// BrowserMetadata retains the browser action and its displayable input and output.
+// Screenshots use StructuredToolResult.Attachments rather than embedding image data.
+type BrowserMetadata struct {
+	Action     string `json:"action"`
+	URL        string `json:"url,omitempty"`
+	Expression string `json:"expression,omitempty"`
+	Path       string `json:"path,omitempty"`
+	SessionID  string `json:"sessionId,omitempty"`
+	Output     string `json:"output,omitempty"`
+}
+
+// ToolType returns the tool type identifier for browser operations.
+func (m BrowserMetadata) ToolType() string { return "browser" }
 
 // WebFetchMetadata contains metadata about a web fetch operation
 type WebFetchMetadata struct {

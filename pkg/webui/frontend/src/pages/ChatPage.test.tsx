@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { Profiler } from 'react';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  BrowserTarget,
   ChatSettings,
   ChatStreamEvent,
   ConversationListResponse,
@@ -51,11 +52,11 @@ vi.mock('../components/workspace/TerminalModal', () => ({
 }));
 
 vi.mock('../components/workspace/BrowserPanel', () => ({
-  default: ({ target }: { target: WorkspaceTarget }) => (
+  default: ({ target }: { target: BrowserTarget }) => (
     <div
       data-testid="browser-panel"
-      data-runner-id={target.kind === 'runner' ? target.runnerId : undefined}
-      data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
+      data-runner-id={target.runnerId}
+      data-conversation-id={target.conversationId}
     />
   ),
 }));
@@ -695,14 +696,28 @@ describe('ChatPage', () => {
     );
   });
 
-  it('opens the workspace panel when browser is its only available tool', async () => {
+  it('gives each new chat its own draft browser even with the same runner and directory', async () => {
     mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceBrowser: true })] });
     await renderChatWithRunner();
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    expect(await screen.findByTestId('browser-panel')).toBeInTheDocument();
+    const firstBrowser = await screen.findByTestId('browser-panel');
+    const firstId = firstBrowser.dataset.conversationId;
+    expect(firstId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     expect(screen.queryByRole('tab', { name: 'Show terminal' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Show changes' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    const nextBrowser = await screen.findByTestId('browser-panel');
+    expect(nextBrowser).not.toBe(firstBrowser);
+    expect(nextBrowser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    expect(nextBrowser.dataset.conversationId).not.toBe(firstId);
+    expect(nextBrowser).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
   it('does not restore browser access from an older conversation runner snapshot', async () => {
@@ -728,36 +743,52 @@ describe('ChatPage', () => {
     expect(screen.queryByRole('tab', { name: 'Show browser' })).not.toBeInTheDocument();
   });
 
-  it.each([
-    false,
-    true,
-  ])('gates browser access to conversation directories (%s)', async (workspaceCwd) => {
-    routeParams = { id: 'conv-browser' };
-    const runner = makeRunner({ workspaceBrowser: true, workspaceCwd });
+  it('uses conversation identity rather than cwd when switching between saved browsers', async () => {
+    const runner = makeRunner({ workspaceBrowser: true });
     mockGetRunners.mockResolvedValue({ runners: [runner] });
-    mockGetConversation.mockResolvedValue({
-      id: 'conv-browser',
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
       createdAt: '2026-09-14T00:00:00Z',
       updatedAt: '2026-09-14T00:00:00Z',
       messageCount: 1,
-      cwd: '/runner/other-project',
+      cwd: '/runner/kodelet',
       runnerId: runner.id,
       runner,
-      messages: [{ role: 'user', content: 'Browser workspace' }],
+      messages: [{ role: 'user', content: `Saved ${id}` }],
       toolResults: {},
+    }));
+    routeParams = { id: 'conv-browser-a' };
+    const { rerender } = render(<ChatPage />);
+    let previousPanel: HTMLElement | undefined;
+    for (const id of ['conv-browser-a', 'conv-browser-b', 'conv-browser-a']) {
+      routeParams = { id };
+      rerender(<ChatPage />);
+      await screen.findByText(`Saved ${id}`);
+      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+      const panel = await screen.findByTestId('browser-panel');
+      expect(panel).toHaveAttribute('data-conversation-id', id);
+      expect(panel).toHaveAttribute('data-runner-id', runner.id);
+      expect(panel).not.toBe(previousPanel);
+      previousPanel = panel;
+    }
+  });
+
+  it('does not expose a draft browser for a custom directory before affinity is saved', async () => {
+    mockGetRunners.mockResolvedValue({
+      runners: [makeRunner({ workspaceBrowser: true, workspaceCwd: true })],
     });
     render(<ChatPage />);
-    await screen.findByText('Browser workspace');
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
     await waitForTerminalAccess();
-    if (!workspaceCwd) {
-      expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
-      return;
-    }
-    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
-      'data-conversation-id',
-      'conv-browser'
-    );
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    selectWorkspaceRunner();
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '/runner/other-project' },
+    });
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('browser-panel')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -908,18 +939,23 @@ describe('ChatPage', () => {
     }
   });
 
-  it('remounts the terminal after runner reconnection without changing its workspace target', async () => {
+  it.each([
+    'terminal',
+    'browser',
+  ])('remounts the %s after runner reconnection without changing its target', async (panel) => {
     vi.useFakeTimers();
     routeParams = { id: 'conv-remote' };
     const firstGeneration = makeRunner({
       generation: 1,
       workspaceGitDiff: true,
       workspaceTerminal: true,
+      workspaceBrowser: true,
     });
     const secondGeneration = makeRunner({
       generation: 2,
       workspaceGitDiff: true,
       workspaceTerminal: true,
+      workspaceBrowser: true,
     });
     mockGetRunners
       .mockResolvedValueOnce({ runners: [firstGeneration] })
@@ -941,9 +977,10 @@ describe('ChatPage', () => {
       await flushAsyncUpdates();
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-      const firstTerminal = screen.getByTestId('terminal-panel');
-      expect(firstTerminal).toHaveAttribute('data-runner-id', 'runner-1');
-      expect(firstTerminal).toHaveAttribute('data-conversation-id', 'conv-remote');
+      if (panel === 'browser') fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+      const firstPanel = screen.getByTestId(`${panel}-panel`);
+      expect(firstPanel).toHaveAttribute('data-runner-id', 'runner-1');
+      expect(firstPanel).toHaveAttribute('data-conversation-id', 'conv-remote');
 
       await act(async () => {
         vi.advanceTimersByTime(5000);
@@ -952,11 +989,12 @@ describe('ChatPage', () => {
       });
 
       expect(mockGetRunners).toHaveBeenCalledTimes(2);
-      const reconnectedTerminal = screen.getByTestId('terminal-panel');
-      expect(reconnectedTerminal).not.toBe(firstTerminal);
-      expect(reconnectedTerminal).toHaveAttribute('data-runner-id', 'runner-1');
-      expect(reconnectedTerminal).toHaveAttribute('data-conversation-id', 'conv-remote');
-      expect(reconnectedTerminal).toHaveAttribute('data-show-pop-out', 'true');
+      const reconnectedPanel = screen.getByTestId(`${panel}-panel`);
+      expect(reconnectedPanel).not.toBe(firstPanel);
+      expect(reconnectedPanel).toHaveAttribute('data-runner-id', 'runner-1');
+      expect(reconnectedPanel).toHaveAttribute('data-conversation-id', 'conv-remote');
+      if (panel === 'terminal')
+        expect(reconnectedPanel).toHaveAttribute('data-show-pop-out', 'true');
     } finally {
       vi.useRealTimers();
     }
@@ -2531,6 +2569,7 @@ describe('ChatPage', () => {
       workspaceDiscovery: true,
       workspaceTerminal: true,
       workspaceGitDiff: true,
+      workspaceBrowser: true,
     });
     mockGetRunners.mockResolvedValue({ runners: [runner] });
     mockGetConversation.mockResolvedValue({
@@ -2569,6 +2608,11 @@ describe('ChatPage', () => {
         runnerId: 'runner-1',
         conversationId: 'conv-selected-directory',
       })
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
+      'data-conversation-id',
+      'conv-selected-directory'
     );
   });
 
@@ -2630,19 +2674,41 @@ describe('ChatPage', () => {
     expect(terminal).toHaveAttribute('data-show-pop-out', 'true');
   });
 
-  it('uses the runner-only workspace target while a new remote conversation is pending', async () => {
-    mockGetRunners.mockResolvedValue({
-      runners: [makeRunner({ workspaceGitDiff: true, workspaceTerminal: true })],
+  it('keeps the draft browser through submission, route handoff and later turns without changing workspace targets', async () => {
+    const runner = makeRunner({
+      workspaceGitDiff: true,
+      workspaceTerminal: true,
+      workspaceBrowser: true,
     });
-    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
+    mockGetRunners.mockResolvedValue({
+      runners: [runner],
+    });
+    let finishStream = () => {};
+    mockStreamChat.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStream = resolve;
+        })
+    );
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '2026-09-14T00:00:00Z',
+      updatedAt: '2026-09-14T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: runner.id,
+      runner,
+      messages: [{ role: 'user', content: 'hello remotely' }],
+      toolResults: {},
+    }));
 
-    const { rerender } = render(<ChatPage />);
-    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    const { rerender } = await renderChatWithRunner();
     await waitForTerminalAccess();
-    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    selectWorkspaceRunner();
-    await flushAsyncUpdates();
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    const draftBrowser = await screen.findByTestId('browser-panel');
+    const draftId = draftBrowser.dataset.conversationId;
+    expect(draftId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello remotely' },
     });
@@ -2650,11 +2716,15 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
     const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
-    expect(preallocatedId).toBeTruthy();
+    expect(preallocatedId).toBe(draftId);
+    expect(screen.getByTestId('browser-panel')).toBe(draftBrowser);
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+    expect(mockNavigate).toHaveBeenCalledWith(`/c/${draftId}`, { replace: true });
     routeParams = { id: preallocatedId };
     rerender(<ChatPage />);
+    expect(screen.getByTestId('browser-panel')).toBe(draftBrowser);
 
-    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Show terminal' }));
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).not.toHaveAttribute('data-conversation-id');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
@@ -2666,6 +2736,30 @@ describe('ChatPage', () => {
       })
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    const pendingBrowser = await screen.findByTestId('browser-panel');
+    expect(pendingBrowser).toHaveAttribute('data-conversation-id', draftId);
+    await act(async () => finishStream());
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(draftId));
+    expect(screen.getByTestId('browser-panel')).toBe(pendingBrowser);
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'second turn' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
+    expect(mockStreamChat.mock.calls[1]?.[0]?.conversationId).toBe(draftId);
+    expect(screen.getByTestId('browser-panel')).toBe(pendingBrowser);
+    expect(mockStopConversation).not.toHaveBeenCalled();
+
+    await act(async () => finishStream());
+    routeParams = {};
+    rerender(<ChatPage />);
+    const newDraftBrowser = await screen.findByTestId('browser-panel');
+    expect(newDraftBrowser).not.toBe(pendingBrowser);
+    expect(newDraftBrowser.dataset.conversationId).not.toBe(draftId);
+    expect(newDraftBrowser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
   });
 
   it('allows correcting runner context before retrying a failed optimistic conversation', async () => {
@@ -5104,30 +5198,6 @@ describe('ChatPage', () => {
         ])
       )
     );
-  });
-
-  it('preallocates a conversation id for a new conversation', async () => {
-    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
-
-    await renderChatWithRunner();
-
-    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
-      target: { value: 'hello' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
-
-    const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
-    expect(preallocatedId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
-    expect(mockNavigate).toHaveBeenCalledWith(`/c/${preallocatedId}`, {
-      replace: true,
-    });
-    await waitFor(() => expect(screen.getByTestId('sidebar-new-chat-button')).toBeEnabled());
-    expect(mockStopConversation).not.toHaveBeenCalled();
   });
 
   it('updates the URL as soon as a new chat receives a conversation id', async () => {

@@ -401,6 +401,11 @@ export type WorkspaceTarget =
   | { kind: 'local'; cwd?: string }
   | { kind: 'runner'; runnerId: string; conversationId?: string };
 
+export interface BrowserTarget {
+  runnerId: string;
+  conversationId: string;
+}
+
 export interface TerminalReadyEvent {
   type: 'ready';
   cwd: string;
@@ -728,14 +733,12 @@ export interface ViewImageMetadata {
 }
 
 export interface BrowserMetadata {
-  url: string;
-  title?: string;
-  pageTitle?: string;
-  filePath?: string;
-  file_path?: string;
+  action: string;
+  url?: string;
+  expression?: string;
   path?: string;
-  dimensions?: string;
-  size?: string;
+  sessionId?: string;
+  output?: string;
 }
 
 export interface SkillMetadata {

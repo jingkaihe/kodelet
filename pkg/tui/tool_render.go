@@ -40,6 +40,10 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	for idx := 0; idx < len(block.tools); {
 		tool := block.tools[idx]
 		switch {
+		case normalizedToolName(tool) == "browser":
+			groups = append(groups, m.buildBrowserToolGroup(block, idx))
+			idx++
+
 		case isImageAttachmentTool(tool):
 			groups = append(groups, m.buildImageToolGroup(block, idx))
 			idx++
@@ -84,6 +88,56 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	}
 
 	return groups
+}
+
+func (m model) buildBrowserToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	var meta tooltypes.BrowserMetadata
+	if tool.structured == nil || !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+		// Before a result arrives, only the invocation supplies the action/code.
+		_ = json.Unmarshal([]byte(tool.input), &meta)
+		meta.Output = ""
+	}
+	label := sanitizeExtensionUIText(renderers.BrowserActionLabel(meta))
+	var parts []string
+	if meta.Action == "evaluate" && strings.TrimSpace(meta.Expression) != "" {
+		parts = append(parts, renderers.FencedCodeBlock("javascript", sanitizeExtensionTranscriptText(meta.Expression)))
+	}
+	if meta.Action == "stop" && meta.SessionID != "" {
+		parts = append(parts, renderers.FencedCodeBlock("text", "Session: "+sanitizeExtensionTranscriptText(meta.SessionID)))
+	}
+	errorText := ""
+	if tool.structured != nil {
+		errorText = tool.structured.Error
+	}
+	if tool.failed && errorText == "" {
+		// Transport failures can finish a call without a structured tool result.
+		errorText = tool.result
+	}
+	if meta.Action != "screenshot" && strings.TrimSpace(meta.Output) != "" && meta.Output != errorText {
+		parts = append(parts, renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(meta.Output)))
+	}
+	if errorText != "" {
+		parts = append(parts, renderers.FencedCodeBlock("text", "Error: "+sanitizeExtensionTranscriptText(errorText)))
+	}
+	if tool.done && tool.structured != nil {
+		images := renderers.ImageAttachmentLines(*tool.structured, m.serverURL)
+		for i, image := range images {
+			images[i] = strings.TrimPrefix(image, "Generated image - ")
+		}
+		if len(images) > 0 {
+			parts = append(parts, renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(strings.Join(images, "\n"))))
+		}
+	}
+	return toolRenderGroup{
+		toolStart: idx, toolEnd: idx, changeIndex: -1,
+		label: label, runningLabel: label,
+		body:         strings.Join(parts, "\n\n"),
+		markdownBody: true,
+		expanded:     block.expanded || tool.expanded || tool.failed,
+		active:       !tool.done,
+		failed:       tool.failed,
+	}
 }
 
 func isImageAttachmentTool(tool toolCall) bool {
@@ -801,7 +855,8 @@ func isExtensionPresentationTool(tool toolCall) bool {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) &&
+	return normalizedToolName(tool) != "browser" &&
+		!isBashTool(tool) &&
 		!isApplyPatchTool(tool) &&
 		!isFileChangeTool(tool) &&
 		!isTaskRunTool(tool) &&
