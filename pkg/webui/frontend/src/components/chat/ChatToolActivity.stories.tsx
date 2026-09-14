@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, userEvent, within } from 'storybook/test';
 import { sampleBashToolResult, sampleFileReadToolResult } from '../../stories/fixtures';
 import type { ChatRenderToolCall } from '../../types';
 import ChatToolActivity from './ChatToolActivity';
@@ -147,6 +148,44 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Successful: Story = {};
+
+export const CommandAlignment: Story = {
+  args: {
+    tools: [
+      {
+        ...successfulTools[0],
+        input: JSON.stringify({
+          command: 'npm run test:run -- ChatComposer',
+          description: 'Measure baseline coverage of affected frontend components',
+        }),
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await canvasElement.ownerDocument.fonts.ready;
+    await userEvent.click(within(canvasElement).getByText('Ran 1 command'));
+
+    const brief = canvasElement.querySelector<HTMLElement>('.bash-tool-brief');
+    const description = brief?.querySelector('.bash-tool-description');
+    const button = brief?.querySelector<HTMLButtonElement>('.bash-copy-command');
+    const badge = brief?.querySelector('.bash-tool-badge');
+    if (!brief || !description || !button || !badge) {
+      throw new Error('Command description, copy button, or exit status was not rendered');
+    }
+
+    const descriptionRect = description.getBoundingClientRect();
+    const center = descriptionRect.top + descriptionRect.height / 2;
+    for (const element of [button, badge]) {
+      const rect = element.getBoundingClientRect();
+      expect(Math.abs(rect.top + rect.height / 2 - center)).toBeLessThan(1);
+      expect(rect.left).toBeGreaterThanOrEqual(descriptionRect.right);
+    }
+    expect(brief.scrollWidth).toBeLessThanOrEqual(brief.clientWidth);
+    expect(button).toHaveClass('copy-button');
+    expect(getComputedStyle(button).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    expect(getComputedStyle(button).borderRadius).toBe('4px');
+  },
+};
 
 export const Running: Story = {
   args: {

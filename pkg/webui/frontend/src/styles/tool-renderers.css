@@ -1,6 +1,6 @@
 .bash-tool-brief {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
@@ -10,6 +10,7 @@
   font-size: 0.82rem;
   font-weight: 500;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   color: color-mix(in srgb, var(--kodelet-dark) 85%, var(--kodelet-light));
 }
 
@@ -32,6 +33,7 @@
   font-size: 0.72rem;
   font-weight: 650;
   line-height: 1.2;
+  white-space: nowrap;
   color: var(--kodelet-muted);
 }
 
