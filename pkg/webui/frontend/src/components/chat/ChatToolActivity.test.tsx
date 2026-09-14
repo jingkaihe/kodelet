@@ -87,6 +87,50 @@ describe('ChatToolActivity', () => {
     expect(screen.getByLabelText('Tool running')).toBeInTheDocument();
   });
 
+  it('renders browser screenshots with view_image metadata as folded image inspections', async () => {
+    const user = userEvent.setup();
+    const filename = 'kodelet-command-alignment-20260914.png';
+    const path = `/tmp/${filename}`;
+    const tool: ChatRenderToolCall = {
+      callId: 'browser-screenshot',
+      name: 'browser',
+      input: JSON.stringify({ action: 'screenshot', path }),
+      result: {
+        toolName: 'browser',
+        metadataType: 'view_image',
+        success: true,
+        metadata: { path, mimeType: 'image/png', imageSize: { width: 536, height: 680 } },
+        attachments: [
+          {
+            type: 'image',
+            artifactId: 'art_screenshot',
+            shortCode: 'screenshot',
+            filename,
+            mimeType: 'image/png',
+          },
+        ],
+      },
+    };
+    const { container } = render(<ChatToolActivity tools={[tool]} />);
+
+    const summary = screen.getByText(`Viewed image ${filename}`);
+    expect(summary).toBeVisible();
+    expect(summary.closest('summary')).toHaveAttribute('title', path);
+    expect(screen.queryByText('Generated image')).not.toBeInTheDocument();
+    const details = container.querySelector('details');
+    expect(details).toHaveClass('activity-image');
+    expect(details).not.toHaveAttribute('open');
+    const preview = screen.getByRole('img', { name: filename });
+    expect(preview.closest('details')).toBe(details);
+    expect(preview).not.toBeVisible();
+
+    await user.click(summary);
+
+    expect(preview).toBeVisible();
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: `Download image: ${filename}` })).toBeVisible();
+  });
+
   it('uses a generic label for an unnamed image artifact without exposing its ID', () => {
     const tool: ChatRenderToolCall = {
       callId: 'view-1',

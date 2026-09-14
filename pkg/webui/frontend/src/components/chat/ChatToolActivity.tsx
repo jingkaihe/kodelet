@@ -231,7 +231,7 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   if (presentation) {
     return presentation.summary;
   }
-  if (normalizedToolName === 'view_image') {
+  if (normalizedToolName === 'view_image' || toolCall.result?.metadataType === 'view_image') {
     const image = toolCall.result?.attachments?.find((attachment) => attachment.type === 'image');
     const filename = (getViewImagePath(toolCall) || image?.filename?.trim())?.split('/').pop();
     const status = getToolActivityStatus(toolCall);
@@ -572,7 +572,7 @@ const toolGroupKind = (
   }
   const name = normalizeToolName(tool.name);
   if (name === 'bash') return 'commands';
-  if (name === 'view_image') return 'image';
+  if (name === 'view_image' || tool.result?.metadataType === 'view_image') return 'image';
   if (['apply_patch', 'file_edit', 'file_read', 'file_write'].includes(name)) return 'file';
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };

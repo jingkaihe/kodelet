@@ -93,7 +93,7 @@ const ToolImageAttachments: React.FC<{ toolResult: ToolResult }> = ({ toolResult
         <ImageAttachment
           key={`${attachment.artifactId || index}-${attachment.shortCode || ''}`}
           attachment={attachment}
-          viewed={toolResult.toolName === 'view_image'}
+          viewed={toolResult.toolName === 'view_image' || toolResult.metadataType === 'view_image'}
         />
       ))}
     </div>

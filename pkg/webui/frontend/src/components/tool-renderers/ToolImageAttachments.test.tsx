@@ -82,6 +82,26 @@ describe('ToolImageAttachments', () => {
   });
 
   it.each([
+    ['view_image', undefined, 'Viewed image'],
+    ['browser', 'view_image', 'Viewed image'],
+    ['draw_chart', 'extension_tool', 'Generated image'],
+  ])('labels unnamed %s attachments using their image semantics', (toolName, metadataType, alt) => {
+    render(
+      <ToolImageAttachments
+        toolResult={{
+          ...result,
+          toolName,
+          metadataType,
+          attachments: [{ ...image, alt: undefined, filename: undefined }],
+        }}
+      />
+    );
+
+    expect(screen.getByRole('img', { name: alt })).toBeVisible();
+    expect(screen.getByRole('link', { name: `Download image: ${alt}` })).toBeVisible();
+  });
+
+  it.each([
     { ...image, artifactId: undefined, path: '/tmp/chart.png', viewUrl: 'file:///tmp/chart.png' },
     { ...image, shortCode: '../private' },
     { ...image, shortCode: 'invalid?token=secret' },
