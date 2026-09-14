@@ -477,17 +477,27 @@ Swipe vertically inside the terminal to scroll: drag down to read older output a
 
 #### Runner browser
 
-The **Browser** tab shares a conversation browser between you and the agent. It requires `terminal` or `admin` access and Chrome/Chromium installed on the runner:
+The **Browser** tab shares a conversation browser between you and the agent. It requires `terminal` or `admin` access and Chrome/Chromium installed on the runner.
+
+Set `browser` on the runner host and `serve` on the server in `~/.kodelet/config.yaml` (or `KODELET_CONFIG_FILE`):
+
+```yaml
+browser:
+  executable: /opt/chrome/chrome # Installed Chrome/Chromium; empty disables launching.
+  idle_timeout: 15m             # Stop disconnected, unused sessions after this duration.
+  devtools_dir: ""              # Optional compiled DevTools frontend containing inspector.html.
+
+serve:
+  browser_enabled: true         # Allow browser UI and agent tools on enabled runners.
+```
+
+These are host settings, not repository/profile overrides. Restart the affected runner or server after changing them. For a built-in runner, you can also use flags:
 
 ```bash
 kodelet serve --browser-enabled --browser-executable /opt/chrome/chrome
 ```
 
-For a standalone runner, pass `--browser-executable` to `kodelet runner start` and enable `--browser-enabled` on the server. Persistent host settings, idle timeout, and optional DevTools configuration are in [config.sample.yaml](../config.sample.yaml); repository/profile overrides do not apply.
-
-Start your app in the terminal, open **Browser**, and enter its URL. `localhost` refers to the runner host. Agents can also navigate, evaluate JavaScript, and take screenshots with the `browser` tool, including from the TUI.
-
-Closing the panel or finishing a run leaves the browser running. Use **Stop conversation browser**, or let it expire after 15 minutes disconnected and unused. Profiles are temporary; use development accounts.
+For a standalone runner, pass `--browser-executable` to `kodelet runner start` and enable `--browser-enabled` on the server. Both commands accept `--browser-idle-timeout` and `--browser-devtools-dir`.
 
 #### Remote terminal chat
 
