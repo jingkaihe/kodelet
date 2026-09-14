@@ -65,6 +65,7 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
   const [dialog, setDialog] = useState<PageDialog | null>(null);
   const clientRef = useRef<BrowserCDP | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const resizeViewportRef = useRef<(() => void) | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -164,9 +165,15 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
           if (page?.url && !page.parentId) {
             mainFrameID = page.id || mainFrameID;
             setURL(page.url);
+            resizeViewportRef.current?.();
           }
           break;
         }
+        case 'Page.loadEventFired':
+          // Navigation can replace Chrome's capture surface while retaining its
+          // emulated layout size. Reapply metrics to synchronize the screencast.
+          resizeViewportRef.current?.();
+          break;
         case 'Page.navigatedWithinDocument':
           if (params.frameId === mainFrameID && typeof params.url === 'string') setURL(params.url);
           break;
@@ -295,11 +302,12 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
     const resize = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const bounds = viewport.getBoundingClientRect();
-        if (bounds.width < 1 || bounds.height < 1) return;
+        const { clientWidth: width, clientHeight: height } = viewport;
+        if (width < 1 || height < 1) return;
         void command('Emulation.setDeviceMetricsOverride', {
-          width: Math.max(1, Math.min(1920, Math.round(bounds.width))),
-          height: Math.max(1, Math.min(1440, Math.round(bounds.height))),
+          // Match the panel's content box; only the encoded screencast is size-limited.
+          width,
+          height,
           deviceScaleFactor: 1,
           mobile: false,
         });
@@ -307,8 +315,10 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
     };
     const observer = new ResizeObserver(resize);
     observer.observe(viewport);
+    resizeViewportRef.current = resize;
     resize();
     return () => {
+      resizeViewportRef.current = null;
       observer.disconnect();
       clearTimeout(timer);
     };
@@ -353,24 +363,28 @@ const BrowserPanel: React.FC<{ target: WorkspaceTarget }> = ({ target }) => {
     if (entry) await command('Page.navigateToHistoryEntry', { entryId: entry.id });
   };
 
-  const point = (event: { clientX: number; clientY: number }) => {
-    const bounds = imageRef.current?.getBoundingClientRect();
-    if (!bounds || !frame || bounds.width < 1 || bounds.height < 1) return null;
+  const point = (event: { clientX: number; clientY: number }, captured = false) => {
+    const image = imageRef.current;
+    if (!image?.complete || !image.naturalWidth || !image.naturalHeight || !frame) return null;
+    const bounds = image.getBoundingClientRect();
+    if (bounds.width < 1 || bounds.height < 1) return null;
+    // object-fit: contain can letterbox a previous frame during a resize. Map only
+    // the displayed pixels, not the entire image element, back into page coordinates.
+    const scale = Math.min(bounds.width / image.naturalWidth, bounds.height / image.naturalHeight);
+    const width = image.naturalWidth * scale;
+    const height = image.naturalHeight * scale;
+    const x = event.clientX - bounds.left - (bounds.width - width) / 2;
+    const y = event.clientY - bounds.top - (bounds.height - height) / 2;
+    if (!captured && (x < 0 || y < 0 || x >= width || y >= height)) return null;
     return {
-      x: Math.max(
-        0,
-        Math.min(frame.width - 1, ((event.clientX - bounds.left) * frame.width) / bounds.width)
-      ),
-      y: Math.max(
-        0,
-        Math.min(frame.height - 1, ((event.clientY - bounds.top) * frame.height) / bounds.height)
-      ),
+      x: Math.max(0, Math.min(frame.width - 1, (x * frame.width) / width)),
+      y: Math.max(0, Math.min(frame.height - 1, (y * frame.height) / height)),
     };
   };
 
   const pointer = (event: React.PointerEvent<HTMLTextAreaElement>, type: string) => {
     if (status !== 'live') return;
-    const coordinates = point(event);
+    const coordinates = point(event, event.currentTarget.hasPointerCapture?.(event.pointerId));
     if (!coordinates) return;
     if (type === 'mousePressed') {
       inputRef.current?.focus();

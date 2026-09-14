@@ -250,6 +250,13 @@ describe('ChatPage', () => {
     routeParams = {};
     window.localStorage.clear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = vi.fn();
+        disconnect = vi.fn();
+      }
+    );
     mockGetAuthPrincipal.mockResolvedValue({ id: 'anonymous', roles: ['admin'] });
     mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
     mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
@@ -1077,6 +1084,254 @@ describe('ChatPage', () => {
     }
 
     expect(fireEvent.keyDown(resizer, { key: 'Tab' })).toBe(true);
+  });
+
+  describe('workspace panel resizing', () => {
+    let viewportWidth: number;
+    let measure: ReturnType<typeof vi.spyOn>;
+    let observers: Set<(entries: ResizeObserverEntry[]) => void>;
+    let mediaListeners: Map<string, Set<(event: MediaQueryListEvent) => void>>;
+    const matches = (query: string) => viewportWidth <= (query.includes('1180') ? 1180 : 1023);
+    const resizeViewport = (width: number) => {
+      act(() => {
+        viewportWidth = width;
+        vi.stubGlobal('innerWidth', width);
+        fireEvent(window, new Event('resize'));
+        for (const [query, listeners] of mediaListeners) {
+          for (const listener of listeners)
+            listener({ matches: matches(query) } as MediaQueryListEvent);
+        }
+        for (const observer of observers) observer([]);
+      });
+    };
+    const openWorkspace = async () => {
+      const result = await renderChatWithRunner();
+      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+      await screen.findByTestId('terminal-panel');
+      return result;
+    };
+
+    beforeEach(() => {
+      viewportWidth = 1600;
+      observers = new Set();
+      mediaListeners = new Map();
+      vi.stubGlobal('innerWidth', viewportWidth);
+      vi.stubGlobal(
+        'PointerEvent',
+        class extends MouseEvent {
+          pointerId: number;
+          constructor(type: string, params: PointerEventInit = {}) {
+            super(type, params);
+            this.pointerId = params.pointerId ?? 1;
+          }
+        }
+      );
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private callback: (entries: ResizeObserverEntry[]) => void) {}
+          observe() {
+            observers.add(this.callback);
+          }
+          disconnect() {
+            observers.delete(this.callback);
+          }
+        }
+      );
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn((query: string) => {
+          const listeners = new Set<(event: MediaQueryListEvent) => void>();
+          mediaListeners.set(query, listeners);
+          return {
+            get matches() {
+              return matches(query);
+            },
+            media: query,
+            addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) =>
+              listeners.add(listener),
+            removeEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) =>
+              listeners.delete(listener),
+          };
+        })
+      );
+      measure = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: HTMLElement) {
+          const width =
+            this.dataset.testid === 'chat-layout'
+              ? viewportWidth
+              : this.dataset.testid === 'chat-sidebar-shell'
+                ? Number.parseFloat(this.style.getPropertyValue('--sidebar-width'))
+                : this.classList.contains('sidebar-collapsed-rail')
+                  ? 44
+                  : 0;
+          return DOMRect.fromRect({ width, height: 900 });
+        });
+    });
+
+    afterEach(() => measure.mockRestore());
+
+    it('drags within bounds without remounting its contents and persists on release', async () => {
+      const { unmount } = await openWorkspace();
+      const separator = screen.getByRole('separator', { name: 'Resize workspace panel' });
+      const shell = screen.getByTestId('workspace-tools-shell');
+      const terminal = screen.getByTestId('terminal-panel');
+      const setPointerCapture = vi.fn();
+      const releasePointerCapture = vi.fn();
+      Object.assign(separator, {
+        setPointerCapture,
+        hasPointerCapture: () => true,
+        releasePointerCapture,
+      });
+      expect(separator).toHaveAttribute('aria-valuenow', '660');
+      fireEvent.pointerDown(separator, { clientX: 940, button: 0, pointerId: 7 });
+      expect(setPointerCapture).toHaveBeenCalledWith(7);
+      expect(separator).toHaveFocus();
+      expect(document.body.style.cursor).toBe('col-resize');
+      expect(document.querySelector('.workspace-resize-shield')).toBeInTheDocument();
+      fireEvent.pointerMove(window, { clientX: 10, pointerId: 8 });
+      expect(shell).toHaveStyle({ '--workspace-width': '660px' });
+      fireEvent.pointerMove(window, { clientX: 840, pointerId: 7 });
+      expect(shell).toHaveStyle({ '--workspace-width': '760px' });
+      fireEvent.pointerMove(window, { clientX: -5000, pointerId: 7 });
+      expect(shell).toHaveStyle({ '--workspace-width': '880px' });
+      fireEvent.pointerMove(window, { clientX: 5000, pointerId: 7 });
+      expect(shell).toHaveStyle({ '--workspace-width': '360px' });
+      fireEvent.pointerMove(window, { clientX: 980, pointerId: 7 });
+      expect(shell).toHaveStyle({ '--workspace-width': '620px' });
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBeNull();
+      fireEvent.pointerUp(window, { pointerId: 7 });
+      expect(screen.getByTestId('terminal-panel')).toBe(terminal);
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('620');
+      expect(releasePointerCapture).toHaveBeenCalledWith(7);
+      expect(document.body.style.cursor).toBe('');
+      expect(document.querySelector('.workspace-resize-shield')).not.toBeInTheDocument();
+      unmount();
+      await openWorkspace();
+      expect(screen.getByTestId('workspace-tools-shell')).toHaveStyle({
+        '--workspace-width': '620px',
+      });
+    });
+
+    it('supports keyboard resizing and exposes bounds that reserve room for the sidebar and chat', async () => {
+      await openWorkspace();
+      const separator = screen.getByRole('separator', { name: 'Resize workspace panel' });
+      expect(separator).toHaveAttribute('aria-controls', 'workspace-tools');
+      expect(separator).toHaveAttribute('aria-orientation', 'vertical');
+      expect(separator).toHaveAttribute('aria-valuemin', '360');
+      expect(separator).toHaveAttribute('aria-valuemax', '880');
+      separator.focus();
+      for (const [key, width] of [
+        ['ArrowLeft', 670],
+        ['ArrowRight', 660],
+        ['Home', 360],
+        ['ArrowRight', 360],
+        ['End', 880],
+        ['ArrowLeft', 880],
+      ] as const) {
+        expect(fireEvent.keyDown(separator, { key })).toBe(false);
+        expect(separator).toHaveFocus();
+        expect(separator).toHaveAttribute('aria-valuenow', String(width));
+        expect(separator).toHaveAttribute('aria-valuetext', `${width} pixels`);
+      }
+      expect(screen.getByTestId('workspace-tools-shell')).toHaveStyle({
+        '--workspace-width': '880px',
+      });
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('880');
+      expect(fireEvent.keyDown(separator, { key: 'Tab' })).toBe(true);
+    });
+
+    it('clamps to viewport and sidebar changes without replacing the preferred width', async () => {
+      window.localStorage.setItem('kodelet.chat.workspace.width', '1000');
+      await openWorkspace();
+      const separator = screen.getByRole('separator', { name: 'Resize workspace panel' });
+      expect(separator).toHaveAttribute('aria-valuenow', '880');
+      resizeViewport(1200);
+      expect(separator).toHaveAttribute('aria-valuenow', '480');
+      resizeViewport(2000);
+      expect(separator).toHaveAttribute('aria-valuenow', '1000');
+      resizeViewport(1600);
+      fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize sidebar' }), { key: 'End' });
+      act(() => {
+        for (const observer of observers) observer([]);
+      });
+      expect(separator).toHaveAttribute('aria-valuemax', '680');
+      expect(separator).toHaveAttribute('aria-valuenow', '680');
+      fireEvent.click(screen.getByTestId('sidebar-hide-button'));
+      expect(separator).toHaveAttribute('aria-valuemax', '1156');
+      expect(separator).toHaveAttribute('aria-valuenow', '1000');
+      fireEvent.click(screen.getByTestId('sidebar-attached-toggle'));
+      expect(separator).toHaveAttribute('aria-valuenow', '680');
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('1000');
+    });
+
+    it('cancels interrupted drags without persisting or leaving handlers active', async () => {
+      await openWorkspace();
+      const separator = screen.getByRole('separator', { name: 'Resize workspace panel' });
+      for (const reason of ['pointercancel', 'lostpointercapture', 'blur', 'Escape']) {
+        fireEvent.pointerDown(separator, { clientX: 940, button: 0 });
+        fireEvent.pointerMove(window, { clientX: 840 });
+        expect(separator).toHaveAttribute('aria-valuenow', '760');
+        if (reason === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+        else if (reason === 'pointercancel') fireEvent.pointerCancel(window);
+        else fireEvent(reason === 'lostpointercapture' ? separator : window, new Event(reason));
+        expect(screen.getByTestId('workspace-tools-shell'), reason).toHaveStyle({
+          '--workspace-width': '660px',
+        });
+        expect(document.body.style.cursor, reason).toBe('');
+        expect(document.body.style.userSelect, reason).toBe('');
+        expect(window.localStorage.getItem('kodelet.chat.workspace.width'), reason).toBeNull();
+        fireEvent.pointerMove(window, { clientX: 500 });
+        expect(separator, reason).toHaveAttribute('aria-valuenow', '660');
+      }
+    });
+
+    it('removes drag capture and restores body styles when unmounted', async () => {
+      const { unmount } = await openWorkspace();
+      const separator = screen.getByRole('separator', { name: 'Resize workspace panel' });
+      const releasePointerCapture = vi.fn();
+      Object.assign(separator, {
+        setPointerCapture: vi.fn(),
+        hasPointerCapture: () => true,
+        releasePointerCapture,
+      });
+      document.body.style.cursor = 'crosshair';
+      document.body.style.userSelect = 'text';
+      fireEvent.pointerDown(separator, { clientX: 940, button: 0 });
+      unmount();
+      expect(releasePointerCapture).toHaveBeenCalledWith(1);
+      expect(document.body.style.cursor).toBe('crosshair');
+      expect(document.body.style.userSelect).toBe('text');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      expect(observers.size).toBe(0);
+    });
+
+    it('cancels an active drag when entering the mobile overlay and restores desktop sizing', async () => {
+      window.localStorage.setItem('kodelet.chat.workspace.width', '700');
+      await openWorkspace();
+      const terminal = screen.getByTestId('terminal-panel');
+      fireEvent.pointerDown(screen.getByRole('separator', { name: 'Resize workspace panel' }), {
+        clientX: 900,
+        button: 0,
+      });
+      fireEvent.pointerMove(window, { clientX: 800 });
+      resizeViewport(1100);
+      expect(
+        screen.queryByRole('separator', { name: 'Resize workspace panel' })
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('workspace-tools-shell')).toHaveAttribute('aria-modal', 'true');
+      expect(document.body.style.cursor).toBe('');
+      expect(document.querySelector('.workspace-resize-shield')).not.toBeInTheDocument();
+      expect(screen.getByTestId('terminal-panel')).toBe(terminal);
+      resizeViewport(1600);
+      expect(screen.getByRole('separator', { name: 'Resize workspace panel' })).toHaveAttribute(
+        'aria-valuenow',
+        '700'
+      );
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('700');
+    });
   });
 
   it('includes pasted image attachments in the streamed chat request', async () => {
@@ -4744,10 +4999,8 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-
     fireEvent.click(
-      screen.getByRole('button', {
+      await screen.findByRole('button', {
         name: /More actions for Enabled resumable webUI conversation/i,
       })
     );

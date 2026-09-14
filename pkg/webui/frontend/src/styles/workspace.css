@@ -13,16 +13,53 @@
 }
 
 .workspace-tools-shell.is-open {
-  flex-basis: calc(clamp(30rem, 38vw, 46rem) + 3.25rem);
-  width: calc(clamp(30rem, 38vw, 46rem) + 3.25rem);
-  max-width: calc(min(48vw, 46rem) + 3.25rem);
+  flex-basis: var(
+    --workspace-width,
+    min(calc(clamp(30rem, 38vw, 46rem) + 3.25rem), calc(48vw + 3.25rem))
+  );
+  width: var(
+    --workspace-width,
+    min(calc(clamp(30rem, 38vw, 46rem) + 3.25rem), calc(48vw + 3.25rem))
+  );
+}
+
+.workspace-tools-resizer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 10;
+  width: 0.5rem;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.workspace-tools-resizer:hover,
+.workspace-tools-resizer:focus-visible {
+  background: color-mix(in srgb, var(--kodelet-link) 20%, transparent);
+}
+
+.workspace-tools-resizer:focus-visible {
+  outline: 2px solid var(--kodelet-link);
+  outline-offset: -2px;
+}
+
+/* Keep embedded DevTools and terminal input from taking over an active drag. */
+.workspace-resize-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  cursor: col-resize;
+  touch-action: none;
 }
 
 .workspace-tools-dock {
   position: relative;
   display: flex;
   flex: 1 1 auto;
-  width: clamp(30rem, 38vw, 46rem);
+  width: 0;
   min-width: 0;
   flex-direction: column;
   gap: 0.45rem;
@@ -384,7 +421,7 @@
 }
 
 .workspace-browser-image {
-  object-fit: fill;
+  object-fit: contain;
 }
 
 .workspace-browser-input {
@@ -728,6 +765,11 @@
 }
 
 @media (max-width: 1180px) {
+  .workspace-tools-resizer,
+  .workspace-resize-shield {
+    display: none;
+  }
+
   .new-chat-dialog-actions {
     flex-wrap: wrap;
   }

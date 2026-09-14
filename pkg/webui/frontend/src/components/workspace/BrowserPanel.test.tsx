@@ -52,6 +52,7 @@ const session: BrowserSession = {
 };
 let sockets: BrowserSocket[];
 let disconnectObserver: ReturnType<typeof vi.fn>;
+let resizeViewport: () => void;
 
 const connect = async (socket = sockets[0]) => {
   await act(async () => {
@@ -69,12 +70,17 @@ const open = async () => {
   return { ...result, socket };
 };
 
-const showFrame = async (socket: BrowserSocket, sessionId = 1, data = 'YQ==') => {
+const showFrame = async (
+  socket: BrowserSocket,
+  sessionId = 1,
+  data = 'YQ==',
+  metadata = { deviceWidth: 800, deviceHeight: 600 }
+) => {
   await act(async () =>
     socket.event('Page.screencastFrame', {
       sessionId,
       data,
-      metadata: { deviceWidth: 800, deviceHeight: 600 },
+      metadata,
     })
   );
   return screen.getByRole('img', { name: 'Runner browser page' });
@@ -87,10 +93,18 @@ beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
     class {
+      constructor(callback: () => void) {
+        resizeViewport = callback;
+      }
       observe = vi.fn();
       disconnect = disconnectObserver;
     }
   );
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300);
+  vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true);
+  vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(800);
+  vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(600);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
     x: 10,
     y: 20,
@@ -117,7 +131,9 @@ afterEach(() => {
 });
 
 describe('BrowserPanel', () => {
-  it('opens the target and enables debugging and a CSS-pixel viewport', async () => {
+  it('opens the target with debugging and an uncapped CSS-pixel viewport', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(2300);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1800);
     const { socket } = await open();
     expect(apiService.openBrowserSession).toHaveBeenCalledWith(target, expect.any(AbortSignal));
     expect(apiService.createBrowserWebSocket).toHaveBeenCalledWith('handle-1');
@@ -133,10 +149,14 @@ describe('BrowserPanel', () => {
     await waitFor(() =>
       expect(socket.matching('Emulation.setDeviceMetricsOverride')).toEqual([
         expect.objectContaining({
-          params: { width: 400, height: 300, deviceScaleFactor: 1, mobile: false },
+          params: { width: 2300, height: 1800, deviceScaleFactor: 1, mobile: false },
         }),
       ])
     );
+    expect(socket.matching('Page.startScreencast')[0].params).toMatchObject({
+      maxWidth: 1920,
+      maxHeight: 1440,
+    });
   });
 
   it('acknowledges rendered frames and bounds the waiting frame queue', async () => {
@@ -160,10 +180,146 @@ describe('BrowserPanel', () => {
     );
   });
 
-  it('sends scaled mouse and wheel input without scrolling the portal', async () => {
+  it('debounces panel resizing and ignores hidden viewport measurements', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get');
+    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get');
+    const { socket, unmount } = await open();
+    await waitFor(() =>
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(1)
+    );
+    width.mockReturnValue(500);
+    resizeViewport();
+    width.mockReturnValue(700);
+    height.mockReturnValue(1500);
+    resizeViewport();
+    await waitFor(() =>
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(2)
+    );
+    expect(socket.matching('Emulation.setDeviceMetricsOverride')[1].params).toMatchObject({
+      width: 700,
+      height: 1500,
+    });
+    vi.useFakeTimers();
+    try {
+      width.mockReturnValue(0);
+      resizeViewport();
+      await act(async () => vi.advanceTimersByTime(100));
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(2);
+      width.mockReturnValue(800);
+      resizeViewport();
+      unmount();
+      await act(async () => vi.advanceTimersByTime(100));
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resynchronizes the capture surface after main-frame navigation even at the same size', async () => {
+    const { socket } = await open();
+    await waitFor(() =>
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(1)
+    );
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        socket.event('Page.frameNavigated', {
+          frame: { id: 'child', parentId: 'main-frame', url: 'http://localhost:1234/frame' },
+        });
+        vi.advanceTimersByTime(100);
+      });
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(1);
+      await act(async () => {
+        socket.event('Page.frameNavigated', {
+          frame: { id: 'main-frame', url: 'http://localhost:1234/next' },
+        });
+        vi.advanceTimersByTime(100);
+      });
+      expect(socket.matching('Emulation.setDeviceMetricsOverride')).toHaveLength(2);
+      await act(async () => {
+        socket.event('Page.loadEventFired', {});
+        vi.advanceTimersByTime(100);
+      });
+      expect(
+        socket.matching('Emulation.setDeviceMetricsOverride').map(({ params }) => params)
+      ).toEqual(Array(3).fill({ width: 400, height: 300, deviceScaleFactor: 1, mobile: false }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      width: 800,
+      height: 400,
+      clientX: 110,
+      clientY: 120,
+      x: 200,
+      y: 100,
+      marginX: 110,
+      marginY: 30,
+    },
+    {
+      width: 400,
+      height: 800,
+      clientX: 172.5,
+      clientY: 95,
+      x: 100,
+      y: 200,
+      marginX: 20,
+      marginY: 95,
+    },
+  ])('maps a contained $width × $height frame and ignores its margins', async ({
+    width,
+    height,
+    clientX,
+    clientY,
+    x,
+    y,
+    marginX,
+    marginY,
+  }) => {
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(width / 2);
+    vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(height / 2);
+    const { socket } = await open();
+    fireEvent.load(
+      await showFrame(socket, 1, 'YQ==', { deviceWidth: width, deviceHeight: height })
+    );
+    const input = screen.getByLabelText('Remote browser input');
+    fireEvent.pointerDown(input, { clientX: marginX, clientY: marginY, button: 0, buttons: 1 });
+    fireEvent.pointerUp(input, { clientX: marginX, clientY: marginY, button: 0 });
+    fireEvent.wheel(input, { clientX: marginX, clientY: marginY, deltaY: 10 });
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+    fireEvent.pointerDown(input, { clientX, clientY, button: 0, buttons: 1 });
+    fireEvent.pointerUp(input, { clientX, clientY, button: 0 });
+    expect(socket.matching('Input.dispatchMouseEvent').map((item) => item.params)).toEqual([
+      expect.objectContaining({ type: 'mousePressed', x, y }),
+      expect.objectContaining({ type: 'mouseReleased', x, y }),
+    ]);
+  });
+
+  it('releases a captured pointer dragged outside the displayed frame', async () => {
     const { socket } = await open();
     fireEvent.load(await showFrame(socket));
     const input = screen.getByLabelText('Remote browser input');
+    Object.defineProperty(input, 'hasPointerCapture', { value: () => true });
+    fireEvent.pointerUp(input, { clientX: 1000, clientY: 1000, button: 0 });
+    expect(socket.matching('Input.dispatchMouseEvent')[0].params).toMatchObject({
+      type: 'mouseReleased',
+      x: 799,
+      y: 599,
+    });
+  });
+
+  it('waits for a decoded frame, then scales mouse and wheel input without scrolling the portal', async () => {
+    const { socket } = await open();
+    const decoded = vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false);
+    const image = await showFrame(socket);
+    const input = screen.getByLabelText('Remote browser input');
+    fireEvent.pointerDown(input, { clientX: 110, clientY: 95, button: 0, buttons: 1 });
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+    decoded.mockReturnValue(true);
+    fireEvent.load(image);
     fireEvent.pointerDown(input, { clientX: 110, clientY: 95, button: 0, buttons: 1 });
     fireEvent.pointerUp(input, { clientX: 110, clientY: 95, button: 0, buttons: 0 });
     const wheel = new WheelEvent('wheel', {
