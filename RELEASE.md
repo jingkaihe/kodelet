@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.6.14-alpha
+
+Added opt-in, per-conversation Chrome/Chromium browsers shared between users and agents, with a Web UI Browser tab for navigation, page interaction, console output, network requests, and element inspection.
+
+Added a `browser` agent tool for opening sessions, navigating, evaluating JavaScript, taking screenshots, and stopping sessions, with dedicated action summaries and screenshot results in the Web UI and TUI.
+
+Added host-level browser executable, idle timeout, and optional DevTools configuration through trusted YAML, environment variables, and CLI flags. Browser access requires server enablement and `terminal` or `admin` permissions.
+
+Made the workspace panel resizable with saved width preferences, improved browser input mapping across panel sizes, and aligned command copy controls and exit status.
+
 ## 0.6.12-beta
 
 Added system-aware Gruvbox light and dark themes plus Classic light, with an accessible appearance picker, saved preferences synchronized across tabs, and consistent colors across the Web UI and workspace terminal.
