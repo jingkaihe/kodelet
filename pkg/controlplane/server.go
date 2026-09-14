@@ -78,6 +78,10 @@ type Server struct {
 	runCancel             context.CancelFunc
 	remoteTerminals       map[string]int
 	remoteTerminalsMu     sync.Mutex
+	browserMu             sync.Mutex
+	browserHandles        map[string]*browserHandle
+	browserTickets        map[string]*browserAttachment
+	browserClosed         bool
 	extensionUI           *webExtensionUIHost
 	runnerRegistry        *runnerregistry.Registry
 	sessionExtensions     map[string]*sessionExtensionAttachment
@@ -176,6 +180,7 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the control-plane server.
 type ServerConfig struct {
+	BrowserEnabled  bool
 	PublicBaseURL   string
 	Host            string
 	Port            int
@@ -413,6 +418,11 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/git/commit", s.requireRole(RoleUser, s.handleWorkspaceCommit)).Methods("GET", "POST")
 	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
+	api.HandleFunc("/browser/session", s.requireBrowser(s.handleBrowserOpen)).Methods("POST")
+	api.HandleFunc("/browser/relay", s.handleBrowserRelay).Methods("GET")
+	api.HandleFunc("/browser/{id}/ws", s.requireBrowser(s.handleBrowserWebsocket)).Methods("GET")
+	api.HandleFunc("/browser/{id}/devtools/{path:.*}", s.requireBrowser(s.handleBrowserAsset)).Methods("GET")
+	api.HandleFunc("/browser/{id}", s.requireBrowser(s.handleBrowserStop)).Methods("DELETE")
 	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
 	api.HandleFunc("/session/extensions", s.requireRole(RoleUser, s.handleSessionExtensionsWebsocket)).Methods("GET")
 	api.HandleFunc("/runners", s.requireRole(RoleUser, s.handleListRunners)).Methods("GET")
@@ -2387,6 +2397,7 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) shutdownHTTPServer() error {
+	s.closeBrowserHandles("", 0)
 	if s.runCancel != nil {
 		s.runCancel()
 	}

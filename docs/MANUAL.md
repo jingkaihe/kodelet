@@ -469,11 +469,40 @@ Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompa
 
 In the Web UI, choose a runner from **Environment**. **Runner profile** and **Working directory** are optional. Relative paths and `~` resolve on the runner host; a blank directory uses its startup workspace. Suggestions and slash commands follow the selected runner, profile, and directory.
 
-The terminal and Git diff use the saved conversation's directory; save a custom directory or upgrade an older runner if panels are hidden. Closing a terminal panel leaves its shell running until you exit it or stop the runner. Exit unused shells if the terminal limit is reached.
+The terminal, browser, and Git diff use the saved conversation's directory; save a custom directory or upgrade an older runner if panels are hidden. Closing a terminal panel leaves its shell running until you exit it or stop the runner. Exit unused shells if the terminal limit is reached.
 
 These buttons send terminal input, not browser shortcuts or clipboard commands. Their effect depends on the running shell or application: **Ctrl+C** commonly interrupts a command, **Ctrl+D** sends end-of-input and can exit a shell at an empty prompt, and **Ctrl+Z** can suspend a foreground job. Keys are unavailable while connecting, restoring the session, disconnected, or after the shell exits; when a pop-out owns the terminal, use its key bar instead.
 
 Swipe vertically inside the terminal to scroll: drag down to read older output and up to return toward the prompt. In full-screen terminal applications, swipes send scroll input to the application instead. Swiping does not open the software keyboard; tap the terminal to type. Two-finger pinch zoom remains available, and the key rows scroll horizontally independently of the terminal output.
+
+#### Runner browser
+
+The **Browser** workspace tab lets you test a web app running on your runner. It is available to users with `terminal` or `admin` access when enabled on both the runner and server.
+
+Install Chrome/Chromium on the runner and set its executable in the runner's environment before starting it. For the built-in runner, use the server process's environment instead:
+
+```bash
+export KODELET_BROWSER_EXECUTABLE=/opt/chrome/chrome
+```
+
+Enable access in the server's user configuration:
+
+```yaml
+serve:
+  browser_enabled: true
+```
+
+Alternatively, use `kodelet serve --browser-enabled`. Restart the affected server or runner after changing these settings.
+
+Start your app in the terminal, open **Browser**, and enter its address, such as `http://localhost:1234/abc`. Here, `localhost` is the runner host. The panel provides navigation, mouse/keyboard input, JavaScript dialogs, a console, network requests, and basic element inspection. Press **F6** to return to the address bar.
+
+The browser starts on demand and is shared with agents in that workspace. Closing the panel or finishing a run leaves it running. Use **Stop workspace browser** to close it, or let it expire after 15 minutes disconnected and unused. Set `KODELET_BROWSER_IDLE_TIMEOUT` to change that duration. Browser profiles are temporary; use development accounts.
+
+For full **DevTools**, optionally set `KODELET_BROWSER_DEVTOOLS_DIR` on the runner to a trusted, compatible compiled frontend containing `inspector.html`. Kodelet does not install Chrome or DevTools for you.
+
+Agents can navigate, evaluate JavaScript, and take screenshots through the `browser` tool, including from the TUI; the TUI has no graphical browser panel. App startup, Procfile/compose support, and public URL sharing are not included.
+
+#### Remote terminal chat
 
 The terminal UI can start a new remote conversation with:
 

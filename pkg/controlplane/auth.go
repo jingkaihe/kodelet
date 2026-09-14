@@ -534,7 +534,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(webSessionCookieName); err == nil && s.authStore != nil {
+		// Logout is public, so resolve the cookie rather than assuming a middleware principal.
+		session, found, _ := s.authStore.LoadWebSession(r.Context(), cookie.Value)
 		_ = s.authStore.DeleteWebSession(r.Context(), cookie.Value)
+		if found {
+			s.cancelBrowserSessionAttachments(session.ID)
+		}
 	}
 	clearCookie(w, r, webSessionCookieName, "/", true)
 	clearCookie(w, r, webCSRFCookieName, "/", false)
@@ -553,6 +558,11 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == protocol.BrowserRelayEndpoint && r.Method == http.MethodGet {
+			// The handler atomically consumes a short-lived, generation-bound relay ticket.
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == runnerpayload.ArtifactUploadPath && r.Method == http.MethodPut {
 			// The upload handler checks an active-tool-bound, one-use ticket.
 			next.ServeHTTP(w, r)

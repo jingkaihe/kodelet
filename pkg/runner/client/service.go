@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/browser"
 	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -79,6 +80,7 @@ type EnvironmentFactory func(workingDirectory string, runtime *extensions.Runtim
 
 // ServiceOptions configures the runner-side request service.
 type ServiceOptions struct {
+	Browser browser.Config
 	// ArtifactBaseURL is the runner's control-plane address, not the advertised image host.
 	ArtifactBaseURL           string
 	RuntimeProvider           RuntimeProvider
@@ -108,6 +110,8 @@ type Service struct {
 	environmentFactory    EnvironmentFactory
 	instanceProvider      ExecutionInstanceProvider
 	workspaceTerminals    *workspaceTerminalManager
+	browserManager        *browser.Manager
+	browserRelays         map[*webBrowserRelay]struct{}
 	directoryTerminals    map[string]*workspaceTerminalManager
 	cleanupTimeout        time.Duration
 	snapshotWaitTimeout   time.Duration
@@ -197,6 +201,9 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	}
 	if service.environmentFactory == nil {
 		service.environmentFactory = func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
+			if service.browserManager.Enabled() {
+				return agentenv.NewLocalEnvironment(workingDirectory, runtime, tools.NewBrowserTool(service.browserManager))
+			}
 			return agentenv.NewLocalEnvironment(workingDirectory, runtime)
 		}
 	}
@@ -208,6 +215,8 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		service.instanceProvider = provider
 	}
 	service.workspaceTerminals = newWorkspaceTerminalManager(service.ctx, service.workspace)
+	service.browserManager = browser.NewManager(service.ctx, options.Browser)
+	service.browserRelays = make(map[*webBrowserRelay]struct{})
 	service.directoryTerminals = map[string]*workspaceTerminalManager{service.workspace: service.workspaceTerminals}
 	return service, nil
 }
@@ -262,6 +271,9 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner service is unavailable"}
 	}
 	switch method {
+	case protocol.MethodWorkspaceBrowserOpen, protocol.MethodWorkspaceBrowserConnect,
+		protocol.MethodWorkspaceBrowserStop, protocol.MethodWorkspaceBrowserAsset:
+		return s.handleBrowserRequest(ctx, method, params)
 	case protocol.MethodSessionExtensionFrame:
 		value, rpcErr := decodeParams[protocol.ExtensionFrame](params)
 		if rpcErr != nil {
@@ -1525,6 +1537,9 @@ func (s *Service) abortActiveRuns(ctx context.Context, detachPeer bool) error {
 	s.mu.Lock()
 	if detachPeer {
 		s.peer = nil
+		for relay := range s.browserRelays {
+			relay.cancel()
+		}
 	}
 	if len(s.runs) == 0 {
 		s.mu.Unlock()
@@ -1594,6 +1609,7 @@ func (s *Service) Close() error {
 		s.mu.Lock()
 		s.closed = true
 		s.mu.Unlock()
+		s.closeBrowserRelays()
 		cleanupCtx := context.Background()
 		if s.ctx != nil {
 			cleanupCtx = context.WithoutCancel(s.ctx)
@@ -1601,6 +1617,9 @@ func (s *Service) Close() error {
 		// Graceful shutdown keeps reverse RPC available while extensions release
 		// UI routing; connection-loss aborts detach the dead peer.
 		activeErr := s.abortActiveRuns(cleanupCtx, false)
+		if s.browserManager != nil {
+			activeErr = combineCleanupErrors(activeErr, s.browserManager.Close())
+		}
 		activeErr = combineCleanupErrors(activeErr, s.closeAllBackgroundResources(cleanupCtx))
 		if s.ownedRuntime != nil {
 			activeErr = combineCleanupErrors(activeErr, runBoundedCleanup(cleanupCtx, s.cleanupTimeout, "runner runtime manager", func(context.Context) error {

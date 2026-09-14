@@ -53,6 +53,7 @@ type ServeConfig struct {
 	OIDCClientSecretFile string
 	SkipAuth             bool
 	EmbeddedRunner       bool
+	BrowserEnabled       bool
 	RunnerWorkspace      string
 	RunnerSettings       map[string]any
 	CORSOrigins          []string
@@ -70,6 +71,7 @@ type trustedServeConfig struct {
 	RunnerAuthMode  *string                 `mapstructure:"runner_auth_mode"`
 	SkipAuth        *bool                   `mapstructure:"skip_auth"`
 	EmbeddedRunner  *bool                   `mapstructure:"embedded_runner"`
+	BrowserEnabled  *bool                   `mapstructure:"browser_enabled"`
 	RunnerWorkspace *string                 `mapstructure:"runner_workspace"`
 	RunnerSettings  map[string]any          `mapstructure:"runner_settings"`
 	CORSOrigins     []string                `mapstructure:"cors_origins"`
@@ -142,6 +144,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "Compatibility shorthand for --web-auth-mode=none --runner-auth-mode=none")
 	cmd.Flags().Bool("disable-control-plane-workspace", true, "Deprecated and ignored; use --embedded-runner=false to run without a built-in runner")
 	cmd.Flags().Bool("embedded-runner", defaults.EmbeddedRunner, "Run tools and access files on this machine using a built-in runner")
+	cmd.Flags().Bool("browser-enabled", defaults.BrowserEnabled, "Allow runner browser sessions and tools for users with terminal access (requires a browser-enabled runner)")
 	cmd.Flags().String("runner-workspace", defaults.RunnerWorkspace, "Default working directory for the built-in runner (default: startup directory)")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
@@ -194,6 +197,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if embeddedRunner, err := cmd.Flags().GetBool("embedded-runner"); err == nil && cmd.Flags().Changed("embedded-runner") {
 		config.EmbeddedRunner = embeddedRunner
+	}
+	if enabled, err := cmd.Flags().GetBool("browser-enabled"); err == nil && cmd.Flags().Changed("browser-enabled") {
+		config.BrowserEnabled = enabled
 	}
 	if runnerWorkspace, err := cmd.Flags().GetString("runner-workspace"); err == nil && cmd.Flags().Changed("runner-workspace") {
 		config.RunnerWorkspace = strings.TrimSpace(runnerWorkspace)
@@ -300,6 +306,9 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	}
 	if trusted.EmbeddedRunner != nil {
 		config.EmbeddedRunner = *trusted.EmbeddedRunner
+	}
+	if trusted.BrowserEnabled != nil {
+		config.BrowserEnabled = *trusted.BrowserEnabled
 	}
 	if trusted.RunnerWorkspace != nil {
 		config.RunnerWorkspace = strings.TrimSpace(*trusted.RunnerWorkspace)
@@ -566,6 +575,7 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 		RunnerAuthToken: runnerAuthToken,
 		WebAuthMode:     webAuthMode,
 		RunnerAuthMode:  runnerAuthMode,
+		BrowserEnabled:  config.BrowserEnabled,
 		OIDC:            oidcConfig,
 		CORSOrigins:     config.CORSOrigins,
 	}
@@ -581,10 +591,14 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to load the built-in runner's settings")
 		}
+		browserConfig, err := runnerBrowserConfigFromEnvironment()
+		if err != nil {
+			return nil, err
+		}
 		serverConfig.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
 			Workspace:      workspace,
 			Settings:       config.RunnerSettings,
-			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader},
+			ServiceOptions: runnerclient.ServiceOptions{ProfileConfigLoader: loader, Browser: browserConfig},
 		}
 	}
 	if err := serverConfig.Validate(); err != nil {

@@ -10,6 +10,7 @@ pkg/             # Core packages
   ├── auth/      # Authentication
   ├── artifacts/ # Persisted image files and conversation references
   ├── binaries/  # External binary management (ripgrep, fd)
+  ├── browser/   # Optional runner-owned external Chrome sessions and CDP access
   ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
   ├── conversations/  # Conversation storage (SQLite)
   ├── fragments/ # Fragment/recipe templates

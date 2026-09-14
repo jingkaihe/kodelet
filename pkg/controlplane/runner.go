@@ -44,12 +44,16 @@ func (s runnerWebExtensionUISource) webExtensionUIRunnerGeneration() int64 {
 	return s.runnerGeneration
 }
 
-func (s *Server) handleListRunners(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
 	if s.runnerRegistry == nil {
 		s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner registry is unavailable", nil)
 		return
 	}
-	s.writeJSONResponse(w, runnerListResponse{Runners: s.runnerRegistry.Runners()})
+	runners := s.runnerRegistry.Runners()
+	for i := range runners {
+		runners[i].WorkspaceBrowser = runners[i].WorkspaceBrowser && s.browserAllowed(r)
+	}
+	s.writeJSONResponse(w, runnerListResponse{Runners: runners})
 }
 
 func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +66,7 @@ func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusNotFound, "runner not found", nil)
 		return
 	}
+	runner.WorkspaceBrowser = runner.WorkspaceBrowser && s.browserAllowed(r)
 	s.writeJSONResponse(w, runner)
 }
 

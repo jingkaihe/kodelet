@@ -4,6 +4,7 @@ import type {
   ConversationListResponse,
   CWDHintsResponse,
   GitDiffResponse,
+  WorkspaceTarget,
 } from '../types';
 import apiService from './api';
 
@@ -1074,6 +1075,79 @@ describe('ApiService', () => {
       await apiService.getGitDiff({ kind: 'runner', runnerId: 'runner-1' });
 
       expect(mockFetch).toHaveBeenCalledWith('/api/git/diff?runnerId=runner-1', expect.any(Object));
+    });
+  });
+
+  describe('browser sessions', () => {
+    it.each<{ target: WorkspaceTarget; query: string }>([
+      {
+        target: { kind: 'local', cwd: '/workspace/project' },
+        query: '?cwd=%2Fworkspace%2Fproject',
+      },
+      { target: { kind: 'local' }, query: '' },
+      { target: { kind: 'runner', runnerId: 'runner-1' }, query: '?runnerId=runner-1' },
+      {
+        target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-1' },
+        query: '?runnerId=runner-1&conversationId=conv-1',
+      },
+    ])('opens a CSRF-protected session for $target', async ({ target, query }) => {
+      const session = {
+        id: 'handle-1',
+        sessionId: 'session-1',
+        cwd: '/workspace/project',
+        devTools: false,
+      };
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => session });
+      setTestCookie('kodelet_csrf=browser-csrf; Path=/');
+      const signal = new AbortController().signal;
+      expect(await apiService.openBrowserSession(target, signal)).toEqual(session);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/browser/session${query}`,
+        expect.objectContaining({
+          method: 'POST',
+          signal,
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'browser-csrf' }),
+        })
+      );
+    });
+
+    it('stops the explicit session through the CSRF-protected API', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+      setTestCookie('kodelet_csrf=browser-csrf; Path=/');
+      await apiService.stopBrowserSession('handle/1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/browser/handle%2F1',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'browser-csrf' }),
+        })
+      );
+    });
+
+    it.each(['http:', 'https:'])('uses the portal origin for %s CDP and DevTools', (protocol) => {
+      const originalLocation = window.location;
+      const socket = vi.fn();
+      vi.stubGlobal('WebSocket', socket);
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { protocol, host: 'portal.example:8443' },
+      });
+      try {
+        apiService.createBrowserWebSocket('handle/1');
+        const scheme = protocol === 'https:' ? 'wss' : 'ws';
+        expect(socket).toHaveBeenCalledWith(
+          `${scheme}://portal.example:8443/api/browser/handle%2F1/ws`
+        );
+        const url = new URL(
+          apiService.browserDevToolsURL('handle/1'),
+          'https://portal.example:8443'
+        );
+        expect(url.pathname).toBe('/api/browser/handle%2F1/devtools/inspector.html');
+        expect(url.searchParams.get(scheme)).toBe('portal.example:8443/api/browser/handle%2F1/ws');
+      } finally {
+        Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+        vi.unstubAllGlobals();
+      }
     });
   });
 

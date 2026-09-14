@@ -5,6 +5,7 @@ import type {
   AnthropicProviderStatus,
   ApiError,
   AuthPrincipal,
+  BrowserSession,
   ChatRequest,
   ChatSettings,
   ChatStreamEvent,
@@ -357,6 +358,40 @@ class ApiService {
     return new WebSocket(
       `${protocol}//${window.location.host}/api/terminal/ws${suffix ? `?${suffix}` : ''}`
     );
+  }
+
+  async openBrowserSession(target: WorkspaceTarget, signal?: AbortSignal): Promise<BrowserSession> {
+    const params = new URLSearchParams();
+    if (target.kind === 'local') {
+      if (target.cwd) params.set('cwd', target.cwd);
+    } else {
+      params.set('runnerId', target.runnerId);
+      if (target.conversationId) params.set('conversationId', target.conversationId);
+    }
+    const suffix = params.toString();
+    return this.request<BrowserSession>(`/api/browser/session${suffix ? `?${suffix}` : ''}`, {
+      method: 'POST',
+      signal,
+    });
+  }
+
+  createBrowserWebSocket(id: string): WebSocket {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return new WebSocket(
+      `${protocol}//${window.location.host}/api/browser/${encodeURIComponent(id)}/ws`
+    );
+  }
+
+  browserDevToolsURL(id: string): string {
+    const path = `/api/browser/${encodeURIComponent(id)}`;
+    const params = new URLSearchParams({
+      [window.location.protocol === 'https:' ? 'wss' : 'ws']: `${window.location.host}${path}/ws`,
+    });
+    return `${path}/devtools/inspector.html?${params}`;
+  }
+
+  async stopBrowserSession(id: string): Promise<void> {
+    await this.request(`/api/browser/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   async deleteConversation(id: string): Promise<void> {

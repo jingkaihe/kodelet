@@ -17,6 +17,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -193,6 +194,10 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err != nil {
 		return err
 	}
+	browserConfig, err := runnerBrowserConfigFromEnvironment()
+	if err != nil {
+		return err
+	}
 
 	var registered bool
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
@@ -200,7 +205,7 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 		AuthToken:      config.AuthToken,
 		Workspace:      workspace,
 		DisplayName:    config.DisplayName,
-		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader},
+		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader, Browser: browserConfig},
 		OnRegistered: func(result protocol.RegisterResult) {
 			if registered {
 				presenter.Success(fmt.Sprintf("Runner reconnected as %s", result.RunnerID))
@@ -227,6 +232,22 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	}
 	presenter.Info("Runner stopped")
 	return nil
+}
+
+// Browser installation and lifetime are host settings, never workspace/model overrides.
+func runnerBrowserConfigFromEnvironment() (browser.Config, error) {
+	config := browser.Config{
+		Executable:  strings.TrimSpace(os.Getenv("KODELET_BROWSER_EXECUTABLE")),
+		DevToolsDir: strings.TrimSpace(os.Getenv("KODELET_BROWSER_DEVTOOLS_DIR")),
+	}
+	if raw := strings.TrimSpace(os.Getenv("KODELET_BROWSER_IDLE_TIMEOUT")); raw != "" {
+		duration, err := time.ParseDuration(raw)
+		if err != nil || duration <= 0 {
+			return browser.Config{}, errors.New("KODELET_BROWSER_IDLE_TIMEOUT must be a positive duration, for example 15m")
+		}
+		config.IdleTimeout = duration
+	}
+	return config, nil
 }
 
 func runRunnerEnroll(ctx context.Context, config runnerEnrollConfig, output io.Writer) error {

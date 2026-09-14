@@ -50,6 +50,16 @@ vi.mock('../components/workspace/TerminalModal', () => ({
     ) : null,
 }));
 
+vi.mock('../components/workspace/BrowserPanel', () => ({
+  default: ({ target }: { target: WorkspaceTarget }) => (
+    <div
+      data-testid="browser-panel"
+      data-runner-id={target.kind === 'runner' ? target.runnerId : undefined}
+      data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
+    />
+  ),
+}));
+
 const mockNavigate = vi.fn();
 const mockGetAuthPrincipal = vi.fn();
 const mockGetConversations = vi.fn();
@@ -641,6 +651,106 @@ describe('ChatPage', () => {
     reopenedTerminalHost.focus();
     fireEvent.keyDown(reopenedTerminalHost, { key: 'F6' });
     expect(workspaceToggle).toHaveFocus();
+  });
+
+  it.each([
+    { name: 'enabled and authorized', capability: true, roles: ['terminal'], available: true },
+    { name: 'enabled for admin', capability: true, roles: ['admin'], available: true },
+    {
+      name: 'disabled by the server or runner',
+      capability: false,
+      roles: ['admin'],
+      available: false,
+    },
+    { name: 'principal lacks access', capability: true, roles: ['user'], available: false },
+  ])('gates the browser tab when $name', async ({ capability, roles, available }) => {
+    mockGetAuthPrincipal.mockResolvedValue({ id: 'user', roles });
+    mockGetRunners.mockResolvedValue({
+      runners: [makeRunner({ workspaceGitDiff: true, workspaceBrowser: capability })],
+    });
+    await renderChatWithRunner();
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    await flushAsyncUpdates();
+    if (!available) {
+      expect(screen.queryByRole('tab', { name: 'Show browser' })).not.toBeInTheDocument();
+      return;
+    }
+    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
+      'data-runner-id',
+      'runner-1'
+    );
+    expect(screen.queryByTestId('terminal-panel')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Show browser' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+  });
+
+  it('opens the workspace panel when browser is its only available tool', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ workspaceBrowser: true })] });
+    await renderChatWithRunner();
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    expect(await screen.findByTestId('browser-panel')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Show terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Show changes' })).not.toBeInTheDocument();
+  });
+
+  it('does not restore browser access from an older conversation runner snapshot', async () => {
+    routeParams = { id: 'conv-browser' };
+    const savedRunner = makeRunner({ workspaceBrowser: true, workspaceTerminal: true });
+    mockGetRunners.mockResolvedValue({ runners: [{ ...savedRunner, workspaceBrowser: false }] });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-browser',
+      createdAt: '2026-09-14T00:00:00Z',
+      updatedAt: '2026-09-14T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: savedRunner.id,
+      runner: savedRunner,
+      messages: [{ role: 'user', content: 'Browser permission changed' }],
+      toolResults: {},
+    });
+    render(<ChatPage />);
+    await screen.findByText('Browser permission changed');
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    await screen.findByTestId('terminal-panel');
+    expect(screen.queryByRole('tab', { name: 'Show browser' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    false,
+    true,
+  ])('gates browser access to conversation directories (%s)', async (workspaceCwd) => {
+    routeParams = { id: 'conv-browser' };
+    const runner = makeRunner({ workspaceBrowser: true, workspaceCwd });
+    mockGetRunners.mockResolvedValue({ runners: [runner] });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-browser',
+      createdAt: '2026-09-14T00:00:00Z',
+      updatedAt: '2026-09-14T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/other-project',
+      runnerId: runner.id,
+      runner,
+      messages: [{ role: 'user', content: 'Browser workspace' }],
+      toolResults: {},
+    });
+    render(<ChatPage />);
+    await screen.findByText('Browser workspace');
+    await waitForTerminalAccess();
+    if (!workspaceCwd) {
+      expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+      return;
+    }
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
+      'data-conversation-id',
+      'conv-browser'
+    );
   });
 
   it.each([

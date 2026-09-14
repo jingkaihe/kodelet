@@ -353,6 +353,7 @@ func (r *Runner) runConnection(ctx context.Context) (bool, error) {
 			WorkspaceGitDiff:        true,
 			WorkspaceGitCommit:      true,
 			WorkspaceTerminal:       true,
+			WorkspaceBrowser:        r.service.browserManager.Enabled(),
 			WorkspaceDiscovery:      true,
 			WorkspaceInspection:     true,
 			WorkspaceMessageHistory: true,

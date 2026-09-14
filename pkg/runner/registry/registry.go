@@ -117,6 +117,7 @@ type Runner struct {
 	WorkspaceGitDiff        bool               `json:"workspaceGitDiff"`
 	WorkspaceGitCommit      bool               `json:"workspaceGitCommit"`
 	WorkspaceTerminal       bool               `json:"workspaceTerminal"`
+	WorkspaceBrowser        bool               `json:"workspaceBrowser"`
 	WorkspaceDiscovery      bool               `json:"workspaceDiscovery"`
 	WorkspaceInspection     bool               `json:"workspaceInspection"`
 	WorkspaceMessageHistory bool               `json:"workspaceMessageHistory"`
@@ -625,6 +626,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
@@ -760,6 +762,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
+	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
 	entry.WorkspaceMessageHistory = params.Capabilities.WorkspaceMessageHistory
@@ -1296,6 +1299,9 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return entry.WorkspaceGitDiff
 	case protocol.MethodWorkspaceGitPrepare, protocol.MethodWorkspaceGitCommit:
 		return entry.WorkspaceGitCommit
+	case protocol.MethodWorkspaceBrowserOpen, protocol.MethodWorkspaceBrowserConnect,
+		protocol.MethodWorkspaceBrowserStop, protocol.MethodWorkspaceBrowserAsset:
+		return entry.WorkspaceBrowser
 	case protocol.MethodWorkspaceTerminalOpen,
 		protocol.MethodWorkspaceTerminalRead,
 		protocol.MethodWorkspaceTerminalInput,

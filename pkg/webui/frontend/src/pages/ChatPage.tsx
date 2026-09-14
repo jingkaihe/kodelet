@@ -1,4 +1,11 @@
-import { ChevronDown, GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
+import {
+  ChevronDown,
+  GitCompareArrows,
+  Globe,
+  PanelLeft,
+  PanelRight,
+  SquareTerminal,
+} from 'lucide-react';
 import type React from 'react';
 import {
   lazy,
@@ -54,6 +61,7 @@ import {
 
 const GitDiffModal = lazy(() => import('../components/workspace/GitDiffModal'));
 const TerminalModal = lazy(() => import('../components/workspace/TerminalModal'));
+const BrowserPanel = lazy(() => import('../components/workspace/BrowserPanel'));
 
 const DEFAULT_REASONING_EFFORT = 'medium';
 
@@ -152,7 +160,7 @@ type UIRequestDialogState =
   | { mode: 'input'; request: UIInputRequestEvent }
   | { mode: 'confirm'; request: UIConfirmRequestEvent }
   | { mode: 'select'; request: UISelectRequestEvent };
-type WorkspacePanelView = 'diff' | 'terminal';
+type WorkspacePanelView = 'diff' | 'terminal' | 'browser';
 const attachmentId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -2926,7 +2934,16 @@ const ChatPage: React.FC = () => {
       runnerDirectoryAvailable &&
       currentRunner?.workspaceGitDiff
   );
-  const workspaceToolsAvailable = workspaceTerminalAvailable || workspaceGitDiffAvailable;
+  const workspaceBrowserAvailable = Boolean(
+    isRemoteConversation &&
+      terminalAuthorized &&
+      runnerWorkspaceAvailable &&
+      runnerDirectoryAvailable &&
+      // Only the live runner listing carries the server's effective browser permission.
+      runners.some((runner) => runner.id === currentRunnerID && runner.workspaceBrowser)
+  );
+  const workspaceToolsAvailable =
+    workspaceTerminalAvailable || workspaceGitDiffAvailable || workspaceBrowserAvailable;
   const workspaceTarget = useMemo<WorkspaceTarget>(
     () => ({
       kind: 'runner',
@@ -2983,11 +3000,13 @@ const ChatPage: React.FC = () => {
     if (
       !workspaceToolsAvailable ||
       (workspacePanelView === 'terminal' && !workspaceTerminalAvailable) ||
+      (workspacePanelView === 'browser' && !workspaceBrowserAvailable) ||
       (workspacePanelView === 'diff' && !workspaceGitDiffAvailable)
     ) {
       setWorkspacePanelView(null);
     }
   }, [
+    workspaceBrowserAvailable,
     workspaceGitDiffAvailable,
     workspacePanelView,
     workspaceTerminalAvailable,
@@ -3380,6 +3399,8 @@ const ChatPage: React.FC = () => {
       } else if (workspaceGitDiffAvailable) {
         setWorkspacePanelView('diff');
         void fetchGitDiff();
+      } else if (workspaceBrowserAvailable) {
+        setWorkspacePanelView('browser');
       }
       return;
     }
@@ -3823,6 +3844,23 @@ const ChatPage: React.FC = () => {
                       <span>Changes</span>
                     </button>
                   ) : null}
+                  {workspaceBrowserAvailable ? (
+                    <button
+                      aria-label="Show browser"
+                      aria-selected={workspacePanelView === 'browser'}
+                      className={cn(
+                        'workspace-tools-tab',
+                        workspacePanelView === 'browser' && 'is-active'
+                      )}
+                      data-testid="workspace-tools-browser-tab"
+                      onClick={() => setWorkspacePanelView('browser')}
+                      role="tab"
+                      type="button"
+                    >
+                      <Globe aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                      <span>Browser</span>
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className="workspace-tools-content">
@@ -3841,6 +3879,8 @@ const ChatPage: React.FC = () => {
                         onClose={handleToggleWorkspacePanel}
                         target={workspaceTarget}
                       />
+                    ) : workspacePanelView === 'browser' ? (
+                      <BrowserPanel key={workspaceTargetKey} target={workspaceTarget} />
                     ) : (
                       <GitDiffModal
                         error={gitDiffError}

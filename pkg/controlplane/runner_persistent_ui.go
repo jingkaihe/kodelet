@@ -418,6 +418,7 @@ func (h *webExtensionUIHost) cleanupRunnerOwner(identity runnerregistry.UIReques
 
 // RunnerUIDetached removes only UI belonging to the lost connection generation.
 func (s *Server) RunnerUIDetached(identity runnerregistry.UIRequestIdentity) {
+	s.closeBrowserHandles(identity.RunnerID, identity.Generation)
 	owners := make(map[runnerpayload.ExtensionOwner]bool)
 	if s.extensionUI != nil {
 		s.extensionUI.mu.Lock()

@@ -296,6 +296,7 @@ export interface Runner {
   concurrentRuns?: boolean;
   workspaceGitDiff?: boolean;
   workspaceTerminal?: boolean;
+  workspaceBrowser?: boolean;
   workspaceDiscovery?: boolean;
   workspaceCwd?: boolean;
   activeRunId?: string;
@@ -307,6 +308,13 @@ export interface Runner {
 
 export interface RunnerListResponse {
   runners: Runner[];
+}
+
+export interface BrowserSession {
+  id: string;
+  sessionId: string;
+  cwd: string;
+  devTools: boolean;
 }
 
 export interface SteerConversationRequest {

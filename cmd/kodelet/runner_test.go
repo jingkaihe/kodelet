@@ -42,6 +42,30 @@ func TestNormalizeRunnerAPIBaseURL(t *testing.T) {
 	require.ErrorContains(t, err, "only scheme, host")
 }
 
+func TestRunnerBrowserConfigFromEnvironment(t *testing.T) {
+	t.Setenv("KODELET_BROWSER_EXECUTABLE", "")
+	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", "")
+	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "")
+	config, err := runnerBrowserConfigFromEnvironment()
+	require.NoError(t, err)
+	assert.Empty(t, config.Executable, "browser support is opt-in")
+	assert.Zero(t, config.IdleTimeout, "the manager supplies the default")
+
+	t.Setenv("KODELET_BROWSER_EXECUTABLE", " /opt/browser/chrome ")
+	t.Setenv("KODELET_BROWSER_DEVTOOLS_DIR", " /opt/browser/devtools ")
+	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", " 5m ")
+	config, err = runnerBrowserConfigFromEnvironment()
+	require.NoError(t, err)
+	assert.Equal(t, "/opt/browser/chrome", config.Executable)
+	assert.Equal(t, "/opt/browser/devtools", config.DevToolsDir)
+	assert.Equal(t, 5*time.Minute, config.IdleTimeout)
+	for _, raw := range []string{"nope", "0", "-1m"} {
+		t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", raw)
+		_, err = runnerBrowserConfigFromEnvironment()
+		assert.ErrorContains(t, err, "positive duration")
+	}
+}
+
 func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 	setServerConfigForTest(t, "")
 	t.Setenv(controlPlaneServerEnv, "")

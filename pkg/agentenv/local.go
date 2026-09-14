@@ -22,6 +22,7 @@ type LocalEnvironment struct {
 	mu               sync.RWMutex
 	workingDirectory string
 	extensions       *extensions.Runtime
+	additionalTools  []tooltypes.Tool
 	providedState    tooltypes.State
 	useProvidedState bool
 	state            tooltypes.State
@@ -31,10 +32,11 @@ type LocalEnvironment struct {
 }
 
 // NewLocalEnvironment creates an environment that builds a fresh BasicState whenever a run opens.
-func NewLocalEnvironment(workingDirectory string, runtime *extensions.Runtime) *LocalEnvironment {
+func NewLocalEnvironment(workingDirectory string, runtime *extensions.Runtime, additionalTools ...tooltypes.Tool) *LocalEnvironment {
 	return &LocalEnvironment{
 		workingDirectory: strings.TrimSpace(workingDirectory),
 		extensions:       runtime,
+		additionalTools:  slices.Clone(additionalTools),
 	}
 }
 
@@ -84,6 +86,7 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 			tools.WithLLMConfig(spec.Config),
 			tools.WithMainTools(),
 			tools.WithSkillTool(),
+			tools.WithExtensionTools(e.additionalTools),
 		}
 		if runtime != nil {
 			stateOpts = append(stateOpts, tools.WithExtensionTools(runtime.Tools()))

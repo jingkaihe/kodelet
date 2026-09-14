@@ -6,6 +6,7 @@ import (
 	stdErrors "errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -171,6 +173,12 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 		conversationID:   conversationID,
 		config:           config,
 	}
+	principal, authenticated := principalFromContext(ctx)
+	controller = browserPolicyController{
+		RemoteController: controller,
+		allowed: r.server.config != nil && r.server.config.BrowserEnabled &&
+			authenticated && principal.HasRole(RoleTerminal) && runner.WorkspaceBrowser,
+	}
 	return agentenv.NewRemoteEnvironment(
 		controller,
 		runnerID,
@@ -184,6 +192,33 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 			return convtypes.GenerateID(), nil
 		}),
 	), nil
+}
+
+// Browser policy is resolved by the server, not by the runner's advertised
+// capability or an extension's agent.init tool-list patch. The underlying
+// registry retains the runner's original manifest and digest.
+type browserPolicyController struct {
+	agentenv.RemoteController
+	allowed bool
+}
+
+func (c browserPolicyController) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+	manifest, err := c.RemoteController.OpenRun(ctx, runnerID, params)
+	if err != nil || c.allowed {
+		return manifest, err
+	}
+	manifest.Tools = slices.DeleteFunc(slices.Clone(manifest.Tools), func(tool runnerpayload.ToolDefinition) bool {
+		return tool.Name == "browser"
+	})
+	manifest.Digest, err = runnerpayload.ComputeManifestDigest(manifest)
+	return manifest, err
+}
+
+func (c browserPolicyController) ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
+	if params.Name == "browser" && !c.allowed {
+		return runnerpayload.ToolExecuteResult{}, errors.New("browser access is disabled by server policy or requires terminal access")
+	}
+	return c.RemoteController.ExecuteTool(ctx, params, updates)
 }
 
 func (s *Server) commitRunnerAffinity(ctx context.Context, conversationID string) error {

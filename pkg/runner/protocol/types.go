@@ -24,6 +24,8 @@ const (
 	Subprotocol = "kodelet.runner.v1.jsonrpc"
 	// Endpoint is the control-plane WebSocket endpoint used by runners.
 	Endpoint = "/api/runner/v1/connect"
+	// BrowserRelayEndpoint carries one authenticated, generation-bound CDP stream.
+	BrowserRelayEndpoint = "/api/browser/relay"
 	// SessionExtensionsEndpoint carries authenticated session callback channels.
 	SessionExtensionsEndpoint    = "/api/session/extensions"
 	SessionExtensionsSubprotocol = "kodelet.session.extensions.v1.jsonrpc"
@@ -56,6 +58,10 @@ const (
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
 	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
 	MethodWorkspaceTerminalResize = "workspace.terminal.resize"
+	MethodWorkspaceBrowserOpen    = "workspace.browser.open"
+	MethodWorkspaceBrowserConnect = "workspace.browser.connect"
+	MethodWorkspaceBrowserStop    = "workspace.browser.stop"
+	MethodWorkspaceBrowserAsset   = "workspace.browser.asset"
 	MethodUIInput                 = "ui.input"
 	MethodUIConfirm               = "ui.confirm"
 	MethodUISelect                = "ui.select"
@@ -209,6 +215,7 @@ type RunnerCapabilities struct {
 	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
 	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
 	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceBrowser        bool `json:"workspaceBrowser,omitempty"`
 	WorkspaceDiscovery      bool `json:"workspaceDiscovery,omitempty"`
 	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
 	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
@@ -600,6 +607,25 @@ type WorkspaceGitDiffResult struct {
 	GitRoot   string `json:"gitRoot,omitempty"`
 	ExitCode  int    `json:"exitCode"`
 	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// WorkspaceBrowserParams identifies a browser session in one runner directory.
+type WorkspaceBrowserParams struct {
+	CWD       string `json:"cwd,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// WorkspaceBrowserConnectParams authorizes one outbound streaming attachment.
+type WorkspaceBrowserConnectParams struct {
+	CWD        string `json:"cwd,omitempty"`
+	SessionID  string `json:"sessionId"`
+	RelayToken string `json:"relayToken"`
+}
+
+// WorkspaceBrowserAssetParams reads a bounded chunk of operator-installed DevTools assets.
+type WorkspaceBrowserAssetParams struct {
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
 }
 
 // WorkspaceTerminalOpenParams opens or reattaches to the runner workspace terminal.

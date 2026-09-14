@@ -33,6 +33,13 @@ log_format: "json"
 #   public_base_url: "https://kodelet.example"
 #   # Set false to use only separately managed runners.
 #   embedded_runner: true
+#   # Opt-in browser UI and agent tools; callers also need terminal/admin access.
+#   # Runners must separately set KODELET_BROWSER_EXECUTABLE to an installed Chrome.
+#   browser_enabled: false
+#   # Runner process environment (also applies to the embedded runner):
+#   # KODELET_BROWSER_EXECUTABLE=/opt/chrome/chrome
+#   # KODELET_BROWSER_IDLE_TIMEOUT=15m
+#   # KODELET_BROWSER_DEVTOOLS_DIR=/opt/devtools/out/Default/gen/front_end (optional)
 #   # runner_workspace: "/srv/workspaces"
 #   # Optional workspace overrides; otherwise inherits daemon settings.
 #   # runner_settings:

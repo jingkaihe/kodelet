@@ -15,6 +15,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLocalEnvironmentAdditionalToolsRespectPolicy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, test := range []struct {
+		name    string
+		config  llmtypes.Config
+		include bool
+	}{
+		{name: "available", include: true},
+		{name: "allowed", config: llmtypes.Config{AllowedTools: []string{"browser"}}, include: true},
+		{name: "restricted", config: llmtypes.Config{AllowedTools: []string{"file_read"}}},
+		{name: "no tools", config: llmtypes.Config{ExecutionOptions: &llmtypes.ExecutionOptions{NoTools: new(true)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			environment := NewLocalEnvironment(t.TempDir(), nil, tools.NewBrowserTool(nil))
+			manifest, err := environment.Open(t.Context(), RunSpec{Config: test.config})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, environment.Close(t.Context())) })
+			_, found := manifest.ToolDefinition("browser")
+			assert.Equal(t, test.include, found)
+		})
+	}
+	environment := NewLocalEnvironment(t.TempDir(), nil)
+	manifest, err := environment.Open(t.Context(), RunSpec{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, environment.Close(t.Context())) })
+	_, found := manifest.ToolDefinition("browser")
+	assert.False(t, found, "an ordinary environment does not acquire browser support")
+}
+
 func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

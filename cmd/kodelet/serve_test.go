@@ -14,6 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestServeBrowserPolicyIsOptIn(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	assert.False(t, NewServeConfig().BrowserEnabled)
+	viper.Set("serve.browser_enabled", true)
+	config := getServeConfigFromFlags(newServeCommandForTest())
+	require.NoError(t, config.ConfigError)
+	assert.True(t, config.BrowserEnabled)
+	config.EmbeddedRunner = false
+	server, err := buildControlPlaneServerConfig(config)
+	require.NoError(t, err)
+	assert.True(t, server.BrowserEnabled)
+	cmd := newServeCommandForTest()
+	require.NoError(t, cmd.Flags().Set("browser-enabled", "false"))
+	assert.False(t, getServeConfigFromFlags(cmd).BrowserEnabled, "explicit flag overrides trusted configuration")
+}
+
 func TestValidateServeConfig(t *testing.T) {
 	tests := []struct {
 		name          string
