@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.6.14-alpha
+## 0.6.15-beta
 
 Added opt-in, per-conversation Chrome/Chromium browsers shared between users and agents, with a Web UI Browser tab for navigation, page interaction, console output, network requests, and element inspection.
 
@@ -9,6 +9,10 @@ Added a `browser` agent tool for opening sessions, navigating, evaluating JavaSc
 Added host-level browser executable, idle timeout, and optional DevTools configuration through trusted YAML, environment variables, and CLI flags. Browser access requires server enablement and `terminal` or `admin` permissions.
 
 Made the workspace panel resizable with saved width preferences, improved browser input mapping across panel sizes, and aligned command copy controls and exit status.
+
+Fixed disappearing punctuation across Web UI text fields and editable content, extending the existing chat composer fix.
+
+Streamlined `AGENTS.md` and the Kodelet skill entrypoint, keeping practical development guidance in an on-demand reference.
 
 ## 0.6.12-beta
 
