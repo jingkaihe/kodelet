@@ -225,6 +225,15 @@ select {
   font: inherit;
 }
 
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+[contenteditable="plaintext-only"] {
+  /* Keep typed punctuation literal: Chromium can mispaint JetBrains Mono's contextual ligatures. */
+  font-variant-ligatures: no-contextual;
+}
+
 textarea::placeholder {
   color: var(--kodelet-muted);
 }
