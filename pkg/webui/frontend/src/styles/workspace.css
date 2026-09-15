@@ -382,19 +382,12 @@
 }
 
 .workspace-browser-navigation,
-.workspace-browser-status,
 .workspace-browser-debug-tabs {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 0.25rem;
   padding: 0.4rem;
-}
-
-.workspace-browser-status {
-  justify-content: space-between;
-  color: var(--kodelet-muted);
-  font-size: 0.7rem;
 }
 
 .workspace-browser-viewport {
@@ -558,6 +551,16 @@
   outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
   color: var(--terminal-foreground);
+}
+
+.workspace-browser-session-button.is-start {
+  border-color: var(--kodelet-success);
+  color: var(--kodelet-success);
+}
+
+.workspace-browser-session-button.is-stop {
+  border-color: var(--kodelet-error);
+  color: var(--kodelet-error);
 }
 
 .workspace-terminal-host {

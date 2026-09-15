@@ -1,10 +1,11 @@
-import { ArrowLeft, ArrowRight, RefreshCw, Square } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Play, RefreshCw, Square } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import apiService from '../../services/api';
 import { BrowserCDP } from '../../services/browser';
 import type { BrowserSession, BrowserTarget } from '../../types';
 import { cn } from '../../utils';
+import Spinner from '../Spinner';
 
 type RemoteObject = {
   value?: unknown;
@@ -48,7 +49,7 @@ const modifiers = (event: {
   (event.shiftKey ? 8 : 0);
 
 const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
-  const helpID = useId();
+  const dialogMessageID = useId();
   const [session, setSession] = useState<BrowserSession | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +69,6 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
   const resizeViewportRef = useRef<(() => void) | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const addressRef = useRef<HTMLInputElement>(null);
   const activeFrame = useRef<Frame | null>(null);
   const nextFrame = useRef<Frame | null>(null);
   const frameSequence = useRef(0);
@@ -347,6 +347,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
 
   const navigate = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!live) return;
     const address = url.trim();
     if (!address) return;
     const destination = /^(https?:\/\/|about:blank$)/i.test(address)
@@ -524,11 +525,6 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
       event.key === 'Dead'
     )
       return;
-    if (event.key === 'F6') {
-      event.preventDefault();
-      if (!up) addressRef.current?.focus();
-      return;
-    }
     // Let the local browser provide clipboard text to onPaste, never grant clipboard access to the remote page.
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return;
     event.preventDefault();
@@ -616,6 +612,16 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
   };
 
   const live = status === 'live' && !stopping;
+  const browserBusy = status === 'connecting' || stopping;
+  const browserActionLabel = stopping
+    ? 'Stopping browser'
+    : status === 'connecting'
+      ? 'Connecting browser'
+      : status === 'live'
+        ? 'Stop conversation browser'
+        : status === 'disconnected'
+          ? 'Reconnect browser'
+          : 'Start browser';
   return (
     <section
       aria-label="Browser"
@@ -660,45 +666,34 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           autoComplete="off"
           className="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs"
           onChange={(event) => setURL(event.target.value)}
-          ref={addressRef}
           spellCheck={false}
           value={url}
         />
-        <button className="btn btn-ghost btn-sm" disabled={!live} type="submit">
-          Go
-        </button>
         <button
-          aria-label="Stop conversation browser"
-          className="workspace-terminal-icon-button"
-          disabled={!session || stopping}
-          onClick={() => void stop()}
-          title="Stop the conversation browser, including agent access"
+          aria-busy={browserBusy || undefined}
+          aria-label={browserActionLabel}
+          className={cn(
+            'workspace-terminal-icon-button workspace-browser-session-button',
+            status === 'live' || stopping ? 'is-stop' : 'is-start'
+          )}
+          disabled={browserBusy}
+          onClick={() => (status === 'live' ? void stop() : setRetry((value) => value + 1))}
+          title={
+            status === 'live'
+              ? 'Stop the conversation browser, including agent access'
+              : browserActionLabel
+          }
           type="button"
         >
-          <Square aria-hidden="true" size={14} />
+          {browserBusy ? (
+            <Spinner />
+          ) : status === 'live' ? (
+            <Square aria-hidden="true" size={14} />
+          ) : (
+            <Play aria-hidden="true" size={14} />
+          )}
         </button>
       </form>
-      <div className="workspace-browser-status">
-        <output>
-          {status === 'live'
-            ? 'Live · Runner browser'
-            : status === 'connecting'
-              ? 'Connecting to runner browser…'
-              : status === 'stopped'
-                ? 'Browser stopped'
-                : 'Disconnected'}
-        </output>
-        {status === 'disconnected' || status === 'stopped' ? (
-          <button
-            className="btn btn-ghost btn-xs"
-            disabled={stopping}
-            onClick={() => setRetry((value) => value + 1)}
-            type="button"
-          >
-            {status === 'stopped' ? 'Start browser' : 'Reconnect'}
-          </button>
-        ) : null}
-      </div>
       {error ? (
         <div className="px-3 py-2 text-xs text-error" role="alert">
           {error}
@@ -707,13 +702,13 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
       {dialog ? (
         <div
           aria-label="Page JavaScript dialog"
-          aria-describedby={`${helpID}-dialog-message`}
+          aria-describedby={dialogMessageID}
           aria-live="polite"
           className="max-h-64 shrink-0 overflow-auto border-y border-base-content/10 p-3 text-xs"
           role="dialog"
         >
           <p className="font-semibold">Page {dialog.type} dialog</p>
-          <p className="my-2 whitespace-pre-wrap break-words" id={`${helpID}-dialog-message`}>
+          <p className="my-2 whitespace-pre-wrap break-words" id={dialogMessageID}>
             {dialog.message}
           </p>
           <p className="mb-2 text-base-content/60">
@@ -770,7 +765,6 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
         )}
         <textarea
           aria-label="Remote browser input"
-          aria-describedby={helpID}
           autoCapitalize="off"
           autoComplete="off"
           className="workspace-browser-input"
@@ -824,10 +818,6 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           }}
         />
       </div>
-      <p className="px-3 py-1 text-[11px] text-base-content/60" id={helpID}>
-        Click to interact. F6 returns to the address bar. Closing this panel keeps the browser
-        running.
-      </p>
       <div aria-label="Browser debugging" className="workspace-browser-debug-tabs" role="tablist">
         {(['console', 'network', 'inspect', 'devtools'] as const).map((view) => (
           <button

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
 import type { BrowserSession, BrowserTarget } from '../../types';
@@ -59,7 +60,7 @@ const connect = async (socket = sockets[0]) => {
     socket.readyState = 1;
     socket.dispatchEvent(new Event('open'));
   });
-  await screen.findByText('Live · Runner browser');
+  await waitFor(() => expect(screen.getByLabelText('Remote browser input')).toBeEnabled());
   return socket;
 };
 
@@ -143,6 +144,30 @@ afterEach(() => {
 });
 
 describe('BrowserPanel', () => {
+  it('uses a busy toolbar control instead of status rows and interaction hints', async () => {
+    const { container } = render(<BrowserPanel target={target} />);
+    const connecting = screen.getByRole('button', { name: 'Connecting browser' });
+    expect(connecting).toBeDisabled();
+    expect(connecting).toHaveAttribute('aria-busy', 'true');
+    expect(connecting.querySelector('.spinner-glyph')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = await connect();
+    fireEvent.load(await showFrame(socket));
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(container.querySelector('.workspace-browser-status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Live · Runner browser')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Click to interact|Closing this panel|F6/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Remote browser input')).not.toHaveAttribute('aria-describedby');
+    const stopButton = screen.getByRole('button', { name: 'Stop conversation browser' });
+    expect(stopButton).toBeEnabled();
+    expect(stopButton).toHaveClass('workspace-browser-session-button', 'is-stop');
+    expect(stopButton.querySelector('.lucide-square')).toBeInTheDocument();
+    expect(stopButton).not.toHaveAttribute('aria-busy');
+    expect(stopButton.querySelector('.spinner-glyph')).not.toBeInTheDocument();
+  });
+
   it('opens the target with debugging and an uncapped CSS-pixel viewport', async () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(2300);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1800);
@@ -487,7 +512,7 @@ describe('BrowserPanel', () => {
     expect(socket.matching('Input.dispatchTouchEvent')).toHaveLength(2);
   });
 
-  it('confines keyboard forwarding to the viewport and provides an F6 escape', async () => {
+  it('confines keyboard forwarding to the viewport without intercepting F6', async () => {
     const { socket } = await open();
     const input = screen.getByLabelText('Remote browser input');
     const address = screen.getByLabelText('Browser address');
@@ -501,8 +526,17 @@ describe('BrowserPanel', () => {
       expect.objectContaining({ type: 'keyUp', key: 'a' }),
     ]);
     fireEvent.keyDown(input, { key: 'F6', code: 'F6' });
-    expect(address).toHaveFocus();
-    expect(socket.matching('Input.dispatchKeyEvent')).toHaveLength(2);
+    fireEvent.keyUp(input, { key: 'F6', code: 'F6' });
+    expect(input).toHaveFocus();
+    expect(
+      socket
+        .matching('Input.dispatchKeyEvent')
+        .slice(2)
+        .map((item) => item.params)
+    ).toEqual([
+      expect.objectContaining({ type: 'rawKeyDown', key: 'F6', code: 'F6' }),
+      expect.objectContaining({ type: 'keyUp', key: 'F6', code: 'F6' }),
+    ]);
   });
 
   it('forwards IME composition and pasted text once', async () => {
@@ -521,13 +555,25 @@ describe('BrowserPanel', () => {
     ]);
   });
 
-  it('navigates on the runner, displays navigation errors, and supports history/reload', async () => {
+  it('ignores address submissions until the browser connects', async () => {
+    const user = userEvent.setup();
+    render(<BrowserPanel target={target} />);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    await user.type(screen.getByLabelText('Browser address'), '{Enter}');
+    const socket = await connect();
+    expect(socket.matching('Page.navigate')).toHaveLength(0);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('navigates with Enter, displays navigation errors, and supports history/reload without a Go button', async () => {
+    const user = userEvent.setup();
     const { socket } = await open();
+    expect(screen.queryByRole('button', { name: 'Go' })).not.toBeInTheDocument();
     socket.responses.set('Page.navigate', { errorText: 'net::ERR_CONNECTION_REFUSED' });
     fireEvent.change(screen.getByLabelText('Browser address'), {
       target: { value: 'localhost:4567/abc' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+    await user.type(screen.getByLabelText('Browser address'), '{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('net::ERR_CONNECTION_REFUSED');
     expect(socket.matching('Page.navigate')[0].params).toEqual({
       url: 'http://localhost:4567/abc',
@@ -549,7 +595,7 @@ describe('BrowserPanel', () => {
     fireEvent.change(screen.getByLabelText('Browser address'), {
       target: { value: 'javascript:alert(1)' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+    await user.type(screen.getByLabelText('Browser address'), '{Enter}');
     expect(screen.getByRole('alert')).toHaveTextContent('Use an HTTP or HTTPS address');
     expect(socket.matching('Page.navigate')).toHaveLength(1);
   });
@@ -702,16 +748,40 @@ describe('BrowserPanel', () => {
     render(<BrowserPanel target={target} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Browser access is disabled');
     expect(apiService.createBrowserWebSocket).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reconnect browser' })).toBeEnabled();
   });
 
   it('keeps the connection available when stopping is rejected', async () => {
     const { socket } = await open();
     vi.mocked(apiService.stopBrowserSession).mockRejectedValue(new Error('Permission denied'));
     fireEvent.click(screen.getByRole('button', { name: 'Stop conversation browser' }));
+    expect(screen.getByRole('button', { name: 'Stopping browser' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Stopping browser' })).toHaveAttribute(
+      'aria-busy',
+      'true'
+    );
     expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
     expect(socket.close).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Remote browser input')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Stop conversation browser' })).toBeEnabled();
+  });
+
+  it('keeps stop styling while a pending stop loses its connection', async () => {
+    const { socket } = await open();
+    let resolveStop: () => void = () => {};
+    vi.mocked(apiService.stopBrowserSession).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveStop = resolve;
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Stop conversation browser' }));
+    await act(async () => socket.dispatchEvent(new Event('close')));
+    const stoppingButton = screen.getByRole('button', { name: 'Stopping browser' });
+    expect(stoppingButton).toBeDisabled();
+    expect(stoppingButton).toHaveClass('is-stop');
+    expect(stoppingButton).not.toHaveClass('is-start');
+    await act(async () => resolveStop());
+    expect(screen.getByRole('button', { name: 'Start browser' })).toHaveClass('is-start');
   });
 
   it('bounds network entries and displays responses and failures', async () => {
@@ -810,20 +880,37 @@ describe('BrowserPanel', () => {
     expect(socket.matching('Page.handleJavaScriptDialog')).toHaveLength(0);
     expect(screen.getByLabelText('Remote browser input')).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('Browser disconnected');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(sockets).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    const reconnect = screen.getByRole('button', { name: 'Reconnect browser' });
+    expect(reconnect).toHaveClass('workspace-browser-session-button', 'is-start');
+    expect(reconnect.querySelector('.lucide-play')).toBeInTheDocument();
+    fireEvent.click(reconnect);
     await waitFor(() => expect(sockets).toHaveLength(2));
     await connect(sockets[1]);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(apiService.openBrowserSession).toHaveBeenCalledTimes(2);
     await act(async () =>
       sockets[1].event('Page.javascriptDialogOpening', { type: 'alert', message: 'Agent dialog' })
     );
     fireEvent.click(screen.getByRole('button', { name: 'Stop conversation browser' }));
-    await screen.findByText('Browser stopped');
+    const startButton = await screen.findByRole('button', { name: 'Start browser' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(apiService.stopBrowserSession).toHaveBeenCalledWith('handle-1');
     expect(sockets[1].close).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Start browser' })).toBeInTheDocument();
+    expect(startButton).toHaveClass('workspace-browser-session-button', 'is-start');
+    expect(startButton.querySelector('.lucide-play')).toBeInTheDocument();
+    expect(startButton.textContent).toBe('');
+    expect(screen.getByRole('form', { name: 'Browser navigation' })).toContainElement(startButton);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Browser stopped')).not.toBeInTheDocument();
+    expect(screen.queryByText('Start browser')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(startButton);
+    expect(screen.getByRole('button', { name: 'Connecting browser' })).toBeDisabled();
+    await waitFor(() => expect(sockets).toHaveLength(3));
+    await connect(sockets[2]);
+    expect(apiService.openBrowserSession).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole('button', { name: 'Stop conversation browser' })).toBeEnabled();
   });
 });
