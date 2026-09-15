@@ -1,166 +1,30 @@
-# Kodelet Documentation
+# Working on Kodelet
 
-## Project Overview
-Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports Anthropic Claude and OpenAI APIs to process user queries and execute various tools through an agentic workflow.
+Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React/TypeScript UI in `pkg/webui/frontend/`.
 
-## Project Structure
-```
-cmd/kodelet/     # CLI commands
-pkg/             # Core packages
-  ├── auth/      # Authentication
-  ├── artifacts/ # Persisted image files and conversation references
-  ├── binaries/  # External binary management (ripgrep, fd)
-  ├── browser/   # Optional runner-owned external Chrome sessions and CDP access
-  ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
-  ├── conversations/  # Conversation storage (SQLite)
-  ├── fragments/ # Fragment/recipe templates
-  ├── llm/       # LLM clients (anthropic/, openai/)
-  ├── plugins/   # Unified plugin system
-  ├── skills/    # Agentic skills system
-  ├── tools/     # Tool implementations
-  ├── webui/     # Embedded React/TypeScript SPA and HTTP handler
-  └── ...        # logger/, presenter/, sysprompt/, telemetry/, types/, utils/
-docs/            # Documentation (MANUAL.md, SKILLS.md, design docs, etc.)
-skills/          # Built-in skills
-  └── kodelet/   # Kodelet skill docs, references, and examples
-recipes/         # Sample fragment/recipe templates
-```
+## Conventions
 
-## Tech Stack
-**Backend**: Go 1.26.5, Cobra/Viper (CLI), Logrus (logging), SQLite (modernc.org/sqlite), OpenTelemetry
-**Frontend**: React 19, TypeScript, Vite, Vitest, Tailwind CSS, DaisyUI
-**LLM SDKs**: Anthropic v1.13.0, OpenAI v1.41.2, MCP v0.29.0
-**Tools**: mise (task runner), Docker
+- Use `github.com/pkg/errors` (`errors.Wrap`/`Wrapf`) rather than `fmt.Errorf` for stack traces.
+- Use `pkg/logger` for diagnostics and `pkg/presenter` for user-facing CLI output.
+- Write tests with testify assertions in Go and Vitest in the frontend.
+- Update documentation when changing the CLI interface.
+- Keep Markdown prose paragraphs on one source line.
+- Use sentence case in the Web UI; no all-caps copy or CSS `text-transform: uppercase` except codes and established acronyms.
+- Support Linux/macOS on amd64/arm64 only unless explicitly asked otherwise.
+- Do not add token environment or argv scrubbing: agents and tools share the trusted process environment, so selective scrubbing is not a security boundary.
+- After editing `pkg/webui/frontend/src/assets/logo.svg`, run `mise run frontend-icons` and commit the PNGs in `pkg/webui/frontend/public/assets/`.
 
-## Build System
-All commands use `mise run <task>`. Frontend is embedded via `go generate ./pkg/webui`.
+## Checks
 
-## Engineering Principles
-1. **Always run linting**: `mise run lint` (Go), `mise run frontend-lint` (frontend)
-2. **Write tests**: Use testify for Go, Vitest for frontend
-3. **Document CLI changes**: Update docs when CLI interface changes
-4. **Do not hard-wrap Markdown prose**: Keep each prose paragraph on a single source line
-5. **Do not implement token environment or argv scrubbing**: The agent and its tools share the trusted process environment and can inspect it, so selective scrubbing is not a meaningful security boundary.
-6. **Supported targets are Linux and macOS on amd64 and arm64**: Do not add Windows or other platform-specific implementations unless explicitly requested.
-7. **Use sentence case in the Web UI**: Avoid all-caps interface copy and CSS `text-transform: uppercase`; reserve uppercase for codes and established acronyms.
+Use `mise` tasks. For code changes, run the relevant lint and tests:
 
-## Testing
-```bash
-mise run test                    # All Go tests
-mise run e2e-test-docker         # Acceptance tests in Docker
-mise run frontend-test           # Frontend tests
-```
+| Area | Lint | Tests |
+| --- | --- | --- |
+| Go | `mise run lint` | `mise run test` |
+| Frontend | `mise run frontend-lint` | `mise run frontend-test` |
 
-**Use testify** for assertions (`assert.Equal`, `require.NotNil`) over `t.Errorf`/`t.Fatalf`.
+## Read as needed
 
-Live Anthropic tests are opt-in and incur API charges. Set `ANTHROPIC_API_KEY`, then run:
-
-```bash
-KODELET_ANTHROPIC_INTEGRATION_TESTS=1 mise exec -- go test -count=1 ./pkg/llm ./pkg/llm/anthropic
-```
-
-## Key Commands
-```bash
-# Core
-kodelet run "query"              # One-shot execution
-kodelet chat                     # Auto-start/reuse a detached local daemon
-kodelet serve                    # Foreground daemon plus embedded runner (localhost:8080)
-kodelet server status|stop|restart  # Manage the local background daemon
-kodelet run -r recipe-name       # Use recipe template
-kodelet run --follow --cwd "$PWD" "continue"  # Continue scoped daemon history
-
-# Git integration
-kodelet commit                   # AI commit messages
-kodelet pr [--target main]       # Generate PRs
-
-# Development
-mise run build|test|lint|format  # Standard commands
-mise run build-dev               # Fast build (skip frontend)
-mise run frontend-icons          # Regenerate app icons (requires uv and Cairo)
-```
-
-After editing `pkg/webui/frontend/src/assets/logo.svg`, regenerate and commit the PNGs in `pkg/webui/frontend/public/assets/`.
-
-See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.
-
-## Configuration
-CLI/TUI/ACP commands use the daemon. Configure models and credentials in `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`; restart the daemon after changing defaults. Repository `kodelet-config.yaml` configures runner workspace settings only and cannot widen host permissions. Model `profiles` and runner `environment_profiles` are separate. See [Configuration](docs/MANUAL.md#configuration).
-
-```bash
-# Provider API keys belong to the daemon environment
-export ANTHROPIC_API_KEY="sk-ant-api..."
-export OPENAI_API_KEY="sk-..."
-
-# Common settings
-export KODELET_PROVIDER="anthropic|openai"
-export KODELET_MODEL="claude-sonnet-4-6|gpt-4.1"
-```
-
-See [`config.sample.yaml`](./config.sample.yaml) for all options.
-
-## LLM Architecture
-Uses `Thread` abstraction for all LLM providers: message history, tool execution, handler-based responses, provider-specific features (extended thinking, reasoning effort), and token tracking.
-
-## Error Handling
-**Use pkg/errors** over fmt.Errorf for stack traces:
-```go
-return errors.Wrap(err, "failed to validate config")
-return errors.Wrapf(err, "failed to process file %s", filename)
-```
-
-## Logging & CLI Output
-```go
-// Diagnostics - use logger package
-logger.G(ctx).WithField("key", "value").Info("message")
-
-// User-facing - use presenter package
-presenter.Success("Done")  // Green ✓
-presenter.Error(err, "Failed")  // Red [ERROR]
-presenter.Warning("Caution")  // Yellow ⚠
-```
-
-**Logger** = diagnostics/debug. **Presenter** = user interaction.
-
-## Agentic Skills
-Model-invoked capabilities at `.kodelet/skills/<name>/SKILL.md` (repo), `~/.kodelet/skills/<name>/SKILL.md` (global), or via plugins.
-
-- **Automatic invocation**: Model decides when relevant
-- **Disable**: `--no-skills` flag or `skills.enabled: false` in config
-- **Built-in**: `kodelet` skill (CLI usage guide)
-
-See [docs/SKILLS.md](docs/SKILLS.md).
-
-## Plugin System
-```bash
-kodelet plugin add user/repo      # Install locally
-kodelet plugin add user/repo -g   # Install globally
-kodelet plugin list               # List all plugins
-kodelet plugin remove user/repo   # Remove plugin
-```
-
-Plugins stored as `org@repo` format.
-
-## Extensions
-Long-running executable extensions at `.kodelet/extensions/` or `~/.kodelet/extensions/` can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers over stdio JSON-RPC.
-
-- **Discovery**: executables named `kodelet-extension-*` directly under an extension root or one level below it
-- **Events**: `user.message`, `agent.init`, `agent.start`, `turn.start`, `tool.call`, `tool.result`, `turn.end`, `agent.end`, plus session lifecycle events
-- **Disable**: `--no-extensions` flag or `extensions.enabled: false` in config
-
-See [docs/extension-design.md](docs/extension-design.md).
-
-Discovery helpers:
-```bash
-kodelet extension list
-kodelet extension inspect <name-or-id-or-path>
-```
-
-## External Binary Management
-Managed binaries in `~/.kodelet/bin/`: ripgrep (15.2.0), fd (10.3.0). Auto-downloaded with checksum verification for standalone installs; packaged Linux builds bundle them in `/usr/libexec/kodelet/` and resolution prefers that location before falling back to managed or system binaries.
-
-## Resources
-- [docs/MANUAL.md](docs/MANUAL.md) - CLI reference
-- [docs/SKILLS.md](docs/SKILLS.md) - Skills system
-- [docs/extension-design.md](docs/extension-design.md) - Extension system design
-- [docs/FRAGMENTS.md](docs/FRAGMENTS.md) - Template system
-- [docs/mcp.md](docs/mcp.md) - MCP integration
+- [Development reference](skills/kodelet/references/development.md): code layout, build tasks, architecture, and opt-in tests.
+- [Kodelet skill](skills/kodelet/SKILL.md): CLI usage, configuration, recipes, skills, extensions, and SDK references.
+- [Manual](docs/MANUAL.md): full user-facing documentation.
