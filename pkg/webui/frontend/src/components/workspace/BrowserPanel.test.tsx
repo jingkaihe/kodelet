@@ -89,7 +89,19 @@ const showFrame = async (
 beforeEach(() => {
   sockets = [];
   disconnectObserver = vi.fn();
-  vi.stubGlobal('PointerEvent', MouseEvent);
+  vi.stubGlobal(
+    'PointerEvent',
+    class extends MouseEvent {
+      pointerId: number;
+      pointerType: string;
+
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 1;
+        this.pointerType = init.pointerType ?? 'mouse';
+      }
+    }
+  );
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -346,6 +358,135 @@ describe('BrowserPanel', () => {
     ]);
   });
 
+  it('forwards scaled touch swipes and taps as native gestures, not mouse drags', async () => {
+    const { socket } = await open();
+    fireEvent.load(await showFrame(socket));
+    const input = screen.getByLabelText('Remote browser input');
+    const touch = { pointerType: 'touch', pointerId: 7, clientX: 110, clientY: 245 };
+    const capture = vi.fn();
+    Object.defineProperty(input, 'setPointerCapture', { value: capture });
+
+    expect(fireEvent.pointerDown(input, touch)).toBe(false);
+    expect(input).not.toHaveFocus();
+    expect(capture).toHaveBeenCalledWith(7);
+    fireEvent.pointerMove(input, { ...touch, clientX: 160, clientY: 145 });
+    fireEvent.pointerMove(input, { ...touch, clientX: -20, clientY: -20 });
+    expect(input).not.toHaveFocus();
+    // Releasing outside the frame must still finish the captured gesture.
+    fireEvent.pointerUp(input, { ...touch, clientX: -20, clientY: -20 });
+    expect(input).not.toHaveFocus();
+    fireEvent.pointerDown(input, touch);
+    fireEvent.pointerUp(input, touch);
+    expect(input).toHaveFocus();
+
+    expect(socket.matching('Input.dispatchTouchEvent').map(({ params }) => params)).toEqual([
+      { type: 'touchStart', touchPoints: [{ id: 7, x: 200, y: 450 }], modifiers: 0 },
+      { type: 'touchMove', touchPoints: [{ id: 7, x: 300, y: 250 }], modifiers: 0 },
+      { type: 'touchMove', touchPoints: [{ id: 7, x: 0, y: 0 }], modifiers: 0 },
+      { type: 'touchEnd', touchPoints: [], modifiers: 0 },
+      { type: 'touchStart', touchPoints: [{ id: 7, x: 200, y: 450 }], modifiers: 0 },
+      { type: 'touchEnd', touchPoints: [], modifiers: 0 },
+    ]);
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+  });
+
+  it.each([
+    'pointerCancel',
+    'lostPointerCapture',
+    'blur',
+    'unmount',
+  ] as const)('cancels an active touch on %s without turning it into a tap', async (finish) => {
+    const { socket, unmount } = await open();
+    fireEvent.load(await showFrame(socket));
+    const input = screen.getByLabelText('Remote browser input');
+    const touch = { pointerType: 'touch', pointerId: 7, clientX: 110, clientY: 245 };
+    fireEvent.pointerDown(input, touch);
+    if (finish === 'unmount') unmount();
+    else fireEvent[finish](input, touch);
+    expect(input).not.toHaveFocus();
+
+    expect(socket.matching('Input.dispatchTouchEvent').map(({ params }) => params.type)).toEqual([
+      'touchStart',
+      'touchCancel',
+    ]);
+    expect(socket.matching('Input.dispatchTouchEvent')[1].params.touchPoints).toEqual([]);
+    if (finish !== 'unmount') {
+      fireEvent.pointerMove(input, touch);
+      fireEvent.pointerUp(input, touch);
+      expect(socket.matching('Input.dispatchTouchEvent')).toHaveLength(2);
+      fireEvent.pointerDown(input, { ...touch, pointerId: 8 });
+      fireEvent.pointerUp(input, { ...touch, pointerId: 8 });
+      expect(socket.matching('Input.dispatchTouchEvent').map(({ params }) => params.type)).toEqual([
+        'touchStart',
+        'touchCancel',
+        'touchStart',
+        'touchEnd',
+      ]);
+    }
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+  });
+
+  it('ignores additional fingers without interrupting the active touch', async () => {
+    const { socket } = await open();
+    fireEvent.load(await showFrame(socket));
+    const input = screen.getByLabelText('Remote browser input');
+    const touch = { pointerType: 'touch', pointerId: 7, clientX: 110, clientY: 245 };
+    fireEvent.pointerDown(input, touch);
+    const second = { ...touch, pointerId: 8 };
+    fireEvent.pointerDown(input, second);
+    fireEvent.pointerMove(input, second);
+    fireEvent.pointerCancel(input, second);
+    fireEvent.lostPointerCapture(input, second);
+    fireEvent.pointerUp(input, second);
+    fireEvent.pointerMove(input, { ...touch, clientY: 145 });
+    fireEvent.pointerUp(input, touch);
+    fireEvent.lostPointerCapture(input, touch);
+
+    expect(socket.matching('Input.dispatchTouchEvent').map(({ params }) => params.type)).toEqual([
+      'touchStart',
+      'touchMove',
+      'touchEnd',
+    ]);
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+  });
+
+  it('does not focus the keyboard after a swipe returns to its starting point', async () => {
+    const { socket } = await open();
+    fireEvent.load(await showFrame(socket));
+    const input = screen.getByLabelText('Remote browser input');
+    const touch = { pointerType: 'touch', pointerId: 7, clientX: 110, clientY: 245 };
+    fireEvent.pointerDown(input, touch);
+    fireEvent.pointerMove(input, { ...touch, clientY: 145 });
+    fireEvent.pointerUp(input, touch);
+    expect(input).not.toHaveFocus();
+
+    fireEvent.pointerDown(input, touch);
+    fireEvent.pointerMove(input, { ...touch, clientX: 112, clientY: 247 });
+    fireEvent.pointerUp(input, { ...touch, clientX: 112, clientY: 247 });
+    expect(input).toHaveFocus();
+  });
+
+  it('does not start touches on undecoded frames or letterbox margins', async () => {
+    const { socket } = await open();
+    const decoded = vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false);
+    vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(400);
+    const image = await showFrame(socket, 1, 'YQ==', { deviceWidth: 800, deviceHeight: 400 });
+    const input = screen.getByLabelText('Remote browser input');
+    const touch = { pointerType: 'touch', pointerId: 7, clientX: 110, clientY: 120 };
+    fireEvent.pointerDown(input, touch);
+    decoded.mockReturnValue(true);
+    fireEvent.load(image);
+    fireEvent.pointerUp(input, touch);
+    fireEvent.pointerDown(input, { ...touch, clientY: 30 });
+    fireEvent.pointerMove(input, touch);
+    fireEvent.pointerUp(input, touch);
+    expect(socket.matching('Input.dispatchTouchEvent')).toHaveLength(0);
+    expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+    fireEvent.pointerDown(input, touch);
+    fireEvent.pointerUp(input, touch);
+    expect(socket.matching('Input.dispatchTouchEvent')).toHaveLength(2);
+  });
+
   it('confines keyboard forwarding to the viewport and provides an F6 escape', async () => {
     const { socket } = await open();
     const input = screen.getByLabelText('Remote browser input');
@@ -591,7 +732,10 @@ describe('BrowserPanel', () => {
     expect(screen.getByText('net::ERR_FAILED')).toBeInTheDocument();
   });
 
-  it('picks a read-only element snapshot without clicking the remote application', async () => {
+  it.each([
+    'mouse',
+    'touch',
+  ])('picks a read-only element snapshot with %s without activating the remote application', async (pointerType) => {
     const { socket } = await open();
     fireEvent.load(await showFrame(socket));
     socket.responses.set('Runtime.evaluate', {
@@ -600,10 +744,11 @@ describe('BrowserPanel', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Inspect' }));
     fireEvent.click(screen.getByRole('button', { name: 'Pick element' }));
     const input = screen.getByLabelText('Remote browser input');
-    fireEvent.pointerDown(input, { clientX: 110, clientY: 95, button: 0 });
-    fireEvent.pointerUp(input, { clientX: 110, clientY: 95, button: 0 });
+    fireEvent.pointerDown(input, { clientX: 110, clientY: 95, button: 0, pointerType });
+    fireEvent.pointerUp(input, { clientX: 110, clientY: 95, button: 0, pointerType });
     await screen.findByText(/<button>Save<\/button>/);
     expect(socket.matching('Input.dispatchMouseEvent')).toHaveLength(0);
+    expect(socket.matching('Input.dispatchTouchEvent')).toHaveLength(0);
     expect(socket.matching('Runtime.evaluate')[0].params.expression).toContain(
       'document.elementFromPoint(200, 150)'
     );

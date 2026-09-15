@@ -76,6 +76,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
   const composing = useRef(false);
   const stopped = useRef(false);
   const heldKeys = useRef(new Map<string, Record<string, unknown>>());
+  const touchGesture = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   const mouseMove = useRef<Record<string, unknown> | null>(null);
   const mouseMoveFrame = useRef<number | null>(null);
   const lastClick = useRef({ time: 0, x: 0, y: 0, count: 0, button: -1 });
@@ -99,6 +100,14 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
     },
     []
   );
+
+  const cancelTouch = useCallback((client = clientRef.current) => {
+    if (touchGesture.current === null) return;
+    touchGesture.current = null;
+    void client
+      ?.request('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+      .catch(() => {});
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(retry): An explicit reconnect opens a fresh authenticated handle to the retained runner session.
   useEffect(() => {
@@ -270,6 +279,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
             activeFrame.current = null;
             nextFrame.current = null;
             heldKeys.current.clear();
+            touchGesture.current = null;
           },
         });
         clientRef.current = client;
@@ -284,6 +294,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
     return () => {
       disposed = true;
       abort.abort();
+      cancelTouch(client);
       clientRef.current = null;
       client?.close();
       activeFrame.current = null;
@@ -293,7 +304,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
       mouseMoveFrame.current = null;
       mouseMove.current = null;
     };
-  }, [appendConsole, target, retry]);
+  }, [appendConsole, cancelTouch, target, retry]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -384,10 +395,52 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
 
   const pointer = (event: React.PointerEvent<HTMLTextAreaElement>, type: string) => {
     if (status !== 'live') return;
+    if (event.pointerType === 'touch' && !inspecting) {
+      const starting = type === 'mousePressed';
+      const ending = type === 'mouseReleased';
+      const gesture = touchGesture.current;
+      // Keep one captured finger per gesture; secondary fingers must not end it.
+      if (starting ? gesture !== null : gesture?.id !== event.pointerId) return;
+      const coordinates = ending ? null : point(event, !starting);
+      if (!ending && !coordinates) return;
+      event.preventDefault();
+      if (starting) {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        touchGesture.current = {
+          id: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+        };
+      } else if (gesture) {
+        gesture.moved ||= Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8;
+        if (ending) {
+          touchGesture.current = null;
+          // Focusing on touch-down opens the mobile keyboard even for a scroll.
+          if (!gesture.moved && event.type !== 'pointercancel')
+            inputRef.current?.focus({ preventScroll: true });
+        }
+      }
+      // Let Chrome distinguish taps from scrolling instead of turning swipes into mouse drags.
+      void command('Input.dispatchTouchEvent', {
+        type:
+          event.type === 'pointercancel'
+            ? 'touchCancel'
+            : starting
+              ? 'touchStart'
+              : ending
+                ? 'touchEnd'
+                : 'touchMove',
+        touchPoints: coordinates ? [{ ...coordinates, id: event.pointerId }] : [],
+        modifiers: modifiers(event),
+      });
+      return;
+    }
     const coordinates = point(event, event.currentTarget.hasPointerCapture?.(event.pointerId));
     if (!coordinates) return;
     if (type === 'mousePressed') {
-      inputRef.current?.focus();
+      if (event.pointerType === 'touch') event.preventDefault();
+      else inputRef.current?.focus();
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const previous = lastClick.current;
       const consecutive =
@@ -725,6 +778,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           ref={inputRef}
           spellCheck={false}
           onBlur={() => {
+            cancelTouch();
             for (const params of heldKeys.current.values())
               void command('Input.dispatchKeyEvent', {
                 ...params,
@@ -765,6 +819,9 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           onPointerMove={(event) => pointer(event, 'mouseMoved')}
           onPointerUp={(event) => pointer(event, 'mouseReleased')}
           onPointerCancel={(event) => pointer(event, 'mouseReleased')}
+          onLostPointerCapture={(event) => {
+            if (touchGesture.current?.id === event.pointerId) cancelTouch();
+          }}
         />
       </div>
       <p className="px-3 py-1 text-[11px] text-base-content/60" id={helpID}>
