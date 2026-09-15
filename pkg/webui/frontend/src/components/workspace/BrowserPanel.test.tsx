@@ -163,7 +163,8 @@ describe('BrowserPanel', () => {
     const stopButton = screen.getByRole('button', { name: 'Stop conversation browser' });
     expect(stopButton).toBeEnabled();
     expect(stopButton).toHaveClass('workspace-browser-session-button', 'is-stop');
-    expect(stopButton.querySelector('.lucide-square')).toBeInTheDocument();
+    expect(stopButton.querySelector('.lucide-square')).toHaveAttribute('fill', 'currentColor');
+    expect(stopButton.querySelector('.lucide-square')).toHaveAttribute('stroke-width', '0');
     expect(stopButton).not.toHaveAttribute('aria-busy');
     expect(stopButton.querySelector('.spinner-glyph')).not.toBeInTheDocument();
   });
@@ -685,6 +686,23 @@ describe('BrowserPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('collapses developer tools and lets the selected tab reopen them', async () => {
+    await open();
+    const tab = screen.getByRole('tab', { name: 'Inspect' });
+    fireEvent.click(tab);
+    fireEvent.click(screen.getByRole('button', { name: 'Pick element' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse developer tools' }));
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(tab).toHaveAttribute('aria-selected', 'false');
+    expect(tab).toHaveFocus();
+    fireEvent.click(tab);
+    expect(screen.getByRole('tabpanel')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pick element' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
   });
 
   it('renders console text safely and evaluates in the remote page', async () => {

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Play, RefreshCw, Square } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Play, RefreshCw, Square } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import apiService from '../../services/api';
@@ -69,6 +69,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
   const resizeViewportRef = useRef<(() => void) | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const debugTabsRef = useRef<HTMLDivElement>(null);
   const activeFrame = useRef<Frame | null>(null);
   const nextFrame = useRef<Frame | null>(null);
   const frameSequence = useRef(0);
@@ -688,7 +689,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           {browserBusy ? (
             <Spinner />
           ) : status === 'live' ? (
-            <Square aria-hidden="true" size={14} />
+            <Square aria-hidden="true" fill="currentColor" size={14} strokeWidth={0} />
           ) : (
             <Play aria-hidden="true" size={14} />
           )}
@@ -818,25 +819,52 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           }}
         />
       </div>
-      <div aria-label="Browser debugging" className="workspace-browser-debug-tabs" role="tablist">
-        {(['console', 'network', 'inspect', 'devtools'] as const).map((view) => (
+      <div className="workspace-browser-debug-tabs">
+        <div
+          aria-label="Browser debugging"
+          className="flex gap-1"
+          ref={debugTabsRef}
+          role="tablist"
+        >
+          {(['console', 'network', 'inspect', 'devtools'] as const).map((view) => (
+            <button
+              aria-selected={debugView === view}
+              className={cn('btn btn-ghost btn-xs', debugView === view && 'btn-active')}
+              key={view}
+              onClick={() => {
+                setDebugView(debugView === view ? null : view);
+                setInspecting(false);
+              }}
+              role="tab"
+              type="button"
+            >
+              {view === 'devtools'
+                ? 'DevTools'
+                : view === 'console'
+                  ? 'Console'
+                  : view === 'network'
+                    ? 'Network'
+                    : 'Inspect'}
+            </button>
+          ))}
+        </div>
+        {debugView ? (
           <button
-            aria-selected={debugView === view}
-            className={cn('btn btn-ghost btn-xs', debugView === view && 'btn-active')}
-            key={view}
-            onClick={() => setDebugView(debugView === view ? null : view)}
-            role="tab"
+            aria-label="Collapse developer tools"
+            className="workspace-terminal-icon-button ml-auto shrink-0"
+            onClick={() => {
+              debugTabsRef.current
+                ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+                ?.focus();
+              setDebugView(null);
+              setInspecting(false);
+            }}
+            title="Collapse developer tools"
             type="button"
           >
-            {view === 'devtools'
-              ? 'DevTools'
-              : view === 'console'
-                ? 'Console'
-                : view === 'network'
-                  ? 'Network'
-                  : 'Inspect'}
+            <ChevronDown aria-hidden="true" size={16} />
           </button>
-        ))}
+        ) : null}
       </div>
       {debugView ? (
         <div
