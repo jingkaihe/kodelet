@@ -27,7 +27,7 @@ func init() {
 	urlCommand := &cobra.Command{
 		Use:   "url",
 		Short: "Print the Web UI address for the local server",
-		Long:  "Print the local server's Web UI address, including the local access token. Starts the background server when one is not already running.",
+		Long:  "Print the local server's Web UI address, including its access token in token mode or its sign-in URL in OIDC mode. Starts the background server when one is not already running.",
 		Args:  cobra.NoArgs,
 		RunE:  localServerURLCommand,
 	}
@@ -145,8 +145,12 @@ func localServerURLCommand(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	target := connection.URL
-	if !noToken {
+	displayURL := connection.URL
+	if connection.WebURL != "" {
+		displayURL = connection.WebURL
+	}
+	target := displayURL
+	if connection.WebURL == "" && !noToken {
 		target = serveURLWithToken(connection.URL, token)
 	}
 	if !open {
@@ -161,7 +165,7 @@ func localServerURLCommand(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), target)
 		return nil
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Opened %s\n", connection.URL)
+	fmt.Fprintf(cmd.OutOrStdout(), "Opened %s\n", displayURL)
 	return nil
 }
 

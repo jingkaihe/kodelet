@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,6 +68,12 @@ func TestServerConfigResolvedAuthModes(t *testing.T) {
 		{
 			name:       "empty configuration",
 			config:     &ServerConfig{},
+			wantWeb:    WebAuthModeNone,
+			wantRunner: RunnerAuthModeNone,
+		},
+		{
+			name:       "local token does not change public auth modes",
+			config:     &ServerConfig{LocalAuthToken: "local-token"},
 			wantWeb:    WebAuthModeNone,
 			wantRunner: RunnerAuthModeNone,
 		},
@@ -724,6 +731,137 @@ func TestLogoutInvalidatesSessionAndStopsOnPublicSignedOutPage(t *testing.T) {
 	assert.Contains(t, signedOutResponse.Body.String(), "<html")
 }
 
+func TestServerConfigValidateLocalAuthToken(t *testing.T) {
+	for _, test := range []struct {
+		name, token, expectedError string
+	}{
+		{name: "valid", token: "local-token_123.~"},
+		{name: "whitespace", token: " local-token", expectedError: "invalid local auth token"},
+		{name: "web collision", token: "web-token", expectedError: "local auth token must differ"},
+		{name: "runner collision", token: "runner-token", expectedError: "local auth token must differ"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := &ServerConfig{
+				Host: "0.0.0.0", CompactRatio: 0.8,
+				AuthToken: "web-token", RunnerAuthToken: "runner-token", LocalAuthToken: test.token,
+			}
+			err := config.Validate()
+			if test.expectedError != "" {
+				require.ErrorContains(t, err, test.expectedError)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+
+	config := &ServerConfig{
+		Host: "0.0.0.0", CompactRatio: 0.8, LocalAuthToken: "local-token",
+		WebAuthMode: WebAuthModeOIDC, RunnerAuthMode: RunnerAuthModeEnrollment,
+		OIDC: OIDCConfig{Flow: testOIDCFlow{}, AllowAnyUser: true, AdminEmails: []string{"admin@example.com"}},
+	}
+	require.NoError(t, config.Validate())
+	assert.Empty(t, config.AuthToken, "local access must not create a compatibility token")
+	config.OIDC.AdminEmails = nil
+	require.ErrorContains(t, config.Validate(), "OIDC runner enrollment requires")
+}
+
+func TestAuthMiddlewareLocalAuthToken(t *testing.T) {
+	// Exercise the shared local-token boundary once in OIDC mode, with a
+	// representative token-mode success rather than repeating the entire matrix.
+	for _, test := range []struct {
+		name      string
+		modify    func(*http.Request)
+		allow     bool
+		tokenMode bool
+	}{
+		{name: "IPv4", allow: true},
+		{name: "token mode", allow: true, tokenMode: true},
+		{name: "IPv6", allow: true, modify: func(r *http.Request) { r.RemoteAddr, r.Host = "[::1]:1234", "[::1]:8080" }},
+		{name: "localhost and case insensitive bearer", allow: true, modify: func(r *http.Request) {
+			r.Host = "LOCALHOST."
+			r.Header.Set("Authorization", "bearer local-token")
+		}},
+		{name: "remote IPv4", modify: func(r *http.Request) { r.RemoteAddr = "192.0.2.1:1234" }},
+		{name: "remote IPv6", modify: func(r *http.Request) { r.RemoteAddr = "[2001:db8::1]:1234" }},
+		{name: "peer hostname", modify: func(r *http.Request) { r.RemoteAddr = "localhost:1234" }},
+		{name: "missing peer port", modify: func(r *http.Request) { r.RemoteAddr = "127.0.0.1" }},
+		{name: "public proxy host", modify: func(r *http.Request) { r.Host = "kodelet.example:8080" }},
+		{name: "wildcard host", modify: func(r *http.Request) { r.Host = "0.0.0.0:8080" }},
+		{name: "localhost suffix", modify: func(r *http.Request) { r.Host = "localhost.example:8080" }},
+		{name: "missing host", modify: func(r *http.Request) { r.Host = "" }},
+		// Each forwarding header must reject even an otherwise valid local
+		// request: proxies may rewrite Host and connect through loopback.
+		{name: "Forwarded", modify: func(r *http.Request) { r.Header.Set("Forwarded", "for=192.0.2.1;host=kodelet.example") }},
+		{name: "X-Forwarded-For", modify: func(r *http.Request) { r.Header.Set("X-Forwarded-For", "127.0.0.1") }},
+		{name: "X-Real-IP", modify: func(r *http.Request) { r.Header.Set("X-Real-IP", "192.0.2.1") }},
+		{name: "empty X-Forwarded-Host", modify: func(r *http.Request) { r.Header.Set("X-Forwarded-Host", "") }},
+		{name: "X-Forwarded-Proto", modify: func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }},
+		{name: "wrong token", modify: func(r *http.Request) { r.Header.Set("Authorization", "Bearer wrong-token") }},
+		{name: "bare token", modify: func(r *http.Request) { r.Header.Set("Authorization", "local-token") }},
+		{name: "legacy token scheme", modify: func(r *http.Request) { r.Header.Set("Authorization", "Token local-token") }},
+		{name: "duplicate authorization", modify: func(r *http.Request) { r.Header.Add("Authorization", "Bearer local-token") }},
+		{name: "cookie", modify: func(r *http.Request) {
+			r.Header.Del("Authorization")
+			r.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "local-token"})
+		}},
+		{name: "query", modify: func(r *http.Request) {
+			r.Header.Del("Authorization")
+			r.URL.RawQuery = "token=local-token"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := &ServerConfig{WebAuthMode: WebAuthModeOIDC, LocalAuthToken: "local-token"}
+			if test.tokenMode {
+				config.WebAuthMode, config.AuthToken = WebAuthModeToken, "web-token"
+			}
+			server := &Server{config: config}
+			request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/server/stop", nil)
+			request.RemoteAddr = "127.0.0.1:1234"
+			request.Header.Set("Authorization", "Bearer local-token")
+			if test.modify != nil {
+				test.modify(request)
+			}
+			handler := server.authMiddleware(server.requireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+				principal, ok := principalFromContext(r.Context())
+				require.True(t, ok)
+				assert.Equal(t, administrativePrincipal("local"), principal)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			expected := http.StatusUnauthorized
+			if test.allow {
+				expected = http.StatusNoContent
+			}
+			assert.Equal(t, expected, response.Code)
+			assert.Empty(t, response.Header().Values("Set-Cookie"))
+		})
+	}
+}
+
+func TestAuthMiddlewareLocalAuthTokenCannotAuthenticateRunner(t *testing.T) {
+	for _, mode := range []RunnerAuthMode{RunnerAuthModeToken, RunnerAuthModeEnrollment} {
+		t.Run(string(mode), func(t *testing.T) {
+			server := &Server{config: &ServerConfig{
+				WebAuthMode: WebAuthModeOIDC, LocalAuthToken: "local-token",
+				RunnerAuthMode: mode,
+			}}
+			if mode == RunnerAuthModeToken {
+				server.config.RunnerAuthToken = "runner-token"
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://localhost:8080"+protocol.Endpoint, nil)
+			request.RemoteAddr = "127.0.0.1:1234"
+			request.Header.Set("Authorization", "Bearer local-token")
+			request.Header.Set("Upgrade", "websocket")
+			response := httptest.NewRecorder()
+			server.authMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				assert.Fail(t, "local credential must not authenticate a runner")
+			})).ServeHTTP(response, request)
+			assert.Equal(t, http.StatusUnauthorized, response.Code)
+		})
+	}
+}
+
 func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 	store, _ := newAuthStoreTest(t)
 	userToken, _, err := store.CreateWebSession(t.Context(), "issuer", "user", "User", "user@example.com", []string{string(RoleUser)}, time.Hour)
@@ -732,8 +870,9 @@ func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 	require.NoError(t, err)
 	server := &Server{
 		config: &ServerConfig{
-			WebAuthMode: WebAuthModeOIDC,
-			AuthToken:   "compat-admin-token",
+			WebAuthMode:    WebAuthModeOIDC,
+			AuthToken:      "compat-admin-token",
+			LocalAuthToken: "local-token",
 		},
 		authStore: store,
 	}
@@ -748,6 +887,7 @@ func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 
 	request = httptest.NewRequest(http.MethodGet, "/api/runners", nil)
 	request.Header.Set("Authorization", "Bearer compat-admin-token")
+	request.Header.Set("X-Forwarded-For", "192.0.2.1")
 	response = httptest.NewRecorder()
 	runnerAdminHandler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusNoContent, response.Code)
@@ -755,6 +895,7 @@ func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 	terminalHandler := server.authMiddleware(server.requireRole(RoleTerminal, allowed))
 	request = httptest.NewRequest(http.MethodGet, "/api/terminal/ws", nil)
 	request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: terminalToken})
+	request.Header.Set("Forwarded", "for=192.0.2.1;host=kodelet.example")
 	response = httptest.NewRecorder()
 	terminalHandler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusNoContent, response.Code)

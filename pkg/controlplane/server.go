@@ -188,13 +188,14 @@ type ServerConfig struct {
 	CompactRatio    float64
 	AuthToken       string
 	RunnerAuthToken string
+	LocalAuthToken  string // Internal credential for direct loopback API clients; never a browser or runner credential.
 	WebAuthMode     WebAuthMode
 	RunnerAuthMode  RunnerAuthMode
 	OIDC            OIDCConfig
 	CORSOrigins     []string
 	EmbeddedRunner  *EmbeddedRunnerConfig
 	InstanceID      string             // Identity of this process for local discovery.
-	LocalShutdown   context.CancelFunc // Set only by managed loopback server hosts.
+	LocalShutdown   context.CancelFunc // Set only by managed server hosts, including wildcard listeners.
 }
 
 // Validate validates the server configuration
@@ -207,6 +208,9 @@ func (c *ServerConfig) Validate() error {
 	}
 	if err := ValidateAuthToken(c.RunnerAuthToken); err != nil {
 		return errors.Wrap(err, "invalid runner auth token")
+	}
+	if err := ValidateAuthToken(c.LocalAuthToken); err != nil {
+		return errors.Wrap(err, "invalid local auth token")
 	}
 	c.normalizeAuth()
 
@@ -229,6 +233,9 @@ func (c *ServerConfig) Validate() error {
 
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
 		return errors.New("runner auth token must differ from the web UI auth token")
+	}
+	if c.LocalAuthToken != "" && (c.LocalAuthToken == c.AuthToken || c.LocalAuthToken == c.RunnerAuthToken) {
+		return errors.New("local auth token must differ from web and runner auth tokens")
 	}
 	if err := c.validateAuthModes(); err != nil {
 		return err

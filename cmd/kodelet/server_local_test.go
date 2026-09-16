@@ -62,7 +62,7 @@ func TestLocalServerStateAndAuthentication(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, lock)
 	defer lock.Close()
-	require.NoError(t, publishLocalServer(directory, "http://127.0.0.1:43210", "private-token", "instance", true))
+	require.NoError(t, publishLocalServer(directory, "http://127.0.0.1:43210", "private-token", "instance", true, ""))
 	connection, err := readLocalServerConnection(directory)
 	require.NoError(t, err)
 	assert.Equal(t, "instance", connection.InstanceID)
@@ -124,7 +124,7 @@ func TestReadLocalServerConnectionRequiresLoopbackEndpoint(t *testing.T) {
 		{"http://localhost:8080#fragment", false},
 	} {
 		t.Run(test.endpoint, func(t *testing.T) {
-			require.NoError(t, publishLocalServer(directory, test.endpoint, "private-token", "instance", true))
+			require.NoError(t, publishLocalServer(directory, test.endpoint, "private-token", "instance", true, ""))
 			connection, err := readLocalServerConnection(directory)
 			if !test.valid {
 				require.ErrorContains(t, err, "expected a loopback HTTP address")
@@ -141,6 +141,9 @@ func TestPrepareClientExplicitServerNeverStartsLocalDaemon(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			directory := localServerTestState(t)
 			forbidLocalServerSpawn(t)
+			// Explicit endpoints must remain connect-only even with a local
+			// OIDC serve policy that would otherwise enable automatic startup.
+			viper.Set("serve", map[string]any{"host": "0.0.0.0", "web_auth_mode": "oidc", "runner_auth_mode": "enrollment"})
 			cmd := &cobra.Command{Use: "run"}
 			addRemoteRunFlags(cmd)
 			const endpoint = "http://127.0.0.1:1"
@@ -162,55 +165,27 @@ func TestPrepareClientExplicitServerNeverStartsLocalDaemon(t *testing.T) {
 	}
 }
 
-func TestPrepareClientOIDCServerRemainsConnectOnly(t *testing.T) {
-	for _, test := range []struct {
-		name, credential, override string
-		oidc                       bool
-	}{
-		{name: "saved login", credential: "valid"},
-		{name: "expired login", credential: "expired"},
-		{name: "OIDC without login", oidc: true},
-		{name: "OIDC flag override", credential: "expired", override: "flag", oidc: true},
-		{name: "OIDC environment override", credential: "expired", override: "environment", oidc: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+func TestPrepareClientSavedLoginWithoutServeConfigRemainsConnectOnly(t *testing.T) {
+	for _, state := range []string{"valid", "expired"} {
+		t.Run(state, func(t *testing.T) {
 			directory := localServerTestState(t)
 			forbidLocalServerSpawn(t)
-			if test.oidc {
-				viper.Set("serve", map[string]any{"web_auth_mode": " OIDC ", "runner_auth_mode": "enrollment"})
-			}
 			bearer := controlPlaneAuthTestBearer(0x91)
-			if test.credential != "" {
-				store, err := userauth.NewStore()
-				require.NoError(t, err)
-				expiry := time.Now().Add(time.Hour)
-				if test.credential == "expired" {
-					expiry = time.Now().Add(-time.Hour)
-				}
-				require.NoError(t, store.SaveCredential(controlPlaneAuthTestCredential(defaultRunnerServer, "saved-login", bearer, controlPlaneAuthTestPrincipal("user", "user@example.com"), expiry)))
+			store, err := userauth.NewStore()
+			require.NoError(t, err)
+			expiry := time.Now().Add(time.Hour)
+			if state == "expired" {
+				expiry = time.Now().Add(-time.Hour)
 			}
-			cmd := remoteRunCommandForTest()
-			switch test.override {
-			case "flag":
-				require.NoError(t, cmd.Flags().Set("auth-token", "override"))
-			case "environment":
-				t.Setenv(controlPlaneAuthTokenEnv, "override")
-			}
-			server, token, err := prepareClientServer(t.Context(), cmd)
+			require.NoError(t, store.SaveCredential(controlPlaneAuthTestCredential(defaultRunnerServer, "saved-login", bearer, controlPlaneAuthTestPrincipal("user", "user@example.com"), expiry)))
+			server, token, err := prepareClientServer(t.Context(), remoteRunCommandForTest())
 			assert.Equal(t, defaultRunnerServer, server)
-			switch {
-			case test.override != "":
-				require.NoError(t, err)
-				assert.Equal(t, "override", token)
-			case test.credential == "expired":
+			if state == "expired" {
 				require.ErrorContains(t, err, "kodelet auth login --server")
 				assert.NotContains(t, err.Error(), bearer)
-			case test.credential == "valid":
+			} else {
 				require.NoError(t, err)
 				assert.Equal(t, bearer, token)
-			default:
-				require.NoError(t, err)
-				assert.Empty(t, token)
 			}
 			assert.NoDirExists(t, directory, "connect-only clients must not create local lifecycle state")
 		})
@@ -222,9 +197,8 @@ func TestOIDCClientsReuseSavedLoginWithoutLocalDiscovery(t *testing.T) {
 		t.Run(client, func(t *testing.T) {
 			directory := localServerTestState(t)
 			forbidLocalServerSpawn(t)
-			viper.Set("serve", map[string]any{"web_auth_mode": "oidc", "runner_auth_mode": "enrollment"})
-			// An operator-owned OIDC server holds the lifetime lock, but does
-			// not publish a token-mode connection.json or client-token.
+			// An existing operator-owned OIDC server, without local serve
+			// configuration or discovery state, remains connect-only.
 			lock, err := tryLocalServerLock(directory, "server.lock")
 			require.NoError(t, err)
 			require.NotNil(t, lock)
@@ -310,11 +284,20 @@ func TestEnsureLocalServerReusesAndWaitsForRunner(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, lock)
 	defer lock.Close()
-	require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true))
+	require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true, ""))
 	connection, err := ensureLocalServer(t.Context(), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, server.URL, connection.URL)
 	assert.GreaterOrEqual(t, probes.Load(), int32(3))
+}
+
+func TestEnsureLocalServerReusesWithoutEmbeddedRunner(t *testing.T) {
+	directory := localServerTestState(t)
+	forbidLocalServerSpawn(t)
+	endpoint := publishLocalServerWithRunner(t, directory, controlplane.EmbeddedRunnerStatus{})
+	connection, err := ensureLocalServer(t.Context(), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, endpoint, connection.URL)
 }
 
 func TestEnsureLocalServerNeverReplacesUnhealthyServer(t *testing.T) {
@@ -341,7 +324,7 @@ func TestEnsureLocalServerNeverReplacesUnhealthyServer(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, lock)
 			defer lock.Close()
-			require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true))
+			require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true, ""))
 			_, err = ensureLocalServer(t.Context(), io.Discard)
 			assert.ErrorContains(t, err, test.expected)
 		})
@@ -361,7 +344,7 @@ func TestEnsureLocalServerRejectsUnownedEndpointAndConfigurationMismatch(t *test
 			require.NoError(t, err)
 			require.NotNil(t, lock)
 			defer lock.Close()
-			require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true))
+			require.NoError(t, publishLocalServer(directory, server.URL, "private", "same", true, ""))
 			connection, err := readLocalServerConnection(directory)
 			require.NoError(t, err)
 			expected := "different configuration file"
@@ -430,22 +413,58 @@ func TestPrepareLocalServeConfig(t *testing.T) {
 	require.NoError(t, prepareLocalServeConfig(config))
 	assert.Equal(t, os.Getenv("HOME"), config.RunnerWorkspace)
 	assert.Equal(t, "https://images.example.com", config.PublicBaseURL)
-	for _, host := range []string{"localhost", "LOCALHOST.", "127.0.0.1", "127.0.0.2", "::1"} {
+	for _, host := range []string{"localhost", "0.0.0.0"} {
 		t.Run(host, func(t *testing.T) {
 			config := NewServeConfig()
+			configureValidOIDC(config, "unused-secret-file")
+			config.RunnerAuthMode = controlplane.RunnerAuthModeEnrollment
 			config.Host = host
+			config.Port = 8765
 			require.NoError(t, prepareLocalServeConfig(config))
+			assert.Equal(t, host, config.Host, "background startup must preserve the configured bind address")
+			assert.Equal(t, 8765, config.Port)
+			assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
+			assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
+			assert.Empty(t, config.AuthToken, "OIDC must not acquire a public compatibility credential")
 		})
 	}
-	for _, mutate := range []func(*ServeConfig){
-		func(c *ServeConfig) { c.Host = "0.0.0.0" },
-		func(c *ServeConfig) { c.SkipAuth = true },
-		func(c *ServeConfig) { c.EmbeddedRunner = false },
-		func(c *ServeConfig) { c.WebAuthMode = controlplane.WebAuthModeOIDC },
-		func(c *ServeConfig) { c.RunnerAuthMode = controlplane.RunnerAuthModeNone },
+	for _, mode := range []controlplane.RunnerAuthMode{controlplane.RunnerAuthModeEnrollment, controlplane.RunnerAuthModeToken} {
+		t.Run("external runners with "+string(mode), func(t *testing.T) {
+			config := NewServeConfig()
+			config.RunnerAuthMode = mode
+			config.EmbeddedRunner = false
+			if mode == controlplane.RunnerAuthModeToken {
+				require.ErrorContains(t, prepareLocalServeConfig(config), "requires serve.runner_auth_token")
+				config.RunnerAuthToken = "configured-runner-token"
+			}
+			require.NoError(t, prepareLocalServeConfig(config))
+			assert.False(t, config.EmbeddedRunner)
+			assert.Empty(t, config.RunnerWorkspace)
+		})
+	}
+	for _, test := range []struct {
+		name, expected string
+		mutate         func(*ServeConfig)
+	}{
+		{"non-loopback interface", "loopback or wildcard host", func(c *ServeConfig) { c.Host = "192.0.2.1" }},
+		{"skip auth", "requires authentication", func(c *ServeConfig) { c.SkipAuth = true }},
+		{"incomplete OIDC", "OIDC client secret file is required", func(c *ServeConfig) { c.WebAuthMode = controlplane.WebAuthModeOIDC }},
+		{"no web auth", "requires authentication", func(c *ServeConfig) { c.WebAuthMode = controlplane.WebAuthModeNone }},
+		{"no runner auth", "requires authentication", func(c *ServeConfig) { c.RunnerAuthMode = controlplane.RunnerAuthModeNone }},
 	} {
-		config := NewServeConfig()
-		mutate(config)
-		assert.Error(t, prepareLocalServeConfig(config))
+		t.Run(test.name, func(t *testing.T) {
+			config := NewServeConfig()
+			test.mutate(config)
+			assert.ErrorContains(t, prepareLocalServeConfig(config), test.expected)
+		})
+	}
+}
+
+func TestLocalServerHost(t *testing.T) {
+	for host, expected := range map[string]string{
+		"localhost": "localhost", "LOCALHOST.": "LOCALHOST.", "127.0.0.2": "127.0.0.2", "::1": "::1",
+		"0.0.0.0": "127.0.0.1", "::": "::1", "192.0.2.1": "", "example.com": "",
+	} {
+		assert.Equal(t, expected, localServerHost(host), host)
 	}
 }

@@ -10,7 +10,8 @@ log_format: "json"
 
 # Default daemon URL. When unset, chat/run/ACP start or reuse a local server.
 # KODELET_SERVER overrides this setting; --server overrides both.
-# Explicit servers and existing OIDC setups are connect-only.
+# Explicit server selections are connect-only, even for localhost.
+# With no selection, trusted serve settings also support OIDC background startup.
 # Set this in ~/.kodelet/config.yaml or KODELET_CONFIG_FILE, not repository config.
 # server: "https://kodelet.example"
 
@@ -27,8 +28,10 @@ log_format: "json"
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
 # modes: token, enrollment, none.
-# Start this public OIDC example with `kodelet serve`. Automatic local startup
-# requires loopback binding, token authentication, and embedded_runner: true.
+# Start this OIDC example with `kodelet server start`, implicit chat/run/ACP
+# startup, or foreground `kodelet serve`. Background startup supports loopback
+# and wildcard hosts with authentication, including OIDC and runner enrollment.
+# Local OIDC clients use a private loopback-only API token; browsers still sign in.
 # Restart the server after changing defaults (`kodelet server restart` locally).
 # serve:
 #   host: "0.0.0.0"
@@ -53,6 +56,7 @@ log_format: "json"
 #   # Legacy shared runner token for token mode only.
 #   # runner_auth_token: "generate-a-different-long-random-token"
 #   # Compatibility shorthand for web_auth_mode: none and runner_auth_mode: none.
+#   # Explicit --skip-auth overrides inherited auth modes/tokens (foreground only).
 #   skip_auth: false
 #   cors_origins:
 #     - "https://app.example.com"

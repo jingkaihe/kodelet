@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -592,6 +593,26 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		if authorization, present := explicitAuthorizationHeader(r); present {
+			scheme, token, bearer := strings.Cut(authorization, " ")
+			if s.config.LocalAuthToken != "" && bearer && strings.EqualFold(scheme, "Bearer") && constantTimeStringEqual(token, s.config.LocalAuthToken) {
+				peer, _, err := net.SplitHostPort(r.RemoteAddr)
+				// Local credentials are for direct clients, not proxies. Reject
+				// forwarding metadata even when empty or claiming a local origin;
+				// never use it instead of the actual peer and request Host.
+				forwarded := false
+				for header := range r.Header {
+					if strings.EqualFold(header, "Forwarded") || strings.EqualFold(header, "X-Real-IP") || strings.HasPrefix(strings.ToLower(header), "x-forwarded-") {
+						forwarded = true
+						break
+					}
+				}
+				if forwarded || err != nil || !net.ParseIP(peer).IsLoopback() || !controlplaneurl.IsLoopbackHostname((&url.URL{Host: r.Host}).Hostname()) {
+					s.writeAuthError(w, r, http.StatusUnauthorized, "invalid authentication credentials")
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("local"))))
+				return
+			}
 			if s.config.AuthToken != "" && constantTimeStringEqual(authHeaderToken(authorization), s.config.AuthToken) {
 				next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("token"))))
 				return

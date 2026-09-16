@@ -464,14 +464,31 @@ func TestBuildControlPlaneServerConfigAuthResolution(t *testing.T) {
 	})
 
 	t.Run("OIDC does not generate a web token", func(t *testing.T) {
-		config := newValidOIDCServeConfig(t)
+		for _, test := range []struct {
+			host       string
+			localToken bool
+		}{
+			{"localhost", true},
+			{"0.0.0.0", true},
+			{"192.0.2.1", false},
+		} {
+			t.Run(test.host, func(t *testing.T) {
+				config := newValidOIDCServeConfig(t)
+				config.Host = test.host
 
-		serverConfig, err := buildControlPlaneServerConfig(config)
-		require.NoError(t, err)
+				serverConfig, err := buildControlPlaneServerConfig(config)
+				require.NoError(t, err)
 
-		assert.Equal(t, controlplane.WebAuthModeOIDC, serverConfig.WebAuthMode)
-		assert.Empty(t, serverConfig.AuthToken)
-		assert.Equal(t, "client-secret", serverConfig.OIDC.ClientSecret)
+				assert.Equal(t, controlplane.WebAuthModeOIDC, serverConfig.WebAuthMode)
+				assert.Empty(t, serverConfig.AuthToken)
+				assert.Equal(t, "client-secret", serverConfig.OIDC.ClientSecret)
+				if test.localToken {
+					assert.NotEmpty(t, serverConfig.LocalAuthToken)
+				} else {
+					assert.Empty(t, serverConfig.LocalAuthToken)
+				}
+			})
+		}
 	})
 
 	t.Run("OIDC preserves an admin compatibility token", func(t *testing.T) {
@@ -840,6 +857,126 @@ func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testin
 	assert.Empty(t, config.OIDC.Scopes)
 }
 
+func TestGetServeConfigFromFlags_SkipAuthOverridesTrustedConfig(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		web, runner    string
+		configuredPort int
+		flags          []string
+		expectedHost   string
+		expectedPort   int
+	}{
+		{"inherited tokens and explicit port", "token", "token", 8443, []string{"--skip-auth=true", "--port=9090"}, "127.0.0.1", 9090},
+		{"OIDC host override retains configured port", "oidc", "enrollment", 8443, []string{"--skip-auth", "--host=0.0.0.0"}, "0.0.0.0", 8443},
+		{"OIDC host and port overrides", "oidc", "enrollment", 8443, []string{"--skip-auth", "--host=0.0.0.0", "--port=9090"}, "0.0.0.0", 9090},
+		{"OIDC host override retains default port", "oidc", "enrollment", 0, []string{"--skip-auth", "--host=0.0.0.0"}, "0.0.0.0", 0},
+		{"compatible explicit auth flags", "token", "token", 8443, []string{"--skip-auth", "--web-auth-mode=none", "--runner-auth-mode=none", "--auth-token=", "--runner-auth-token="}, "127.0.0.1", 8443},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			settings := map[string]any{
+				"host":             "127.0.0.1",
+				"web_auth_mode":    test.web,
+				"runner_auth_mode": test.runner,
+				"auth_token":       "yaml-token",
+				"oidc": map[string]any{
+					// A successful build proves disabled OIDC never reads this secret.
+					"client_secret_file": filepath.Join(t.TempDir(), "missing-secret"),
+				},
+			}
+			if test.configuredPort != 0 {
+				settings["port"] = test.configuredPort
+			}
+			if test.runner == "token" {
+				settings["runner_auth_token"] = "yaml-runner-token"
+			}
+			setTrustedServeConfigForTest(t, settings)
+			cmd := newServeCommandForTest()
+			require.NoError(t, cmd.ParseFlags(test.flags))
+
+			config := getServeConfigFromFlags(cmd)
+			require.NoError(t, config.ConfigError)
+			assert.True(t, config.SkipAuth)
+			serverConfig, err := buildControlPlaneServerConfig(config)
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedHost, serverConfig.Host)
+			assert.Equal(t, test.expectedPort, serverConfig.Port)
+			assert.Equal(t, controlplane.WebAuthModeNone, serverConfig.WebAuthMode)
+			assert.Equal(t, controlplane.RunnerAuthModeNone, serverConfig.RunnerAuthMode)
+			assert.Empty(t, serverConfig.AuthToken)
+			assert.Empty(t, serverConfig.RunnerAuthToken)
+			assert.Empty(t, serverConfig.LocalAuthToken)
+			assert.Equal(t, test.web, viper.GetString("serve.web_auth_mode"))
+			assert.Equal(t, "yaml-token", viper.GetString("serve.auth_token"))
+		})
+	}
+}
+
+func TestGetServeConfigFromFlags_ExplicitSkipAuthRejectsConflictingFlags(t *testing.T) {
+	setTrustedServeConfigForTest(t, map[string]any{
+		"web_auth_mode":     "token",
+		"runner_auth_mode":  "token",
+		"auth_token":        "yaml-token",
+		"runner_auth_token": "yaml-runner-token",
+	})
+	for _, test := range []struct {
+		flag, expectedError string
+	}{
+		{"--web-auth-mode=oidc", "disabled authentication conflicts with a non-none web authentication mode"},
+		{"--runner-auth-mode=enrollment", "disabled authentication conflicts with a non-none runner authentication mode"},
+		{"--auth-token=flag-token", "web auth token cannot be used when authentication is disabled"},
+		{"--runner-auth-token=flag-token", "runner auth token cannot be used when authentication is disabled"},
+	} {
+		t.Run(test.flag, func(t *testing.T) {
+			for _, flags := range [][]string{
+				{"--skip-auth=true", test.flag},
+				{test.flag, "--skip-auth=true"},
+			} {
+				cmd := newServeCommandForTest()
+				require.NoError(t, cmd.ParseFlags(flags))
+				config := getServeConfigFromFlags(cmd)
+				require.NoError(t, config.ConfigError)
+				assert.ErrorContains(t, validateServeConfig(config), test.expectedError, "flags: %v", flags)
+			}
+		})
+	}
+}
+
+func TestGetServeConfigFromFlags_SkipAuthPreservesTrustedAuthenticationWithoutExplicitTrue(t *testing.T) {
+	setTrustedServeConfigForTest(t, map[string]any{
+		"skip_auth":         true,
+		"web_auth_mode":     "token",
+		"runner_auth_mode":  "token",
+		"auth_token":        "yaml-token",
+		"runner_auth_token": "yaml-runner-token",
+	})
+	for _, test := range []struct {
+		name          string
+		flags         []string
+		expectedSkip  bool
+		expectedError string
+	}{
+		{"inherited skip auth still conflicts", nil, true, "web auth token cannot be used when authentication is disabled"},
+		{"explicit false overrides inherited true", []string{"--skip-auth=false"}, false, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := newServeCommandForTest()
+			require.NoError(t, cmd.ParseFlags(test.flags))
+			config := getServeConfigFromFlags(cmd)
+			require.NoError(t, config.ConfigError)
+			assert.Equal(t, test.expectedSkip, config.SkipAuth)
+			assert.Equal(t, controlplane.WebAuthModeToken, config.WebAuthMode)
+			assert.Equal(t, controlplane.RunnerAuthModeToken, config.RunnerAuthMode)
+			assert.Equal(t, "yaml-token", config.AuthToken)
+			assert.Equal(t, "yaml-runner-token", config.RunnerAuthToken)
+			if test.expectedError != "" {
+				assert.ErrorContains(t, validateServeConfig(config), test.expectedError)
+			} else {
+				assert.NoError(t, validateServeConfig(config))
+			}
+		})
+	}
+}
+
 func TestGetServeConfigFromFlags_RejectsInvalidTrustedYAML(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -883,9 +1020,11 @@ func TestGetServeConfigFromFlags_RejectsInvalidTrustedYAML(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setTrustedServeConfigForTest(t, tt.config)
 
-			config := getServeConfigFromFlags(newServeCommandForTest())
-			require.Error(t, config.ConfigError)
-			assert.Contains(t, config.ConfigError.Error(), "failed to decode trusted serve configuration")
+			cmd := newServeCommandForTest()
+			require.NoError(t, cmd.ParseFlags([]string{"--skip-auth=true"}))
+			config := getServeConfigFromFlags(cmd)
+			require.ErrorContains(t, config.ConfigError, "failed to decode trusted serve configuration")
+			assert.ErrorIs(t, validateServeConfig(config), config.ConfigError)
 		})
 	}
 }

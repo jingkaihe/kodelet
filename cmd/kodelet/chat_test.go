@@ -296,7 +296,7 @@ func TestPrepareDaemonChatUsesConnectedServerURL(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, lock)
 				defer lock.Close()
-				require.NoError(t, publishLocalServer(directory, daemon.URL, "client", "chat", true))
+				require.NoError(t, publishLocalServer(directory, daemon.URL, "client", "chat", true, ""))
 			} else {
 				args = []string{"--server=" + daemon.URL + test.prefix + "//./"}
 			}

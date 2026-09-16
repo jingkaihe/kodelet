@@ -24,7 +24,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
-	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
@@ -183,6 +182,17 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	if cwd, err := cmd.Flags().GetString("cwd"); err == nil && cmd.Flags().Changed("cwd") {
 		config.CWD = strings.TrimSpace(cwd)
 	}
+	if skipAuth, err := cmd.Flags().GetBool("skip-auth"); err == nil && cmd.Flags().Changed("skip-auth") {
+		config.SkipAuth = skipAuth
+		if skipAuth {
+			// Override inherited authentication, but retain explicit auth flags below
+			// so contradictory CLI options still fail validation.
+			config.WebAuthMode = controlplane.WebAuthModeNone
+			config.RunnerAuthMode = controlplane.RunnerAuthModeNone
+			config.AuthToken = ""
+			config.RunnerAuthToken = ""
+		}
+	}
 	if webAuthMode, err := cmd.Flags().GetString("web-auth-mode"); err == nil && cmd.Flags().Changed("web-auth-mode") {
 		config.WebAuthMode = controlplane.WebAuthMode(webAuthMode)
 	}
@@ -194,9 +204,6 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if runnerAuthToken, err := cmd.Flags().GetString("runner-auth-token"); err == nil && cmd.Flags().Changed("runner-auth-token") {
 		config.RunnerAuthToken = runnerAuthToken
-	}
-	if skipAuth, err := cmd.Flags().GetBool("skip-auth"); err == nil && cmd.Flags().Changed("skip-auth") {
-		config.SkipAuth = skipAuth
 	}
 	if embeddedRunner, err := cmd.Flags().GetBool("embedded-runner"); err == nil && cmd.Flags().Changed("embedded-runner") {
 		config.EmbeddedRunner = embeddedRunner
@@ -589,6 +596,15 @@ func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerCon
 		OIDC:            oidcConfig,
 		CORSOrigins:     config.CORSOrigins,
 	}
+	if webAuthMode == controlplane.WebAuthModeOIDC && localServerHost(config.Host) != "" {
+		// Same-host clients manage the daemon without an OIDC browser login.
+		// This private credential is accepted only over loopback, never as a
+		// browser cookie/query token or an external compatibility credential.
+		serverConfig.LocalAuthToken, err = controlplane.NewAuthToken()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to generate local API token")
+		}
+	}
 	if config.EmbeddedRunner {
 		workspace := config.RunnerWorkspace
 		if workspace == "" {
@@ -681,11 +697,25 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 	}()
 
 	baseURL := serveBaseURL(serverConfig.Host, listener.Addr().(*net.TCPAddr).Port)
-	// Foreground loopback token servers are discoverable too, but remain
-	// operator-owned: local lifecycle commands may not stop/restart them.
-	discoverable := controlplaneurl.IsLoopbackHostname(serverConfig.Host) && serverConfig.WebAuthMode == controlplane.WebAuthModeToken
+	browserURL := baseURL
+	if serverConfig.WebAuthMode == controlplane.WebAuthModeOIDC {
+		// OIDC state and session cookies belong to the callback origin, not
+		// necessarily the listener address or the loopback discovery endpoint.
+		redirect, _ := url.Parse(serverConfig.OIDC.RedirectURL)
+		browserURL = redirect.Scheme + "://" + redirect.Host
+	}
+	// Foreground authenticated servers reachable on loopback are discoverable
+	// too, but local lifecycle commands may not stop/restart them.
+	localHost := localServerHost(serverConfig.Host)
+	discoverable := localHost != "" && serverConfig.WebAuthMode != controlplane.WebAuthModeNone
 	if discoverable {
-		if err := publishLocalServer(directory, baseURL, serverConfig.AuthToken, serverConfig.InstanceID, config.Managed); err != nil {
+		token, webURL := serverConfig.AuthToken, ""
+		if serverConfig.WebAuthMode == controlplane.WebAuthModeOIDC {
+			token = serverConfig.LocalAuthToken
+			webURL = browserURL
+		}
+		endpoint := serveBaseURL(localHost, listener.Addr().(*net.TCPAddr).Port)
+		if err := publishLocalServer(directory, endpoint, token, serverConfig.InstanceID, config.Managed, webURL); err != nil {
 			return errors.Wrap(err, "failed to publish local server connection")
 		}
 		defer os.Remove(filepath.Join(directory, "connection.json"))
@@ -714,7 +744,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 		}
 	case controlplane.WebAuthModeOIDC:
 		presenter.Info("Web UI authentication mode: OIDC")
-		presenter.Info(fmt.Sprintf("Open this URL: %s", baseURL))
+		presenter.Info(fmt.Sprintf("Open this URL: %s", browserURL))
 		if serverConfig.AuthToken != "" {
 			presenter.Info("OIDC admin compatibility token: configured (value not displayed)")
 		}
@@ -735,7 +765,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) error {
 		}
 	case controlplane.RunnerAuthModeEnrollment:
 		presenter.Info("Runner authentication mode: enrollment")
-		presenter.Info(fmt.Sprintf("Approve runner enrollments at: %s/runner/enroll", baseURL))
+		presenter.Info(fmt.Sprintf("Approve runner enrollments at: %s/runner/enroll", browserURL))
 	case controlplane.RunnerAuthModeNone:
 		if config.SkipAuth {
 			presenter.Warning("Runner authentication disabled (--skip-auth)")

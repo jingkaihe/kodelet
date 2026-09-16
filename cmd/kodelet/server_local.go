@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 )
 
@@ -28,6 +29,7 @@ const localServerTimeout = 30 * time.Second
 type localServerConnection struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	URL           string `json:"url"`
+	WebURL        string `json:"webUrl,omitempty"` // Browser sign-in URL; never append the local API credential.
 	PID           int    `json:"pid"`
 	InstanceID    string `json:"instanceId"`
 	Version       string `json:"version"`
@@ -159,13 +161,13 @@ func localServerConfigIdentity() (string, string, error) {
 	return path, mode, err
 }
 
-func publishLocalServer(directory, endpoint, token, instanceID string, managed bool) error {
+func publishLocalServer(directory, endpoint, token, instanceID string, managed bool, webURL string) error {
 	configFile, configMode, err := localServerConfigIdentity()
 	if err != nil {
 		return err
 	}
 	connection := localServerConnection{
-		SchemaVersion: 1, URL: endpoint, PID: os.Getpid(), InstanceID: instanceID,
+		SchemaVersion: 1, URL: endpoint, WebURL: webURL, PID: os.Getpid(), InstanceID: instanceID,
 		Version: version.Version, ConfigFile: configFile, ConfigMode: configMode, Managed: managed,
 	}
 	data, err := json.MarshalIndent(connection, "", "  ")
@@ -213,20 +215,40 @@ func probeLocalServer(ctx context.Context, connection localServerConnection, tok
 	return status, nil
 }
 
-// prepareLocalServeConfig validates rather than silently overriding an operator's
-// network/auth policy. Request-scoped CLI model flags are never forwarded.
+// localServerHost returns the loopback address reachable through this binding.
+// Wildcard listeners retain their configured exposure, but local credentials
+// and lifecycle requests always travel over loopback.
+func localServerHost(host string) string {
+	switch host {
+	case "0.0.0.0":
+		return "127.0.0.1"
+	case "::":
+		return "::1"
+	default:
+		if controlplaneurl.IsLoopbackHostname(host) {
+			return host
+		}
+		return ""
+	}
+}
+
+// prepareLocalServeConfig preserves the operator's network/auth policy.
+// Request-scoped CLI model flags are never forwarded.
 func prepareLocalServeConfig(config *ServeConfig) error {
-	if !controlplaneurl.IsLoopbackHostname(config.Host) || config.SkipAuth || !config.EmbeddedRunner {
-		return errors.New("automatic startup requires a loopback host, authentication, and an embedded runner; use 'kodelet serve' and --server for custom deployments")
+	if localServerHost(config.Host) == "" {
+		return errors.New("background startup requires a loopback or wildcard host; use 'kodelet serve' and --server for a specific non-loopback interface")
 	}
 	webMode, runnerMode, err := resolveServeAuthModes(config)
 	if err != nil {
 		return err
 	}
-	if webMode != controlplane.WebAuthModeToken || runnerMode != controlplane.RunnerAuthModeToken {
-		return errors.New("automatic startup requires token authentication; use 'kodelet serve' and --server for custom authentication")
+	if webMode == controlplane.WebAuthModeNone || runnerMode == controlplane.RunnerAuthModeNone {
+		return errors.New("background startup requires authentication; use 'kodelet serve' for unauthenticated deployments")
 	}
-	if config.RunnerWorkspace == "" {
+	if !config.EmbeddedRunner && runnerMode == controlplane.RunnerAuthModeToken && config.RunnerAuthToken == "" {
+		return errors.New("background startup without an embedded runner requires serve.runner_auth_token or serve.runner_auth_mode: enrollment")
+	}
+	if config.EmbeddedRunner && config.RunnerWorkspace == "" {
 		config.RunnerWorkspace, err = os.UserHomeDir()
 		if err != nil {
 			return err
@@ -357,10 +379,10 @@ func ensureLocalServer(ctx context.Context, output io.Writer) (localServerConnec
 				return connection, err
 			}
 			if err == nil {
-				if !status.EmbeddedRunner.Enabled || status.EmbeddedRunner.Error != "" {
+				if status.EmbeddedRunner.Error != "" {
 					return connection, errors.Errorf("local server's embedded runner is unavailable: %s; check 'kodelet server logs'", status.EmbeddedRunner.Error)
 				}
-				if status.APIReady && status.EmbeddedRunner.Ready {
+				if status.APIReady && (!status.EmbeddedRunner.Enabled || status.EmbeddedRunner.Ready) {
 					return connection, nil
 				}
 			}
@@ -374,24 +396,10 @@ func ensureLocalServer(ctx context.Context, output io.Writer) (localServerConnec
 func prepareClientServer(ctx context.Context, cmd *cobra.Command) (string, string, error) {
 	server, configured := serverFlagOrConfig(cmd)
 	token, source, err := resolveControlPlaneAuthToken(cmd, server)
-	if configured || source == controlPlaneAuthTokenSourceStored || err != nil {
-		// A saved sign-in identifies an existing operator-managed server, even
-		// without --server. Preserve login/connection errors instead of starting
-		// another daemon or waiting for token-based local discovery state.
+	if configured || ((source == controlPlaneAuthTokenSourceStored || err != nil) && !viper.IsSet("serve")) {
+		// Explicit endpoints remain connect-only. Without a local serve policy,
+		// preserve saved sign-ins to existing operator-managed servers too.
 		return server, token, err
-	}
-	config := NewServeConfig()
-	if err := applyTrustedServeConfig(config); err != nil {
-		return "", "", err
-	}
-	webMode, _, err := resolveServeAuthModes(config)
-	if err != nil {
-		return "", "", err
-	}
-	if webMode == controlplane.WebAuthModeOIDC {
-		// OIDC deployments remain connect-only before login too, and may
-		// use an explicit API credential instead of a saved sign-in.
-		return server, token, nil
 	}
 	output := cmd.ErrOrStderr()
 	if cmd.Name() == "chat" {

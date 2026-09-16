@@ -23,6 +23,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -200,6 +201,252 @@ func TestManagedServerColdRunReuseAndRecovery(t *testing.T) {
 		require.NoError(t, process.Wait(), "%s", diagnostics.String())
 		assert.Contains(t, diagnostics.String(), "Starting local Kodelet server")
 	})
+}
+
+func TestManagedOIDCServerLifecycleAndImplicitClients(t *testing.T) {
+	for _, embedded := range []bool{true, false} {
+		t.Run(fmt.Sprintf("embedded_runner=%t", embedded), func(t *testing.T) {
+			directory := localServerTestState(t)
+			home := os.Getenv("HOME")
+			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+			defer cancel()
+			var toolResults, helperCalls, discoveryCalls atomic.Int32
+			provider := daemonTestProvider(t, "", "", &toolResults, &helperCalls, nil)
+			t.Cleanup(provider.Close)
+			// Only discovery is needed: the local API credential must not require
+			// an interactive OIDC login or an externally usable compatibility token.
+			var issuer *httptest.Server
+			issuer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/.well-known/openid-configuration" {
+					assert.Fail(t, "unexpected OIDC request", "%s", r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				discoveryCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+					"issuer": issuer.URL, "authorization_endpoint": issuer.URL + "/authorize",
+					"token_endpoint": issuer.URL + "/token", "jwks_uri": issuer.URL + "/keys",
+					"id_token_signing_alg_values_supported": []string{"RS256"},
+				}))
+			}))
+			t.Cleanup(issuer.Close)
+			binDir := filepath.Join(home, ".kodelet", "bin")
+			require.NoError(t, os.MkdirAll(binDir, 0o700))
+			for name, output := range map[string]string{"rg": "ripgrep " + binaries.RipgrepVersion, "fd": "fd " + binaries.FdVersion} {
+				require.NoError(t, os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\necho '"+output+"'\n"), 0o700))
+			}
+			secretFile := writeOIDCSecretFile(t, "fixture-client-secret")
+			reservation, err := net.Listen("tcp4", "0.0.0.0:0")
+			require.NoError(t, err)
+			port := reservation.Addr().(*net.TCPAddr).Port
+			t.Cleanup(func() { _ = reservation.Close() })
+			const webURL = "https://kodelet.example.test"
+			config := fmt.Sprintf(`provider: openai
+model: gpt-4o
+weak_model: gpt-4o
+max_tokens: 256
+openai:
+  platform: openai
+  base_url: %s
+  api_mode: chat_completions
+  api_key_env_var: KODELET_TEST_PROVIDER_KEY
+extensions:
+  enabled: false
+skills:
+  enabled: false
+serve:
+  host: 0.0.0.0
+  port: %d
+  embedded_runner: %t
+  web_auth_mode: oidc
+  runner_auth_mode: enrollment
+  oidc:
+    issuer: %s
+    client_id: fixture-client
+    client_secret_file: %q
+    redirect_url: %s/auth/oidc/callback
+    admin_emails: [admin@example.test]
+`, provider.URL, port, embedded, issuer.URL, secretFile, webURL)
+			require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte(config), 0o600))
+			environment := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "SHELL=/bin/sh", "KODELET_BASE_PATH=" + os.Getenv("KODELET_BASE_PATH"), "KODELET_TEST_CLI_PROCESS=1", "KODELET_TEST_PROVIDER_KEY=daemon-only-key"}
+			cli := func(args ...string) *exec.Cmd { return daemonCLIProcess(ctx, t, home, environment, args...) }
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				process := daemonCLIProcess(cleanupCtx, t, home, environment, "server", "stop", "--force")
+				output, err := process.CombinedOutput()
+				assert.NoError(t, err, "%s", output)
+				if t.Failed() {
+					data, _ := os.ReadFile(filepath.Join(directory, "server.log"))
+					t.Logf("server log: %.12000s", data)
+				}
+			})
+			runCLI := func(args ...string) string {
+				t.Helper()
+				output, err := cli(args...).CombinedOutput()
+				require.NoError(t, err, "%s", output)
+				return string(output)
+			}
+			require.NoError(t, reservation.Close())
+			assert.Contains(t, runCLI("server", "start"), "Local server ready")
+			connection, err := readLocalServerConnection(directory)
+			require.NoError(t, err)
+			assert.True(t, connection.Managed)
+			assert.NotEqual(t, os.Getpid(), connection.PID)
+			assert.Equal(t, fmt.Sprintf("http://127.0.0.1:%d", port), connection.URL)
+			assert.Equal(t, webURL, connection.WebURL)
+			output := runCLI("server", "status")
+			assert.Contains(t, output, "Managed: true")
+			assert.Contains(t, output, "API ready: true")
+			assert.Contains(t, output, fmt.Sprintf("Runner ready: %t", embedded))
+			client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
+			if embedded {
+				// Exercise shared lifecycle and credential behavior once; the
+				// external-only case only needs to prove readiness without a runner.
+				token, err := os.ReadFile(filepath.Join(directory, "client-token"))
+				require.NoError(t, err)
+				require.NotEmpty(t, token)
+				for name, mode := range map[string]os.FileMode{"": 0o700, "connection.json": 0o600, "client-token": 0o600} {
+					info, err := os.Stat(filepath.Join(directory, name))
+					require.NoError(t, err)
+					assert.Equal(t, mode, info.Mode().Perm())
+				}
+				data, err := os.ReadFile(filepath.Join(directory, "connection.json"))
+				require.NoError(t, err)
+				assert.NotContains(t, string(data), string(token))
+				status, err := probeLocalServer(ctx, connection, string(token))
+				require.NoError(t, err)
+				assert.True(t, status.EmbeddedRunner.Enabled)
+				assert.True(t, status.EmbeddedRunner.Ready)
+				for _, path := range []string{"/api/status", "/api/status?token=" + string(token)} {
+					request, err := http.NewRequestWithContext(ctx, http.MethodGet, connection.URL+path, nil)
+					require.NoError(t, err)
+					response, err := client.Do(request)
+					require.NoError(t, err)
+					assert.Equal(t, http.StatusUnauthorized, response.StatusCode, "local credential is header-only; OIDC remains required otherwise")
+					require.NoError(t, response.Body.Close())
+				}
+				assert.NotContains(t, runCLI("server", "start"), string(token))
+				reused, err := readLocalServerConnection(directory)
+				require.NoError(t, err)
+				assert.Equal(t, connection.InstanceID, reused.InstanceID)
+				assert.NotContains(t, output, string(token))
+				assert.Equal(t, webURL+"\n", runCLI("server", "url"))
+				logs := runCLI("server", "logs")
+				assert.NotContains(t, logs, string(token))
+				assert.Contains(t, logs, "Open this URL: "+webURL)
+				assert.Contains(t, logs, "Approve runner enrollments at: "+webURL+"/runner/enroll")
+				runCLI("server", "restart")
+				restarted, err := readLocalServerConnection(directory)
+				require.NoError(t, err)
+				assert.NotEqual(t, connection.InstanceID, restarted.InstanceID)
+				assert.Equal(t, connection.URL, restarted.URL)
+				replacementToken, err := os.ReadFile(filepath.Join(directory, "client-token"))
+				require.NoError(t, err)
+				assert.NotEqual(t, string(token), string(replacementToken))
+				_, err = probeLocalServer(ctx, restarted, string(token))
+				assert.ErrorContains(t, err, "HTTP 401")
+			}
+			runCLI("server", "stop")
+			assert.NoFileExists(t, filepath.Join(directory, "connection.json"))
+			assert.NoFileExists(t, filepath.Join(directory, "client-token"))
+			assert.Positive(t, discoveryCalls.Load())
+			if !embedded {
+				// Explicit foreground flags override the inherited OIDC policy and
+				// wildcard host while retaining the configured pinned port.
+				discoveries := discoveryCalls.Load()
+				process := cli("serve", "--skip-auth", "--host=127.0.0.1")
+				var diagnostics bytes.Buffer
+				process.Stdout, process.Stderr = &diagnostics, &diagnostics
+				require.NoError(t, process.Start())
+				processDone := make(chan error, 1)
+				go func() { processDone <- process.Wait() }()
+				exited := false
+				defer func() {
+					if !exited {
+						_ = process.Process.Kill()
+						<-processDone
+					}
+					if t.Failed() {
+						t.Logf("foreground server output: %s", diagnostics.String())
+					}
+				}()
+				request, err := http.NewRequestWithContext(ctx, http.MethodGet, connection.URL+"/api/status", nil)
+				require.NoError(t, err)
+				require.Eventually(t, func() bool {
+					response, err := client.Do(request)
+					if err != nil {
+						return false
+					}
+					defer response.Body.Close()
+					var status localServerStatus
+					return response.StatusCode == http.StatusOK && json.NewDecoder(response.Body).Decode(&status) == nil && status.APIReady && !status.EmbeddedRunner.Enabled
+				}, 10*time.Second, 20*time.Millisecond, "foreground server must accept unauthenticated requests on the inherited port")
+				assert.Equal(t, discoveries, discoveryCalls.Load(), "--skip-auth must not initialize OIDC")
+				assert.NoFileExists(t, filepath.Join(directory, "connection.json"))
+				assert.NoFileExists(t, filepath.Join(directory, "client-token"))
+				require.NoError(t, process.Process.Signal(os.Interrupt))
+				select {
+				case err := <-processDone:
+					exited = true
+					require.NoError(t, err, "%s", diagnostics.String())
+				case <-time.After(5 * time.Second):
+					require.FailNow(t, "foreground server did not stop")
+				}
+				return
+			}
+
+			// A stale login at the bootstrap default must not prevent starting
+			// this user's explicitly configured OIDC server on its pinned port.
+			store, err := userauth.NewStore()
+			require.NoError(t, err)
+			require.NoError(t, store.SaveCredential(controlPlaneAuthTestCredential(defaultRunnerServer, "expired-login", controlPlaneAuthTestBearer(0x93), controlPlaneAuthTestPrincipal("user", "user@example.test"), time.Now().Add(-time.Hour))))
+			// Both clients start with no lifecycle state or credential overrides.
+			process := cli("run", "--no-tools", "--result-only", "cold OIDC query")
+			var stdout, diagnostics bytes.Buffer
+			process.Stdout, process.Stderr = &stdout, &diagnostics
+			require.NoError(t, process.Run(), "%s", diagnostics.String())
+			assert.Equal(t, "tool-free answer\n", stdout.String())
+			assert.Contains(t, diagnostics.String(), "Starting local Kodelet server")
+			runCLI("server", "stop")
+			process = cli("chat", "--no-tools")
+			process.Env = append(process.Env, "TERM=xterm-256color", "COLORTERM=truecolor")
+			terminal, err := pty.StartWithSize(process, &pty.Winsize{Rows: 40, Cols: 120})
+			require.NoError(t, err)
+			var screen daemonChatPTYOutput
+			readDone, processDone := make(chan struct{}), make(chan error, 1)
+			go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
+			go func() { processDone <- process.Wait() }()
+			exited := false
+			defer func() {
+				if !exited {
+					_ = process.Process.Kill()
+					<-processDone
+				}
+				_ = terminal.Close()
+				<-readDone
+				if t.Failed() {
+					t.Logf("chat screen: %s", screen.String())
+				}
+			}()
+			require.Eventually(t, func() bool { return strings.Contains(screen.String(), "extensions · ") }, 10*time.Second, 20*time.Millisecond)
+			_, err = io.WriteString(terminal, "cold OIDC chat query\r")
+			require.NoError(t, err)
+			require.Eventually(t, func() bool { return strings.Contains(screen.String(), "tool-free answer") }, 10*time.Second, 20*time.Millisecond)
+			_, err = io.WriteString(terminal, "\x03")
+			require.NoError(t, err)
+			select {
+			case err := <-processDone:
+				exited = true
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "chat did not exit")
+			}
+			assert.Contains(t, runCLI("server", "status"), "Runner ready: true")
+			assert.GreaterOrEqual(t, discoveryCalls.Load(), int32(4))
+		})
+	}
 }
 
 func TestDaemonChatRendersAndAcceptsInputBeforeBootstrapAndExtensionsReady(t *testing.T) {

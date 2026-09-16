@@ -44,19 +44,39 @@ func publishLocalServerWithRunner(t *testing.T, directory string, runner control
 	require.NoError(t, err)
 	require.NotNil(t, lock)
 	t.Cleanup(func() { _ = lock.Close() })
-	require.NoError(t, publishLocalServer(directory, server.URL, "private-token", "same", true))
+	require.NoError(t, publishLocalServer(directory, server.URL, "private-token", "same", true, ""))
 	return server.URL
 }
 
-func TestLocalServerURLCommandPrintsTokenURL(t *testing.T) {
-	directory := localServerTestState(t)
-	forbidLocalServerSpawn(t)
-	endpoint := publishHealthyLocalServer(t, directory)
-
-	command, stdout, stderr := localServerURLTestCommand()
-	require.NoError(t, command.ExecuteContext(t.Context()))
-	assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
-	assert.Empty(t, stderr.String())
+func TestLocalServerURLCommandPrintsURL(t *testing.T) {
+	for _, test := range []struct {
+		name, webURL string
+		noToken      bool
+	}{
+		{name: "token"},
+		{name: "no token", noToken: true},
+		{name: "OIDC", webURL: "https://kodelet.example.com"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			endpoint := publishHealthyLocalServer(t, directory)
+			expected := endpoint + "?token=private-token"
+			if test.webURL != "" {
+				require.NoError(t, publishLocalServer(directory, endpoint, "private-token", "same", true, test.webURL))
+				expected = test.webURL
+			} else if test.noToken {
+				expected = endpoint
+			}
+			command, stdout, stderr := localServerURLTestCommand()
+			if test.noToken {
+				require.NoError(t, command.Flags().Set("no-token", "true"))
+			}
+			require.NoError(t, command.ExecuteContext(t.Context()))
+			assert.Equal(t, expected+"\n", stdout.String())
+			assert.Empty(t, stderr.String())
+		})
+	}
 }
 
 func TestLocalServerURLCommandWorksWithoutEmbeddedRunner(t *testing.T) {
@@ -79,66 +99,48 @@ func TestLocalServerURLCommandWorksWithoutEmbeddedRunner(t *testing.T) {
 	}
 }
 
-func TestLocalServerURLCommandOmitsTokenOnRequest(t *testing.T) {
-	directory := localServerTestState(t)
-	forbidLocalServerSpawn(t)
-	endpoint := publishHealthyLocalServer(t, directory)
-
-	command, stdout, _ := localServerURLTestCommand()
-	require.NoError(t, command.Flags().Set("no-token", "true"))
-	require.NoError(t, command.ExecuteContext(t.Context()))
-	assert.Equal(t, endpoint+"\n", stdout.String())
-}
-
-func TestLocalServerURLCommandOpensBrowserWithoutLeakingToken(t *testing.T) {
-	directory := localServerTestState(t)
-	forbidLocalServerSpawn(t)
-	endpoint := publishHealthyLocalServer(t, directory)
-
-	previous := localServerOpenBrowser
-	t.Cleanup(func() { localServerOpenBrowser = previous })
-	var opened string
-	localServerOpenBrowser = func(target string) (bool, error) {
-		opened = target
-		return true, nil
+func TestLocalServerURLCommandOpensBrowser(t *testing.T) {
+	for _, test := range []struct {
+		name, webURL string
+		confirmed    bool
+		launchErr    error
+	}{
+		{name: "token", confirmed: true},
+		{name: "OIDC", webURL: "https://kodelet.example.com", confirmed: true},
+		{name: "browser failure", launchErr: errors.New("no browser")},
+		{name: "unconfirmed launch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := localServerTestState(t)
+			forbidLocalServerSpawn(t)
+			endpoint := publishHealthyLocalServer(t, directory)
+			displayURL, target := endpoint, endpoint+"?token=private-token"
+			if test.webURL != "" {
+				require.NoError(t, publishLocalServer(directory, endpoint, "private-token", "same", true, test.webURL))
+				displayURL, target = test.webURL, test.webURL
+			}
+			previous := localServerOpenBrowser
+			t.Cleanup(func() { localServerOpenBrowser = previous })
+			var opened string
+			localServerOpenBrowser = func(url string) (bool, error) {
+				opened = url
+				return test.confirmed, test.launchErr
+			}
+			command, stdout, stderr := localServerURLTestCommand()
+			require.NoError(t, command.Flags().Set("open", "true"))
+			require.NoError(t, command.ExecuteContext(t.Context()))
+			assert.Equal(t, target, opened)
+			if test.confirmed {
+				assert.Equal(t, "Opened "+displayURL+"\n", stdout.String())
+				assert.NotContains(t, stdout.String(), "private-token")
+			} else {
+				assert.Equal(t, target+"\n", stdout.String())
+			}
+			if test.launchErr != nil {
+				assert.Contains(t, stderr.String(), "Could not open the browser automatically")
+			} else {
+				assert.Empty(t, stderr.String())
+			}
+		})
 	}
-
-	command, stdout, _ := localServerURLTestCommand()
-	require.NoError(t, command.Flags().Set("open", "true"))
-	require.NoError(t, command.ExecuteContext(t.Context()))
-	assert.Equal(t, endpoint+"?token=private-token", opened)
-	assert.Equal(t, "Opened "+endpoint+"\n", stdout.String())
-	assert.NotContains(t, stdout.String(), "private-token")
-}
-
-func TestLocalServerURLCommandFallsBackWhenBrowserFails(t *testing.T) {
-	directory := localServerTestState(t)
-	forbidLocalServerSpawn(t)
-	endpoint := publishHealthyLocalServer(t, directory)
-
-	previous := localServerOpenBrowser
-	t.Cleanup(func() { localServerOpenBrowser = previous })
-	localServerOpenBrowser = func(string) (bool, error) { return false, errors.New("no browser") }
-
-	command, stdout, stderr := localServerURLTestCommand()
-	require.NoError(t, command.Flags().Set("open", "true"))
-	require.NoError(t, command.ExecuteContext(t.Context()))
-	assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
-	assert.Contains(t, stderr.String(), "Could not open the browser automatically")
-}
-
-func TestLocalServerURLCommandPrintsURLWhenLaunchIsUnconfirmed(t *testing.T) {
-	directory := localServerTestState(t)
-	forbidLocalServerSpawn(t)
-	endpoint := publishHealthyLocalServer(t, directory)
-
-	previous := localServerOpenBrowser
-	t.Cleanup(func() { localServerOpenBrowser = previous })
-	localServerOpenBrowser = func(string) (bool, error) { return false, nil }
-
-	command, stdout, stderr := localServerURLTestCommand()
-	require.NoError(t, command.Flags().Set("open", "true"))
-	require.NoError(t, command.ExecuteContext(t.Context()))
-	assert.Equal(t, endpoint+"?token=private-token\n", stdout.String())
-	assert.Empty(t, stderr.String())
 }
