@@ -10,11 +10,11 @@ The terminal UI, Web UI, and ACP-compatible editors connect to the agent without
 
 ## Why Kodelet?
 
-- **One control plane, multiple machines.** The daemon owns the agentic loops, model access, and conversation history; runners provide workspace access and tool execution. Use the built-in runner locally or connect remote runners to manage work across machines from the same server. Host both the server and runners remotely to keep working when your laptop is offline.
-- **Clients attach. Work carries on.** Start a task in the TUI, follow the same conversation in the Web UI, and return without starting over. Closing a client does not stop the agent; its lifetime is managed by the backend, not the client.
-- **Extend behavior, not just the tool list.** Write custom tools, commands, and lifecycle handlers with executable extensions. Connect MCP tools through the SDK MCP extension, add specialist expertise with agent skills, and package extensions, skills, and reusable recipes as plugins.
-- **Sign in with your identity.** Use OpenID Connect (OIDC) for browser sign-in and browser-approved CLI, TUI, and editor access. Control who can connect through email or domain allowlists, with roles for sensitive capabilities such as terminal access and runner administration.
-- **Pick the model for the job.** Use Anthropic Claude, OpenAI, or an OpenAI-compatible endpoint with your own credentials. Choose a configured model profile and reasoning effort before starting a conversation.
+- **Run locally or across remote machines.** Kodelet separates the backend that runs the agentic loops from the runners that access files and execute tools, allowing one backend to coordinate multiple agent runs across different machines. You can keep everything local or host both the backend and runners remotely so work continues when your laptop is offline.
+- **Move between clients without interrupting the agent.** The TUI, Web UI, and ACP-compatible editors connect to the same backend so you can start a task in the terminal and follow the same conversation in your browser without restarting it. The backend manages the agent's lifetime independently of these clients, which means closing your terminal or browser doesn't stop the work.
+- **Customize how the agent works.** Extensions let you change the agent's behavior by adding custom tools and commands or responding to lifecycle events. The SDK MCP extension brings MCP tools into this system alongside your own extensions, while skills and recipes provide specialist instructions and reusable prompts that you can package with extensions as plugins to install and share.
+- **Sign in through your identity provider.** Kodelet supports OpenID Connect (OIDC) so you can use your existing identity to sign in on the web and approve access for CLI, TUI, and ACP clients through your browser. You can restrict access to specific email addresses or domains and assign roles to control who can use the server's terminal or administer runners.
+- **Choose the model for each task.** Kodelet works with Anthropic Claude, OpenAI, and OpenAI-compatible endpoints using your own credentials. Model profiles let you select a model and its settings for each conversation so you can adjust how the agent reasons to suit the work you're doing.
 
 ## Get started
 
