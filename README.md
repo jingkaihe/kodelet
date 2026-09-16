@@ -4,17 +4,16 @@
 
 <h1 align="center">Kodelet</h1>
 
-**Your tools. Your models. Your agent.**
+[Kodelet](https://kodelet.com/) is an open-source coding agent that isn't tied to your laptop or terminal session. Run everything locally, or use a single control plane to manage multiple agent runs across remote machines. The agentic loop is decoupled from the execution environments, so the server coordinating the work doesn't have to be the machine doing it.
 
-[Kodelet](https://kodelet.com/) is an open-source coding agent built for software engineering and the work around it. Use it to understand a codebase, implement and verify changes, investigate failures, and automate repeatable work. Extend it with specialist tools and expertise to take it beyond coding.
-
-Start a task in your terminal, follow it in your browser, or work through an ACP-compatible editor. You choose the model, the machine doing the work, and the capabilities available to the agent.
+The terminal UI, Web UI, and ACP-compatible editors connect to the agent without owning its lifetime. Switch clients or disconnect while the work continues. Shape the agent with custom extension tools, MCP integrations, and agent skills, and access your server through identity-based sign-in.
 
 ## Why Kodelet?
 
-- **Close the terminal. Keep the work going.** A background daemon owns execution and saves your conversations. Leave terminal chat without stopping the task, follow the same conversation in the Web UI, and return without starting over.
-- **Your terminal. Another machine.** Use the built-in runner for local work, or connect a runner on another machine to work with its files, dependencies, and environment. Your client does not need to be where the work happens.
-- **Bring the tools you rely on.** Skills, recipes, and executable extensions add expertise, repeatable workflows, and new tools. Plugins package them for reuse, including capabilities beyond coding, such as image generation and integrations with external services.
+- **One control plane, multiple machines.** The daemon owns the agentic loops, model access, and conversation history; runners provide workspace access and tool execution. Use the built-in runner locally or connect remote runners to manage work across machines from the same server. Host both the server and runners remotely to keep working when your laptop is offline.
+- **Clients attach. Work carries on.** Start a task in the TUI, follow the same conversation in the Web UI, and return without starting over. Closing a client does not stop the agent; its lifetime is managed by the backend, not the client.
+- **Extend behavior, not just the tool list.** Write custom tools, commands, and lifecycle handlers with executable extensions. Connect MCP tools through the SDK MCP extension, add specialist expertise with agent skills, and package extensions, skills, and reusable recipes as plugins.
+- **Sign in with your identity.** Use OpenID Connect (OIDC) for browser sign-in and browser-approved CLI, TUI, and editor access. Control who can connect through email or domain allowlists, with roles for sensitive capabilities such as terminal access and runner administration.
 - **Pick the model for the job.** Use Anthropic Claude, OpenAI, or an OpenAI-compatible endpoint with your own credentials. Choose a configured model profile and reasoning effort before starting a conversation.
 
 ## Get started
@@ -97,6 +96,7 @@ Start with project instructions, then add capabilities as you need them:
 | [Recipes](docs/FRAGMENTS.md) | Reusable prompts with arguments and shell substitutions for tasks you repeat. |
 | [Skills](docs/SKILLS.md) | Domain guidance the agent loads when relevant to the task. |
 | [Extensions](docs/extension-design.md) | Executable tools, commands, and lifecycle behavior that connect the agent to your workflows. |
+| [MCP tools](sdk/src/extensions/mcp/README.md) | Tools from local or remote MCP servers, connected through the SDK MCP extension. |
 | [Plugins](docs/SKILLS.md#managing-skills-with-plugins) | Bundles of skills, recipes, and extensions you can install and share. |
 
 For example, with an image-generation extension installed, a request in terminal chat can produce an image you open in the Web UI.
