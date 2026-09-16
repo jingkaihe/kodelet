@@ -42,235 +42,79 @@ import (
 
 // This is the public main -> chat command -> Bubble Tea -> daemon path, not an
 // injected TUI model or chat runner. Only the external model service is faked.
+// Each journey owns its state and processes so failures do not gate other journeys.
 func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 	for _, placement := range []string{"embedded", "standalone"} {
 		t.Run(placement, func(t *testing.T) {
-			readyFile := os.Getenv("KODELET_BROWSER_READY_FILE")
-			timeout := 40 * time.Second
-			if readyFile != "" {
-				timeout = 5 * time.Minute
-			}
-			ctx, cancel := context.WithTimeout(t.Context(), timeout)
-			defer cancel()
-			root := t.TempDir()
-			t.Setenv("HOME", root)
-			t.Setenv("SHELL", "/bin/sh")
-			startup := filepath.Join(root, "runner-startup")
-			workspace, clientCWD := filepath.Join(root, "runner-workspace"), filepath.Join(root, "client-workspace")
-			for _, cwd := range []string{startup, workspace, clientCWD} {
-				require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kodelet", "extensions"), 0o700))
-			}
-			for _, cwd := range []string{startup, workspace} {
-				git := func(args ...string) {
-					t.Helper()
-					command := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
-					output, err := command.CombinedOutput()
-					require.NoError(t, err, "git: %.2000s", output)
+			t.Run("pty-prompts", func(t *testing.T) {
+				f := newDaemonChatPTYFixture(t, placement)
+				readyFile := os.Getenv("KODELET_BROWSER_READY_FILE")
+				if readyFile != "" && os.Getenv("KODELET_BROWSER_REUSE_CONVERSATION") != "1" {
+					f.waitForBrowser(t, readyFile, "")
+					return
 				}
-				git("init")
-				require.NoError(t, os.WriteFile(filepath.Join(cwd, "panel-marker.txt"), []byte("original\n"), 0o600))
-				git("add", "panel-marker.txt")
-				git("-c", "user.name=PTY test", "-c", "user.email=pty@example.test", "-c", "commit.gpgSign=false", "commit", "-m", "panel baseline")
-				require.NoError(t, os.WriteFile(filepath.Join(cwd, "panel-marker.txt"), []byte(filepath.Base(cwd)+"-only-diff\n"), 0o600))
-			}
-			// Seed the existing JSONL format before any CLI starts. The embedded
-			// runner shares the daemon home; a standalone runner owns its own store.
-			historyBasePath := filepath.Join(root, "daemon-store")
-			if placement == "standalone" {
-				historyBasePath = filepath.Join(root, "runner-store")
-			}
-			historyStore := messagehistory.NewStoreWithBasePath(historyBasePath)
-			workspaceScope, err := messagehistory.ResolveScopeCWD(workspace)
-			require.NoError(t, err)
-			startupScope, err := messagehistory.ResolveScopeCWD(startup)
-			require.NoError(t, err)
-			const legacyRawMessage = "/goal legacy-raw-history ship the old task"
-			const otherProjectMessage = "isolated-project history must stay in the other repository"
-			require.NoError(t, historyStore.Append(ctx, messagehistory.Entry{ScopeCWD: workspaceScope, Source: "tui", Text: legacyRawMessage}))
-			require.NoError(t, historyStore.Append(ctx, messagehistory.Entry{ScopeCWD: startupScope, Source: "tui", Text: otherProjectMessage}))
-			executable, err := os.Executable()
-			require.NoError(t, err)
-			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_CHAT_EXTENSION=1 exec %q -test.run '^TestDaemonChatExtensionProcess$'\n", executable)
-			require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-pty"), []byte(script), 0o700))
-			clientMarker := filepath.Join(clientCWD, "client-extension-started")
-			poison := fmt.Sprintf("#!/bin/sh\nprintf 'unexpected local execution' > %q\nexit 1\n", clientMarker)
-			require.NoError(t, os.WriteFile(filepath.Join(clientCWD, ".kodelet", "extensions", "kodelet-extension-client-only"), []byte(poison), 0o700))
-			var providerCalls atomic.Int32
-			provider := daemonChatPTYProvider(t, &providerCalls)
-			defer provider.Close()
-			previous := viper.AllSettings()
-			viper.Reset()
-			t.Cleanup(func() {
-				viper.Reset()
-				for key, value := range previous {
-					viper.Set(key, value)
+				terminal := f.startChat(t, "--runner="+f.runnerID, "--cwd="+f.workspace)
+				terminal.waitRendered(t, "extension · ")
+				terminal.write(t, "exercise native PTY prompts\r")
+				terminal.waitRendered(t, "PTY answer prompt")
+				terminal.write(t, "terminal-answer\r")
+				// A distinct body line survives incremental title repainting.
+				terminal.waitRendered(t, "Dismiss this request to finish the PTY gate.")
+				terminal.write(t, "\x1b")
+				terminal.waitRendered(t, "pty-answer-and-cancel-complete")
+				conversationID := f.conversation(t, "pty-answer-and-cancel-complete")
+				terminal.exit(t)
+
+				assert.EqualValues(t, 2, f.providerCalls.Load(), "only the daemon performs the model/tool round trip")
+				data, err := os.ReadFile(filepath.Join(f.workspace, "pty-extension-evidence.json"))
+				require.NoError(t, err)
+				var evidence daemonChatPTYEvidence
+				require.NoError(t, json.Unmarshal(data, &evidence))
+				assert.Equal(t, f.workspace, evidence.CWD)
+				assert.Equal(t, f.runnerPID, evidence.ParentPID)
+				assert.NotEqual(t, terminal.process.Process.Pid, evidence.PID)
+				assert.Equal(t, extensions.UIInputStatusSubmitted, evidence.Answer.Status)
+				assert.Equal(t, "terminal-answer", evidence.Answer.Value)
+				assert.Equal(t, extensions.UIInputStatusDismissed, evidence.Cancel.Status)
+				initializations, err := os.ReadFile(filepath.Join(f.workspace, "pty-initializations.jsonl"))
+				require.NoError(t, err)
+				for _, line := range strings.Split(strings.TrimSpace(string(initializations)), "\n") {
+					var initialization daemonChatPTYEvidence
+					require.NoError(t, json.Unmarshal([]byte(line), &initialization))
+					assert.Equal(t, f.runnerPID, initialization.ParentPID, "even discovery belongs to the runner")
+				}
+				if readyFile != "" {
+					f.waitForBrowser(t, readyFile, conversationID)
 				}
 			})
-			viper.Set("provider", "openai")
-			viper.Set("model", "gpt-4o")
-			viper.Set("weak_model", "gpt-4o")
-			viper.Set("max_tokens", 256)
-			viper.Set("openai", map[string]any{"platform": "openai", "base_url": provider.URL, "api_key_env_var": "KODELET_TEST_CHAT_PROVIDER_KEY", "api_mode": "chat_completions"})
-			viper.Set("extensions.enabled", true)
-			viper.Set("skills.enabled", false)
-			viper.Set("allowed_tools", []string{"pty_prompt", "pty_background"})
-			t.Setenv("KODELET_TEST_CHAT_PROVIDER_KEY", "daemon-only-pty-key")
-			t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-store"))
-			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			settings := map[string]any{"allowed_tools": []string{"pty_prompt", "pty_background"}, "extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}}
-			settingsData, err := json.Marshal(settings)
-			require.NoError(t, err)
-			for _, cwd := range []string{startup, workspace} {
-				require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), settingsData, 0o600))
+			if os.Getenv("KODELET_BROWSER_READY_FILE") != "" {
+				return // Manual browser mode uses only the prompt fixture.
 			}
-			config := &controlplane.ServerConfig{Host: "127.0.0.1", AuthToken: "client-secret", RunnerAuthToken: "runner-secret", CompactRatio: 0.8}
-			if placement == "embedded" {
-				store, err := localstate.NewStore()
-				require.NoError(t, err)
-				config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{Workspace: startup, Settings: settings, Store: store}
-			}
-			frontend, err := webui.NewHandler()
-			require.NoError(t, err)
-			daemon, err := controlplane.NewServer(ctx, config, frontend)
-			require.NoError(t, err)
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			require.NoError(t, err)
-			endpoint := "http://" + listener.Addr().String()
-			serverCtx, stopServer := context.WithCancel(ctx)
-			serverDone := make(chan error, 1)
-			go func() { serverDone <- daemon.Serve(serverCtx, listener) }()
-			t.Cleanup(func() {
-				stopServer()
-				select {
-				case err := <-serverDone:
-					assert.NoError(t, err)
-				case <-time.After(10 * time.Second):
-					assert.Fail(t, "chat acceptance daemon did not stop")
-				}
-				assert.NoError(t, daemon.Close())
-			})
-			// Deliberate independent test environments, not runtime token scrubbing.
-			childEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "SHELL=/bin/sh", "KODELET_TEST_CLI_PROCESS=1"}
-			runnerPID := os.Getpid()
-			if placement == "standalone" {
-				runnerCtx, stopRunner := context.WithCancel(ctx)
-				process := daemonCLIProcess(runnerCtx, t, startup, append(childEnv, "KODELET_BASE_PATH="+filepath.Join(root, "runner-store")), "runner", "start", "--server="+endpoint, "--auth-token=runner-secret")
-				var output bytes.Buffer
-				process.Stdout, process.Stderr = &output, &output
-				require.NoError(t, process.Start())
-				runnerPID = process.Process.Pid
-				t.Cleanup(func() {
-					stopRunner()
-					_ = process.Wait()
-					if t.Failed() {
-						t.Logf("runner output: %.4000s", output.String())
-					}
-				})
-			}
-			var runnerID string
-			require.Eventually(t, func() bool {
-				runners, _, err := fetchRunners(ctx, endpoint, "client-secret")
-				if err != nil {
-					return false
-				}
-				for _, runner := range runners {
-					if runner.Connected && runner.Status == runnerregistry.RunnerStatusIdle {
-						runnerID = runner.ID
-						return true
-					}
-				}
-				return false
-			}, 10*time.Second, 20*time.Millisecond)
-			waitForBrowser := func(conversationID string) {
-				// Opt-in manual browser acceptance against exactly this provider and
-				// runner fixture. No production flag or unbounded server is added.
-				data, err := json.Marshal(map[string]string{"server": endpoint, "cwd": workspace, "runnerId": runnerID, "token": "client-secret", "conversationId": conversationID})
-				require.NoError(t, err)
-				require.NoError(t, os.WriteFile(readyFile, data, 0o600))
-				ticker := time.NewTicker(100 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					if _, err := os.Stat(readyFile + ".done"); err == nil {
-						return
-					}
-					select {
-					case <-ticker.C:
-					case <-ctx.Done():
-						require.FailNow(t, "browser acceptance did not finish within five minutes")
-					}
-				}
-			}
-			if readyFile != "" && os.Getenv("KODELET_BROWSER_REUSE_CONVERSATION") != "1" {
-				waitForBrowser("")
-				return
-			}
-			invalidStore := filepath.Join(root, "client-store-is-a-file")
-			require.NoError(t, os.WriteFile(invalidStore, []byte("no client conversation database"), 0o600))
-			clientEnv := append(childEnv, "KODELET_BASE_PATH="+invalidStore, "TERM=xterm-256color", "COLORTERM=truecolor")
-			process := daemonCLIProcess(ctx, t, clientCWD, clientEnv, "chat", "--server="+endpoint, "--auth-token=client-secret", "--runner="+runnerID, "--cwd="+workspace)
-			terminal, err := pty.StartWithSize(process, &pty.Winsize{Rows: 40, Cols: 120})
-			require.NoError(t, err)
-			var screen daemonChatPTYOutput
-			readDone, processDone := make(chan struct{}), make(chan error, 1)
-			go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
-			go func() { processDone <- process.Wait() }()
-			processExited := false
-			t.Cleanup(func() {
-				if !processExited {
-					_ = process.Process.Kill()
-					<-processDone
-				}
-				_ = terminal.Close()
-				<-readDone
-				if t.Failed() {
-					t.Logf("terminal output: %.6000s", screen.String())
-				}
-			})
-			waitRendered := func(t *testing.T, text string) {
-				t.Helper()
-				require.Eventually(t, func() bool { return strings.Contains(screen.String(), text) }, 10*time.Second, 10*time.Millisecond, "terminal did not render %q", text)
-			}
-			write := func(t *testing.T, text string) {
-				t.Helper()
-				_, err := io.WriteString(terminal, text)
-				require.NoError(t, err)
-			}
-			waitRendered(t, "extension · ")
-			write(t, "exercise native PTY prompts\r")
-			waitRendered(t, "PTY answer prompt")
-			write(t, "terminal-answer\r")
-			// The renderer may emit only the changed word in a reused title.
-			// This new body line proves the second prompt reached the screen.
-			waitRendered(t, "Dismiss this request to finish the PTY gate.")
-			write(t, "\x1b")
-			waitRendered(t, "pty-answer-and-cancel-complete")
-			client, err := chat.NewClient(endpoint, "client-secret", runnerID)
-			require.NoError(t, err)
-			var conversationID string
-			require.Eventually(t, func() bool {
-				conversations, err := client.ListConversationsInCWD(ctx, 10, workspace)
-				if err != nil || len(conversations) != 1 {
-					return false
-				}
-				conversationID = conversations[0].ID
-				record, err := client.LoadConversationRecord(ctx, conversationID)
-				return err == nil && strings.Contains(string(record.RawMessages), "pty-answer-and-cancel-complete")
-			}, 5*time.Second, 10*time.Millisecond)
-			history, err := client.LoadConversation(ctx, conversationID)
-			require.NoError(t, err)
-			assert.Equal(t, runnerID, history.RunnerID)
-			assert.Equal(t, workspace, history.CWD)
+
 			t.Run("conversation-directory-panels", func(t *testing.T) {
+				f := newDaemonChatPTYFixture(t, placement)
+				for _, cwd := range []string{f.startup, f.workspace} {
+					initDaemonChatPTYRepository(f.ctx, t, cwd)
+					require.NoError(t, os.WriteFile(
+						filepath.Join(cwd, "panel-marker.txt"), []byte(filepath.Base(cwd)+"-only-diff\n"), 0o600,
+					))
+				}
+				conversationID := f.seedConversation(t)
 				for _, target := range []struct {
 					query url.Values
 					cwd   string
-				}{{url.Values{"runnerId": {runnerID}}, startup}, {url.Values{"conversationId": {conversationID}}, workspace}} {
-					request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/api/git/diff?"+target.query.Encode(), nil)
+				}{
+					{url.Values{"runnerId": {f.runnerID}}, f.startup},
+					{url.Values{"conversationId": {conversationID}}, f.workspace},
+				} {
+					request, err := http.NewRequestWithContext(
+						f.ctx, http.MethodGet, f.endpoint+"/api/git/diff?"+target.query.Encode(), nil,
+					)
 					require.NoError(t, err)
 					request.Header.Set("Authorization", "Bearer client-secret")
 					response, err := http.DefaultClient.Do(request)
 					require.NoError(t, err)
-					defer response.Body.Close()
+					t.Cleanup(func() { _ = response.Body.Close() })
 					require.Equal(t, http.StatusOK, response.StatusCode)
 					var diff struct {
 						CWD     string `json:"cwd"`
@@ -285,16 +129,25 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 					assert.Contains(t, diff.Diff, "+"+filepath.Base(target.cwd)+"-only-diff")
 				}
 				query := url.Values{"conversationId": {conversationID}, "rows": {"30"}, "cols": {"100"}}
-				connection, _, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(endpoint, "http")+"/api/terminal/ws?"+query.Encode(), http.Header{"Authorization": {"Bearer client-secret"}})
+				connection, _, err := websocket.DefaultDialer.DialContext(
+					f.ctx, "ws"+strings.TrimPrefix(f.endpoint, "http")+"/api/terminal/ws?"+query.Encode(),
+					http.Header{"Authorization": {"Bearer client-secret"}},
+				)
 				require.NoError(t, err)
-				defer connection.Close()
+				t.Cleanup(func() { _ = connection.Close() })
 				require.NoError(t, connection.SetReadDeadline(time.Now().Add(5*time.Second)))
 				var ready struct{ Type, CWD string }
 				require.NoError(t, connection.ReadJSON(&ready))
 				assert.Equal(t, "ready", ready.Type)
-				assert.Equal(t, workspace, ready.CWD)
+				assert.Equal(t, f.workspace, ready.CWD)
 				require.NoError(t, connection.WriteJSON(map[string]any{"type": "resize", "rows": 37, "cols": 111}))
-				require.NoError(t, connection.WriteJSON(map[string]any{"type": "input", "data": "printf 'actual-panel-cwd:%s\\n' \"$PWD\"; printf 'actual-panel-parent:%s\\n' \"$PPID\"; cat panel-marker.txt; stty size; exit 7\n"}))
+				const command = `printf 'actual-panel-cwd:%s\n' "$PWD"
+printf 'actual-panel-parent:%s\n' "$PPID"
+cat panel-marker.txt
+stty size
+exit 7
+`
+				require.NoError(t, connection.WriteJSON(map[string]any{"type": "input", "data": command}))
 				var output strings.Builder
 				for {
 					kind, data, err := connection.ReadMessage()
@@ -313,21 +166,28 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 						break
 					}
 				}
-				physicalWorkspace, err := filepath.EvalSymlinks(workspace)
+				physicalWorkspace, err := filepath.EvalSymlinks(f.workspace)
 				require.NoError(t, err)
 				assert.Contains(t, output.String(), "actual-panel-cwd:"+physicalWorkspace)
-				assert.Contains(t, output.String(), "actual-panel-parent:"+strconv.Itoa(runnerPID))
+				assert.Contains(t, output.String(), "actual-panel-parent:"+strconv.Itoa(f.runnerPID))
 				assert.Contains(t, output.String(), "runner-workspace-only-diff")
 				assert.Contains(t, output.String(), "37 111")
 				assert.NotContains(t, output.String(), "runner-startup-only-diff")
 			})
+
 			t.Run("discovered-native-shortcut", func(t *testing.T) {
-				write(t, "?")
-				waitRendered(t, "PTY shortcut submission")
-				write(t, "\r")   // Close help without an Escape prefix merging with Ctrl-R.
-				write(t, "\x12") // Ctrl-R comes from runner discovery, not a TUI test hook.
-				waitRendered(t, "pty-shortcut-complete")
-				data, err := os.ReadFile(filepath.Join(workspace, "pty-shortcut.json"))
+				f := newDaemonChatPTYFixture(t, placement)
+				terminal := f.startChat(t, "--runner="+f.runnerID, "--cwd="+f.workspace)
+				terminal.waitRendered(t, "extension · ")
+				terminal.write(t, "exercise native chat history\r")
+				terminal.waitRendered(t, "pty-history-answer")
+				conversationID := f.conversation(t, "pty-history-answer")
+				terminal.write(t, "?")
+				terminal.waitRendered(t, "PTY shortcut submission")
+				terminal.write(t, "\r")   // Avoid merging an Escape prefix with Ctrl-R.
+				terminal.write(t, "\x12") // Discovered binding, not a TUI test hook.
+				terminal.waitRendered(t, "pty-shortcut-complete")
+				data, err := os.ReadFile(filepath.Join(f.workspace, "pty-shortcut.json"))
 				require.NoError(t, err)
 				var invocation struct {
 					ParentPID int                             `json:"parentPid"`
@@ -335,179 +195,451 @@ func TestDaemonChatPTYAcrossRunnerPlacements(t *testing.T) {
 					Context   extensions.ExtensionCallContext `json:"context"`
 				}
 				require.NoError(t, json.Unmarshal(data, &invocation))
-				assert.Equal(t, runnerPID, invocation.ParentPID)
+				assert.Equal(t, f.runnerPID, invocation.ParentPID)
 				assert.Equal(t, "ctrl+r", invocation.Key)
-				assert.Equal(t, workspace, invocation.Context.CWD)
+				assert.Equal(t, f.workspace, invocation.Context.CWD)
 				assert.NotEmpty(t, invocation.Context.ConversationID)
 				assert.NotEqual(t, conversationID, invocation.Context.ConversationID, "idle shortcut uses a temporary execution scope")
-				require.Eventually(t, func() bool {
-					record, err := client.LoadConversationRecord(ctx, conversationID)
-					return err == nil && strings.Contains(string(record.RawMessages), "exercise native shortcut") && strings.Contains(string(record.RawMessages), "pty-shortcut-complete")
-				}, 5*time.Second, 10*time.Millisecond)
-				conversations, err := client.ListConversationsInCWD(ctx, 10, workspace)
+				assert.Equal(t, conversationID, f.conversation(t, "pty-shortcut-complete"), "shortcut uses the existing conversation")
+				record, err := f.client.LoadConversationRecord(f.ctx, conversationID)
 				require.NoError(t, err)
-				require.Len(t, conversations, 1, "shortcut execution does not create an extra conversation")
-				assert.Equal(t, conversationID, conversations[0].ID)
+				assert.Contains(t, string(record.RawMessages), "exercise native shortcut")
+				terminal.exit(t)
+				assert.EqualValues(t, 2, f.providerCalls.Load())
 			})
-			write(t, "\x03")
-			select {
-			case err := <-processDone:
-				processExited = true
-				require.NoError(t, err)
-			case <-time.After(5 * time.Second):
-				require.FailNow(t, "public chat did not exit after Ctrl-C")
-			}
+
 			t.Run("builtin-history-recall-across-processes", func(t *testing.T) {
-				entries, err := historyStore.List(ctx, workspaceScope, messagehistory.MaxEntriesPerScope)
+				f := newDaemonChatPTYFixture(t, placement)
+				for _, cwd := range []string{f.startup, f.workspace} {
+					initDaemonChatPTYRepository(f.ctx, t, cwd)
+				}
+				// Seed legacy JSONL history before either chat CLI starts.
+				historyStore := messagehistory.NewStoreWithBasePath(f.historyBasePath)
+				workspaceScope, err := messagehistory.ResolveScopeCWD(f.workspace)
+				require.NoError(t, err)
+				startupScope, err := messagehistory.ResolveScopeCWD(f.startup)
+				require.NoError(t, err)
+				const legacyRawMessage = "/goal legacy-raw-history ship the old task"
+				const otherProjectMessage = "isolated-project history must stay in the other repository"
+				require.NoError(t, historyStore.Append(f.ctx, messagehistory.Entry{
+					ScopeCWD: workspaceScope, Source: "tui", Text: legacyRawMessage,
+				}))
+				require.NoError(t, historyStore.Append(f.ctx, messagehistory.Entry{
+					ScopeCWD: startupScope, Source: "tui", Text: otherProjectMessage,
+				}))
+				first := f.startChat(t, "--runner="+f.runnerID, "--cwd="+f.workspace)
+				first.waitRendered(t, "extension · ")
+				first.write(t, "exercise native chat history\r")
+				first.waitRendered(t, "pty-history-answer")
+				conversationID := f.conversation(t, "pty-history-answer")
+				first.exit(t)
+
+				entries, err := historyStore.List(f.ctx, workspaceScope, messagehistory.MaxEntriesPerScope)
 				require.NoError(t, err)
 				var messages []string
 				for _, entry := range entries {
 					messages = append(messages, entry.Text)
 				}
 				require.Contains(t, messages, legacyRawMessage, "existing raw composer history must remain readable")
-				require.Contains(t, messages, "exercise native PTY prompts", "the first CLI must persist new submissions on its runner")
+				require.Contains(t, messages, "exercise native chat history", "the first CLI must persist new submissions on its runner")
 				assert.NotContains(t, messages, otherProjectMessage)
 
 				// A fresh conversation in a subdirectory must recall the same Git
 				// project's messages, not load a saved conversation transcript.
-				subdirectory := filepath.Join(workspace, "history-subdirectory")
+				subdirectory := filepath.Join(f.workspace, "history-subdirectory")
 				require.NoError(t, os.MkdirAll(subdirectory, 0o700))
-				callsBefore := providerCalls.Load()
-				fresh := daemonCLIProcess(ctx, t, clientCWD, clientEnv, "chat", "--server="+endpoint, "--auth-token=client-secret", "--runner="+runnerID, "--cwd="+subdirectory, "--no-extensions")
-				terminal, err := pty.StartWithSize(fresh, &pty.Winsize{Rows: 40, Cols: 120})
-				require.NoError(t, err)
-				var screen daemonChatPTYOutput
-				readDone, done := make(chan struct{}), make(chan error, 1)
-				go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
-				go func() { done <- fresh.Wait() }()
-				exited := false
-				t.Cleanup(func() {
-					if !exited {
-						_ = fresh.Process.Kill()
-						<-done
-					}
-					_ = terminal.Close()
-					<-readDone
-					if t.Failed() {
-						t.Logf("fresh history terminal: %.6000s", screen.String())
-					}
-				})
-				waitRendered := func(text string) {
-					t.Helper()
-					require.Eventually(t, func() bool { return strings.Contains(screen.String(), text) }, 5*time.Second, 10*time.Millisecond, "fresh terminal did not render %q", text)
-				}
-				write := func(text string) {
-					t.Helper()
-					_, err := io.WriteString(terminal, text)
-					require.NoError(t, err)
-				}
-				waitRendered("0 extensions · ")
-				assert.NotContains(t, screen.String(), "pty-answer-and-cancel-complete", "fresh chat must not resume the old transcript")
-				assert.NotContains(t, screen.String(), "exercise native PTY prompts")
+				callsBefore := f.providerCalls.Load()
+				fresh := f.startChat(t, "--runner="+f.runnerID, "--cwd="+subdirectory, "--no-extensions")
+				fresh.waitRendered(t, "0 extensions · ")
+				assert.NotContains(t, fresh.screen.String(), "pty-history-answer", "fresh chat must not resume the old transcript")
+				assert.NotContains(t, fresh.screen.String(), "exercise native chat history")
 				// --no-extensions prevents the fixture's Ctrl-R shortcut from
 				// overriding the built-in search. Never submit a recalled message.
 				// Paste each query atomically: per-key matching can select a shared
 				// prefix first, leaving only a suffix in Bubble Tea's delta output.
 				// ansi.Strip removes escapes but does not reconstruct the screen.
-				write("\x12\x1b[200~legacy-raw-history\x1b[201~")
-				waitRendered("reverse-i-search:")
-				waitRendered(legacyRawMessage)
-				write("\x15\x1b[200~native PTY\x1b[201~")
-				waitRendered("exercise native PTY prompts")
-				write("\x15\x1b[200~isolated-project\x1b[201~")
-				waitRendered("isolated-project  no matches")
-				assert.NotContains(t, screen.String(), otherProjectMessage)
-				write("\x03")
-				select {
-				case err := <-done:
-					exited = true
-					require.NoError(t, err)
-				case <-time.After(5 * time.Second):
-					require.FailNow(t, "fresh history CLI did not exit after Ctrl-C")
-				}
-				assert.Equal(t, callsBefore, providerCalls.Load(), "composer history search must not call a model")
-				conversations, err := client.ListConversations(ctx, 10)
+				fresh.write(t, "\x12\x1b[200~legacy-raw-history\x1b[201~")
+				fresh.waitRendered(t, "reverse-i-search:")
+				fresh.waitRendered(t, legacyRawMessage)
+				fresh.write(t, "\x15\x1b[200~native chat history\x1b[201~")
+				fresh.waitRendered(t, "exercise native chat history")
+				fresh.write(t, "\x15\x1b[200~isolated-project\x1b[201~")
+				fresh.waitRendered(t, "isolated-project  no matches")
+				assert.NotContains(t, fresh.screen.String(), otherProjectMessage)
+				fresh.exit(t)
+				assert.Equal(t, callsBefore, f.providerCalls.Load(), "composer history search must not call a model")
+				conversations, err := f.client.ListConversations(f.ctx, 10)
 				require.NoError(t, err)
 				require.Len(t, conversations, 1, "recalling history must not create a conversation")
 				assert.Equal(t, conversationID, conversations[0].ID)
 			})
+
 			t.Run("same-history-cli-and-native-resume", func(t *testing.T) {
-				expected, err := client.LoadConversationRecord(ctx, conversationID)
+				f := newDaemonChatPTYFixture(t, placement)
+				first := f.startChat(t, "--runner="+f.runnerID, "--cwd="+f.workspace)
+				first.waitRendered(t, "extension · ")
+				first.write(t, "exercise native PTY prompts\r")
+				first.waitRendered(t, "PTY answer prompt")
+				first.write(t, "terminal-answer\r")
+				first.waitRendered(t, "Dismiss this request to finish the PTY gate.")
+				first.write(t, "\x1b")
+				first.waitRendered(t, "pty-answer-and-cancel-complete")
+				conversationID := f.conversation(t, "pty-answer-and-cancel-complete")
+				// A later turn must not hide the earlier tool exchange on resume.
+				first.write(t, "exercise native chat history\r")
+				first.waitRendered(t, "pty-history-answer")
+				assert.Equal(t, conversationID, f.conversation(t, "pty-history-answer"))
+				first.exit(t)
+				assert.EqualValues(t, 3, f.providerCalls.Load(), "tool exchange plus a second plain turn")
+				expected, err := f.client.LoadConversationRecord(f.ctx, conversationID)
 				require.NoError(t, err)
-				show := daemonCLIProcess(ctx, t, clientCWD, clientEnv, "conversation", "show", conversationID, "--format=raw", "--server="+endpoint, "--auth-token=client-secret")
+				assert.Contains(t, string(expected.RawMessages), "pty_prompt")
+				assert.Contains(t, string(expected.RawMessages), "terminal-answer")
+				show := f.command(t, "conversation", "show", conversationID, "--format=raw")
 				output, err := show.CombinedOutput()
 				require.NoError(t, err, "conversation show: %.2000s", output)
 				var exported convtypes.ConversationRecord
 				require.NoError(t, json.Unmarshal(output, &exported))
 				assert.Equal(t, conversationID, exported.ID)
-				assert.Equal(t, workspace, exported.CWD)
+				assert.Equal(t, f.workspace, exported.CWD)
 				assert.Equal(t, expected.Metadata, exported.Metadata)
 				assert.Equal(t, expected.Usage, exported.Usage)
 				assert.JSONEq(t, string(expected.RawMessages), string(exported.RawMessages))
 				// No CWD or runner argument: resume must use the saved affinity,
 				// not the client CWD or the embedded runner's startup directory.
-				resumed := daemonCLIProcess(ctx, t, clientCWD, clientEnv, "chat", "--resume="+conversationID, "--server="+endpoint, "--auth-token=client-secret")
-				terminal, err := pty.StartWithSize(resumed, &pty.Winsize{Rows: 60, Cols: 120})
-				require.NoError(t, err)
-				var screen daemonChatPTYOutput
-				readDone, done := make(chan struct{}), make(chan error, 1)
-				go func() { _, _ = io.Copy(&screen, terminal); close(readDone) }()
-				go func() { done <- resumed.Wait() }()
-				exited := false
-				t.Cleanup(func() {
-					if !exited {
-						_ = resumed.Process.Kill()
-						<-done
-					}
-					_ = terminal.Close()
-					<-readDone
-					if t.Failed() {
-						t.Logf("resumed terminal: %.6000s", screen.String())
-					}
-				})
-				require.Eventually(t, func() bool {
-					view := screen.String()
-					return strings.Contains(view, "exercise native PTY prompts") && strings.Contains(view, "pty-answer-and-cancel-complete") && strings.Contains(view, "pty-shortcut-complete") && strings.Contains(view, "runner-workspace")
-				}, 5*time.Second, 10*time.Millisecond, "resumed native CLI must render the same persisted conversation")
-				_, err = io.WriteString(terminal, "\x03")
-				require.NoError(t, err)
-				select {
-				case err := <-done:
-					exited = true
-					require.NoError(t, err)
-				case <-time.After(5 * time.Second):
-					require.FailNow(t, "resumed native CLI did not exit")
-				}
-				after, err := client.LoadConversationRecord(ctx, conversationID)
+				resumed := f.startChat(t, "--resume="+conversationID)
+				resumed.waitRendered(t, "exercise native PTY prompts")
+				resumed.waitRendered(t, "pty-answer-and-cancel-complete")
+				resumed.waitRendered(t, "exercise native chat history")
+				resumed.waitRendered(t, "pty-history-answer")
+				resumed.waitRendered(t, "runner-workspace")
+				resumed.exit(t)
+				after, err := f.client.LoadConversationRecord(f.ctx, conversationID)
 				require.NoError(t, err)
 				assert.Equal(t, expected, after, "show and native resume are read-only until a user submits")
+				assert.EqualValues(t, 3, f.providerCalls.Load(), "show and resume must not call a model")
 			})
-			assert.EqualValues(t, 3, providerCalls.Load(), "only the daemon performs the model/tool round trip and shortcut submission")
-			assert.NoFileExists(t, clientMarker, "client-side extensions must not be initialized")
-			info, err := os.Stat(invalidStore)
-			require.NoError(t, err)
-			assert.False(t, info.IsDir(), "chat did not replace the invalid client store")
-			data, err := os.ReadFile(filepath.Join(workspace, "pty-extension-evidence.json"))
-			require.NoError(t, err)
-			var evidence daemonChatPTYEvidence
-			require.NoError(t, json.Unmarshal(data, &evidence))
-			assert.Equal(t, workspace, evidence.CWD)
-			assert.Equal(t, runnerPID, evidence.ParentPID)
-			assert.NotEqual(t, process.Process.Pid, evidence.PID)
-			assert.Equal(t, extensions.UIInputStatusSubmitted, evidence.Answer.Status)
-			assert.Equal(t, "terminal-answer", evidence.Answer.Value)
-			assert.Equal(t, extensions.UIInputStatusDismissed, evidence.Cancel.Status)
-			initializations, err := os.ReadFile(filepath.Join(workspace, "pty-initializations.jsonl"))
-			require.NoError(t, err)
-			for _, line := range strings.Split(strings.TrimSpace(string(initializations)), "\n") {
-				var initialization daemonChatPTYEvidence
-				require.NoError(t, json.Unmarshal([]byte(line), &initialization))
-				assert.Equal(t, runnerPID, initialization.ParentPID, "even discovery processes belong to the runner, not the client")
-			}
-			if readyFile != "" {
-				waitForBrowser(conversationID)
+		})
+	}
+}
+
+type daemonChatPTYFixture struct {
+	ctx             context.Context
+	startup         string
+	workspace       string
+	clientCWD       string
+	clientEnv       []string
+	endpoint        string
+	runnerID        string
+	runnerPID       int
+	historyBasePath string
+	providerCalls   atomic.Int32
+	client          *chat.Client
+}
+
+func newDaemonChatPTYFixture(t *testing.T, placement string) *daemonChatPTYFixture {
+	t.Helper()
+	timeout := 40 * time.Second
+	if os.Getenv("KODELET_BROWSER_READY_FILE") != "" {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	t.Cleanup(cancel)
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("SHELL", "/bin/sh")
+	f := &daemonChatPTYFixture{
+		ctx:             ctx,
+		startup:         filepath.Join(root, "runner-startup"),
+		workspace:       filepath.Join(root, "runner-workspace"),
+		clientCWD:       filepath.Join(root, "client-workspace"),
+		runnerPID:       os.Getpid(),
+		historyBasePath: filepath.Join(root, "daemon-store"),
+	}
+	for _, cwd := range []string{f.startup, f.workspace, f.clientCWD} {
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kodelet", "extensions"), 0o700))
+	}
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf(`#!/bin/sh
+KODELET_TEST_CHAT_EXTENSION=1 exec %q -test.run '^TestDaemonChatExtensionProcess$'
+`, executable)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(f.workspace, ".kodelet", "extensions", "kodelet-extension-pty"), []byte(script), 0o700,
+	))
+	clientMarker := filepath.Join(f.clientCWD, "client-extension-started")
+	poison := fmt.Sprintf(`#!/bin/sh
+printf 'unexpected local execution' > %q
+exit 1
+`, clientMarker)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(f.clientCWD, ".kodelet", "extensions", "kodelet-extension-client-only"), []byte(poison), 0o700,
+	))
+	provider := daemonChatPTYProvider(t, &f.providerCalls)
+	t.Cleanup(provider.Close)
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range previous {
+			viper.Set(key, value)
+		}
+	})
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4o")
+	viper.Set("weak_model", "gpt-4o")
+	viper.Set("max_tokens", 256)
+	viper.Set("openai", map[string]any{
+		"platform":        "openai",
+		"base_url":        provider.URL,
+		"api_key_env_var": "KODELET_TEST_CHAT_PROVIDER_KEY",
+		"api_mode":        "chat_completions",
+	})
+	viper.Set("extensions.enabled", true)
+	viper.Set("skills.enabled", false)
+	viper.Set("allowed_tools", []string{"pty_prompt", "pty_background"})
+	t.Setenv("KODELET_TEST_CHAT_PROVIDER_KEY", "daemon-only-pty-key")
+	t.Setenv("KODELET_BASE_PATH", filepath.Join(root, "daemon-store"))
+	require.NoError(t, db.RunMigrations(ctx, migrations.All()))
+	settings := map[string]any{
+		"allowed_tools": []string{"pty_prompt", "pty_background"},
+		"extensions":    map[string]any{"enabled": true},
+		"skills":        map[string]any{"enabled": false},
+	}
+	settingsData, err := json.Marshal(settings)
+	require.NoError(t, err)
+	for _, cwd := range []string{f.startup, f.workspace} {
+		require.NoError(t, os.WriteFile(filepath.Join(cwd, "kodelet-config.yaml"), settingsData, 0o600))
+	}
+	config := &controlplane.ServerConfig{
+		Host:            "127.0.0.1",
+		AuthToken:       "client-secret",
+		RunnerAuthToken: "runner-secret",
+		CompactRatio:    0.8,
+	}
+	if placement == "embedded" {
+		store, err := localstate.NewStore()
+		require.NoError(t, err)
+		config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
+			Workspace: f.startup,
+			Settings:  settings,
+			Store:     store,
+		}
+	}
+	frontend, err := webui.NewHandler()
+	require.NoError(t, err)
+	daemon, err := controlplane.NewServer(ctx, config, frontend)
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	f.endpoint = "http://" + listener.Addr().String()
+	serverCtx, stopServer := context.WithCancel(ctx)
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- daemon.Serve(serverCtx, listener)
+	}()
+	t.Cleanup(func() {
+		stopServer()
+		select {
+		case err := <-serverDone:
+			assert.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "chat acceptance daemon did not stop")
+		}
+		assert.NoError(t, daemon.Close())
+	})
+	// Deliberate independent test environments, not runtime token scrubbing.
+	childEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + root,
+		"SHELL=/bin/sh",
+		"KODELET_TEST_CLI_PROCESS=1",
+	}
+	if placement == "standalone" {
+		f.historyBasePath = filepath.Join(root, "runner-store")
+		runnerCtx, stopRunner := context.WithCancel(ctx)
+		process := daemonCLIProcess(
+			runnerCtx, t, f.startup, append(childEnv, "KODELET_BASE_PATH="+f.historyBasePath),
+			"runner", "start", "--server="+f.endpoint, "--auth-token=runner-secret",
+		)
+		var output bytes.Buffer
+		process.Stdout, process.Stderr = &output, &output
+		require.NoError(t, process.Start())
+		f.runnerPID = process.Process.Pid
+		t.Cleanup(func() {
+			stopRunner()
+			_ = process.Wait()
+			if t.Failed() {
+				t.Logf("runner output: %.4000s", output.String())
 			}
 		})
+	}
+	require.Eventually(t, func() bool {
+		runners, _, err := fetchRunners(ctx, f.endpoint, "client-secret")
+		if err != nil {
+			return false
+		}
+		for _, runner := range runners {
+			if runner.Connected && runner.Status == runnerregistry.RunnerStatusIdle {
+				f.runnerID = runner.ID
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond)
+	f.client, err = chat.NewClient(f.endpoint, "client-secret", f.runnerID)
+	require.NoError(t, err)
+	invalidStore := filepath.Join(root, "client-store-is-a-file")
+	require.NoError(t, os.WriteFile(invalidStore, []byte("no client conversation database"), 0o600))
+	f.clientEnv = append(childEnv, "KODELET_BASE_PATH="+invalidStore, "TERM=xterm-256color", "COLORTERM=truecolor")
+	t.Cleanup(func() {
+		assert.NoFileExists(t, clientMarker, "client-side extensions must not be initialized")
+		info, err := os.Stat(invalidStore)
+		if assert.NoError(t, err) {
+			assert.False(t, info.IsDir(), "chat did not replace the invalid client store")
+		}
+	})
+	return f
+}
+
+func (f *daemonChatPTYFixture) command(t *testing.T, args ...string) *exec.Cmd {
+	t.Helper()
+	args = append(args, "--server="+f.endpoint, "--auth-token=client-secret")
+	return daemonCLIProcess(f.ctx, t, f.clientCWD, f.clientEnv, args...)
+}
+
+func (f *daemonChatPTYFixture) seedConversation(t *testing.T) string {
+	t.Helper()
+	// Panels and resume need persisted affinity, not an interactive prompt journey.
+	process := f.command(t, "run", "--runner="+f.runnerID, "--cwd="+f.workspace,
+		"--result-only", "exercise native chat history")
+	output, err := process.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	assert.Equal(t, "pty-history-answer\n", string(output))
+	return f.conversation(t, "pty-history-answer")
+}
+
+func (f *daemonChatPTYFixture) conversation(t *testing.T, text string) string {
+	t.Helper()
+	var conversationID string
+	require.Eventually(t, func() bool {
+		conversations, err := f.client.ListConversationsInCWD(f.ctx, 10, f.workspace)
+		if err != nil || len(conversations) != 1 || conversations[0].IsRunning {
+			return false
+		}
+		conversationID = conversations[0].ID
+		record, err := f.client.LoadConversationRecord(f.ctx, conversationID)
+		return err == nil && strings.Contains(string(record.RawMessages), text)
+	}, 5*time.Second, 10*time.Millisecond, "expected one completed conversation containing %q", text)
+	history, err := f.client.LoadConversation(f.ctx, conversationID)
+	require.NoError(t, err)
+	assert.Equal(t, f.runnerID, history.RunnerID)
+	assert.Equal(t, f.workspace, history.CWD)
+	return conversationID
+}
+
+func (f *daemonChatPTYFixture) waitForBrowser(t *testing.T, readyFile, conversationID string) {
+	t.Helper()
+	// Opt-in manual acceptance; ordinary tests never require a browser.
+	data, err := json.Marshal(map[string]string{
+		"server":         f.endpoint,
+		"cwd":            f.workspace,
+		"runnerId":       f.runnerID,
+		"token":          "client-secret",
+		"conversationId": conversationID,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(readyFile, data, 0o600))
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(readyFile + ".done"); err == nil {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-f.ctx.Done():
+			require.FailNow(t, "browser acceptance did not finish within five minutes")
+		}
+	}
+}
+
+func initDaemonChatPTYRepository(ctx context.Context, t *testing.T, cwd string) {
+	t.Helper()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, "git: %.2000s", output)
+	}
+	git("init")
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "panel-marker.txt"), []byte("original\n"), 0o600))
+	git("add", "panel-marker.txt")
+	git("-c", "user.name=PTY test", "-c", "user.email=pty@example.test",
+		"-c", "commit.gpgSign=false", "commit", "-m", "panel baseline")
+}
+
+type daemonChatPTYSession struct {
+	process  *exec.Cmd
+	terminal *os.File
+	screen   daemonChatPTYOutput
+	done     chan error
+	exited   bool
+}
+
+func (f *daemonChatPTYFixture) startChat(t *testing.T, args ...string) *daemonChatPTYSession {
+	t.Helper()
+	s := &daemonChatPTYSession{
+		process: f.command(t, append([]string{"chat"}, args...)...),
+		done:    make(chan error, 1),
+	}
+	var err error
+	s.terminal, err = pty.StartWithSize(s.process, &pty.Winsize{Rows: 40, Cols: 120})
+	require.NoError(t, err)
+	readDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&s.screen, s.terminal)
+		close(readDone)
+	}()
+	go func() {
+		s.done <- s.process.Wait()
+	}()
+	t.Cleanup(func() {
+		if !s.exited {
+			_ = s.process.Process.Kill()
+			<-s.done
+		}
+		_ = s.terminal.Close()
+		<-readDone
+		if t.Failed() {
+			t.Logf("terminal output: %.6000s", s.screen.String())
+		}
+	})
+	return s
+}
+
+func (s *daemonChatPTYSession) waitRendered(t *testing.T, text string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return strings.Contains(s.screen.String(), text)
+	}, 10*time.Second, 10*time.Millisecond, "terminal did not render %q", text)
+}
+
+func (s *daemonChatPTYSession) write(t *testing.T, text string) {
+	t.Helper()
+	_, err := io.WriteString(s.terminal, text)
+	require.NoError(t, err)
+}
+
+func (s *daemonChatPTYSession) exit(t *testing.T) {
+	t.Helper()
+	s.write(t, "\x03")
+	select {
+	case err := <-s.done:
+		s.exited = true
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "chat did not exit after Ctrl-C")
 	}
 }
 
@@ -550,11 +682,20 @@ func daemonChatPTYProvider(t *testing.T, calls *atomic.Int32) *httptest.Server {
 		calls.Add(1)
 		assert.True(t, request.Stream)
 		finish := "tool_calls"
-		delta := map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "pty-call", "type": "function", "function": map[string]any{"name": "pty_prompt", "arguments": "{}"}}}}
-		var shortcut bool
+		delta := map[string]any{
+			"role": "assistant",
+			"tool_calls": []any{map[string]any{
+				"index":    0,
+				"id":       "pty-call",
+				"type":     "function",
+				"function": map[string]any{"name": "pty_prompt", "arguments": "{}"},
+			}},
+		}
+		var shortcut, history bool
 		for _, message := range request.Messages {
 			if message.Role == "user" {
 				shortcut = strings.Contains(string(message.Content), "exercise native shortcut")
+				history = strings.Contains(string(message.Content), "exercise native chat history")
 			}
 			if message.Role == "tool" {
 				assert.Contains(t, string(message.Content), "terminal-answer")
@@ -566,11 +707,25 @@ func daemonChatPTYProvider(t *testing.T, calls *atomic.Int32) *httptest.Server {
 		if shortcut {
 			finish = "stop"
 			delta = map[string]any{"role": "assistant", "content": "pty-shortcut-complete"}
+		} else if history {
+			// Non-interactive seed for journeys that do not exercise extension prompts.
+			finish = "stop"
+			delta = map[string]any{"role": "assistant", "content": "pty-history-answer"}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		chunk := map[string]any{"id": "pty-completion", "object": "chat.completion.chunk", "model": "gpt-4o", "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+		chunk := map[string]any{
+			"id":      "pty-completion",
+			"object":  "chat.completion.chunk",
+			"model":   "gpt-4o",
+			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
+			"usage":   map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+		}
 		encoded, _ := json.Marshal(chunk)
-		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", encoded)
+		_, _ = fmt.Fprintf(w, `data: %s
+
+data: [DONE]
+
+`, encoded)
 	}))
 }
 
@@ -639,27 +794,52 @@ func TestDaemonChatExtensionProcess(_ *testing.T) {
 			}
 			_ = json.Unmarshal(message["params"], &params)
 			cwd = params.Extension.CWD
-			file, err := os.OpenFile(filepath.Join(cwd, "pty-initializations.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			file, err := os.OpenFile(
+				filepath.Join(cwd, "pty-initializations.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600,
+			)
 			if err == nil {
-				_ = json.NewEncoder(file).Encode(daemonChatPTYEvidence{PID: os.Getpid(), ParentPID: os.Getppid(), CWD: cwd})
+				_ = json.NewEncoder(file).Encode(daemonChatPTYEvidence{
+					PID:       os.Getpid(),
+					ParentPID: os.Getppid(),
+					CWD:       cwd,
+				})
 				_ = file.Close()
 			}
-			result = extensions.InitializeResult{
-				Name: "pty", Version: "1",
-				Tools:     []extensions.ToolRegistration{{Name: "pty_prompt", Description: "Exercise native terminal prompts", InputSchema: map[string]any{"type": "object"}}},
+			initialized := extensions.InitializeResult{
+				Name:    "pty",
+				Version: "1",
+				Tools: []extensions.ToolRegistration{{
+					Name:        "pty_prompt",
+					Description: "Exercise native terminal prompts",
+					InputSchema: map[string]any{"type": "object"},
+				}},
 				Shortcuts: []extensions.ShortcutRegistration{{Key: "ctrl+r", Description: "PTY shortcut submission"}},
 			}
 			// Like subagent extensions, advertise background tools only during execution.
 			if params.Capabilities.Runtime.BackgroundTasks {
-				initialized := result.(extensions.InitializeResult)
-				initialized.Tools = append(initialized.Tools, extensions.ToolRegistration{Name: "pty_background", Description: "Requires background execution", InputSchema: map[string]any{"type": "object"}})
-				result = initialized
+				initialized.Tools = append(initialized.Tools, extensions.ToolRegistration{
+					Name:        "pty_background",
+					Description: "Requires background execution",
+					InputSchema: map[string]any{"type": "object"},
+				})
 			}
 			if os.Getenv("KODELET_TEST_INSPECTION_RECIPES") == "1" {
-				initialized := result.(extensions.InitializeResult)
-				initialized.Commands = []extensions.CommandRegistration{{Name: "dynamic-review", Description: "Dynamic runner recipe", Kind: "recipe", InputSchema: map[string]any{"type": "object"}}, {Name: "not-a-recipe", Description: "Regular command", Kind: "command", InputSchema: map[string]any{"type": "object"}}}
-				result = initialized
+				initialized.Commands = []extensions.CommandRegistration{
+					{
+						Name:        "dynamic-review",
+						Description: "Dynamic runner recipe",
+						Kind:        "recipe",
+						InputSchema: map[string]any{"type": "object"},
+					},
+					{
+						Name:        "not-a-recipe",
+						Description: "Regular command",
+						Kind:        "command",
+						InputSchema: map[string]any{"type": "object"},
+					},
+				}
 			}
+			result = initialized
 		case "extension.shortcut.execute":
 			var params struct {
 				Key     string                          `json:"key"`
@@ -672,7 +852,13 @@ func TestDaemonChatExtensionProcess(_ *testing.T) {
 		case "extension.tool.execute":
 			input := func(title, body string) (extensions.UIInputResponse, error) {
 				next++
-				write(map[string]any{"jsonrpc": "2.0", "id": next, "parentId": message["id"], "method": "kodelet.ui.input", "params": extensions.UIInputRequest{Title: title, Message: body}})
+				write(map[string]any{
+					"jsonrpc":  "2.0",
+					"id":       next,
+					"parentId": message["id"],
+					"method":   "kodelet.ui.input",
+					"params":   extensions.UIInputRequest{Title: title, Message: body},
+				})
 				for {
 					response, err := read()
 					if err != nil {

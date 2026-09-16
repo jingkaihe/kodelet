@@ -48,7 +48,11 @@ func (e *forkCallbackEnvironment) ExecuteTool(ctx context.Context, request agent
 	result := tooltypes.BaseToolResult{Result: conversationID}
 	structured := result.StructuredData()
 	structured.ToolName = request.Name
-	return agentenv.ToolExecution{Input: request.Input, Result: result, StructuredResult: structured}, nil
+	return agentenv.ToolExecution{
+		Input:            request.Input,
+		Result:           result,
+		StructuredResult: structured,
+	}, nil
 }
 
 type integrationConversationForker struct {
@@ -118,7 +122,9 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 			return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
 		},
 		EnvironmentFactory: func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
-			return &forkCallbackEnvironment{Environment: agentenv.NewLocalEnvironment(workingDirectory, runtime)}
+			return &forkCallbackEnvironment{
+				Environment: agentenv.NewLocalEnvironment(workingDirectory, runtime),
+			}
 		},
 	})
 	require.NoError(t, err)
@@ -176,12 +182,14 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, manifest.Config.SystemInformation.Date)
 
 	var lifecycle runnerpayload.LifecycleDispatchResult
-	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
-		RunID:        "run-wire",
-		Event:        runnerpayload.LifecycleAgentInit,
-		SystemPrompt: "wire prompt",
-		AllowedTools: []string{"file_read"},
-	}, &lifecycle))
+	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch,
+		runnerpayload.LifecycleDispatchParams{
+			RunID:        "run-wire",
+			Event:        runnerpayload.LifecycleAgentInit,
+			SystemPrompt: "wire prompt",
+			AllowedTools: []string{"file_read"},
+		}, &lifecycle,
+	))
 	assert.Equal(t, "wire prompt", lifecycle.SystemPrompt)
 
 	result, err := registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
@@ -220,7 +228,8 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 
 	var lateFork runnerpayload.ConversationForkResult
 	err = peer.Call(t.Context(), protocol.MethodConversationFork, runnerpayload.ConversationForkParams{
-		RunID: "run-wire", ToolCallID: "tool-fork",
+		RunID:      "run-wire",
+		ToolCallID: "tool-fork",
 	}, &lateFork)
 	var rpcErr *protocol.RPCError
 	require.ErrorAs(t, err, &rpcErr)

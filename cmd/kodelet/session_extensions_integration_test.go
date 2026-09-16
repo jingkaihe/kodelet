@@ -58,17 +58,36 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 			viper.Set("provider", "openai")
 			viper.Set("model", "gpt-4o")
 			viper.Set("max_tokens", 256)
-			viper.Set("openai", map[string]any{"platform": "openai", "base_url": provider.URL, "api_key_env_var": "KODELET_TEST_PROVIDER_KEY", "api_mode": "chat_completions"})
+			viper.Set("openai", map[string]any{
+				"platform":        "openai",
+				"base_url":        provider.URL,
+				"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
+				"api_mode":        "chat_completions",
+			})
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
 			viper.Set("allowed_tools", []string{"sdk_echo"})
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			config := &controlplane.ServerConfig{Host: "127.0.0.1", Port: 0, CompactRatio: 0.8, AuthToken: "client-secret", RunnerAuthToken: "runner-secret"}
-			settings := map[string]any{"allowed_tools": []string{"sdk_echo"}, "extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}}
+			config := &controlplane.ServerConfig{
+				Host:            "127.0.0.1",
+				Port:            0,
+				CompactRatio:    0.8,
+				AuthToken:       "client-secret",
+				RunnerAuthToken: "runner-secret",
+			}
+			settings := map[string]any{
+				"allowed_tools": []string{"sdk_echo"},
+				"extensions":    map[string]any{"enabled": true},
+				"skills":        map[string]any{"enabled": false},
+			}
 			if placement == "embedded" {
 				store, err := localstate.NewStore()
 				require.NoError(t, err)
-				config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{Workspace: workspace, Settings: settings, Store: store}
+				config.EmbeddedRunner = &controlplane.EmbeddedRunnerConfig{
+					Workspace: workspace,
+					Settings:  settings,
+					Store:     store,
+				}
 			}
 			daemon, err := controlplane.NewServer(ctx, config, nil)
 			require.NoError(t, err)
@@ -77,7 +96,9 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 			serverURL := "http://" + listener.Addr().String()
 			serverCtx, stopServer := context.WithCancel(ctx)
 			serverDone := make(chan error, 1)
-			go func() { serverDone <- daemon.Serve(serverCtx, listener) }()
+			go func() {
+				serverDone <- daemon.Serve(serverCtx, listener)
+			}()
 			t.Cleanup(func() {
 				stopServer()
 				select {
@@ -94,7 +115,15 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, os.WriteFile(filepath.Join(workspace, "kodelet-config.yaml"), settingsJSON, 0o600))
 				runnerCtx, stopRunner := context.WithCancel(ctx)
-				process := daemonCLIProcess(runnerCtx, t, workspace, append(environment, "KODELET_TEST_CLI_PROCESS=1", "KODELET_BASE_PATH="+filepath.Join(root, "runner-state")), "runner", "start", "--server="+serverURL, "--auth-token=runner-secret")
+				process := daemonCLIProcess(runnerCtx, t, workspace,
+					append(environment,
+						"KODELET_TEST_CLI_PROCESS=1",
+						"KODELET_BASE_PATH="+filepath.Join(root, "runner-state"),
+					),
+					"runner", "start",
+					"--server="+serverURL,
+					"--auth-token=runner-secret",
+				)
 				var logs bytes.Buffer
 				process.Stdout, process.Stderr = &logs, &logs
 				require.NoError(t, process.Start())
@@ -123,8 +152,14 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 			executable, err := os.Executable()
 			require.NoError(t, err)
 			wrapper := filepath.Join(root, "sdk-kodelet")
-			require.NoError(t, os.WriteFile(wrapper, []byte(fmt.Sprintf("#!/bin/sh\nKODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- \"$@\"\n", executable)), 0o700))
-			options, err := json.Marshal(map[string]string{"command": wrapper, "server": serverURL, "runner": runnerID})
+			require.NoError(t, os.WriteFile(wrapper, []byte(fmt.Sprintf(`#!/bin/sh
+KODELET_TEST_CLI_PROCESS=1 exec %q -test.run '^TestDaemonFirstCLIProcess$' -- "$@"
+`, executable)), 0o700))
+			options, err := json.Marshal(map[string]string{
+				"command": wrapper,
+				"server":  serverURL,
+				"runner":  runnerID,
+			})
 			require.NoError(t, err)
 			var interpreter, script, source string
 			if sdk == "typescript" {
@@ -156,7 +191,12 @@ func TestSessionExtensionsAcrossProcessBoundary(t *testing.T) {
 				require.NoError(t, err)
 				process := exec.CommandContext(ctx, tsx, example, "Use sdk_echo to say hello")
 				process.Dir = root
-				process.Env = append(environment, "KODELET_BIN="+wrapper, "KODELET_SERVER="+serverURL, "KODELET_RUNNER="+runnerID, "KODELET_CWD="+workspace)
+				process.Env = append(environment,
+					"KODELET_BIN="+wrapper,
+					"KODELET_SERVER="+serverURL,
+					"KODELET_RUNNER="+runnerID,
+					"KODELET_CWD="+workspace,
+				)
 				output, err := process.CombinedOutput()
 				require.NoError(t, err, "%s", output)
 				assert.Contains(t, string(output), "inline answer")
@@ -230,7 +270,8 @@ func assertSessionExtensionHierarchy(ctx context.Context, t *testing.T, serverUR
 					messages = append(messages, message.Content)
 				}
 			}
-			assert.Equal(t, []string{"plain fresh child", "plain resumed child"}, messages, "both child turns must persist without inheriting parent context")
+			assert.Equal(t, []string{"plain fresh child", "plain resumed child"}, messages,
+				"both child turns must persist without inheriting parent context")
 		}
 		if id == copyID {
 			fork, ok := record.Metadata["conversation_fork"].(map[string]any)
@@ -298,11 +339,40 @@ func sessionExtensionTestProvider(t *testing.T) *httptest.Server {
 				text = "disconnect"
 			}
 			arguments, _ := json.Marshal(map[string]string{"text": text})
-			delta = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "inline-call", "type": "function", "function": map[string]any{"name": "sdk_echo", "arguments": string(arguments)}}}}
+			delta = map[string]any{
+				"role": "assistant",
+				"tool_calls": []any{
+					map[string]any{
+						"index": 0,
+						"id":    "inline-call",
+						"type":  "function",
+						"function": map[string]any{
+							"name":      "sdk_echo",
+							"arguments": string(arguments),
+						},
+					},
+				},
+			}
 			finish = "tool_calls"
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		chunk := map[string]any{"id": "inline", "object": "chat.completion.chunk", "model": "gpt-4o", "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+		chunk := map[string]any{
+			"id":     "inline",
+			"object": "chat.completion.chunk",
+			"model":  "gpt-4o",
+			"choices": []any{
+				map[string]any{
+					"index":         0,
+					"delta":         delta,
+					"finish_reason": finish,
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     10,
+				"completion_tokens": 5,
+				"total_tokens":      15,
+			},
+		}
 		data, _ := json.Marshal(chunk)
 		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", data)
 	}))

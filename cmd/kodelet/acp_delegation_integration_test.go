@@ -174,8 +174,18 @@ func TestDaemonACPSearchExtensionProcess(t *testing.T) {
 		switch method {
 		case "extension.initialize":
 			result = extensions.InitializeResult{
-				Name: "code_search", Tools: []extensions.ToolRegistration{{Name: "code_search", Description: "Run restricted code search", InputSchema: map[string]any{"type": "object"}}},
-				Subscriptions: []extensions.Subscription{{Event: "user.message"}, {Event: "agent.init"}},
+				Name: "code_search",
+				Tools: []extensions.ToolRegistration{
+					{
+						Name:        "code_search",
+						Description: "Run restricted code search",
+						InputSchema: map[string]any{"type": "object"},
+					},
+				},
+				Subscriptions: []extensions.Subscription{
+					{Event: "user.message"},
+					{Event: "agent.init"},
+				},
 			}
 		case "extension.event.handle":
 			var event struct {
@@ -188,14 +198,24 @@ func TestDaemonACPSearchExtensionProcess(t *testing.T) {
 			if event.Event == "user.message" {
 				parentSearch = event.Payload.Message == "delegate code search"
 			} else if event.Event == "agent.init" && parentSearch {
-				result = map[string]any{"tools": map[string]any{"disable": []string{"file_read", "grep_tool", "glob_tool"}}}
+				result = map[string]any{
+					"tools": map[string]any{
+						"disable": []string{"file_read", "grep_tool", "glob_tool"},
+					},
+				}
 			}
 		case "extension.tool.execute":
 			var request struct {
 				Context extensions.ExtensionCallContext `json:"context"`
 			}
 			require.NoError(t, json.Unmarshal(message["params"], &request))
-			write(map[string]any{"jsonrpc": "2.0", "id": 1000, "parentId": message["id"], "method": extensions.ConversationForkMethod, "params": map[string]string{"name": daemonACPSearchName}})
+			write(map[string]any{
+				"jsonrpc":  "2.0",
+				"id":       1000,
+				"parentId": message["id"],
+				"method":   extensions.ConversationForkMethod,
+				"params":   map[string]string{"name": daemonACPSearchName},
+			})
 			response := read()
 			require.Empty(t, response["error"])
 			var fork struct {
@@ -218,7 +238,12 @@ func TestDaemonACPSearchExtensionProcess(t *testing.T) {
 // Minimal ACP client: initialize, load a normal named fork, attach an inline
 // agent.init prompt callback, and consume session/update until prompt completion.
 func daemonACPSearch(ctx context.Context, cwd, conversationID string) (string, error) {
-	process := exec.CommandContext(ctx, os.Getenv("KODELET_BIN"), "acp", "--allowed-tools=file_read,grep_tool,glob_tool", "--no-skills=true", "--enable-fs-search-tools=true", "--max-turns=3")
+	process := exec.CommandContext(ctx, os.Getenv("KODELET_BIN"), "acp",
+		"--allowed-tools=file_read,grep_tool,glob_tool",
+		"--no-skills=true",
+		"--enable-fs-search-tools=true",
+		"--max-turns=3",
+	)
 	input, err := process.StdinPipe()
 	if err != nil {
 		return "", err
@@ -231,11 +256,20 @@ func daemonACPSearch(ctx context.Context, cwd, conversationID string) (string, e
 	if err := process.Start(); err != nil {
 		return "", err
 	}
-	defer func() { _ = input.Close(); _ = process.Process.Kill(); _ = process.Wait() }()
+	defer func() {
+		_ = input.Close()
+		_ = process.Process.Kill()
+		_ = process.Wait()
+	}()
 	encoder, decoder := json.NewEncoder(input), json.NewDecoder(output)
 	var content strings.Builder
 	call := func(id int, method string, params any) error {
-		if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		if err := encoder.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"method":  method,
+			"params":  params,
+		}); err != nil {
 			return err
 		}
 		for {
@@ -272,12 +306,20 @@ func daemonACPSearch(ctx context.Context, cwd, conversationID string) (string, e
 				var result any = map[string]any{}
 				switch request.Method {
 				case "extension.initialize":
-					result = extensions.InitializeResult{Name: "search-prompt", Subscriptions: []extensions.Subscription{{Event: "agent.init"}}}
+					result = extensions.InitializeResult{
+						Name:          "search-prompt",
+						Subscriptions: []extensions.Subscription{{Event: "agent.init"}},
+					}
 				case "extension.event.handle":
 					result = map[string]any{"systemPrompt": map[string]string{"replace": daemonACPSearchPrompt}}
 				}
 				frame["message"], _ = json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
-				if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": "inline-response", "method": "kodelet/extensionFrame", "params": frame}); err != nil {
+				if err := encoder.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      "inline-response",
+					"method":  "kodelet/extensionFrame",
+					"params":  frame,
+				}); err != nil {
 					return err
 				}
 			} else if message.Method == "session/update" {
@@ -307,14 +349,35 @@ func daemonACPSearch(ctx context.Context, cwd, conversationID string) (string, e
 			}
 		}
 	}
-	meta := map[string]any{"sessionExtensions": map[string]any{"version": 1, "extensionIds": []string{"inline-1"}}}
-	if err := call(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"_meta": map[string]any{"sessionExtensions": map[string]any{"version": 1}}}}); err != nil {
+	meta := map[string]any{
+		"sessionExtensions": map[string]any{
+			"version":      1,
+			"extensionIds": []string{"inline-1"},
+		},
+	}
+	if err := call(1, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientCapabilities": map[string]any{
+			"_meta": map[string]any{
+				"sessionExtensions": map[string]any{"version": 1},
+			},
+		},
+	}); err != nil {
 		return "", err
 	}
-	if err := call(2, "session/load", map[string]any{"sessionId": conversationID, "cwd": cwd, "_meta": meta}); err != nil {
+	if err := call(2, "session/load", map[string]any{
+		"sessionId": conversationID,
+		"cwd":       cwd,
+		"_meta":     meta,
+	}); err != nil {
 		return "", err
 	}
-	if err := call(3, "session/prompt", map[string]any{"sessionId": conversationID, "prompt": []any{map[string]string{"type": "text", "text": "child code search"}}}); err != nil {
+	if err := call(3, "session/prompt", map[string]any{
+		"sessionId": conversationID,
+		"prompt": []any{
+			map[string]string{"type": "text", "text": "child code search"},
+		},
+	}); err != nil {
 		return "", err
 	}
 	return content.String(), nil

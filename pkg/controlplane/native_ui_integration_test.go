@@ -57,7 +57,13 @@ func TestNativeUIReleaseExtensionProcess(t *testing.T) {
 		state.Lock()
 		pending[string(key)] = ch
 		state.Unlock()
-		write(map[string]any{"jsonrpc": "2.0", "id": id, "parentId": parent, "method": method, "params": params})
+		write(map[string]any{
+			"jsonrpc":  "2.0",
+			"id":       id,
+			"parentId": parent,
+			"method":   method,
+			"params":   params,
+		})
 		return <-ch
 	}
 	log := func(method string, value any) {
@@ -84,7 +90,18 @@ func TestNativeUIReleaseExtensionProcess(t *testing.T) {
 			state.Lock()
 			workspace = params.Extension.CWD
 			state.Unlock()
-			result = extensions.InitializeResult{Name: "native-release", Version: "1", Tools: []extensions.ToolRegistration{{Name: "native_release", Description: "Exercise real UI transport", InputSchema: map[string]any{"type": "object"}}}, Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart}}}
+			result = extensions.InitializeResult{
+				Name:    "native-release",
+				Version: "1",
+				Tools: []extensions.ToolRegistration{
+					{
+						Name:        "native_release",
+						Description: "Exercise real UI transport",
+						InputSchema: map[string]any{"type": "object"},
+					},
+				},
+				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart}},
+			}
 		case "extension.event.handle":
 			var params struct {
 				Event   string                          `json:"event"`
@@ -95,7 +112,8 @@ func TestNativeUIReleaseExtensionProcess(t *testing.T) {
 				state.Lock()
 				scope = params.Context.ConversationID
 				state.Unlock()
-				response := call(request.ID, extensions.BackgroundTaskAcquireMethod, extensions.BackgroundTaskAcquireRequest{Description: "UI release gate worker"})
+				response := call(request.ID, extensions.BackgroundTaskAcquireMethod,
+					extensions.BackgroundTaskAcquireRequest{Description: "UI release gate worker"})
 				log("lease", response)
 				_ = os.WriteFile(filepath.Join(cwd, "native-worker.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600)
 			}
@@ -113,9 +131,17 @@ func TestNativeUIReleaseExtensionProcess(t *testing.T) {
 			log(request.Method, request.Params)
 			// No creating tool/session request remains. A background widget may
 			// still update, but a surface must not recover transparently.
-			response := call(nil, "kodelet.ui.widget.set", extensions.UIWidgetSetRequest{ScopeID: conversation, ID: "worker", Frame: extensions.UIFrame{Sequence: widgetSequence.Add(1)}})
+			response := call(nil, "kodelet.ui.widget.set", extensions.UIWidgetSetRequest{
+				ScopeID: conversation,
+				ID:      "worker",
+				Frame:   extensions.UIFrame{Sequence: widgetSequence.Add(1)},
+			})
 			log("background-widget", response)
-			response = call(nil, "kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ScopeID: conversation, ID: "late", Frame: extensions.UIFrame{Sequence: 1}})
+			response = call(nil, "kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{
+				ScopeID: conversation,
+				ID:      "late",
+				Frame:   extensions.UIFrame{Sequence: 1},
+			})
 			log("closed-open", response)
 		case "kodelet.ui.capabilities", extensions.UISurfaceInputMethod, extensions.UISurfaceResizeMethod:
 			log(request.Method, request.Params)
@@ -227,7 +253,11 @@ func (h *nativeReleaseHost) ExtensionUIHostCapabilities(context.Context) extensi
 	return extensions.ExtensionUIHostCapabilities{Widgets: true, Surfaces: true, Transcript: true}
 }
 
-func (h *nativeReleaseHost) OpenSurface(_ context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
+func (h *nativeReleaseHost) OpenSurface(
+	_ context.Context,
+	source extensions.UIExtensionSource,
+	request extensions.UISurfaceOpenRequest,
+) (extensions.UIFrameResponse, error) {
 	h.mu.Lock()
 	h.surfaces[source.ExtensionUIOwner()] = source
 	h.mu.Unlock()
@@ -235,12 +265,20 @@ func (h *nativeReleaseHost) OpenSurface(_ context.Context, source extensions.UIE
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *nativeReleaseHost) UpdateSurface(_ context.Context, _ extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
+func (h *nativeReleaseHost) UpdateSurface(
+	_ context.Context,
+	_ extensions.UIExtensionSource,
+	request extensions.UISurfaceFrameRequest,
+) (extensions.UIFrameResponse, error) {
 	h.frames <- request
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *nativeReleaseHost) CloseSurface(_ context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
+func (h *nativeReleaseHost) CloseSurface(
+	_ context.Context,
+	source extensions.UIExtensionSource,
+	request extensions.UISurfaceCloseRequest,
+) (extensions.UIFrameResponse, error) {
 	h.mu.Lock()
 	delete(h.surfaces, source.ExtensionUIOwner())
 	h.mu.Unlock()
@@ -254,7 +292,11 @@ func (h *nativeReleaseHost) CleanupExtensionUI(owner extensions.UIExtensionOwner
 	h.webExtensionUIHost.CleanupExtensionUI(owner)
 }
 
-func (h *nativeReleaseHost) AppendTranscript(_ context.Context, _ extensions.UIExtensionSource, request extensions.UITranscriptAppendRequest) (extensions.UITranscriptAppendResponse, error) {
+func (h *nativeReleaseHost) AppendTranscript(
+	_ context.Context,
+	_ extensions.UIExtensionSource,
+	request extensions.UITranscriptAppendRequest,
+) (extensions.UITranscriptAppendResponse, error) {
 	h.transcript <- request
 	return extensions.UITranscriptAppendResponse{Accepted: true}, nil
 }
@@ -275,7 +317,8 @@ func nativeReleasePost(t *testing.T, endpoint, clientID, path string, body any) 
 	t.Helper()
 	data, err := json.Marshal(body)
 	require.NoError(t, err)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint+"/api/conversations/native-release/"+path, bytes.NewReader(data))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		endpoint+"/api/conversations/native-release/"+path, bytes.NewReader(data))
 	require.NoError(t, err)
 	request.Header.Set("Authorization", "Bearer web-secret")
 	request.Header.Set(chat.ClientIDHeader, clientID)
@@ -292,7 +335,14 @@ func nativeReleaseBrowser(t *testing.T, endpoint, message string) <-chan chat.Ch
 	var body io.Reader
 	if message != "" {
 		method, path = http.MethodPost, "/api/chat"
-		data, err := json.Marshal(chat.ChatRequest{ConversationID: "native-release", Message: message, ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true, PersistentWidgets: true}})
+		data, err := json.Marshal(chat.ChatRequest{
+			ConversationID: "native-release",
+			Message:        message,
+			ClientCapabilities: &chat.ChatClientCapabilities{
+				InteractiveUI:     true,
+				PersistentWidgets: true,
+			},
+		})
 		require.NoError(t, err)
 		body = bytes.NewReader(data)
 	}
@@ -332,11 +382,19 @@ func TestNativeUIReleaseRunnerProcess(t *testing.T) {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	loader, err := runnerclient.NewWorkspaceConfigLoader(map[string]any{"extensions": map[string]any{"enabled": true}, "skills": map[string]any{"enabled": false}})
+	loader, err := runnerclient.NewWorkspaceConfigLoader(map[string]any{
+		"extensions": map[string]any{"enabled": true},
+		"skills":     map[string]any{"enabled": false},
+	})
 	require.NoError(t, err)
 	store, err := localstate.NewStoreAt(os.Getenv("KODELET_NATIVE_UI_RUNNER_STORE"))
 	require.NoError(t, err)
-	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{Server: endpoint, Workspace: os.Getenv("KODELET_NATIVE_UI_RUNNER_WORKSPACE"), Store: store, ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader}})
+	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
+		Server:         endpoint,
+		Workspace:      os.Getenv("KODELET_NATIVE_UI_RUNNER_WORKSPACE"),
+		Store:          store,
+		ServiceOptions: runnerclient.ServiceOptions{WorkspaceConfigLoader: loader},
+	})
 	require.NoError(t, err)
 	require.NoError(t, runner.Run(ctx))
 }
@@ -346,13 +404,19 @@ func startNativeReleaseRunnerProcess(t *testing.T, server *Server, endpoint, wor
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	command := exec.Command(executable, "-test.run", "^TestNativeUIReleaseRunnerProcess$")
-	command.Env = append(os.Environ(), "KODELET_NATIVE_UI_RUNNER_SERVER="+endpoint, "KODELET_NATIVE_UI_RUNNER_WORKSPACE="+workspace, "KODELET_NATIVE_UI_RUNNER_STORE="+t.TempDir())
+	command.Env = append(os.Environ(),
+		"KODELET_NATIVE_UI_RUNNER_SERVER="+endpoint,
+		"KODELET_NATIVE_UI_RUNNER_WORKSPACE="+workspace,
+		"KODELET_NATIVE_UI_RUNNER_STORE="+t.TempDir(),
+	)
 	output, err := os.Create(filepath.Join(t.TempDir(), "runner.log"))
 	require.NoError(t, err)
 	command.Stdout, command.Stderr = output, output
 	require.NoError(t, command.Start())
 	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
+	go func() {
+		done <- command.Wait()
+	}()
 	t.Cleanup(func() {
 		_ = command.Process.Signal(os.Interrupt)
 		select {
@@ -389,7 +453,9 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			require.NoError(t, os.MkdirAll(directory, 0o700))
 			executable, err := os.Executable()
 			require.NoError(t, err)
-			script := fmt.Sprintf("#!/bin/sh\nKODELET_NATIVE_UI_RELEASE_HELPER=1 exec %q -test.run '^TestNativeUIReleaseExtensionProcess$'\n", executable)
+			script := fmt.Sprintf(`#!/bin/sh
+KODELET_NATIVE_UI_RELEASE_HELPER=1 exec %q -test.run '^TestNativeUIReleaseExtensionProcess$'
+`, executable)
 			require.NoError(t, os.WriteFile(filepath.Join(directory, "kodelet-extension-native-release"), []byte(script), 0o700))
 			if placement == "standalone" {
 				config.EmbeddedRunner = nil
@@ -397,7 +463,9 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			server, endpoint, stop := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
 			var runnerID string
 			if placement == "embedded" {
-				require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+				require.Eventually(t, func() bool {
+					return server.EmbeddedRunnerStatus().Ready
+				}, 5*time.Second, 10*time.Millisecond)
 				runnerID = server.EmbeddedRunnerStatus().RunnerID
 			} else {
 				runnerID = startNativeReleaseRunnerProcess(t, server, endpoint, workspace)
@@ -409,27 +477,45 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			record.Provider, record.CWD, record.RawMessages = "anthropic", workspace, json.RawMessage(`[]`)
 			require.NoError(t, store.Save(t.Context(), record))
 			opened, finish := make(chan string, 2), make(chan struct{}, 2)
-			server.chatRunner = &mockChatRunner{runFunc: func(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
-				runID := ctx.Value(turnRunIDKey{}).(string)
-				capabilities := protocol.ClientCapabilities{}
-				if request.ClientCapabilities != nil {
-					capabilities.InteractiveUI = request.ClientCapabilities.InteractiveUI
-					capabilities.PersistentWidgets = request.ClientCapabilities.PersistentWidgets
-					capabilities.PersistentSurfaces = request.ClientCapabilities.PersistentSurfaces
-				}
-				_, err := server.runnerRegistry.OpenRun(ctx, runnerID, protocol.RunOpenParams{RunID: runID, ConversationID: request.ConversationID, CWD: workspace, ClientCapabilities: capabilities})
-				if err != nil {
-					return request.ConversationID, err
-				}
-				opened <- runID
-				_ = sink.Send(chat.ChatEvent{Kind: "text-delta", ConversationID: request.ConversationID, Delta: "UI transport gate"})
-				select {
-				case <-finish:
-				case <-ctx.Done():
-				}
-				return request.ConversationID, server.runnerRegistry.CloseRun(context.WithoutCancel(ctx), runID, registry.RunStatusSucceeded, nil)
-			}}
-			host := &nativeReleaseHost{webExtensionUIHost: newWebExtensionUIHost(nil), surfaces: make(map[extensions.UIExtensionOwner]extensions.UIExtensionSource), opened: make(chan extensions.UIExtensionSource, 8), frames: make(chan extensions.UISurfaceFrameRequest, 8), transcript: make(chan extensions.UITranscriptAppendRequest, 8)}
+			server.chatRunner = &mockChatRunner{
+				runFunc: func(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
+					runID := ctx.Value(turnRunIDKey{}).(string)
+					capabilities := protocol.ClientCapabilities{}
+					if request.ClientCapabilities != nil {
+						capabilities.InteractiveUI = request.ClientCapabilities.InteractiveUI
+						capabilities.PersistentWidgets = request.ClientCapabilities.PersistentWidgets
+						capabilities.PersistentSurfaces = request.ClientCapabilities.PersistentSurfaces
+					}
+					_, err := server.runnerRegistry.OpenRun(ctx, runnerID, protocol.RunOpenParams{
+						RunID:              runID,
+						ConversationID:     request.ConversationID,
+						CWD:                workspace,
+						ClientCapabilities: capabilities,
+					})
+					if err != nil {
+						return request.ConversationID, err
+					}
+					opened <- runID
+					_ = sink.Send(chat.ChatEvent{
+						Kind:           "text-delta",
+						ConversationID: request.ConversationID,
+						Delta:          "UI transport gate",
+					})
+					select {
+					case <-finish:
+					case <-ctx.Done():
+					}
+					return request.ConversationID, server.runnerRegistry.CloseRun(
+						context.WithoutCancel(ctx), runID, registry.RunStatusSucceeded, nil)
+				},
+			}
+			host := &nativeReleaseHost{
+				webExtensionUIHost: newWebExtensionUIHost(nil),
+				surfaces:           make(map[extensions.UIExtensionOwner]extensions.UIExtensionSource),
+				opened:             make(chan extensions.UIExtensionSource, 8),
+				frames:             make(chan extensions.UISurfaceFrameRequest, 8),
+				transcript:         make(chan extensions.UITranscriptAppendRequest, 8),
+			}
 			prompts := make(nativeReleasePrompts, 8)
 			nativeCtx := extensions.ContextWithUIInputBroker(extensions.ContextWithExtensionUIHost(t.Context(), host), prompts)
 			native, err := chat.NewClient(endpoint, "web-secret", runnerID)
@@ -438,7 +524,10 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			firstCtx, detachFirst := context.WithCancel(nativeCtx)
 			t.Cleanup(detachFirst)
 			go func() {
-				_, err := native.Run(firstCtx, chat.ChatRequest{ConversationID: record.ID, Message: "first UI turn"}, &recordingChatSink{})
+				_, err := native.Run(firstCtx, chat.ChatRequest{
+					ConversationID: record.ID,
+					Message:        "first UI turn",
+				}, &recordingChatSink{})
 				nativeDone <- err
 			}()
 			runID := nativeReleaseNext(t, opened)
@@ -457,7 +546,12 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			invoke := func(method string, request any) <-chan runnerpayload.ToolExecuteResult {
 				result := make(chan runnerpayload.ToolExecuteResult, 1)
 				data := mustRunnerJSON(t, map[string]any{"method": method, "request": request})
-				params := runnerpayload.ToolExecuteParams{RunID: runID, ToolCallID: convtypes.GenerateID(), Name: "native_release", Input: data}
+				params := runnerpayload.ToolExecuteParams{
+					RunID:      runID,
+					ToolCallID: convtypes.GenerateID(),
+					Name:       "native_release",
+					Input:      data,
+				}
 				go func() {
 					response, err := server.runnerRegistry.ExecuteTool(t.Context(), params, nil)
 					assert.NoError(t, err)
@@ -473,14 +567,38 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			}
 			waitClosed := func() {
 				t.Helper()
-				require.Eventually(t, func() bool { host.mu.Lock(); defer host.mu.Unlock(); return len(host.surfaces) == 0 }, 5*time.Second, time.Millisecond)
+				require.Eventually(t, func() bool {
+					host.mu.Lock()
+					defer host.mu.Unlock()
+					return len(host.surfaces) == 0
+				}, 5*time.Second, time.Millisecond)
 			}
-			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 1}})
+			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{
+				ID:    "canvas",
+				Frame: extensions.UIFrame{Sequence: 1},
+			})
 			first := nativeReleaseNext(t, host.opened)
-			input := extensions.UISurfaceInputNotification{ScopeID: record.ID, ID: "canvas", Sequence: 1, Kind: extensions.UISurfaceInputKey, Key: "enter"}
+			input := extensions.UISurfaceInputNotification{
+				ScopeID:  record.ID,
+				ID:       "canvas",
+				Sequence: 1,
+				Kind:     extensions.UISurfaceInputKey,
+				Key:      "enter",
+			}
 			require.NoError(t, first.NotifyExtensionUI(t.Context(), extensions.UISurfaceInputMethod, input))
-			require.NoError(t, first.NotifyExtensionUI(t.Context(), extensions.UISurfaceResizeMethod, extensions.UISurfaceResizeNotification{ScopeID: record.ID, ID: "canvas", Sequence: 2, Width: 100, Height: 40}))
-			accepted("kodelet.ui.surface.frame", extensions.UISurfaceFrameRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 2}})
+			require.NoError(t, first.NotifyExtensionUI(t.Context(), extensions.UISurfaceResizeMethod,
+				extensions.UISurfaceResizeNotification{
+					ScopeID:  record.ID,
+					ID:       "canvas",
+					Sequence: 2,
+					Width:    100,
+					Height:   40,
+				},
+			))
+			accepted("kodelet.ui.surface.frame", extensions.UISurfaceFrameRequest{
+				ID:    "canvas",
+				Frame: extensions.UIFrame{Sequence: 2},
+			})
 			assert.EqualValues(t, 2, nativeReleaseNext(t, host.frames).Frame.Sequence)
 			accepted("kodelet.ui.transcript.append", extensions.UITranscriptAppendRequest{Message: "native transcript"})
 			assert.Equal(t, "native transcript", nativeReleaseNext(t, host.transcript).Message)
@@ -504,14 +622,20 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			require.Error(t, first.NotifyExtensionUI(t.Context(), extensions.UISurfaceInputMethod, input))
 			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, nativeID, "ui-input/"+stalePrompt.request.ID, answer))
 			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, "browser", "ui-input/"+stalePrompt.request.ID, answer))
-			require.Eventually(t, func() bool { broker.mu.Lock(); defer broker.mu.Unlock(); return broker.owner == nil }, 5*time.Second, time.Millisecond)
+			require.Eventually(t, func() bool {
+				broker.mu.Lock()
+				defer broker.mu.Unlock()
+				return broker.owner == nil
+			}, 5*time.Second, time.Millisecond)
 			assert.True(t, server.isActiveChat(record.ID), "owner disconnect must not cancel admitted execution")
 
 			// Reconnecting the original client only observes the ongoing turn.
 			streamCtx, detach := context.WithCancel(nativeCtx)
 			t.Cleanup(detach)
 			streamDone := make(chan error, 1)
-			go func() { streamDone <- native.StreamConversation(streamCtx, record.ID, &recordingChatSink{}) }()
+			go func() {
+				streamDone <- native.StreamConversation(streamCtx, record.ID, &recordingChatSink{})
+			}()
 			require.Eventually(t, func() bool {
 				server.chatSubscribersMu.Lock()
 				defer server.chatSubscribersMu.Unlock()
@@ -522,7 +646,10 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			broker.mu.Unlock()
 			unavailable := nativeReleaseNext(t, invoke("kodelet.ui.input", extensions.UIInputRequest{Title: "unattended"}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, "unavailable")
-			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 3}}))
+			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{
+				ID:    "canvas",
+				Frame: extensions.UIFrame{Sequence: 3},
+			}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
 			detach()
 			_ = nativeReleaseNext(t, streamDone)
@@ -556,9 +683,14 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, nativeReleasePost(t, endpoint, nativeID, "ui-input/"+browserPrompt.ID, answer))
 			assert.Equal(t, http.StatusOK, nativeReleasePost(t, endpoint, "browser", "ui-input/"+browserPrompt.ID, answer))
 			assert.Contains(t, nativeReleaseNext(t, promptResult).Result.AssistantFacing, "native answer")
-			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 4}}))
+			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{
+				ID:    "canvas",
+				Frame: extensions.UIFrame{Sequence: 4},
+			}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
-			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.transcript.append", extensions.UITranscriptAppendRequest{Message: "unavailable browser transcript"}))
+			unavailable = nativeReleaseNext(t, invoke("kodelet.ui.transcript.append", extensions.UITranscriptAppendRequest{
+				Message: "unavailable browser transcript",
+			}))
 			assert.Contains(t, unavailable.Result.AssistantFacing, `"accepted":false`)
 			finish <- struct{}{}
 			for nativeReleaseNext(t, browserTurn).Kind != "done" {
@@ -567,7 +699,10 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 
 			// The next native submission restores its own capabilities on activation.
 			go func() {
-				_, err := native.Run(nativeCtx, chat.ChatRequest{ConversationID: record.ID, Message: "next native UI turn"}, &recordingChatSink{})
+				_, err := native.Run(nativeCtx, chat.ChatRequest{
+					ConversationID: record.ID,
+					Message:        "next native UI turn",
+				}, &recordingChatSink{})
 				nativeDone <- err
 			}()
 			runID = nativeReleaseNext(t, opened)
@@ -579,18 +714,32 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			require.NotNil(t, owner)
 			assert.Equal(t, nativeID, owner.clientID)
 			assert.True(t, nativeCapabilities(owner.ctx).PersistentSurfaces)
-			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{ID: "canvas", Frame: extensions.UIFrame{Sequence: 5}})
+			accepted("kodelet.ui.surface.open", extensions.UISurfaceOpenRequest{
+				ID:    "canvas",
+				Frame: extensions.UIFrame{Sequence: 5},
+			})
 			finalSource := nativeReleaseNext(t, host.opened)
 			finish <- struct{}{}
 			require.NoError(t, nativeReleaseNext(t, nativeDone))
 			waitClosed()
-			require.Error(t, finalSource.NotifyExtensionUI(t.Context(), extensions.UISurfaceResizeMethod, extensions.UISurfaceResizeNotification{ScopeID: record.ID, ID: "canvas", Sequence: 3, Width: 80, Height: 24}))
+			require.Error(t, finalSource.NotifyExtensionUI(t.Context(), extensions.UISurfaceResizeMethod,
+				extensions.UISurfaceResizeNotification{
+					ScopeID:  record.ID,
+					ID:       "canvas",
+					Sequence: 3,
+					Width:    80,
+					Height:   24,
+				},
+			))
 			pidData, err := os.ReadFile(filepath.Join(workspace, "native-worker.pid"))
 			require.NoError(t, err)
 			pid, err := strconv.Atoi(string(pidData))
 			require.NoError(t, err)
 			require.NoError(t, syscall.Kill(pid, 0), "explicit lease, not interactive UI, retains the worker")
-			require.Eventually(t, func() bool { _, widgets := server.extensionUI.Snapshot(record.ID); return len(widgets) == 1 }, 5*time.Second, time.Millisecond)
+			require.Eventually(t, func() bool {
+				_, widgets := server.extensionUI.Snapshot(record.ID)
+				return len(widgets) == 1
+			}, 5*time.Second, time.Millisecond)
 			require.Eventually(t, func() bool {
 				data, _ := os.ReadFile(filepath.Join(workspace, "native-events.log"))
 				return strings.Contains(string(data), "native surfaces require an active execution")
@@ -614,7 +763,9 @@ func TestNativeUIReleaseAcrossRunnerPlacements(t *testing.T) {
 			assert.Contains(t, string(data), "extension.ui.surface.closed")
 			assert.Contains(t, string(data), "background-widget")
 			stop()
-			require.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }, 5*time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				return syscall.Kill(pid, 0) == syscall.ESRCH
+			}, 5*time.Second, 10*time.Millisecond)
 		})
 	}
 }

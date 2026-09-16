@@ -37,12 +37,21 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Join(workspace, ".kodelet", "recipes"), 0o700))
 			require.NoError(t, os.MkdirAll(filepath.Join(workspace, ".kodelet", "extensions"), 0o700))
 			templateMarker := filepath.Join(workspace, "template-ran")
-			recipe := "---\nname: Runner recipe\ndescription: Selected workspace only\narguments:\n  subject:\n    default: world\n---\nHello {{.subject}}! {{bash \"/bin/sh\" \"-c\" \"pwd; touch template-ran\"}}"
+			recipe := `---
+name: Runner recipe
+description: Selected workspace only
+arguments:
+  subject:
+    default: world
+---
+Hello {{.subject}}! {{bash "/bin/sh" "-c" "pwd; touch template-ran"}}`
 			require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kodelet", "recipes", "selected.md"), []byte(recipe), 0o600))
 			executable, err := os.Executable()
 			require.NoError(t, err)
 			// The extension fixture records startup and advertises a dynamic recipe.
-			script := fmt.Sprintf("#!/bin/sh\nKODELET_TEST_CHAT_EXTENSION=1 KODELET_TEST_INSPECTION_RECIPES=1 exec %q -test.run '^TestDaemonChatExtensionProcess$'\n", executable)
+			script := fmt.Sprintf(`#!/bin/sh
+KODELET_TEST_CHAT_EXTENSION=1 KODELET_TEST_INSPECTION_RECIPES=1 exec %q -test.run '^TestDaemonChatExtensionProcess$'
+`, executable)
 			extensionPath := filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-pty")
 			require.NoError(t, os.WriteFile(extensionPath, []byte(script), 0o700))
 			extensionMarker := filepath.Join(workspace, "pty-initializations.jsonl")
@@ -59,7 +68,12 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			viper.Set("extensions.enabled", true)
 			viper.Set("skills.enabled", false)
 			require.NoError(t, db.RunMigrations(ctx, migrations.All()))
-			config := &controlplane.ServerConfig{Host: "127.0.0.1", AuthToken: "client-secret", RunnerAuthToken: "runner-secret", CompactRatio: 0.8}
+			config := &controlplane.ServerConfig{
+				Host:            "127.0.0.1",
+				AuthToken:       "client-secret",
+				RunnerAuthToken: "runner-secret",
+				CompactRatio:    0.8,
+			}
 			if placement == "embedded" {
 				store, err := localstate.NewStore()
 				require.NoError(t, err)
@@ -74,7 +88,9 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			endpoint := "http://" + listener.Addr().String()
 			serverCtx, stopServer := context.WithCancel(ctx)
 			done := make(chan error, 1)
-			go func() { done <- server.Serve(serverCtx, listener) }()
+			go func() {
+				done <- server.Serve(serverCtx, listener)
+			}()
 			t.Cleanup(func() {
 				stopServer()
 				select {
@@ -87,8 +103,17 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			})
 			if placement == "standalone" {
 				runnerCtx, stopRunner := context.WithCancel(ctx)
-				env := []string{"HOME=" + root, "PATH=" + os.Getenv("PATH"), "SHELL=/bin/sh", "KODELET_TEST_CLI_PROCESS=1", "KODELET_BASE_PATH=" + filepath.Join(root, "runner-state")}
-				process := daemonCLIProcess(runnerCtx, t, startup, env, "runner", "start", "--server="+endpoint, "--auth-token=runner-secret")
+				env := []string{
+					"HOME=" + root,
+					"PATH=" + os.Getenv("PATH"),
+					"SHELL=/bin/sh",
+					"KODELET_TEST_CLI_PROCESS=1",
+					"KODELET_BASE_PATH=" + filepath.Join(root, "runner-state"),
+				}
+				process := daemonCLIProcess(runnerCtx, t, startup, env, "runner", "start",
+					"--server="+endpoint,
+					"--auth-token=runner-secret",
+				)
 				var output bytes.Buffer
 				process.Stdout, process.Stderr = &output, &output
 				require.NoError(t, process.Start())
@@ -117,7 +142,12 @@ func TestWorkspaceInspectionAcrossRunnerPlacements(t *testing.T) {
 			fixture := newWorkspaceInspectionFixture(t)
 			invoke := func(args ...string) []byte {
 				t.Helper()
-				args = append(args, "--server="+endpoint, "--auth-token=client-secret", "--runner="+runnerID[:12], "--cwd="+workspace)
+				args = append(args,
+					"--server="+endpoint,
+					"--auth-token=client-secret",
+					"--runner="+runnerID[:12],
+					"--cwd="+workspace,
+				)
 				output, err := daemonCLIProcess(ctx, t, fixture.cwd, fixture.env, args...).CombinedOutput()
 				require.NoError(t, err, "%s", output)
 				assert.NoFileExists(t, fixture.extensionMarker)

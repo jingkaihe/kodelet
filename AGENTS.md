@@ -7,6 +7,7 @@ Kodelet is an agentic coding CLI: Go backend in `cmd/kodelet/` and `pkg/`, React
 - Use `github.com/pkg/errors` (`errors.Wrap`/`Wrapf`) rather than `fmt.Errorf` for stack traces.
 - Use `pkg/logger` for diagnostics and `pkg/presenter` for user-facing CLI output.
 - Write tests with testify assertions in Go and Vitest in the frontend.
+- Prefer raw multiline strings for embedded scripts and configuration fixtures; split dense Go literals and calls across lines instead of packing multiple operations onto one line.
 - Update documentation when changing the CLI interface.
 - Keep Markdown prose paragraphs on one source line.
 - Use sentence case in the Web UI; no all-caps copy or CSS `text-transform: uppercase` except codes and established acronyms.

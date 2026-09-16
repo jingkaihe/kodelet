@@ -62,16 +62,67 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 					<-r.Context().Done() // Tool completed; kill before terminal provider outcome.
 					return
 				}
-				arguments, _ := json.Marshal(map[string]any{"command": "printf 'once\\n' >> effects.log", "description": "Append one durable test side effect", "timeout": 10})
-				delta := map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "effect-once", "type": "function", "function": map[string]any{"name": "bash", "arguments": string(arguments)}}}}
-				chunk := map[string]any{"id": "completion", "object": "chat.completion.chunk", "model": "gpt-4o", "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+				arguments, _ := json.Marshal(map[string]any{
+					"command":     `printf 'once\n' >> effects.log`,
+					"description": "Append one durable test side effect",
+					"timeout":     10,
+				})
+				delta := map[string]any{
+					"role": "assistant",
+					"tool_calls": []any{
+						map[string]any{
+							"index": 0,
+							"id":    "effect-once",
+							"type":  "function",
+							"function": map[string]any{
+								"name":      "bash",
+								"arguments": string(arguments),
+							},
+						},
+					},
+				}
+				chunk := map[string]any{
+					"id":     "completion",
+					"object": "chat.completion.chunk",
+					"model":  "gpt-4o",
+					"choices": []any{
+						map[string]any{
+							"index":         0,
+							"delta":         delta,
+							"finish_reason": "tool_calls",
+						},
+					},
+					"usage": map[string]int{
+						"prompt_tokens":     10,
+						"completion_tokens": 5,
+						"total_tokens":      15,
+					},
+				}
 				encoded, _ := json.Marshal(chunk)
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", encoded)
 			}))
 			t.Cleanup(provider.Close)
-			settings := map[string]any{"tool_mode": "full", "allowed_tools": []string{"bash"}, "extensions": map[string]any{"enabled": false}, "skills": map[string]any{"enabled": false}}
-			daemonSettings := map[string]any{"provider": "openai", "model": "gpt-4o", "weak_model": "gpt-4o", "max_tokens": 256, "reasoning_effort": "medium", "openai": map[string]any{"platform": "openai", "base_url": provider.URL, "api_key_env_var": "KODELET_TEST_PROVIDER_KEY", "api_mode": "chat_completions"}, "serve": map[string]any{"runner_settings": settings}}
+			settings := map[string]any{
+				"tool_mode":     "full",
+				"allowed_tools": []string{"bash"},
+				"extensions":    map[string]any{"enabled": false},
+				"skills":        map[string]any{"enabled": false},
+			}
+			daemonSettings := map[string]any{
+				"provider":         "openai",
+				"model":            "gpt-4o",
+				"weak_model":       "gpt-4o",
+				"max_tokens":       256,
+				"reasoning_effort": "medium",
+				"openai": map[string]any{
+					"platform":        "openai",
+					"base_url":        provider.URL,
+					"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
+					"api_mode":        "chat_completions",
+				},
+				"serve": map[string]any{"runner_settings": settings},
+			}
 			for key, value := range settings {
 				daemonSettings[key] = value
 			}
@@ -88,15 +139,32 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 			require.NoError(t, listener.Close())
 			serverURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 			baseEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "KODELET_TEST_CLI_PROCESS=1"}
-			daemonEnv := append(append([]string{}, baseEnv...), "KODELET_BASE_PATH="+filepath.Join(root, "daemon-store"), "KODELET_CONFIG_FILE="+configPath, "KODELET_CONFIG_FILE_MODE=isolated", "KODELET_TEST_PROVIDER_KEY=daemon-only-key")
+			daemonEnv := append(append([]string{}, baseEnv...),
+				"KODELET_BASE_PATH="+filepath.Join(root, "daemon-store"),
+				"KODELET_CONFIG_FILE="+configPath,
+				"KODELET_CONFIG_FILE_MODE=isolated",
+				"KODELET_TEST_PROVIDER_KEY=daemon-only-key",
+			)
 			startDaemon := func() func() {
-				process := daemonCLIProcess(ctx, t, root, daemonEnv, "serve", "--host=127.0.0.1", "--port="+strconv.Itoa(port), "--auth-token=client-secret", "--runner-auth-token=runner-secret", "--disable-control-plane-workspace", "--embedded-runner="+strconv.FormatBool(placement == "embedded"), "--runner-workspace="+workspace)
+				process := daemonCLIProcess(ctx, t, root, daemonEnv, "serve",
+					"--host=127.0.0.1",
+					"--port="+strconv.Itoa(port),
+					"--auth-token=client-secret",
+					"--runner-auth-token=runner-secret",
+					"--disable-control-plane-workspace",
+					"--embedded-runner="+strconv.FormatBool(placement == "embedded"),
+					"--runner-workspace="+workspace,
+				)
 				return startReceiptProcess(t, process)
 			}
 			crashDaemon := startDaemon()
 			if placement == "standalone" {
 				runnerEnv := append(append([]string{}, baseEnv...), "KODELET_BASE_PATH="+filepath.Join(root, "runner-state"))
-				startReceiptProcess(t, daemonCLIProcess(ctx, t, workspace, runnerEnv, "runner", "start", "--server="+serverURL, "--auth-token=runner-secret", "--name=receipt-runner"))
+				startReceiptProcess(t, daemonCLIProcess(ctx, t, workspace, runnerEnv, "runner", "start",
+					"--server="+serverURL,
+					"--auth-token=runner-secret",
+					"--name=receipt-runner",
+				))
 			}
 			var runnerID string
 			require.Eventually(t, func() bool {
@@ -114,7 +182,13 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 			}, 20*time.Second, 20*time.Millisecond)
 			client, err := chat.NewClient(serverURL, "client-secret", runnerID)
 			require.NoError(t, err)
-			req := chat.ChatRequest{ConversationID: "receipt-crash-conversation", TurnID: "receipt-crash-turn", RunnerID: runnerID, CWD: workspace, Message: "perform effect once"}
+			req := chat.ChatRequest{
+				ConversationID: "receipt-crash-conversation",
+				TurnID:         "receipt-crash-turn",
+				RunnerID:       runnerID,
+				CWD:            workspace,
+				Message:        "perform effect once",
+			}
 			data, err := json.Marshal(req)
 			require.NoError(t, err)
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/chat", strings.NewReader(string(data)))
@@ -169,7 +243,11 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 			invalidState := filepath.Join(root, "client-state-is-not-directory")
 			require.NoError(t, os.WriteFile(invalidState, []byte("no client persistence"), 0o600))
 			clientEnv := append(append([]string{}, baseEnv...), "KODELET_BASE_PATH="+invalidState)
-			query := daemonCLIProcess(ctx, t, root, clientEnv, "conversation", "turn", req.ConversationID, req.TurnID, "--server="+serverURL, "--auth-token=client-secret")
+			query := daemonCLIProcess(ctx, t, root, clientEnv, "conversation", "turn",
+				req.ConversationID, req.TurnID,
+				"--server="+serverURL,
+				"--auth-token=client-secret",
+			)
 			output, err := query.CombinedOutput()
 			require.NoError(t, err, "%s", output)
 			var queried chat.TurnReceipt
