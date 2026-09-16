@@ -4,6 +4,7 @@ import {
   Globe,
   PanelLeft,
   PanelRight,
+  RotateCw,
   SquareTerminal,
 } from 'lucide-react';
 import type React from 'react';
@@ -1962,6 +1963,7 @@ const ChatPage: React.FC = () => {
         }
 
         console.error('Failed to resume conversation stream', error);
+        setStreamError(message);
       })
       .finally(() => {
         if (resumeControllerRef.current === controller) {
@@ -3913,6 +3915,14 @@ const ChatPage: React.FC = () => {
                 <div className="surface-panel max-w-3xl rounded-3xl border-kodelet-orange/20 px-6 py-5 text-kodelet-dark">
                   <p className="eyebrow-label text-kodelet-orange">Load error</p>
                   <p className="mt-3 text-sm leading-7">{conversationError}</p>
+                  <button
+                    className="panel-action-button panel-action-button-reload mt-3"
+                    onClick={() => window.location.reload()}
+                    type="button"
+                  >
+                    <RotateCw aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.9} />
+                    Reload
+                  </button>
                 </div>
               </div>
             ) : (
@@ -4011,6 +4021,7 @@ const ChatPage: React.FC = () => {
             onDraftChange={setDraft}
             onDraftKeyDown={handleDraftKeyDown}
             onPaste={handlePaste}
+            onReload={streamError ? () => window.location.reload() : undefined}
             onRemoveAttachment={handleRemoveAttachment}
             onSelectSlashCommand={handleSelectSlashCommand}
             onStop={handleStop}

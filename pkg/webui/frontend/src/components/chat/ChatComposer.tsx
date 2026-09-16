@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, Paperclip, RotateCw, Square, X } from 'lucide-react';
 import React from 'react';
 import type { PendingImageAttachment, SlashCommandOption } from '../../types';
 import { cn } from '../../utils';
@@ -31,6 +31,7 @@ interface ChatComposerProps {
   onDraftChange: (value: string) => void;
   onDraftKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  onReload?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectSlashCommand: (commandName: string) => void;
   onStop: () => void;
@@ -65,6 +66,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   onDraftChange,
   onDraftKeyDown,
   onPaste,
+  onReload,
   onRemoveAttachment,
   onSelectSlashCommand,
   onStop,
@@ -171,7 +173,24 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   return (
     <div className="composer-dock sticky bottom-0 z-10 shrink-0 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:py-3 lg:pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
       <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
-        {streamError ? <div className="composer-error">{streamError}</div> : null}
+        {streamError ? (
+          <div
+            className="composer-error flex items-center justify-between gap-3"
+            role={onReload ? 'alert' : undefined}
+          >
+            <span className="min-w-0">{streamError}</span>
+            {onReload ? (
+              <button
+                className="panel-action-button panel-action-button-reload shrink-0"
+                onClick={onReload}
+                type="button"
+              >
+                <RotateCw aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.9} />
+                Reload
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* biome-ignore lint/a11y/noStaticElementInteractions: Drag and drop supplements the keyboard-accessible Add image button and file input. */}
         <div

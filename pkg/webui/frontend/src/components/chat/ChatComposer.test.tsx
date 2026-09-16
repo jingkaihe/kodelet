@@ -79,6 +79,32 @@ describe('ChatComposer', () => {
     expect(screen.queryByTestId('composer-expand-toggle')).not.toBeInTheDocument();
   });
 
+  it('offers an explicit reload action alongside a stream error', () => {
+    const onReload = vi.fn();
+    const composer = renderComposer({ streamError: 'Failed to fetch', onReload });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch');
+    const reloadButton = screen.getByRole('button', { name: 'Reload' });
+    expect(reloadButton).toHaveClass('panel-action-button', 'panel-action-button-reload');
+    expect(reloadButton.querySelector('svg')).toHaveClass('lucide-rotate-cw');
+    expect(onReload).not.toHaveBeenCalled();
+
+    fireEvent.click(reloadButton);
+
+    expect(onReload).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('hello');
+
+    composer.rerenderComposer({ streamError: null });
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer reload for a notice without a recovery action', () => {
+    renderComposer({ streamError: 'Select a workspace runner to start a chat.' });
+
+    expect(screen.getByText('Select a workspace runner to start a chat.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+  });
+
   it('keeps a fitting single-line editor stable during layout syncs', () => {
     renderComposer({ draft: 'hello' });
 

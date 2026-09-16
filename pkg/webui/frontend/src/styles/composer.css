@@ -34,6 +34,19 @@
   box-shadow: none;
 }
 
+.panel-action-button-reload {
+  border-radius: 0.25rem;
+}
+
+.panel-action-button-reload:hover {
+  border-color: color-mix(in srgb, var(--kodelet-link) 24%, transparent);
+  color: var(--kodelet-link);
+}
+
+.panel-action-button-reload:focus-visible {
+  outline-color: var(--kodelet-link);
+}
+
 .copy-button {
   display: inline-flex;
   flex-shrink: 0;

@@ -187,11 +187,20 @@ export const RepeatedPunctuation: Story = {
   },
 };
 
+export const Disconnected: Story = {
+  args: {
+    draft: '',
+    streamError: 'Network connection lost.',
+    onReload: fn(),
+  },
+};
+
 export const ErrorWithAttachment: Story = {
   args: {
     attachments: [sampleAttachment],
     draft: '',
     streamError: 'Failed to send message',
+    onReload: fn(),
     submitDisabled: false,
   },
 };

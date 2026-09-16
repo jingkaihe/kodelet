@@ -4826,6 +4826,45 @@ describe('ChatPage', () => {
     );
   });
 
+  it('offers reload when a conversation fails to load', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    render(<ChatPage />);
+
+    expect(await screen.findByText('Load error')).toBeInTheDocument();
+    expect(screen.getByText('Failed to fetch')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+  });
+
+  it.each([
+    false,
+    true,
+  ])('offers reload on stream failure (received events: %s)', async (receivedEvents) => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      runnerId: 'runner-1',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 0,
+      messages: [],
+      toolResults: {},
+    });
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      if (receivedEvents) {
+        options.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+      }
+      throw new TypeError('Failed to fetch');
+    });
+
+    render(<ChatPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch');
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    expect(mockStreamChat).not.toHaveBeenCalled();
+  });
+
   it('clears selected conversation running state when stream attach is stale', async () => {
     routeParams = { id: 'conv-123' };
     mockGetConversations.mockResolvedValue({
@@ -4866,6 +4905,7 @@ describe('ChatPage', () => {
     );
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
     expect(screen.queryByTestId('conversation-running-indicator-conv-123')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
   });
 
   it('allows sending in another conversation while one conversation is streaming', async () => {
