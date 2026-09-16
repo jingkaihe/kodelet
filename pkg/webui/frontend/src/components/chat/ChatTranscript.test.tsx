@@ -1076,7 +1076,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout');
   });
 
-  it('uses shared TUI spinners and groups developer tools without semantic icons', () => {
+  it('uses shared TUI spinners with dedicated skill rows and no semantic icons', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -1112,7 +1112,8 @@ describe('ChatTranscript', () => {
     );
 
     expect(screen.getByText('Running 1 command')).toBeVisible();
-    expect(screen.getByText('Running 1 tool')).toBeVisible();
+    expect(screen.getByText('Loading skill')).toBeVisible();
+    expect(screen.queryByText('Running 1 tool')).not.toBeInTheDocument();
     expect(screen.getByText('Edit file: README.md')).toBeVisible();
     expect(container.querySelectorAll('details')).toHaveLength(3);
     expect(container.querySelector('details details')).not.toBeInTheDocument();

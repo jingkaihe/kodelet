@@ -1398,8 +1398,41 @@ describe('ChatToolActivity', () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([true, false])('renders a standalone skill lifecycle (success %s)', async (success) => {
+    const user = userEvent.setup();
+    const tool: ChatRenderToolCall = {
+      callId: 'skill-1',
+      name: 'skill',
+      input: '{"skill_name":"kodelet"}',
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[tool]} />);
+
+    expect(screen.getByText('Loading skill')).toBeVisible();
+    expect(container.querySelector('summary .spinner-glyph')).toBeInTheDocument();
+
+    const result: ToolResult = {
+      toolName: 'skill',
+      success,
+      metadata: success ? { skillName: 'Kodelet', directory: '/skills/kodelet' } : undefined,
+      error: success ? undefined : 'Skill not found',
+    };
+    rerender(<ChatToolActivity tools={[{ ...tool, result }]} />);
+    expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
+    expect(container.querySelector('summary .spinner-glyph')).not.toBeInTheDocument();
+    if (success) {
+      expect(screen.getByText('Loaded skill Kodelet')).toBeVisible();
+      expect(container.querySelector('details')).not.toHaveAttribute('open');
+      expect(screen.getByText('/skills/kodelet')).not.toBeVisible();
+      await user.click(screen.getByText('Loaded skill Kodelet'));
+      expect(screen.getByText('/skills/kodelet')).toBeVisible();
+    } else {
+      expect(screen.getByText('Failed to load skill kodelet')).toBeVisible();
+      expect(screen.getByRole('alert')).toHaveTextContent('Skill not found');
+      expect(screen.getByRole('alert')).toBeVisible();
+    }
+  });
+
   it.each([
-    'skill',
     'get_goal',
     'update_goal',
     'todo_read',
@@ -1493,7 +1526,7 @@ describe('ChatToolActivity', () => {
     expect(screen.getByText('Page unavailable.')).toBeVisible();
   });
 
-  it('keeps file rows, builtin, command, and extension groups in transcript order', () => {
+  it('keeps file rows, skills, command, and extension groups in transcript order', () => {
     const read = (callId: string): ChatRenderToolCall => ({
       callId,
       name: 'file_read',
@@ -1535,9 +1568,10 @@ describe('ChatToolActivity', () => {
     expect(rows[2]).toHaveClass('activity-file');
     expect(rows[3]).not.toHaveClass('activity-tool-group');
     expect(rows[4]).toHaveClass('activity-file');
-    expect(rows[5]).toHaveClass('activity-tool-group');
+    expect(rows[5]).not.toHaveClass('activity-tool-group');
     expect(screen.getByText('Review repository')).toBeVisible();
-    expect(screen.getAllByText('Ran 1 tool')).toHaveLength(1);
+    expect(screen.getByText('Loaded skill')).toBeVisible();
+    expect(screen.queryByText('Ran 1 tool')).not.toBeInTheDocument();
     expect(within(rows[0] as HTMLElement).getByText('Read file: first.md')).toBeInTheDocument();
     expect(within(rows[2] as HTMLElement).getByText('Read file: second.md')).toBeInTheDocument();
     expect(within(rows[4] as HTMLElement).getByText('Read file: third.md')).toBeInTheDocument();

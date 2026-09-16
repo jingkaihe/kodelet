@@ -346,11 +346,14 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
         getStringField(metadata, 'toolName') || toolCall.name
       );
 
-    case 'skill':
-      return formatToolSummary(
-        'Skill',
-        getStringField(input, 'skill_name') || getStringField(metadata, 'skillName')
-      );
+    case 'skill': {
+      const status = getToolActivityStatus(toolCall);
+      if (status === 'running') return 'Loading skill';
+      const skillName =
+        getStringField(metadata, 'skillName') || getStringField(input, 'skill_name', 'skillName');
+      const label = status === 'failed' ? 'Failed to load skill' : 'Loaded skill';
+      return skillName ? `${label} ${skillName}` : label;
+    }
 
     default:
       return formatToolSummary(
@@ -575,7 +578,6 @@ const builtinToolNames = new Set([
   'grep_tool',
   'openai_web_search',
   'read_conversation',
-  'skill',
   'todo_read',
   'todo_write',
   'update_goal',
@@ -584,7 +586,7 @@ const builtinToolNames = new Set([
 
 const toolGroupKind = (
   tool: ChatRenderToolCall
-): 'commands' | 'tools' | 'file' | 'image' | 'browser' | 'extension' => {
+): 'commands' | 'tools' | 'file' | 'image' | 'browser' | 'skill' | 'extension' => {
   const name = normalizeToolName(tool.name);
   if (name === 'browser' || tool.result?.metadataType === 'browser') return 'browser';
   if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
@@ -593,6 +595,7 @@ const toolGroupKind = (
   if (name === 'bash') return 'commands';
   if (name === 'view_image' || tool.result?.metadataType === 'view_image') return 'image';
   if (['apply_patch', 'file_edit', 'file_read', 'file_write'].includes(name)) return 'file';
+  if (name === 'skill') return 'skill';
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };
 
@@ -601,7 +604,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
     return null;
   }
 
-  // Preserve transcript order and keep files, images, and extension presentations independent.
+  // Preserve transcript order; only aggregate command and generic builtin tool calls.
   const groups: ChatRenderToolCall[][] = [];
   for (const tool of tools) {
     const previous = groups[groups.length - 1];
@@ -666,7 +669,9 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 running && 'activity-card-live',
                 failedCount > 0 && 'activity-card-error'
               )}
-              open={running || (browser && failedCount > 0) ? true : undefined}
+              open={
+                running || ((browser || kind === 'skill') && failedCount > 0) ? true : undefined
+              }
             >
               <summary className="tool-summary activity-summary" title={summaryText}>
                 <span className="activity-marker" aria-hidden="true">
@@ -681,7 +686,10 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                     <span className="tool-summary-status">{failedCount} failed</span>
                   ) : null
                 ) : (
-                  <output className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                  <output
+                    className={kind === 'skill' ? 'sr-only' : 'tool-summary-status'}
+                    aria-label={`Tool ${activityStatus}`}
+                  >
                     {activityStatus}
                   </output>
                 )}
