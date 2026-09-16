@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.6.16-beta
+
+Added OIDC background server startup on loopback and wildcard listeners, including runner enrollment and deployments without an embedded runner. Same-host CLI, TUI, and ACP clients use a private loopback-only API credential while browsers continue to sign in through OIDC.
+
+Made `kodelet server url` and server startup messages use the configured OIDC sign-in origin without exposing the local API credential in browser URLs.
+
+Fixed explicit `serve --skip-auth` to override inherited authentication modes and tokens while still rejecting conflicting explicit authentication flags.
+
+Added theme-aware reload controls for Web UI conversation load and connection errors, and surfaced failures to resume conversation streams.
+
+Made skill loads appear as standalone Web UI activity rows with clear loading, success, and failure summaries, automatically expanding failed loads.
+
+Improved daemon integration-test isolation across CLI, TUI, ACP, and runner scenarios.
+
 ## 0.6.15-beta
 
 Added opt-in, per-conversation Chrome/Chromium browsers shared between users and agents, with a Web UI Browser tab for navigation, page interaction, console output, network requests, and element inspection.
