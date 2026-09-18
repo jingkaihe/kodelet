@@ -18,7 +18,6 @@ import (
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1767,7 +1766,7 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	m.stopConversationStream(state)
 	conversationKey := state.key
 	if strings.TrimSpace(state.title) == "" {
-		state.title = conversations.NormalizeConversationName(userDisplayMessage(message))
+		state.title = conversations.NormalizeConversationName(message)
 	}
 	state.updatedAt = time.Now()
 
@@ -1788,7 +1787,7 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	m.appendSubmittedMessageToHistory(message)
 	persistMessageHistory := m.persistSubmittedMessageCommandForState(state, message)
 	m.clearActiveAssistantEntry()
-	m.entries = append(m.entries, chatEntry{kind: entryUser, content: userDisplayMessage(message)})
+	m.entries = append(m.entries, chatEntry{kind: entryUser, content: strings.TrimSpace(message)})
 	m.running = true
 	m.workingFrame = 0
 	m.nextRunID++
@@ -1956,20 +1955,6 @@ func insertSlashCommand(draft, commandName string) string {
 		}
 	}
 	return draft[:leadingWhitespaceLength] + "/" + strings.TrimSpace(commandName) + " "
-}
-
-func userDisplayMessage(message string) string {
-	command, args, found := slashcommands.Parse(message)
-	if !found {
-		return strings.TrimSpace(message)
-	}
-
-	update, handled, err := goals.ParseSlashCommand(command, args, time.Now())
-	if handled && err == nil {
-		return update.Display
-	}
-
-	return strings.TrimSpace(message)
 }
 
 func mergeSlashCommands(base, additions []slashcommands.Command) []slashcommands.Command {

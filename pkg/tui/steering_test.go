@@ -74,7 +74,7 @@ func TestQueuedSlashCommandStartsAfterRunAndPreservesDraft(t *testing.T) {
 	assert.Empty(t, m.queuedFollowUps)
 	assert.Equal(t, "draft typed while waiting", m.textarea.Value())
 	require.Len(t, m.entries, 2)
-	assert.Equal(t, "Objective: finish the review", m.entries[1].content)
+	assert.Equal(t, "/goal finish the review", m.entries[1].content)
 }
 
 func TestBackgroundQueuedSlashCommandPreservesBothDrafts(t *testing.T) {

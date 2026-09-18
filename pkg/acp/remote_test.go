@@ -547,7 +547,7 @@ func TestRemoteACPCommandsIncludeBuiltInsAndWorkspaceCommands(t *testing.T) {
 		assert.Equal(t, chat.WorkspaceTarget{RunnerID: "runner-1", CWD: "/runner/another-project", EnvironmentProfile: "gpu"}, target)
 		return protocol.WorkspaceDiscoverResult{Commands: []slashcommands.Command{
 			{Name: "review", Description: "Review the workspace"},
-			{Name: "goal", Description: "duplicate"},
+			{Name: "rename", Description: "duplicate"},
 		}}, nil
 	}}
 	manager := newRemoteSessionManager(RemoteSessionConfig{})
@@ -559,7 +559,7 @@ func TestRemoteACPCommandsIncludeBuiltInsAndWorkspaceCommands(t *testing.T) {
 	for _, command := range commands {
 		names = append(names, command.Name)
 	}
-	assert.Equal(t, []string{"goal", "rename", "review"}, names)
+	assert.Equal(t, []string{"rename", "review"}, names)
 }
 
 func TestRemoteACPSessionsCanRunConcurrently(t *testing.T) {

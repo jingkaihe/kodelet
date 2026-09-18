@@ -71,7 +71,8 @@ type sessionStartPayload struct{}
 type resourcesDiscoverPayload struct{}
 
 type agentInitPayload struct {
-	SystemPrompt string `json:"systemPrompt"`
+	SystemPrompt string   `json:"systemPrompt"`
+	AllowedTools []string `json:"allowedTools"`
 }
 
 type agentStartPayload struct{}
@@ -175,7 +176,10 @@ func (r *Runtime) DispatchAgentInitDecision(ctx context.Context, callContext Ext
 	}
 
 	for _, handler := range r.eventHandlers(EventAgentInit) {
-		result, err := r.dispatchEventToHandler(ctx, handler, EventAgentInit, agentInitPayload{SystemPrompt: decision.SystemPrompt}, callContext)
+		result, err := r.dispatchEventToHandler(ctx, handler, EventAgentInit, agentInitPayload{
+			SystemPrompt: decision.SystemPrompt,
+			AllowedTools: append([]string{}, decision.AllowedTools...),
+		}, callContext)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension agent.init handler failed")
 			continue

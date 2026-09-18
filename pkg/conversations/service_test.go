@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -524,7 +523,6 @@ func TestConversationService_ForkConversation(t *testing.T) {
 	now := time.Now().UTC()
 	metadata, err := AddConfigSnapshot(map[string]any{
 		"profile":                         "work",
-		goals.MetadataKey:                 goals.New("finish the parent task", now),
 		conversations.RunnerIDMetadataKey: "runner-1",
 		conversations.RunnerEnvironmentProfileMetadataKey:       "gpu",
 		conversations.CodexResponsesWindowGenerationMetadataKey: float64(3),
@@ -596,7 +594,6 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Equal(t, sourceRecord.Usage.CurrentContextWindow, forkedRecord.Usage.CurrentContextWindow)
 		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
 		assert.NotContains(t, forkedRecord.Metadata, conversations.CodexResponsesWindowGenerationMetadataKey)
-		assert.NotContains(t, forkedRecord.Metadata, goals.MetadataKey)
 		assert.NotContains(t, forkedRecord.Metadata, conversations.RunnerIDMetadataKey)
 		assert.NotContains(t, forkedRecord.Metadata, conversations.RunnerEnvironmentProfileMetadataKey)
 		assert.Equal(t, sourceRecord.Metadata["profile"], forkedRecord.Metadata["profile"])

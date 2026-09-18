@@ -3136,10 +3136,10 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	assert.Equal(t, "/init focus", blocks[0].Text)
 	assert.Equal(t, "init", blocks[0].Command)
 
-	goalPrompt := "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
-	metadata = conversations.AddMessageDisplay(nil, goalPrompt, "Objective: find cores", conversations.MessageDisplayKindGoal, "goal")
+	extensionPrompt := "Inspect project dependencies"
+	metadata = conversations.AddSlashCommandDisplay(nil, extensionPrompt, "/review dependencies", "review")
 	messages, err = server.convertToWebMessages(
-		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]}]`),
+		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]}]`),
 		"anthropic",
 		metadata,
 		nil,
@@ -3149,9 +3149,9 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	blocks, ok = messages[0].Content.([]WebContentBlock)
 	require.True(t, ok)
 	require.Len(t, blocks, 1)
-	assert.Equal(t, "goal", blocks[0].Type)
-	assert.Equal(t, "Objective: find cores", blocks[0].Text)
-	assert.Equal(t, "goal", blocks[0].Command)
+	assert.Equal(t, "slash-command", blocks[0].Type)
+	assert.Equal(t, "/review dependencies", blocks[0].Text)
+	assert.Equal(t, "review", blocks[0].Command)
 
 	plainPrompt := "Internal transcription prompt"
 	metadata = conversations.AddMessageDisplay(nil, plainPrompt, "What should I make for breakfast?", "", "")
@@ -3171,27 +3171,30 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	assert.Empty(t, blocks[0].Command)
 }
 
-func TestServer_convertToWebMessagesHidesRepeatedGoalContext(t *testing.T) {
+func TestServer_convertToWebMessagesPreservesRepeatedCommands(t *testing.T) {
 	server := &Server{}
-	goalPrompt := "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
-	metadata := conversations.AddMessageDisplay(nil, goalPrompt, "Objective: find cores", conversations.MessageDisplayKindGoal, "goal")
+	prompt := "Inspect project dependencies"
+	metadata := conversations.AddSlashCommandDisplay(nil, prompt, "/review dependencies", "review")
 
 	messages, err := server.convertToWebMessages(
 		json.RawMessage(`[
-			{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]},
-			{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]}
+			{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]},
+			{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]}
 		]`),
 		"anthropic",
 		metadata,
 		nil,
 	)
 	require.NoError(t, err)
-	require.Len(t, messages, 1)
-	blocks, ok := messages[0].Content.([]WebContentBlock)
-	require.True(t, ok)
-	require.Len(t, blocks, 1)
-	assert.Equal(t, "goal", blocks[0].Type)
-	assert.Equal(t, "Objective: find cores", blocks[0].Text)
+	require.Len(t, messages, 2)
+	for _, message := range messages {
+		blocks, ok := message.Content.([]WebContentBlock)
+		require.True(t, ok)
+		require.Len(t, blocks, 1)
+		assert.Equal(t, "slash-command", blocks[0].Type)
+		assert.Equal(t, "/review dependencies", blocks[0].Text)
+		assert.Equal(t, "review", blocks[0].Command)
+	}
 }
 
 func TestServer_Close(t *testing.T) {

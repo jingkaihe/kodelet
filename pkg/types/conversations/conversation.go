@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -230,7 +229,6 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 		forked.Metadata = maps.Clone(source.Metadata)
 		delete(forked.Metadata, ParentConversationIDMetadataKey)
 		delete(forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
-		delete(forked.Metadata, goals.MetadataKey)
 		// Runner affinity is authoritative for a specific conversation ID and
 		// must be explicitly re-established for the forked ID by the caller.
 		delete(forked.Metadata, RunnerIDMetadataKey)

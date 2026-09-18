@@ -9,7 +9,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -181,7 +180,7 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 		return CommandResult{}, nil
 	}
 	pinned, opened := e.pinnedCommands(command)
-	if opened && command != goals.SlashCommandName && command != slashcommands.RenameCommandName && len(pinned) == 0 {
+	if opened && command != slashcommands.RenameCommandName && len(pinned) == 0 {
 		return CommandResult{}, errors.Errorf("slash command '/%s' is not available in the pinned run manifest", command)
 	}
 
@@ -218,7 +217,7 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 		}
 	}
 
-	if command == goals.SlashCommandName || command == slashcommands.RenameCommandName {
+	if command == slashcommands.RenameCommandName {
 		return CommandResult{}, nil
 	}
 
@@ -589,7 +588,7 @@ func workspaceCommands(ctx context.Context, workingDirectory string, runtime *ex
 	commands := slashcommands.List(ctx, processor)
 	filtered := commands[:0]
 	for _, command := range commands {
-		if command.Name != goals.SlashCommandName && command.Name != slashcommands.RenameCommandName {
+		if command.Name != slashcommands.RenameCommandName {
 			filtered = append(filtered, command)
 		}
 	}

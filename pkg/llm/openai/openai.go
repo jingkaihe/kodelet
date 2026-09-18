@@ -16,7 +16,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -224,17 +223,6 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
-	if goals.IsContextText(message) {
-		if imageParts := t.userImageParts(ctx, imagePaths); len(imageParts) > 0 {
-			t.messages = append(t.messages, openai.ChatCompletionMessage{
-				Role:         openai.ChatMessageRoleUser,
-				MultiContent: imageParts,
-			})
-		}
-		t.messages = append(t.messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: message})
-		return
-	}
-
 	contentParts := t.userImageParts(ctx, imagePaths)
 	contentParts = append(contentParts, openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeText,
@@ -422,9 +410,6 @@ OUTER:
 					return "", errors.Wrap(err, "failed to dispatch agent end")
 				}
 				if continued {
-					continue OUTER
-				}
-				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {

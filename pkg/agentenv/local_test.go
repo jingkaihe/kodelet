@@ -55,7 +55,7 @@ func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {
 	environment := NewLocalEnvironment(workspace, nil)
 	config := llmtypes.Config{
 		WorkingDirectory: workspace,
-		AllowedTools:     []string{"file_read", "get_goal"},
+		AllowedTools:     []string{"file_read", "read_conversation"},
 	}
 	manifest, err := environment.Open(context.Background(), RunSpec{ConversationID: "conv-1", Config: config})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 
 	manifest, err := environment.Open(context.Background(), RunSpec{Config: llmtypes.Config{
 		WorkingDirectory: workspace,
-		AllowedTools:     []string{"file_read", "get_goal"},
+		AllowedTools:     []string{"file_read", "read_conversation"},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = environment.Close(context.Background()) })
@@ -91,9 +91,9 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 	assert.Equal(t, "object", fileRead.InputSchema["type"])
 	require.NotNil(t, fileRead.Tool)
 
-	getGoal, ok := manifest.ToolDefinition("get_goal")
+	readConversation, ok := manifest.ToolDefinition("read_conversation")
 	require.True(t, ok)
-	assert.Equal(t, ToolPlacementControlPlane, getGoal.Placement)
+	assert.Equal(t, ToolPlacementControlPlane, readConversation.Placement)
 
 	fileRead.InputSchema["type"] = "changed"
 	unchanged, ok := environment.Manifest().ToolDefinition("file_read")
@@ -305,7 +305,7 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	assert.True(t, blocked.Result.IsError())
 	assert.Contains(t, blocked.Result.GetError(), "not allowed")
 
-	controlPlane, err := environment.ExecuteTool(t.Context(), ToolRequest{Name: "get_goal", Input: `{}`, ToolCallID: "call-control"}, nil)
+	controlPlane, err := environment.ExecuteTool(t.Context(), ToolRequest{Name: "read_conversation", Input: `{}`, ToolCallID: "call-control"}, nil)
 	require.NoError(t, err)
 	assert.True(t, controlPlane.Result.IsError())
 	assert.Contains(t, controlPlane.Result.GetError(), "server tool")
@@ -327,9 +327,8 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	plain, err := environment.ExecuteCommand(t.Context(), CommandRequest{Message: "not a command", RunSpec: spec})
 	require.NoError(t, err)
 	assert.False(t, plain.Matched)
-	goal, err := environment.ExecuteCommand(t.Context(), CommandRequest{Message: "/goal", RunSpec: spec})
-	require.NoError(t, err)
-	assert.False(t, goal.Matched)
+	_, err = environment.ExecuteCommand(t.Context(), CommandRequest{Message: "/goal", RunSpec: spec})
+	require.ErrorContains(t, err, "not available in the pinned run manifest")
 	rename, err := environment.ExecuteCommand(t.Context(), CommandRequest{Message: "/rename new name", RunSpec: spec})
 	require.NoError(t, err)
 	assert.False(t, rename.Matched)

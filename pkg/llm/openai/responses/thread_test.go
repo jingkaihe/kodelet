@@ -18,7 +18,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -1577,7 +1576,6 @@ func TestRetainedStoredItemsForRemoteCompactionV2(t *testing.T) {
 		{Type: "message", Role: "assistant", Content: "commentary", RawItem: json.RawMessage(`{"phase":"commentary","content":[{"type":"output_text","text":"commentary"}]}`)},
 		{Type: "function_call", CallID: "call-1", Name: "bash", Arguments: `{}`},
 		{Type: "message", Role: "developer", Content: "stale instructions"},
-		{Type: "message", Role: "user", Content: goals.RenderContext(goals.New("keep working", time.Now()))},
 		{Type: "message", Role: "user", Content: "latest user"},
 		{Type: "compaction", EncryptedContent: "old-compaction"},
 	}
@@ -2827,24 +2825,6 @@ func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
 	assert.Contains(t, string(streamable[0].RawItem), `"type":"input_image"`)
 }
 
-func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
-	thread := &Thread{
-		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems: make([]StoredInputItem, 0),
-	}
-	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
-
-	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
-
-	require.Len(t, thread.inputItems, 2)
-	require.Len(t, thread.storedItems, 2)
-	assert.Empty(t, extractInputItemText(thread.inputItems[0]))
-	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(thread.inputItems[0]))
-	assert.Equal(t, goalContext, extractInputItemText(thread.inputItems[1]))
-	assert.Empty(t, thread.storedItems[0].Content)
-	assert.Equal(t, goalContext, thread.storedItems[1].Content)
-}
-
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -3527,7 +3507,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	thread.Usage.OutputTokens = 5
 	thread.Usage.CurrentContextWindow = 123
 	thread.Usage.MaxContextWindow = 456
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("finish the parent task", time.Now()))
+	thread.SetMetadataValue("custom_key", "parent value")
 	store := &mockResponsesConversationStore{}
 	thread.Store = store
 	thread.Persisted = true
@@ -3566,7 +3546,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, 123, store.savedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.savedRecords[0].Usage.MaxContextWindow)
 	assert.NotContains(t, store.savedRecords[0].Metadata, convtypes.CodexResponsesWindowGenerationMetadataKey)
-	assert.NotContains(t, store.savedRecords[0].Metadata, goals.MetadataKey)
+	assert.Equal(t, "parent value", store.savedRecords[0].Metadata["custom_key"])
 	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
 	forkMetadata, ok := store.savedRecords[0].Metadata[convtypes.ConversationForkMetadataKey].(map[string]any)
 	require.True(t, ok)
@@ -3878,126 +3858,6 @@ func TestOpenAIReasoningEffortForRequest(t *testing.T) {
 	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortNone))
 	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(" GPT-6-ASTRA ", shared.ReasoningEffortMinimal))
 	assert.Equal(t, shared.ReasoningEffortNone, openAIReasoningEffortForRequest("gpt-5.6-sol", shared.ReasoningEffortNone))
-}
-
-func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
-	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test"),
-	}
-	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
-		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
-			},
-		},
-	}
-	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
-
-	var capturedParams openairesponses.ResponseNewParams
-	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
-		capturedParams = params
-		return nil
-	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
-		return processStreamResult{responseCompleted: true}, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
-	require.NoError(t, err)
-
-	require.Len(t, capturedParams.Input.OfInputItemList, 1)
-	assert.Equal(t, "hello", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.NotContains(t, extractInputItemText(capturedParams.Input.OfInputItemList[0]), "<goal_context>")
-	require.Len(t, thread.inputItems, 1)
-	require.Len(t, thread.storedItems, 1)
-}
-
-func TestProcessMessageExchangeDoesNotDuplicatePersistedGoalContext(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
-	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test"),
-	}
-	goal := goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC))
-	goalContext := goals.RenderContext(goal)
-	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
-		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(goalContext)},
-			},
-		},
-	}
-	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: goalContext}}
-	thread.SetMetadataValue(goals.MetadataKey, goal)
-
-	var capturedParams openairesponses.ResponseNewParams
-	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
-		capturedParams = params
-		return nil
-	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
-		return processStreamResult{responseCompleted: true}, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
-	require.NoError(t, err)
-
-	require.Len(t, capturedParams.Input.OfInputItemList, 1)
-	assert.Equal(t, goalContext, extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-}
-
-func TestProcessMessageExchangeDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
-	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test"),
-	}
-	goal := goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC))
-	goalContext := goals.RenderContext(goal)
-	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
-		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
-			},
-		},
-		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(goalContext)},
-			},
-		},
-		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("follow up")},
-			},
-		},
-	}
-	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}, {Type: "message", Role: "user", Content: goalContext}, {Type: "message", Role: "user", Content: "follow up"}}
-	thread.SetMetadataValue(goals.MetadataKey, goal)
-
-	var capturedParams openairesponses.ResponseNewParams
-	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
-		capturedParams = params
-		return nil
-	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
-		return processStreamResult{responseCompleted: true}, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
-	require.NoError(t, err)
-
-	require.Len(t, capturedParams.Input.OfInputItemList, 3)
-	assert.Equal(t, "hello", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.Equal(t, goalContext, extractInputItemText(capturedParams.Input.OfInputItemList[1]))
-	assert.Equal(t, "follow up", extractInputItemText(capturedParams.Input.OfInputItemList[2]))
 }
 
 func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
@@ -4764,144 +4624,6 @@ func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
 	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
 	require.NoError(t, err)
 	assert.False(t, hasPending)
-}
-
-func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
-	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test"),
-		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems: make([]StoredInputItem, 0),
-	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
-
-	exchangeCalls := 0
-	thread.processMessageExchangeFunc = func(
-		_ context.Context,
-		_ llmtypes.MessageHandler,
-		_ string,
-		_ int,
-		_ string,
-		_ llmtypes.MessageOpt,
-	) (string, bool, bool, error) {
-		exchangeCalls++
-		return "progress", false, true, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{MaxTurns: 2})
-	require.NoError(t, err)
-	assert.Equal(t, 2, exchangeCalls)
-	require.Len(t, thread.inputItems, 2)
-	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
-	assert.Contains(t, extractInputItemText(thread.inputItems[1]), "<goal_context>")
-}
-
-func TestSendMessageAutoContinuationStopsWhenUpdateGoalUnavailable(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
-	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test"),
-		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems: make([]StoredInputItem, 0),
-	}
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
-
-	exchangeCalls := 0
-	thread.processMessageExchangeFunc = func(
-		_ context.Context,
-		_ llmtypes.MessageHandler,
-		_ string,
-		_ int,
-		_ string,
-		_ llmtypes.MessageOpt,
-	) (string, bool, bool, error) {
-		exchangeCalls++
-		return "progress", false, true, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true})
-	require.NoError(t, err)
-	assert.Equal(t, 1, exchangeCalls)
-	require.Len(t, thread.inputItems, 1)
-	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
-}
-
-func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
-	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test"),
-		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems: make([]StoredInputItem, 0),
-	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
-
-	exchangeCalls := 0
-	thread.processMessageExchangeFunc = func(
-		_ context.Context,
-		_ llmtypes.MessageHandler,
-		_ string,
-		_ int,
-		_ string,
-		_ llmtypes.MessageOpt,
-	) (string, bool, bool, error) {
-		exchangeCalls++
-		if exchangeCalls == 3 {
-			goal, metadata, err := goals.UpdateStatus(thread.GetMetadata(), goals.StatusComplete, "done", time.Now())
-			require.NoError(t, err)
-			assert.Equal(t, goals.StatusComplete, goal.Status)
-			for key, value := range metadata {
-				thread.SetMetadataValue(key, value)
-			}
-		}
-		return "progress", false, true, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{})
-	require.NoError(t, err)
-	assert.Equal(t, 3, exchangeCalls)
-	require.Len(t, thread.inputItems, 3)
-	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
-	assert.Contains(t, extractInputItemText(thread.inputItems[1]), "<goal_context>")
-	assert.Contains(t, extractInputItemText(thread.inputItems[2]), "<goal_context>")
-}
-
-func TestSendMessageAutoContinuationStopsWhenGoalPaused(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
-	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test"),
-		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems: make([]StoredInputItem, 0),
-	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
-
-	exchangeCalls := 0
-	thread.processMessageExchangeFunc = func(
-		_ context.Context,
-		_ llmtypes.MessageHandler,
-		_ string,
-		_ int,
-		_ string,
-		_ llmtypes.MessageOpt,
-	) (string, bool, bool, error) {
-		exchangeCalls++
-		goal, metadata, err := goals.UpdateStatus(thread.GetMetadata(), goals.StatusPaused, "user paused", time.Now())
-		require.NoError(t, err)
-		assert.Equal(t, goals.StatusPaused, goal.Status)
-		for key, value := range metadata {
-			thread.SetMetadataValue(key, value)
-		}
-		return "paused", false, true, nil
-	}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{MaxTurns: 2})
-	require.NoError(t, err)
-	assert.Equal(t, 1, exchangeCalls)
 }
 
 func TestRecordUsesResponsesAPI_MetadataDetection(t *testing.T) {

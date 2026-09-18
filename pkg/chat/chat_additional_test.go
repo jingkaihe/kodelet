@@ -17,7 +17,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -1170,20 +1169,6 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, conversations.MessageDisplayKindSlashCommand, display.Kind)
 	assert.Equal(t, extensionResult.Display, display.Text)
 	assert.Equal(t, extensionResult.CommandName, display.Command)
-
-	goalUpdate := &goals.CommandUpdate{
-		ModelPrompt: goals.ModelPrompt("find cores"),
-		Display:     goals.DisplayText("find cores"),
-		Goal:        goals.New("find cores", time.Now()),
-	}
-	AddGoalDisplay(thread, goalUpdate)
-
-	assert.Equal(t, goalUpdate.Goal, thread.metadata[goals.MetadataKey])
-	display, ok = conversations.LookupMessageDisplay(thread.metadata, goalUpdate.ModelPrompt)
-	require.True(t, ok)
-	assert.Equal(t, conversations.MessageDisplayKindGoal, display.Kind)
-	assert.Equal(t, goalUpdate.Display, display.Text)
-	assert.Equal(t, goals.SlashCommandName, display.Command)
 
 	environmentResult := agentenv.CommandResult{
 		Matched:         true,

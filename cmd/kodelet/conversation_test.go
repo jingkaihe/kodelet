@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -111,8 +110,7 @@ func TestConversationFork(t *testing.T) {
 		},
 	}
 	sourceRecord.Metadata = map[string]any{
-		"test_key":        "test_value",
-		goals.MetadataKey: goals.New("finish the parent task", time.Now()),
+		"test_key": "test_value",
 	}
 
 	// Save to store
@@ -142,9 +140,8 @@ func TestConversationFork(t *testing.T) {
 	assert.Equal(t, loadedSource.Summary, loadedForked.Summary)
 	assert.Equal(t, loadedSource.ToolResults, loadedForked.ToolResults)
 
-	// Assert that ordinary metadata is copied while the parent goal is not inherited.
+	// Assert that ordinary metadata is copied.
 	assert.Equal(t, loadedSource.Metadata["test_key"], loadedForked.Metadata["test_key"])
-	assert.NotContains(t, loadedForked.Metadata, goals.MetadataKey)
 
 	// Assert that IDs are different
 	assert.NotEqual(t, loadedSource.ID, loadedForked.ID)

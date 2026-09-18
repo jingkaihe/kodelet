@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -19,7 +18,6 @@ const (
 	legacyMessageDisplayMetadataKey = "message_display_overrides"
 	MessageDisplayVersion           = "v1"
 	MessageDisplayKindSlashCommand  = "slash-command"
-	MessageDisplayKindGoal          = "goal"
 )
 
 type (
@@ -215,19 +213,11 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 	}
 
 	displays := messageDisplays(metadata)
-	consumedDisplays := map[string]struct{}{}
 
 	result := make([]StreamableMessage, 0, len(messages))
 	for _, message := range messages {
 		if message.Kind != "text" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
 			result = append(result, message)
-			continue
-		}
-		if goals.IsContextText(message.Content) {
-			if display, ok := consumeDisplay(displays, consumedDisplays, message.Content); ok {
-				message.Content = display.Text
-				result = append(result, message)
-			}
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
@@ -245,19 +235,11 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 	}
 
 	displays := messageDisplays(metadata)
-	consumedDisplays := map[string]struct{}{}
 
 	result := make([]llmtypes.Message, 0, len(messages))
 	for _, message := range messages {
 		if message.Role != "user" || strings.TrimSpace(message.Content) == "" {
 			result = append(result, message)
-			continue
-		}
-		if goals.IsContextText(message.Content) {
-			if display, ok := consumeDisplay(displays, consumedDisplays, message.Content); ok {
-				message.Content = display.Text
-				result = append(result, message)
-			}
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
@@ -266,22 +248,6 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 		result = append(result, message)
 	}
 	return result
-}
-
-func consumeDisplay(displays map[string]MessageDisplay, consumed map[string]struct{}, text string) (MessageDisplay, bool) {
-	if len(displays) == 0 || strings.TrimSpace(text) == "" {
-		return MessageDisplay{}, false
-	}
-	key := MessageDisplayKey(text)
-	if _, ok := consumed[key]; ok {
-		return MessageDisplay{}, false
-	}
-	display, ok := displays[key]
-	if !ok || strings.TrimSpace(display.Text) == "" {
-		return MessageDisplay{}, false
-	}
-	consumed[key] = struct{}{}
-	return display, true
 }
 
 func rawMessageDisplays(displays map[string]MessageDisplay) map[string]any {

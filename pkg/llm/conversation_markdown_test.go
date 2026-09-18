@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
@@ -245,20 +244,20 @@ func TestRenderConversationEntriesMarkdownPreservesResponsesImageOnlyMessage(t *
 	assert.NotContains(t, markdown, "_Empty message._")
 }
 
-func TestRenderConversationMarkdownDropsRepeatedGoalContexts(t *testing.T) {
-	goalContext := "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
-	metadata := conversations.AddMessageDisplay(nil, goalContext, "Objective: find cores", conversations.MessageDisplayKindGoal, goals.SlashCommandName)
+func TestRenderConversationMarkdownPreservesRepeatedCommands(t *testing.T) {
+	prompt := "Inspect project dependencies"
+	metadata := conversations.AddSlashCommandDisplay(nil, prompt, "/review dependencies", "review")
 	rawMessages := []byte(`[
-		{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]},
-		{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]}
+		{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]},
+		{"role":"user","content":[{"type":"text","text":"Inspect project dependencies"}]}
 	]`)
 
 	markdown, err := RenderConversationMarkdown("anthropic", rawMessages, metadata, nil)
 
 	assert.NoError(t, err)
-	assert.Contains(t, markdown, "Objective: find cores")
+	assert.Equal(t, 2, strings.Count(markdown, "/review dependencies"))
 	assert.NotContains(t, markdown, "_Empty message._")
-	assert.Equal(t, 1, strings.Count(markdown, "### User"))
+	assert.Equal(t, 2, strings.Count(markdown, "### User"))
 }
 
 func TestRenderConversationEntriesMarkdownUsesLongerCodeFenceWhenPayloadContainsBackticks(t *testing.T) {

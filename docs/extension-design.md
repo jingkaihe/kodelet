@@ -732,6 +732,8 @@ type ToolCallResult =
     };
 ```
 
+The `agent.init` payload includes `systemPrompt` and `allowedTools`, an array containing the current tool allowlist after any earlier init handlers have patched it. An empty array means no tools are allowed. Older hosts may omit `allowedTools`.
+
 Example `agent.init` result:
 
 ```typescript

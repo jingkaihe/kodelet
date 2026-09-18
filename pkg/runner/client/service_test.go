@@ -445,7 +445,7 @@ Review the runner workspace.`), 0o600))
 			Profile:            "control-work",
 			EnvironmentProfile: "runner-work",
 		},
-		ReservedToolNames: []string{"get_goal", "update_goal", "read_conversation"},
+		ReservedToolNames: []string{"read_conversation"},
 	})
 	assert.Equal(t, "runner-1", manifest.RunnerID)
 	assert.Equal(t, "runner-work", loadedEnvironmentProfile)
@@ -455,7 +455,7 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, "runner prompt {{.WorkingDirectory}}", manifest.Config.SystemPromptContent)
 	assert.NotEmpty(t, manifest.Digest)
 	assert.True(t, manifest.Capabilities.PersistentWidgets)
-	assert.NotContains(t, manifestToolNames(manifest), "get_goal")
+	assert.NotContains(t, manifestToolNames(manifest), "read_conversation")
 	assert.Contains(t, manifestToolNames(manifest), "file_read")
 	require.NotEmpty(t, manifest.ContextFiles)
 	assert.Contains(t, manifest.ContextFiles[0].Content, "Workspace rules")
@@ -1010,7 +1010,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 		AllowedCommands:     []string{"go test ./..."},
 		EnableFSSearchTools: true,
 		SyspromptArgs:       map[string]string{"audience": "developer"},
-	}, nil, "runner-1", "run-1", 4, []string{"get_goal", " "})
+	}, nil, "runner-1", "run-1", 4, []string{"read_conversation", " "})
 	require.NoError(t, err)
 	assert.Equal(t, new(0), manifest.ExtensionCount, "no runtime is an explicitly known zero")
 	require.Len(t, manifest.ContextFiles, 2)
@@ -1035,10 +1035,10 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 	_, err = buildWireManifest(agentenv.Manifest{
 		WorkingDirectory: workspace,
 		Tools: []agentenv.ToolDefinition{{
-			Name:      "get_goal",
+			Name:      "read_conversation",
 			Placement: agentenv.ToolPlacementEnvironment,
 		}},
-	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"get_goal"})
+	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"read_conversation"})
 	require.ErrorContains(t, err, "collides with a reserved server tool")
 }
 

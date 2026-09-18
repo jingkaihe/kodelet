@@ -267,13 +267,3 @@
   font-weight: 500;
   color: var(--kodelet-muted);
 }
-
-.slash-command-card-goal {
-  width: calc(100% - 3rem);
-}
-
-.slash-command-card-goal .slash-command-card-command {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}

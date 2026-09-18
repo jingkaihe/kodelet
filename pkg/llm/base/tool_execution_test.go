@@ -9,7 +9,6 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -229,14 +228,17 @@ func TestExecuteToolWithHandlerForwardsUpdatesAndRejectsLateCallbacks(t *testing
 }
 
 func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironment(t *testing.T) {
+	ctx := tooltypes.ContextWithModelHelper(t.Context(), func(_ context.Context, request tooltypes.ModelHelperRequest) (string, error) {
+		assert.Equal(t, tooltypes.ModelHelperReadConversationExtract, request.Operation)
+		assert.Equal(t, "saved-conversation", request.ConversationID)
+		assert.Equal(t, "extract phase one", request.Prompt)
+		return "phase one context", nil
+	})
 	thread := &environmentThreadStub{
 		threadStub: &threadStub{
 			config:         llmtypes.Config{WorkingDirectory: t.TempDir()},
 			conversationID: "conv-control-plane-tool",
-			metadata: map[string]any{
-				goals.MetadataKey: goals.Goal{Objective: "ship phase one", Status: goals.StatusActive, Version: 1},
-			},
-			state: &toolState{tools: []tooltypes.Tool{namedTool("file_read"), namedTool("get_goal")}},
+			state:          &toolState{tools: []tooltypes.Tool{namedTool("file_read"), namedTool("read_conversation")}},
 		},
 	}
 
@@ -245,17 +247,17 @@ func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironmen
 	t.Cleanup(func() { _ = CloseEnvironment(context.Background(), thread) })
 
 	execution := ExecuteEnvironmentTool(
-		context.Background(),
+		ctx,
 		thread,
 		renderers.NewRendererRegistry(),
-		"get_goal",
-		`{}`,
-		"call-goal",
+		"read_conversation",
+		`{"conversation_id":"saved-conversation","goal":"extract phase one"}`,
+		"call-conversation",
 	)
 
 	require.NotNil(t, execution.Result)
 	assert.False(t, execution.Result.IsError())
-	assert.Contains(t, execution.Result.GetResult(), "ship phase one")
+	assert.Equal(t, "phase one context", execution.Result.GetResult())
 }
 
 func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
@@ -399,7 +401,7 @@ func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing
 	thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
 	registry := renderers.NewRendererRegistry()
 
-	unavailable := ExecuteEnvironmentTool(t.Context(), thread, registry, "get_goal", `{}`, "call-goal")
+	unavailable := ExecuteEnvironmentTool(t.Context(), thread, registry, "read_conversation", `{}`, "call-conversation")
 	require.NotNil(t, unavailable.Result)
 	assert.True(t, unavailable.Result.IsError())
 	assert.Contains(t, unavailable.Result.GetError(), "not available in the current run")
@@ -423,13 +425,13 @@ func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing
 }
 
 func TestExecuteControlPlaneToolHonorsEnvironmentPolicyAndResultMutation(t *testing.T) {
-	mutated := tooltypes.StructuredToolResult{ToolName: "get_goal", Success: false, Error: "redacted by runner policy"}
+	mutated := tooltypes.StructuredToolResult{ToolName: "read_conversation", Success: false, Error: "redacted by runner policy"}
 	environment := &recordingAgentEnvironment{
 		open: true,
 		manifest: agentenv.Manifest{
 			WorkingDirectory: "/runner/workspace",
 			Tools: []agentenv.ToolDefinition{{
-				Name:      "get_goal",
+				Name:      "read_conversation",
 				Placement: agentenv.ToolPlacementControlPlane,
 			}},
 		},
@@ -438,7 +440,7 @@ func TestExecuteControlPlaneToolHonorsEnvironmentPolicyAndResultMutation(t *test
 	}
 	thread := &environmentThreadStub{threadStub: &threadStub{conversationID: "conversation"}, environment: environment}
 
-	execution := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "get_goal", `{}`, "call-goal")
+	execution := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "read_conversation", `{}`, "call-conversation")
 
 	require.NoError(t, execution.Err)
 	assert.Equal(t, `{"changed":true}`, execution.Input)

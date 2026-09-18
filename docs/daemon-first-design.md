@@ -10,7 +10,7 @@ This design builds on the [runner design](runner-design.md) and [extension desig
 
 ## Summary
 
-`kodelet serve` becomes the required control-plane daemon. `kodelet chat`, `kodelet run`, `kodelet conversation`, ACP, and the SDK become clients of that daemon rather than alternative hosts for the agent loop. The daemon owns provider connections, provider credentials, conversations, execution state, goals, steering, and event distribution. Runners own workspace context, tools, skills, extensions, and workspace processes.
+`kodelet serve` becomes the required control-plane daemon. `kodelet chat`, `kodelet run`, `kodelet conversation`, ACP, and the SDK become clients of that daemon rather than alternative hosts for the agent loop. The daemon owns provider connections, provider credentials, conversations, execution state, steering, and event distribution. Runners own workspace context, tools, skills, extensions, and workspace processes.
 
 For single-machine operation, `serve` can host an embedded runner. That runner uses the same WebSocket and JSON-RPC connection, registration, manifests, and run lifecycle as a separately launched `kodelet runner start`. Embedding changes process placement and lifecycle ownership, not execution semantics. A control-plane-only deployment can disable embedded execution and accept external runners instead.
 
@@ -59,7 +59,7 @@ The following table records the starting architecture and migration seams, not c
 | Discovery and workspace panels | [ChatPage](../pkg/webui/frontend/src/pages/ChatPage.tsx) disables remote slash-command discovery and CWD suggestions. [Workspace targeting](../pkg/controlplane/workspace_runner.go) rejects custom CWD for runner-wide operations. | Add runner-backed discovery and distinguish conversation directory targets from runner-wide targets. |
 | ACP directory behavior | [Remote ACP sessions](../pkg/acp/remote.go) constrain session CWD to the startup workspace. | Move directory selection and validation to the selected runner consistently. |
 
-Core shell/file tools, skills, extension tools, ordinary agent/tool lifecycle hooks, slash-command execution, images, goals, steering, and background leases are not wholesale missing from the runner architecture. The work is to close the specific gaps and remove alternative ownership paths.
+Core shell/file tools, skills, extension tools, ordinary agent/tool lifecycle hooks, slash-command execution, images, steering, and background leases are not wholesale missing from the runner architecture. The work is to close the specific gaps and remove alternative ownership paths.
 
 ## Proposed architecture
 
@@ -90,11 +90,11 @@ Core shell/file tools, skills, extension tools, ordinary agent/tool lifecycle ho
 | Component | Owns | Must not do |
 |---|---|---|
 | Thin client | Argument parsing, stdin, attachment preparation, terminal rendering, interactive responses, request submission, output formatting, exit codes | Construct provider threads, execute an alternative agent loop, or read/write the conversation database directly |
-| Control plane | Provider configuration and credentials, model requests, execution state, conversation persistence, goals, steering, usage, client event distribution, runner assignment | Interpret runner-local paths as server-local files or execute workspace tools through a direct-local fallback |
+| Control plane | Provider configuration and credentials, model requests, execution state, conversation persistence, steering, usage, client event distribution, runner assignment | Interpret runner-local paths as server-local files or execute workspace tools through a direct-local fallback |
 | Runner | Canonical execution CWD, context and resource discovery, tools, extensions, environment policy, workspace services, execution-instance lifecycle | Own the central provider loop or require provider credentials for supported Kodelet-managed helpers |
 | Service host | Listener startup, embedded runner composition, process shutdown, operational status | Change execution behavior based on whether a runner shares its process |
 
-Provider-native tools remain provider-owned. Control-plane tools such as goals and conversation reading remain central; their placement is not a workspace-execution bypass. Extension subprocesses retain their existing runner-local protocol.
+Provider-native tools remain provider-owned. Conversation reading remains a control-plane tool; its placement is not a workspace-execution bypass. Extension subprocesses retain their existing runner-local protocol.
 
 ### Invariants
 

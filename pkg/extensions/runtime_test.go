@@ -453,10 +453,16 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 	callContext := ExtensionCallContext{ConversationID: "conv-events", CWD: rootDir, InvokedBy: "main"}
 	systemPrompt := runtime.DispatchAgentInit(context.Background(), callContext, "base prompt")
 	assert.Equal(t, "preface\nbase prompt\nappendix", systemPrompt)
+	payload, err := os.ReadFile(filepath.Join(rootDir, "agent-init.json"))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"systemPrompt":"base prompt","allowedTools":[]}`, string(payload))
 
 	agentInit := runtime.DispatchAgentInitDecision(context.Background(), callContext, "base prompt", []string{"bash", "file_read"})
 	assert.Equal(t, "preface\nbase prompt\nappendix", agentInit.SystemPrompt)
 	assert.Equal(t, []string{"file_read", "get_weather"}, agentInit.AllowedTools)
+	payload, err = os.ReadFile(filepath.Join(rootDir, "agent-init.json"))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"systemPrompt":"base prompt","allowedTools":["bash","file_read"]}`, string(payload))
 
 	runtime.DispatchTurnEnd(context.Background(), callContext, "final response", 3)
 
@@ -1358,6 +1364,10 @@ func handleHelperEvent(params eventParams) EventResult {
 		message := event.Message + " [mutated]"
 		return EventResult{Message: &message}
 	case EventAgentInit:
+		if params.Context.CWD != "" {
+			payload, _ := json.Marshal(params.Payload)
+			_ = os.WriteFile(filepath.Join(params.Context.CWD, "agent-init.json"), payload, 0o644)
+		}
 		prepend := "preface"
 		appendix := "appendix"
 		return EventResult{

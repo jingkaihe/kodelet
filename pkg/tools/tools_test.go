@@ -67,14 +67,13 @@ func TestGetAvailableToolNames(t *testing.T) {
 }
 
 func TestControlPlaneToolClassification(t *testing.T) {
-	assert.Equal(t, []string{"get_goal", "update_goal", "read_conversation"}, ControlPlaneToolNames())
-	assert.True(t, IsControlPlaneTool("get_goal"))
+	assert.Equal(t, []string{"read_conversation"}, ControlPlaneToolNames())
 	assert.True(t, IsControlPlaneTool("read_conversation"))
 	assert.False(t, IsControlPlaneTool("bash"))
 
-	tool, ok := ControlPlaneTool("update_goal")
+	tool, ok := ControlPlaneTool("read_conversation")
 	require.True(t, ok)
-	assert.Equal(t, "update_goal", tool.Name())
+	assert.Equal(t, "read_conversation", tool.Name())
 	_, ok = ControlPlaneTool("bash")
 	assert.False(t, ok)
 }
@@ -277,7 +276,7 @@ func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
 	assert.False(t, tool.executed)
 }
 
-func TestGetMainTools_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
+func TestGetMainTools_RespectsExplicitAllowlist(t *testing.T) {
 	tools := GetMainTools(context.Background(), []string{"bash"})
 
 	toolNames := make([]string, len(tools))
@@ -285,12 +284,10 @@ func TestGetMainTools_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Contains(t, toolNames, "bash")
-	assert.Contains(t, toolNames, "get_goal")
-	assert.Contains(t, toolNames, "update_goal")
+	assert.Equal(t, []string{"bash"}, toolNames)
 }
 
-func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
+func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesSearchMetaTools(t *testing.T) {
 	tools := GetMainToolsWithOptions(context.Background(), []string{"bash"}, true)
 
 	toolNames := make([]string, len(tools))
@@ -298,9 +295,7 @@ func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesGoalMetaTools(t *testi
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Contains(t, toolNames, "bash")
-	assert.Contains(t, toolNames, "get_goal")
-	assert.Contains(t, toolNames, "update_goal")
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "bash"}, toolNames)
 }
 
 func TestGetMainTools_NoToolsMarker(t *testing.T) {

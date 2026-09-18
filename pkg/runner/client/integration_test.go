@@ -171,7 +171,7 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	manifest, err := registry.OpenRun(t.Context(), registration.RunnerID, protocol.RunOpenParams{
 		RunID:             "run-wire",
 		ConversationID:    "conversation-wire",
-		ReservedToolNames: []string{"get_goal", "update_goal", "read_conversation"},
+		ReservedToolNames: []string{"read_conversation"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "run-wire", manifest.RunID)

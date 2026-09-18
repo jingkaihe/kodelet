@@ -10,7 +10,7 @@ export interface Message {
 }
 
 export interface ContentBlock {
-  type: 'text' | 'image' | 'slash-command' | 'goal';
+  type: 'text' | 'image' | 'slash-command';
   text?: string;
   command?: string;
   source?: {

@@ -166,12 +166,6 @@ func List(ctx context.Context, processor *fragments.Processor) []Command {
 func BuiltIns() []Command {
 	return []Command{
 		{
-			Name:        "goal",
-			Description: "Set the active goal for this thread",
-			Hint:        "objective",
-			Placeholder: "/goal <objective>",
-		},
-		{
 			Name:        RenameCommandName,
 			Description: "Rename the current conversation",
 			Hint:        "name",

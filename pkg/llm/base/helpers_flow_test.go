@@ -9,7 +9,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -200,7 +199,7 @@ func (e *recordingAgentEnvironment) Close(context.Context) error {
 func (e *recordingAgentEnvironment) State() tooltypes.State { return e.state }
 
 func TestAvailableTools(t *testing.T) {
-	tools := []tooltypes.Tool{namedTool("read_file"), namedTool("update_goal")}
+	tools := []tooltypes.Tool{namedTool("file_read"), namedTool("file_write")}
 	state := &toolState{tools: tools}
 
 	assert.Empty(t, AvailableTools(nil, false))
@@ -209,9 +208,9 @@ func TestAvailableTools(t *testing.T) {
 }
 
 func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
-	tools := []tooltypes.Tool{namedTool("read_file"), namedTool("bash"), namedTool("update_goal")}
+	tools := []tooltypes.Tool{namedTool("file_read"), namedTool("bash"), namedTool("file_write")}
 	state := &toolState{tools: tools}
-	thread := &threadStub{metadata: map[string]any{"allowed_tools": []string{"read_file", "update_goal"}}}
+	thread := &threadStub{metadata: map[string]any{"allowed_tools": []string{"file_read", "file_write"}}}
 
 	available := AvailableToolsForThread(thread, state, false)
 
@@ -367,50 +366,6 @@ func TestBase64ImageSourceMediaType(t *testing.T) {
 			assert.Equal(t, tt.expected, actual)
 		})
 	}
-}
-
-func TestHandleGoalAutoContinuation(t *testing.T) {
-	t.Run("continues active goal when update tool is available", func(t *testing.T) {
-		thread := &threadStub{
-			metadata: map[string]any{
-				goals.MetadataKey: goals.Goal{Objective: "finish coverage", Status: goals.StatusActive, Version: 1},
-			},
-		}
-
-		continued := HandleGoalAutoContinuation(context.Background(), thread, []tooltypes.Tool{namedTool("update_goal")})
-
-		assert.True(t, continued)
-		require.Len(t, thread.userMessages, 1)
-		assert.Contains(t, thread.userMessages[0], goals.ContextStartMarker)
-		assert.Contains(t, thread.userMessages[0], "finish coverage")
-	})
-
-	t.Run("skips when no active goal", func(t *testing.T) {
-		thread := &threadStub{}
-
-		continued := HandleGoalAutoContinuation(context.Background(), thread, []tooltypes.Tool{namedTool("update_goal")})
-
-		assert.False(t, continued)
-		assert.Empty(t, thread.userMessages)
-	})
-
-	t.Run("skips when update goal tool is unavailable", func(t *testing.T) {
-		thread := &threadStub{
-			metadata: map[string]any{
-				goals.MetadataKey: goals.Goal{Objective: "finish coverage", Status: goals.StatusActive, Version: 1},
-			},
-		}
-
-		continued := HandleGoalAutoContinuation(context.Background(), thread, []tooltypes.Tool{namedTool("read_file")})
-
-		assert.False(t, continued)
-		assert.Empty(t, thread.userMessages)
-	})
-}
-
-func TestHasTool(t *testing.T) {
-	assert.True(t, hasTool([]tooltypes.Tool{nil, namedTool("update_goal")}, "update_goal"))
-	assert.False(t, hasTool([]tooltypes.Tool{nil, namedTool("read_file")}, "update_goal"))
 }
 
 func TestTriggerTurnEnd(t *testing.T) {

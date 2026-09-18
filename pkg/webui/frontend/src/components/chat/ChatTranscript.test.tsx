@@ -791,7 +791,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.lucide-square-slash')).toBeInTheDocument();
   });
 
-  it('renders goals as compact command cards', () => {
+  it('renders user text display overrides without command cards', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -800,9 +800,8 @@ describe('ChatTranscript', () => {
             role: 'user',
             content: [
               {
-                type: 'goal',
-                text: 'Objective: find server cores and ram',
-                command: 'goal',
+                type: 'text',
+                text: 'Inspect server resources',
               },
             ],
           },
@@ -810,10 +809,9 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByTestId('slash-command-card')).toBeInTheDocument();
-    expect(screen.getByTestId('slash-command-card')).toHaveClass('slash-command-card-goal');
-    expect(screen.getByText('Objective: find server cores and ram')).toBeInTheDocument();
-    expect(container.querySelector('.slash-command-card-command')).toBeInTheDocument();
+    expect(screen.queryByTestId('slash-command-card')).not.toBeInTheDocument();
+    expect(screen.getByText('Inspect server resources')).toBeInTheDocument();
+    expect(container.querySelector('.chat-prose')).toBeInTheDocument();
   });
 
   it('renders streamed steering as a regular user block', () => {

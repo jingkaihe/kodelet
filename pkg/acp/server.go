@@ -23,7 +23,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -791,16 +790,6 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 				}
 			}
 			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
-		} else if goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now()); handled {
-			if err != nil {
-				return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
-			}
-			sess.Thread.SetMetadataValue(goals.MetadataKey, goalUpdate.Goal)
-			metadata := conversations.AddMessageDisplay(sess.Thread.GetMetadata(), goalUpdate.ModelPrompt, goalUpdate.Display, conversations.MessageDisplayKindGoal, goals.SlashCommandName)
-			for key, value := range metadata {
-				sess.Thread.SetMetadataValue(key, value)
-			}
-			prompt = transformGoalCommandPrompt(goalUpdate, params.Prompt)
 		} else if s.fragmentProcessor != nil {
 			transformedPrompt, expansion, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
 			if err != nil {
@@ -1146,27 +1135,6 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 	}
 
 	return newPrompt, expansion, nil
-}
-
-func transformGoalCommandPrompt(update goals.CommandUpdate, originalPrompt []acptypes.ContentBlock) []acptypes.ContentBlock {
-	newPrompt := []acptypes.ContentBlock{
-		{
-			Type: acptypes.ContentTypeText,
-			Text: update.ModelPrompt,
-		},
-	}
-
-	for _, block := range originalPrompt {
-		// Preserve media that does not alter the flattened user text. Resource
-		// blocks are text-like after bridge.ContentBlocksToMessage and would
-		// prevent the goal display metadata from matching the saved prompt.
-		if block.Type != acptypes.ContentTypeImage {
-			continue
-		}
-		newPrompt = append(newPrompt, block)
-	}
-
-	return newPrompt
 }
 
 func (s *Server) handleSetMode(req *acptypes.Request) error {

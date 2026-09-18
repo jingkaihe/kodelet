@@ -119,8 +119,6 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"WebFetchMetadata", WebFetchMetadata{}, "web_fetch"},
 		{"OpenAIWebSearchMetadata", OpenAIWebSearchMetadata{}, "openai_web_search"},
 		{"ReadConversationMetadata", ReadConversationMetadata{}, "read_conversation"},
-		{"GetGoalMetadata", GetGoalMetadata{}, "get_goal"},
-		{"UpdateGoalMetadata", UpdateGoalMetadata{}, "update_goal"},
 		{"SkillMetadata", SkillMetadata{}, "skill"},
 		{"BlockedMetadata", BlockedMetadata{}, "blocked"},
 	}

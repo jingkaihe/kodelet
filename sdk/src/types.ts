@@ -411,6 +411,8 @@ export interface UserMessageEventPayload {
 
 export interface AgentInitEventPayload {
   systemPrompt?: string;
+  /** Current tool allowlist, including patches from earlier init handlers. */
+  allowedTools?: string[];
 }
 
 export interface TurnStartEventPayload {

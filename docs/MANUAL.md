@@ -138,9 +138,6 @@ kodelet run --no-tools "what is the capital of France?"
 # Enable filesystem search tools (glob_tool and grep_tool) instead of fd/rg via bash
 kodelet run --enable-fs-search-tools "find references to SessionManager"
 
-# Set a persistent thread goal for goal-directed work
-kodelet run "/goal finish the migration and verify tests pass"
-
 # Rename a persisted conversation without invoking the model
 kodelet run --cwd "$PWD" --follow "/rename Migration cleanup"
 kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
@@ -164,10 +161,6 @@ Authenticate with `kodelet auth login`, `KODELET_AUTH_TOKEN`, or `--auth-token`.
 Recipes and `--runner-profile` use the runner's files and environment, not the client's. Restart the runner to apply environment changes, including virtual environments.
 
 All runs are saved, including `--result-only`; `--no-save` is no longer supported. Ctrl+C requests cancellation, but a network disconnect does not cancel work. Check `kodelet conversation turn <conversation-id> <turn-id>` before retrying an interrupted request.
-
-### Thread Goals
-
-Use `/goal <objective>` in CLI, ACP, or the Web UI to set an active goal for the current thread. While the goal is active, Kodelet keeps future turns focused on that objective, including after conversation resume or compaction. The agent marks the goal complete when it is done, or blocked if it cannot make meaningful progress without user input.
 
 ### Conversation Names
 
@@ -620,14 +613,14 @@ kodelet conversation show <conversation-id> --format [text|markdown|json|raw]
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 
-# Fork a conversation without carrying over its active thread goal
+# Fork a conversation with a fresh usage tally
 kodelet conversation fork [conversation-id]
 
 # Rename a conversation without invoking the model
 kodelet run --resume <conversation-id> "/rename New conversation name"
 ```
 
-`conversation list --search` matches conversation IDs, working directories, first messages, and summaries. `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage and does not inherit the source conversation's active thread goal.
+`conversation list --search` matches conversation IDs, working directories, first messages, and summaries. `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage. Extension state keyed by conversation ID is not copied.
 
 Conversation commands use the server's history, even when the runner is offline, and authenticate like `run`.
 

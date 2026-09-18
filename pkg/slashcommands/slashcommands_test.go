@@ -86,19 +86,13 @@ func TestBuildCommandPlaceholder(t *testing.T) {
 func TestBuiltIns(t *testing.T) {
 	commands := BuiltIns()
 
-	require.Len(t, commands, 2)
-	assert.Equal(t, Command{
-		Name:        "goal",
-		Description: "Set the active goal for this thread",
-		Hint:        "objective",
-		Placeholder: "/goal <objective>",
-	}, commands[0])
+	require.Len(t, commands, 1)
 	assert.Equal(t, Command{
 		Name:        "rename",
 		Description: "Rename the current conversation",
 		Hint:        "name",
 		Placeholder: "/rename <name>",
-	}, commands[1])
+	}, commands[0])
 }
 
 func TestParseRenameCommand(t *testing.T) {

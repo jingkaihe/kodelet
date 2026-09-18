@@ -27,7 +27,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
@@ -247,20 +246,6 @@ func (t *Thread) resetResponsesWebSocket() {
 
 // AddUserMessage adds a user message with optional images to the thread.
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
-	if goals.IsContextText(message) {
-		if imageItem, ok := userImageInputItem(ctx, imagePaths); ok {
-			t.addInputItem(ctx, imageItem, "")
-		}
-		inputItem := responses.ResponseInputItemUnionParam{
-			OfMessage: &responses.EasyInputMessageParam{
-				Role:    responses.EasyInputMessageRoleUser,
-				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(message)},
-			},
-		}
-		t.addInputItem(ctx, inputItem, message)
-		return
-	}
-
 	var inputItem responses.ResponseInputItemUnionParam
 
 	// Build content parts if we have images
@@ -312,20 +297,6 @@ func (t *Thread) AddAssistantMessage(ctx context.Context, message string) {
 		Content: message,
 		RawItem: rawItem,
 	}})
-}
-
-func userImageInputItem(ctx context.Context, imagePaths []string) (responses.ResponseInputItemUnionParam, bool) {
-	contentParts := userImageContentParts(ctx, imagePaths)
-	if len(contentParts) == 0 {
-		return responses.ResponseInputItemUnionParam{}, false
-	}
-
-	return responses.ResponseInputItemUnionParam{
-		OfMessage: &responses.EasyInputMessageParam{
-			Role:    responses.EasyInputMessageRoleUser,
-			Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
-		},
-	}, true
 }
 
 func userImageContentParts(ctx context.Context, imagePaths []string) responses.ResponseInputMessageContentListParam {
@@ -688,9 +659,6 @@ OUTER:
 					return "", errors.Wrap(err, "failed to dispatch agent end")
 				}
 				if continued {
-					continue OUTER
-				}
-				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableEnvironmentToolsForThread(t, opt.NoToolUse)) {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {
@@ -2266,7 +2234,7 @@ func shouldRetainStoredItemForRemoteCompactionV2(item StoredInputItem) bool {
 		return false
 	}
 
-	return strings.EqualFold(strings.TrimSpace(item.Role), "user") && !goals.IsContextText(item.Content)
+	return strings.EqualFold(strings.TrimSpace(item.Role), "user")
 }
 
 func approximateStoredMessageTokens(item StoredInputItem) int {

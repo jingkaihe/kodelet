@@ -28,7 +28,7 @@ Kodelet currently runs the provider loop, context discovery, tools, skills, exte
 
 The proposed design introduces an explicit boundary between the **agent** and its **environment**:
 
-- the control plane owns the agent, including model requests, provider-native history, continuation decisions, goals, steering, usage, and client APIs;
+- the control plane owns the agent, including model requests, provider-native history, continuation decisions, steering, usage, and client APIs;
 - the runner owns the environment, including workspace context, runner-local configuration, tools, runner-global and workspace skills, plugins, extensions, and eventually creation of an ephemeral execution instance.
 
 This boundary is richer than a remote tool API because Kodelet extensions participate in user-message processing, system-prompt construction, tool policy, tool-result shaping, agent lifecycle events, follow-up messages, and interactive UI requests. The runner therefore exposes a remote **agent environment**, not merely a command executor.
@@ -46,7 +46,7 @@ The runner provides logical same-workspace parallelism without imposing a capaci
 Kodelet will use the following model:
 
 1. `kodelet serve` acts as the control plane and client-facing API.
-2. The control plane owns provider clients, provider-native conversation state, the complete model/tool continuation loop, goals, steering, usage accounting, and conversation persistence.
+2. The control plane owns provider clients, provider-native conversation state, the complete model/tool continuation loop, steering, usage accounting, and conversation persistence.
 3. `kodelet runner start` starts a long-running process bound to the command's canonical current working directory.
 4. A runner has exactly one canonical startup workspace for identity, locking, defaults, terminal access, and Git diff, while an assigned conversation may request any working directory accessible to the runner process.
 5. Runner startup takes an exclusive OS-backed advisory file lock for its canonical workspace. The locked file contains diagnostic metadata such as PID, but lock ownership rather than file existence or PID state determines whether a runner is active.
@@ -65,7 +65,7 @@ Kodelet will use the following model:
 - Enable a central Kodelet server to operate an agent against a workspace hosted by another Kodelet process.
 - Keep provider credentials and provider-native conversation history in the control plane.
 - Couple runner identity and execution behavior to one workspace directory.
-- Preserve Kodelet's current context, skill, tool, extension, lifecycle, goal, steering, and UI semantics where practical.
+- Preserve Kodelet's current context, skill, tool, extension, lifecycle, steering, and UI semantics where practical.
 - Snapshot `AGENTS.md` and related prompt inputs once per run for deterministic behavior and stable inference-prefix caching.
 - Treat runner-global skills as resources belonging only to that runner.
 - Keep existing extensions and extension SDKs unaware of the network boundary.
@@ -104,11 +104,11 @@ The runner's canonical startup directory. It defines runner identity, the adviso
 
 ### Run
 
-One accepted top-level user submission. A run can contain multiple provider turns, parallel tool calls, steering received during execution, extension follow-up messages, and automatic goal continuation. A later top-level user submission is another run.
+One accepted top-level user submission. A run can contain multiple provider turns, parallel tool calls, steering received during execution, and extension follow-up messages. A later top-level user submission is another run.
 
 ### Conversation
 
-The durable provider-native message history, metadata, usage, goal state, and structured tool results associated with a sequence of runs.
+The durable provider-native message history, metadata, usage, and structured tool results associated with a sequence of runs.
 
 ### Agent environment
 
@@ -167,7 +167,7 @@ If acquisition fails, ordinary runner startup exits before registration and repo
 
 ### The control plane owns the agent loop
 
-Provider requests, provider-native messages, reasoning streams, tool-continuation decisions, auto-compaction, goals, steering, extension follow-up continuation, usage aggregation, and final conversation persistence remain in the control plane.
+Provider requests, provider-native messages, reasoning streams, tool-continuation decisions, auto-compaction, steering, extension follow-up continuation, usage aggregation, and final conversation persistence remain in the control plane.
 
 The runner never needs OpenAI or Anthropic credentials for centrally operated runs.
 
@@ -213,7 +213,7 @@ When ephemeral execution support is introduced, every top-level run receives a n
                                                    │ provider thread              │
                                                    │ central agent loop           │
                                                    │ conversation persistence     │
-                                                   │ goals and steering           │
+                                                   │ steering                     │
                                                    │ control-plane tools          │
                                                    │ client event fan-out         │
                                                    └──────────────┬───────────────┘
@@ -265,7 +265,7 @@ The mechanism used to provision the environment is deliberately unspecified.
 | Provider-native messages | Owns | Receives only lifecycle payloads required by extensions |
 | Core agentic loop | Owns | Services environment operations |
 | Conversation persistence | Owns | Does not open the authoritative conversation store |
-| Goals, steering, and metadata | Owns | Participates only through lifecycle context |
+| Steering and metadata | Owns | Participates only through lifecycle context |
 | Runner registration and status | Stores | Connects and heartbeats |
 | `AGENTS.md` and context discovery | Consumes pinned snapshot | Discovers and snapshots |
 | Model-facing system information (git status, OS/version, date) | Consumes pinned snapshot | Discovers and snapshots |
@@ -344,12 +344,12 @@ for each provider turn:
     ↓
 agent.end lifecycle may return follow-up messages
     ↓
-control plane applies goal and steering continuation rules
+control plane applies extension follow-up and steering continuation rules
     ↓
 control plane persists provider-native conversation and closes run environment
 ```
 
-A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as goal mutation remain control-plane operations.
+A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as renaming remain control-plane operations.
 
 The initial runner reuses one extension runtime for its workspace and environment-profile variant, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation. When configuration or executable fingerprints change, later callers receive a replacement generation while an active run keeps its prior runtime generation leased through run cleanup; runtime construction cancellation remains tied to the individual `run.open` operation. The retired generation receives `session.end` and closes after its run leases end, or when the host shuts down. A transient fingerprint/discovery failure continues serving an existing cached generation rather than terminating active extension processes. Per-run extension runtimes can be introduced with future ephemeral execution instances without changing the control-plane lifecycle methods.
 
@@ -501,8 +501,6 @@ Tools that operate on central conversation or provider state execute in the cont
 
 | Tool | Reason |
 |---|---|
-| `get_goal` | Reads central conversation metadata |
-| `update_goal` | Mutates central conversation metadata |
 | `read_conversation` | Reads the authoritative conversation store and invokes a utility model |
 
 ### Provider-native capabilities
@@ -561,7 +559,7 @@ Runner-local system information is excluded from the protocol-v1 resource digest
 
 Workspace-derived prompt inputs that the central model requires, such as a custom system-prompt file, must be loaded by the runner and included as content in the manifest. The control plane must not interpret runner-local paths as server-local paths.
 
-Runner `allowed_tools` policy filters runner-owned tools while the manifest is built. An explicit list is currently a strict allowlist: unknown names do not cause a fallback to the full default tool catalog. It does not suppress `get_goal`, `update_goal`, `read_conversation`, or other control-plane-owned tools, whose availability is resolved centrally. Runner extensions still receive the effective merged tool list during `agent.init` and retain the lifecycle visibility described above for host-executed control-plane tools.
+Runner `allowed_tools` policy filters runner-owned tools while the manifest is built. An explicit list is currently a strict allowlist: unknown names do not cause a fallback to the full default tool catalog. It does not suppress `read_conversation` or other control-plane-owned tools, whose availability is resolved centrally. Runner extensions receive the effective merged tool list in `agent.init` as `allowedTools` and retain the lifecycle visibility described above for host-executed control-plane tools.
 
 Recipe-backed commands carry a digest of their raw content and metadata in the pinned manifest. If a recipe changes or disappears during an active run, command execution fails and asks the user to start a new run rather than executing content that was not part of the pinned snapshot.
 
@@ -675,7 +673,7 @@ The control plane opens a run with a request:
       "interactiveUI": true,
       "persistentSurfaces": true
     },
-    "reservedToolNames": ["get_goal", "update_goal", "read_conversation"]
+    "reservedToolNames": ["read_conversation"]
   }
 }
 ```

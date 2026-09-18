@@ -16,7 +16,6 @@ import (
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -611,20 +610,6 @@ func runDefaultChat(
 		}
 	}
 
-	var goalUpdate *goals.CommandUpdate
-	if renameName == "" && !commandResult.Matched {
-		if command, args, found := slashcommands.Parse(message); found {
-			update, handled, commandErr := goals.ParseSlashCommand(command, args, time.Now())
-			if commandErr != nil {
-				return sessionID, commandErr
-			}
-			if handled {
-				message = update.ModelPrompt
-				goalUpdate = &update
-			}
-		}
-	}
-
 	if err := prepareThread(ctx); err != nil {
 		return sessionID, err
 	}
@@ -667,10 +652,6 @@ func runDefaultChat(
 	if commandResult.Matched && commandResult.Action == agentenv.CommandActionRunAgent {
 		AddEnvironmentCommandDisplay(thread, commandResult)
 	}
-	if goalUpdate != nil {
-		AddGoalDisplay(thread, goalUpdate)
-	}
-
 	if err := sink.Send(ChatEvent{
 		Kind:           "conversation",
 		ConversationID: sessionID,
@@ -1347,31 +1328,6 @@ func newFragmentProcessor(cwd string) (*fragments.Processor, error) {
 	return fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(cwd))
 }
 
-func TransformSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, *goals.CommandUpdate, error) {
-	command, args, found := slashcommands.Parse(message)
-	if !found {
-		return message, nil, nil, nil
-	}
-
-	goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now())
-	if handled {
-		if err != nil {
-			return "", nil, nil, err
-		}
-		return goalUpdate.ModelPrompt, nil, &goalUpdate, nil
-	}
-
-	message, expansion, err := ExpandSlashCommand(ctx, message, cwd)
-	return message, expansion, nil, err
-}
-
-func TransformSlashCommandIfNeeded(ctx context.Context, message string, cwd string, enabled bool) (string, *slashcommands.Expansion, *goals.CommandUpdate, error) {
-	if !enabled {
-		return message, nil, nil, nil
-	}
-	return TransformSlashCommand(ctx, message, cwd)
-}
-
 func TryExtensionCommand(
 	ctx context.Context,
 	message string,
@@ -1491,18 +1447,6 @@ func commandDisplayMetadata(metadata map[string]any, prompt, display, command st
 		return conversationservice.AddMessageDisplay(metadata, prompt, display, "", "")
 	}
 	return conversationservice.AddSlashCommandDisplay(metadata, prompt, display, command)
-}
-
-func AddGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {
-	if thread == nil || update == nil {
-		return
-	}
-
-	thread.SetMetadataValue(goals.MetadataKey, update.Goal)
-	metadata := conversationservice.AddMessageDisplay(thread.GetMetadata(), update.ModelPrompt, update.Display, conversationservice.MessageDisplayKindGoal, goals.SlashCommandName)
-	for key, value := range metadata {
-		thread.SetMetadataValue(key, value)
-	}
 }
 
 func BuildState(

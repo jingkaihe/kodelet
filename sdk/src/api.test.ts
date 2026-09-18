@@ -552,8 +552,9 @@ test("tool context runner identity comes from initialize metadata", () => {
 
 test("agent.init can patch the system prompt and tool list", async () => {
   const extension = defineExtension((ext) => {
-    ext.on("agent.init", (_event, ctx) => {
+    ext.on("agent.init", (event, ctx) => {
       assert.equal(ctx.invokedBy, "subagent");
+      assert.deepEqual(event.allowedTools, ["bash", "file_read"]);
       return {
         systemPrompt: { append: "Use safe tools only." },
         tools: { disable: ["bash"], enable: ["get_weather"] },
@@ -565,7 +566,7 @@ test("agent.init can patch the system prompt and tool list", async () => {
   const result = await harness.handleEvent({
     id: "evt_agent_init",
     event: "agent.init",
-    payload: { systemPrompt: "base" },
+    payload: { systemPrompt: "base", allowedTools: ["bash", "file_read"] },
     context: { invokedBy: "subagent" },
   });
 

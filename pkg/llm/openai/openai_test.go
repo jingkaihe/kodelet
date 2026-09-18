@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -716,27 +715,6 @@ func TestAddUserMessageWithImages(t *testing.T) {
 	}
 }
 
-func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
-	thread := &Thread{}
-	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
-
-	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
-
-	require.Len(t, thread.messages, 2)
-	attachments := thread.messages[0]
-	assert.Equal(t, openai.ChatMessageRoleUser, attachments.Role)
-	assert.Empty(t, attachments.Content)
-	require.Len(t, attachments.MultiContent, 1)
-	assert.Equal(t, openai.ChatMessagePartTypeImageURL, attachments.MultiContent[0].Type)
-	require.NotNil(t, attachments.MultiContent[0].ImageURL)
-	assert.Equal(t, "data:image/png;base64,aGVsbG8=", attachments.MultiContent[0].ImageURL.URL)
-
-	goalMessage := thread.messages[1]
-	assert.Equal(t, openai.ChatMessageRoleUser, goalMessage.Role)
-	assert.Equal(t, goalContext, goalMessage.Content)
-	assert.Empty(t, goalMessage.MultiContent)
-}
-
 func TestAddAssistantMessage(t *testing.T) {
 	thread := &Thread{}
 	thread.AddAssistantMessage(t.Context(), "Direct response")
@@ -1372,31 +1350,6 @@ func TestOpenAIProcessMessageExchangeIgnoresConfiguredTextVerbosity(t *testing.T
 	require.NoError(t, err)
 	assert.Empty(t, capturedRequest.Verbosity)
 	assert.NotContains(t, capturedBody, `"verbosity"`)
-}
-
-func TestOpenAIProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
-	var capturedRequest openai.ChatCompletionRequest
-	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
-		capturedRequest = decodeOpenAIChatRequest(t, req)
-		return jsonOpenAIResponse(http.StatusOK, `{
-			"id":"chatcmpl-test",
-			"model":"gpt-4o",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}
-		}`), nil
-	}))
-	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
-	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
-	handler := &captureOpenAIMessageHandler{}
-
-	_, toolsUsed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4o", 64, llm.MessageOpt{DisableUsageLog: true})
-
-	require.NoError(t, err)
-	assert.False(t, toolsUsed)
-	require.Len(t, capturedRequest.Messages, 1)
-	assert.Equal(t, "hi", capturedRequest.Messages[0].Content)
-	assert.NotContains(t, capturedRequest.Messages[0].Content, "<goal_context>")
 }
 
 func TestOpenAIProcessMessageExchangeStreamingHandlerSkipsFullTextCallbacks(t *testing.T) {

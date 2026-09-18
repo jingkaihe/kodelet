@@ -15,7 +15,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/stretchr/testify/assert"
@@ -277,7 +276,6 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 		),
 		messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))},
 	}
-	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
 	thread.SetState(tools.NewBasicState(
 		context.Background(),
 		tools.WithExtensionTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
@@ -305,7 +303,6 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 	require.Len(t, capturedRequest.Messages[0].Content, 1)
 	assert.Equal(t, "hello", capturedRequest.Messages[0].Content[0].Text)
 	assert.Equal(t, "ephemeral", capturedRequest.Messages[0].Content[0].CacheControl.Type)
-	assert.NotContains(t, capturedRequest.Messages[0].Content[0].Text, "<goal_context>")
 }
 
 func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {
@@ -764,25 +761,6 @@ func TestAddAssistantMessage(t *testing.T) {
 	require.Len(t, thread.messages[0].Content, 1)
 	require.NotNil(t, thread.messages[0].Content[0].OfText)
 	assert.Equal(t, "Direct response", thread.messages[0].Content[0].OfText.Text)
-}
-
-func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
-	thread := &Thread{}
-	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
-
-	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
-
-	require.Len(t, thread.messages, 2)
-	attachments := thread.messages[0]
-	assert.Equal(t, anthropic.MessageParamRoleUser, attachments.Role)
-	require.Len(t, attachments.Content, 1)
-	assert.NotNil(t, attachments.Content[0].OfImage)
-
-	goalMessage := thread.messages[1]
-	assert.Equal(t, anthropic.MessageParamRoleUser, goalMessage.Role)
-	require.Len(t, goalMessage.Content, 1)
-	require.NotNil(t, goalMessage.Content[0].OfText)
-	assert.Equal(t, goalContext, goalMessage.Content[0].OfText.Text)
 }
 
 func TestProcessPendingSteerWithImages(t *testing.T) {

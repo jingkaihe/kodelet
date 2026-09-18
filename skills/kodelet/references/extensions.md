@@ -107,6 +107,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - `runAgent` results may set `display` when the visible and persisted user message should differ from the model-facing `prompt`.
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list` for the selected workspace, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
+- `agent.init` includes `allowedTools`, the current tool allowlist including patches from earlier init handlers. Use it to avoid requesting work that requires unavailable tools; an empty list means no tools are allowed. Older hosts may omit this field.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
 - Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`; multi-line widgets use their first line as a foldable summary in the TUI.
 

@@ -1433,8 +1433,6 @@ describe('ChatToolActivity', () => {
   });
 
   it.each([
-    'get_goal',
-    'update_goal',
     'todo_read',
     'todo_write',
     'glob_tool',

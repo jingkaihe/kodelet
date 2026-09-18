@@ -18,7 +18,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -196,14 +195,6 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
-	if goals.IsContextText(message) {
-		if imageBlocks := t.userImageContentBlocks(ctx, imagePaths); len(imageBlocks) > 0 {
-			t.messages = append(t.messages, anthropic.NewUserMessage(imageBlocks...))
-		}
-		t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
-		return
-	}
-
 	contentBlocks := t.userImageContentBlocks(ctx, imagePaths)
 	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
 
@@ -440,9 +431,6 @@ OUTER:
 					return "", errors.Wrap(err, "failed to dispatch agent end")
 				}
 				if continued {
-					continue OUTER
-				}
-				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {

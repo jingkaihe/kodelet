@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -53,7 +52,6 @@ func TestForkConversationRecord(t *testing.T) {
 		"profile":                                 "work",
 		ParentConversationIDMetadataKey:           "grandparent",
 		CodexResponsesWindowGenerationMetadataKey: float64(3),
-		goals.MetadataKey:                         goals.New("finish the parent task", time.Now()),
 		RunnerIDMetadataKey:                       "runner-1",
 		RunnerEnvironmentProfileMetadataKey:       "gpu",
 	}
@@ -74,7 +72,6 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, 456, forked.Usage.MaxContextWindow)
 	assert.Equal(t, "work", forked.Metadata["profile"])
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
-	assert.NotContains(t, forked.Metadata, goals.MetadataKey)
 	assert.NotContains(t, forked.Metadata, RunnerIDMetadataKey)
 	assert.NotContains(t, forked.Metadata, ParentConversationIDMetadataKey)
 	assert.Equal(t, "grandparent", ParentConversationIDFromMetadata(source.Metadata))

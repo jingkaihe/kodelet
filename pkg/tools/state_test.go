@@ -15,6 +15,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type testMetadataStore struct {
+	metadata map[string]any
+}
+
+func (s *testMetadataStore) GetMetadata() map[string]any {
+	copy := make(map[string]any, len(s.metadata))
+	for key, value := range s.metadata {
+		copy[key] = value
+	}
+	return copy
+}
+
+func (s *testMetadataStore) SetMetadataValue(key string, value any) {
+	if s.metadata == nil {
+		s.metadata = map[string]any{}
+	}
+	s.metadata[key] = value
+}
+
 func TestBasicState(t *testing.T) {
 	s := NewBasicState(context.TODO())
 
@@ -660,7 +679,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"grep_tool", "glob_tool", "get_goal", "update_goal", "file_read"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.NotContains(t, toolNames, "skill")
 }
 
@@ -678,7 +697,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"grep_tool", "glob_tool", "get_goal", "update_goal", "file_read"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.Empty(t, state.ExtensionTools())
 	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }

@@ -62,14 +62,14 @@ func TestAddSlashCommandDisplayAndLookup(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestAddMessageDisplayGoalAndLookup(t *testing.T) {
-	metadata := AddMessageDisplay(nil, "Objective: find cores", "/goal find cores", MessageDisplayKindGoal, "goal")
+func TestAddMessageDisplayAndLookup(t *testing.T) {
+	metadata := AddMessageDisplay(nil, "Inspect project dependencies", "Review dependencies", "", "")
 
-	display, ok := LookupMessageDisplay(metadata, "Objective: find cores")
+	display, ok := LookupMessageDisplay(metadata, "Inspect project dependencies")
 	require.True(t, ok)
-	assert.Equal(t, "/goal find cores", display.Text)
-	assert.Equal(t, MessageDisplayKindGoal, display.Kind)
-	assert.Equal(t, "goal", display.Command)
+	assert.Equal(t, "Review dependencies", display.Text)
+	assert.Empty(t, display.Kind)
+	assert.Empty(t, display.Command)
 }
 
 func TestLookupMessageDisplayReadsLegacyMetadata(t *testing.T) {
@@ -143,32 +143,34 @@ func TestApplyDisplayToLLMMessages(t *testing.T) {
 	assert.Equal(t, "full recipe prompt", got[1].Content)
 }
 
-func TestApplyDisplayHidesGoalContextMessages(t *testing.T) {
-	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
-	streamable := ApplyDisplayToStreamableMessages([]StreamableMessage{{Kind: "text", Role: "user", Content: goalContext}}, nil)
-	assert.Empty(t, streamable)
+func TestApplyDisplayPreservesMessagesWithoutOverrides(t *testing.T) {
+	content := "<context>\nInspect project dependencies.\n</context>"
+	streamable := []StreamableMessage{{Kind: "text", Role: "user", Content: content}}
+	assert.Equal(t, streamable, ApplyDisplayToStreamableMessages(streamable, nil))
 
-	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: "user", Content: goalContext}}, nil)
-	assert.Empty(t, llmMessages)
+	llmMessages := []llmtypes.Message{{Role: "user", Content: content}}
+	assert.Equal(t, llmMessages, ApplyDisplayToLLMMessages(llmMessages, nil))
 }
 
-func TestApplyDisplayConsumesGoalContextOverrideOnce(t *testing.T) {
-	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
-	metadata := AddMessageDisplay(nil, goalContext, "Objective: find cores", MessageDisplayKindGoal, "goal")
+func TestApplyDisplayPreservesRepeatedCommandMessages(t *testing.T) {
+	prompt := "Inspect project dependencies"
+	metadata := AddSlashCommandDisplay(nil, prompt, "/review dependencies", "review")
 
 	streamable := ApplyDisplayToStreamableMessages([]StreamableMessage{
-		{Kind: "text", Role: "user", Content: goalContext},
-		{Kind: "text", Role: "user", Content: goalContext},
+		{Kind: "text", Role: "user", Content: prompt},
+		{Kind: "text", Role: "user", Content: prompt},
 	}, metadata)
-	require.Len(t, streamable, 1)
-	assert.Equal(t, "Objective: find cores", streamable[0].Content)
+	require.Len(t, streamable, 2)
+	assert.Equal(t, "/review dependencies", streamable[0].Content)
+	assert.Equal(t, "/review dependencies", streamable[1].Content)
 
 	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{
-		{Role: "user", Content: goalContext},
-		{Role: "user", Content: goalContext},
+		{Role: "user", Content: prompt},
+		{Role: "user", Content: prompt},
 	}, metadata)
-	require.Len(t, llmMessages, 1)
-	assert.Equal(t, "Objective: find cores", llmMessages[0].Content)
+	require.Len(t, llmMessages, 2)
+	assert.Equal(t, "/review dependencies", llmMessages[0].Content)
+	assert.Equal(t, "/review dependencies", llmMessages[1].Content)
 }
 
 func TestAddMessageDisplayIgnoresBlankInputs(t *testing.T) {
@@ -192,8 +194,8 @@ func TestLookupMessageDisplayParsesCurrentAndLegacyShapes(t *testing.T) {
 			MessageDisplayVersion: map[string]any{
 				currentKey: map[string]string{
 					"text":    "/current",
-					"kind":    MessageDisplayKindGoal,
-					"command": "goal",
+					"kind":    MessageDisplayKindSlashCommand,
+					"command": "current",
 				},
 				"blank":       map[string]any{"text": "ignored"},
 				"unknown-raw": 123,
@@ -208,8 +210,8 @@ func TestLookupMessageDisplayParsesCurrentAndLegacyShapes(t *testing.T) {
 	current, ok := LookupMessageDisplay(metadata, "current prompt")
 	require.True(t, ok)
 	assert.Equal(t, "/current", current.Text)
-	assert.Equal(t, MessageDisplayKindGoal, current.Kind)
-	assert.Equal(t, "goal", current.Command)
+	assert.Equal(t, MessageDisplayKindSlashCommand, current.Kind)
+	assert.Equal(t, "current", current.Command)
 
 	_, ok = LookupMessageDisplay(metadata, " ")
 	assert.False(t, ok)

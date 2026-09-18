@@ -491,26 +491,6 @@ Hello {{.name}}
 	assert.Equal(t, []string{"git status"}, expansion.Metadata.AllowedCommands)
 }
 
-func TestTransformWebChatSlashCommandHandlesGoal(t *testing.T) {
-	prompt, expansion, goalUpdate, err := TransformSlashCommand(context.Background(), "/goal find server cores and ram", t.TempDir())
-
-	require.NoError(t, err)
-	assert.Nil(t, expansion)
-	require.NotNil(t, goalUpdate)
-	assert.Contains(t, prompt, "<goal_context>")
-	assert.Contains(t, prompt, "find server cores and ram")
-	assert.Equal(t, "Objective: find server cores and ram", goalUpdate.Display)
-}
-
-func TestTransformWebChatSlashCommandIfNeededSkipsExtensionPrompt(t *testing.T) {
-	prompt, expansion, goalUpdate, err := TransformSlashCommandIfNeeded(context.Background(), "/tmp/path/from-extension", t.TempDir(), false)
-
-	require.NoError(t, err)
-	assert.Equal(t, "/tmp/path/from-extension", prompt)
-	assert.Nil(t, expansion)
-	assert.Nil(t, goalUpdate)
-}
-
 func TestTryWebExtensionCommandRoutesCommand(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "commands")

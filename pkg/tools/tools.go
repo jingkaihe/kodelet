@@ -39,8 +39,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
 	"web_fetch":         &WebFetchTool{},
-	"get_goal":          NewGetGoalTool(),
-	"update_goal":       NewUpdateGoalTool(),
 	"view_image":        NewViewImageTool("", ""),
 	"skill":             NewSkillTool(nil, false, false),
 }
@@ -50,8 +48,6 @@ var virtualToolNames = []string{
 }
 
 var controlPlaneToolNames = []string{
-	"get_goal",
-	"update_goal",
 	"read_conversation",
 }
 
@@ -106,12 +102,6 @@ var metaTools = []string{
 	"glob_tool",
 }
 
-// mainAgentMetaTools are enabled for the main agent even when allowed_tools is restrictive.
-var mainAgentMetaTools = []string{
-	"get_goal",
-	"update_goal",
-}
-
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",
@@ -121,8 +111,6 @@ var defaultMainTools = []string{
 	"grep_tool",
 	"glob_tool",
 	"web_fetch",
-	"get_goal",
-	"update_goal",
 	"view_image",
 	"skill",
 }
@@ -179,12 +167,6 @@ func metaToolsWithOptions(enableFSSearchTools bool) []string {
 	return filterOutFSSearchTools(metaTools)
 }
 
-func mainAgentMetaToolsWithOptions(enableFSSearchTools bool) []string {
-	tools := append([]string{}, metaToolsWithOptions(enableFSSearchTools)...)
-	tools = append(tools, mainAgentMetaTools...)
-	return tools
-}
-
 // GetToolsFromNames returns a list of tools from the given tool names
 func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	return getToolsFromNamesWithOptions(toolNames, false)
@@ -192,10 +174,6 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 
 func getToolsFromNamesWithOptions(toolNames []string, enableFSSearchTools bool) []tooltypes.Tool {
 	return getToolsFromNamesWithMetaTools(toolNames, metaToolsWithOptions(enableFSSearchTools))
-}
-
-func getMainToolsFromNamesWithOptions(toolNames []string, enableFSSearchTools bool) []tooltypes.Tool {
-	return getToolsFromNamesWithMetaTools(toolNames, mainAgentMetaToolsWithOptions(enableFSSearchTools))
 }
 
 func getToolsFromNamesWithMetaTools(toolNames []string, metaTools []string) []tooltypes.Tool {
@@ -278,7 +256,7 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableF
 		allowedTools = filtered
 	}
 
-	return getMainToolsFromNamesWithOptions(allowedTools, enableFSSearchTools)
+	return getToolsFromNamesWithOptions(allowedTools, enableFSSearchTools)
 }
 
 var tracer = telemetry.Tracer("kodelet.tools")

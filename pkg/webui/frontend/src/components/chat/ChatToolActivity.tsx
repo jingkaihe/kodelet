@@ -573,14 +573,12 @@ const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => 
 };
 
 const builtinToolNames = new Set([
-  'get_goal',
   'glob_tool',
   'grep_tool',
   'openai_web_search',
   'read_conversation',
   'todo_read',
   'todo_write',
-  'update_goal',
   'web_fetch',
 ]);
 

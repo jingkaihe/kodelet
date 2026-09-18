@@ -1149,7 +1149,8 @@ Body
 	commands, err := listBaseSlashCommands(context.Background(), workspace)
 
 	require.NoError(t, err)
-	assert.Contains(t, slashCommandNames(commands), "goal")
+	assert.NotContains(t, slashCommandNames(commands), "goal")
+	assert.Contains(t, slashCommandNames(commands), "rename")
 	assert.Contains(t, slashCommandNames(commands), "stop")
 	assert.Contains(t, slashCommandNames(commands), "theme")
 	assert.Contains(t, slashCommandNames(commands), "workspace-only")
@@ -1168,7 +1169,8 @@ func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, workspace, baseMsg.cwd)
 	assert.NoError(t, baseMsg.err)
-	assert.Contains(t, slashCommandNames(baseMsg.commands), "goal")
+	assert.NotContains(t, slashCommandNames(baseMsg.commands), "goal")
+	assert.Contains(t, slashCommandNames(baseMsg.commands), "rename")
 	assert.False(t, baseMsg.extensionsOnly)
 
 	runtimeManager := extensions.NewRuntimeManager()
@@ -1454,7 +1456,8 @@ func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {
 
 	baseCommands, err := listBaseSlashCommands(context.Background(), missing)
 	assert.ErrorContains(t, err, "cwd directory does not exist")
-	assert.Contains(t, slashCommandNames(baseCommands), "goal")
+	assert.NotContains(t, slashCommandNames(baseCommands), "goal")
+	assert.Contains(t, slashCommandNames(baseCommands), "rename")
 	assert.Contains(t, slashCommandNames(baseCommands), "stop")
 	assert.Contains(t, slashCommandNames(baseCommands), "theme")
 }
@@ -1845,7 +1848,7 @@ func TestSubmitRecordsAndPersistsRawMessageHistory(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	assert.Equal(t, []string{"/goal ship raw history"}, m.messageHistory)
-	assert.Equal(t, chatEntry{kind: entryUser, content: "Objective: ship raw history"}, m.entries[0])
+	assert.Equal(t, chatEntry{kind: entryUser, content: "/goal ship raw history"}, m.entries[0])
 
 	assert.Nil(t, cmd())
 	entries, err := m.messageHistoryStore.List(context.Background(), workspace, messagehistory.MaxEntriesPerScope)
@@ -1991,7 +1994,7 @@ func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
 	assert.Contains(t, rendered, errorStart)
 }
 
-func TestSubmitGoalSlashCommandDisplaysObjectiveImmediately(t *testing.T) {
+func TestSubmitSlashCommandDisplaysRawInputUntilRunnerResponds(t *testing.T) {
 	runner := &recordingRunner{conversationID: "conversation-done"}
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Runner: runner})
 	t.Cleanup(m.cancel)
@@ -2003,7 +2006,7 @@ func TestSubmitGoalSlashCommandDisplaysObjectiveImmediately(t *testing.T) {
 	cmd := m.submit()
 	require.NotNil(t, cmd)
 	require.Len(t, m.entries, 1)
-	assert.Equal(t, chatEntry{kind: entryUser, content: "Objective: run ls -la"}, m.entries[0])
+	assert.Equal(t, chatEntry{kind: entryUser, content: "/goal run ls -la"}, m.entries[0])
 
 	assert.Nil(t, cmd())
 	_ = receiveRunMsg(t, m.runCh)
@@ -2085,11 +2088,6 @@ func TestSlashCommandIndexMovementAndMergeHelpers(t *testing.T) {
 		[]slashcommands.Command{{Name: "review"}, {Name: "custom"}, {Name: ""}},
 	)
 	assert.Equal(t, []string{"goal", "review", "custom"}, slashCommandNames(merged))
-}
-
-func TestUserDisplayMessageFallsBackForInvalidGoalCommand(t *testing.T) {
-	invalidGoal := "  /goal   "
-	assert.Equal(t, strings.TrimSpace(invalidGoal), userDisplayMessage(invalidGoal))
 }
 
 func TestStreamingDeltasAreDebouncedBeforeViewportRefresh(t *testing.T) {
