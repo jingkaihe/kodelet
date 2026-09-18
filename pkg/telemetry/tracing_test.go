@@ -38,6 +38,17 @@ func TestContentCaptureIsExplicit(t *testing.T) {
 	}
 }
 
+func TestInternalRPCSpansAreOptIn(t *testing.T) {
+	previous := InternalRPCSpansEnabled()
+	t.Cleanup(func() { internalRPCSpans.Store(previous) })
+	for _, enabled := range []bool{false, true, false} {
+		shutdown, err := InitTracer(t.Context(), Config{InternalRPCSpans: enabled})
+		require.NoError(t, err)
+		assert.Equal(t, enabled, InternalRPCSpansEnabled())
+		assert.NoError(t, shutdown(t.Context()))
+	}
+}
+
 func TestTracerShutdownFlushesPendingSpans(t *testing.T) {
 	requests := make(chan []byte, 1)
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

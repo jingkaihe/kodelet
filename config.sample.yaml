@@ -487,6 +487,10 @@ tracing:
   # Configure independently on the daemon and standalone runners.
   capture_content: false
 
+  # Include routine lifecycle.dispatch and ui.extension.cleanup RPC spans (default: false).
+  # Actual extension handlers and failed RPCs remain visible without this setting.
+  internal_rpc_spans: false
+
   # Sampling strategy (options: always, never, ratio)
   sampler: always
 
@@ -514,6 +518,7 @@ tracing:
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_CAPTURE_CONTENT: Opts in to sensitive content in traces
+# - KODELET_TRACING_INTERNAL_RPC_SPANS: Includes routine lifecycle and housekeeping RPC spans
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)

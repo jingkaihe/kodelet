@@ -20,12 +20,13 @@ func getVersion() string {
 
 func initTracing(ctx context.Context) (func(context.Context) error, error) {
 	config := telemetry.Config{
-		Enabled:        viper.GetBool("tracing.enabled"),
-		CaptureContent: viper.GetBool("tracing.capture_content"),
-		ServiceName:    "kodelet",
-		ServiceVersion: getVersion(),
-		SamplerType:    viper.GetString("tracing.sampler"),
-		SamplerRatio:   viper.GetFloat64("tracing.ratio"),
+		Enabled:          viper.GetBool("tracing.enabled"),
+		CaptureContent:   viper.GetBool("tracing.capture_content"),
+		InternalRPCSpans: viper.GetBool("tracing.internal_rpc_spans"),
+		ServiceName:      "kodelet",
+		ServiceVersion:   getVersion(),
+		SamplerType:      viper.GetString("tracing.sampler"),
+		SamplerRatio:     viper.GetFloat64("tracing.ratio"),
 	}
 
 	shutdown, err := telemetry.InitTracer(ctx, config)
@@ -101,11 +102,13 @@ func isSensitiveFlagName(name string) bool {
 func init() {
 	rootCmd.PersistentFlags().Bool("tracing-enabled", false, "Enable OpenTelemetry tracing")
 	rootCmd.PersistentFlags().Bool("tracing-capture-content", false, "Include prompts, messages, and tool payloads in traces")
+	rootCmd.PersistentFlags().Bool("tracing-internal-rpc-spans", false, "Include routine lifecycle and housekeeping RPC spans in traces")
 	rootCmd.PersistentFlags().String("tracing-sampler", "ratio", "Tracing sampler type (always, never, ratio)")
 	rootCmd.PersistentFlags().Float64("tracing-ratio", 1, "Sampling ratio when using ratio sampler")
 
 	viper.BindPFlag("tracing.enabled", rootCmd.PersistentFlags().Lookup("tracing-enabled"))
 	viper.BindPFlag("tracing.capture_content", rootCmd.PersistentFlags().Lookup("tracing-capture-content"))
+	viper.BindPFlag("tracing.internal_rpc_spans", rootCmd.PersistentFlags().Lookup("tracing-internal-rpc-spans"))
 	viper.BindPFlag("tracing.sampler", rootCmd.PersistentFlags().Lookup("tracing-sampler"))
 	viper.BindPFlag("tracing.ratio", rootCmd.PersistentFlags().Lookup("tracing-ratio"))
 }

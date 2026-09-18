@@ -15,10 +15,14 @@ import (
 	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Process is an extension RPC endpoint backed by a subprocess or session transport.
@@ -612,34 +616,53 @@ func (p *Process) ExecuteShortcutWithResult(ctx context.Context, key string, cal
 }
 
 // HandleEvent invokes an extension event handler.
-func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
+func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName string, payload any, callContext ExtensionCallContext) (result *EventResult, err error) {
 	ctx, cancel := p.attachedCallContext(ctx)
 	defer cancel()
 	// Cleanup must never restart a failed generation merely to notify it that
 	// its session ended. Ordinary events retain their existing restart policy.
+	client, source := p.rpcSession()
+	if eventName == EventSessionEnd && (client == nil || source == nil) {
+		return &EventResult{}, nil
+	}
+
+	ctx, span := telemetry.Tracer("kodelet.extensions").Start(ctx, "extension "+p.Extension.ID+" "+eventName,
+		trace.WithAttributes(
+			attribute.String("kodelet.extension.id", p.Extension.ID),
+			attribute.String("kodelet.extension.event", eventName),
+		),
+	)
+	defer func() {
+		telemetry.RecordSpanError(span, err)
+		span.End()
+	}()
+
 	if eventName != EventSessionEnd {
 		if err := p.ensureRunning(ctx); err != nil {
 			return nil, err
 		}
+		client, source = p.rpcSession()
 	}
-	client, source := p.rpcSession()
 	if client == nil || source == nil {
-		if eventName == EventSessionEnd {
-			return &EventResult{}, nil
-		}
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
 	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := eventParams{ID: eventID, Event: eventName, Context: callContext, Payload: payload}
-	var result EventResult
-	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, &result, source); err != nil {
+	result = &EventResult{}
+	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, result, source); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.failClientGeneration(client)
 		}
 		return nil, err
 	}
-	return &result, nil
+	if span.IsRecording() && (eventName == EventToolUpdate || eventName == EventToolResult) && len(result.Output) > 0 {
+		// The runtime applies output validation and its existing fail-open/closed
+		// policy after this call. Reflect invalid output without changing that policy.
+		var output tooltypes.StructuredToolResult
+		telemetry.RecordSpanError(span, json.Unmarshal(result.Output, &output))
+	}
+	return result, nil
 }
 
 func extensionCallContextWithUIScope(ctx context.Context, callContext ExtensionCallContext) ExtensionCallContext {

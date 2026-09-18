@@ -684,9 +684,161 @@ func TestPeerTracingLocalFailure(t *testing.T) {
 	assert.Empty(t, spans[0].Events())
 }
 
+func TestPeerInternalRPCTracing(t *testing.T) {
+	for _, method := range []string{MethodLifecycleDispatch, MethodUIExtensionCleanup} {
+		for _, detailed := range []bool{false, true} {
+			name := method + "/default"
+			if detailed {
+				name = method + "/detailed"
+			}
+			t.Run(name, func(t *testing.T) {
+				recorder := recordPeerSpans(t)
+				_, err := telemetry.InitTracer(t.Context(), telemetry.Config{InternalRPCSpans: detailed})
+				require.NoError(t, err)
+				tracer := otel.Tracer("test")
+				connectionCtx, connectionSpan := tracer.Start(t.Context(), "websocket")
+				defer connectionSpan.End()
+				handler := RequestHandlerFunc(func(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
+					_, span := tracer.Start(ctx, "extension handler")
+					span.End()
+					return nil, nil
+				})
+				_, clientPeer := newTestPeerPair(t, PeerConfig{Handler: handler}, PeerConfig{}, connectionCtx)
+				ctx, parent := tracer.Start(t.Context(), "invoke_agent kodelet")
+				state, err := trace.ParseTraceState("vendor=value")
+				require.NoError(t, err)
+				// Propagate tracestate without changing the caller span's lifetime.
+				callCtx := trace.ContextWithSpanContext(ctx, parent.SpanContext().WithTraceState(state))
+				require.NoError(t, clientPeer.Call(callCtx, method, nil, nil))
+				assert.True(t, parent.IsRecording(), "suppressing a transport span must not end its parent")
+				parent.End()
+				count := 2
+				if detailed {
+					count = 4
+				}
+				require.Eventually(t, func() bool { return len(recorder.Ended()) == count }, time.Second, time.Millisecond)
+				var handlerSpan, clientSpan, serverSpan sdktrace.ReadOnlySpan
+				for _, span := range recorder.Ended() {
+					assert.Equal(t, parent.SpanContext().TraceID(), span.SpanContext().TraceID())
+					switch {
+					case span.Name() == "extension handler":
+						handlerSpan = span
+					case span.SpanKind() == trace.SpanKindClient:
+						clientSpan = span
+					case span.SpanKind() == trace.SpanKindServer:
+						serverSpan = span
+					}
+				}
+				require.NotNil(t, handlerSpan)
+				assert.Equal(t, state, handlerSpan.Parent().TraceState())
+				if detailed {
+					require.NotNil(t, clientSpan)
+					require.NotNil(t, serverSpan)
+					assert.Equal(t, parent.SpanContext().SpanID(), clientSpan.Parent().SpanID())
+					assert.Equal(t, clientSpan.SpanContext().SpanID(), serverSpan.Parent().SpanID())
+					assert.Equal(t, serverSpan.SpanContext().SpanID(), handlerSpan.Parent().SpanID())
+				} else {
+					assert.Nil(t, clientSpan)
+					assert.Nil(t, serverSpan)
+					assert.Equal(t, parent.SpanContext().SpanID(), handlerSpan.Parent().SpanID())
+					assert.True(t, handlerSpan.Parent().IsRemote())
+				}
+			})
+		}
+	}
+}
+
+func TestPeerInternalRPCNoOpDoesNotCreateTraces(t *testing.T) {
+	recorder := recordPeerSpans(t)
+	serverPeer, clientPeer := newTestPeerPair(t, PeerConfig{
+		Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
+			return nil, nil
+		}),
+	}, PeerConfig{})
+	for _, method := range []string{MethodLifecycleDispatch, MethodUIExtensionCleanup} {
+		require.NoError(t, clientPeer.Call(t.Context(), method, nil, nil))
+	}
+	// Wait for trace finalizers before cleanup cancels the connection context.
+	require.Eventually(t, func() bool {
+		serverPeer.inboundMu.Lock()
+		defer serverPeer.inboundMu.Unlock()
+		return len(serverPeer.inbound) == 0
+	}, time.Second, time.Millisecond)
+	assert.Empty(t, recorder.Ended())
+}
+
+func TestPeerInternalRPCFailureDiagnostics(t *testing.T) {
+	for _, content := range []bool{false, true} {
+		name := "metadata"
+		if content {
+			name = "content"
+		}
+		t.Run(name, func(t *testing.T) {
+			recorder := recordPeerSpans(t)
+			_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: content})
+			require.NoError(t, err)
+			const secret = "private extension failure"
+			_, clientPeer := newTestPeerPair(t, PeerConfig{
+				Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
+					return nil, &RPCError{Code: ErrorCodeInternal, Message: secret}
+				}),
+			}, PeerConfig{})
+			ctx, parent := otel.Tracer("test").Start(t.Context(), "invoke_agent kodelet")
+			err = clientPeer.Call(ctx, MethodLifecycleDispatch, nil, nil)
+			require.ErrorContains(t, err, secret)
+			assert.True(t, parent.IsRecording())
+			parent.End()
+			require.Eventually(t, func() bool { return len(recorder.Ended()) == 2 }, time.Second, time.Millisecond)
+			for _, span := range recorder.Ended() {
+				if span.SpanKind() == trace.SpanKindServer {
+					assert.Equal(t, codes.Error, span.Status().Code)
+					assert.Equal(t, parent.SpanContext().SpanID(), span.Parent().SpanID())
+				}
+				require.NotEmpty(t, span.Events())
+				event := span.Events()[0]
+				assert.Equal(t, "runner.rpc.error", event.Name)
+				assert.Contains(t, event.Attributes, attribute.String("rpc.method", MethodLifecycleDispatch))
+				assert.Contains(t, event.Attributes, attribute.String("error.type", "rpc_error"))
+				assert.Contains(t, event.Attributes, attribute.Int("rpc.jsonrpc.error_code", ErrorCodeInternal))
+				if content {
+					assert.Contains(t, event.Attributes, attribute.String("exception.message", err.Error()))
+				} else {
+					assert.NotContains(t, span.Status().Description, secret)
+					assert.NotContains(t, span.Attributes(), attribute.String("exception.message", err.Error()))
+					require.Len(t, span.Events(), 1)
+					assert.NotContains(t, event.Attributes, attribute.String("exception.message", err.Error()))
+				}
+			}
+		})
+	}
+}
+
+func TestInternalRPCDiagnosticsWithoutParentAndOnCancellation(t *testing.T) {
+	recorder := recordPeerSpans(t)
+	ctx, finish := startRPCTrace(t.Context(), MethodUIExtensionCleanup, trace.SpanKindClient)
+	assert.Equal(t, t.Context(), ctx)
+	finish(context.DeadlineExceeded)
+	require.Len(t, recorder.Ended(), 1)
+	span := recorder.Ended()[0]
+	assert.False(t, span.Parent().IsValid())
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Contains(t, span.Attributes(), attribute.String("error.type", "timeout"))
+	assert.Equal(t, "runner.rpc "+MethodUIExtensionCleanup, span.Name())
+
+	ctx, parent := otel.Tracer("test").Start(t.Context(), "invocation")
+	_, finish = startRPCTrace(ctx, MethodLifecycleDispatch, trace.SpanKindClient)
+	finish(context.Canceled)
+	parent.End()
+	require.Len(t, recorder.Ended(), 2)
+	span = recorder.Ended()[1]
+	require.Len(t, span.Events(), 1)
+	assert.Contains(t, span.Events()[0].Attributes, attribute.String("error.type", "canceled"))
+}
+
 func recordPeerSpans(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	previousContent := telemetry.ContentEnabled()
+	previousInternalRPC := telemetry.InternalRPCSpansEnabled()
 	_, err := telemetry.InitTracer(t.Context(), telemetry.Config{})
 	require.NoError(t, err)
 	recorder := tracetest.NewSpanRecorder()
@@ -700,7 +852,7 @@ func recordPeerSpans(t *testing.T) *tracetest.SpanRecorder {
 		require.NoError(t, provider.Shutdown(context.Background()))
 		otel.SetTracerProvider(previousProvider)
 		otel.SetTextMapPropagator(previousPropagator)
-		_, err := telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+		_, err := telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent, InternalRPCSpans: previousInternalRPC})
 		require.NoError(t, err)
 	})
 	return recorder

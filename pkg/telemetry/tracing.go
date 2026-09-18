@@ -21,6 +21,8 @@ type Config struct {
 	Enabled bool
 	// CaptureContent opts in to recording prompts, messages, and tool payloads.
 	CaptureContent bool
+	// InternalRPCSpans includes routine lifecycle and housekeeping transport spans.
+	InternalRPCSpans bool
 	// ServiceName is the name of the service in traces
 	ServiceName string
 	// ServiceVersion is the version of the service in traces
@@ -31,7 +33,10 @@ type Config struct {
 	SamplerRatio float64
 }
 
-var captureContent atomic.Bool
+var (
+	captureContent   atomic.Bool
+	internalRPCSpans atomic.Bool
+)
 
 // ContentEnabled reports whether this process opted in to recording content.
 // This setting is local policy and is never accepted from a remote trace carrier.
@@ -39,10 +44,16 @@ func ContentEnabled() bool {
 	return captureContent.Load()
 }
 
+// InternalRPCSpansEnabled reports this process's internal transport tracing policy.
+func InternalRPCSpansEnabled() bool {
+	return internalRPCSpans.Load()
+}
+
 // InitTracer initializes the OpenTelemetry tracer provider
 // Returns a shutdown function to be called before application termination
 func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
 	captureContent.Store(cfg.CaptureContent)
+	internalRPCSpans.Store(cfg.InternalRPCSpans)
 	if !cfg.Enabled {
 		// Return a no-op shutdown function if tracing is disabled
 		return func(context.Context) error { return nil }, nil

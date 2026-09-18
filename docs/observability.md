@@ -40,12 +40,13 @@ The exporter sends protobuf to the endpoint's `/v1/traces` path. Use `OTEL_EXPOR
 | `tracing.sampler` | `--tracing-sampler` | `KODELET_TRACING_SAMPLER` | `ratio` |
 | `tracing.ratio` | `--tracing-ratio` | `KODELET_TRACING_RATIO` | `1.0` |
 | `tracing.capture_content` | `--tracing-capture-content` | `KODELET_TRACING_CAPTURE_CONTENT` | `false` |
+| `tracing.internal_rpc_spans` | `--tracing-internal-rpc-spans` | `KODELET_TRACING_INTERNAL_RPC_SPANS` | `false` |
 
 Samplers are `always`, `never`, or `ratio`. The ratio sampler uses parent-based sampling: downstream spans honor the incoming sampling decision, while new root traces use the configured ratio. Use it consistently across processes to avoid partial traces. A process with tracing disabled does not export its own spans.
 
 ## Trace structure
 
-A one-shot invocation typically has this structure (initialization and lifecycle RPCs are omitted):
+A one-shot invocation typically has this structure (initialization RPCs are omitted):
 
 ```text
 cli.command
@@ -63,6 +64,12 @@ cli.command
 Interactive chat creates bounded traces per submission, not a single process-lifetime trace. Long-lived event subscriptions and WebSocket connections are not trace roots. Missing or invalid incoming context starts an independent server trace. Runner RPC context is carried on individual requests, including reverse calls, rather than on the shared connection; older peers can ignore the optional `traceContext` envelope field.
 
 The daemon preserves trace parentage when it detaches execution from an HTTP observer's cancellation. The runner preserves request parentage while also honoring run cancellation. Logical tool spans include extension hooks and remote execution; lower-level runner spans show where the actual implementation ran.
+
+Successful `lifecycle.dispatch` and `ui.extension.cleanup` RPCs do not create transport spans by default. They still execute normally and propagate trace context, but empty lifecycle hooks and background UI teardown no longer clutter the trace timeline or search results. Registered extension event handlers produce `extension <extension-id> <event>` spans only when invoked, with `kodelet.extension.id` and `kodelet.extension.event` attributes. Their model/helper calls inherit the handler span.
+
+Failures remain visible: suppressed RPCs add a `runner.rpc.error` event to a recording caller span. When no recording span is available locally (for example, on the receiving process or during background cleanup), they emit a failure-only RPC span instead. Error classifications and RPC error codes are recorded by default; raw messages still require content capture. Handler failures are marked on their own spans without changing existing extension error-handling behavior.
+
+To debug transport overhead, set `tracing.internal_rpc_spans: true` or `KODELET_TRACING_INTERNAL_RPC_SPANS=true` on the daemon and runner and restart them. This restores both client and server spans for lifecycle dispatch and UI cleanup. It is a process-local diagnostic setting, independent of content capture; other RPC spans, including tool execution, are unchanged.
 
 Model calls use `chat <model>` client spans for Anthropic, OpenAI Chat Completions, and OpenAI Responses. Spans cover streaming and logical-call retries rather than individual tokens. Model calls finish before tool execution, making model and logical tool spans siblings under the agent invocation. Automatic provider-SDK retry attempts are not necessarily separate spans.
 

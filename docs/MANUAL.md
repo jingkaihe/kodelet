@@ -1076,6 +1076,8 @@ Kodelet supports distributed OpenTelemetry tracing across clients, the daemon, a
 
 Prompt and tool content is excluded by default. `tracing.capture_content: true`, `KODELET_TRACING_CAPTURE_CONTENT=true`, or `--tracing-capture-content` opts that process into sensitive content capture. See [Observability](observability.md) for sampling, trace structure, exporter configuration, and content-capture scope.
 
+Routine lifecycle and UI-cleanup RPC spans are hidden by default; actual extension handlers and failures remain visible. Set `tracing.internal_rpc_spans: true` or `--tracing-internal-rpc-spans` on each participating process to restore transport-level diagnostics.
+
 ## Security Configuration
 
 Kodelet includes security features to control command execution and protect your system from potentially harmful operations.

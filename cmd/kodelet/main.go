@@ -99,6 +99,7 @@ func init() {
 
 	viper.SetDefault("tracing.enabled", false)
 	viper.SetDefault("tracing.capture_content", false)
+	viper.SetDefault("tracing.internal_rpc_spans", false)
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
 

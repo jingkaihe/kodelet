@@ -284,8 +284,8 @@ func (p *Peer) call(ctx context.Context, method string, params any, result any, 
 		ctx = context.Background()
 	}
 
-	ctx, span := startRPCSpan(ctx, method, trace.SpanKindClient)
-	defer func() { finishRPCSpan(span, err) }()
+	ctx, finishTrace := startRPCTrace(ctx, method, trace.SpanKindClient)
+	defer func() { finishTrace(err) }()
 	carrier := propagation.MapCarrier{}
 	propagation.TraceContext{}.Inject(ctx, carrier)
 
@@ -647,7 +647,7 @@ func (p *Peer) dispatchRequest(message Message) {
 	// carriers must not attach unrelated calls to the long-lived WebSocket span.
 	parent := trace.ContextWithSpanContext(p.ctx, trace.SpanContext{})
 	parent = propagation.TraceContext{}.Extract(parent, propagation.MapCarrier(message.TraceContext))
-	requestCtx, span := startRPCSpan(parent, message.Method, trace.SpanKindServer)
+	requestCtx, finishTrace := startRPCTrace(parent, message.Method, trace.SpanKindServer)
 	requestCtx, cancel := context.WithCancel(requestCtx)
 	requestCtx = context.WithValue(requestCtx, requestIDContextKey{}, id)
 	call := &inboundCall{cancel: cancel}
@@ -661,7 +661,7 @@ func (p *Peer) dispatchRequest(message Message) {
 		p.inboundMu.Unlock()
 		cancel()
 		rpcErr := &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"}
-		finishRPCSpan(span, rpcErr)
+		finishTrace(rpcErr)
 		p.trySendErrorResponse(id, rpcErr)
 		return
 	}
@@ -676,7 +676,7 @@ func (p *Peer) dispatchRequest(message Message) {
 			if requestCtx.Err() != nil {
 				requestErr = requestCtx.Err()
 			}
-			finishRPCSpan(span, requestErr)
+			finishTrace(requestErr)
 		}()
 		if !acquireSlot(requestCtx, slots) {
 			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeUnavailable, Message: requestCtx.Err().Error()})
@@ -717,11 +717,43 @@ func (p *Peer) dispatchRequest(message Message) {
 	}) {
 		p.removeInbound(id, call)
 		cancel()
-		finishRPCSpan(span, p.closedError())
+		finishTrace(p.closedError())
 	}
 }
 
-func startRPCSpan(ctx context.Context, method string, kind trace.SpanKind) (context.Context, trace.Span) {
+func startRPCTrace(ctx context.Context, method string, kind trace.SpanKind) (context.Context, func(error)) {
+	if (method == MethodLifecycleDispatch || method == MethodUIExtensionCleanup) && !telemetry.InternalRPCSpansEnabled() {
+		// Keep the caller's context on the wire without inventing transport parents.
+		// Only failed calls need diagnostics; extension handlers trace their own work.
+		started := time.Now()
+		return ctx, func(err error) {
+			if err == nil {
+				return
+			}
+			attrs := append(rpcErrorAttributes(err), attribute.String("rpc.method", method))
+			if telemetry.ContentEnabled() {
+				attrs = append(attrs, attribute.String("exception.message", err.Error()))
+			}
+			parent := trace.SpanFromContext(ctx)
+			if parent.IsRecording() {
+				parent.AddEvent("runner.rpc.error", trace.WithAttributes(attrs...))
+				return
+			}
+			// A remote parent cannot accept events. Emit a failure-only span rather
+			// than silently losing runner-side errors (including response failures).
+			_, span := otel.Tracer("kodelet.runner.rpc").Start(ctx, "runner.rpc "+method,
+				trace.WithSpanKind(kind),
+				trace.WithTimestamp(started),
+				trace.WithAttributes(
+					attribute.String("rpc.system", "jsonrpc"),
+					attribute.String("rpc.service", "kodelet.runner"),
+					attribute.String("rpc.method", method),
+				),
+			)
+			span.AddEvent("runner.rpc.error", trace.WithAttributes(attrs...))
+			finishRPCSpan(span, err)
+		}
+	}
 	// Unknown methods may contain arbitrary client input. Keep both the name and
 	// method attribute bounded to the protocol's fixed vocabulary.
 	switch method {
@@ -741,7 +773,7 @@ func startRPCSpan(ctx context.Context, method string, kind trace.SpanKind) (cont
 	default:
 		method = "_OTHER"
 	}
-	return otel.Tracer("kodelet.runner.rpc").Start(ctx, "runner.rpc "+method,
+	ctx, span := otel.Tracer("kodelet.runner.rpc").Start(ctx, "runner.rpc "+method,
 		trace.WithSpanKind(kind),
 		trace.WithAttributes(
 			attribute.String("rpc.system", "jsonrpc"),
@@ -749,6 +781,7 @@ func startRPCSpan(ctx context.Context, method string, kind trace.SpanKind) (cont
 			attribute.String("rpc.method", method),
 		),
 	)
+	return ctx, func(err error) { finishRPCSpan(span, err) }
 }
 
 func finishRPCSpan(span trace.Span, err error) {
@@ -757,18 +790,24 @@ func finishRPCSpan(span trace.Span, err error) {
 		return
 	}
 	telemetry.RecordSpanError(span, err)
+	span.SetAttributes(rpcErrorAttributes(err)...)
+}
+
+func rpcErrorAttributes(err error) []attribute.KeyValue {
+	errorType := fmt.Sprintf("%T", err)
 	var rpcErr *RPCError
 	switch {
 	case errors.Is(err, context.Canceled):
-		span.SetAttributes(attribute.String("error.type", "canceled"))
+		errorType = "canceled"
 	case errors.Is(err, context.DeadlineExceeded):
-		span.SetAttributes(attribute.String("error.type", "timeout"))
+		errorType = "timeout"
 	case errors.As(err, &rpcErr):
-		span.SetAttributes(
+		return []attribute.KeyValue{
 			attribute.String("error.type", "rpc_error"),
 			attribute.Int("rpc.jsonrpc.error_code", rpcErr.Code),
-		)
+		}
 	}
+	return []attribute.KeyValue{attribute.String("error.type", errorType)}
 }
 
 func (p *Peer) startWorker(worker func()) bool {

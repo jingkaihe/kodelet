@@ -40,10 +40,16 @@ func TestInitTracingDisabled(t *testing.T) {
 	viper.Set("tracing.enabled", false)
 	viper.Set("tracing.sampler", "never")
 	viper.Set("tracing.ratio", 0.25)
+	viper.Set("tracing.internal_rpc_spans", true)
+	previousInternalRPC := telemetry.InternalRPCSpansEnabled()
+	t.Cleanup(func() {
+		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{InternalRPCSpans: previousInternalRPC})
+	})
 
 	shutdown, err := initTracing(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, shutdown)
+	assert.True(t, telemetry.InternalRPCSpansEnabled())
 	assert.NoError(t, shutdown(context.Background()))
 }
 
@@ -255,6 +261,8 @@ func TestDistributedTraceFromCLIThroughDaemonAndRunner(t *testing.T) {
 	var tool *tracev1.Span
 	for _, span := range spans {
 		byID[string(span.SpanId)] = span
+		assert.NotEqual(t, "runner.rpc lifecycle.dispatch", span.Name, "routine lifecycle spans are opt-in")
+		assert.NotEqual(t, "runner.rpc ui.extension.cleanup", span.Name, "successful cleanup must not create traces")
 		if span.Name == "tools.run_tool.file_read" {
 			tool = span
 		}
