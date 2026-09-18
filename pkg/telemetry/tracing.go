@@ -3,7 +3,7 @@ package telemetry
 
 import (
 	"context"
-	"errors"
+	"sync/atomic"
 	"time"
 
 	pkgerrors "github.com/pkg/errors"
@@ -19,6 +19,8 @@ import (
 type Config struct {
 	// Enabled determines if tracing is enabled
 	Enabled bool
+	// CaptureContent opts in to recording prompts, messages, and tool payloads.
+	CaptureContent bool
 	// ServiceName is the name of the service in traces
 	ServiceName string
 	// ServiceVersion is the version of the service in traces
@@ -29,15 +31,22 @@ type Config struct {
 	SamplerRatio float64
 }
 
+var captureContent atomic.Bool
+
+// ContentEnabled reports whether this process opted in to recording content.
+// This setting is local policy and is never accepted from a remote trace carrier.
+func ContentEnabled() bool {
+	return captureContent.Load()
+}
+
 // InitTracer initializes the OpenTelemetry tracer provider
 // Returns a shutdown function to be called before application termination
 func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
+	captureContent.Store(cfg.CaptureContent)
 	if !cfg.Enabled {
 		// Return a no-op shutdown function if tracing is disabled
 		return func(context.Context) error { return nil }, nil
 	}
-
-	var shutdownFuncs []func(context.Context) error
 
 	// Configure resource with service information
 	res, err := resource.New(ctx,
@@ -58,8 +67,6 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to create trace exporter")
 	}
-	shutdownFuncs = append(shutdownFuncs, traceExporter.Shutdown)
-
 	// Configure trace provider with batch export for better performance
 	batchSpanProcessor := trace.NewBatchSpanProcessor(
 		traceExporter,
@@ -75,8 +82,6 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 		trace.WithSpanProcessor(batchSpanProcessor),
 		trace.WithSampler(sampler),
 	)
-	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
-
 	// Set the global tracer provider
 	otel.SetTracerProvider(tracerProvider)
 
@@ -86,14 +91,8 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 		propagation.Baggage{},
 	))
 
-	// Return a shutdown function that calls all the shutdown functions
-	return func(ctx context.Context) error {
-		var err error
-		for _, fn := range shutdownFuncs {
-			err = errors.Join(err, fn(ctx))
-		}
-		return err
-	}, nil
+	// The provider drains pending spans before shutting down its exporter.
+	return tracerProvider.Shutdown, nil
 }
 
 // getSampler returns a sampler based on the provided configuration

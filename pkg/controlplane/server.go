@@ -41,6 +41,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // FrontendHandler serves an optional browser frontend and identifies static
@@ -513,6 +518,38 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		// Create a custom response writer to capture status code
 		rw := &responseWriter{ResponseWriter: w, statusCode: 200}
 
+		// Trace submissions, not long-lived conversation subscriptions or
+		// WebSocket connections. Keep the existing streaming-capable writer.
+		if r.Method == http.MethodPost && r.URL.Path == "/api/chat" {
+			ctx := trace.ContextWithSpanContext(r.Context(), trace.SpanContext{})
+			ctx = (propagation.TraceContext{}).Extract(ctx, propagation.HeaderCarrier(r.Header))
+			ctx, span := otel.Tracer("kodelet.controlplane").Start(ctx, "POST /api/chat",
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(
+					attribute.String("http.request.method", http.MethodPost),
+					attribute.String("http.route", "/api/chat"),
+				),
+			)
+			r = r.WithContext(ctx)
+			defer func() {
+				span.SetAttributes(attribute.Int("http.response.status_code", rw.statusCode))
+				errorType := ""
+				switch {
+				case errors.Is(ctx.Err(), context.Canceled):
+					errorType = "cancelled"
+				case errors.Is(ctx.Err(), context.DeadlineExceeded):
+					errorType = "timeout"
+				case rw.statusCode >= http.StatusInternalServerError:
+					errorType = strconv.Itoa(rw.statusCode)
+				}
+				if errorType != "" {
+					span.SetAttributes(attribute.String("error.type", errorType))
+					span.SetStatus(codes.Error, errorType)
+				}
+				span.End()
+			}()
+		}
+
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
@@ -855,6 +892,9 @@ func (s *Server) chatExecutionContext(requestCtx context.Context) context.Contex
 	if principal, ok := principalFromContext(requestCtx); ok {
 		baseCtx = contextWithPrincipal(baseCtx, principal)
 	}
+	// A disconnected observer must not cancel server-owned work, but that
+	// work still belongs to the submitting request's distributed trace.
+	baseCtx = trace.ContextWithSpanContext(baseCtx, trace.SpanContextFromContext(requestCtx))
 
 	return logger.WithLogger(baseCtx, logger.G(requestCtx))
 }

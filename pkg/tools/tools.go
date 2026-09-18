@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -296,10 +297,15 @@ func RunToolImplementationWithUpdates(
 		return tooltypes.BaseToolResult{Error: "tool implementation is required"}
 	}
 
-	kvs, err := tool.TracingKVs(parameters)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to get tracing kvs")
+	var kvs []attribute.KeyValue
+	if telemetry.ContentEnabled() {
+		var err error
+		kvs, err = tool.TracingKVs(parameters)
+		if err != nil {
+			logger.G(ctx).WithError(err).Error("failed to get tracing kvs")
+		}
 	}
+	kvs = append(kvs, attribute.String("gen_ai.tool.name", tool.Name()))
 
 	ctx, span := tracer.Start(
 		ctx,
@@ -308,8 +314,9 @@ func RunToolImplementationWithUpdates(
 	)
 	defer span.End()
 
-	err = tool.ValidateInput(state, parameters)
+	err := tool.ValidateInput(state, parameters)
 	if err != nil {
+		telemetry.RecordSpanError(span, err)
 		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
@@ -323,8 +330,7 @@ func RunToolImplementationWithUpdates(
 	}
 
 	if result.IsError() {
-		span.SetStatus(codes.Error, result.GetError())
-		span.RecordError(errors.New(result.GetError()))
+		telemetry.RecordSpanError(span, errors.New(result.GetError()))
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}

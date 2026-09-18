@@ -38,6 +38,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Profile Usage](#profile-usage)
   - [Profile Precedence and Merging](#profile-precedence-and-merging)
   - [Special "Default" Profile](#special-default-profile)
+- [Observability](#observability)
 - [Security Configuration](#security-configuration)
   - [Bash Command Restrictions](#bash-command-restrictions)
 - [LLM Providers](#llm-providers)
@@ -1068,6 +1069,12 @@ kodelet profile --local use default -g
 ```
 
 You cannot define a profile named "default" in your configuration files - it's reserved for this special purpose.
+
+## Observability
+
+Kodelet supports distributed OpenTelemetry tracing across clients, the daemon, and workspace runners. Configure `tracing.enabled: true` or `KODELET_TRACING_ENABLED=true` on each process and set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/HTTP collector. Restart existing daemons and runners to apply changes. `--tracing-enabled` affects only the process receiving the flag.
+
+Prompt and tool content is excluded by default. `tracing.capture_content: true`, `KODELET_TRACING_CAPTURE_CONTENT=true`, or `--tracing-capture-content` opts that process into sensitive content capture. See [Observability](observability.md) for sampling, trace structure, exporter configuration, and content-capture scope.
 
 ## Security Configuration
 

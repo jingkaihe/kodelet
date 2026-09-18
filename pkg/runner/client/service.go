@@ -1419,6 +1419,8 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Keep request values, including its RPC span. The run contributes only an
+	// additional cancellation signal, not its long-lived trace parent.
 	operationCtx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(run.ctx, cancel)
 	return operationCtx, func() {

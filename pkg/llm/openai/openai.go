@@ -5,6 +5,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -271,6 +272,17 @@ func (t *Thread) SendMessage(
 	if opt.NoSaveConversation {
 		defer t.BlockConversationFork()()
 	}
+	// Check if tracing is enabled and wrap the handler
+	tracer := telemetry.Tracer("kodelet.llm")
+
+	// Create span with OpenAI-specific attributes
+	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
+		attribute.String("reasoning_effort", t.reasoningEffort),
+		attribute.String("platform", resolvePlatformName(t.Config)),
+	)
+	defer func() {
+		t.FinalizeMessageSpan(span, stderrors.Join(err, ctx.Err()))
+	}()
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
@@ -282,18 +294,6 @@ func (t *Thread) SendMessage(
 		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
 			err = errors.Wrap(closeErr, "failed to close agent environment")
 		}
-	}()
-
-	// Check if tracing is enabled and wrap the handler
-	tracer := telemetry.Tracer("kodelet.llm")
-
-	// Create span with OpenAI-specific attributes
-	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
-		attribute.String("reasoning_effort", t.reasoningEffort),
-		attribute.String("platform", resolvePlatformName(t.Config)),
-	)
-	defer func() {
-		t.FinalizeMessageSpan(span, err)
 	}()
 
 	var originalMessages []openai.ChatCompletionMessage
@@ -582,7 +582,6 @@ func (t *Thread) processMessageExchange(
 
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
-			attribute.String("result", output.AssistantFacing()),
 		)
 
 		// Add tool result to messages for next API call
@@ -735,8 +734,26 @@ func (t *Thread) createChatCompletionWithRetry(
 	streamHandler llmtypes.StreamingMessageHandler,
 	isStreamingHandler bool,
 	extraHeaders map[string]string,
-) (openai.ChatCompletionResponse, error) {
-	var response openai.ChatCompletionResponse
+) (response openai.ChatCompletionResponse, err error) {
+	ctx, span := t.StartModelSpan(ctx, "openai", requestParams.Model,
+		attribute.Bool("gen_ai.request.stream", isStreamingHandler))
+	defer func() {
+		if response.ID != "" {
+			span.SetAttributes(
+				attribute.String("gen_ai.response.id", response.ID),
+				attribute.String("gen_ai.response.model", response.Model),
+				attribute.Int("gen_ai.usage.input_tokens", response.Usage.PromptTokens),
+				attribute.Int("gen_ai.usage.output_tokens", response.Usage.CompletionTokens),
+			)
+			if details := response.Usage.PromptTokensDetails; details != nil {
+				span.SetAttributes(attribute.Int("gen_ai.usage.cache_read.input_tokens", details.CachedTokens))
+			}
+			if details := response.Usage.CompletionTokensDetails; details != nil {
+				span.SetAttributes(attribute.Int("gen_ai.usage.reasoning.output_tokens", details.ReasoningTokens))
+			}
+		}
+		base.FinishModelSpan(span, stderrors.Join(err, ctx.Err()))
+	}()
 	var originalErrors []error // Store all errors for better context
 
 	retryConfig := t.Config.Retry
@@ -754,7 +771,7 @@ func (t *Thread) createChatCompletionWithRetry(
 		delayType = retry.BackOffDelay
 	}
 
-	err := retry.Do(
+	err = retry.Do(
 		func() error {
 			var apiErr error
 			client := t.client
@@ -778,6 +795,7 @@ func (t *Thread) createChatCompletionWithRetry(
 		retry.MaxDelay(maxDelay),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
+			telemetry.AddEvent(ctx, "kodelet.model.retry", attribute.Int("retry.attempt", int(n)+1))
 			logger.G(ctx).WithError(err).WithField("attempt", n+1).WithField("max_attempts", retryConfig.Attempts).Warn("retrying OpenAI API call")
 		}),
 	)
@@ -908,6 +926,13 @@ func (t *Thread) createStreamingChatCompletionWithClient(
 				finishReason = choice.FinishReason
 			}
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if finishReason == "" {
+		return openai.ChatCompletionResponse{}, errors.New("OpenAI stream ended before a finish reason")
 	}
 
 	// Signal end of content blocks

@@ -483,6 +483,10 @@ tracing:
   # Enable OpenTelemetry tracing (default: false)
   enabled: true
 
+  # Include prompts, messages, tool payloads, and detailed errors (default: false).
+  # Configure independently on the daemon and standalone runners.
+  capture_content: false
+
   # Sampling strategy (options: always, never, ratio)
   sampler: always
 
@@ -509,6 +513,7 @@ tracing:
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
+# - KODELET_TRACING_CAPTURE_CONTENT: Opts in to sensitive content in traces
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)

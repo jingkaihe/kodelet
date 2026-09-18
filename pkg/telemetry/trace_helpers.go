@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -27,8 +29,7 @@ func WithSpan(ctx context.Context, name string, f func(context.Context) error, a
 
 	err := f(ctx)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
+		RecordSpanError(span, err)
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}
@@ -61,6 +62,27 @@ func SetAttributes(ctx context.Context, attrs ...attribute.KeyValue) {
 // RecordError records an error on the current span
 func RecordError(ctx context.Context, err error, opts ...trace.EventOption) {
 	span := trace.SpanFromContext(ctx)
-	span.RecordError(err, opts...)
-	span.SetStatus(codes.Error, err.Error())
+	RecordSpanError(span, err, opts...)
+}
+
+// RecordSpanError records an error without exporting arbitrary provider responses
+// or tool output unless content capture is explicitly enabled in this process.
+func RecordSpanError(span trace.Span, err error, opts ...trace.EventOption) {
+	if err == nil {
+		return
+	}
+	errorType := fmt.Sprintf("%T", err)
+	switch {
+	case errors.Is(err, context.Canceled):
+		errorType = "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		errorType = "timeout"
+	}
+	span.SetAttributes(attribute.String("error.type", errorType))
+	if ContentEnabled() {
+		span.RecordError(err, opts...)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetStatus(codes.Error, errorType)
+	}
 }

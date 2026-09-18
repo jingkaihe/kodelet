@@ -33,7 +33,209 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func TestChatTraceClientToDaemon(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		require.NoError(t, provider.Shutdown(context.Background()))
+	})
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              t.Context(),
+		router:              mux.NewRouter(),
+		turns:               openTurnTestStore(t, filepath.Join(t.TempDir(), "tracing.db")),
+		chatRunner: &mockChatRunner{runFunc: func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+			_, span := provider.Tracer("test.agent").Start(ctx, "invoke_agent test")
+			defer span.End()
+			return req.ConversationID, sink.Send(ChatEvent{Kind: "text-delta", Delta: "secret-response"})
+		}},
+	}
+	server.setupRoutes()
+	httpServer := httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+	client, err := chat.NewClient(httpServer.URL, "", "")
+	require.NoError(t, err)
+	var previousTraceID trace.TraceID
+	for _, turnID := range []string{"first-turn", "second-turn"} {
+		recorder.Reset()
+		_, err := client.Run(t.Context(), ChatRequest{
+			ConversationID: "conversation", TurnID: turnID, Message: "secret-prompt",
+		}, &recordingChatSink{})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return len(recorder.Ended()) == 3 }, time.Second, time.Millisecond)
+		var clientSpan, serverSpan, agentSpan sdktrace.ReadOnlySpan
+		for _, span := range recorder.Ended() {
+			switch span.SpanKind() {
+			case trace.SpanKindClient:
+				clientSpan = span
+			case trace.SpanKindServer:
+				serverSpan = span
+			default:
+				agentSpan = span
+			}
+		}
+		require.NotNil(t, clientSpan)
+		require.NotNil(t, serverSpan)
+		require.NotNil(t, agentSpan)
+		assert.False(t, clientSpan.Parent().IsValid())
+		assert.NotEqual(t, previousTraceID, clientSpan.SpanContext().TraceID())
+		assert.Equal(t, clientSpan.SpanContext().TraceID(), serverSpan.SpanContext().TraceID())
+		assert.Equal(t, clientSpan.SpanContext().SpanID(), serverSpan.Parent().SpanID())
+		assert.True(t, serverSpan.Parent().IsRemote())
+		assert.Equal(t, serverSpan.SpanContext().TraceID(), agentSpan.SpanContext().TraceID())
+		assert.Equal(t, serverSpan.SpanContext().SpanID(), agentSpan.Parent().SpanID())
+		assert.False(t, agentSpan.Parent().IsRemote())
+		assert.False(t, agentSpan.EndTime().After(serverSpan.EndTime()))
+		receipt, err := server.turns.get(t.Context(), "conversation", turnID)
+		require.NoError(t, err)
+		require.NotEmpty(t, receipt.RunID)
+		assert.Contains(t, serverSpan.Attributes(), attribute.String("kodelet.run.id", receipt.RunID))
+		for _, span := range []sdktrace.ReadOnlySpan{clientSpan, serverSpan} {
+			assert.Equal(t, codes.Unset, span.Status().Code)
+			assert.Contains(t, span.Attributes(), attribute.String("gen_ai.conversation.id", "conversation"))
+			assert.Contains(t, span.Attributes(), attribute.String("kodelet.turn.id", turnID))
+			assert.Contains(t, span.Attributes(), attribute.Int("http.response.status_code", http.StatusOK))
+			assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
+		}
+		previousTraceID = clientSpan.SpanContext().TraceID()
+	}
+}
+
+func TestChatTraceMiddlewareScopeAndParentage(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		require.NoError(t, provider.Shutdown(context.Background()))
+	})
+	state, err := trace.ParseTraceState("test=value")
+	require.NoError(t, err)
+	parent := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2},
+		TraceFlags: trace.FlagsSampled, TraceState: state,
+	})
+	for _, test := range []struct{ name, method, path, header string }{
+		{"remote parent", http.MethodPost, "/api/chat", "valid"},
+		{"no parent", http.MethodPost, "/api/chat", ""},
+		{"invalid parent", http.MethodPost, "/api/chat", "invalid"},
+		{"conversation subscription", http.MethodGet, "/api/conversations/conversation/stream", "valid"},
+		{"runner connection", http.MethodGet, protocol.Endpoint, "valid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder.Reset()
+			server := &Server{}
+			ctx := trace.ContextWithSpanContext(t.Context(), parent)
+			req := httptest.NewRequest(test.method, test.path, nil).WithContext(ctx)
+			if test.header == "valid" {
+				propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(req.Header))
+			} else {
+				req.Header.Set("traceparent", test.header)
+			}
+			response := httptest.NewRecorder()
+			server.loggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				assert.Empty(t, recorder.Ended())
+				w.WriteHeader(http.StatusOK)
+				w.(http.Flusher).Flush()
+			})).ServeHTTP(response, req)
+			assert.True(t, response.Flushed)
+			spans := recorder.Ended()
+			if test.method != http.MethodPost {
+				assert.Empty(t, spans, "subscriptions and WebSockets must not create lifetime spans")
+				return
+			}
+			require.Len(t, spans, 1)
+			span := spans[0]
+			assert.Equal(t, trace.SpanKindServer, span.SpanKind())
+			if test.header == "valid" {
+				assert.Equal(t, parent.TraceID(), span.SpanContext().TraceID())
+				assert.Equal(t, parent.SpanID(), span.Parent().SpanID())
+				assert.Equal(t, state, span.Parent().TraceState())
+				assert.True(t, span.Parent().IsRemote())
+			} else {
+				assert.False(t, span.Parent().IsValid(), "do not inherit connection-lifetime span context")
+				assert.NotEqual(t, parent.TraceID(), span.SpanContext().TraceID())
+			}
+		})
+	}
+}
+
+func TestChatExecutionContextRetainsTraceWithoutRequestCancellation(t *testing.T) {
+	serverCtx, stopServer := context.WithCancel(t.Context())
+	defer stopServer()
+	requestCtx, stopRequest := context.WithTimeout(t.Context(), time.Hour)
+	defer stopRequest()
+	parent := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled,
+	})
+	requestCtx = trace.ContextWithSpanContext(requestCtx, parent)
+	principal := Principal{ID: "user", Roles: []string{string(RoleUser)}}
+	requestCtx = contextWithPrincipal(requestCtx, principal)
+	server := &Server{runCtx: serverCtx}
+	executionCtx := server.chatExecutionContext(requestCtx)
+	assert.Equal(t, parent, trace.SpanContextFromContext(executionCtx))
+	actualPrincipal, ok := principalFromContext(executionCtx)
+	require.True(t, ok)
+	assert.Equal(t, principal, actualPrincipal)
+	_, hasDeadline := executionCtx.Deadline()
+	assert.False(t, hasDeadline, "the request deadline must not constrain server-owned work")
+	stopRequest()
+	require.NoError(t, executionCtx.Err())
+	stopServer()
+	assert.ErrorIs(t, executionCtx.Err(), context.Canceled)
+}
+
+func TestChatTraceStreamFailures(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		require.NoError(t, provider.Shutdown(context.Background()))
+	})
+	for _, test := range []struct {
+		name, errorType string
+		err             error
+	}{
+		{"run failure", "chat_run_error", errors.New("secret-provider-error")},
+		{"cancelled", "cancelled", context.Canceled},
+		{"timeout", "timeout", context.DeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder.Reset()
+			server := &Server{
+				conversationService: &mockConversationService{},
+				chatRunner: &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+					return req.ConversationID, test.err
+				}},
+			}
+			response := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"secret-prompt"}`))
+			server.loggingMiddleware(http.HandlerFunc(server.handleChat)).ServeHTTP(response, req)
+			assert.Equal(t, http.StatusOK, response.Code)
+			spans := recorder.Ended()
+			require.Len(t, spans, 1)
+			span := spans[0]
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Contains(t, span.Attributes(), attribute.String("error.type", test.errorType))
+			assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
+		})
+	}
+}
 
 // mockConversationService implements the methods we need for testing
 type mockConversationService struct {

@@ -114,6 +114,9 @@ type Message struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *RPCError       `json:"error,omitempty"`
+	// TraceContext carries optional W3C traceparent/tracestate on requests.
+	// Older peers ignore it; missing or invalid context starts an independent trace.
+	TraceContext map[string]string `json:"traceContext,omitempty"`
 }
 
 // RPCError is a JSON-RPC error object.

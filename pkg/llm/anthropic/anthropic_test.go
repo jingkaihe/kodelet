@@ -16,10 +16,15 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -56,6 +61,86 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, test.expected, result)
+			}
+		})
+	}
+}
+
+func TestNewMessageTracing(t *testing.T) {
+	const streamStart = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_trace","type":"message","role":"assistant","model":"actual-model","content":[],"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":3,"cache_read_input_tokens":7}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
+
+`
+	for _, tc := range []struct {
+		name    string
+		content bool
+		partial bool
+	}{
+		{name: "metadata only"},
+		{name: "content opted in", content: true},
+		{name: "truncated stream", partial: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			previous := otel.GetTracerProvider()
+			previousContent := telemetry.ContentEnabled()
+			otel.SetTracerProvider(provider)
+			_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: tc.content})
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+				_ = provider.Shutdown(context.Background())
+				otel.SetTracerProvider(previous)
+			})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, streamStart)
+				if !tc.partial {
+					_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+				}
+			}))
+			defer server.Close()
+			thread := &Thread{
+				Thread: base.NewThread(llmtypes.Config{Model: "primary"}, "conv-trace"),
+				client: anthropic.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test")),
+			}
+			thread.Usage.InputTokens = 999
+			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "secret", llmtypes.MessageOpt{})
+			_, err = thread.NewMessage(ctx, anthropic.MessageNewParams{
+				Model: "requested-model", MaxTokens: 100,
+				System:   []anthropic.TextBlockParam{{Text: "private system"}},
+				Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("private input"))},
+			}, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{})
+			thread.FinalizeMessageSpan(invocation, err)
+			spans := recorder.Ended()
+			require.Len(t, spans, 2)
+			model := spans[0]
+			assert.Equal(t, "chat requested-model", model.Name())
+			assert.Equal(t, invocation.SpanContext().SpanID(), model.Parent().SpanID())
+			attrs := make(map[attribute.Key]attribute.Value)
+			for _, attr := range model.Attributes() {
+				attrs[attr.Key] = attr.Value
+			}
+			_, systemCaptured := attrs["system.0"]
+			_, inputCaptured := attrs["message.0.content"]
+			assert.Equal(t, tc.content, systemCaptured)
+			assert.Equal(t, tc.content, inputCaptured)
+			if tc.partial {
+				require.ErrorContains(t, err, "message_stop")
+				assert.Equal(t, codes.Error, model.Status().Code)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, codes.Ok, model.Status().Code)
+				assert.Equal(t, int64(20), attrs["gen_ai.usage.input_tokens"].AsInt64())
+				assert.Equal(t, int64(5), attrs["gen_ai.usage.output_tokens"].AsInt64())
+				assert.Equal(t, int64(7), attrs["gen_ai.usage.cache_read.input_tokens"].AsInt64())
+				assert.Equal(t, int64(3), attrs["gen_ai.usage.cache_write.input_tokens"].AsInt64())
+				assert.Equal(t, "actual-model", attrs["gen_ai.response.model"].AsString())
+				assert.Equal(t, "msg_trace", attrs["gen_ai.response.id"].AsString())
 			}
 		})
 	}
@@ -844,6 +929,68 @@ func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {
 	assert.Equal(t, "toolu-second", results[1].blockID)
 	assert.Equal(t, "second_tool", results[1].toolName)
 	assert.ElementsMatch(t, []string{"toolu-first:first_tool", "toolu-second:second_tool"}, handler.toolResults)
+}
+
+type privacyAnthropicTool struct{ testTool }
+
+func (privacyAnthropicTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{Result: "private-tool-output"}
+}
+
+func TestAnthropicToolLoopTracingPrivacy(t *testing.T) {
+	for _, capture := range []bool{false, true} {
+		recorder := tracetest.NewSpanRecorder()
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+		previous, previousContent := otel.GetTracerProvider(), telemetry.ContentEnabled()
+		otel.SetTracerProvider(provider)
+		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+			_ = provider.Shutdown(context.Background())
+			otel.SetTracerProvider(previous)
+		})
+		thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conversation")}
+		thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
+			privacyAnthropicTool{testTool{name: "privacy_tool"}},
+		})))
+		block := anthropicToolUseBlockForTest(t, "call-1", map[string]any{"value": "private-tool-input"}, "privacy_tool")
+		ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
+		results, err := thread.executeToolsParallel(ctx, &captureAnthropicToolHandler{}, []struct {
+			block   anthropic.ContentBlockUnion
+			variant anthropic.ToolUseBlock
+		}{{block: block, variant: block.AsToolUse()}}, llmtypes.MessageOpt{})
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Contains(t, results[0].output.AssistantFacing(), "private-tool-output")
+		thread.FinalizeMessageSpan(invocation, nil)
+		var sawStart, sawComplete, sawTool bool
+		for _, span := range recorder.Ended() {
+			if span.Name() == "invoke_agent kodelet" {
+				encoded, err := json.Marshal(span.Events())
+				require.NoError(t, err)
+				assert.NotContains(t, string(encoded), "private-tool-input")
+				assert.NotContains(t, string(encoded), "private-tool-output")
+				for _, event := range span.Events() {
+					sawStart = sawStart || event.Name == "tool_execution_start"
+					sawComplete = sawComplete || event.Name == "tool_execution_complete"
+				}
+			}
+			if span.Name() == "execute_tool privacy_tool" {
+				sawTool = true
+				attributes, err := json.Marshal(span.Attributes())
+				require.NoError(t, err)
+				if capture {
+					assert.Contains(t, string(attributes), "private-tool-input")
+					assert.Contains(t, string(attributes), "private-tool-output")
+				} else {
+					assert.NotContains(t, string(attributes), "private-tool-input")
+					assert.NotContains(t, string(attributes), "private-tool-output")
+				}
+			}
+		}
+		assert.True(t, sawStart && sawComplete && sawTool)
+	}
 }
 
 func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testing.T) {

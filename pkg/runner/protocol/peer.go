@@ -11,7 +11,12 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -267,7 +272,7 @@ func (p *Peer) CallTracked(ctx context.Context, method string, params any, resul
 	return p.call(ctx, method, params, result, onRequestID)
 }
 
-func (p *Peer) call(ctx context.Context, method string, params any, result any, onRequestID func(string)) error {
+func (p *Peer) call(ctx context.Context, method string, params any, result any, onRequestID func(string)) (err error) {
 	if err := p.ready(); err != nil {
 		return err
 	}
@@ -279,12 +284,23 @@ func (p *Peer) call(ctx context.Context, method string, params any, result any, 
 		ctx = context.Background()
 	}
 
+	ctx, span := startRPCSpan(ctx, method, trace.SpanKindClient)
+	defer func() { finishRPCSpan(span, err) }()
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
+
 	id := fmt.Sprintf("%s:%d", p.config.RequestPrefix, p.requestSeq.Add(1))
 	paramsPayload, err := marshalRPCValue(params)
 	if err != nil {
 		return errors.Wrap(err, "failed to encode runner rpc params")
 	}
-	payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Method: method, Params: paramsPayload})
+	payload, err := json.Marshal(Message{
+		JSONRPC:      JSONRPCVersion,
+		ID:           &id,
+		Method:       method,
+		Params:       paramsPayload,
+		TraceContext: carrier,
+	})
 	if err != nil {
 		return errors.Wrap(err, "failed to encode runner rpc request")
 	}
@@ -627,7 +643,12 @@ func (p *Peer) dispatchNotification(message Message) {
 
 func (p *Peer) dispatchRequest(message Message) {
 	id := *message.ID
-	requestCtx, cancel := context.WithCancel(p.ctx)
+	// The connection owns cancellation, not trace parentage. Legacy or malformed
+	// carriers must not attach unrelated calls to the long-lived WebSocket span.
+	parent := trace.ContextWithSpanContext(p.ctx, trace.SpanContext{})
+	parent = propagation.TraceContext{}.Extract(parent, propagation.MapCarrier(message.TraceContext))
+	requestCtx, span := startRPCSpan(parent, message.Method, trace.SpanKindServer)
+	requestCtx, cancel := context.WithCancel(requestCtx)
 	requestCtx = context.WithValue(requestCtx, requestIDContextKey{}, id)
 	call := &inboundCall{cancel: cancel}
 	slots := p.requestSlots
@@ -639,7 +660,9 @@ func (p *Peer) dispatchRequest(message Message) {
 	if _, exists := p.inbound[id]; exists {
 		p.inboundMu.Unlock()
 		cancel()
-		p.trySendErrorResponse(id, &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"})
+		rpcErr := &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"}
+		finishRPCSpan(span, rpcErr)
+		p.trySendErrorResponse(id, rpcErr)
 		return
 	}
 	p.inbound[id] = call
@@ -648,6 +671,13 @@ func (p *Peer) dispatchRequest(message Message) {
 	if !p.startWorker(func() {
 		defer cancel()
 		defer p.removeInbound(id, call)
+		var requestErr error
+		defer func() {
+			if requestCtx.Err() != nil {
+				requestErr = requestCtx.Err()
+			}
+			finishRPCSpan(span, requestErr)
+		}()
 		if !acquireSlot(requestCtx, slots) {
 			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeUnavailable, Message: requestCtx.Err().Error()})
 			return
@@ -656,20 +686,24 @@ func (p *Peer) dispatchRequest(message Message) {
 
 		result, rpcErr := p.handleRequestSafely(requestCtx, message.Method, message.Params)
 		if rpcErr != nil {
+			requestErr = rpcErr
 			p.sendErrorResponse(id, rpcErr)
 			return
 		}
 		resultPayload, err := marshalRPCValue(result)
 		if err != nil {
+			requestErr = err
 			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeInternal, Message: err.Error()})
 			return
 		}
 		payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Result: resultPayload})
 		if err != nil {
+			requestErr = err
 			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeInternal, Message: err.Error()})
 			return
 		}
 		if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
+			requestErr = err
 			p.sendErrorResponse(id, &RPCError{
 				Code:    ErrorCodeUnavailable,
 				Message: "runner rpc result exceeds the connection message-size limit; return a smaller result or use an artifact channel",
@@ -679,10 +713,61 @@ func (p *Peer) dispatchRequest(message Message) {
 		}
 		ctx, cancelWrite := context.WithTimeout(p.ctx, p.config.WriteWait)
 		defer cancelWrite()
-		_ = p.enqueueControl(ctx, websocket.TextMessage, payload, nil)
+		requestErr = p.enqueueControl(ctx, websocket.TextMessage, payload, nil)
 	}) {
 		p.removeInbound(id, call)
 		cancel()
+		finishRPCSpan(span, p.closedError())
+	}
+}
+
+func startRPCSpan(ctx context.Context, method string, kind trace.SpanKind) (context.Context, trace.Span) {
+	// Unknown methods may contain arbitrary client input. Keep both the name and
+	// method attribute bounded to the protocol's fixed vocabulary.
+	switch method {
+	case MethodRunnerRegister, MethodRunnerHeartbeat, MethodRunnerManifestChanged, MethodRunnerGoodbye,
+		MethodRunOpen, MethodRunCheckpoint, MethodRunClose, MethodRunCancel, MethodRunEnvironmentError,
+		MethodCommandExecute, MethodShortcutExecute, MethodLifecycleDispatch, MethodToolExecute, MethodToolUpdate,
+		MethodConversationFork, MethodWorkspaceGitDiff, MethodWorkspaceGitPrepare, MethodWorkspaceGitCommit,
+		MethodWorkspaceDiscover, MethodWorkspaceInspect, MethodWorkspaceMessageHistory, MethodWorkspaceCWDHints,
+		MethodWorkspaceTerminalOpen, MethodWorkspaceTerminalRead, MethodWorkspaceTerminalInput, MethodWorkspaceTerminalResize,
+		MethodWorkspaceBrowserOpen, MethodWorkspaceBrowserConnect, MethodWorkspaceBrowserStop, MethodWorkspaceBrowserAsset,
+		MethodUIInput, MethodUIConfirm, MethodUISelect, MethodUINotify, MethodUIWidgetSet, MethodUIWidgetFrame,
+		MethodUIWidgetRemove, MethodUITranscriptAppend, MethodUISurfaceOpen, MethodUISurfaceFrame, MethodUISurfaceClose,
+		MethodUISurfaceInput, MethodUISurfaceResize, MethodUISurfaceInvalidate, MethodUIExtensionCleanup,
+		MethodOperationCancel, MethodSessionExtensionsAttach, MethodSessionExtensionFrame:
+	case "model.helper.execute", "artifact.upload.begin", "artifact.resolve":
+		// Reverse methods live in payload, which imports protocol.
+	default:
+		method = "_OTHER"
+	}
+	return otel.Tracer("kodelet.runner.rpc").Start(ctx, "runner.rpc "+method,
+		trace.WithSpanKind(kind),
+		trace.WithAttributes(
+			attribute.String("rpc.system", "jsonrpc"),
+			attribute.String("rpc.service", "kodelet.runner"),
+			attribute.String("rpc.method", method),
+		),
+	)
+}
+
+func finishRPCSpan(span trace.Span, err error) {
+	defer span.End()
+	if err == nil {
+		return
+	}
+	telemetry.RecordSpanError(span, err)
+	var rpcErr *RPCError
+	switch {
+	case errors.Is(err, context.Canceled):
+		span.SetAttributes(attribute.String("error.type", "canceled"))
+	case errors.Is(err, context.DeadlineExceeded):
+		span.SetAttributes(attribute.String("error.type", "timeout"))
+	case errors.As(err, &rpcErr):
+		span.SetAttributes(
+			attribute.String("error.type", "rpc_error"),
+			attribute.Int("rpc.jsonrpc.error_code", rpcErr.Code),
+		)
 	}
 }
 

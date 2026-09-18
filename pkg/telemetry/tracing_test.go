@@ -3,8 +3,12 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +25,52 @@ func TestInitTracerDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, shutdown)
 	assert.NoError(t, shutdown(context.Background()))
+}
+
+func TestContentCaptureIsExplicit(t *testing.T) {
+	previous := ContentEnabled()
+	t.Cleanup(func() { captureContent.Store(previous) })
+	for _, enabled := range []bool{false, true, false} {
+		shutdown, err := InitTracer(t.Context(), Config{CaptureContent: enabled})
+		require.NoError(t, err)
+		assert.Equal(t, enabled, ContentEnabled())
+		assert.NoError(t, shutdown(t.Context()))
+	}
+}
+
+func TestTracerShutdownFlushesPendingSpans(t *testing.T) {
+	requests := make(chan []byte, 1)
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/traces", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		requests <- body
+		w.Header().Set("Content-Type", "application/x-protobuf")
+	}))
+	defer collector.Close()
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", collector.URL+"/v1/traces")
+	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "")
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+	})
+	shutdown, err := InitTracer(t.Context(), Config{Enabled: true, ServiceName: "tracing-test", SamplerType: "always"})
+	require.NoError(t, err)
+	_, span := Tracer("").Start(t.Context(), "pending-span")
+	span.End()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, shutdown(ctx))
+	select {
+	case body := <-requests:
+		assert.Contains(t, string(body), "pending-span")
+	case <-ctx.Done():
+		t.Fatal("shutdown did not export the pending span")
+	}
 }
 
 func TestGetSampler(t *testing.T) {
@@ -108,8 +158,8 @@ func TestSpanHelpers(t *testing.T) {
 	span = ended[0]
 	assert.Equal(t, "failing-operation", span.Name())
 	assert.Equal(t, codes.Error, span.Status().Code)
-	assert.Equal(t, wantErr.Error(), span.Status().Description)
-	assert.NotEmpty(t, span.Events())
+	assert.Equal(t, "*errors.errorString", span.Status().Description)
+	assert.Empty(t, span.Events(), "error text may contain content and requires opt-in")
 
 	spanRecorder.Reset()
 	WithSpanFunc(ctx, "func-operation", func(ctx context.Context) {

@@ -98,6 +98,7 @@ func init() {
 	viper.SetDefault("extensions.max_output_size", 102400)
 
 	viper.SetDefault("tracing.enabled", false)
+	viper.SetDefault("tracing.capture_content", false)
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
 
@@ -327,7 +328,14 @@ func main() {
 		logger.G(ctx).WithError(configFileLoadError).Fatal("Failed to load trusted configuration")
 	}
 
+	var tracingShutdown func(context.Context) error
 	cobra.OnInitialize(func() {
+		// Cobra has parsed flags by this point; CLI overrides must apply to tracing.
+		var err error
+		tracingShutdown, err = initTracing(ctx)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to initialize tracing")
+		}
 		if logLevel := viper.GetString("log_level"); logLevel != "" {
 			if err := logger.SetLogLevel(logLevel); err != nil {
 				logger.G(context.TODO()).WithField("error", err).WithField("log_level", logLevel).Warn("Invalid log level, using default")
@@ -403,30 +411,14 @@ func main() {
 	rootCmd.AddCommand(remoteProfileCmd)
 	rootCmd.AddCommand(dbCmd)
 
-	// Initialize telemetry with tracing
-	tracingShutdown, err := initTracing(ctx)
-	if err != nil {
-		logger.G(context.TODO()).WithField("error", err).Warn("Failed to initialize tracing")
-	} else if tracingShutdown != nil {
-		// Ensure tracing is properly shutdown
-		defer func() {
-			if viper.GetBool("tracing.enabled") {
-				// best effort to ensure graceful shutdown
-				time.Sleep(1 * time.Second)
-				if err := tracingShutdown(ctx); err != nil {
-					logger.G(context.TODO()).WithField("error", err).Warn("Failed to shutdown tracing")
-				}
-			}
-		}()
-	}
-
 	// Resolve the command and its flags before touching local execution resources.
 	// Thin clients must work even when no local conversation database is writable.
 	rootCmd.PersistentPreRunE = initializeCommandResources
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
-	chatCmd = withTracing(chatCmd)
+	// Interactive clients and servers outlive individual turns. Their operations
+	// start bounded traces instead of sharing a process-lifetime command span.
 	versionCmd = withTracing(versionCmd)
 	commitCmd = withTracing(commitCmd)
 	setupCmd = withTracing(setupCmd)
@@ -436,15 +428,22 @@ func main() {
 	anthropicCmd = withTracing(anthropicCmd)
 	copilotLoginCmd = withTracing(copilotLoginCmd)
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
-	serveCmd = withTracing(serveCmd)
 	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)
 
-	// Execute
-	if err := executeCLICommand(ctx, rootCmd); err != nil {
+	// Flush before os.Exit, which does not run deferred functions.
+	err := executeCLICommand(ctx, rootCmd)
+	if tracingShutdown != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if shutdownErr := tracingShutdown(shutdownCtx); shutdownErr != nil {
+			logger.G(ctx).WithError(shutdownErr).Warn("Failed to shutdown tracing")
+		}
+		cancel()
+	}
+	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			os.Exit(130)
 		}

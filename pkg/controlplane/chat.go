@@ -22,6 +22,9 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type serverChatRunner struct {
@@ -353,6 +356,7 @@ func (s *subscriberEventSink) Close() {
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	requestCtx := r.Context()
+	span := trace.SpanFromContext(requestCtx)
 
 	var req chat.ChatRequest
 	decoder := json.NewDecoder(r.Body)
@@ -414,6 +418,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ConversationID = conversationID
+	span.SetAttributes(
+		attribute.String("gen_ai.conversation.id", conversationID),
+		attribute.String("kodelet.turn.id", req.TurnID),
+	)
 	if err := conversations.ValidateParentConversation(requestCtx, s.conversationService, conversationID, req.ParentConversationID); err != nil {
 		s.writeErrorResponse(w, http.StatusBadRequest, err.Error(), nil)
 		return
@@ -429,6 +437,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 			s.writeErrorResponse(w, code, err.Error(), nil)
 			return
+		}
+		if receipt.RunID != "" {
+			span.SetAttributes(attribute.String("kodelet.run.id", receipt.RunID))
 		}
 		if !admitted {
 			s.replyTurnReceipt(w, sink, receipt)
@@ -525,6 +536,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		conversationID = registeredConversationID
 	}
 	if runErr != nil {
+		// A streamed failure can still have HTTP 200. Do not attach the
+		// error message: provider/tool errors may contain user content.
+		errorType := "chat_run_error"
+		switch {
+		case errors.Is(runErr, context.Canceled), errors.Is(runErr, io.ErrClosedPipe):
+			errorType = "cancelled"
+		case errors.Is(runErr, context.DeadlineExceeded):
+			errorType = "timeout"
+		}
+		span.SetAttributes(attribute.String("error.type", errorType))
+		span.SetStatus(codes.Error, errorType)
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
 			s.unregisterActiveChat(registeredConversationID, run)
 			completionEvent := chat.ChatEvent{

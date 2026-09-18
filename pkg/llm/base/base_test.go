@@ -2,17 +2,24 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -45,6 +52,80 @@ func TestNewThread(t *testing.T) {
 	assert.NotNil(t, bt.ToolResults)
 	assert.NotNil(t, bt.RendererRegistry)
 	assert.Len(t, bt.ToolResults, 0)
+}
+
+func TestInvocationAndModelSpans(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previous)
+	})
+	thread := NewThread(llmtypes.Config{Model: "primary"}, "conversation-1")
+	thread.Usage.InputTokens = 1000 // Historical usage must not become model-call usage.
+	ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private prompt", llmtypes.MessageOpt{})
+	modelCtx, model := thread.StartModelSpan(ctx, "openai", "weak-model")
+	assert.Equal(t, model.SpanContext(), trace.SpanFromContext(modelCtx).SpanContext())
+	FinishModelSpan(model, context.Canceled)
+	_, tool := provider.Tracer("test").Start(ctx, "execute_tool test")
+	tool.End()
+	thread.FinalizeMessageSpan(invocation, nil)
+
+	spans := recorder.Ended()
+	require.Len(t, spans, 3)
+	assert.Equal(t, "chat weak-model", spans[0].Name())
+	assert.Equal(t, trace.SpanKindClient, spans[0].SpanKind())
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	assert.Equal(t, invocation.SpanContext().SpanID(), spans[0].Parent().SpanID())
+	assert.Equal(t, invocation.SpanContext().SpanID(), spans[1].Parent().SpanID())
+	assert.Contains(t, spans[0].Attributes(), attribute.String("gen_ai.request.model", "weak-model"))
+	assert.Contains(t, spans[0].Attributes(), attribute.String("gen_ai.provider.name", "openai"))
+	assert.Contains(t, spans[0].Attributes(), attribute.String("gen_ai.conversation.id", "conversation-1"))
+	assert.Equal(t, "invoke_agent kodelet", spans[2].Name())
+	assert.Contains(t, spans[2].Attributes(), attribute.String("gen_ai.operation.name", "invoke_agent"))
+	assert.Contains(t, spans[2].Attributes(), attribute.String("gen_ai.agent.name", "kodelet"))
+	for _, span := range spans {
+		for _, attr := range span.Attributes() {
+			assert.NotEqual(t, attribute.Key("gen_ai.usage.input_tokens"), attr.Key)
+		}
+	}
+}
+
+func TestInvocationAndModelErrorsRespectContentPolicy(t *testing.T) {
+	previousContent := telemetry.ContentEnabled()
+	t.Cleanup(func() {
+		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+	})
+	for _, capture := range []bool{false, true} {
+		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
+		require.NoError(t, err)
+		recorder := tracetest.NewSpanRecorder()
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+		previous := otel.GetTracerProvider()
+		otel.SetTracerProvider(provider)
+		thread := NewThread(llmtypes.Config{}, "conversation")
+		ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
+		_, model := thread.StartModelSpan(ctx, "openai", "model")
+		providerErr := errors.New("provider echoed private prompt")
+		FinishModelSpan(model, providerErr)
+		thread.FinalizeMessageSpan(invocation, providerErr)
+		otel.SetTracerProvider(previous)
+		require.NoError(t, provider.Shutdown(context.Background()))
+		for _, span := range recorder.Ended() {
+			assert.Equal(t, codes.Error, span.Status().Code)
+			events, err := json.Marshal(span.Events())
+			require.NoError(t, err)
+			if capture {
+				assert.Contains(t, span.Status().Description, providerErr.Error())
+				assert.Contains(t, string(events), providerErr.Error())
+			} else {
+				assert.NotContains(t, span.Status().Description, providerErr.Error())
+				assert.NotContains(t, string(events), providerErr.Error())
+			}
+		}
+	}
 }
 
 func TestThreadMetadata(t *testing.T) {

@@ -11,8 +11,16 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestPeerSupportsSymmetricCallsAndNotifications(t *testing.T) {
@@ -244,23 +252,57 @@ func TestPeerOperationCancelBypassesNotificationLimit(t *testing.T) {
 }
 
 func TestPeerPropagatesRPCErrors(t *testing.T) {
-	_, clientPeer := newTestPeerPair(t,
-		PeerConfig{
-			Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
-				return nil, &RPCError{Code: ErrorCodeBusy, Message: "runner is busy"}
-			}),
-		},
-		PeerConfig{},
-	)
+	for _, test := range []struct {
+		name           string
+		captureContent bool
+	}{
+		{name: "metadata only by default"},
+		{name: "content capture enabled", captureContent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := recordPeerSpans(t)
+			// Keep tracing disabled here: only configure content policy, without a live exporter.
+			_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: test.captureContent})
+			require.NoError(t, err)
+			const errorMessage = "runner is busy: private tool output"
+			_, clientPeer := newTestPeerPair(t,
+				PeerConfig{
+					Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
+						return nil, &RPCError{Code: ErrorCodeBusy, Message: errorMessage}
+					}),
+				},
+				PeerConfig{},
+			)
 
-	err := clientPeer.Call(t.Context(), "run.open", map[string]string{"runId": "run-one"}, nil)
-	var rpcErr *RPCError
-	require.ErrorAs(t, err, &rpcErr)
-	assert.Equal(t, ErrorCodeBusy, rpcErr.Code)
-	assert.Equal(t, "runner is busy", rpcErr.Message)
+			err = clientPeer.Call(t.Context(), "run.open", map[string]string{"runId": "run-one"}, nil)
+			var rpcErr *RPCError
+			require.ErrorAs(t, err, &rpcErr)
+			assert.Equal(t, ErrorCodeBusy, rpcErr.Code)
+			assert.Equal(t, errorMessage, rpcErr.Message, "telemetry policy must not change the RPC error")
+			require.Eventually(t, func() bool { return len(recorder.Ended()) == 2 }, time.Second, time.Millisecond)
+			for _, span := range recorder.Ended() {
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Contains(t, span.Attributes(), attribute.Int("rpc.jsonrpc.error_code", ErrorCodeBusy))
+				assert.Contains(t, span.Attributes(), attribute.String("error.type", "rpc_error"))
+				if test.captureContent {
+					assert.Equal(t, rpcErr.Error(), span.Status().Description)
+					require.Len(t, span.Events(), 1)
+					assert.Equal(t, "exception", span.Events()[0].Name)
+					assert.Contains(t, span.Events()[0].Attributes, attribute.String("exception.message", rpcErr.Error()))
+				} else {
+					assert.Equal(t, "*protocol.RPCError", span.Status().Description)
+					assert.Empty(t, span.Events(), "raw exception messages must not bypass content policy")
+					attrs, err := json.Marshal(span.Attributes())
+					require.NoError(t, err)
+					assert.NotContains(t, string(attrs), errorMessage)
+				}
+			}
+		})
+	}
 }
 
 func TestPeerCancellationCancelsRemoteRequest(t *testing.T) {
+	recorder := recordPeerSpans(t)
 	remoteStarted := make(chan struct{})
 	remoteCanceled := make(chan struct{})
 	_, clientPeer := newTestPeerPair(t,
@@ -292,6 +334,14 @@ func TestPeerCancellationCancelsRemoteRequest(t *testing.T) {
 	case <-remoteCanceled:
 	case <-time.After(time.Second):
 		t.Fatal("remote request was not canceled")
+	}
+	require.Eventually(t, func() bool { return len(recorder.Ended()) == 2 }, time.Second, time.Millisecond)
+	for _, span := range recorder.Ended() {
+		assert.Equal(t, codes.Error, span.Status().Code)
+		assert.Contains(t, span.Attributes(), attribute.String("error.type", "canceled"))
+		assert.Empty(t, span.Events())
+		assert.Equal(t, "runner.rpc _OTHER", span.Name())
+		assert.Contains(t, span.Attributes(), attribute.String("rpc.method", "_OTHER"))
 	}
 }
 
@@ -506,8 +556,162 @@ func TestPeerDefaultsAndMarshalRPCValue(t *testing.T) {
 	assert.Equal(t, "null", string(payload))
 }
 
-func newTestPeerPair(t *testing.T, serverConfig, clientConfig PeerConfig) (*Peer, *Peer) {
+func TestPeerTracingParentsPerCall(t *testing.T) {
+	recorder := recordPeerSpans(t)
+	tracer := otel.Tracer("test")
+	connectionCtx, connectionSpan := tracer.Start(t.Context(), "websocket")
+	defer connectionSpan.End()
+	handler := RequestHandlerFunc(func(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
+		_, span := tracer.Start(ctx, "tool.execution")
+		defer span.End()
+		return "private result", nil
+	})
+	serverPeer, clientPeer := newTestPeerPair(t,
+		PeerConfig{Handler: handler}, PeerConfig{Handler: handler}, connectionCtx,
+	)
+
+	state, err := trace.ParseTraceState("vendor=value")
+	require.NoError(t, err)
+	parents := make([]trace.SpanContext, 0, 2)
+	results := make(chan error, 2)
+	methods := []string{MethodToolExecute, "model.helper.execute"}
+	for i, method := range methods {
+		ctx, span := tracer.Start(t.Context(), "invocation")
+		defer span.End()
+		parent := span.SpanContext().WithTraceState(state)
+		parents = append(parents, parent)
+		ctx = trace.ContextWithSpanContext(ctx, parent)
+		peer := clientPeer
+		if i == 1 {
+			peer = serverPeer
+		}
+		go func() {
+			results <- peer.Call(ctx, method, map[string]string{"input": "private input"}, nil)
+		}()
+	}
+	for range 2 {
+		require.NoError(t, <-results)
+	}
+	require.Eventually(t, func() bool { return len(recorder.Ended()) == 6 }, time.Second, time.Millisecond)
+	assert.NotEqual(t, parents[0].TraceID(), parents[1].TraceID())
+	for i, parent := range parents {
+		var clientSpan, serverSpan, toolSpan sdktrace.ReadOnlySpan
+		for _, span := range recorder.Ended() {
+			if span.SpanContext().TraceID() != parent.TraceID() {
+				continue
+			}
+			switch span.SpanKind() {
+			case trace.SpanKindClient:
+				clientSpan = span
+			case trace.SpanKindServer:
+				serverSpan = span
+			default:
+				toolSpan = span
+			}
+		}
+		require.NotNil(t, clientSpan)
+		require.NotNil(t, serverSpan)
+		require.NotNil(t, toolSpan)
+		assert.Equal(t, parent.SpanID(), clientSpan.Parent().SpanID())
+		assert.Equal(t, clientSpan.SpanContext().SpanID(), serverSpan.Parent().SpanID())
+		assert.Equal(t, serverSpan.SpanContext().SpanID(), toolSpan.Parent().SpanID())
+		assert.True(t, serverSpan.Parent().IsRemote())
+		assert.Equal(t, state, serverSpan.Parent().TraceState())
+		assert.NotEqual(t, connectionSpan.SpanContext().TraceID(), serverSpan.SpanContext().TraceID())
+		for _, span := range []sdktrace.ReadOnlySpan{clientSpan, serverSpan} {
+			assert.Equal(t, "runner.rpc "+methods[i], span.Name())
+			assert.Equal(t, codes.Unset, span.Status().Code)
+			assert.ElementsMatch(t, []attribute.KeyValue{
+				attribute.String("rpc.system", "jsonrpc"),
+				attribute.String("rpc.service", "kodelet.runner"),
+				attribute.String("rpc.method", methods[i]),
+			}, span.Attributes(), "RPC spans must not capture params or results")
+			assert.Empty(t, span.Events())
+		}
+	}
+}
+
+func TestPeerTracingWithoutValidCarrier(t *testing.T) {
+	recorder := recordPeerSpans(t)
+	connectionCtx, connectionSpan := otel.Tracer("test").Start(t.Context(), "websocket")
+	defer connectionSpan.End()
+	_, clientPeer := newTestPeerPair(t,
+		PeerConfig{Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
+			return nil, nil
+		})},
+		PeerConfig{}, connectionCtx,
+	)
+
+	carriers := []map[string]string{
+		nil,
+		{"traceparent": "invalid", "tracestate": "vendor=value"},
+		{"tracestate": "vendor=value"},
+	}
+	for i, carrier := range carriers {
+		id := "legacy-" + strings.Repeat("x", i+1)
+		payload, err := json.Marshal(Message{
+			JSONRPC:      JSONRPCVersion,
+			ID:           &id,
+			Method:       MethodToolExecute,
+			TraceContext: carrier,
+		})
+		require.NoError(t, err)
+		// Send an old-style/custom request without the instrumented Call wrapper.
+		require.NoError(t, clientPeer.enqueueControl(t.Context(), websocket.TextMessage, payload, nil))
+	}
+	require.Eventually(t, func() bool { return len(recorder.Ended()) == len(carriers) }, time.Second, time.Millisecond)
+	traceIDs := make(map[trace.TraceID]bool)
+	for _, span := range recorder.Ended() {
+		assert.Equal(t, trace.SpanKindServer, span.SpanKind())
+		assert.False(t, span.Parent().IsValid())
+		assert.Empty(t, span.SpanContext().TraceState().String())
+		assert.NotEqual(t, connectionSpan.SpanContext().TraceID(), span.SpanContext().TraceID())
+		assert.False(t, traceIDs[span.SpanContext().TraceID()], "independent calls must start independent traces")
+		traceIDs[span.SpanContext().TraceID()] = true
+	}
+}
+
+func TestPeerTracingLocalFailure(t *testing.T) {
+	recorder := recordPeerSpans(t)
+	_, clientPeer := newTestPeerPair(t, PeerConfig{}, PeerConfig{})
+	err := clientPeer.Call(t.Context(), MethodToolExecute, make(chan struct{}), nil)
+	require.ErrorContains(t, err, "failed to encode runner rpc params")
+	spans := recorder.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, trace.SpanKindClient, spans[0].SpanKind())
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	assert.NotContains(t, spans[0].Status().Description, "failed to encode runner rpc params")
+	assert.Empty(t, spans[0].Events())
+}
+
+func recordPeerSpans(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
+	previousContent := telemetry.ContentEnabled()
+	_, err := telemetry.InitTracer(t.Context(), telemetry.Config{})
+	require.NoError(t, err)
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(provider)
+	// RPC propagation must work even without global propagator initialization.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
+	t.Cleanup(func() {
+		require.NoError(t, provider.Shutdown(context.Background()))
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		_, err := telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+		require.NoError(t, err)
+	})
+	return recorder
+}
+
+func newTestPeerPair(t *testing.T, serverConfig, clientConfig PeerConfig, parent ...context.Context) (*Peer, *Peer) {
+	t.Helper()
+	connectionCtx := t.Context()
+	if len(parent) != 0 {
+		connectionCtx = parent[0]
+	}
 	serverPeerCh := make(chan *Peer, 1)
 	serverErrCh := make(chan error, 1)
 	upgrader := websocket.Upgrader{
@@ -525,7 +729,7 @@ func newTestPeerPair(t *testing.T, serverConfig, clientConfig PeerConfig) (*Peer
 			serverErrCh <- err
 			return
 		}
-		if err := peer.Start(t.Context()); err != nil {
+		if err := peer.Start(connectionCtx); err != nil {
 			serverErrCh <- err
 			return
 		}
@@ -545,7 +749,7 @@ func newTestPeerPair(t *testing.T, serverConfig, clientConfig PeerConfig) (*Peer
 
 	clientPeer, err := NewPeer(conn, clientConfig)
 	require.NoError(t, err)
-	require.NoError(t, clientPeer.Start(t.Context()))
+	require.NoError(t, clientPeer.Start(connectionCtx))
 
 	var serverPeer *Peer
 	select {

@@ -5,6 +5,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"slices"
@@ -28,8 +29,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -308,19 +307,6 @@ func (t *Thread) SendMessage(
 	if opt.NoSaveConversation {
 		defer t.BlockConversationFork()()
 	}
-	if _, err = base.OpenEnvironment(ctx, t); err != nil {
-		return "", errors.Wrap(err, "failed to open agent environment")
-	}
-	defer func() {
-		runErr := err
-		if runErr == nil {
-			runErr = ctx.Err()
-		}
-		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
-			err = errors.Wrap(closeErr, "failed to close agent environment")
-		}
-	}()
-
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
 
@@ -337,7 +323,19 @@ func (t *Thread) SendMessage(
 			attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
 			attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
 		}
-		t.FinalizeMessageSpan(span, err, extraFinalizeAttrs...)
+		t.FinalizeMessageSpan(span, stderrors.Join(err, ctx.Err()), extraFinalizeAttrs...)
+	}()
+	if _, err = base.OpenEnvironment(ctx, t); err != nil {
+		return "", errors.Wrap(err, "failed to open agent environment")
+	}
+	defer func() {
+		runErr := err
+		if runErr == nil {
+			runErr = ctx.Err()
+		}
+		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+			err = errors.Wrap(closeErr, "failed to close agent environment")
+		}
 	}()
 
 	var originalMessages []anthropic.MessageParam
@@ -552,7 +550,6 @@ func (t *Thread) executeToolsParallel(
 			telemetry.AddEvent(gctx, "tool_execution_complete",
 				attribute.String("tool_name", toolName),
 				attribute.Int("tool_index", i),
-				attribute.String("result", output.AssistantFacing()),
 			)
 
 			result := toolExecResult{
@@ -1041,11 +1038,10 @@ func requiresInterleavedThinkingBeta(params anthropic.MessageNewParams) bool {
 
 // NewMessage sends a message to Anthropic with OTEL tracing.
 // If handler implements StreamingMessageHandler, content will be streamed as it arrives.
-func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (*anthropic.Message, error) {
-	tracer := telemetry.Tracer("kodelet.llm.anthropic")
-
+func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (response *anthropic.Message, err error) {
 	// Create attributes for the span
 	spanAttrs := []attribute.KeyValue{
+		attribute.Bool("gen_ai.request.stream", true),
 		attribute.String("model", params.Model),
 		attribute.Int64("max_tokens", params.MaxTokens),
 	}
@@ -1059,8 +1055,11 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			spanAttrs = append(spanAttrs, attribute.Int64("budget_tokens", *budgetTokens))
 		}
 	}
-	for i, sys := range params.System {
-		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
+	if telemetry.ContentEnabled() {
+		for i, sys := range params.System {
+			spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
+		}
+		spanAttrs = append(spanAttrs, t.getLastMessagesAttributes(params.Messages, 10)...)
 	}
 	if params.OutputConfig.Effort != "" {
 		spanAttrs = append(spanAttrs, attribute.String("reasoning_effort", string(params.OutputConfig.Effort)))
@@ -1083,12 +1082,10 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	log := logger.G(ctx).WithFields(logFields)
 	log.Debug("new message")
 
-	// Add the last 10 messages (or fewer if there aren't 10) to the span attributes
-	spanAttrs = append(spanAttrs, t.getLastMessagesAttributes(params.Messages, 10)...)
-
 	// Create a new span for the API call
-	ctx, span := tracer.Start(ctx, "llm.anthropic.new_message", trace.WithAttributes(spanAttrs...))
-	defer span.End()
+	ctx, span := t.StartModelSpan(ctx, "anthropic", params.Model, spanAttrs...)
+	var accumulationErr error
+	defer func() { base.FinishModelSpan(span, stderrors.Join(err, ctx.Err(), accumulationErr)) }()
 
 	retryAttempts := t.Config.Retry.Attempts
 	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
@@ -1104,13 +1101,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	if stream.Err() != nil {
 		log.WithError(stream.Err()).Error("failed to start streaming messages")
-		telemetry.RecordError(ctx, stream.Err())
-		span.SetStatus(codes.Error, stream.Err().Error())
 		return nil, stream.Err()
 	}
 
 	message := anthropic.Message{}
 	inThinkingBlock := false
+	completed := false
 	for stream.Next() {
 		// Check for context cancellation - Anthropic SDK may not propagate it properly
 		if ctx.Err() != nil {
@@ -1119,6 +1115,9 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 		}
 
 		event := stream.Current()
+		if event.Type == "message_stop" {
+			completed = true
+		}
 		err := message.Accumulate(event)
 		if err != nil {
 			// issue: https://github.com/anthropics/anthropic-sdk-go/issues/187
@@ -1132,15 +1131,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			//
 			// the alternative approach is to return the error, however it will cause all the progress to be lost
 			logger.G(ctx).WithError(err).Error("error accumulating message")
-			telemetry.RecordError(ctx, err)
-			span.SetStatus(codes.Error, err.Error())
+			accumulationErr = err
 			continue
 		}
 
 		if stream.Err() != nil {
 			logger.G(ctx).WithError(stream.Err()).Error("error streaming message from anthropic")
-			telemetry.RecordError(ctx, stream.Err())
-			span.SetStatus(codes.Error, stream.Err().Error())
 			return nil, stream.Err()
 		}
 
@@ -1170,15 +1166,29 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 		}
 	}
 
-	// Add response data to the span
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	if !completed {
+		return nil, errors.New("Anthropic stream ended before message_stop event")
+	}
+
+	// Anthropic reports uncached, cache-read and cache-write input separately.
 	span.SetAttributes(
+		attribute.String("gen_ai.response.id", message.ID),
+		attribute.String("gen_ai.response.model", message.Model),
+		attribute.Int64("gen_ai.usage.input_tokens", message.Usage.InputTokens+message.Usage.CacheReadInputTokens+message.Usage.CacheCreationInputTokens),
+		attribute.Int64("gen_ai.usage.output_tokens", message.Usage.OutputTokens),
+		attribute.Int64("gen_ai.usage.cache_read.input_tokens", message.Usage.CacheReadInputTokens),
+		attribute.Int64("gen_ai.usage.cache_write.input_tokens", message.Usage.CacheCreationInputTokens),
 		attribute.Int64("input_tokens", message.Usage.InputTokens),
 		attribute.Int64("output_tokens", message.Usage.OutputTokens),
 		attribute.Int64("cache_creation_tokens", message.Usage.CacheCreationInputTokens),
 		attribute.Int64("cache_read_tokens", message.Usage.CacheReadInputTokens),
 	)
-	span.SetStatus(codes.Ok, "")
-
 	return &message, nil
 }
 

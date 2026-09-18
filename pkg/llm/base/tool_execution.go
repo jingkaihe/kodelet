@@ -6,10 +6,14 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ToolExecution holds the normalized result of one tool execution cycle.
@@ -59,11 +63,13 @@ func executeEnvironmentTool(
 	toolInput string,
 	toolCallID string,
 	handler llmtypes.MessageHandler,
-) ToolExecution {
+) (out ToolExecution) {
 	environment := EnvironmentForThread(thread)
 	if environment == nil || !environment.IsOpen() {
 		return executeTool(ctx, thread, threadState(thread), rendererRegistry, toolName, toolInput, toolCallID, handler)
 	}
+	ctx, span := startToolSpan(ctx, thread, toolName, toolCallID, toolInput)
+	defer func() { finishToolSpan(ctx, span, out) }()
 
 	if rendererRegistry == nil {
 		panic("rendererRegistry must not be nil")
@@ -344,7 +350,10 @@ func executeTool(
 	toolInput string,
 	toolCallID string,
 	handler llmtypes.MessageHandler,
-) ToolExecution {
+) (out ToolExecution) {
+	ctx, span := startToolSpan(ctx, thread, toolName, toolCallID, toolInput)
+	defer func() { finishToolSpan(ctx, span, out) }()
+
 	effectiveInput := toolInput
 	blocked := false
 	reason := ""
@@ -437,6 +446,42 @@ func executeTool(
 		Result:           result,
 		StructuredResult: structuredResult,
 		RenderedOutput:   renderedOutput,
+	}
+}
+
+// The logical tool span includes extensions and remote execution. The runner's
+// implementation span is a descendant through the RPC client/server spans.
+func startToolSpan(ctx context.Context, thread llmtypes.Thread, name, callID, input string) (context.Context, trace.Span) {
+	attrs := []attribute.KeyValue{
+		attribute.String("gen_ai.operation.name", "execute_tool"),
+		attribute.String("gen_ai.tool.name", name),
+		attribute.String("gen_ai.tool.call.id", callID),
+	}
+	if thread != nil {
+		attrs = append(attrs, attribute.String("gen_ai.conversation.id", thread.GetConversationID()))
+	}
+	if telemetry.ContentEnabled() {
+		attrs = append(attrs, attribute.String("gen_ai.tool.call.arguments", input))
+	}
+	return telemetry.Tracer("kodelet.tools").Start(ctx, "execute_tool "+name, trace.WithAttributes(attrs...))
+}
+
+func finishToolSpan(ctx context.Context, span trace.Span, execution ToolExecution) {
+	defer span.End()
+	err := execution.Err
+	if execution.Result != nil {
+		if err == nil && execution.Result.IsError() {
+			err = errors.New(execution.Result.GetError())
+		}
+		if telemetry.ContentEnabled() {
+			span.SetAttributes(attribute.String("gen_ai.tool.call.result", execution.Result.AssistantFacing()))
+		}
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		telemetry.RecordSpanError(span, err)
 	}
 }
 

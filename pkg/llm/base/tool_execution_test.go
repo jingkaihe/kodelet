@@ -9,10 +9,16 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -20,6 +26,70 @@ import (
 )
 
 type multimodalTool struct{}
+
+func TestEnvironmentToolTraceIncludesRemoteLifecycle(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previousProvider := otel.GetTracerProvider()
+	previousContent := telemetry.ContentEnabled()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		_ = provider.Shutdown(context.Background())
+		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+	})
+	for _, capture := range []bool{false, true} {
+		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
+		require.NoError(t, err)
+		for _, failed := range []bool{false, true} {
+			recorder.Reset()
+			ctx, invocation := provider.Tracer("test").Start(t.Context(), "invocation")
+			var toolContext trace.SpanContext
+			environment := &recordingAgentEnvironment{
+				open: true,
+				executeTool: func(ctx context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+					toolContext = trace.SpanContextFromContext(ctx)
+					_, remote := provider.Tracer("test").Start(ctx, "rpc tool.execute")
+					defer remote.End()
+					if failed {
+						return agentenv.ToolExecution{}, assert.AnError
+					}
+					return agentenv.ToolExecution{Input: request.Input, Result: tooltypes.BaseToolResult{Result: "private output"}}, nil
+				},
+			}
+			thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
+			out := ExecuteEnvironmentTool(ctx, thread, renderers.NewRendererRegistry(), "bash", `{"command":"private input"}`, "call-1")
+			invocation.End()
+			if failed {
+				assert.ErrorIs(t, out.Err, assert.AnError)
+			} else {
+				require.NoError(t, out.Err)
+			}
+			spans := recorder.Ended()
+			require.Len(t, spans, 3)
+			tool := spans[1]
+			assert.Equal(t, "execute_tool bash", tool.Name())
+			assert.Equal(t, invocation.SpanContext().SpanID(), tool.Parent().SpanID())
+			assert.Equal(t, invocation.SpanContext().TraceID(), tool.SpanContext().TraceID())
+			assert.Equal(t, toolContext, tool.SpanContext())
+			assert.Equal(t, toolContext.SpanID(), spans[0].Parent().SpanID())
+			assert.Contains(t, tool.Attributes(), attribute.String("gen_ai.tool.call.id", "call-1"))
+			assert.Equal(t, failed, tool.Status().Code == codes.Error)
+			arguments := attribute.String("gen_ai.tool.call.arguments", `{"command":"private input"}`)
+			if capture {
+				assert.Contains(t, tool.Attributes(), arguments)
+				if !failed {
+					assert.Contains(t, tool.Attributes(), attribute.String("gen_ai.tool.call.result", out.Result.AssistantFacing()))
+				}
+			} else {
+				assert.NotContains(t, tool.Attributes(), arguments)
+				for _, attr := range tool.Attributes() {
+					assert.NotEqual(t, attribute.Key("gen_ai.tool.call.result"), attr.Key)
+				}
+			}
+		}
+	}
+}
 
 func (t multimodalTool) GenerateSchema() *jsonschema.Schema { return &jsonschema.Schema{} }
 func (t multimodalTool) Name() string                       { return "view_image" }

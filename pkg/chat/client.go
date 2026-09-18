@@ -23,6 +23,11 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -139,7 +144,7 @@ func NewClient(server, authToken, runnerID string) (*Client, error) {
 }
 
 // Run posts one chat request and forwards NDJSON events to the event sink.
-func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSink) (string, error) {
+func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSink) (conversationID string, err error) {
 	if r == nil || r.client == nil {
 		return "", errors.New("the chat connection is not initialized")
 	}
@@ -156,6 +161,36 @@ func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSin
 	if request.TurnID == "" {
 		request.TurnID = convtypes.GenerateID()
 	}
+	ctx, span := otel.Tracer("kodelet.chat").Start(ctx, "POST /api/chat",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("http.request.method", http.MethodPost),
+			attribute.String("gen_ai.conversation.id", request.ConversationID),
+			attribute.String("kodelet.turn.id", request.TurnID),
+		),
+	)
+	cancelled := false
+	defer func() {
+		defer span.End()
+		var pending *TurnPendingError
+		if (err == nil && !cancelled) || errors.As(err, &pending) {
+			return
+		}
+		// Error strings can contain response bodies or secrets. Export only a
+		// bounded classification, not the underlying error or exception text.
+		errorType := "chat_request_error"
+		var httpErr *ControlPlaneHTTPError
+		switch {
+		case cancelled || errors.Is(err, context.Canceled):
+			errorType = "cancelled"
+		case errors.Is(err, context.DeadlineExceeded):
+			errorType = "timeout"
+		case errors.As(err, &httpErr):
+			errorType = strconv.Itoa(httpErr.StatusCode)
+		}
+		span.SetAttributes(attribute.String("error.type", errorType))
+		span.SetStatus(codes.Error, errorType)
+	}()
 	capabilities := controlPlaneClientCapabilities(ctx)
 	request.ClientCapabilities = &capabilities
 	payload, err := json.Marshal(request)
@@ -171,12 +206,14 @@ func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSin
 	if r.authToken != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+r.authToken)
 	}
+	propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(httpRequest.Header))
 
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
 		return request.ConversationID, &UncertainSubmissionError{ConversationID: request.ConversationID, TurnID: request.TurnID, Err: err}
 	}
 	defer response.Body.Close()
+	span.SetAttributes(attribute.Int("http.response.status_code", response.StatusCode))
 	if response.StatusCode == http.StatusAccepted {
 		var receipt TurnReceipt
 		if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(&receipt); err != nil {
@@ -184,6 +221,9 @@ func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSin
 		}
 		if err := validateTurnReceipt(receipt, request.ConversationID, request.TurnID); err != nil {
 			return request.ConversationID, err
+		}
+		if receipt.RunID != "" {
+			span.SetAttributes(attribute.String("kodelet.run.id", receipt.RunID))
 		}
 		return request.ConversationID, &TurnPendingError{Receipt: receipt}
 	}
@@ -199,6 +239,7 @@ func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSin
 	id, err := r.consumeChatStream(ctx, response.Body, strings.TrimSpace(request.ConversationID), shortcutEventSink(func(event ChatEvent) error {
 		// Older servers end failed turns with an error event rather than done.
 		terminal = terminal || event.Kind == "done" || event.Kind == "error"
+		cancelled = cancelled || (event.Kind == "done" && event.Cancelled)
 		return sink.Send(event)
 	}), true, false, "")
 	if err != nil && !terminal {

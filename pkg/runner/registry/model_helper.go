@@ -8,6 +8,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type modelHelperKey struct {
@@ -91,6 +92,9 @@ func (r *Registry) executeModelHelper(ctx context.Context, runnerID, connectionI
 	// Join RPC cancellation with the parent tool's lifetime. No registry lock,
 	// conversation slot, or runner snapshot admission is held during the call.
 	helperCtx, cancel := context.WithCancel(registration.ctx)
+	// Retain the tool's capabilities and lifetime, but parent helper work under
+	// the incoming reverse RPC rather than the original tool registration span.
+	helperCtx = trace.ContextWithSpanContext(helperCtx, trace.SpanContextFromContext(ctx))
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
 	defer cancel()

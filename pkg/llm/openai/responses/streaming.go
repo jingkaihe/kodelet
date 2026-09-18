@@ -35,6 +35,25 @@ func (t *Thread) processStream(
 	model string,
 	opt llmtypes.MessageOpt,
 ) (processStreamResult, error) {
+	result, err := t.readStream(ctx, stream, handler, model, opt)
+	if result.complete != nil {
+		var completionErr error
+		result, completionErr = result.complete(ctx)
+		if completionErr != nil {
+			return result, completionErr
+		}
+	}
+	return result, err
+}
+
+// readStream separates model generation from tool execution so their spans are siblings.
+func (t *Thread) readStream(
+	ctx context.Context,
+	stream *ssestream.Stream[responses.ResponseStreamEventUnion],
+	handler llmtypes.MessageHandler,
+	model string,
+	opt llmtypes.MessageOpt,
+) (processStreamResult, error) {
 	telemetry.AddEvent(ctx, "stream_processing_started")
 	log := logger.G(ctx)
 	log.Debug("starting stream processing")
@@ -83,6 +102,7 @@ func (t *Thread) processStream(
 			responseCompleted: responseCompleted,
 			responseID:        responseID,
 			serverKnownItems:  cloneResponsesInputItems(serverKnownItems),
+			response:          finalResponse,
 		}
 	}
 
@@ -391,88 +411,95 @@ streamLoop:
 		return result(), streamProcessingErr
 	}
 
-	sort.SliceStable(functionCalls, func(i, j int) bool {
-		return functionCalls[i].outputIndex < functionCalls[j].outputIndex
-	})
-	for _, functionCall := range functionCalls {
-		handler.HandleToolUse(functionCall.callID, functionCall.name, functionCall.arguments)
+	complete := func(ctx context.Context) (processStreamResult, error) {
+		sort.SliceStable(functionCalls, func(i, j int) bool {
+			return functionCalls[i].outputIndex < functionCalls[j].outputIndex
+		})
+		for _, functionCall := range functionCalls {
+			handler.HandleToolUse(functionCall.callID, functionCall.name, functionCall.arguments)
 
-		// The function call itself is already present in the server's response
-		// state; only its locally produced output is incremental input.
-		functionCallItem := responses.ResponseInputItemUnionParam{
-			OfFunctionCall: &responses.ResponseFunctionToolCallParam{
+			// The function call itself is already present in the server's response
+			// state; only its locally produced output is incremental input.
+			functionCallItem := responses.ResponseInputItemUnionParam{
+				OfFunctionCall: &responses.ResponseFunctionToolCallParam{
+					CallID:    functionCall.callID,
+					Name:      functionCall.name,
+					Arguments: functionCall.arguments,
+				},
+			}
+			serverKnownItems = append(serverKnownItems, functionCallItem)
+			t.appendHistoryItems([]responses.ResponseInputItemUnionParam{functionCallItem}, []StoredInputItem{{
+				Type:      "function_call",
 				CallID:    functionCall.callID,
 				Name:      functionCall.name,
 				Arguments: functionCall.arguments,
-			},
+			}})
 		}
-		serverKnownItems = append(serverKnownItems, functionCallItem)
-		t.appendHistoryItems([]responses.ResponseInputItemUnionParam{functionCallItem}, []StoredInputItem{{
-			Type:      "function_call",
-			CallID:    functionCall.callID,
-			Name:      functionCall.name,
-			Arguments: functionCall.arguments,
-		}})
-	}
 
-	toolExecutions, err := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
-	if err != nil {
-		return result(), err
-	}
-	for i, toolExecution := range toolExecutions {
-		functionCall := functionCalls[i]
-		toolResult := toolExecution.Result
-		t.SetStructuredToolResult(functionCall.callID, toolExecution.StructuredResult)
-
-		outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(toolResult)
-		inputItem := responses.ResponseInputItemUnionParam{
-			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-				CallID: functionCall.callID,
-				Output: outputUnion,
-			},
+		toolExecutions, err := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
+		if err != nil {
+			return result(), err
 		}
-		t.appendHistoryItems([]responses.ResponseInputItemUnionParam{inputItem}, []StoredInputItem{{
-			Type:      "function_call_output",
-			CallID:    functionCall.callID,
-			Output:    storedOutput,
-			RawOutput: rawOutput,
-		}})
-		localInputTokens += approximateResponseInputItemTokens(inputItem)
-	}
-	if err := ctx.Err(); err != nil {
-		return result(), err
+		for i, toolExecution := range toolExecutions {
+			functionCall := functionCalls[i]
+			toolResult := toolExecution.Result
+			t.SetStructuredToolResult(functionCall.callID, toolExecution.StructuredResult)
+
+			outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(toolResult)
+			inputItem := responses.ResponseInputItemUnionParam{
+				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+					CallID: functionCall.callID,
+					Output: outputUnion,
+				},
+			}
+			t.appendHistoryItems([]responses.ResponseInputItemUnionParam{inputItem}, []StoredInputItem{{
+				Type:      "function_call_output",
+				CallID:    functionCall.callID,
+				Output:    storedOutput,
+				RawOutput: rawOutput,
+			}})
+			localInputTokens += approximateResponseInputItemTokens(inputItem)
+		}
+		if err := ctx.Err(); err != nil {
+			return result(), err
+		}
+
+		if streamProcessingErr != nil {
+			return result(), nil
+		}
+
+		// Update usage from final response
+		if finalResponse != nil {
+			t.updateUsageWithLocalInput(
+				finalResponse.Usage,
+				model,
+				llmtypes.OpenAIServiceTier(finalResponse.ServiceTier),
+				localInputTokens,
+			)
+			if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+				usageHandler.HandleUsage(t.GetUsage())
+			}
+
+			if !opt.DisableUsageLog {
+				usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))
+			}
+		}
+
+		return result(), nil
 	}
 
+	streamResult := result()
+	streamResult.complete = complete
 	if streamProcessingErr != nil {
-		return result(), streamProcessingErr
+		return streamResult, streamProcessingErr
 	}
-
-	// Update usage from final response
-	if finalResponse != nil {
-		t.updateUsageWithLocalInput(
-			finalResponse.Usage,
-			model,
-			llmtypes.OpenAIServiceTier(finalResponse.ServiceTier),
-			localInputTokens,
-		)
-		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
-			usageHandler.HandleUsage(t.GetUsage())
-		}
-
-		if !opt.DisableUsageLog {
-			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))
-		}
-	}
-
 	if responseIncompleteReason != "" {
-		return result(), errors.Errorf("response incomplete: %s", responseIncompleteReason)
+		return streamResult, errors.Errorf("response incomplete: %s", responseIncompleteReason)
 	}
-
 	if !responseCompleted {
-		return result(), errors.New("response stream ended before response.completed event")
+		return streamResult, errors.New("response stream ended before response.completed event")
 	}
-
-	return result(), nil
+	return streamResult, nil
 }
 
 type processStreamResult struct {
@@ -480,6 +507,9 @@ type processStreamResult struct {
 	responseCompleted bool
 	responseID        string
 	serverKnownItems  []responses.ResponseInputItemUnionParam
+	response          *responses.Response
+	// complete returns only tool/context errors; readStream owns stream errors.
+	complete func(context.Context) (processStreamResult, error)
 }
 
 type responseStreamEventError struct {

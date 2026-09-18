@@ -522,6 +522,22 @@ func (t *Thread) SendMessage(
 		defer t.BlockConversationFork()()
 	}
 
+	logger.G(ctx).Debug("SendMessage called")
+	ctx = withCodexTurnID(ctx)
+	tracer := telemetry.Tracer("kodelet.llm")
+
+	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
+		attribute.String("reasoning_effort", string(t.reasoningEffort)),
+		attribute.String("api", "responses"),
+		attribute.String("platform", resolvePlatformName(t.Config)),
+	)
+	defer func() {
+		spanErr := err
+		if spanErr == nil {
+			spanErr = ctx.Err()
+		}
+		t.FinalizeMessageSpan(span, spanErr)
+	}()
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
@@ -533,19 +549,6 @@ func (t *Thread) SendMessage(
 		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
 			err = errors.Wrap(closeErr, "failed to close agent environment")
 		}
-	}()
-
-	logger.G(ctx).Debug("SendMessage called")
-	ctx = withCodexTurnID(ctx)
-	tracer := telemetry.Tracer("kodelet.llm")
-
-	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
-		attribute.String("reasoning_effort", string(t.reasoningEffort)),
-		attribute.String("api", "responses"),
-		attribute.String("platform", resolvePlatformName(t.Config)),
-	)
-	defer func() {
-		t.FinalizeMessageSpan(span, err)
 	}()
 
 	if opt.NoSaveConversation {
@@ -827,7 +830,7 @@ func (t *Thread) processMessageExchange(
 	processStream := t.processStreamFunc
 	processStreamHandlesNilStream := processStream != nil
 	if processStream == nil {
-		processStream = t.processStream
+		processStream = t.readStream
 	}
 
 	var newResponsesStream responsesStreamFactory
@@ -921,7 +924,24 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 	opt llmtypes.MessageOpt,
 	saveConversation func(),
 	transportName string,
-) (string, bool, bool, error) {
+) (output string, toolsUsed bool, completed bool, resultErr error) {
+	invocationCtx := ctx
+	ctx, span := t.StartModelSpan(ctx, "openai", model,
+		attribute.Bool("gen_ai.request.stream", true))
+	finished := false
+	finish := func(err error) {
+		if !finished {
+			finished = true
+			base.FinishModelSpan(span, err)
+		}
+	}
+	defer func() {
+		spanErr := resultErr
+		if spanErr == nil {
+			spanErr = ctx.Err()
+		}
+		finish(spanErr)
+	}()
 	log := logger.G(ctx)
 	retryConfig := responsesStreamRetryConfig(t.Config)
 	var finalOutput string
@@ -951,6 +971,27 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 			if closeErr := closeResponsesStream(attempt.stream); err == nil && closeErr != nil {
 				err = errors.Wrap(closeErr, "failed to close Responses API stream")
 			}
+			if response := streamResult.response; response != nil {
+				span.SetAttributes(responseSpanAttributes(*response)...)
+			}
+			if err == nil && !streamResult.responseCompleted {
+				err = errors.New("response stream ended before response.completed event")
+			}
+			if err == nil {
+				err = ctx.Err()
+			}
+			if err == nil {
+				// End the model span before any tool work, keeping tool failures
+				// separate from a successfully completed model generation.
+				finish(nil)
+			}
+			if complete := streamResult.complete; complete != nil {
+				completedResult, completionErr := complete(invocationCtx)
+				streamResult = completedResult
+				if completionErr != nil {
+					return retry.Unrecoverable(completionErr)
+				}
+			}
 			if err == nil {
 				if attempt.webSocketGeneration != 0 {
 					t.webSocketContinuation.commit(
@@ -978,6 +1019,8 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 		retry.DelayType(responsesStreamRetryDelayType(retryConfig)),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
+			telemetry.AddEvent(ctx, "kodelet.model.retry",
+				attribute.Int("retry.attempt", int(n)+1), attribute.String("kodelet.model.transport", transportName))
 			log.WithError(err).
 				WithField("attempt", n+1).
 				WithField("max_attempts", retryConfig.Attempts).
@@ -994,6 +1037,17 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 	saveConversation()
 	return finalOutput, finalStreamResult.toolsUsed, finalStreamResult.responseCompleted, nil
+}
+
+func responseSpanAttributes(response responses.Response) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.response.id", response.ID),
+		attribute.String("gen_ai.response.model", response.Model),
+		attribute.Int64("gen_ai.usage.input_tokens", response.Usage.InputTokens),
+		attribute.Int64("gen_ai.usage.output_tokens", response.Usage.OutputTokens),
+		attribute.Int64("gen_ai.usage.cache_read.input_tokens", response.Usage.InputTokensDetails.CachedTokens),
+		attribute.Int64("gen_ai.usage.reasoning.output_tokens", response.Usage.OutputTokensDetails.ReasoningTokens),
+	}
 }
 
 func (t *Thread) lastAssistantMessageText() string {
@@ -1469,6 +1523,8 @@ type remoteCompactionV2Result struct {
 type remoteCompactionV2UsageRecord struct {
 	usage       responses.ResponseUsage
 	serviceTier llmtypes.OpenAIServiceTier
+	responseID  string
+	model       string
 }
 
 type codexCompactionMetadata struct {
@@ -1959,7 +2015,36 @@ func (t *Thread) runRemoteCompactionV2(
 	ctx context.Context,
 	params responses.ResponseNewParams,
 	requestMetadata ...codexResponsesRequestMetadata,
-) (remoteCompactionV2Result, error) {
+) (result remoteCompactionV2Result, err error) {
+	ctx, span := t.StartModelSpan(ctx, "openai", params.Model,
+		attribute.Bool("gen_ai.request.stream", true),
+		attribute.String("kodelet.model_call.purpose", "compaction"))
+	defer func() {
+		var inputTokens, outputTokens, cacheTokens, reasoningTokens int64
+		for _, record := range result.usageRecords {
+			inputTokens += record.usage.InputTokens
+			outputTokens += record.usage.OutputTokens
+			cacheTokens += record.usage.InputTokensDetails.CachedTokens
+			reasoningTokens += record.usage.OutputTokensDetails.ReasoningTokens
+			span.SetAttributes(
+				attribute.String("gen_ai.response.id", record.responseID),
+				attribute.String("gen_ai.response.model", record.model),
+			)
+		}
+		if len(result.usageRecords) > 0 {
+			span.SetAttributes(
+				attribute.Int64("gen_ai.usage.input_tokens", inputTokens),
+				attribute.Int64("gen_ai.usage.output_tokens", outputTokens),
+				attribute.Int64("gen_ai.usage.cache_read.input_tokens", cacheTokens),
+				attribute.Int64("gen_ai.usage.reasoning.output_tokens", reasoningTokens),
+			)
+		}
+		spanErr := err
+		if spanErr == nil {
+			spanErr = ctx.Err()
+		}
+		base.FinishModelSpan(span, spanErr)
+	}()
 	var priorUsage []remoteCompactionV2UsageRecord
 	var metadata codexResponsesRequestMetadata
 	if len(requestMetadata) > 0 {
@@ -2002,6 +2087,9 @@ func (t *Thread) runRemoteCompactionV2(
 			return result, err
 		}
 		priorUsage = append(priorUsage, result.usageRecords...)
+		telemetry.AddEvent(ctx, "kodelet.model.transport_fallback",
+			attribute.String("kodelet.transport.from", "websocket"),
+			attribute.String("kodelet.transport.to", "https"))
 		t.useWebSocket = false
 		t.resetResponsesWebSocket()
 		logger.G(ctx).WithError(err).Warn("remote compaction v2 websocket failed, falling back to HTTPS")
@@ -2016,7 +2104,7 @@ func (t *Thread) runRemoteCompactionV2(
 		newStreaming = t.client.Responses.NewStreaming
 	}
 
-	result, err := t.runRemoteCompactionV2WithRetries(ctx, params, "https", func(
+	result, err = t.runRemoteCompactionV2WithRetries(ctx, params, "https", func(
 		ctx context.Context,
 		params responses.ResponseNewParams,
 	) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
@@ -2087,6 +2175,8 @@ func (t *Thread) runRemoteCompactionV2WithRetries(
 		retry.DelayType(responsesStreamRetryDelayType(retryConfig)),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
+			telemetry.AddEvent(ctx, "kodelet.model.retry",
+				attribute.Int("retry.attempt", int(n)+1), attribute.String("kodelet.model.transport", transportName))
 			logger.G(ctx).WithError(err).
 				WithField("attempt", n+1).
 				WithField("max_attempts", retryConfig.Attempts).
@@ -2106,6 +2196,8 @@ func remoteCompactionV2ResultWithUsage(response responses.Response) remoteCompac
 		usageRecords: []remoteCompactionV2UsageRecord{{
 			usage:       response.Usage,
 			serviceTier: llmtypes.OpenAIServiceTier(response.ServiceTier),
+			responseID:  response.ID,
+			model:       response.Model,
 		}},
 	}
 }

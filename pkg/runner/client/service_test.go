@@ -23,6 +23,9 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sys/unix"
 )
 
@@ -36,6 +39,74 @@ func TestDecorateRunContextEnablesBackgroundTasks(t *testing.T) {
 	assert.True(t, capabilities.BackgroundTasks)
 	_, ok := extensions.BackgroundTaskHostFromContext(ctx)
 	assert.True(t, ok)
+}
+
+type tracedToolEnvironment struct {
+	agentenv.Environment
+	tracer  trace.Tracer
+	started chan context.Context
+}
+
+func (e *tracedToolEnvironment) ExecuteTool(ctx context.Context, _ agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	ctx, span := e.tracer.Start(ctx, "tool.execution")
+	defer span.End()
+	e.started <- ctx
+	<-ctx.Done()
+	return agentenv.ToolExecution{}, ctx.Err()
+}
+
+func TestServiceToolRetainsRPCTraceAndCancellation(t *testing.T) {
+	for _, cancellation := range []string{"request", "run"} {
+		t.Run(cancellation, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+			tracer := provider.Tracer("test")
+			runCtx, runSpan := tracer.Start(t.Context(), "run-lifetime")
+			defer runSpan.End()
+			runCtx, cancelRun := context.WithCancel(runCtx)
+			defer cancelRun()
+			requestCtx, rpcSpan := tracer.Start(t.Context(), "runner.rpc tool.execute", trace.WithSpanKind(trace.SpanKindServer))
+			defer rpcSpan.End()
+			requestCtx, cancelRequest := context.WithCancel(requestCtx)
+			defer cancelRequest()
+			environment := &tracedToolEnvironment{tracer: tracer, started: make(chan context.Context, 1)}
+			service := &Service{runs: map[string]*activeRun{
+				"run-1": {id: "run-1", conversationID: "conversation-1", ctx: runCtx, environment: environment},
+			}}
+			done := make(chan error, 1)
+			go func() {
+				_, err := service.executeTool(requestCtx, runnerpayload.ToolExecuteParams{
+					RunID: "run-1", ToolCallID: "tool-1", Name: "bash", Input: json.RawMessage(`{}`),
+				})
+				done <- err
+			}()
+			select {
+			case toolCtx := <-environment.started:
+				assert.NoError(t, toolCtx.Err())
+				assert.Equal(t, rpcSpan.SpanContext().TraceID(), trace.SpanContextFromContext(toolCtx).TraceID())
+				assert.NotEqual(t, runSpan.SpanContext().TraceID(), trace.SpanContextFromContext(toolCtx).TraceID())
+			case <-time.After(time.Second):
+				t.Fatal("tool did not start")
+			}
+			if cancellation == "request" {
+				cancelRequest()
+				assert.NoError(t, runCtx.Err(), "canceling a request must not cancel its run")
+			} else {
+				cancelRun()
+				assert.NoError(t, requestCtx.Err(), "canceling a run must not mutate the caller context")
+			}
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("tool was not canceled")
+			}
+			spans := recorder.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, rpcSpan.SpanContext().SpanID(), spans[0].Parent().SpanID())
+		})
+	}
 }
 
 func (p staticRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {

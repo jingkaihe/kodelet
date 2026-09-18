@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -10,15 +11,23 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type fakeDecoder struct {
@@ -162,6 +171,230 @@ func responseStreamFromMaps(t *testing.T, events []map[string]any) *ssestream.St
 	}
 
 	return ssestream.NewStream[responses.ResponseStreamEventUnion](&fakeDecoder{events: streamEvents}, nil)
+}
+
+func TestResponsesTracing(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		websocket bool
+		retry     bool
+		partial   bool
+		cancel    bool
+	}{
+		{name: "HTTP with tool"},
+		{name: "websocket retry with tool", websocket: true, retry: true},
+		{name: "incomplete HTTP", partial: true},
+		{name: "cancelled websocket", websocket: true, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			previous := otel.GetTracerProvider()
+			otel.SetTracerProvider(provider)
+			t.Cleanup(func() {
+				_ = provider.Shutdown(context.Background())
+				otel.SetTracerProvider(previous)
+			})
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+				Provider: "openai", Model: "primary",
+				Retry: llmtypes.RetryConfig{Attempts: 2, InitialDelay: 1, MaxDelay: 1},
+			}, "trace-conversation")}
+			thread.Usage.InputTokens = 999
+			thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+			attempts := 0
+			var requestSpanIDs []trace.SpanID
+			newStream := func(ctx context.Context, params responses.ResponseNewParams) *ssestream.Stream[responses.ResponseStreamEventUnion] {
+				attempts++
+				assert.Equal(t, "weak", params.Model)
+				requestSpanIDs = append(requestSpanIDs, trace.SpanFromContext(ctx).SpanContext().SpanID())
+				if tc.cancel {
+					return ssestream.NewStream[responses.ResponseStreamEventUnion](&fakeDecoder{err: context.Canceled}, nil)
+				}
+				if tc.partial || (tc.retry && attempts == 1) {
+					return responseStreamFromMaps(t, nil)
+				}
+				return responseStreamFromMaps(t, []map[string]any{
+					{"type": "response.output_item.done", "item": map[string]any{
+						"type": "function_call", "call_id": "call-1", "name": "ok_tool", "arguments": "{}",
+					}},
+					{"type": "response.completed", "response": map[string]any{
+						"id": "response-1", "model": "actual", "status": "completed",
+						"usage": map[string]any{
+							"input_tokens": 20, "output_tokens": 8,
+							"input_tokens_details":  map[string]any{"cached_tokens": 7},
+							"output_tokens_details": map[string]any{"reasoning_tokens": 3},
+						},
+					}},
+				})
+			}
+			if tc.websocket {
+				thread.useWebSocket = true
+				thread.webSocket = &fakeResponsesWebSocketStreamer{streamFunc: func(ctx context.Context, params responses.ResponseNewParams, _ []string, _ auth.HTTPAuthorizer) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+					return newStream(ctx, params), nil
+				}}
+			} else {
+				thread.newStreamingFunc = func(ctx context.Context, params responses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion] {
+					return newStream(ctx, params)
+				}
+			}
+			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private", llmtypes.MessageOpt{})
+			_, _, _, err := thread.processMessageExchange(ctx, &captureStreamHandler{}, "weak", 100, "private system", llmtypes.MessageOpt{DisableUsageLog: true})
+			thread.FinalizeMessageSpan(invocation, err)
+			var model, tool sdktrace.ReadOnlySpan
+			modelCount := 0
+			for _, span := range recorder.Ended() {
+				switch span.Name() {
+				case "chat weak":
+					model = span
+					modelCount++
+				case "execute_tool ok_tool":
+					tool = span
+				}
+			}
+			require.Equal(t, 1, modelCount, "all retries share the logical model span")
+			assert.Equal(t, invocation.SpanContext().SpanID(), model.Parent().SpanID())
+			for _, requestSpanID := range requestSpanIDs {
+				assert.Equal(t, model.SpanContext().SpanID(), requestSpanID)
+			}
+			if tc.cancel || tc.partial {
+				require.Error(t, err)
+				assert.Equal(t, codes.Error, model.Status().Code)
+				assert.Nil(t, tool)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, tool)
+				assert.Equal(t, codes.Ok, model.Status().Code)
+				assert.Equal(t, invocation.SpanContext().SpanID(), tool.Parent().SpanID())
+				assert.False(t, tool.StartTime().Before(model.EndTime()), "model span must finish before tool execution")
+				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.input_tokens", 20))
+				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.output_tokens", 8))
+				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.cache_read.input_tokens", 7))
+				assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.reasoning.output_tokens", 3))
+				assert.Contains(t, model.Attributes(), attribute.String("gen_ai.response.model", "actual"))
+			}
+			if tc.retry {
+				assert.Equal(t, 2, attempts)
+			}
+		})
+	}
+}
+
+func TestRemoteCompactionFallbackSharesModelSpan(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previous)
+	})
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{
+			Model: "primary", Retry: llmtypes.RetryConfig{Attempts: 1, InitialDelay: 1, MaxDelay: 1},
+		}, "conversation"),
+		useWebSocket: true,
+	}
+	var requests []trace.SpanContext
+	thread.webSocket = &fakeResponsesWebSocketStreamer{streamFunc: func(ctx context.Context, _ responses.ResponseNewParams, _ []string, _ auth.HTTPAuthorizer) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+		requests = append(requests, trace.SpanFromContext(ctx).SpanContext())
+		return responseStreamFromMaps(t, []map[string]any{{
+			"type": "response.incomplete", "response": map[string]any{
+				"id": "first", "incomplete_details": map[string]any{"reason": "max_output_tokens"},
+				"usage": map[string]any{"input_tokens": 10, "output_tokens": 2},
+			},
+		}}), nil
+	}}
+	thread.newStreamingFunc = func(ctx context.Context, _ responses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion] {
+		requests = append(requests, trace.SpanFromContext(ctx).SpanContext())
+		return remoteCompactionV2Stream(t, "summary")
+	}
+	ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private", llmtypes.MessageOpt{})
+	_, err := thread.runRemoteCompactionV2(ctx, responses.ResponseNewParams{Model: "weak"}, codexResponsesRequestMetadata{})
+	require.NoError(t, err)
+	thread.FinalizeMessageSpan(invocation, nil)
+	spans := recorder.Ended()
+	require.Len(t, spans, 2)
+	model := spans[0]
+	assert.Equal(t, "chat weak", model.Name())
+	assert.Equal(t, codes.Ok, model.Status().Code)
+	assert.Equal(t, invocation.SpanContext().SpanID(), model.Parent().SpanID())
+	require.Len(t, requests, 2)
+	for _, request := range requests {
+		assert.Equal(t, model.SpanContext(), request)
+	}
+	assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.input_tokens", 110))
+	assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.output_tokens", 12))
+	assert.Contains(t, model.Attributes(), attribute.Int64("gen_ai.usage.cache_read.input_tokens", 20))
+	var sawFallback bool
+	for _, event := range model.Events() {
+		if event.Name == "kodelet.model.transport_fallback" {
+			sawFallback = true
+		}
+	}
+	assert.True(t, sawFallback)
+}
+
+type failingResponsesToolEnvironment struct {
+	agentenv.Environment
+	err error
+}
+
+func (*failingResponsesToolEnvironment) IsOpen() bool { return true }
+
+func (*failingResponsesToolEnvironment) Manifest() agentenv.Manifest {
+	return agentenv.Manifest{}
+}
+
+func (e *failingResponsesToolEnvironment) ExecuteTool(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	result := tooltypes.BaseToolResult{Result: "tool completed"}
+	return agentenv.ToolExecution{Result: result, StructuredResult: result.StructuredData()}, e.err
+}
+
+func TestResponsesToolFailureTakesPrecedenceOverStreamFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		toolErr error
+	}{
+		{name: "tool failure stops retries", toolErr: errors.New("runner tool environment unavailable")},
+		{name: "successful tool preserves stream retries"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+				Model: "model", Retry: llmtypes.RetryConfig{Attempts: 3, InitialDelay: 1, MaxDelay: 1},
+			}, "conversation")}
+			thread.SetEnvironment(&failingResponsesToolEnvironment{err: tc.toolErr})
+			requests := 0
+			newStream := func(context.Context, responses.ResponseNewParams) (*responsesStreamAttempt, error) {
+				requests++
+				if requests > 1 {
+					return &responsesStreamAttempt{stream: responseStreamFromMaps(t, []map[string]any{
+						{"type": "response.completed", "response": map[string]any{"id": "done", "status": "completed"}},
+					})}, nil
+				}
+				return &responsesStreamAttempt{stream: responseStreamFromMaps(t, []map[string]any{
+					{"type": "response.output_item.done", "item": map[string]any{
+						"type": "function_call", "call_id": "call-1", "name": "test_tool", "arguments": "{}",
+					}},
+					{"type": "error", "code": "server_error", "message": "retryable stream failure"},
+				})}, nil
+			}
+			ctx := t.Context()
+			_, _, _, err := thread.processMessageExchangeWithStreamRetries(
+				ctx, &captureStreamHandler{}, "model", responses.ResponseNewParams{Model: "model"}, nil,
+				newStream,
+				func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) error { return stream.Close() },
+				thread.readStream, llmtypes.MessageOpt{DisableUsageLog: true}, func() {}, "https",
+			)
+			if tc.toolErr != nil {
+				assert.ErrorIs(t, err, tc.toolErr)
+				assert.Equal(t, 1, requests, "tool failure must not retry the model request")
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, 2, requests, "successful tool completion must preserve stream retries")
+			}
+			assert.NoError(t, ctx.Err(), "tool error precedence must not rely on cancellation")
+		})
+	}
 }
 
 type captureStreamHandler struct {

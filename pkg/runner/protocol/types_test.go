@@ -36,6 +36,37 @@ func TestRegisterResultRemoteProfilesCompatibility(t *testing.T) {
 	}
 }
 
+func TestMessageTraceContextCompatibility(t *testing.T) {
+	legacy := `{"jsonrpc":"2.0","id":"call-1","method":"tool.execute","params":{"name":"bash"}}`
+	message, err := DecodeMessage([]byte(legacy))
+	require.NoError(t, err)
+	assert.Nil(t, message.TraceContext)
+	encoded, err := json.Marshal(message)
+	require.NoError(t, err)
+	assert.JSONEq(t, legacy, string(encoded))
+
+	message.TraceContext = map[string]string{
+		"traceparent": "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+		"tracestate":  "vendor=value",
+	}
+	encoded, err = json.Marshal(message)
+	require.NoError(t, err)
+	decoded, err := DecodeMessage(encoded)
+	require.NoError(t, err)
+	assert.Equal(t, message, decoded)
+	// A peer using the previous envelope ignores the additional optional field.
+	var oldMessage struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      *string         `json:"id,omitempty"`
+		Method  string          `json:"method,omitempty"`
+		Params  json.RawMessage `json:"params,omitempty"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &oldMessage))
+	assert.Equal(t, message.ID, oldMessage.ID)
+	assert.Equal(t, message.Method, oldMessage.Method)
+	assert.Equal(t, message.Params, oldMessage.Params)
+}
+
 func TestSessionExtensionWireContract(t *testing.T) {
 	descriptor := SessionExtensions{ID: "attachment-1", ExtensionIDs: []string{"inline-1", "inline-2"}}
 	require.NoError(t, descriptor.Validate())

@@ -6,9 +6,13 @@ import (
 	"testing"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -19,6 +23,7 @@ type testTool struct {
 	description string
 	validateErr error
 	traceErr    error
+	traceAttrs  []attribute.KeyValue
 	result      tooltypes.ToolResult
 	executed    bool
 	rawSchema   map[string]any
@@ -36,7 +41,10 @@ func (t *testTool) Execute(_ context.Context, _ tooltypes.State, _ string) toolt
 	}
 	return tooltypes.BaseToolResult{Result: "ok"}
 }
-func (t *testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) { return nil, t.traceErr }
+
+func (t *testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
+	return t.traceAttrs, t.traceErr
+}
 
 type streamingTestTool struct {
 	*testTool
@@ -274,6 +282,40 @@ func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
 	require.True(t, invalid.IsError())
 	assert.Contains(t, invalid.GetError(), assert.AnError.Error())
 	assert.False(t, tool.executed)
+}
+
+func TestToolTraceContentOptInAndValidationFailure(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previousTracer := tracer
+	previousContent := telemetry.ContentEnabled()
+	tracer = provider.Tracer("kodelet.tools")
+	t.Cleanup(func() {
+		tracer = previousTracer
+		_ = provider.Shutdown(context.Background())
+		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
+	})
+	tool := &testTool{
+		name:        "file_write",
+		traceAttrs:  []attribute.KeyValue{attribute.String("text", "private file content")},
+		validateErr: assert.AnError,
+	}
+	for _, capture := range []bool{false, true} {
+		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
+		require.NoError(t, err)
+		recorder.Reset()
+		result := RunToolImplementationWithUpdates(t.Context(), nil, tool, `{}`, nil)
+		assert.True(t, result.IsError())
+		require.Len(t, recorder.Ended(), 1)
+		span := recorder.Ended()[0]
+		assert.Equal(t, codes.Error, span.Status().Code)
+		assert.Contains(t, span.Attributes(), attribute.String("gen_ai.tool.name", "file_write"))
+		if capture {
+			assert.Contains(t, span.Attributes(), tool.traceAttrs[0])
+		} else {
+			assert.NotContains(t, span.Attributes(), tool.traceAttrs[0])
+		}
+	}
 }
 
 func TestGetMainTools_RespectsExplicitAllowlist(t *testing.T) {

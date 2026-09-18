@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -473,6 +474,9 @@ func (t *Thread) CreateMessageSpan(
 	extraAttributes ...attribute.KeyValue,
 ) (context.Context, trace.Span) {
 	attributes := []attribute.KeyValue{
+		attribute.String("gen_ai.operation.name", "invoke_agent"),
+		attribute.String("gen_ai.agent.name", "kodelet"),
+		attribute.String("gen_ai.conversation.id", t.ConversationID),
 		attribute.String("model", t.Config.Model),
 		attribute.Int("max_tokens", t.Config.MaxTokens),
 		attribute.Int("weak_model_max_tokens", t.Config.WeakModelMaxTokens),
@@ -484,7 +488,31 @@ func (t *Thread) CreateMessageSpan(
 
 	attributes = append(attributes, extraAttributes...)
 
-	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
+	return tracer.Start(ctx, "invoke_agent kodelet", trace.WithAttributes(attributes...))
+}
+
+// StartModelSpan describes one logical provider call, including streaming and retries.
+// Callers must keep tool execution on the original context, outside this span.
+func (t *Thread) StartModelSpan(ctx context.Context, provider, model string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	attributes := []attribute.KeyValue{
+		attribute.String("gen_ai.operation.name", "chat"),
+		attribute.String("gen_ai.provider.name", provider),
+		attribute.String("gen_ai.request.model", model),
+		attribute.String("gen_ai.conversation.id", t.ConversationID),
+	}
+	attributes = append(attributes, attrs...)
+	return telemetry.Tracer("kodelet.llm").Start(ctx, "chat "+model,
+		trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(attributes...))
+}
+
+// FinishModelSpan records the logical call outcome and ends its span exactly once.
+func FinishModelSpan(span trace.Span, err error) {
+	if err != nil {
+		telemetry.RecordSpanError(span, err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	span.End()
 }
 
 // FinalizeMessageSpan records final metrics and status to the span before ending it.
@@ -511,8 +539,7 @@ func (t *Thread) FinalizeMessageSpan(span trace.Span, err error, extraAttributes
 	span.SetAttributes(attributes...)
 
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
+		telemetry.RecordSpanError(span, err)
 	} else {
 		span.SetStatus(codes.Ok, "")
 		span.AddEvent("message_processing_completed")

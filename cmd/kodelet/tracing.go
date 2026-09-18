@@ -21,6 +21,7 @@ func getVersion() string {
 func initTracing(ctx context.Context) (func(context.Context) error, error) {
 	config := telemetry.Config{
 		Enabled:        viper.GetBool("tracing.enabled"),
+		CaptureContent: viper.GetBool("tracing.capture_content"),
 		ServiceName:    "kodelet",
 		ServiceVersion: getVersion(),
 		SamplerType:    viper.GetString("tracing.sampler"),
@@ -39,8 +40,12 @@ var tracer = telemetry.Tracer("kodelet.cli")
 
 func withTracing(cmd *cobra.Command) *cobra.Command {
 	originalRun := cmd.Run
+	originalRunE := cmd.RunE
+	if originalRun == nil && originalRunE == nil {
+		return cmd
+	}
 
-	cmd.Run = func(cmd *cobra.Command, args []string) {
+	run := func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
 		attrs := []attribute.KeyValue{
@@ -49,11 +54,16 @@ func withTracing(cmd *cobra.Command) *cobra.Command {
 			attribute.Int("args.count", len(args)),
 		}
 
+		var flags []string
 		cmd.Flags().Visit(func(flag *pflag.Flag) {
 			if !isSensitiveFlagName(flag.Name) {
-				attrs = append(attrs, attribute.String("flag."+flag.Name, flag.Value.String()))
+				flags = append(flags, flag.Name)
+				if telemetry.ContentEnabled() {
+					attrs = append(attrs, attribute.String("flag."+flag.Name, flag.Value.String()))
+				}
 			}
 		})
+		attrs = append(attrs, attribute.StringSlice("command.flags", flags))
 
 		ctx, span := tracer.Start(
 			ctx,
@@ -63,8 +73,21 @@ func withTracing(cmd *cobra.Command) *cobra.Command {
 		defer span.End()
 
 		cmd.SetContext(ctx)
-		originalRun(cmd, args)
+		if originalRunE != nil {
+			if err := originalRunE(cmd, args); err != nil {
+				telemetry.RecordSpanError(span, err)
+				return err
+			}
+		} else {
+			originalRun(cmd, args)
+		}
 		span.SetStatus(codes.Ok, "")
+		return nil
+	}
+	if originalRunE != nil {
+		cmd.RunE = run
+	} else {
+		cmd.Run = func(cmd *cobra.Command, args []string) { _ = run(cmd, args) }
 	}
 
 	return cmd
@@ -77,10 +100,12 @@ func isSensitiveFlagName(name string) bool {
 
 func init() {
 	rootCmd.PersistentFlags().Bool("tracing-enabled", false, "Enable OpenTelemetry tracing")
+	rootCmd.PersistentFlags().Bool("tracing-capture-content", false, "Include prompts, messages, and tool payloads in traces")
 	rootCmd.PersistentFlags().String("tracing-sampler", "ratio", "Tracing sampler type (always, never, ratio)")
 	rootCmd.PersistentFlags().Float64("tracing-ratio", 1, "Sampling ratio when using ratio sampler")
 
 	viper.BindPFlag("tracing.enabled", rootCmd.PersistentFlags().Lookup("tracing-enabled"))
+	viper.BindPFlag("tracing.capture_content", rootCmd.PersistentFlags().Lookup("tracing-capture-content"))
 	viper.BindPFlag("tracing.sampler", rootCmd.PersistentFlags().Lookup("tracing-sampler"))
 	viper.BindPFlag("tracing.ratio", rootCmd.PersistentFlags().Lookup("tracing-ratio"))
 }

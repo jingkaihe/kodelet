@@ -741,7 +741,7 @@ type daemonRunFixture struct {
 	finishChild  func()
 }
 
-func newDaemonRunFixture(t *testing.T, placement string) *daemonRunFixture {
+func newDaemonRunFixture(t *testing.T, placement string, processEnv ...string) *daemonRunFixture {
 	t.Helper()
 	sdk := os.Getenv("KODELET_TEST_EXTENSION_SDK")
 	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
@@ -877,6 +877,7 @@ KODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionPro
 		"KODELET_AUTH_TOKEN=client-secret",
 		"KODELET_BIN=" + wrapper,
 	}
+	childEnv = append(childEnv, processEnv...)
 	if placement == "standalone" {
 		data, err := json.Marshal(settings)
 		require.NoError(t, err)

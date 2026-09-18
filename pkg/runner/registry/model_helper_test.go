@@ -12,6 +12,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func newModelHelperRegistry(t *testing.T) (*Registry, *fakeLink, *Session) {
@@ -205,9 +208,26 @@ func TestModelHelperCancellationAndCleanup(t *testing.T) {
 	for _, action := range []string{"RPC cancellation", "parent cancellation", "tool completion", "run cancellation", "run close", "disconnect", "reconnect", "registry close"} {
 		t.Run(action, func(t *testing.T) {
 			registry, _, session := newModelHelperRegistry(t)
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+			tracer := provider.Tracer("test")
+			parentCtx, parentSpan := tracer.Start(t.Context(), "tool owner")
+			defer parentSpan.End()
+			rpcCtx, rpcSpan := tracer.Start(t.Context(), "runner.rpc model.helper.execute", trace.WithSpanKind(trace.SpanKindServer))
+			defer rpcSpan.End()
+			type ownerKey struct{}
+			parentCtx = context.WithValue(parentCtx, ownerKey{}, "registered tool")
+			rpcCtx = context.WithValue(rpcCtx, ownerKey{}, "rpc request")
+			rpcCtx, rpcCancel := context.WithCancel(rpcCtx)
+			defer rpcCancel()
 			started := make(chan struct{})
 			var calls atomic.Int32
-			parentCtx, parentCancel := context.WithCancel(tooltypes.ContextWithModelHelper(t.Context(), func(ctx context.Context, _ tooltypes.ModelHelperRequest) (string, error) {
+			parentCtx, parentCancel := context.WithCancel(tooltypes.ContextWithModelHelper(parentCtx, func(ctx context.Context, _ tooltypes.ModelHelperRequest) (string, error) {
+				assert.Equal(t, "registered tool", ctx.Value(ownerKey{}), "capabilities and values belong to the registered tool")
+				assert.Equal(t, rpcSpan.SpanContext(), trace.SpanContextFromContext(ctx))
+				ctx, helperSpan := tracer.Start(ctx, "chat helper-model")
+				defer helperSpan.End()
 				calls.Add(1)
 				close(started)
 				<-ctx.Done()
@@ -219,8 +239,6 @@ func TestModelHelperCancellationAndCleanup(t *testing.T) {
 			cleanup, err := registry.registerToolModelHelper(parentCtx, runnerpayload.ToolExecuteParams{RunID: "run-one", ToolCallID: "tool-one", Name: "web_fetch"})
 			require.NoError(t, err)
 			defer cleanup()
-			rpcCtx, rpcCancel := context.WithCancel(t.Context())
-			defer rpcCancel()
 			request := mustRegistryJSON(t, testModelHelperParams())
 			done := make(chan *protocol.RPCError, 1)
 			go func() {
@@ -240,8 +258,10 @@ func TestModelHelperCancellationAndCleanup(t *testing.T) {
 			switch action {
 			case "RPC cancellation":
 				rpcCancel()
+				assert.NoError(t, parentCtx.Err(), "RPC cancellation must not cancel the registered tool")
 			case "parent cancellation":
 				parentCancel()
+				assert.NoError(t, rpcCtx.Err(), "tool cancellation must not mutate the incoming RPC context")
 			case "tool completion":
 				cleanup()
 			case "run cancellation":
@@ -265,6 +285,11 @@ func TestModelHelperCancellationAndCleanup(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				require.FailNow(t, "helper cancellation did not propagate")
 			}
+			spans := recorder.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, rpcSpan.SpanContext().SpanID(), spans[0].Parent().SpanID())
+			assert.Equal(t, rpcSpan.SpanContext().TraceID(), spans[0].SpanContext().TraceID())
+			assert.NotEqual(t, parentSpan.SpanContext().TraceID(), spans[0].SpanContext().TraceID())
 			_, rpcErr = session.HandleRequest(t.Context(), runnerpayload.MethodModelHelperExecute, request)
 			require.NotNil(t, rpcErr)
 			if action == "RPC cancellation" {
