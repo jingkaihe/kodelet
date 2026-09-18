@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.6.17-beta
+
+Added `allowedTools` to extension `agent.init` events and the TypeScript SDK, exposing the current tool allowlist including patches from earlier init handlers. An empty list means no tools are allowed; older hosts may omit the field.
+
+**Breaking change:** Removed built-in thread goals, including the `/goal` command, `get_goal` and `update_goal` tools, automatic goal continuation, and goal-specific transcript rendering.
+
 ## 0.6.16-beta
 
 Added OIDC background server startup on loopback and wildcard listeners, including runner enrollment and deployments without an embedded runner. Same-host CLI, TUI, and ACP clients use a private loopback-only API credential while browsers continue to sign in through OIDC.
