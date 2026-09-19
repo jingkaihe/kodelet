@@ -70,9 +70,6 @@ export class ExtensionHost implements ExtensionAPI {
   registerProfile(registration: ExtensionProfileRegistration): string {
     const { name, hidden = false, ...options } = registration;
     validateProfileSlug(name);
-    if (name.toLowerCase() === "default") {
-      throw new Error('Extension profile name "default" is reserved');
-    }
     if (this.profiles.has(name)) {
       throw new Error(`Duplicate extension profile registration: ${name}`);
     }

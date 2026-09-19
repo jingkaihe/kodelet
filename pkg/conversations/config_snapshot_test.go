@@ -14,7 +14,9 @@ func TestConfigSnapshotMetadataRoundTrip(t *testing.T) {
 		Provider:        "openai",
 		Model:           "gpt-5",
 		ReasoningEffort: "xhigh",
-		OpenAI:          &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses},
+		OpenAI: &llmtypes.OpenAIConfig{
+			APIMode: llmtypes.OpenAIAPIModeResponses, EnableSearch: new(false), WebSocketMode: new(false),
+		},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "value", metadata["existing"])
@@ -27,6 +29,21 @@ func TestConfigSnapshotMetadataRoundTrip(t *testing.T) {
 	assert.Equal(t, "xhigh", snapshot.ReasoningEffort)
 	require.NotNil(t, snapshot.OpenAI)
 	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, snapshot.OpenAI.APIMode)
+	assert.Equal(t, new(false), snapshot.OpenAI.EnableSearch)
+	assert.Equal(t, new(false), snapshot.OpenAI.WebSocketMode)
+	cloned := llmtypes.CloneConversationConfigSnapshot(snapshot)
+	*cloned.OpenAI.EnableSearch = true
+	*cloned.OpenAI.WebSocketMode = true
+	resumed, err := snapshot.Apply(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{EnableSearch: new(true), WebSocketMode: new(true)},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, new(false), resumed.OpenAI.EnableSearch)
+	assert.Equal(t, new(false), resumed.OpenAI.WebSocketMode)
+	*resumed.OpenAI.EnableSearch = true
+	*resumed.OpenAI.WebSocketMode = true
+	assert.Equal(t, new(false), snapshot.OpenAI.EnableSearch)
+	assert.Equal(t, new(false), snapshot.OpenAI.WebSocketMode)
 }
 
 func TestConfigSnapshotFromMetadataHandlesLegacyAndInvalidValues(t *testing.T) {

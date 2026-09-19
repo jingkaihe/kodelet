@@ -24,12 +24,21 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "7m")
 	viper.Set("profile", "deep")
 	viper.Set("tool_mode", "full")
-	viper.Set("model", "daemon-only-model")
 	viper.Set("openai", map[string]any{"api_key": "daemon-only-secret"})
 	viper.Set("context.patterns", []string{"TEAM.md"})
 	viper.Set("profiles", map[string]any{
-		"deep":  map[string]any{"tool_mode": "patch", "bash": map[string]any{"timeout": "30s"}},
-		"flair": map[string]any{"tool_mode": "full", "enable_fs_search_tools": true},
+		"deep": map[string]any{
+			"provider": "openai", "model": "daemon-only-model",
+			"tool_mode": "patch", "bash": map[string]any{"timeout": "30s"},
+		},
+		"flair": map[string]any{
+			"provider": "openai", "model": "flair-model",
+			"tool_mode": "full", "enable_fs_search_tools": true,
+		},
+		"default": map[string]any{
+			"provider": "openai", "model": "named-default-model",
+			"tool_mode": "patch", "enable_fs_search_tools": true,
+		},
 	})
 	viper.Set("environment_profiles", map[string]any{
 		"review": map[string]any{"allowed_tools": []string{"bash"}},
@@ -58,10 +67,10 @@ func TestServeInstallsPinnedEmbeddedProfileLoader(t *testing.T) {
 		mode    llmtypes.ToolMode
 		search  bool
 	}{
-		{"", llmtypes.ToolModePatch, false},
+		{"", llmtypes.ToolModeFull, false},
 		{"deep", llmtypes.ToolModePatch, false},
 		{"flair", llmtypes.ToolModeFull, true},
-		{"default", llmtypes.ToolModeFull, false},
+		{"default", llmtypes.ToolModePatch, true},
 	} {
 		config, err := loader(workspace, test.profile, "review")
 		require.NoError(t, err)
@@ -89,6 +98,8 @@ func TestServePinsBrowserConfigAtStartup(t *testing.T) {
 	t.Setenv("KODELET_BROWSER_IDLE_TIMEOUT", "")
 	viper.Set("browser", map[string]any{"executable": "/yaml/chrome", "devtools_dir": "/yaml/devtools", "idle_timeout": "7m"})
 	viper.Set("profiles.deep.browser.executable", "/profile/chrome")
+	viper.Set("profiles.deep.provider", "openai")
+	viper.Set("profiles.deep.model", "gpt-4.1")
 	viper.Set("profile", "deep")
 	viper.Set("serve.runner_settings.browser.executable", "/workspace/chrome")
 	cmd := newServeCommandForTest()

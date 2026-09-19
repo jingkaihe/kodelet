@@ -1,8 +1,10 @@
 package llm
 
 import (
-	"fmt"
+	"maps"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -10,103 +12,114 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// GetConfigFromViper loads the LLM configuration from Viper, applies the active profile if set,
-// and resolves any model aliases.
+// GetConfigFromViper loads the selected named model profile and shared settings,
+// then resolves model aliases. A profile selection is required.
 func GetConfigFromViper() (llmtypes.Config, error) {
 	return GetConfigFromViperWithCmd(nil)
 }
 
-// GetConfigFromViperWithoutProfile loads configuration from Viper without
-// applying any active profile from shared process state.
+// GetConfigFromViperWithoutProfile loads only shared configuration. It neither
+// requires nor applies model profiles, and returns no model settings.
 func GetConfigFromViperWithoutProfile() (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd("", nil, true)
-}
-
-// GetConfigFromViperWithoutProfileAndCmd loads configuration without an active
-// profile, then reapplies explicitly changed Cobra flags.
-func GetConfigFromViperWithoutProfileAndCmd(cmd *cobra.Command) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd("", cmd, true)
-}
-
-// GetConfigFromViperWithoutProfileAndCmdIgnoringFlags is the request-scoped
-// variant used when persisted conversation fields must remain authoritative.
-func GetConfigFromViperWithoutProfileAndCmdIgnoringFlags(cmd *cobra.Command, ignoredFlags ...string) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd("", cmd, true, ignoredFlags...)
+	return loadSharedConfigFromSettings(settingsFromViper())
 }
 
 // GetConfigFromViperWithProfile loads configuration from Viper while applying the
 // provided profile name instead of the globally active viper profile. This is
 // useful for request-scoped profile selection (for example, in the web UI)
-// without mutating shared process-wide viper state.
+// without mutating shared process-wide viper state. An empty name uses the
+// configured profile selection; "default" is an ordinary profile name.
 func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd(profileName, nil, true)
+	return getConfigFromViper(profileName, nil)
 }
 
 // GetConfigFromViperWithEnvironmentProfile loads runner-owned configuration from
 // the separate environment_profiles namespace without applying a model profile.
 func GetConfigFromViperWithEnvironmentProfile(profileName string) (llmtypes.Config, error) {
-	return GetConfigFromSettingsWithEnvironmentProfile(viper.AllSettings(), profileName)
+	return GetConfigFromSettingsWithEnvironmentProfile(settingsFromViper(), profileName)
 }
 
 // GetConfigFromSettingsWithEnvironmentProfile resolves a runner-owned settings
 // snapshot without consulting or mutating the process-global Viper instance.
 func GetConfigFromSettingsWithEnvironmentProfile(settings map[string]any, profileName string) (llmtypes.Config, error) {
 	settings = cloneSettings(settings)
-	delete(settings, "profile")
-
-	config, err := loadConfigFromSettings(settings)
-	if err != nil {
-		return config, err
-	}
 	profileName = strings.TrimSpace(profileName)
 	if strings.EqualFold(profileName, "default") {
 		profileName = ""
 	}
 	if profileName != "" {
-		profile, exists := config.EnvironmentProfiles[profileName]
+		profiles, _ := settingValueMap(settings["environment_profiles"])
+		rawProfile, exists := profiles[profileName]
 		if !exists {
-			return config, errors.Errorf("failed to apply environment profile: profile '%s' not found", profileName)
+			return llmtypes.Config{}, errors.Errorf("failed to apply environment profile: profile '%s' not found", profileName)
 		}
-		applyProfileToSettings(settings, profile)
-		delete(settings, "profile")
+		profile, ok := settingValueMap(rawProfile)
+		if !ok {
+			return llmtypes.Config{}, errors.Errorf("environment profile '%s' must be a mapping", profileName)
+		}
+		mergeSettings(settings, profile)
 	}
 
-	config, err = loadConfigFromSettings(settings)
-	if err != nil {
-		return config, err
-	}
-	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
-		return config, err
-	}
-	config.Profile = ""
-	config.Aliases = withDefaultModelAliases(config.Aliases)
-	config.Model = resolveModelAlias(config.Model, config.Aliases)
-	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
-	return config, nil
-}
-
-// GetConfigFromViperWithProfileAndCmd loads configuration from Viper while
-// applying the provided profile name and then re-applying any explicitly
-// changed Cobra flags on top.
-func GetConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd(profileName, cmd, true)
-}
-
-// GetConfigFromViperWithProfileAndCmdIgnoringFlags applies a named profile and
-// all explicit Cobra flags except the supplied persisted-field flags.
-func GetConfigFromViperWithProfileAndCmdIgnoringFlags(profileName string, cmd *cobra.Command, ignoredFlags ...string) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd(profileName, cmd, true, ignoredFlags...)
+	return loadSharedConfigFromSettings(settings)
 }
 
 // GetConfigFromViperWithCmd loads the LLM configuration from Viper with command context.
 // When a cobra.Command is provided, CLI flags that were explicitly changed take priority
 // over profile settings.
 func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd("", cmd, false)
+	return getConfigFromViper("", cmd)
+}
+
+// modelSettingKeys belong exclusively to named model profiles. Provider
+// connections, authentication, platform selection, model registries and pricing
+// remain shared settings and may be overridden by a profile.
+var modelSettingKeys = []string{
+	"provider",
+	"model",
+	"weak_model",
+	"max_tokens",
+	"weak_model_max_tokens",
+	"thinking_budget_tokens",
+	"reasoning_effort",
+	"allowed_reasoning_efforts",
+	"openai.api_mode",
+	"openai.text_verbosity",
+	"openai.enable_search",
+	"openai.websocket_mode",
+	"openai.service_tier",
+	"openai.manual_cache",
+	"anthropic.adaptive_thinking",
+}
+
+// ValidateModelProfiles validates daemon model configuration at startup. Clients,
+// runners and saved-conversation shared loaders must not call this: they do not
+// need a default model profile. Removed top-level file and environment settings
+// are rejected; explicit model flags remain per-request overrides.
+func ValidateModelProfiles() error {
+	for _, key := range modelSettingKeys {
+		if viper.InConfig(key) {
+			return errors.Errorf("top-level model setting %q is not supported; move it into profiles.<name>", key)
+		}
+		envKey := "KODELET_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		if _, configured := os.LookupEnv(envKey); configured {
+			return errors.Errorf("model environment setting %s is not supported; configure %s in profiles.<name> instead", envKey, key)
+		}
+	}
+	if _, err := GetConfigFromViper(); err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(viper.GetStringMap("profiles"))) {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("model profile names must not be empty")
+		}
+		if _, err := GetConfigFromViperWithProfile(name); err != nil {
+			return errors.Wrapf(err, "invalid model profile %q", name)
+		}
+	}
+	return nil
 }
 
 // HasConfiguredProfile reports whether a named profile exists in the merged
@@ -130,23 +143,6 @@ func IsProfileHidden(profileName string) bool {
 	return hidden
 }
 
-// GetConfigFromProfile decodes an isolated profile using ordinary configuration
-// keys and built-in defaults, without consulting daemon or workspace settings.
-func GetConfigFromProfile(profile llmtypes.ProfileConfig) (llmtypes.Config, error) {
-	config, err := loadConfigFromSettings(cloneSettings(profile))
-	if err != nil {
-		return llmtypes.Config{}, err
-	}
-	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
-		return llmtypes.Config{}, err
-	}
-	config.Aliases = withDefaultModelAliases(config.Aliases)
-	config.Model = resolveModelAlias(strings.TrimSpace(config.Model), config.Aliases)
-	config.WeakModel = resolveModelAlias(strings.TrimSpace(config.WeakModel), config.Aliases)
-	config.ModelAliasesResolved = true
-	return config, nil
-}
-
 // ProviderPlatform returns the normalized platform for a provider's configuration block.
 func ProviderPlatform(config llmtypes.Config, provider string) string {
 	platform := ""
@@ -166,86 +162,144 @@ func ProviderPlatform(config llmtypes.Config, provider string) string {
 	return platform
 }
 
-func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool, ignoredFlags ...string) (llmtypes.Config, error) {
-	settings := cloneSettings(viper.AllSettings())
-	if ignoreActiveProfile {
-		delete(settings, "profile")
+func getConfigFromViper(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
+	settings := settingsFromViper()
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = getActiveProfile()
 	}
-	config, err := loadConfigFromSettings(settings)
-	if err != nil {
-		return config, err
-	}
-
-	// Clean up profiles - remove default profile if it exists
-	if config.Profiles != nil {
-		delete(config.Profiles, "default")
+	if profileName == "" {
+		return llmtypes.Config{}, errors.New("no model profile selected; set profile: <name> or use --profile <name>")
 	}
 
-	activeProfile := profileName
-	if activeProfile == "" && !ignoreActiveProfile {
-		activeProfile = getActiveProfile()
+	profiles, _ := settingValueMap(settings["profiles"])
+	rawProfile, exists := profiles[profileName]
+	if !exists {
+		return llmtypes.Config{}, errors.Errorf("failed to apply configuration profile: profile '%s' not found", profileName)
+	}
+	profile, ok := settingValueMap(rawProfile)
+	if !ok {
+		return llmtypes.Config{}, errors.Errorf("model profile '%s' must be a mapping", profileName)
+	}
+	if err := validateModelIdentity(profile); err != nil {
+		return llmtypes.Config{}, errors.Wrapf(err, "invalid model profile %q", profileName)
 	}
 
-	// Apply active profile to viper if set
-	if activeProfile != "" && config.Profiles != nil {
-		if profile, exists := config.Profiles[activeProfile]; exists {
-			applyProfileToSettings(settings, profile)
-		} else if profileName != "" {
-			return config, errors.Errorf("failed to apply configuration profile: profile '%s' not found", profileName)
+	clearModelSettings(settings)
+	mergeSettings(settings, profile)
+	if cmd != nil {
+		applyExplicitFlagsToSettings(cmd, settings)
+	}
+	settings["profile"] = profileName
+	return GetConfigFromProfile(settings)
+}
+
+func validateModelIdentity(settings map[string]any) error {
+	for _, key := range []string{"provider", "model"} {
+		value, ok := settings[key].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return errors.Errorf("%s is required and must be a non-empty string in each model profile", key)
 		}
 	}
-
-	// Apply explicitly changed CLI flags to viper (highest priority)
-	if cmd != nil {
-		applyExplicitFlagsToSettings(cmd, settings, ignoredFlags...)
+	switch strings.ToLower(strings.TrimSpace(settings["provider"].(string))) {
+	case "openai", "anthropic":
+		return nil
+	default:
+		return errors.Errorf("unsupported provider %q; supported providers are openai and anthropic", settings["provider"])
 	}
+}
 
-	// Re-load config with all overrides applied
-	config, err = loadConfigFromSettings(settings)
+// GetConfigFromProfile decodes a model profile with field defaults, without
+// consulting daemon or workspace settings.
+func GetConfigFromProfile(settings llmtypes.ProfileConfig) (llmtypes.Config, error) {
+	if err := validateModelIdentity(settings); err != nil {
+		return llmtypes.Config{}, err
+	}
+	defaults := map[string]any{
+		"max_tokens":             8192,
+		"weak_model_max_tokens":  8192,
+		"thinking_budget_tokens": 4048,
+	}
+	if strings.EqualFold(strings.TrimSpace(settings["provider"].(string)), "openai") {
+		defaults["openai"] = map[string]any{
+			"api_mode":       "responses",
+			"enable_search":  true,
+			"websocket_mode": true,
+		}
+	}
+	mergeSettings(defaults, settings)
+	config, err := loadConfigFromSettings(defaults)
 	if err != nil {
 		return config, err
 	}
+	config.Provider = strings.ToLower(strings.TrimSpace(config.Provider))
 	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return config, err
 	}
 
-	if activeProfile != "" {
-		config.Profile = activeProfile
-	}
-
 	config.Aliases = withDefaultModelAliases(config.Aliases)
-
-	// Resolve model aliases
-	config.Model = resolveModelAlias(config.Model, config.Aliases)
-	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
-
+	config.Model = resolveModelAlias(strings.TrimSpace(config.Model), config.Aliases)
+	config.WeakModel = resolveModelAlias(strings.TrimSpace(config.WeakModel), config.Aliases)
+	config.ModelAliasesResolved = true
 	return config, nil
 }
 
-// applyExplicitFlagsToSettings sets explicitly changed CLI flag values into a local settings map.
-func applyExplicitFlagsToSettings(cmd *cobra.Command, settings map[string]any, ignoredFlags ...string) {
-	ignored := make(map[string]struct{}, len(ignoredFlags))
-	for _, flagName := range ignoredFlags {
-		ignored[flagName] = struct{}{}
-	}
-	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
-		if flag.Changed {
-			if _, skip := ignored[flag.Name]; skip {
-				return
-			}
-			viperKey := explicitFlagViperKey(flag.Name)
-			if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
-				setSetting(settings, viperKey, sliceValue.GetSlice())
-				return
-			}
-			if flag.Value.Type() == "stringToString" {
-				if mapValue, err := cmd.Flags().GetStringToString(flag.Name); err == nil {
-					setSetting(settings, viperKey, mapValue)
-					return
-				}
-			}
-			setSetting(settings, viperKey, flag.Value.String())
+func settingsFromViper() map[string]any {
+	settings := cloneSettings(viper.AllSettings())
+	// Read these maps directly: AllSettings splits literal dots in model IDs.
+	for _, path := range []string{"aliases", "openai.pricing", "profiles", "environment_profiles"} {
+		if value := viper.Get(path); value != nil {
+			setSetting(settings, path, value)
 		}
+	}
+	return settings
+}
+
+func loadSharedConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
+	clearModelSettings(settings)
+	delete(settings, "profile")
+	delete(settings, "profiles")
+	config, err := loadConfigFromSettings(settings)
+	if err != nil {
+		return config, err
+	}
+	config.Aliases = withDefaultModelAliases(config.Aliases)
+	return config, nil
+}
+
+func clearModelSettings(settings map[string]any) {
+	for _, key := range modelSettingKeys {
+		parent, child, nested := strings.Cut(key, ".")
+		if !nested {
+			delete(settings, key)
+			continue
+		}
+		if values, ok := settingValueMap(settings[parent]); ok {
+			delete(values, child)
+			if len(values) == 0 {
+				delete(settings, parent)
+			} else {
+				settings[parent] = values
+			}
+		}
+	}
+}
+
+// applyExplicitFlagsToSettings sets explicitly changed CLI flag values into a local settings map.
+func applyExplicitFlagsToSettings(cmd *cobra.Command, settings map[string]any) {
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		viperKey := explicitFlagViperKey(flag.Name)
+		if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
+			setSetting(settings, viperKey, sliceValue.GetSlice())
+			return
+		}
+		if flag.Value.Type() == "stringToString" {
+			if mapValue, err := cmd.Flags().GetStringToString(flag.Name); err == nil {
+				setSetting(settings, viperKey, mapValue)
+				return
+			}
+		}
+		setSetting(settings, viperKey, flag.Value.String())
 	})
 }
 
@@ -257,6 +311,7 @@ func explicitFlagViperKey(flagName string) string {
 }
 
 var explicitFlagKeyOverrides = map[string]string{
+	"enable-openai-search":       "openai.enable_search",
 	"context-patterns":           "context.patterns",
 	"tracing-enabled":            "tracing.enabled",
 	"tracing-sampler":            "tracing.sampler",
@@ -267,14 +322,11 @@ var explicitFlagKeyOverrides = map[string]string{
 	"sysprompt-arg":              "sysprompt_args",
 }
 
-// applyProfileToSettings applies profile settings to a local settings map.
-func applyProfileToSettings(settings map[string]any, profile llmtypes.ProfileConfig) {
-	mergeSettings(settings, map[string]any(profile))
-}
-
 func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	var config llmtypes.Config
-	v := viper.New()
+	// Model aliases and pricing registries use literal model IDs such as
+	// "gpt-5.6" as keys, rather than dot-delimited configuration paths.
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
 	for key, value := range settings {
 		v.Set(key, value)
 	}
@@ -282,9 +334,6 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	// Use viper's automatic unmarshaling with mapstructure tags
 	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
-	}
-	if config.Model == "" && strings.EqualFold(config.Provider, "openai") {
-		config.Model = openaipreset.DefaultModel
 	}
 	if config.OpenAI != nil {
 		if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {
@@ -323,7 +372,7 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 
 func validateCompactRatio(ratio float64) error {
 	if ratio <= 0.0 || ratio > 1.0 {
-		return fmt.Errorf("compact_ratio must be greater than 0.0 and less than or equal to 1.0")
+		return errors.New("compact_ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
 	return nil
 }
@@ -445,9 +494,5 @@ func setSetting(settings map[string]any, key string, value any) {
 }
 
 func getActiveProfile() string {
-	profile := viper.GetString("profile")
-	if profile == "default" || profile == "" {
-		return ""
-	}
-	return profile
+	return strings.TrimSpace(viper.GetString("profile"))
 }

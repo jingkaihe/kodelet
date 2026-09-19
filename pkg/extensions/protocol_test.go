@@ -19,18 +19,18 @@ import (
 
 func TestProfileNamesRequireBoundedASCIISlugs(t *testing.T) {
 	options := llmtypes.ProfileConfig{"provider": "openai", "model": "search"}
-	for _, name := range []string{"A", "0", "Search.v1_fast-2", strings.Repeat("x", 128)} {
+	for _, name := range []string{"A", "0", "Search.v1_fast-2", strings.Repeat("x", 128), "default", "DEFAULT", "Default"} {
 		t.Run("valid/"+name, func(t *testing.T) {
 			assert.NoError(t, (ProfileRegistration{Name: name, Options: options}).Validate())
 		})
 	}
-	for _, name := range []string{"", " ", "leading ", " trailing", ".dot", "_under", "-dash", "a/b", "a\\b", "a:b", "a@b", "é", "a\n", "a\x00", strings.Repeat("x", 129), "default", "DEFAULT", "Default"} {
+	for _, name := range []string{"", " ", "leading ", " trailing", ".dot", "_under", "-dash", "a/b", "a\\b", "a:b", "a@b", "é", "a\n", "a\x00", strings.Repeat("x", 129)} {
 		t.Run("invalid/"+name, func(t *testing.T) {
 			assert.Error(t, (ProfileRegistration{Name: name, Options: options}).Validate())
 		})
 	}
 	assert.ErrorContains(t, (ProfileRegistration{Name: "search"}).Validate(), "provider must be a nonempty string")
-	assert.Error(t, (Profile{Name: "default", ExtensionID: "source", Options: options}).Validate())
+	assert.NoError(t, (Profile{Name: "default", ExtensionID: "source", Options: options}).Validate())
 	assert.Error(t, (Profile{Name: "search", Options: options}).Validate())
 	assert.Error(t, (Profile{Name: "search", ExtensionID: "bad\x00source", Options: options}).Validate())
 }

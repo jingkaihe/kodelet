@@ -16,6 +16,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -126,6 +127,17 @@ func TestWorkspaceShortcutIdleLeasePinsGenerationAndReleasesScope(t *testing.T) 
 }
 
 func TestWorkspaceShortcutRoutesModelProfileToTemporaryRun(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	viper.Set("profile", "model-profile")
+	viper.Set("profiles", map[string]any{
+		"default":       map[string]any{"provider": "openai", "model": "default-model"},
+		"model-profile": map[string]any{"provider": "openai", "model": "named-model"},
+	})
 	for _, test := range []struct {
 		name     string
 		profile  string
@@ -133,12 +145,12 @@ func TestWorkspaceShortcutRoutesModelProfileToTemporaryRun(t *testing.T) {
 		want     string
 		conflict bool
 	}{
-		{name: "daemon default"},
+		{name: "daemon default", want: "model-profile"},
 		{name: "explicit default", profile: "default", want: "default"},
 		{name: "named", profile: "model-profile", want: "model-profile"},
 		{name: "stored", stored: new("stored-profile"), want: "stored-profile"},
 		{name: "stored default", stored: new("default"), want: "default"},
-		{name: "stored empty pins base", stored: new(""), want: "default"},
+		{name: "stored empty uses shared settings", stored: new("")},
 		{name: "conflicting", profile: "default", stored: new("stored-profile"), conflict: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {

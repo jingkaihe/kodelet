@@ -981,19 +981,23 @@ func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 
 func TestProfileSelectionRefreshesReasoningEffortOptions(t *testing.T) {
 	withTUIViper(t, map[string]any{
-		"provider":                  "openai",
-		"model":                     "base-model",
-		"reasoning_effort":          "medium",
-		"allowed_reasoning_efforts": []string{"low", "medium"},
+		"profile": "flair",
 		"profiles": map[string]any{
+			"flair": map[string]any{
+				"provider":                  "openai",
+				"model":                     "flair-model",
+				"reasoning_effort":          "medium",
+				"allowed_reasoning_efforts": []string{"low", "medium"},
+			},
 			"work": map[string]any{
+				"provider":                  "openai",
 				"model":                     "work-model",
 				"reasoning_effort":          "max",
 				"allowed_reasoning_efforts": []string{"high", "max"},
 			},
 		},
 	})
-	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work"}})
+	m := newModel(context.Background(), Config{Profile: "flair", ProfileOptions: []string{"flair", "work"}})
 	t.Cleanup(m.cancel)
 
 	m.openProfilePicker()
@@ -1006,11 +1010,14 @@ func TestProfileSelectionRefreshesReasoningEffortOptions(t *testing.T) {
 
 func TestEmptyAllowedReasoningEffortsUsesProviderOptions(t *testing.T) {
 	withTUIViper(t, map[string]any{
-		"provider":                  "openai",
-		"model":                     "base-model",
-		"reasoning_effort":          "medium",
-		"allowed_reasoning_efforts": []string{"medium"},
+		"profile": "flair",
 		"profiles": map[string]any{
+			"flair": map[string]any{
+				"provider":                  "openai",
+				"model":                     "flair-model",
+				"reasoning_effort":          "medium",
+				"allowed_reasoning_efforts": []string{"medium"},
+			},
 			"unrestricted": map[string]any{
 				"provider":                  "anthropic",
 				"model":                     "claude-test",
@@ -1019,7 +1026,7 @@ func TestEmptyAllowedReasoningEffortsUsesProviderOptions(t *testing.T) {
 			},
 		},
 	})
-	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "unrestricted"}})
+	m := newModel(context.Background(), Config{Profile: "flair", ProfileOptions: []string{"flair", "unrestricted"}})
 	t.Cleanup(m.cancel)
 
 	assert.Equal(t, []string{"medium"}, m.reasoningEffortOptions)
@@ -1036,11 +1043,14 @@ func TestEmptyAllowedReasoningEffortsUsesProviderOptions(t *testing.T) {
 
 func TestProfileSelectionDropsUnsupportedExplicitReasoningEffort(t *testing.T) {
 	withTUIViper(t, map[string]any{
-		"provider":                  "openai",
-		"model":                     "gpt-test",
-		"reasoning_effort":          "medium",
-		"allowed_reasoning_efforts": []string{},
+		"profile": "flair",
 		"profiles": map[string]any{
+			"flair": map[string]any{
+				"provider":                  "openai",
+				"model":                     "gpt-test",
+				"reasoning_effort":          "medium",
+				"allowed_reasoning_efforts": []string{},
+			},
 			"anthropic": map[string]any{
 				"provider":                  "anthropic",
 				"model":                     "claude-test",
@@ -1049,7 +1059,7 @@ func TestProfileSelectionDropsUnsupportedExplicitReasoningEffort(t *testing.T) {
 			},
 		},
 	})
-	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "anthropic"}})
+	m := newModel(context.Background(), Config{Profile: "flair", ProfileOptions: []string{"flair", "anthropic"}})
 	t.Cleanup(m.cancel)
 
 	m.setReasoningEffort("minimal", true)

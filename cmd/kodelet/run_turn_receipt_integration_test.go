@@ -110,16 +110,9 @@ func TestDaemonTurnReceiptSurvivesProcessCrashWithoutReplay(t *testing.T) {
 				"skills":        map[string]any{"enabled": false},
 			}
 			daemonSettings := map[string]any{
-				"provider":         "openai",
-				"model":            "gpt-4o",
-				"weak_model":       "gpt-4o",
-				"max_tokens":       256,
-				"reasoning_effort": "medium",
-				"openai": map[string]any{
-					"platform":        "openai",
-					"base_url":        provider.URL,
-					"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
-					"api_mode":        "chat_completions",
+				"profile": "work",
+				"profiles": map[string]any{
+					"work": daemonTestModelProfile(provider.URL, "KODELET_TEST_PROVIDER_KEY"),
 				},
 				"serve": map[string]any{"runner_settings": settings},
 			}

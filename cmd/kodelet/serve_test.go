@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,7 @@ func TestServeBrowserPolicyIsOptIn(t *testing.T) {
 		viper.Reset()
 		require.NoError(t, viper.MergeConfigMap(previous))
 	})
+	setServeModelProfileForTest(t)
 	assert.False(t, NewServeConfig().BrowserEnabled)
 	viper.Set("serve.browser_enabled", true)
 	config := getServeConfigFromFlags(newServeCommandForTest())
@@ -588,29 +590,62 @@ func TestIsSensitiveFlagName(t *testing.T) {
 
 func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	originalSettings := viper.AllSettings()
-	defer func() {
+	t.Cleanup(func() {
 		viper.Reset()
 		for key, value := range originalSettings {
 			viper.Set(key, value)
 		}
-	}()
+	})
 
 	viper.Reset()
+	setServeModelProfileForTest(t)
 	viper.Set("compact_ratio", 0.65)
 
 	cmd := newServeCommandForTest()
 
 	config := getServeConfigFromFlags(cmd)
+	require.NoError(t, config.ConfigError)
 	assert.Equal(t, 0.65, config.CompactRatio)
 	assert.Equal(t, defaultOIDCScopes, config.OIDC.Scopes)
 	assert.Equal(t, defaultOIDCSessionDuration, config.OIDC.SessionDuration)
 }
 
+func TestGetServeConfigFromFlagsRequiresNamedModelProfiles(t *testing.T) {
+	const validProfiles = `
+profiles:
+  flair:
+    provider: openai
+    model: flair-model
+`
+	for _, test := range []struct {
+		name, config, wantError string
+	}{
+		{"missing selector", validProfiles, "no model profile selected"},
+		{"top-level model", "profile: flair\nmodel: removed-base-model\n" + validProfiles, "top-level model setting"},
+		{"invalid unselected profile", "profile: flair\n" + validProfiles + "  invalid:\n    provider: openai\n", "model is required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previous := viper.AllSettings()
+			viper.Reset()
+			t.Cleanup(func() {
+				viper.Reset()
+				require.NoError(t, viper.MergeConfigMap(previous))
+			})
+			viper.SetConfigType("yaml")
+			require.NoError(t, viper.ReadConfig(bytes.NewBufferString(test.config)))
+			config := getServeConfigFromFlags(newServeCommandForTest())
+			require.ErrorContains(t, config.ConfigError, test.wantError)
+		})
+	}
+}
+
 func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
+	setServeModelProfileForTest(t)
 	cmd := newServeCommandForTest()
 	require.NoError(t, cmd.Flags().Set("cors-origins", "https://app.example.com,http://localhost:3000"))
 
 	config := getServeConfigFromFlags(cmd)
+	require.NoError(t, config.ConfigError)
 	assert.Equal(t, []string{"https://app.example.com", "http://localhost:3000"}, config.CORSOrigins)
 }
 
@@ -1030,6 +1065,7 @@ func TestGetServeConfigFromFlags_RejectsInvalidTrustedYAML(t *testing.T) {
 }
 
 func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
+	setServeModelProfileForTest(t)
 	cmd := newServeCommandForTest()
 	require.NoError(t, cmd.ParseFlags([]string{
 		"--web-auth-mode=oidc",
@@ -1051,6 +1087,7 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 	}))
 
 	config := getServeConfigFromFlags(cmd)
+	require.NoError(t, config.ConfigError)
 	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
 	assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
@@ -1079,6 +1116,7 @@ func newServeCommandForTest() *cobra.Command {
 
 func setTrustedServeConfigForTest(t *testing.T, config map[string]any) {
 	t.Helper()
+	setServeModelProfileForTest(t)
 	previous := viper.Get("serve")
 	wasSet := viper.IsSet("serve")
 	viper.Set("serve", config)
@@ -1088,6 +1126,20 @@ func setTrustedServeConfigForTest(t *testing.T, config map[string]any) {
 			return
 		}
 		viper.Set("serve", nil)
+	})
+}
+
+func setServeModelProfileForTest(t *testing.T) {
+	t.Helper()
+	previousProfile := viper.Get("profile")
+	previousProfiles := viper.Get("profiles")
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{"provider": "openai", "model": "gpt-4.1"},
+	})
+	t.Cleanup(func() {
+		viper.Set("profile", previousProfile)
+		viper.Set("profiles", previousProfiles)
 	})
 }
 

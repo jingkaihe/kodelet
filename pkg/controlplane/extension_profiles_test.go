@@ -23,16 +23,14 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4o")
-	viper.Set("reasoning_effort", "medium")
 	viper.Set("profile", "deep")
 	viper.Set("profiles", map[string]any{
 		"deep": map[string]any{
+			"provider": "openai", "model": "gpt-4o",
 			"reasoning_effort": "xhigh", "allowed_reasoning_efforts": []string{"medium", "high", "xhigh"},
 			"openai": map[string]any{"platform": "codex", "base_url": "https://active.invalid"},
 		},
-		"internal": map[string]any{"hidden": true, "model": "gpt-4o"},
+		"internal": map[string]any{"provider": "openai", "hidden": true, "model": "gpt-4o"},
 	})
 	server := newRunnerTestServer(t, "")
 	ctx := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
@@ -76,6 +74,7 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	require.ErrorContains(t, server.registerExtensionProfiles(context.Background(), manifest), "authenticated")
 	assert.NotContains(t, server.modelProfileOptions(ctx, runner.RunnerID, "deep", false), ChatProfileOption{Name: profile.Name, Scope: "extension", Hidden: true})
 	assert.Contains(t, server.modelProfileOptions(ctx, runner.RunnerID, "deep", true), ChatProfileOption{Name: profile.Name, Scope: "extension", Hidden: true})
+	assert.Contains(t, server.modelProfileOptions(ctx, runner.RunnerID, profile.Name, false), ChatProfileOption{Name: profile.Name, Scope: "extension", Hidden: true})
 	for _, option := range server.modelProfileOptions(ctx, runner.RunnerID, "deep", false) {
 		assert.NotEqual(t, "internal", option.Name)
 		assert.NotEqual(t, profile.Name, option.Name)
@@ -93,7 +92,7 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	assert.Equal(t, profile.Name, settings.CurrentProfile)
 	target, targetErr := server.resolveRunnerTarget(request)
 	require.Nil(t, targetErr)
-	assert.Equal(t, "default", target.Profile)
+	assert.Empty(t, target.Profile)
 
 	visible := profile.Clone()
 	visible.Name, visible.Hidden = "review", false
@@ -101,12 +100,12 @@ func TestExtensionProfilesOwnershipDiscoveryAndSnapshots(t *testing.T) {
 	require.NoError(t, server.registerExtensionProfiles(ctx, runnerpayload.Manifest{
 		RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{visible},
 	}))
-	assert.Contains(t, server.modelProfileOptions(ctx, runner.RunnerID, "review", false), ChatProfileOption{Name: "review", Scope: "extension", Active: true})
+	assert.Contains(t, server.modelProfileOptions(ctx, runner.RunnerID, "review", false), ChatProfileOption{Name: "review", Scope: "extension"})
 	visible.Name = "deep"
 	require.ErrorContains(t, server.registerExtensionProfiles(ctx, runnerpayload.Manifest{
 		RunnerID: runner.RunnerID, Generation: runner.Generation, Profiles: []extensions.Profile{visible},
 	}), "daemon-configured profile")
-	for _, name := range []string{"", "default", "deep", "internal"} {
+	for _, name := range []string{"", "deep", "internal"} {
 		configured, err := server.resolveModelProfile(ctx, runner.RunnerID, name, "")
 		require.NoError(t, err)
 		assert.False(t, configured.ExtensionProfile)

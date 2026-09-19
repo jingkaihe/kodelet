@@ -261,6 +261,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 		}
 	}
 	llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
+	if err == nil {
+		err = llm.ValidateModelProfiles()
+	}
 	if err != nil {
 		if config.ConfigError == nil {
 			config.ConfigError = err

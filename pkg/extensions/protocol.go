@@ -135,9 +135,6 @@ func (p ProfileRegistration) Validate() error {
 	if !profileNamePattern.MatchString(p.Name) {
 		return errors.New("invalid extension profile name: must contain 1 to 128 ASCII characters matching [A-Za-z0-9][A-Za-z0-9._-]*")
 	}
-	if strings.EqualFold(p.Name, "default") {
-		return errors.New("extension profile name default is reserved")
-	}
 	for _, name := range []string{"provider", "model"} {
 		value, ok := p.Options[name].(string)
 		if !ok || strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {

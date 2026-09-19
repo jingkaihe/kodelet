@@ -59,8 +59,8 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 	}
 	cwd := strings.TrimSpace(r.URL.Query().Get("cwd"))
 	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
-	if strings.EqualFold(profile, "default") {
-		profile = "default"
+	if conversationID == "" && profile == "" {
+		profile = getCurrentWebUIProfile()
 	}
 	environmentProfile := chat.NormalizeEnvironmentProfile(r.URL.Query().Get("environmentProfile"))
 	extensionProfile := false
@@ -95,22 +95,18 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 			}
 			storedProfile, hasStoredProfile := record.Metadata["profile"].(string)
 			if hasSnapshot {
-				storedProfile, hasStoredProfile = snapshot.Profile, true
+				storedProfile = snapshot.Profile
 				extensionProfile = snapshot.ExtensionProfile
+			} else if !hasStoredProfile {
+				storedProfile = getCurrentWebUIProfile()
 			}
 			storedProfile = strings.TrimSpace(storedProfile)
-			// An empty persisted profile means the base configuration, not the
-			// daemon's current active profile. Only legacy records without any
-			// stored profile continue to inherit the daemon default.
-			if hasStoredProfile && (storedProfile == "" || strings.EqualFold(storedProfile, "default")) {
-				storedProfile = "default"
-			}
 			if profile != "" && profile != storedProfile {
 				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the model profile differs from the conversation's saved profile"}
 			}
 			profile = storedProfile
 			if hasSnapshot && s.missingEmbeddedModelProfile(runnerID, storedProfile) {
-				profile = "default"
+				profile = ""
 			}
 			if strings.TrimSpace(record.CWD) == "" {
 				return nil, &workspaceRunnerTargetError{status: http.StatusConflict, message: "the conversation has no saved working directory on its runner"}
@@ -132,19 +128,15 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner is offline"}
 	}
 	if conversationID == "" && chat.NormalizeRequestedProfile(profile) != "" && !llm.HasConfiguredProfile(profile) {
-		if principal, ok := principalFromContext(r.Context()); ok {
-			registered, found := s.registeredProfile(extensionProfileKey{principal.ID, runnerID, profile}, runner.Generation)
-			if found {
-				if _, err := chat.ResolveExtensionProfile(registered, ""); err != nil {
-					return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "could not resolve extension profile", err: err}
-				}
-				extensionProfile = true
-			}
+		config, err := s.resolveModelProfile(r.Context(), runnerID, profile, "")
+		if err != nil {
+			return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "could not resolve model profile", err: err}
 		}
+		extensionProfile = config.ExtensionProfile
 	}
 	if extensionProfile {
 		// Registered model profiles have no runner-local environment overlay.
-		profile = "default"
+		profile = ""
 	}
 	return &workspaceRunnerTarget{Runner: runner, CWD: cwd, Profile: profile, EnvironmentProfile: environmentProfile}, nil
 }

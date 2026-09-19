@@ -8,6 +8,7 @@ interface NewChatSelectProps {
   testId: string;
   value: string;
   options: { value: string; label: string; disabled?: boolean }[];
+  placeholder?: string;
   disabled?: boolean;
   busy?: boolean;
   wide?: boolean;
@@ -19,6 +20,7 @@ const NewChatSelect = ({
   testId,
   value,
   options,
+  placeholder,
   disabled,
   busy,
   wide,
@@ -180,7 +182,7 @@ const NewChatSelect = ({
           role="combobox"
           type="button"
         >
-          {selectedOption?.label ?? options[0]?.label}
+          {selectedOption?.label ?? placeholder ?? options[0]?.label}
           <span className="new-chat-select-chevron" aria-hidden="true">
             <ChevronDown className="h-4 w-4" strokeWidth={1.8} />
           </span>
@@ -345,11 +347,13 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
               <NewChatSelect
                 label="Profile"
                 testId="new-chat-profile-select"
+                placeholder="Select a profile"
+                disabled={availableProfiles.length === 0}
                 onChange={onProfileDraftChange}
                 value={profileDraft}
                 options={availableProfiles.map((profile) => ({
                   value: profile.name,
-                  label: profile.name,
+                  label: profile.active ? `${profile.name} (Default)` : profile.name,
                 }))}
               />
               <NewChatSelect
@@ -486,7 +490,9 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
               </button>
               <button
                 className="new-chat-primary-button"
-                disabled={reasoningEffortLoading || !selectedRunnerAvailable}
+                disabled={
+                  reasoningEffortLoading || !selectedRunnerAvailable || !profileDraft.trim()
+                }
                 onClick={onCommit}
                 type="button"
               >

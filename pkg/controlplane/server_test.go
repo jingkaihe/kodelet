@@ -1260,6 +1260,11 @@ func TestServer_handleGetConversationStreamFormatSupportsLegacyResponsesProvider
 }
 
 func TestServer_handleGetChatSettings_NeverUsesLocalCWD(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "work-model"})
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("USERPROFILE", homeDir)
@@ -1346,6 +1351,11 @@ func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
 }
 
 func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "work-model"})
 	config := embeddedRunnerTestConfig(t)
 	workspace := config.EmbeddedRunner.Workspace
 	t.Setenv("HOME", workspace) // Even coincident daemon HOME must not abbreviate runner paths.
@@ -1618,14 +1628,14 @@ func TestGetWebUIProfileOptionsHonoursConfigFileEnv(t *testing.T) {
 	t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
 
 	viper.Reset()
-	viper.Set("profile", "deep")
+	viper.SetConfigFile(overridePath)
+	require.NoError(t, viper.ReadInConfig())
 
 	options := getWebUIProfileOptions()
 
-	require.Len(t, options, 3)
-	assert.Equal(t, ChatProfileOption{Name: "default", Scope: webUIBuiltInProfileScope}, options[0])
-	assert.Equal(t, ChatProfileOption{Name: "deep", Scope: webUIOverrideProfileScope, Active: true}, options[1])
-	assert.Equal(t, ChatProfileOption{Name: "flair", Scope: webUIOverrideProfileScope}, options[2])
+	require.Len(t, options, 2)
+	assert.Equal(t, ChatProfileOption{Name: "deep", Scope: webUIOverrideProfileScope, Active: true}, options[0])
+	assert.Equal(t, ChatProfileOption{Name: "flair", Scope: webUIOverrideProfileScope}, options[1])
 }
 
 func TestGetWebUIProfileOptionsPreservesOverridePrecedence(t *testing.T) {
@@ -1656,15 +1666,19 @@ func TestGetWebUIProfileOptionsPreservesOverridePrecedence(t *testing.T) {
 
 	viper.Reset()
 	viper.Set("profile", "shared")
+	viper.Set("profiles", map[string]any{
+		"global-only": map[string]any{}, "override-only": map[string]any{}, "shared": map[string]any{},
+	})
 
 	options := getWebUIProfileOptions()
 
-	require.Len(t, options, 5)
-	assert.Equal(t, ChatProfileOption{Name: "default", Scope: webUIBuiltInProfileScope}, options[0])
-	assert.Equal(t, ChatProfileOption{Name: "global-only", Scope: webUIGlobalProfileScope}, options[1])
-	assert.Equal(t, ChatProfileOption{Name: "override-only", Scope: webUIOverrideProfileScope}, options[2])
-	assert.Equal(t, ChatProfileOption{Name: "repo-only", Scope: webUIRepoProfileScope}, options[3])
-	assert.Equal(t, ChatProfileOption{Name: "shared", Scope: webUIOverrideProfileScope, Active: true}, options[4])
+	require.Len(t, options, 3)
+	assert.Equal(t, ChatProfileOption{Name: "global-only", Scope: webUIGlobalProfileScope}, options[0])
+	assert.Equal(t, ChatProfileOption{Name: "override-only", Scope: webUIOverrideProfileScope}, options[1])
+	assert.Equal(t, ChatProfileOption{Name: "shared", Scope: webUIOverrideProfileScope, Active: true}, options[2])
+	for _, option := range options {
+		assert.NotEqual(t, "repo-only", option.Name, "the picker must not advertise profiles absent from daemon configuration")
+	}
 }
 
 func TestServer_handleGetChatSettings(t *testing.T) {
@@ -1678,16 +1692,17 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 
 	viper.Reset()
 	viper.Set("profile", "work")
-	viper.Set("provider", "openai")
-	viper.Set("reasoning_effort", "medium")
-	viper.Set("allowed_reasoning_efforts", []string{"medium"})
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
+			"hidden":                    true,
+			"provider":                  "openai",
+			"model":                     "work-model",
 			"reasoning_effort":          "high",
 			"allowed_reasoning_efforts": []string{"low", "high"},
 		},
 		"anthropic": map[string]any{
 			"provider":                  "anthropic",
+			"model":                     "anthropic-model",
 			"reasoning_effort":          "max",
 			"allowed_reasoning_efforts": []string{"medium", "max"},
 		},
@@ -1708,9 +1723,9 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	assert.Equal(t, "high", response.ReasoningEffort)
 	assert.Equal(t, []string{"low", "high"}, response.ReasoningEffortOptions)
 	require.NotEmpty(t, response.Profiles)
-	assert.Equal(t, "default", response.Profiles[0].Name)
+	assert.Contains(t, response.Profiles, ChatProfileOption{Name: "work", Scope: "configured", Active: true, Hidden: true})
 
-	req = httptest.NewRequest("GET", "/api/chat/settings?profile=anthropic", nil)
+	req = httptest.NewRequest("GET", "/api/chat/settings?profile=anthropic&includeHidden=true", nil)
 	w = httptest.NewRecorder()
 
 	server.handleGetChatSettings(w, req)
@@ -1721,6 +1736,9 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	assert.Equal(t, "anthropic", response.CurrentProfile)
 	assert.Equal(t, "max", response.ReasoningEffort)
 	assert.Equal(t, []string{"medium", "max"}, response.ReasoningEffortOptions)
+	for _, option := range response.Profiles {
+		assert.Equal(t, option.Name == "work", option.Active, "the default badge must not follow the requested selection")
+	}
 }
 
 func TestServer_handleGetChatSettingsUsesProviderReasoningEffortsWithoutAllowlist(t *testing.T) {
@@ -1733,8 +1751,10 @@ func TestServer_handleGetChatSettingsUsesProviderReasoningEffortsWithoutAllowlis
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("reasoning_effort", "medium")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{
+		"provider": "anthropic", "model": "work-model", "reasoning_effort": "medium",
+	})
 
 	server := &Server{router: mux.NewRouter()}
 	req := httptest.NewRequest("GET", "/api/chat/settings", nil)

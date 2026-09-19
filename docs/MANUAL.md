@@ -37,7 +37,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Profile Management Commands](#profile-management-commands)
   - [Profile Usage](#profile-usage)
   - [Profile Precedence and Merging](#profile-precedence-and-merging)
-  - [Special "Default" Profile](#special-default-profile)
+  - [Default Profile Selection](#default-profile-selection)
 - [Observability](#observability)
 - [Security Configuration](#security-configuration)
   - [Bash Command Restrictions](#bash-command-restrictions)
@@ -96,6 +96,8 @@ For running locally or building from source:
 Before upgrading, stop older Kodelet processes and back up `~/.kodelet`. Use matching client and server releases, and do not let older clients write to the upgraded database. Existing history is preserved; [move legacy conversations to a runner](#conversation-management) before continuing them.
 
 ### Local background server
+
+On a fresh daemon host, run `kodelet setup` first and configure the selected profile's credentials. Setup writes named profiles and the required `profile: openai` selection; there is no built-in unnamed model configuration.
 
 ```bash
 kodelet chat                    # start or reuse the local server, then open chat
@@ -787,27 +789,18 @@ Configure models and credentials on the daemon, workspace tools on the runner, a
 
 Kodelet settings use the `KODELET_` prefix; provider keys keep their provider-specific names. Set environment variables before starting the daemon or runner that uses them:
 
+Model-valued environment variables such as `KODELET_PROVIDER`, `KODELET_MODEL`, `KODELET_WEAK_MODEL`, `KODELET_MAX_TOKENS`, `KODELET_REASONING_EFFORT`, and `KODELET_OPENAI_API_MODE` have been removed and are rejected at daemon startup. Define those values inside named profiles instead. `KODELET_PROFILE` remains supported to select a configured profile, as do provider credential variables such as `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`.
+
 ```bash
 # Logging configuration
 export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
 
-# LLM configuration - Anthropic
+# Provider credentials stay on the daemon host.
 export ANTHROPIC_API_KEY="sk-ant-api..."
-export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-export KODELET_MODEL="claude-sonnet-4-6"
-export KODELET_MAX_TOKENS="8192"
-export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
-
-# LLM configuration - OpenAI
 export OPENAI_API_KEY="sk-..."
-export KODELET_PROVIDER="openai"
-export KODELET_MODEL="gpt-4.1"
-export KODELET_MAX_TOKENS="8192"
-export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh|max; Anthropic adaptive thinking: none|low|medium|high|xhigh|max
-export KODELET_OPENAI_TEXT_VERBOSITY="low"  # Responses API only: low|medium|high
 
-# Profile configuration
-export KODELET_PROFILE="anthropic"  # Use a specific profile
+# Model configuration is defined under profiles, not top-level model variables.
+export KODELET_PROFILE="anthropic"  # Select a configured named profile
 
 # Default Kodelet server
 export KODELET_SERVER="https://kodelet.example"
@@ -829,10 +822,13 @@ Configuration files are loaded in this order:
 ```yaml
 # Global config (~/.kodelet/config.yaml)
 server: "https://kodelet.example"
-provider: "anthropic"
-model: "claude-sonnet-4-6"
-max_tokens: 8192
 log_level: "info"
+profile: "anthropic"
+profiles:
+  anthropic:
+    provider: "anthropic"
+    model: "claude-sonnet-4-6"
+    max_tokens: 8192
 ```
 
 `--server` overrides `KODELET_SERVER`, which overrides the user-level `server` setting. Without an explicit server, clients use the local endpoint; only `chat`, `run`, and `acp` start it automatically. See [Local background server](#local-background-server).
@@ -856,23 +852,29 @@ Example `config.yaml`:
 # Logging configuration
 log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 
-# Anthropic configuration
-provider: "anthropic"
-model: "claude-sonnet-4-6"
-max_tokens: 8192
-weak_model: "claude-haiku-4-5-20251001"
-weak_model_max_tokens: 8192
+# Required default selection and independent model definitions
+profile: "anthropic"
+profiles:
+  anthropic:
+    provider: "anthropic"
+    model: "claude-sonnet-4-6"
+    max_tokens: 8192
+    weak_model: "claude-haiku-4-5-20251001"
+    weak_model_max_tokens: 8192
+  openai:
+    provider: "openai"
+    model: "gpt-4.1"
+    max_tokens: 8192
+    weak_model: "gpt-4.1-mini"
+    weak_model_max_tokens: 4096
+    reasoning_effort: "medium"
+    allowed_reasoning_efforts: ["low", "medium", "high"]
 
-# Alternative OpenAI configuration
-# provider: "openai"
-# model: "gpt-4.1"
-# max_tokens: 8192
-# weak_model: "gpt-4.1-mini"
-# weak_model_max_tokens: 4096
-# reasoning_effort: "medium"
-# allowed_reasoning_efforts: ["low", "medium", "high"]
-# weak_reasoning_effort: "low"
-# Anthropic adaptive-thinking models also use reasoning_effort via output_config.effort.
+# Shared settings are retained for every profile.
+extensions:
+  enabled: true
+tracing:
+  enabled: false
 
 # Security configuration
 allowed_commands: []  # Empty means use default banned commands
@@ -935,38 +937,33 @@ Kodelet includes a comprehensive profile system that allows you to define and sw
 
 ### Profile Definition
 
-Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Omitted fields inherit the daemon's base settings.
+Define model profiles under `profiles` in the daemon's `~/.kodelet/config.yaml` or `KODELET_CONFIG_FILE`, not repository configuration. Named profiles are the only model configuration mechanism. The daemon requires a `profile: <name>` selector, and every profile must explicitly define `provider` and `model`. Missing selectors, nonexistent selected profiles, and top-level model settings are configuration errors. Clients and standalone runners do not need model profiles.
 
 ```yaml
+# Default selection for new conversations
+profile: "anthropic"
 
-# Default profile
-model: "claude-sonnet-4-6"
-weak_model: "claude-haiku-4-5-20251001"
-max_tokens: 16000
-weak_model_max_tokens: 8192
-# On adaptive Claude models, reasoning_effort controls adaptive thinking.
-# thinking_budget_tokens is only used on older Claude models that still use manual thinking.
-reasoning_effort: "medium"
-allowed_reasoning_efforts: ["low", "medium", "high"]
-
-# Anthropic-compatible platforms can force adaptive-thinking plumbing for the configured
-# non-standard model IDs that Kodelet does not know about yet.
-anthropic:
-  # platform: copilot
-  # adaptive_thinking: true
-
-# Active profile selection
-profile: "anthropic"  # Optional: specify the active profile
+# Shared configuration remains outside profiles.
+extensions:
+  enabled: true
+tracing:
+  enabled: false
 
 # Profile definitions
 profiles:
   anthropic:
+    provider: "anthropic"
     model: "opus-5" # alias to "claude-opus-5"
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
     reasoning_effort: "max"
     allowed_reasoning_efforts: ["medium", "high", "xhigh", "max"]
+    # On adaptive Claude models, reasoning_effort controls adaptive thinking.
+    # thinking_budget_tokens applies only to models using manual thinking.
+    # For non-standard model IDs supporting adaptive thinking:
+    # anthropic:
+    #   adaptive_thinking: true
 
   openai:
     provider: "openai"
@@ -977,7 +974,6 @@ profiles:
     allowed_reasoning_efforts: ["low", "medium", "high"]
     tool_mode: "patch"
     enable_fs_search_tools: false
-    enable_search: true
     openai:
       platform: copilot
 
@@ -1023,7 +1019,6 @@ To change the default, run these commands **on the daemon host**, then restart t
 ```bash
 kodelet profile --local show anthropic
 kodelet profile --local use anthropic -g
-kodelet profile --local use default -g
 ```
 
 `--local` works with configuration files on the current machine, not a remote server; `-g` selects the user configuration. If using `KODELET_CONFIG_FILE`, edit that file directly.
@@ -1036,9 +1031,6 @@ kodelet profile --local use default -g
 kodelet run --profile anthropic "explain this architecture"
 kodelet commit --profile anthropic
 kodelet run --profile openai "what does this function do?"
-
-# Use base configuration without any profile
-kodelet run --profile default "use base configuration"
 ```
 
 **Daemon-host environment default (before starting the daemon):**
@@ -1050,25 +1042,21 @@ kodelet serve
 ### Profile Precedence and Merging
 
 - `--profile NAME` selects a model profile available on the daemon; unknown names fail for new conversations.
-- `--profile default` uses the daemon's base settings without a named profile.
-- Omitting `--profile` uses the daemon's active default.
-- Profile settings override base settings; omitted fields inherit them. Restart the server after changing profile definitions or defaults.
+- Omitting `--profile` uses the daemon's configured `profile:` selection, including a daemon-host `KODELET_PROFILE` or `serve --profile` override.
+- Provider/model, weak-model settings, token limits, reasoning settings, and model-specific provider options belong only inside profiles. Optional model fields use built-in field defaults, not top-level settings or another profile.
+- Shared top-level settings, including extensions, skills, tracing, tools, aliases, and connection/authentication settings, remain available. Supported profile overrides deep-merge nested maps; scalar and list values replace inherited values. Omitted shared fields are retained.
+- Existing daemon/runner ownership and process-startup behavior remain unchanged. Selecting a profile does not dynamically reconfigure tracing or other process-level services.
+- Restart the server after changing profile definitions or its default selection.
 
-Resuming a conversation whose profile was removed keeps its saved model settings and uses the base environment, not the active default profile.
+Existing conversations keep their saved model configuration, even when the configured default changes or their profile is removed. A removed profile uses the shared environment, not the newly selected default profile's environment.
 
-### Special "Default" Profile
+### Default Profile Selection
 
-The `"default"` profile is a special reserved name that means "use base configuration without any profile":
+“Default” describes which named profile is selected implicitly; it is not a separate model configuration. Pickers list actual profile names and mark the configured default separately from the current selection. Choosing another profile for one conversation does not change the daemon's default.
 
-```bash
-# Select base configuration for one conversation
-kodelet run --profile default "query"
+There is no synthetic `default` entry, unnamed fallback model, or reserved model-profile name. `--profile default` is valid only when `profiles.default` is explicitly defined, and resolves it like any other profile.
 
-# Change the daemon-host default, then restart serve
-kodelet profile --local use default -g
-```
-
-You cannot define a profile named "default" in your configuration files - it's reserved for this special purpose.
+`kodelet setup` writes named `openai` and `anthropic` profiles and sets `profile: openai`. The default selector is required even with a single configured profile; Kodelet never chooses a profile based on its name or order.
 
 ## Observability
 
@@ -1184,11 +1172,16 @@ Features:
 - Function calling capabilities
 - Vision support (planned)
 
-Configure OpenAI Responses API text verbosity under the provider block. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Chat Completions requests do not send this setting:
+Configure OpenAI Responses API text verbosity under the model profile's provider block. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Chat Completions requests do not send this setting:
 
 ```yaml
-openai:
-  text_verbosity: low
+profiles:
+  openai:
+    provider: openai
+    model: gpt-6-astra
+    openai:
+      api_mode: responses
+      text_verbosity: low
 ```
 
 ## OpenAI Codex Authentication
@@ -1219,16 +1212,19 @@ To log out of Codex or Copilot, stop the server, run `kodelet codex logout --loc
 
 ### Configure Codex
 
-Set these model defaults in the daemon-host configuration and restart `serve`.
+Define this named model profile in the daemon-host configuration and restart `serve`.
 
 ```yaml
-provider: openai
-model: gpt-6-astra
-openai:
-  platform: codex
-  api_mode: responses
-  service_tier: fast
-  websocket_mode: true
+profile: codex
+profiles:
+  codex:
+    provider: openai
+    model: gpt-6-astra
+    openai:
+      platform: codex
+      api_mode: responses
+      service_tier: fast
+      websocket_mode: true
 ```
 
 `openai.service_tier` is optional. Kodelet accepts OpenAI's native values
@@ -1251,11 +1247,17 @@ local input context. Only one response is in flight on each socket. If WebSocket
 setup or streaming fails while this is enabled, the request fails after the
 configured retries instead of silently switching to HTTP.
 
-You can force HTTP streaming with:
+You can force HTTP streaming inside the profile:
 
 ```yaml
-openai:
-  websocket_mode: false
+profiles:
+  codex:
+    provider: openai
+    model: gpt-6-astra
+    openai:
+      platform: codex
+      api_mode: responses
+      websocket_mode: false
 ```
 
 ## OpenAI Native Web Search
@@ -1273,11 +1275,16 @@ Native OpenAI search is enabled by default and can be controlled with:
 kodelet run --enable-openai-search "what changed in postgres 18 this week?"
 ```
 
-Or in config:
+Or inside a model profile:
 
 ```yaml
-openai:
-  enable_search: true
+profiles:
+  openai:
+    provider: openai
+    model: gpt-6-astra
+    openai:
+      api_mode: responses
+      enable_search: true
 ```
 
 Kodelet only enables this built-in tool when all of the following are true:

@@ -50,7 +50,7 @@ kodelet anthropic-login
 # Or use an API key
 export ANTHROPIC_API_KEY="sk-ant-api..."
 
-kodelet run --provider anthropic "query"
+kodelet run --profile anthropic "query"
 ```
 
 Common model aliases in examples include `sonnet-46`, `haiku-45`, `opus-48`, and `opus-5`. Check current config/source for the latest alias mapping.
@@ -59,16 +59,21 @@ Common model aliases in examples include `sonnet-46`, `haiku-45`, `opus-48`, and
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-kodelet run --provider openai --model gpt-5 "query"
+kodelet run --profile openai "query"
 ```
 
 OpenAI supports reasoning effort values such as `none`, `minimal`, `low`, `medium`, `high`, and `xhigh` when supported by the selected model/API mode.
 
-OpenAI text verbosity applies to the Responses API. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Chat Completions requests do not send this setting. Set `openai.text_verbosity` to `low`, `medium`, or `high`:
+OpenAI text verbosity applies to the Responses API. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Chat Completions requests do not send this setting. Set `openai.text_verbosity` to `low`, `medium`, or `high` inside the model profile:
 
 ```yaml
-openai:
-  text_verbosity: high
+profiles:
+  openai:
+    provider: openai
+    model: gpt-6-astra
+    openai:
+      api_mode: responses
+      text_verbosity: high
 ```
 
 ## Example config
@@ -81,18 +86,26 @@ aliases:
   opus-5: claude-opus-5
   sonnet-46: claude-sonnet-4-6
 
-profile: default
-provider: anthropic
-model: sonnet-46
-weak_model: haiku-45
-max_tokens: 16000
-reasoning_effort: medium
-allowed_reasoning_efforts: [low, medium, high]
-anthropic:
-  # Optional: force adaptive-thinking request plumbing for custom Anthropic model IDs.
-  # adaptive_thinking: true
+profile: anthropic
+
+# Shared settings remain top-level and are retained for every profile.
+extensions:
+  enabled: true
+tracing:
+  enabled: false
 
 profiles:
+  anthropic:
+    provider: anthropic
+    model: sonnet-46
+    weak_model: haiku-45
+    max_tokens: 16000
+    reasoning_effort: medium
+    allowed_reasoning_efforts: [low, medium, high]
+    # Optional: force adaptive-thinking plumbing for custom Anthropic model IDs.
+    # anthropic:
+    #   adaptive_thinking: true
+
   openai:
     provider: openai
     model: gpt-6-astra
@@ -116,7 +129,13 @@ profiles:
 
 ```
 
-Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
+Named profiles are the only model configuration mechanism. The daemon requires `profile: <name>` to select its default and an explicit `provider` and `model` in every profile. Omitting `--profile` selects that configured name; an explicit name selects that profile. Missing selectors and unknown names are errors. There is no unnamed model fallback or reserved `default` model profile; `default` works only if a profile with that name is defined.
+
+Model-valued environment variables such as `KODELET_MODEL`, `KODELET_PROVIDER`, `KODELET_WEAK_MODEL`, `KODELET_MAX_TOKENS`, `KODELET_REASONING_EFFORT`, and `KODELET_OPENAI_API_MODE` are removed and rejected at daemon startup. Define their values inside profiles. `KODELET_PROFILE` remains supported, along with provider credential variables and supported explicit CLI model overrides.
+
+Model fields, including weak-model settings, token limits, reasoning settings, and model-specific provider options, belong inside profiles, not at the top level. Optional model fields use built-in field defaults. Shared non-model settings such as extensions, skills, tracing, tools, aliases, and connection/authentication settings remain top-level. Supported profile overrides deep-merge nested maps, replace scalar and list values, and preserve omitted shared fields. This does not change daemon/runner ownership or make process-startup settings dynamically switchable.
+
+Pickers list actual profile names and mark the configured default separately from the current selection. Changing `profile:` does not change an explicitly selected profile's model settings. Restart the daemon after changing its configuration; existing conversations retain their saved model configuration. `kodelet setup` generates named `openai` and `anthropic` profiles and selects `openai`.
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 

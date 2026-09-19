@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -154,19 +155,12 @@ func (s *Server) registeredProfile(key extensionProfileKey, generation int64) (e
 
 func (s *Server) modelProfileOptions(ctx context.Context, runnerID, selected string, includeHidden bool) []ChatProfileOption {
 	options := getWebUIProfileOptions()
-	if includeHidden {
-		for name := range llm.ProfileSources() {
-			if llm.IsProfileHidden(name) {
-				options = append(options, ChatProfileOption{Name: name, Scope: "configured", Hidden: true})
-			}
-		}
-	}
 	principal, authenticated := principalFromContext(ctx)
 	if authenticated && s.runnerRegistry != nil {
 		if runner, ok := s.runnerRegistry.Runner(runnerID); ok && runner.Connected {
 			s.extensionProfilesMu.RLock()
 			for key, registered := range s.extensionProfiles {
-				if key.principalID != principal.ID || key.runnerID != runnerID || registered.generation != runner.Generation || (registered.profile.Hidden && !includeHidden) {
+				if key.principalID != principal.ID || key.runnerID != runnerID || registered.generation != runner.Generation {
 					continue
 				}
 				options = append(options, ChatProfileOption{Name: key.name, Scope: "extension", Hidden: registered.profile.Hidden})
@@ -174,14 +168,11 @@ func (s *Server) modelProfileOptions(ctx context.Context, runnerID, selected str
 			s.extensionProfilesMu.RUnlock()
 		}
 	}
+	options = slices.DeleteFunc(options, func(option ChatProfileOption) bool {
+		return option.Hidden && !includeHidden && option.Name != selected
+	})
 	sort.Slice(options, func(i, j int) bool {
-		if options[i].Name == "default" || options[j].Name == "default" {
-			return options[i].Name == "default"
-		}
 		return options[i].Name < options[j].Name
 	})
-	for i := range options {
-		options[i].Active = options[i].Name == selected
-	}
 	return options
 }

@@ -36,6 +36,8 @@ type ConversationOpenAISnapshot struct {
 	TextVerbosity OpenAITextVerbosity     `json:"text_verbosity,omitempty" yaml:"text_verbosity,omitempty"`
 	ServiceTier   OpenAIServiceTier       `json:"service_tier,omitempty" yaml:"service_tier,omitempty"`
 	ManualCache   bool                    `json:"manual_cache,omitempty" yaml:"manual_cache,omitempty"`
+	EnableSearch  *bool                   `json:"enable_search,omitempty" yaml:"enable_search,omitempty"`
+	WebSocketMode *bool                   `json:"websocket_mode,omitempty" yaml:"websocket_mode,omitempty"`
 	Models        *CustomModels           `json:"models,omitempty" yaml:"models,omitempty"`
 	Pricing       map[string]ModelPricing `json:"pricing,omitempty" yaml:"pricing,omitempty"`
 }
@@ -83,6 +85,8 @@ func NewConversationConfigSnapshot(config Config) (*ConversationConfigSnapshot, 
 			snapshot.OpenAI.TextVerbosity = config.OpenAI.TextVerbosity
 			snapshot.OpenAI.ServiceTier = config.OpenAI.ServiceTier
 			snapshot.OpenAI.ManualCache = config.OpenAI.ManualCache
+			snapshot.OpenAI.EnableSearch = cloneOption(config.OpenAI.EnableSearch)
+			snapshot.OpenAI.WebSocketMode = cloneOption(config.OpenAI.WebSocketMode)
 			snapshot.OpenAI.Models = cloneCustomModels(config.OpenAI.Models)
 			snapshot.OpenAI.Pricing = cloneModelPricing(config.OpenAI.Pricing)
 		}
@@ -203,6 +207,8 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 		}
 		config.OpenAI.ServiceTier = openAI.ServiceTier
 		config.OpenAI.ManualCache = openAI.ManualCache
+		config.OpenAI.EnableSearch = cloneOption(openAI.EnableSearch)
+		config.OpenAI.WebSocketMode = cloneOption(openAI.WebSocketMode)
 		config.OpenAI.Models = cloneCustomModels(openAI.Models)
 		config.OpenAI.Pricing = cloneModelPricing(openAI.Pricing)
 	case "anthropic":
@@ -232,6 +238,8 @@ func CloneConversationConfigSnapshot(snapshot *ConversationConfigSnapshot) *Conv
 	cloned := *snapshot
 	if snapshot.OpenAI != nil {
 		openAI := *snapshot.OpenAI
+		openAI.EnableSearch = cloneOption(snapshot.OpenAI.EnableSearch)
+		openAI.WebSocketMode = cloneOption(snapshot.OpenAI.WebSocketMode)
 		openAI.Models = cloneCustomModels(snapshot.OpenAI.Models)
 		openAI.Pricing = cloneModelPricing(snapshot.OpenAI.Pricing)
 		cloned.OpenAI = &openAI

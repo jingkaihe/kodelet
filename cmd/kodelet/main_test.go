@@ -320,12 +320,14 @@ func TestLoadConfigFilesMergesTrustedOverrideWithoutRepositorySettings(t *testin
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Chdir(t.TempDir())
-	viper.SetDefault("provider", "openai")
-	viper.SetDefault("model", "default-model")
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o755))
 	globalConfig := `
 server: https://global.example/control
 profile: global-profile
+profiles:
+  global-profile:
+    provider: openai
+    model: global-model
 browser:
   executable: /global/chrome
   idle_timeout: 7m
@@ -360,14 +362,21 @@ extensions:
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte(repositoryConfig), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
-	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","browser":{"executable":"/override/chrome"},"serve":{"runner_auth_mode":"enrollment"},"extensions":{"local_dir":"/tmp/sdk-extensions"}}`), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte(`{
+  "profiles": {"global-profile": {"provider": "anthropic"}},
+  "browser": {"executable": "/override/chrome"},
+  "serve": {"runner_auth_mode": "enrollment"},
+  "extensions": {"local_dir": "/tmp/sdk-extensions"}
+}`), 0o644))
 	t.Setenv(configFileEnv, configPath)
 	t.Setenv(configFileModeEnv, configFileModeMerge)
 
 	require.NoError(t, loadConfigFiles())
 
-	assert.Equal(t, "anthropic", viper.GetString("provider"))
-	assert.Equal(t, "default-model", viper.GetString("model"))
+	assert.Equal(t, "anthropic", viper.GetString("profiles.global-profile.provider"))
+	assert.Equal(t, "global-model", viper.GetString("profiles.global-profile.model"))
+	assert.Empty(t, viper.GetString("provider"))
+	assert.Empty(t, viper.GetString("model"))
 	assert.Equal(t, "https://global.example/control", viper.GetString("server"))
 	assert.Equal(t, "global-profile", viper.GetString("profile"))
 	assert.Equal(t, "/override/chrome", viper.GetString("browser.executable"))
@@ -389,22 +398,36 @@ func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Chdir(t.TempDir())
-	viper.SetDefault("provider", "openai")
-	viper.SetDefault("model", "default-model")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte("model: global-model\nserve:\n  web_auth_mode: none\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte(`profile: global
+profiles:
+  global:
+    provider: openai
+    model: global-model
+serve:
+  web_auth_mode: none
+`), 0o644))
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte("model: repo-model\n"), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
-	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","server":"https://override.example/control","serve":{"web_auth_mode":"oidc","oidc":{"issuer":"https://override-issuer.example"}}}`), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte(`{
+  "profile": "override",
+  "profiles": {"override": {"provider": "anthropic", "model": "override-model"}},
+  "server": "https://override.example/control",
+  "serve": {"web_auth_mode": "oidc", "oidc": {"issuer": "https://override-issuer.example"}}
+}`), 0o644))
 	t.Setenv(configFileEnv, configPath)
 	t.Setenv(configFileModeEnv, configFileModeIsolate)
 
 	require.NoError(t, loadConfigFiles())
 
-	assert.Equal(t, "anthropic", viper.GetString("provider"))
-	assert.Equal(t, "default-model", viper.GetString("model"))
+	assert.Equal(t, "override", viper.GetString("profile"))
+	assert.Equal(t, "anthropic", viper.GetString("profiles.override.provider"))
+	assert.Equal(t, "override-model", viper.GetString("profiles.override.model"))
+	assert.Empty(t, viper.GetStringMap("profiles.global"))
+	assert.Empty(t, viper.GetString("provider"))
+	assert.Empty(t, viper.GetString("model"))
 	assert.Equal(t, "https://override.example/control", viper.GetString("server"))
 	assert.Equal(t, "oidc", viper.GetString("serve.web_auth_mode"))
 	assert.Equal(t, "https://override-issuer.example", viper.GetString("serve.oidc.issuer"))

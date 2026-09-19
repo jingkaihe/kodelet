@@ -129,7 +129,7 @@ func TestProfilePickerPreservesResourcesWithoutRemoteProfileChange(t *testing.T)
 	}
 }
 
-func TestLoadProfileOptionsDefaultFirstThenSortedConfiguredProfiles(t *testing.T) {
+func TestLoadProfileOptionsSortedConfiguredProfiles(t *testing.T) {
 	oldCWD, err := os.Getwd()
 	require.NoError(t, err)
 	repoDir := t.TempDir()
@@ -155,10 +155,29 @@ func TestLoadProfileOptionsDefaultFirstThenSortedConfiguredProfiles(t *testing.T
   shared:
     model: repo-shared
   default:
-    model: ignored
+    model: named-default-model
 `), 0o644))
 
-	assert.Equal(t, []string{"default", "alpha", "shared", "zeta"}, loadProfileOptions())
+	assert.Equal(t, []string{"alpha", "default", "shared", "zeta"}, loadProfileOptions())
+}
+
+func TestRemoteProfileOptionsDoNotInventNames(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		profile string
+		options []string
+		want    []string
+	}{
+		{name: "missing names"},
+		{name: "named profiles", profile: "deep", options: []string{"flair", "deep"}, want: []string{"flair", "deep"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{Remote: true, Profile: test.profile, ProfileOptions: test.options})
+			t.Cleanup(m.cancel)
+			assert.Equal(t, test.profile, m.profile)
+			assert.Equal(t, test.want, append([]string(nil), m.profileOptions...))
+		})
+	}
 }
 
 func TestLoadProfileOptionsIncludesOverrideLastAndHonoursIsolatedMode(t *testing.T) {
@@ -175,12 +194,12 @@ func TestLoadProfileOptionsIncludesOverrideLastAndHonoursIsolatedMode(t *testing
 
 	t.Run("merge", func(t *testing.T) {
 		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeMerge)
-		assert.Equal(t, []string{"default", "global-only", "override-only", "repo-only"}, loadProfileOptions())
+		assert.Equal(t, []string{"global-only", "override-only", "repo-only"}, loadProfileOptions())
 	})
 
 	t.Run("isolated", func(t *testing.T) {
 		t.Setenv(llm.ConfigFileModeEnv, llm.ConfigFileModeIsolated)
-		assert.Equal(t, []string{"default", "override-only"}, loadProfileOptions())
+		assert.Equal(t, []string{"override-only"}, loadProfileOptions())
 	})
 }
 
@@ -208,7 +227,7 @@ func TestLoadProfileOptionsHidesProfilesWithoutLosingExplicitOrSavedSelection(t 
 	require.NoError(t, viper.ReadInConfig())
 
 	options := loadProfileOptions()
-	assert.Equal(t, []string{"default", "visible-search", "work"}, options)
+	assert.Equal(t, []string{"visible-search", "work"}, options)
 	for _, conversationID := range []string{"", "saved-conversation"} {
 		t.Run("conversation="+conversationID, func(t *testing.T) {
 			m := newModel(t.Context(), Config{

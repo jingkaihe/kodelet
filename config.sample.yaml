@@ -82,26 +82,6 @@ log_format: "json"
 # Enroll a runner separately from its workspace with:
 # kodelet runner enroll --server https://kodelet.example
 
-# LLM Configuration
-# Provider to use (anthropic or openai)
-provider: "anthropic"
-
-# Model to use for LLM interactions
-model: "claude-sonnet-4-6"
-
-# Maximum tokens for responses
-max_tokens: 8192
-
-# Maximum thinking budget for non-adaptive Claude models
-# Adaptive Claude models ignore this and use reasoning_effort instead.
-thinking_budget_tokens: 4048
-
-# Weak model to use for less complex tasks
-weak_model: "claude-haiku-4-5-20251001"
-
-# Maximum tokens for weak model responses
-weak_model_max_tokens: 8192
-
 # Custom system prompt template file
 # Supports Go templates and can include built-in sections, e.g.:
 # {{include "templates/sections/behavior.tmpl" .}}
@@ -126,21 +106,34 @@ aliases:
   opus-48: "claude-opus-4-8"
   opus-5: "claude-opus-5"
 
-# Active profile selection (uncomment to activate a specific profile)
-# profile: "anthropic"
+# Required default model profile for new conversations on the daemon.
+# --profile selects another named profile for one conversation.
+profile: "anthropic"
 
 # Model profiles belong in daemon configuration; select one with --profile.
-# Omitted fields inherit daemon defaults.
+# Each profile requires provider and model. Model settings are not allowed at
+# the top level; optional model fields use built-in defaults, not another profile.
+# Shared top-level settings (extensions, tracing, tools, aliases, etc.) remain
+# available. Profile overrides deep-merge maps and replace scalar/list values.
+# There is no synthetic "default" model profile; that name is ordinary if defined.
 profiles:
   anthropic:
+    provider: "anthropic"
     model: "claude-opus-5"
     weak_model: "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
     reasoning_effort: "max"
     allowed_reasoning_efforts: ["medium", "high", "xhigh", "max"]
+    # Optional maximum thinking budget for non-adaptive Claude models.
+    # Adaptive Claude models ignore this and use reasoning_effort instead.
+    # thinking_budget_tokens: 4048
+    # For non-standard Anthropic-compatible model IDs supporting adaptive thinking:
+    # anthropic:
+    #   adaptive_thinking: true
 
   fast:
+    provider: "anthropic"
     model: "haiku-45"
     weak_model: "haiku-45"
     max_tokens: 4096
@@ -188,6 +181,17 @@ profiles:
     enable_fs_search_tools: false
     openai:
       api_mode: "responses"
+      # Responses text detail: low, medium, or high. Omitted uses upstream default.
+      # text_verbosity: "low"
+      # Request latency tier: auto, default, flex, priority, scale, or fast.
+      # fast is sent upstream as priority; flex is rejected for gpt-6-astra.
+      # service_tier: "fast"
+      # Native web_search is available only on the real OpenAI platform.
+      # enable_search: true
+      # Persistent Responses WebSocket transport; false forces HTTP streaming.
+      # websocket_mode: true
+      # Chat Completions prompt-cache affinity (only when caching is requested).
+      # manual_cache: true
 
   codex:
     provider: "openai"
@@ -218,30 +222,13 @@ environment_profiles:
       allow:
         - "acp-subagent"
 
-# OpenAI specific settings
-# Reasoning effort for supported reasoning/adaptive models
-# OpenAI: none, minimal, low, medium, high, xhigh, max
-# Anthropic adaptive thinking: none, low, medium, high, xhigh, max
-reasoning_effort: "medium"
-
-# Optional policy for reasoning efforts that users may select when creating a
-# conversation. Empty exposes every effort supported by the provider. Profiles
-# may override this list. Existing conversations keep their persisted effort
-# even if this policy later changes.
-# allowed_reasoning_efforts: ["low", "medium", "high"]
-
-# Anthropic-specific settings
+# Shared Anthropic connection settings. Model behavior belongs inside profiles.
 anthropic:
   # Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
   # platform: "copilot"
 
   # Custom Anthropic-compatible base URL (overrides platform defaults)
   # base_url: "https://proxy.example"
-
-  # Force adaptive-thinking request plumbing for the configured custom Anthropic model ID.
-  # Useful when an Anthropic-compatible platform supports a non-standard ID like
-  # "claude-opus-4.6" but still accepts Anthropic output_config.effort.
-  # adaptive_thinking: true
 
 # API Retry Configuration
 # Controls retry behavior for API calls
@@ -329,16 +316,9 @@ allowed_tools: []
 #   - "web_fetch"
 #   - "view_image"
 
-# Example OpenAI configuration (uncomment to use)
-# provider: "openai"
-# model: "gpt-6-astra"
-# max_tokens: 8192
-# weak_model: "gpt-5.6-luna"
-# weak_model_max_tokens: 4096
-# reasoning_effort: "medium"
-
-# OpenAI-compatible API configuration
+# Shared OpenAI-compatible connection settings and model registries.
 # Supports any OpenAI-compatible provider (Fireworks, Groq, Together AI, etc.)
+# Model-specific options such as api_mode and text_verbosity belong in profiles.
 openai:
   # Optional platform label used for built-in defaults/metadata (e.g., openai, codex, fireworks)
   # platform: "fireworks"
@@ -346,39 +326,6 @@ openai:
   # Custom endpoint/auth configuration
   # base_url: "https://api.fireworks.ai/inference/v1"  # Custom API endpoint
   # api_key_env_var: "FIREWORK_API_KEY"                # Environment variable name for API key (defaults to OPENAI_API_KEY)
-
-  # Select which OpenAI API surface to use.
-  # Kodelet's Responses API path keeps conversation state locally by replaying
-  # input history with store: false and a stable prompt_cache_key, rather than
-  # relying on previous_response_id/server-stored conversation state.
-  # api_mode: "responses"
-
-  # Control generated text detail for the Responses API.
-  # Supported values are low, medium, and high. The field is omitted unless
-  # explicitly configured, so the upstream default applies (medium on OpenAI).
-  # text_verbosity: "low"
-
-  # Optional request latency tier. Native OpenAI values are auto, default,
-  # flex, priority, and scale. Kodelet also accepts fast as a Codex-friendly
-  # alias that is sent upstream as priority. Flex is rejected for gpt-6-astra.
-  # service_tier: "fast"
-
-  # Enable OpenAI's native Responses web_search tool when talking to the real
-  # OpenAI platform. This stays off for OpenAI-compatible platforms and custom
-  # base URLs that may not support the built-in tool.
-  # enable_search: true
-
-  # Use a persistent Responses API WebSocket when supported. Sequential model/tool
-  # exchanges reuse one connection and continue with previous_response_id plus only
-  # new input items. Kodelet still sends store: false and automatically reconnects
-  # with full local context when connection-local state is unavailable. Defaults to
-  # true for OpenAI/Codex Responses API calls; set false to force HTTP streaming.
-  # websocket_mode: true
-
-  # Enable manual prompt-cache affinity for Chat Completions.
-  # When true, kodelet adds x-session-affinity header per conversation,
-  # but only on calls where prompt caching is requested.
-  # manual_cache: true
 
   # models:
   #   # Models that support reasoning capabilities
@@ -500,15 +447,12 @@ tracing:
 # Environment variables can also be used to configure Kodelet:
 # - KODELET_LOG_LEVEL: Overrides the log_level setting
 # - KODELET_LOG_FORMAT: Overrides the log_format setting
-# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai)
-# - KODELET_MODEL: Overrides the model setting
-# - KODELET_MAX_TOKENS: Overrides the max_tokens setting
-# - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
-# - KODELET_WEAK_MODEL: Overrides the weak_model setting
-# - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
-# - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting
-# - KODELET_ALLOWED_REASONING_EFFORTS: Overrides allowed_reasoning_efforts
-# - KODELET_WEAK_REASONING_EFFORT: Overrides the weak_reasoning_effort setting (OpenAI)
+# - KODELET_PROFILE: Selects a configured named model profile on the daemon
+# Model-valued environment variables (KODELET_MODEL, KODELET_PROVIDER,
+# KODELET_WEAK_MODEL, KODELET_MAX_TOKENS, KODELET_REASONING_EFFORT,
+# KODELET_OPENAI_API_MODE, etc.) are removed and rejected at daemon startup.
+# Define those values inside profiles. KODELET_PROFILE remains supported.
+# Supported explicit CLI flags can override the selected profile's settings.
 # - KODELET_RETRY_ATTEMPTS: Overrides the retry.attempts setting
 # - KODELET_RETRY_INITIAL_DELAY: Overrides the retry.initial_delay setting (milliseconds)
 # - KODELET_RETRY_MAX_DELAY: Overrides the retry.max_delay setting (milliseconds)
@@ -522,9 +466,6 @@ tracing:
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
-# - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
-# - KODELET_OPENAI_TEXT_VERBOSITY: OpenAI Responses text verbosity (low, medium, or high)
-# - KODELET_OPENAI_WEBSOCKET_MODE: Use Responses API WebSocket mode when supported (true/false)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider

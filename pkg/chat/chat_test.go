@@ -75,7 +75,7 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	assert.Equal(t, llmtypes.OpenAIServiceTierFast, config.OpenAI.ServiceTier)
 }
 
-func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveProfile(t *testing.T) {
+func TestResolveChatConfigDefaultIsAnOrdinaryName(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -85,54 +85,35 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.5")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
+		"default": map[string]any{"provider": "openai", "model": "gpt-5.5"},
 		"work": map[string]any{
 			"provider": "openai",
 			"model":    "gpt-4.1",
 		},
 	})
 
-	config, err := ResolveConfigForNewConversation("default")
-	require.NoError(t, err)
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.5", config.Model)
-	assert.Equal(t, "default", config.Profile)
-}
-
-func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActiveProfile(t *testing.T) {
-	originalSettings := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalSettings {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.5")
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"provider": "openai",
-			"model":    "gpt-4.1",
-		},
-	})
-
-	config, err := ResolveConfigForExistingConversation(&conversations.GetConversationResponse{
-		ID:       "conv-default",
-		Provider: "openai",
-		Metadata: map[string]any{
-			"profile": "default",
-		},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.5", config.Model)
-	assert.Equal(t, "default", config.Profile)
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			var config llmtypes.Config
+			var err error
+			if existing {
+				config, err = ResolveConfigForExistingConversation(&conversations.GetConversationResponse{
+					ID: "conv-default", Provider: "openai", Metadata: map[string]any{"profile": "default"},
+				})
+			} else {
+				config, err = ResolveConfigForNewConversation("default")
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "openai", config.Provider)
+			assert.Equal(t, "gpt-5.5", config.Model)
+			assert.Equal(t, "default", config.Profile)
+		})
+	}
+	viper.Set("profiles", map[string]any{"work": map[string]any{"provider": "openai", "model": "gpt-4.1"}})
+	_, err := ResolveConfigForNewConversation("default")
+	require.ErrorContains(t, err, "not found")
 }
 
 func TestResolveConfigForNewConversationReasoningOverrideRespectsPolicy(t *testing.T) {
@@ -145,11 +126,9 @@ func TestResolveConfigForNewConversationReasoningOverrideRespectsPolicy(t *testi
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "base-model")
-	viper.Set("reasoning_effort", "medium")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
+			"provider":                  "openai",
 			"model":                     "work-model",
 			"reasoning_effort":          "max",
 			"allowed_reasoning_efforts": []string{"low", "max"},
@@ -231,12 +210,11 @@ func TestResolveConfigForLegacyConversationPreservesSelectedProfile(t *testing.T
 	previous := viper.AllSettings()
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
-	viper.Set("provider", "openai")
-	viper.Set("model", "base-model")
 	viper.Set("tool_mode", "full")
 	viper.Set("profile", "deep")
 	viper.Set("profiles", map[string]any{
-		"deep": map[string]any{"model": "active-model", "tool_mode": "patch"},
+		"deep":    map[string]any{"provider": "openai", "model": "active-model", "tool_mode": "patch"},
+		"default": map[string]any{"provider": "openai", "model": "other-model"},
 	})
 	for _, test := range []struct {
 		name     string
@@ -246,8 +224,8 @@ func TestResolveConfigForLegacyConversationPreservesSelectedProfile(t *testing.T
 	}{
 		{name: "nil metadata", profile: "deep", mode: llmtypes.ToolModePatch},
 		{name: "missing profile", metadata: map[string]any{}, profile: "deep", mode: llmtypes.ToolModePatch},
-		{name: "stored empty", metadata: map[string]any{"profile": ""}, profile: "default", mode: llmtypes.ToolModeFull},
-		{name: "stored default", metadata: map[string]any{"profile": " DEFAULT "}, profile: "default", mode: llmtypes.ToolModeFull},
+		{name: "stored empty", metadata: map[string]any{"profile": ""}, profile: "", mode: llmtypes.ToolModeFull},
+		{name: "stored default", metadata: map[string]any{"profile": " default "}, profile: "default", mode: llmtypes.ToolModeFull},
 		{name: "stored named", metadata: map[string]any{"profile": "deep"}, profile: "deep", mode: llmtypes.ToolModePatch},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -269,7 +247,7 @@ func TestResolveConfigForExistingLegacyConversationRejectsReasoningOverride(t *t
 	record := &conversations.GetConversationResponse{
 		ID:       "legacy-conversation",
 		Provider: "openai",
-		Metadata: map[string]any{"model": "gpt-4.1"},
+		Metadata: map[string]any{"model": "gpt-4.1", "profile": ""},
 	}
 
 	_, err := ResolveConfigForExistingConversation(record, "high")
@@ -315,13 +293,13 @@ func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing
 	require.NoError(t, os.Mkdir(backendDir, 0o755))
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.5")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-5.5"})
 
 	config, resolvedCWD, err := ResolveConfig(
 		context.Background(),
 		"",
-		"default",
+		"work",
 		"backend",
 		rootDir,
 	)

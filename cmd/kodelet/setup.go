@@ -21,22 +21,8 @@ func recommendedSetupConfigYAML() string {
     opus-5: claude-opus-5
     sonnet-46: claude-sonnet-4-6
 enable_fs_search_tools: false
-max_tokens: 128000
-model: gpt-6-astra
-openai:
-    api_mode: responses
-profile: default
-provider: openai
-reasoning_effort: xhigh
-allowed_reasoning_efforts:
-    - low
-    - medium
-    - high
-    - xhigh
-    - max
+profile: openai
 tool_mode: patch
-weak_model: gpt-5.6-luna
-weak_model_max_tokens: 8192
 profiles:
     openai:
         max_tokens: 128000
@@ -52,6 +38,7 @@ profiles:
             - xhigh
             - max
         weak_model: gpt-5.6-luna
+        weak_model_max_tokens: 8192
     anthropic:
         max_tokens: 64000
         model: opus-5

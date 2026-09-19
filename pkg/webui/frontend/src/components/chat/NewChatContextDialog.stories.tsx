@@ -68,7 +68,7 @@ const meta = {
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
-    profileDraft: 'default',
+    profileDraft: 'flair',
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],

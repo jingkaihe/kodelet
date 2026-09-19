@@ -17,7 +17,8 @@ profiles:
   shared:
     provider: anthropic
   default:
-    provider: ignored
+    provider: openai
+    model: default-model
 `
 
 const homeConfigContents = `
@@ -85,7 +86,8 @@ func TestOverrideProfilesFromOverrideOnly(t *testing.T) {
 	profiles := OverrideProfiles()
 	assert.Contains(t, profiles, "override-only")
 	assert.Contains(t, profiles, "shared")
-	assert.NotContains(t, profiles, "default")
+	assert.Contains(t, profiles, "default")
+	assert.Equal(t, "default-model", profiles["default"]["model"])
 	assert.Nil(t, GlobalProfiles())
 	profile, configured := OverrideProfileSetting()
 	assert.True(t, configured)
@@ -96,6 +98,7 @@ func TestOverrideProfilesFromOverrideOnly(t *testing.T) {
 	sources := ProfileSources()
 	assert.Equal(t, ProfileSourceOverride, sources["override-only"])
 	assert.Equal(t, ProfileSourceOverride, sources["shared"])
+	assert.Equal(t, ProfileSourceOverride, sources["default"])
 }
 
 func TestProfileLayersPreserveMergePrecedence(t *testing.T) {
@@ -141,6 +144,7 @@ func TestIsolatedModeIgnoresHomeAndRepoConfig(t *testing.T) {
 	assert.Equal(t, map[string]ProfileSource{
 		"override-only": ProfileSourceOverride,
 		"shared":        ProfileSourceOverride,
+		"default":       ProfileSourceOverride,
 	}, ProfileSources())
 }
 

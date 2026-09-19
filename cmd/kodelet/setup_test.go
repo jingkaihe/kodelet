@@ -8,53 +8,48 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *testing.T) {
-	var config struct {
-		Model                   string                    `yaml:"model"`
-		ToolMode                string                    `yaml:"tool_mode"`
-		ReasoningEffort         string                    `yaml:"reasoning_effort"`
-		Aliases                 map[string]string         `yaml:"aliases"`
-		AllowedReasoningEfforts []string                  `yaml:"allowed_reasoning_efforts"`
-		Profiles                map[string]map[string]any `yaml:"profiles"`
-	}
-
-	err := yaml.Unmarshal([]byte(recommendedSetupConfigYAML()), &config)
+	sample, err := os.ReadFile("../../config.sample.yaml")
 	require.NoError(t, err)
-	assert.Equal(t, "gpt-6-astra", config.Model)
-	assert.Equal(t, "patch", config.ToolMode)
-	assert.Equal(t, "claude-fable-5", config.Aliases["fable-5"])
-	assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
-	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
-	assert.Equal(t, "claude-opus-4-8", config.Aliases["opus-48"])
-	assert.Equal(t, "claude-opus-5", config.Aliases["opus-5"])
-	assert.Equal(t, "xhigh", config.ReasoningEffort)
-	assert.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, config.AllowedReasoningEfforts)
-
-	openAIProfile, ok := config.Profiles["openai"]
-	require.True(t, ok)
-	assert.NotContains(t, openAIProfile, "tool_mode")
-	assert.NotContains(t, openAIProfile, "enable_fs_search_tools")
-	assert.Equal(t, "openai", openAIProfile["provider"])
-	assert.Equal(t, "gpt-6-astra", openAIProfile["model"])
-	assert.Equal(t, 128000, openAIProfile["max_tokens"])
-	assert.Equal(t, "xhigh", openAIProfile["reasoning_effort"])
-	assert.Equal(t, []any{"low", "medium", "high", "xhigh", "max"}, openAIProfile["allowed_reasoning_efforts"])
-
-	anthropicProfile, ok := config.Profiles["anthropic"]
-	require.True(t, ok)
-	assert.Equal(t, "anthropic", anthropicProfile["provider"])
-	assert.NotContains(t, anthropicProfile, "tool_mode")
-	assert.NotContains(t, anthropicProfile, "enable_fs_search_tools")
-	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
-	assert.Equal(t, "opus-5", anthropicProfile["model"])
-	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])
-	assert.Equal(t, []any{"low", "medium", "high", "xhigh", "max"}, anthropicProfile["allowed_reasoning_efforts"])
+	for name, content := range map[string]string{
+		"setup":  recommendedSetupConfigYAML(),
+		"sample": string(sample),
+	} {
+		t.Run(name, func(t *testing.T) {
+			previous := viper.AllSettings()
+			viper.Reset()
+			t.Cleanup(func() {
+				viper.Reset()
+				require.NoError(t, viper.MergeConfigMap(previous))
+			})
+			viper.SetConfigType("yaml")
+			require.NoError(t, viper.ReadConfig(strings.NewReader(content)))
+			require.NoError(t, llm.ValidateModelProfiles())
+			config, err := llm.GetConfigFromViper()
+			require.NoError(t, err)
+			assert.Equal(t, viper.GetString("profile"), config.Profile)
+			if name == "setup" {
+				assert.Equal(t, "openai", config.Profile)
+				assert.Equal(t, "patch", viper.GetString("tool_mode"))
+				assert.False(t, viper.GetBool("enable_fs_search_tools"))
+				require.Len(t, config.Profiles, 2)
+				for _, profile := range []string{"openai", "anthropic"} {
+					definition := config.Profiles[profile]
+					require.NotNil(t, definition)
+					assert.NotContains(t, definition, "tool_mode")
+					assert.NotContains(t, definition, "enable_fs_search_tools")
+					assert.Equal(t, profile, definition["provider"])
+				}
+			}
+		})
+	}
 }
 
 func TestSetupCommandCreatesConfig(t *testing.T) {
@@ -108,8 +103,8 @@ func TestSetupCommandOverrideBacksUpExistingConfig(t *testing.T) {
 
 	updated, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	assert.True(t, strings.Contains(string(updated), "profile: default"))
-	assert.True(t, strings.Contains(string(updated), "reasoning_effort: xhigh"))
+	assert.Contains(t, string(updated), "profile: openai")
+	assert.Contains(t, string(updated), "reasoning_effort: xhigh")
 	if runtime.GOOS != "windows" {
 		for _, path := range []string{configPath, filepath.Join(home, ".kodelet", "config.yaml.bak")} {
 			info, statErr := os.Stat(path)

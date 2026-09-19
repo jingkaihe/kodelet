@@ -246,8 +246,8 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "claude-test")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "anthropic", "model": "claude-test"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	workspace := t.TempDir()
 	sentinel := errors.New("stop after runtime acquisition")
@@ -333,8 +333,8 @@ func TestExecutorExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testi
 		}
 	}()
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "anthropic", "model": "claude-sonnet-4-6"})
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
@@ -431,8 +431,8 @@ func TestExecutorStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4.1")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	conversationID := "conversation-dictate-display"
@@ -494,8 +494,8 @@ func TestExecutorIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4.1")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	conversationID := "conversation-dictate-display-image"
@@ -593,8 +593,8 @@ func TestExecutorPersistsFreshChildAndPreservesParentOnResume(t *testing.T) {
 		}
 	})
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4.1")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
@@ -631,8 +631,8 @@ func TestExecutorValidatesParentAgainAtInitialCheckpoint(t *testing.T) {
 				}
 			})
 			viper.Reset()
-			viper.Set("provider", "openai")
-			viper.Set("model", "gpt-4.1")
+			viper.Set("profile", "work")
+			viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 			t.Setenv("OPENAI_API_KEY", "test-key")
 			t.Setenv("KODELET_BASE_PATH", t.TempDir())
 			require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
@@ -687,8 +687,8 @@ func TestExecutorRenameCommandPersistsWithoutCallingModel(t *testing.T) {
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4.1")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	workspace := t.TempDir()
@@ -1088,7 +1088,7 @@ func TestResolveWebChatConfigForNewConversationProfileBranches(t *testing.T) {
 	require.ErrorContains(t, err, "profile 'missing' not found")
 
 	assert.Equal(t, "", NormalizeRequestedProfile(""))
-	assert.Equal(t, "", NormalizeRequestedProfile(" default "))
+	assert.Equal(t, "default", NormalizeRequestedProfile(" default "))
 	assert.Equal(t, "team", NormalizeRequestedProfile(" team "))
 }
 
@@ -1102,16 +1102,16 @@ func TestResolveWebChatConfigForExistingConversationNilAndFallbackBranches(t *te
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "base-model")
+	viper.Set("profile", "main")
 	viper.Set("profiles", map[string]any{
+		"main": map[string]any{"provider": "anthropic", "model": "main-model"},
 		"work": map[string]any{"provider": "openai", "model": "work-model"},
 	})
 
 	config, err := ResolveConfigForExistingConversation(nil)
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
-	assert.Equal(t, "base-model", config.Model)
+	assert.Equal(t, "main-model", config.Model)
 
 	config, err = ResolveConfigForExistingConversation(&conversations.GetConversationResponse{
 		ID:       "conv-123",

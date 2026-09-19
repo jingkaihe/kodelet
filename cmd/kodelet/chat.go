@@ -456,7 +456,7 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 	}
 	profile := strings.TrimSpace(selected.CurrentProfile)
 	if profile == "" {
-		profile = "default"
+		return "", nil, nil, "", errors.New("chat settings did not return a model profile")
 	}
 	options := make([]string, 0, len(selected.Profiles)+1)
 	settings := make(map[string]tui.ProfileSettings, len(selected.Profiles)+1)
@@ -474,6 +474,7 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 			}
 		}
 		settings[name] = tui.ProfileSettings{
+			Default:                option.Active,
 			ReasoningEffort:        profileSettings.ReasoningEffort,
 			ReasoningEffortOptions: append([]string(nil), profileSettings.ReasoningEffortOptions...),
 		}

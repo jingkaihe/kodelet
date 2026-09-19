@@ -17,7 +17,7 @@ export const sampleConversations: Conversation[] = [
     messageCount: 18,
     summary: 'Extract chat UI into stories',
     cwd: '/home/jingkaihe/workspace/kodelet',
-    profile: 'default',
+    profile: 'flair',
   },
   {
     id: 'conv-review',
@@ -65,7 +65,7 @@ export const sampleSlashCommands: SlashCommandOption[] = [
 ];
 
 export const sampleProfiles: ChatProfileOption[] = [
-  { name: 'default', scope: 'global', active: true },
+  { name: 'flair', scope: 'global', active: true },
   { name: 'code-review', scope: 'repo' },
   { name: 'docs', scope: 'repo' },
 ];

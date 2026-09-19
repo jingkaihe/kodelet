@@ -39,8 +39,8 @@ func UsesIsolatedConfigFile() bool {
 }
 
 // GlobalProfiles returns the profiles declared by the global configuration
-// layer. The built-in "default" profile is excluded, and nil is returned when
-// no profile is declared or an isolated override disables the layer.
+// layer. Nil is returned when no profile is declared or an isolated override
+// disables the layer. All names, including "default", are ordinary profiles.
 func GlobalProfiles() map[string]llmtypes.ProfileConfig {
 	if UsesIsolatedConfigFile() {
 		return nil
@@ -174,9 +174,6 @@ func profilesFromViper(v *viper.Viper) map[string]llmtypes.ProfileConfig {
 
 	profiles := make(map[string]llmtypes.ProfileConfig)
 	for name, profileData := range v.GetStringMap("profiles") {
-		if strings.EqualFold(name, "default") {
-			continue
-		}
 		profileMap, ok := profileData.(map[string]any)
 		if !ok {
 			continue

@@ -12,17 +12,10 @@ import (
 )
 
 func displayProfile(profile string) string {
-	profile = strings.TrimSpace(profile)
-	if profile == "" || strings.EqualFold(profile, "default") {
-		return "default"
-	}
-	return profile
+	return strings.TrimSpace(profile)
 }
 
 func profileForRequest(profile string) string {
-	if strings.EqualFold(strings.TrimSpace(profile), "default") {
-		return "default"
-	}
 	return strings.TrimSpace(profile)
 }
 
@@ -34,14 +27,13 @@ func normalizeProfileOptions(options []string, selected string) []string {
 	appendOption := func(profile string) {
 		profile = displayProfile(profile)
 		key := strings.ToLower(profile)
-		if seen[key] {
+		if profile == "" || seen[key] {
 			return
 		}
 		seen[key] = true
 		normalized = append(normalized, profile)
 	}
 
-	appendOption("default")
 	for _, option := range options {
 		appendOption(option)
 	}

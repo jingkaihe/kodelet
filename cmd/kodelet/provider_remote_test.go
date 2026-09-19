@@ -40,8 +40,10 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 		{"oauth-eof", []string{"anthropic", "login", "--no-browser"}, "", "EOF", true, 2},
 		{"bad-alias", []string{"anthropic", "accounts", "remove", "../bad"}, "", "path separators", true, 0},
 		{"profile-current", []string{"profile", "current"}, "", "central", false, 1},
+		{"profile-unset", []string{"profile", "current"}, "", "server returned no model profile", true, 1},
 		{"profile-list", []string{"profile", "list"}, "", "central", false, 1},
 		{"profile-show", []string{"profile", "show", "central"}, "", `"profile": "central"`, false, 1},
+		{"profile-named-default", []string{"profile", "show", "default"}, "", `"profile": "default"`, false, 1},
 		{"profile-missing", []string{"profile", "show", "local-only"}, "", "could not load model profiles", true, 1},
 		{"profile-use", []string{"profile", "use", "local-only", "--global"}, "", "profile use <profile> --local", true, 0},
 		{"profile-format", []string{"profile", "show", "central", "--format=toml"}, "", "json or yaml", true, 0},
@@ -96,7 +98,15 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 						http.Error(w, "profile not advertised", http.StatusBadRequest)
 						return
 					}
-					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: "central", Profiles: []chat.ControlPlaneProfileOption{{Name: "central", Scope: "global", Active: true}}, ReasoningEffort: "high"}))
+					profile := "central"
+					switch test.name {
+					case "profile-unset":
+						profile = ""
+					case "profile-named-default":
+						assert.Equal(t, "default", r.URL.Query().Get("profile"))
+						profile = "default"
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(chat.ControlPlaneChatSettings{CurrentProfile: profile, Profiles: []chat.ControlPlaneProfileOption{{Name: profile, Scope: "global", Active: true}}, ReasoningEffort: "high"}))
 				case "/api/providers/codex/status":
 					require.NoError(t, json.NewEncoder(w).Encode(chat.CodexStatus{Connected: true, AccountID: "server-account"}))
 				case "/api/providers/codex/device-login", "/api/providers/copilot/device-login":
@@ -132,6 +142,10 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 				require.NoError(t, err, "%s", output)
 			}
 			assert.Contains(t, string(output), test.want)
+			if test.name == "profile-list" {
+				assert.Contains(t, string(output), "DEFAULT")
+				assert.NotRegexp(t, `(?m)^default\s`, string(output))
+			}
 			assert.NotContains(t, string(output), "client-credential-marker")
 			assert.EqualValues(t, test.calls, calls.Load())
 			current, err := os.ReadFile(configPath)
@@ -222,6 +236,15 @@ func TestRemoteProviderAndProfileUnavailableNeverFallBack(t *testing.T) {
 func TestLocalProviderAndProfileOperationsAreExplicit(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte(`profile: work
+profiles:
+  work:
+    provider: openai
+    model: gpt-4.1
+  default:
+    provider: openai
+    model: gpt-4.1-mini
+`), 0o600))
 	for _, name := range []string{"codex-credentials.json", "copilot-subscription.json"} {
 		require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", name), []byte("{}"), 0o600))
 	}
@@ -238,7 +261,9 @@ func TestLocalProviderAndProfileOperationsAreExplicit(t *testing.T) {
 	assert.Zero(t, calls.Load())
 	assert.NoFileExists(t, filepath.Join(home, ".kodelet", "codex-credentials.json"))
 	assert.NoFileExists(t, filepath.Join(home, ".kodelet", "copilot-subscription.json"))
-	assert.FileExists(t, filepath.Join(home, ".kodelet", "config.yaml"))
+	config, err := os.ReadFile(filepath.Join(home, ".kodelet", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(config), "profile: default")
 }
 
 func TestProviderInputCancellationAndBounds(t *testing.T) {

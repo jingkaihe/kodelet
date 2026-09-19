@@ -56,8 +56,9 @@ func WithRemoteSessionExtensions(attachment *protocol.SessionExtensions) RemoteE
 // trusted server uses this for embedded snapshot fallback without changing the
 // resolved model configuration or its immutable saved profile identity.
 func WithRemoteModelProfile(profile string) RemoteEnvironmentOption {
+	profile = strings.TrimSpace(profile)
 	return func(environment *RemoteEnvironment) {
-		environment.modelProfile = strings.TrimSpace(profile)
+		environment.modelProfile = &profile
 	}
 }
 
@@ -75,7 +76,7 @@ type RemoteEnvironment struct {
 	mu                 sync.RWMutex
 	controller         RemoteController
 	runnerID           string
-	modelProfile       string
+	modelProfile       *string
 	clientCapabilities protocol.ClientCapabilities
 	sessionExtensions  *protocol.SessionExtensions
 	newRunID           func() (string, error)
@@ -128,15 +129,11 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		e.finishOpenFailure()
 		return Manifest{}, errors.Wrap(err, "failed to generate remote run id")
 	}
-	// RunSpec contains an already resolved model configuration. An empty
-	// profile here means the base, not the embedded runner's active default
-	// (which may have changed since this conversation's snapshot was saved).
+	// RunSpec contains an already resolved model configuration. An explicit
+	// empty override requests shared runner settings without a model overlay.
 	profile := strings.TrimSpace(spec.Config.Profile)
-	if profile == "" {
-		profile = "default"
-	}
-	if e.modelProfile != "" {
-		profile = e.modelProfile
+	if e.modelProfile != nil {
+		profile = *e.modelProfile
 	}
 	params := protocol.RunOpenParams{
 		RunID:          runID,

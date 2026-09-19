@@ -14,7 +14,7 @@ const renderDialog = (
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
-    profileDraft: 'default',
+    profileDraft: 'flair',
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
@@ -62,14 +62,25 @@ describe('NewChatContextDialog', () => {
     expect(props.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('emits profile and directory changes without owning page state', () => {
-    const props = renderDialog();
+  it.each([
+    'code-review',
+    'default',
+  ])('emits %s and directory changes without owning page state', (name) => {
+    const props = renderDialog({
+      availableProfiles: [...sampleProfiles, { name: 'default', scope: 'global' }],
+    });
 
     const profile = screen.getByRole('combobox', { name: 'Profile' });
     // fireEvent does not provide the browser's implicit click-to-focus behavior.
     fireEvent.click(profile);
     expect(profile).toHaveFocus();
-    fireEvent.click(screen.getByRole('option', { name: 'code-review' }));
+    const options = screen.getByRole('listbox', { name: 'Profile' });
+    expect(within(options).getAllByRole('option')).toHaveLength(4);
+    expect(within(options).getByRole('option', { name: 'flair (Default)' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    fireEvent.click(within(options).getByRole('option', { name }));
     fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
     fireEvent.click(screen.getByRole('option', { name: 'high' }));
     fireEvent.change(screen.getByTestId('cwd-input'), {
@@ -77,12 +88,31 @@ describe('NewChatContextDialog', () => {
     });
     fireEvent.click(screen.getByTestId('cwd-suggestion-1'));
 
-    expect(props.onProfileDraftChange).toHaveBeenCalledWith('code-review');
+    expect(props.onProfileDraftChange).toHaveBeenCalledWith(name);
     expect(props.onReasoningEffortDraftChange).toHaveBeenCalledWith('high');
     expect(props.onCwdInputChange).toHaveBeenCalledWith('/tmp/project');
     expect(props.onSelectCwdSuggestion).toHaveBeenCalledWith(
       '/home/jingkaihe/workspace/kodelet/pkg/webui/frontend'
     );
+  });
+
+  it.each([
+    { name: 'empty', availableProfiles: [] },
+    { name: 'configured', availableProfiles: sampleProfiles },
+  ])('requires a resolved profile with $name options', ({ availableProfiles }) => {
+    renderDialog({ profileDraft: '', availableProfiles });
+
+    const profile = screen.getByRole('combobox', { name: 'Profile' });
+    expect(profile).toHaveTextContent('Select a profile');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    if (availableProfiles.length === 0) {
+      expect(profile).toBeDisabled();
+      return;
+    }
+    fireEvent.click(profile);
+    const options = screen.getByRole('listbox', { name: 'Profile' });
+    expect(within(options).queryByRole('option', { selected: true })).not.toBeInTheDocument();
+    expect(within(options).queryByRole('option', { name: 'default' })).not.toBeInTheDocument();
   });
 
   it('exposes the directory autocomplete and its active suggestion to assistive technology', () => {
@@ -253,7 +283,7 @@ describe('NewChatContextDialog', () => {
     profile.focus();
     await user.keyboard('{ArrowDown}');
     const menu = screen.getByRole('listbox', { name: 'Profile' });
-    const selected = within(menu).getByRole('option', { name: 'default' });
+    const selected = within(menu).getByRole('option', { name: 'flair (Default)' });
     expect(profile).toHaveFocus();
     expect(profile).toHaveAttribute('aria-controls', menu.id);
     expect(profile).toHaveAttribute('aria-activedescendant', selected.id);

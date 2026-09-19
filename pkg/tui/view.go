@@ -851,8 +851,12 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 
 	parts := []styledLabelPart{
 		{text: formatUsage(m.usage), style: inputLabelStyle},
-		{text: " - ", style: inputLabelStyle},
-		{text: m.profile, style: m.profileStyle(m.profileIndex)},
+	}
+	if m.profile != "" {
+		parts = append(parts,
+			styledLabelPart{text: " - ", style: inputLabelStyle},
+			styledLabelPart{text: m.profile, style: m.profileStyle(m.profileIndex)},
+		)
 	}
 	if strings.HasSuffix(fullLabel, " - "+m.reasoningEffortLabel()) {
 		parts = append(parts,
@@ -891,7 +895,7 @@ func (m model) renderProfilePicker() string {
 
 	lines := make([]string, 0, len(m.profileOptions))
 	for index, profile := range m.profileOptions {
-		label := fitVisible(profile, optionWidth)
+		label := fitVisible(m.profileOptionLabel(profile), optionWidth)
 		style := m.profileStyle(index)
 		if index == m.profilePickerIndex {
 			style = style.Background(themeColor(m.theme.ProfileSelected))
@@ -902,10 +906,17 @@ func (m model) renderProfilePicker() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) profileOptionLabel(profile string) string {
+	if settings, ok := profileSettingsFor(m.profileSettings, profile); ok && settings.Default {
+		return profile + "  (Default)"
+	}
+	return profile
+}
+
 func (m model) profilePickerWidth() int {
 	width := lipgloss.Width(m.profile)
 	for _, profile := range m.profileOptions {
-		width = max(width, lipgloss.Width(profile))
+		width = max(width, lipgloss.Width(m.profileOptionLabel(profile)))
 	}
 	return max(1, min(width, m.inputOuterWidth()))
 }
@@ -1197,7 +1208,10 @@ func renderComposerBottomLeftLabel(label string) string {
 }
 
 func (m model) inputTopRightLabel() string {
-	base := strings.Join([]string{formatUsage(m.usage), m.profile}, " - ")
+	base := formatUsage(m.usage)
+	if m.profile != "" {
+		base += " - " + m.profile
+	}
 	full := base + " - " + m.reasoningEffortLabel()
 	if lipgloss.Width(full) <= max(1, m.inputOuterWidth()-6) {
 		return full

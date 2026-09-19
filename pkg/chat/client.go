@@ -796,8 +796,8 @@ func (r *Client) ChatSettings(ctx context.Context, profile string) (ControlPlane
 
 // WorkspaceTarget selects runner-owned discovery without interpreting paths on
 // the client. Profile selects the daemon model profile independently of the
-// runner's EnvironmentProfile; blank inherits the daemon default, while "default"
-// explicitly selects the base profile. ConversationID pins discovery to persisted
+// runner's EnvironmentProfile; blank inherits the daemon's configured profile.
+// ConversationID pins discovery to persisted
 // runner/CWD affinity and the stored model profile; clients should omit Profile
 // when discovering a saved conversation.
 type WorkspaceTarget struct {

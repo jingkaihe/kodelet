@@ -48,11 +48,15 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.True(t, strings.HasPrefix(plainLines[0], strings.Repeat(" ", tuiLeftMargin)))
 	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
 	assert.Equal(t, m.contentWidth(), m.viewport.Width())
-	assert.Equal(t, "default", displayProfile(""))
-	assert.Equal(t, "default", displayProfile(" DEFAULT "))
+	assert.Empty(t, displayProfile(""))
+	assert.Equal(t, "DEFAULT", displayProfile(" DEFAULT "))
+	assert.Empty(t, profileForRequest("  "))
+	assert.Equal(t, "DEFAULT", profileForRequest(" DEFAULT "))
 	assert.Equal(t, "default", profileForRequest("default"))
 	assert.Equal(t, "work", profileForRequest(" work "))
 	assert.Equal(t, []string{"default", "work", "prod"}, normalizeProfileOptions([]string{"default", "work", "work"}, "prod"))
+	assert.Equal(t, []string{"flair", "deep"}, normalizeProfileOptions([]string{"flair", "", "deep", " "}, ""))
+	assert.Empty(t, normalizeProfileOptions(nil, ""))
 	assert.Equal(t, 1, profileOptionIndex([]string{"default", "work"}, " WORK "))
 	assert.Equal(t, "work", profileFromMetadata(map[string]any{"profile": " work "}))
 	assert.Equal(t, "abcdefgh", shortID("abcdefghi123"))
@@ -223,7 +227,13 @@ func TestNotificationSeverityUsesThemeColors(t *testing.T) {
 }
 
 func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
-	m := newModel(context.Background(), Config{Profile: "work", ProfileOptions: []string{"default", "work", "prod"}, Theme: "tokyo-night"})
+	m := newModel(context.Background(), Config{
+		Remote:          true,
+		Profile:         "work",
+		ProfileOptions:  []string{"default", "work", "prod"},
+		ProfileSettings: map[string]ProfileSettings{"prod": {Default: true}},
+		Theme:           "tokyo-night",
+	})
 	t.Cleanup(m.cancel)
 	m.width = 80
 	m.height = 24
@@ -239,7 +249,10 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	pickerLine := lines[m.viewport.Height()+2]
 	composerTop := lines[m.viewport.Height()+m.profilePickerHeight()]
 
-	assert.Contains(t, pickerLine, "prod")
+	assert.Contains(t, pickerLine, "prod  (Default)")
+	assert.NotContains(t, view, "work  (Default)")
+	assert.NotContains(t, view, "default  (Default)")
+	assert.Equal(t, lipgloss.Width("prod  (Default)"), m.profilePickerWidth())
 	assert.Contains(t, composerTop, "work")
 	profileStart, _ := styleSequences(m.profileStyle(m.profileIndex))
 	selectedStart, _ := styleSequences(m.profileStyle(m.profilePickerIndex).Background(themeColor(m.theme.ProfileSelected)))
@@ -248,6 +261,11 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	assert.NotContains(t, view, "→")
 	assert.NotContains(t, view, "ACTIVE")
 	assert.NotContains(t, view, "repo")
+
+	m.selectProfilePickerOption(0)
+	assert.Equal(t, "default", m.profile)
+	m.openProfilePicker()
+	assert.Contains(t, xansi.Strip(m.renderProfilePicker()), "prod  (Default)")
 }
 
 func TestReasoningPickerRendersBesideProfile(t *testing.T) {
@@ -278,7 +296,7 @@ func TestReasoningPickerRendersBesideProfile(t *testing.T) {
 }
 
 func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T) {
-	m := newModel(context.Background(), Config{Theme: "tokyo-night"})
+	m := newModel(context.Background(), Config{Theme: "tokyo-night", Profile: "flair"})
 	t.Cleanup(m.cancel)
 	m.width = 160
 	m.height = 24
@@ -303,7 +321,7 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	assert.NotContains(t, suggestionsTop, "objective")
 	assert.Contains(t, view, "/review")
 	assert.NotContains(t, view, "target")
-	assert.Contains(t, composerTop, "default")
+	assert.Contains(t, composerTop, "flair")
 	assert.Equal(t, tuiLeftMargin+m.inputOuterWidth(), lipgloss.Width(suggestionsTop))
 	nameStart, _ := styleSequences(slashCommandNameStyle)
 	selectedStart, _ := styleSequences(slashCommandSelectedStyle)

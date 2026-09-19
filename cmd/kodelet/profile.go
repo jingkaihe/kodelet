@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -18,11 +19,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 const (
-	ScopeBuiltIn       = "built-in"
 	ScopeRepo          = "repo"
 	ScopeGlobal        = "global"
 	ScopeOverride      = "override"
@@ -41,9 +40,11 @@ var profileCurrentCmd = &cobra.Command{
 	Short: "Show the current active profile",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		profile, location := effectiveProfileSetting(cmd)
-		if profile == "" || strings.EqualFold(profile, "default") {
-			presenter.Info("Using default configuration (no profile active)")
-			return nil
+		if profile == "" {
+			return errors.New("no default model profile configured; set profile: <name> in the daemon configuration or run 'kodelet setup'")
+		}
+		if !llm.HasConfiguredProfile(profile) {
+			return errors.Errorf("configured model profile '%s' not found; set profile: to an existing profile or run 'kodelet profile list --local'", profile)
 		}
 
 		if location == "" {
@@ -82,49 +83,51 @@ func effectiveProfileSetting(cmd *cobra.Command) (string, string) {
 var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available configuration profiles",
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		profileSources := llm.ProfileSources()
-
-		activeProfile := strings.TrimSpace(viper.GetString("profile"))
-		activeProfileName := activeProfile
-		if strings.EqualFold(activeProfile, "default") {
-			activeProfileName = ""
+		if len(profileSources) == 0 {
+			return errors.New("no model profiles configured; run 'kodelet setup' on the daemon host")
 		}
+		activeProfile, location := effectiveProfileSetting(cmd)
+		configuredProfile, _ := llm.ActiveProfileSetting()
 
 		presenter.Section("Available Profiles")
 
-		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
 		fmt.Fprintln(tw, "NAME\tSCOPE\tSTATUS")
 		fmt.Fprintln(tw, "----\t-----\t------")
 
-		status := ""
-		if activeProfileName == "" {
-			status = "ACTIVE"
+		names := make([]string, 0, len(profileSources))
+		for name := range profileSources {
+			names = append(names, name)
 		}
-		fmt.Fprintf(tw, "default\t%s\t%s\n", ScopeBuiltIn, status)
-
-		if len(profileSources) > 0 {
-			for name, source := range profileSources {
-				status := ""
-				if name == activeProfileName {
-					status = "ACTIVE"
-				}
-
-				scope := ""
-				switch source {
-				case llm.ProfileSourceRepoOverridesGlobal:
-					scope = ScopeRepoOverrides
-				case llm.ProfileSourceGlobal:
-					scope = ScopeGlobal
-				case llm.ProfileSourceOverride:
-					scope = ScopeOverride
-				default:
-					scope = ScopeRepo
-				}
-
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", name, scope, status)
+		sort.Strings(names)
+		for _, name := range names {
+			status := ""
+			if name == configuredProfile {
+				status = "Default"
 			}
+			if name == activeProfile && (location == "command-line flag" || location == "environment") {
+				if status != "" {
+					status += ", "
+				}
+				status += "Selected (" + location + ")"
+			}
+
+			scope := ""
+			switch profileSources[name] {
+			case llm.ProfileSourceRepoOverridesGlobal:
+				scope = ScopeRepoOverrides
+			case llm.ProfileSourceGlobal:
+				scope = ScopeGlobal
+			case llm.ProfileSourceOverride:
+				scope = ScopeOverride
+			default:
+				scope = ScopeRepo
+			}
+
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", name, scope, status)
 		}
 
 		return tw.Flush()
@@ -136,26 +139,17 @@ var profileShowCmd = &cobra.Command{
 	Short: "Show merged configuration for a specific profile",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profileName := args[0]
+		profileName := strings.TrimSpace(args[0])
 		format, _ := cmd.Flags().GetString("format")
 
-		var (
-			config llmtypes.Config
-			err    error
-		)
-		if profileName == "default" {
-			config, err = llm.GetConfigFromViperWithoutProfile()
-		} else {
-			if !llm.HasConfiguredProfile(profileName) {
-				return fmt.Errorf("profile '%s' not found", profileName)
-			}
-			config, err = llm.GetConfigFromViperWithProfile(profileName)
+		if !llm.HasConfiguredProfile(profileName) {
+			return errors.Errorf("profile '%s' not found", profileName)
 		}
+		config, err := llm.GetConfigFromViperWithProfile(profileName)
 		if err != nil {
 			return errors.Wrap(err, "failed to load configuration")
 		}
 
-		config.Profile = ""
 		config.Profiles = nil
 		config.Aliases = nil
 
@@ -167,15 +161,15 @@ var profileShowCmd = &cobra.Command{
 		case "json":
 			output, err = json.MarshalIndent(config, "", "  ")
 		default:
-			return fmt.Errorf("unsupported format '%s'. Supported formats: json, yaml", format)
+			return errors.Errorf("unsupported format '%s'. Supported formats: json, yaml", format)
 		}
 
 		if err != nil {
-			return fmt.Errorf("failed to marshal config: %w", err)
+			return errors.Wrap(err, "failed to marshal config")
 		}
 
-		fmt.Print(string(output))
-		return nil
+		_, err = fmt.Fprint(cmd.OutOrStdout(), string(output))
+		return err
 	},
 }
 
@@ -187,20 +181,18 @@ then restart the server. Repository files do not configure server model profiles
 Without -g flag: updates ./kodelet-config.yaml
 With -g flag: updates ~/.kodelet/config.yaml
 
-Use "default" to use base configuration without any profile.`,
+The name must identify a configured model profile.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profileName := args[0]
+		profileName := strings.TrimSpace(args[0])
 		global, _ := cmd.Flags().GetBool("global")
 
 		if err := ensureProfileSelectionWritable(global); err != nil {
 			return err
 		}
 
-		if profileName != "default" {
-			if _, exists := llm.ProfileSources()[profileName]; !exists {
-				return fmt.Errorf("profile '%s' not found", profileName)
-			}
+		if _, exists := llm.ProfileSources()[profileName]; !exists {
+			return errors.Errorf("profile '%s' not found; choose a name from 'kodelet profile list --local'", profileName)
 		}
 
 		if err := updateProfileInConfig(global, profileName); err != nil {
@@ -274,9 +266,6 @@ func getProfileSwitchMessage(profileName string, global bool) string {
 		location = "global"
 	}
 
-	if profileName == "default" {
-		return fmt.Sprintf("Switched to default configuration in %s config", location)
-	}
 	return fmt.Sprintf("Switched to profile '%s' in %s config", profileName, location)
 }
 

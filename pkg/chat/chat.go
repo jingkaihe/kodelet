@@ -1130,22 +1130,7 @@ func ResolveConfigForNewConversation(requestedProfile string, requestedReasoning
 	if len(requestedReasoningEfforts) > 0 {
 		requestedReasoningEffort = requestedReasoningEfforts[0]
 	}
-	requestedProfile = strings.TrimSpace(requestedProfile)
-	var (
-		config llmtypes.Config
-		err    error
-	)
-	if strings.EqualFold(requestedProfile, "default") {
-		config, err = llm.GetConfigFromViperWithoutProfile()
-		config.Profile = "default"
-	} else {
-		profileName := NormalizeRequestedProfile(requestedProfile)
-		if profileName != "" {
-			config, err = llm.GetConfigFromViperWithProfile(profileName)
-		} else {
-			config, err = llm.GetConfigFromViper()
-		}
-	}
+	config, err := llm.GetConfigFromViperWithProfile(requestedProfile)
 	if err != nil {
 		return llmtypes.Config{}, err
 	}
@@ -1216,16 +1201,10 @@ func resolveConfigForExistingConversation(ctx context.Context, record *conversat
 		config llmtypes.Config
 		err    error
 	)
-	if hasStoredProfile {
-		if profileName != "" {
-			config, err = llm.GetConfigFromViperWithProfile(profileName)
-		} else {
-			config, err = llm.GetConfigFromViperWithoutProfile()
-		}
-	} else if profileName != "" {
-		config, err = llm.GetConfigFromViperWithProfile(profileName)
+	if hasStoredProfile && profileName == "" {
+		config, err = llm.GetConfigFromViperWithoutProfile()
 	} else {
-		config, err = llm.GetConfigFromViper()
+		config, err = llm.GetConfigFromViperWithProfile(profileName)
 	}
 	if err != nil {
 		return llmtypes.Config{}, err
@@ -1259,9 +1238,6 @@ func resolveConfigForExistingConversation(ctx context.Context, record *conversat
 		}
 	}
 
-	if hasStoredProfile && profileName == "" {
-		config.Profile = "default"
-	}
 	if strings.TrimSpace(requestedReasoningEffort) != "" {
 		return llmtypes.Config{}, errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")
 	}
@@ -1269,11 +1245,7 @@ func resolveConfigForExistingConversation(ctx context.Context, record *conversat
 }
 
 func NormalizeRequestedProfile(profile string) string {
-	normalized := strings.TrimSpace(profile)
-	if normalized == "" || strings.EqualFold(normalized, "default") {
-		return ""
-	}
-	return normalized
+	return strings.TrimSpace(profile)
 }
 
 func NormalizeRequest(req ChatRequest) (string, []string, error) {

@@ -13,1112 +13,475 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetConfigFromViper(t *testing.T) {
-	// Setup
+func configureTestProfile(t *testing.T, provider, model string) {
+	t.Helper()
 	viper.Reset()
-	viper.Set("model", "test-model")
-	viper.Set("max_tokens", 1234)
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	assert.Equal(t, "test-model", config.Model)
-	assert.Equal(t, 1234, config.MaxTokens)
+	t.Cleanup(viper.Reset)
+	viper.Set("profile", "test")
+	viper.Set("profiles.test.provider", provider)
+	viper.Set("profiles.test.model", model)
 }
 
-func TestGetConfigFromViperDefaults(t *testing.T) {
-	// Setup
-	viper.Reset()
+func TestModelProfileSelection(t *testing.T) {
+	for _, test := range []struct {
+		name, selected, requested, want, wantErr string
+		defineDefault                            bool
+	}{
+		{name: "configured", selected: "test", want: "test"},
+		{name: "single profile still needs selector", wantErr: "no model profile selected"},
+		{name: "explicit without selector", requested: " test ", want: "test"},
+		{name: "explicit ignores default", selected: "default", requested: "test", want: "test", defineDefault: true},
+		{name: "unknown selector", selected: "missing", wantErr: "profile 'missing' not found"},
+		{name: "unknown request", selected: "test", requested: "missing", wantErr: "profile 'missing' not found"},
+		{name: "no synthetic default", selected: "test", requested: "default", wantErr: "profile 'default' not found"},
+		{name: "ordinary default name", selected: "test", requested: "default", want: "default", defineDefault: true},
+		{name: "default name selected", selected: " default ", want: "default", defineDefault: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			configureTestProfile(t, "openai", "test-model")
+			if test.defineDefault {
+				viper.Set("profiles.default", map[string]any{"provider": "anthropic", "model": "default-model"})
+			}
+			viper.Set("profile", test.selected)
+			before := viper.AllSettings()
+			config, err := GetConfigFromViperWithProfile(test.requested)
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, config.Profile)
+			assert.Equal(t, test.want+"-model", config.Model)
+			assert.Equal(t, before, viper.AllSettings(), "selection must not mutate process defaults")
+		})
+	}
+}
 
-	// Execute
+func TestModelProfileDefaults(t *testing.T) {
+	for _, test := range []struct {
+		name, provider string
+		zeroes         bool
+	}{
+		{name: "OpenAI", provider: "openai"},
+		{name: "Anthropic", provider: "anthropic"},
+		{name: "normalized provider", provider: " OPENAI "},
+		{name: "explicit zero and false", provider: "openai", zeroes: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			configureTestProfile(t, test.provider, "test-model")
+			for _, key := range modelSettingKeys {
+				viper.Set(key, "must-not-be-inherited")
+			}
+			maxTokens, thinking, effort, search := 8192, 4048, "medium", true
+			if test.zeroes {
+				for _, key := range []string{"max_tokens", "weak_model_max_tokens", "thinking_budget_tokens"} {
+					viper.Set("profiles.test."+key, 0)
+				}
+				viper.Set("profiles.test.reasoning_effort", "none")
+				viper.Set("profiles.test.openai.enable_search", false)
+				viper.Set("profiles.test.openai.websocket_mode", false)
+				maxTokens, thinking, effort, search = 0, 0, "none", false
+			}
+			config, err := GetConfigFromViper()
+			require.NoError(t, err)
+			assert.Equal(t, strings.ToLower(strings.TrimSpace(test.provider)), config.Provider)
+			assert.Empty(t, config.WeakModel)
+			assert.Equal(t, maxTokens, config.MaxTokens)
+			assert.Equal(t, maxTokens, config.WeakModelMaxTokens)
+			assert.Equal(t, thinking, config.ThinkingBudgetTokens)
+			assert.Equal(t, effort, config.ReasoningEffort)
+			assert.Equal(t, llmtypes.DefaultCompactRatio, config.CompactRatio)
+			assert.Equal(t, llmtypes.DefaultRetryConfig, config.Retry)
+			assert.Equal(t, llmtypes.AnthropicAPIAccessAuto, config.AnthropicAPIAccess)
+			assert.Equal(t, &llmtypes.BashConfig{Timeout: llmtypes.DefaultBashTimeout}, config.Bash)
+			if config.Provider == "openai" {
+				assert.Equal(t, &llmtypes.OpenAIConfig{
+					APIMode: llmtypes.OpenAIAPIModeResponses, EnableSearch: new(search), WebSocketMode: new(search),
+				}, config.OpenAI)
+			} else {
+				assert.Nil(t, config.OpenAI)
+			}
+			assert.Nil(t, config.Anthropic)
+			isolated, err := GetConfigFromProfile(viper.GetStringMap("profiles.test"))
+			require.NoError(t, err)
+			config.Profile, config.Profiles = "", nil
+			assert.Equal(t, isolated, config, "extension profiles use the same field defaults")
+		})
+	}
+}
+
+func TestModelProfilePreservesSharedSettings(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader(`
+profile: work
+extensions:
+  enabled: true
+  allow: [shared]
+  settings: {retained: shared-value, overridden: shared-value}
+skills:
+  enabled: true
+  allowed: [pdf]
+context:
+  patterns: [AGENTS.md]
+tracing:
+  enabled: true
+  ratio: 0.5
+tool_mode: patch
+allowed_tools: [bash, file_read]
+compact_ratio: 0.65
+bash:
+  timeout: 45s
+anthropic_api_access: subscription
+anthropic_account: work
+aliases:
+  driver.v1: shared-model
+  small: weak-model
+openai:
+  platform: custom
+  base_url: https://provider.example
+  api_key_env_var: SHARED_API_KEY
+  models:
+    reasoning: [shared-model]
+    non_reasoning: [weak-model]
+  pricing:
+    custom-model.v1:
+      input: 1
+      cached_input: 0.5
+      output: 2
+      long_context_input: 3
+      long_context_cached_input: 1.5
+      long_context_output: 4
+      long_context_threshold: 10000
+      context_window: 20000
+    partial:
+      input: 1
+anthropic:
+  platform: copilot
+  base_url: https://anthropic.example
+profiles:
+  work:
+    provider: openai
+    model: driver.v1
+    weak_model: small
+    aliases:
+      driver.v1: profile-model
+    extensions:
+      allow: [profile]
+      settings: {overridden: profile-value}
+    skills:
+      allowed: []
+    openai:
+      api_mode: chat_completions
+      text_verbosity: ' HIGH '
+      manual_cache: true
+      pricing:
+        custom-model.v1:
+          input: 5
+`)))
+	before := viper.AllSettings()
+	require.NoError(t, ValidateModelProfiles())
 	config, err := GetConfigFromViper()
 	require.NoError(t, err)
-
-	// Verify
-	assert.Empty(t, config.Model)
-	assert.Zero(t, config.MaxTokens)
-	assert.Equal(t, llmtypes.DefaultCompactRatio, config.CompactRatio)
-	require.NotNil(t, config.Bash)
-	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
+	assert.Equal(t, "profile-model", config.Model)
+	assert.Equal(t, "weak-model", config.WeakModel)
+	assert.Equal(t, map[string]any{
+		"enabled": true, "allow": []any{"profile"},
+		"settings": map[string]any{"retained": "shared-value", "overridden": "profile-value"},
+	}, config.ExtensionSettings)
+	require.NotNil(t, config.Skills)
+	assert.True(t, config.Skills.Enabled)
+	assert.Empty(t, config.Skills.Allowed, "explicit empty lists replace shared lists")
+	assert.Equal(t, &llmtypes.ContextConfig{Patterns: []string{"AGENTS.md"}}, config.Context)
+	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.Equal(t, []string{"bash", "file_read"}, config.AllowedTools)
+	assert.Equal(t, 0.65, config.CompactRatio)
+	assert.Equal(t, &llmtypes.BashConfig{Timeout: 45 * time.Second}, config.Bash)
+	assert.Equal(t, llmtypes.AnthropicAPIAccessSubscription, config.AnthropicAPIAccess)
+	assert.Equal(t, "work", config.AnthropicAccount)
+	assert.Equal(t, &llmtypes.OpenAIConfig{
+		Platform: "custom", BaseURL: "https://provider.example", APIKeyEnvVar: "SHARED_API_KEY",
+		APIMode: llmtypes.OpenAIAPIModeChatCompletions, TextVerbosity: llmtypes.OpenAITextVerbosityHigh,
+		ManualCache: true, EnableSearch: new(true), WebSocketMode: new(true),
+		Models: &llmtypes.CustomModels{Reasoning: []string{"shared-model"}, NonReasoning: []string{"weak-model"}},
+		Pricing: map[string]llmtypes.ModelPricing{
+			"custom-model.v1": {
+				Input: 5, CachedInput: 0.5, Output: 2, LongContextInput: 3, LongContextCachedInput: 1.5,
+				LongContextOutput: 4, LongContextThreshold: 10000, ContextWindow: 20000,
+			},
+			"partial": {Input: 1},
+		},
+	}, config.OpenAI)
+	assert.Equal(t, &llmtypes.AnthropicConfig{Platform: "copilot", BaseURL: "https://anthropic.example"}, config.Anthropic)
+	config.Aliases["driver.v1"] = "changed"
+	config.OpenAI.Models.Reasoning[0] = "changed"
+	config.OpenAI.Pricing["partial"] = llmtypes.ModelPricing{Input: 99}
+	assert.Equal(t, before, viper.AllSettings(), "resolution preserves shared process settings, including tracing")
 }
 
 func TestGetConfigFromProfileIsolatedConfiguration(t *testing.T) {
-	previous := viper.AllSettings()
-	viper.Reset()
-	t.Cleanup(func() {
-		viper.Reset()
-		require.NoError(t, viper.MergeConfigMap(previous))
-	})
-	viper.Set("provider", "anthropic")
-	viper.Set("thinking_budget_tokens", 100)
-	viper.Set("aliases", map[string]any{"gpt-5.6": "daemon-only"})
-	viper.Set("openai", map[string]any{"platform": "codex", "api_key_env_var": "BASE_KEY"})
-	viper.Set("profile", "active")
-	viper.Set("profiles", map[string]any{"active": map[string]any{
-		"model": "active-model", "reasoning_effort": "max",
-		"openai": map[string]any{"platform": "openai", "api_key_env_var": "ACTIVE_KEY"},
-	}})
+	configureTestProfile(t, "openai", "daemon-model")
+	viper.Set("aliases", map[string]any{"private.v1": "daemon-alias"})
+	viper.Set("anthropic.base_url", "https://daemon.invalid")
 	t.Setenv("KODELET_THINKING_BUDGET_TOKENS", "200")
-	before := viper.AllSettings()
 	var profile llmtypes.ProfileConfig
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"provider": "openai", "model": " gpt-6 ", "weak_model": "gpt-5.6",
-		"aliases": {"gpt-6": "private-model"}, "max_tokens": 4096, "weak_model_max_tokens": 1024,
-		"reasoning_effort": " LOW ", "allowed_reasoning_efforts": ["low", "high"],
-		"compact_ratio": 0.65, "bash": {"timeout": "45s"},
-		"retry": {"attempts": 2, "initial_delay": 100, "max_delay": 500, "backoff_type": "fixed"},
-		"openai": {"platform": "custom", "base_url": "https://profile.invalid", "websocket_mode": false,
-			"models": {"reasoning": ["private-model"]},
-			"pricing": {"private-model": {"input": 1.5, "context_window": 32000}}},
-		"future_setting": {"values": [false, null, 1.5]}
-	}`), &profile))
-	input := cloneSettings(profile)
+  "provider": "anthropic", "model": " private.v1 ", "weak_model": "small",
+  "aliases": {"private.v1": "private-model", "small": "weak-model"},
+  "anthropic_api_access": "subscription", "anthropic_account": "work",
+  "thinking_budget_tokens": 1024, "reasoning_effort": " LOW ",
+  "allowed_reasoning_efforts": ["low", "high"],
+  "anthropic": {"platform": "anthropic", "adaptive_thinking": true}
+}`), &profile))
+	before := cloneSettings(profile)
 	config, err := GetConfigFromProfile(profile)
 	require.NoError(t, err)
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "private-model", config.Model)
-	assert.Equal(t, defaultModelAliases["gpt-5.6"], config.WeakModel)
-	assert.True(t, config.ModelAliasesResolved)
-	assert.Equal(t, 4096, config.MaxTokens)
-	assert.Equal(t, 1024, config.WeakModelMaxTokens)
-	assert.Zero(t, config.ThinkingBudgetTokens)
 	assert.Empty(t, config.Profile)
-	assert.Nil(t, config.Profiles)
+	assert.Equal(t, "private-model", config.Model)
+	assert.Equal(t, "weak-model", config.WeakModel)
 	assert.Equal(t, "low", config.ReasoningEffort)
 	assert.Equal(t, []string{"low", "high"}, config.AllowedReasoningEfforts)
-	assert.Equal(t, 0.65, config.CompactRatio)
-	assert.Equal(t, &llmtypes.BashConfig{Timeout: 45 * time.Second}, config.Bash)
-	assert.Equal(t, llmtypes.RetryConfig{Attempts: 2, InitialDelay: 100, MaxDelay: 500, BackoffType: "fixed"}, config.Retry)
-	require.Equal(t, &llmtypes.OpenAIConfig{
-		Platform: "custom", BaseURL: "https://profile.invalid", WebSocketMode: new(false),
-		Models:  &llmtypes.CustomModels{Reasoning: []string{"private-model"}},
-		Pricing: map[string]llmtypes.ModelPricing{"private-model": {Input: 1.5, ContextWindow: 32000}},
-	}, config.OpenAI)
-	config.Aliases["gpt-6"] = "changed"
-	config.OpenAI.Models.Reasoning[0] = "changed"
-	config.OpenAI.Pricing["private-model"] = llmtypes.ModelPricing{Input: 99}
-	assert.Equal(t, llmtypes.ProfileConfig(input), profile, "resolved settings must not share mutable input")
-	assert.Equal(t, before, viper.AllSettings())
-	assert.Equal(t, "gpt-6-astra", defaultModelAliases["gpt-6"])
-}
-
-func TestGetConfigFromProfileDefaultsAndValidation(t *testing.T) {
-	config, err := GetConfigFromProfile(llmtypes.ProfileConfig{"provider": "anthropic", "model": "private-model"})
-	require.NoError(t, err)
-	assert.Equal(t, llmtypes.DefaultReasoningEffort, config.ReasoningEffort)
-	assert.Equal(t, llmtypes.DefaultCompactRatio, config.CompactRatio)
-	assert.Equal(t, llmtypes.DefaultRetryConfig, config.Retry)
-	assert.Equal(t, &llmtypes.BashConfig{Timeout: llmtypes.DefaultBashTimeout}, config.Bash)
-	assert.Equal(t, llmtypes.AnthropicAPIAccessAuto, config.AnthropicAPIAccess)
-	assert.Empty(t, config.WeakModel)
-	assert.Zero(t, config.MaxTokens)
-
-	config, err = GetConfigFromProfile(llmtypes.ProfileConfig{
-		"provider": "anthropic", "model": "private-model", "anthropic_api_access": "subscription",
-		"anthropic_account": "work", "thinking_budget_tokens": 1024,
-		"anthropic": map[string]any{"platform": "anthropic", "adaptive_thinking": true},
-	})
-	require.NoError(t, err)
+	assert.Equal(t, 1024, config.ThinkingBudgetTokens)
 	assert.Equal(t, llmtypes.AnthropicAPIAccessSubscription, config.AnthropicAPIAccess)
 	assert.Equal(t, "work", config.AnthropicAccount)
-	assert.Equal(t, 1024, config.ThinkingBudgetTokens)
 	assert.Equal(t, &llmtypes.AnthropicConfig{Platform: "anthropic", AdaptiveThinking: true}, config.Anthropic)
-
-	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"max_tokens": "not-a-number"})
-	require.ErrorContains(t, err, "failed to unmarshal configuration")
-	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"bash": map[string]any{"timeout": "5s"}})
-	require.ErrorContains(t, err, "bash.timeout must be at least")
-	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"compact_ratio": 1.1})
-	require.ErrorContains(t, err, "compact_ratio must be greater than")
-	_, err = GetConfigFromProfile(llmtypes.ProfileConfig{"reasoning_effort": "unknown"})
-	require.ErrorContains(t, err, "invalid reasoning_effort")
+	config.Aliases["private.v1"] = "changed"
+	assert.Equal(t, before, map[string]any(profile))
 }
 
-func TestGetConfigFromViperPlatformModelDefaults(t *testing.T) {
-	tests := []struct {
-		name      string
-		settings  map[string]any
-		envModel  string
-		flagModel string
-		want      string
+func TestModelProfileValidation(t *testing.T) {
+	for _, test := range []struct {
+		key, wantErr string
+		value        any
 	}{
-		{name: "OpenAI default", want: "gpt-6-astra"},
-		{name: "explicit OpenAI model", settings: map[string]any{"model": "gpt-5.5"}, want: "gpt-5.5"},
-		{name: "Codex default", settings: map[string]any{"openai.platform": "codex"}, want: "gpt-6-astra"},
-		{name: "normalized Codex platform", settings: map[string]any{"openai.platform": " CODEX "}, want: "gpt-6-astra"},
-		{name: "explicit previous default", settings: map[string]any{"openai.platform": "codex", "model": "gpt-5.5"}, want: "gpt-5.5"},
-		{name: "environment model", settings: map[string]any{"openai.platform": "codex"}, envModel: "gpt-5.6-sol", want: "gpt-5.6-sol"},
-		{name: "flag model", settings: map[string]any{"openai.platform": "codex"}, flagModel: "gpt-5.5", want: "gpt-5.5"},
-		{
-			name: "profile selects Codex",
-			settings: map[string]any{"profile": "codex", "profiles": map[string]any{
-				"codex": map[string]any{"openai": map[string]any{"platform": "codex"}},
-			}},
-			want: "gpt-6-astra",
-		},
-		{
-			name: "profile preserves explicit model",
-			settings: map[string]any{"profile": "codex", "profiles": map[string]any{
-				"codex": map[string]any{"model": "gpt-5.5", "openai": map[string]any{"platform": "codex"}},
-			}},
-			want: "gpt-5.5",
-		},
-		{
-			name: "profile switches away from Codex",
-			settings: map[string]any{"openai.platform": "codex", "profile": "api", "profiles": map[string]any{
-				"api": map[string]any{"openai": map[string]any{"platform": "openai"}},
-			}},
-			want: "gpt-6-astra",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
-			t.Cleanup(viper.Reset)
-			t.Setenv("KODELET_MODEL", tt.envModel)
-			viper.SetEnvPrefix("KODELET")
-			viper.AutomaticEnv()
-			viper.SetDefault("provider", "openai")
-			viper.SetDefault("model", "")
-			for key, value := range tt.settings {
-				viper.Set(key, value)
-			}
-			cmd := &cobra.Command{Use: "test"}
-			cmd.Flags().String("model", "", "Model override")
-			require.NoError(t, viper.BindPFlag("model", cmd.Flags().Lookup("model")))
-			if tt.flagModel != "" {
-				require.NoError(t, cmd.Flags().Set("model", tt.flagModel))
-			}
-
-			config, err := GetConfigFromViperWithCmd(cmd)
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, config.Model)
-		})
-	}
-}
-
-func TestGetConfigFromViper_CompactRatio(t *testing.T) {
-	viper.Reset()
-	viper.Set("compact_ratio", 0.65)
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	assert.Equal(t, 0.65, config.CompactRatio)
-}
-
-func TestGetConfigFromViper_InvalidCompactRatio(t *testing.T) {
-	tests := []struct {
-		name  string
-		ratio float64
-	}{
-		{name: "zero", ratio: 0.0},
-		{name: "negative", ratio: -0.1},
-		{name: "greater than one", ratio: 1.5},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
-			viper.Set("compact_ratio", tt.ratio)
-
+		{key: "provider", wantErr: "provider is required"},
+		{key: "provider", value: 12, wantErr: "provider is required"},
+		{key: "provider", value: "unsupported", wantErr: "unsupported provider"},
+		{key: "model", wantErr: "model is required"},
+		{key: "model", value: " ", wantErr: "model is required"},
+		{key: "model", value: 12, wantErr: "model is required"},
+		{key: "max_tokens", value: "invalid", wantErr: "failed to unmarshal"},
+		{key: "reasoning_effort", value: "invalid", wantErr: "invalid reasoning_effort"},
+		{key: "openai.text_verbosity", value: "invalid", wantErr: "invalid openai.text_verbosity"},
+		{key: "openai.pricing", value: map[string]any{"invalid-entry": "not-a-map"}, wantErr: "failed to unmarshal"},
+		{key: "bash.timeout", value: "5s", wantErr: "bash.timeout must be at least"},
+		{key: "compact_ratio", value: 0, wantErr: "compact_ratio must be greater than"},
+		{key: "compact_ratio", value: 1.1, wantErr: "compact_ratio must be greater than"},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			configureTestProfile(t, "openai", "test-model")
+			profile := map[string]any{"provider": "openai", "model": "test-model"}
+			setSetting(profile, test.key, test.value)
+			viper.Set("profiles", map[string]any{"test": profile})
 			_, err := GetConfigFromViper()
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "compact_ratio must be greater than 0.0 and less than or equal to 1.0")
+			require.ErrorContains(t, err, test.wantErr)
+			_, err = GetConfigFromProfile(profile)
+			require.ErrorContains(t, err, test.wantErr, "extension profiles share validation")
 		})
 	}
 }
 
-func TestGetConfigFromViper_BashTimeout(t *testing.T) {
-	viper.Reset()
-	viper.Set("bash.timeout", "5m")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Bash)
-	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
-}
-
-func TestGetConfigFromViper_BashTimeoutFromNestedConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("bash", map[string]any{"timeout": "5m"})
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Bash)
-	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
-}
-
-func TestGetConfigFromViper_BashTimeoutFromEnv(t *testing.T) {
-	viper.Reset()
-	viper.SetDefault("bash.timeout", "120s")
-	viper.SetEnvPrefix("KODELET")
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	viper.AutomaticEnv()
-	t.Setenv("KODELET_BASH_TIMEOUT", "5m")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Bash)
-	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
-}
-
-func TestGetConfigFromViper_BashTimeoutRejectsTooShortDuration(t *testing.T) {
-	viper.Reset()
-	viper.Set("bash.timeout", "5s")
-
-	_, err := GetConfigFromViper()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "bash.timeout must be at least 10s")
-}
-
-func TestGetConfigFromViperWithCmd_ExplicitCompactRatioOverridesProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"compact_ratio": 0.9,
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().Float64("compact-ratio", llmtypes.DefaultCompactRatio, "Compact ratio")
-	err := cmd.Flags().Set("compact-ratio", "0.6")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithCmd(cmd)
-	require.NoError(t, err)
-	assert.Equal(t, 0.6, config.CompactRatio)
-}
-
-func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"context": map[string]any{
-				"patterns": []string{"README.md"},
-			},
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns")
-	err := cmd.Flags().Set("context-patterns", "CODING.md,README.md")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithCmd(cmd)
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Context)
-	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
-}
-
-func TestGetConfigFromViperWithCmd_ExplicitSyspromptOverridesProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"sysprompt": "/profile/sysprompt.tmpl",
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().String("sysprompt", "", "custom system prompt")
-	err := cmd.Flags().Set("sysprompt", "./custom/sysprompt.tmpl")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithCmd(cmd)
-	require.NoError(t, err)
-	assert.Equal(t, "./custom/sysprompt.tmpl", config.Sysprompt)
-}
-
-func TestGetConfigFromViperWithCmd_ExplicitSyspromptArgsOverrideProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"sysprompt_args": map[string]any{
-				"project": "from-profile",
-			},
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().StringToString("sysprompt-arg", map[string]string{}, "custom sysprompt args")
-	err := cmd.Flags().Set("sysprompt-arg", "project=from-flag")
-	require.NoError(t, err)
-	err = cmd.Flags().Set("sysprompt-arg", "env=dev")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithCmd(cmd)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"project": "from-flag", "env": "dev"}, config.SyspromptArgs)
-}
-
-func TestGetConfigFromViperWithProfileOpenAIManualCache(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("profile", "cached-openai")
-	viper.Set("profiles", map[string]any{
-		"cached-openai": map[string]any{
-			"openai": map[string]any{
-				"manual_cache": true,
-			},
-		},
-	})
-
-	config, err := GetConfigFromViperWithCmd(nil)
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	assert.True(t, config.OpenAI.ManualCache)
-}
-
-func TestApplyProfileToSettings_DeepMergesNestedMaps(t *testing.T) {
-	settings := map[string]any{
-		"openai": map[string]any{
-			"api_mode":     "responses",
-			"manual_cache": true,
-		},
+func TestValidateModelProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name, key, wantErr string
+		value              any
+	}{
+		{name: "missing selector", key: "profile", value: "", wantErr: "no model profile selected"},
+		{name: "unknown selector", key: "profile", value: "missing", wantErr: "profile 'missing' not found"},
+		{name: "malformed profile", key: "profiles.test", value: "not-a-map", wantErr: "must be a mapping"},
+		{name: "unselected profile", key: "profiles.hidden", value: map[string]any{"hidden": true, "provider": "openai"}, wantErr: `invalid model profile "hidden"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			configureTestProfile(t, "openai", "test-model")
+			viper.Set(test.key, test.value)
+			require.ErrorContains(t, ValidateModelProfiles(), test.wantErr)
+			_, err := GetConfigFromViperWithoutProfile()
+			require.NoError(t, err, "clients and runners do not require model configuration")
+		})
 	}
-
-	applyProfileToSettings(settings, llmtypes.ProfileConfig{
-		"openai": map[string]any{
-			"platform": "fireworks",
-		},
-	})
-
-	openAISettings, ok := settings["openai"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "responses", openAISettings["api_mode"])
-	assert.Equal(t, true, openAISettings["manual_cache"])
-	assert.Equal(t, "fireworks", openAISettings["platform"])
+	for _, key := range modelSettingKeys {
+		for _, source := range []string{"file", "environment"} {
+			t.Run(key+"/"+source, func(t *testing.T) {
+				configureTestProfile(t, "openai", "test-model")
+				if source == "file" {
+					settings := map[string]any{}
+					setSetting(settings, key, "removed-value")
+					require.NoError(t, viper.MergeConfigMap(settings))
+				} else {
+					t.Setenv("KODELET_"+strings.ToUpper(strings.ReplaceAll(key, ".", "_")), "removed-value")
+				}
+				require.ErrorContains(t, ValidateModelProfiles(), "is not supported")
+			})
+		}
+	}
 }
 
-func TestGetConfigFromViperWithProfile_InheritsNestedOpenAISettings(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.api_mode", "responses")
-	viper.Set("openai.manual_cache", true)
-	viper.Set("profile", "fireworks")
-	viper.Set("profiles", map[string]any{
-		"fireworks": map[string]any{
-			"openai": map[string]any{
-				"platform": "fireworks",
-			},
-		},
-	})
-
-	config, err := GetConfigFromViperWithCmd(nil)
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
-	assert.True(t, config.OpenAI.ManualCache)
-	assert.Equal(t, "fireworks", config.OpenAI.Platform)
-}
-
-func TestGetConfigFromViperWithProfile_UsesExplicitProfileWithoutMutatingViper(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "base-model")
-	viper.Set("profile", "current")
-	viper.Set("profiles", map[string]any{
-		"current": map[string]any{
-			"model": "current-model",
-		},
-		"premium": map[string]any{
-			"model": "premium-model",
-		},
-	})
-
-	config, err := GetConfigFromViperWithProfile("premium")
-	require.NoError(t, err)
-	assert.Equal(t, "premium-model", config.Model)
-	assert.Equal(t, "premium", config.Profile)
-	assert.Equal(t, "current", viper.GetString("profile"))
-	assert.Equal(t, "base-model", viper.GetString("model"))
-}
-
-func TestGetConfigFromViperWithoutProfile_IgnoresActiveProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "base-model")
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"provider": "openai",
-			"model":    "gpt-4.1",
-		},
-	})
-
-	config, err := GetConfigFromViperWithoutProfile()
+func TestModelProfileExplicitFlags(t *testing.T) {
+	configureTestProfile(t, "anthropic", "test-model")
+	viper.Set("profiles.test.context.patterns", []string{"PROFILE.md"})
+	viper.Set("profiles.test.sysprompt_args", map[string]any{"project": "profile"})
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("provider", "openai", "Provider override")
+	cmd.Flags().String("model", "flag-default", "Model override")
+	cmd.Flags().String("weak-model", "flag-default", "Weak model override")
+	cmd.Flags().Int("max-tokens", 123, "Token override")
+	cmd.Flags().Bool("enable-openai-search", true, "Search override")
+	cmd.Flags().Float64("compact-ratio", llmtypes.DefaultCompactRatio, "Compact ratio")
+	cmd.Flags().StringSlice("context-patterns", nil, "Context patterns")
+	cmd.Flags().String("sysprompt", "", "System prompt")
+	cmd.Flags().StringToString("sysprompt-arg", nil, "System prompt arguments")
+	require.NoError(t, viper.BindPFlags(cmd.Flags()))
+	require.NoError(t, viper.BindPFlag("weak_model", cmd.Flags().Lookup("weak-model")))
+	require.NoError(t, viper.BindPFlag("max_tokens", cmd.Flags().Lookup("max-tokens")))
+	require.NoError(t, viper.BindPFlag("openai.enable_search", cmd.Flags().Lookup("enable-openai-search")))
+	require.NoError(t, ValidateModelProfiles(), "bound flag defaults are not top-level configuration")
+	config, err := GetConfigFromViperWithCmd(cmd)
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
-	assert.Equal(t, "base-model", config.Model)
-	assert.Empty(t, config.Profile)
+	assert.Equal(t, "test-model", config.Model)
+	assert.Empty(t, config.WeakModel)
+	assert.Equal(t, 8192, config.MaxTokens)
+
+	require.NoError(t, cmd.ParseFlags([]string{
+		"--provider=openai", "--model=gpt-6", "--weak-model=gpt-5.6", "--max-tokens=2048",
+		"--enable-openai-search=false", "--compact-ratio=0.6", "--context-patterns=CODING.md,README.md",
+		"--sysprompt=custom.tmpl", "--sysprompt-arg=project=flag", "--sysprompt-arg=env=dev",
+	}))
+	config, err = GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "test", config.Profile)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "gpt-6-astra", config.Model)
+	assert.Equal(t, "gpt-5.6-sol", config.WeakModel)
+	assert.Equal(t, 2048, config.MaxTokens)
+	assert.Equal(t, new(false), config.OpenAI.EnableSearch)
+	assert.Equal(t, 0.6, config.CompactRatio)
+	assert.Equal(t, &llmtypes.ContextConfig{Patterns: []string{"CODING.md", "README.md"}}, config.Context)
+	assert.Equal(t, "custom.tmpl", config.Sysprompt)
+	assert.Equal(t, map[string]string{"project": "flag", "env": "dev"}, config.SyspromptArgs)
+	viper.Set("profiles.test.provider", "")
+	_, err = GetConfigFromViperWithCmd(cmd)
+	require.ErrorContains(t, err, "provider is required", "flags cannot supply a missing profile identity")
 }
 
-func TestGetConfigFromViperWithEnvironmentProfileUsesSeparateNamespace(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "base-model")
-	viper.Set("allowed_tools", []string{"file_read"})
-	viper.Set("extensions", map[string]any{"allow": []string{"base"}})
-	viper.Set("profile", "model-work")
-	viper.Set("profiles", map[string]any{
-		"model-work": map[string]any{
-			"model":         "profile-model",
-			"allowed_tools": []string{"bash"},
-		},
-	})
-	viper.Set("environment_profiles", map[string]any{
-		"runner-work": map[string]any{
-			"allowed_tools": []string{"grep_tool"},
-			"extensions": map[string]any{
-				"allow": []string{"runner-only"},
+func TestSharedConfigLoaders(t *testing.T) {
+	configureTestProfile(t, "openai", "must-not-be-inherited")
+	for _, key := range modelSettingKeys {
+		viper.Set(key, "invalid-model-value")
+	}
+	viper.Set("profiles.malformed", "not-a-map")
+	viper.Set("extensions.enabled", true)
+	viper.Set("tool_mode", "full")
+	viper.Set("openai.platform", "custom")
+	viper.Set("openai.base_url", "https://provider.example")
+	viper.Set("environment_profiles.runner", map[string]any{"tool_mode": "patch", "model": "not-a-runner-setting"})
+	settings := viper.AllSettings()
+	before := cloneSettings(settings)
+	for _, test := range []struct {
+		name string
+		load func() (llmtypes.Config, error)
+		mode llmtypes.ToolMode
+	}{
+		{name: "shared", load: GetConfigFromViperWithoutProfile, mode: llmtypes.ToolModeFull},
+		{
+			name: "runner", mode: llmtypes.ToolModePatch,
+			load: func() (llmtypes.Config, error) {
+				return GetConfigFromViperWithEnvironmentProfile("runner")
 			},
 		},
-	})
-
-	config, err := GetConfigFromViperWithEnvironmentProfile("runner-work")
-	require.NoError(t, err)
-	assert.Equal(t, "base-model", config.Model)
-	assert.Empty(t, config.Profile)
-	assert.Equal(t, []string{"grep_tool"}, config.AllowedTools)
-	assert.Equal(t, []string{"runner-only"}, config.ExtensionSettings["allow"])
-	assert.Equal(t, "model-work", viper.GetString("profile"))
-
-	base, err := GetConfigFromViperWithEnvironmentProfile("default")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"file_read"}, base.AllowedTools)
-	assert.Equal(t, []string{"base"}, base.ExtensionSettings["allow"])
-
-	_, err = GetConfigFromViperWithEnvironmentProfile("missing")
+		{
+			name: "snapshot", mode: llmtypes.ToolModePatch,
+			load: func() (llmtypes.Config, error) {
+				return GetConfigFromSettingsWithEnvironmentProfile(settings, "runner")
+			},
+		},
+		{
+			name: "runner default", mode: llmtypes.ToolModeFull,
+			load: func() (llmtypes.Config, error) {
+				return GetConfigFromViperWithEnvironmentProfile("default")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := test.load()
+			require.NoError(t, err)
+			assert.Empty(t, config.Profile)
+			assert.Nil(t, config.Profiles)
+			assert.Empty(t, config.Provider)
+			assert.Empty(t, config.Model)
+			assert.Empty(t, config.WeakModel)
+			assert.Zero(t, config.MaxTokens)
+			assert.Zero(t, config.WeakModelMaxTokens)
+			assert.Zero(t, config.ThinkingBudgetTokens)
+			assert.Empty(t, config.ReasoningEffort)
+			assert.Empty(t, config.AllowedReasoningEfforts)
+			assert.Nil(t, config.Anthropic)
+			assert.Equal(t, &llmtypes.OpenAIConfig{Platform: "custom", BaseURL: "https://provider.example"}, config.OpenAI)
+			assert.Equal(t, map[string]any{"enabled": true}, config.ExtensionSettings)
+			assert.Equal(t, test.mode, config.ToolMode)
+			assert.Equal(t, before, settings)
+			assert.Equal(t, before, viper.AllSettings())
+		})
+	}
+	_, err := GetConfigFromViperWithEnvironmentProfile("missing")
 	require.ErrorContains(t, err, "profile 'missing' not found")
 }
 
-func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "current")
-	viper.Set("profiles", map[string]any{
-		"current": map[string]any{
-			"context": map[string]any{
-				"patterns": []string{"CURRENT.md"},
-			},
-		},
-		"premium": map[string]any{
-			"context": map[string]any{
-				"patterns": []string{"README.md"},
-			},
-			"allowed_tools":             []string{"bash"},
-			"tool_mode":                 "full",
-			"reasoning_effort":          "max",
-			"allowed_reasoning_efforts": []string{"low", "max"},
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns")
-	err := cmd.Flags().Set("context-patterns", "CODING.md,README.md")
-	require.NoError(t, err)
-	cmd.Flags().StringSlice("allowed-tools", []string{}, "Allowed tools")
-	err = cmd.Flags().Set("allowed-tools", "grep_tool,file_read")
-	require.NoError(t, err)
-	cmd.Flags().String("tool-mode", "full", "Tool mode")
-	err = cmd.Flags().Set("tool-mode", "patch")
-	require.NoError(t, err)
-	cmd.Flags().String("reasoning-effort", "medium", "Reasoning effort")
-	err = cmd.Flags().Set("reasoning-effort", "low")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithProfileAndCmd("premium", cmd)
-	require.NoError(t, err)
-
-	assert.Equal(t, "premium", config.Profile)
-	require.NotNil(t, config.Context)
-	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
-	assert.Equal(t, []string{"grep_tool", "file_read"}, config.AllowedTools)
-	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
-	assert.Equal(t, "low", config.ReasoningEffort)
-	assert.Equal(t, []string{"low", "max"}, config.AllowedReasoningEfforts)
-}
-
-func TestGetConfigFromViperWithProfile_ProfileNotFound(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"model": "work-model",
-		},
-	})
-
-	_, err := GetConfigFromViperWithProfile("missing")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "profile 'missing' not found")
-}
-
 func TestGetConfigFromViperWithAliases(t *testing.T) {
-	// Save original viper state
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	tests := []struct {
-		name            string
-		configData      map[string]any
-		expectedAliases map[string]string
-		description     string
+	for _, test := range []struct {
+		name, alias, model string
+		shared, profile    map[string]any
 	}{
-		{
-			name: "loads aliases from config",
-			configData: map[string]any{
-				"provider":   "anthropic",
-				"model":      "claude-sonnet-4-6",
-				"max_tokens": 8192,
-				"aliases": map[string]any{
-					"sonnet-46": "claude-sonnet-4-6",
-					"haiku-45":  "claude-haiku-4-5-20251001",
-					"gpt41":     "gpt-4.1",
-				},
-			},
-			expectedAliases: map[string]string{
-				"gpt-6":     "gpt-6-astra",
-				"gpt-5.6":   "gpt-5.6-sol",
-				"sonnet-46": "claude-sonnet-4-6",
-				"haiku-45":  "claude-haiku-4-5-20251001",
-				"gpt41":     "gpt-4.1",
-			},
-			description: "should load aliases from config data",
-		},
-		{
-			name: "handles missing aliases config",
-			configData: map[string]any{
-				"provider":   "anthropic",
-				"model":      "claude-sonnet-4-6",
-				"max_tokens": 8192,
-			},
-			expectedAliases: map[string]string{"gpt-6": "gpt-6-astra", "gpt-5.6": "gpt-5.6-sol"},
-			description:     "should include default aliases when aliases are omitted",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset viper
-			viper.Reset()
-
-			// Set config data
-			for key, value := range tt.configData {
-				viper.Set(key, value)
-			}
-
-			// Get config
-			config, err := GetConfigFromViper()
-			require.NoError(t, err)
-
-			// Verify aliases
-			assert.Equal(t, tt.expectedAliases, config.Aliases, tt.description)
-
-			// Verify other config fields are preserved
-			if provider, exists := tt.configData["provider"]; exists {
-				assert.Equal(t, provider, config.Provider, "provider should be preserved")
-			}
-			if model, exists := tt.configData["model"]; exists {
-				assert.Equal(t, model, config.Model, "model should be preserved")
-			}
-		})
+		{name: "built-in", alias: "gpt-5.6", model: "gpt-5.6-sol"},
+		{name: "shared dotted alias", alias: "driver.v1", model: "shared-model", shared: map[string]any{"driver.v1": "shared-model"}},
+		{name: "profile override", alias: "driver.v1", model: "profile-model", shared: map[string]any{"driver.v1": "shared-model"}, profile: map[string]any{"driver.v1": "profile-model"}},
+	} {
+		for _, source := range []string{"file", "override"} {
+			t.Run(test.name+"/"+source, func(t *testing.T) {
+				viper.Reset()
+				t.Cleanup(viper.Reset)
+				settings := map[string]any{
+					"profile": "test", "aliases": test.shared,
+					"profiles": map[string]any{"test": map[string]any{
+						"provider": "openai", "model": test.alias, "weak_model": test.alias, "aliases": test.profile,
+					}},
+				}
+				if source == "file" {
+					require.NoError(t, viper.MergeConfigMap(settings))
+				} else {
+					for key, value := range settings {
+						viper.Set(key, value)
+					}
+				}
+				config, err := GetConfigFromViper()
+				require.NoError(t, err)
+				assert.Equal(t, test.model, config.Model)
+				assert.Equal(t, test.model, config.WeakModel)
+				assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
+				assert.True(t, config.ModelAliasesResolved)
+			})
+		}
 	}
 }
 
 func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
-	// Save original viper state
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	// Reset viper and set config with alias
-	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "sonnet-46") // This is an alias
-	viper.Set("max_tokens", 8192)
-	viper.Set("aliases", map[string]any{
-		"sonnet-46": "claude-sonnet-4-6",
-		"haiku-45":  "claude-haiku-4-5-20251001",
-	})
-
-	// Get config and create thread
+	configureTestProfile(t, "anthropic", "sonnet-46")
+	viper.Set("aliases", map[string]any{"sonnet-46": "claude-sonnet-4-6"})
 	config, err := GetConfigFromViper()
 	require.NoError(t, err)
-	originalModel := config.Model
-
 	thread, err := NewThread(config)
-
-	require.NoError(t, err, "should resolve alias from config through NewThread")
-	require.NotNil(t, thread, "thread should not be nil")
-
-	// Verify the original config was not modified (passed by value to NewThread)
-	assert.Equal(t, originalModel, config.Model, "original config should not be modified")
-}
-
-func TestGetConfigFromViperIncludesDefaultOpenAIAliases(t *testing.T) {
-	// Save original viper state
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.6")
-	viper.Set("weak_model", "gpt-5.6")
-
-	config, err := GetConfigFromViper()
 	require.NoError(t, err)
-
-	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
-	assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
-	assert.Equal(t, "gpt-5.6-sol", config.Model)
-	assert.Equal(t, "gpt-5.6-sol", config.WeakModel)
+	require.NotNil(t, thread)
+	assert.Equal(t, "claude-sonnet-4-6", config.Model)
 }
 
-func TestGetConfigFromViperOpenAINotSet(t *testing.T) {
-	// Setup
+func TestSharedBashTimeoutFromEnv(t *testing.T) {
 	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4")
-
-	// Execute
-	config, err := GetConfigFromViper()
+	t.Cleanup(viper.Reset)
+	t.Setenv("KODELET_BASH_TIMEOUT", "35s")
+	require.NoError(t, viper.BindEnv("bash.timeout", "KODELET_BASH_TIMEOUT"))
+	config, err := GetConfigFromViperWithoutProfile()
 	require.NoError(t, err)
-
-	// Verify
-	assert.Nil(t, config.OpenAI, "OpenAI config should be nil when not set")
-}
-
-func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.platform", "fireworks")
-	viper.Set("openai.base_url", "https://api.fireworks.ai/inference/v1")
-	viper.Set("openai.manual_cache", true)
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "fireworks", config.OpenAI.Platform)
-	assert.Equal(t, "https://api.fireworks.ai/inference/v1", config.OpenAI.BaseURL)
-	assert.Empty(t, config.OpenAI.TextVerbosity)
-	assert.True(t, config.OpenAI.ManualCache)
-	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
-	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
-}
-
-func TestGetConfigFromViperAnthropicBasicConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("anthropic.platform", "copilot")
-	viper.Set("anthropic.base_url", "https://proxy.example")
-	viper.Set("anthropic.adaptive_thinking", true)
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Anthropic, "Anthropic config should not be nil")
-	assert.Equal(t, "copilot", config.Anthropic.Platform)
-	assert.Equal(t, "https://proxy.example", config.Anthropic.BaseURL)
-	assert.True(t, config.Anthropic.AdaptiveThinking)
-}
-
-func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.api_mode", "responses")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-
-	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
-}
-
-func TestGetConfigFromViperOpenAITextVerbosityConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.text_verbosity", " HIGH ")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	assert.Equal(t, llmtypes.OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
-}
-
-func TestGetConfigFromViperOpenAITextVerbosityFromEnv(t *testing.T) {
-	viper.Reset()
-	viper.SetDefault("openai.text_verbosity", "")
-	viper.SetEnvPrefix("KODELET")
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	viper.AutomaticEnv()
-	t.Setenv("KODELET_OPENAI_TEXT_VERBOSITY", "high")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	assert.Equal(t, llmtypes.OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
-}
-
-func TestGetConfigFromViperRejectsInvalidOpenAITextVerbosity(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.text_verbosity", "extreme")
-
-	_, err := GetConfigFromViper()
-	require.ErrorContains(t, err, "invalid openai.text_verbosity")
-}
-
-func TestGetConfigFromViperOpenAISearchConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.enable_search", false)
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	require.NotNil(t, config.OpenAI.EnableSearch)
-	assert.False(t, *config.OpenAI.EnableSearch)
-}
-
-func TestGetConfigFromViperOpenAIWebSocketModeConfig(t *testing.T) {
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.websocket_mode", false)
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	require.NotNil(t, config.OpenAI)
-	require.NotNil(t, config.OpenAI.WebSocketMode)
-	assert.False(t, *config.OpenAI.WebSocketMode)
-}
-
-func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini", "o3-mini"})
-	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"})
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
-	assert.Equal(t, []string{"o1-preview", "o1-mini", "o3-mini"}, config.OpenAI.Models.Reasoning)
-	assert.Equal(t, []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"}, config.OpenAI.Models.NonReasoning)
-}
-
-func TestGetConfigFromViperOpenAIPartialModelsConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("openai.models.reasoning", []string{"o1-preview"})
-	// Don't set non_reasoning
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
-	assert.Equal(t, []string{"o1-preview"}, config.OpenAI.Models.Reasoning)
-	assert.Nil(t, config.OpenAI.Models.NonReasoning, "NonReasoning should be nil when not set")
-}
-
-func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-
-	// Create complex pricing configuration
-	pricingConfig := map[string]any{
-		"gpt-4": map[string]any{
-			"input":                     0.00003,
-			"cached_input":              0.000015,
-			"output":                    0.00006,
-			"long_context_input":        0.00006,
-			"long_context_cached_input": 0.00003,
-			"long_context_output":       0.00009,
-			"long_context_threshold":    272000,
-			"context_window":            128000,
-		},
-		"o1-preview": map[string]any{
-			"input":          0.000015,
-			"output":         0.00006,
-			"context_window": 32768,
-		},
-	}
-	viper.Set("openai.pricing", pricingConfig)
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
-	require.Len(t, config.OpenAI.Pricing, 2, "Should have 2 pricing entries")
-
-	// Check gpt-4 pricing
-	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
-	require.True(t, exists, "gpt-4 pricing should exist")
-	assert.Equal(t, 0.00003, gpt4Pricing.Input)
-	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
-	assert.Equal(t, 0.00006, gpt4Pricing.Output)
-	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
-	assert.Equal(t, 0.00003, gpt4Pricing.LongContextCachedInput)
-	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
-	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
-	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
-
-	// Check o1-preview pricing
-	o1Pricing, exists := config.OpenAI.Pricing["o1-preview"]
-	require.True(t, exists, "o1-preview pricing should exist")
-	assert.Equal(t, 0.000015, o1Pricing.Input)
-	assert.Equal(t, 0.0, o1Pricing.CachedInput) // Not set, should be zero value
-	assert.Equal(t, 0.00006, o1Pricing.Output)
-	assert.Equal(t, 32768, o1Pricing.ContextWindow)
-}
-
-func TestGetConfigFromViperOpenAIPricingPartialConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-
-	// Create pricing configuration with only some fields
-	pricingConfig := map[string]any{
-		"gpt-4": map[string]any{
-			"input":  0.00003,
-			"output": 0.00006,
-			// Missing cached_input and context_window
-		},
-	}
-	viper.Set("openai.pricing", pricingConfig)
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
-
-	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
-	require.True(t, exists, "gpt-4 pricing should exist")
-	assert.Equal(t, 0.00003, gpt4Pricing.Input)
-	assert.Equal(t, 0.0, gpt4Pricing.CachedInput) // Should be zero value
-	assert.Equal(t, 0.00006, gpt4Pricing.Output)
-	assert.Equal(t, 0, gpt4Pricing.ContextWindow) // Should be zero value
-}
-
-func TestGetConfigFromViperOpenAIPricingInvalidTypes(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-
-	// Create pricing configuration with invalid types
-	pricingConfig := map[string]any{
-		"gpt-4": map[string]any{
-			"input":          "invalid", // Should be float64
-			"cached_input":   0.000015,
-			"output":         0.00006,
-			"context_window": "invalid", // Should be int
-		},
-		"invalid-entry": "not-a-map", // Should be a map
-	}
-	viper.Set("openai.pricing", pricingConfig)
-
-	// Execute - invalid types should cause configuration to fail
-	_, err := GetConfigFromViper()
-
-	// Verify that error is returned for invalid configuration
-	assert.Error(t, err, "should return error for invalid pricing configuration types")
-	assert.Contains(t, err.Error(), "failed to unmarshal configuration", "error should mention unmarshaling failure")
-}
-
-func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
-	// Setup
-	viper.Reset()
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4")
-	viper.Set("max_tokens", 4096)
-
-	// Set full OpenAI configuration
-	viper.Set("openai.platform", "custom")
-	viper.Set("openai.base_url", "https://api.custom.ai/v1")
-	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini"})
-	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-3.5-turbo"})
-
-	pricingConfig := map[string]any{
-		"gpt-4": map[string]any{
-			"input":                  0.00003,
-			"cached_input":           0.000015,
-			"output":                 0.00006,
-			"long_context_input":     0.00006,
-			"long_context_output":    0.00009,
-			"long_context_threshold": 272000,
-			"context_window":         128000,
-		},
-		"o1-preview": map[string]any{
-			"input":          0.000015,
-			"output":         0.00006,
-			"context_window": 32768,
-		},
-	}
-	viper.Set("openai.pricing", pricingConfig)
-
-	// Execute
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	// Verify basic config
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-4", config.Model)
-	assert.Equal(t, 4096, config.MaxTokens)
-
-	// Verify OpenAI config
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "custom", config.OpenAI.Platform)
-	assert.Equal(t, "https://api.custom.ai/v1", config.OpenAI.BaseURL)
-
-	// Verify models config
-	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
-	assert.Equal(t, []string{"o1-preview", "o1-mini"}, config.OpenAI.Models.Reasoning)
-	assert.Equal(t, []string{"gpt-4", "gpt-3.5-turbo"}, config.OpenAI.Models.NonReasoning)
-
-	// Verify pricing config
-	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
-	require.Len(t, config.OpenAI.Pricing, 2, "Should have 2 pricing entries")
-
-	gpt4Pricing := config.OpenAI.Pricing["gpt-4"]
-	assert.Equal(t, 0.00003, gpt4Pricing.Input)
-	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
-	assert.Equal(t, 0.00006, gpt4Pricing.Output)
-	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
-	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
-	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
-	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
-
-	o1Pricing := config.OpenAI.Pricing["o1-preview"]
-	assert.Equal(t, 0.000015, o1Pricing.Input)
-	assert.Equal(t, 0.0, o1Pricing.CachedInput)
-	assert.Equal(t, 0.00006, o1Pricing.Output)
-	assert.Equal(t, 32768, o1Pricing.ContextWindow)
+	assert.Equal(t, &llmtypes.BashConfig{Timeout: 35 * time.Second}, config.Bash)
 }

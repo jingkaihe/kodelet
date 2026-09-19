@@ -306,7 +306,7 @@ func TestRemoteSlashDiscoveryUsesRunnerTargetAndDiscardsStaleDirectory(t *testin
 	assert.NotContains(t, slashCommandNames(m.slashCommands), "runner-only")
 	m.profile = "default"
 	m.loadRemoteSlashCommands(m.conversationState)()
-	assert.Equal(t, "default", runner.target.Profile, "explicit default must not inherit the daemon's active profile")
+	assert.Equal(t, "default", runner.target.Profile, "a profile named default is sent unchanged like any other name")
 	m.conversationID = "persisted-conversation"
 	m.loadRemoteSlashCommands(m.conversationState)()
 	assert.Equal(t, chat.WorkspaceTarget{ConversationID: "persisted-conversation"}, runner.target, "stored affinity must replace CLI directory/profile defaults on resume")

@@ -20,17 +20,15 @@ type ProfileConfigLoader func(cwd, modelProfile, environmentProfile string) (llm
 // the ordinary workspace loader then applies repository policy and runner profiles.
 func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigLoader, error) {
 	type settingsSnapshot struct {
-		Defaults      map[string]any
-		Overrides     map[string]any
-		Profiles      map[string]map[string]any
-		ActiveProfile string
+		Defaults  map[string]any
+		Overrides map[string]any
+		Profiles  map[string]map[string]any
 	}
 	settings := settingsSnapshot{
 		Defaults:  environmentSettings(defaults),
 		Overrides: environmentSettings(overrides),
 		Profiles:  make(map[string]map[string]any),
 	}
-	settings.ActiveProfile, _ = defaults["profile"].(string)
 	if profiles, ok := defaults["profiles"].(map[string]any); ok {
 		for name, raw := range profiles {
 			if profile, ok := raw.(map[string]any); ok {
@@ -50,14 +48,11 @@ func NewEmbeddedConfigLoader(defaults, overrides map[string]any) (ProfileConfigL
 			return llmtypes.Config{}, errors.Wrap(err, "failed to decode embedded runner settings")
 		}
 		profile := strings.TrimSpace(modelProfile)
-		if profile == "" {
-			profile = strings.TrimSpace(settings.ActiveProfile)
-		}
 		v := viper.New()
 		if err := v.MergeConfigMap(settings.Defaults); err != nil {
 			return llmtypes.Config{}, errors.Wrap(err, "failed to load embedded runner defaults")
 		}
-		if profile != "" && !strings.EqualFold(profile, "default") {
+		if profile != "" {
 			values, ok := settings.Profiles[profile]
 			if !ok {
 				return llmtypes.Config{}, errors.Errorf("embedded runner model profile %q not found; restart the server after changing profiles", profile)

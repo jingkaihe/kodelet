@@ -8,11 +8,20 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestWorkspaceInspectionTargetsRunnerAndRejectsInvalidRequests(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	viper.Set("profile", "model")
+	viper.Set("profiles.model", map[string]any{"provider": "openai", "model": "test-model"})
 	for _, supported := range []bool{true, false} {
 		t.Run(map[bool]string{true: "supported", false: "old-runner"}[supported], func(t *testing.T) {
 			server := newRunnerTestServer(t, "")

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,7 +30,8 @@ profiles:
   shared:
     provider: anthropic
   default:
-    provider: ignored
+    provider: openai
+    model: repo-default-model
 `
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "kodelet-config.yaml"), []byte(repoConfig), 0o644))
 
@@ -42,7 +45,8 @@ profiles:
   shared:
     provider: openai
   default:
-    provider: ignored
+    provider: anthropic
+    model: global-default-model
 `
 	require.NoError(t, os.WriteFile(globalConfigPath, []byte(globalConfig), 0o644))
 
@@ -52,17 +56,18 @@ profiles:
 	repoProfiles := llm.RepoProfiles()
 	assert.Contains(t, repoProfiles, "repo-only")
 	assert.Contains(t, repoProfiles, "shared")
-	assert.NotContains(t, repoProfiles, "default")
+	assert.Contains(t, repoProfiles, "default")
 
 	globalProfiles := llm.GlobalProfiles()
 	assert.Contains(t, globalProfiles, "global-only")
 	assert.Contains(t, globalProfiles, "shared")
-	assert.NotContains(t, globalProfiles, "default")
+	assert.Contains(t, globalProfiles, "default")
 
 	sources := llm.ProfileSources()
 	assert.Equal(t, llm.ProfileSourceGlobal, sources["global-only"])
 	assert.Equal(t, llm.ProfileSourceRepo, sources["repo-only"])
 	assert.Equal(t, llm.ProfileSourceRepoOverridesGlobal, sources["shared"])
+	assert.Equal(t, llm.ProfileSourceRepoOverridesGlobal, sources["default"])
 }
 
 func TestProfileMissingConfigReturnsEmptyValues(t *testing.T) {
@@ -86,7 +91,7 @@ func TestProfileHelpers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, ".kodelet", "config.yaml"), globalPath)
 
-	assert.Equal(t, "Switched to default configuration in repo config", getProfileSwitchMessage("default", false))
+	assert.Equal(t, "Switched to profile 'default' in repo config", getProfileSwitchMessage("default", false))
 	assert.Equal(t, "Switched to profile 'fast' in global config", getProfileSwitchMessage("fast", true))
 }
 
@@ -133,6 +138,90 @@ func TestEffectiveProfileSetting(t *testing.T) {
 
 		assert.Equal(t, "repo-profile", profile)
 		assert.Equal(t, "repo config", source)
+	})
+}
+
+func TestProfileCommandsUseOnlyNamedProfiles(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previous))
+	})
+	home := t.TempDir()
+	withTempHomeAndCWD(t, home, t.TempDir())
+	t.Setenv(profileEnv, "")
+	const content = `profile: flair
+extensions:
+  enabled: true
+profiles:
+  flair:
+    provider: openai
+    model: flair-model
+  deep:
+    provider: openai
+    model: deep-model
+`
+	path := filepath.Join(home, ".kodelet", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	var settings map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(content), &settings))
+	require.NoError(t, viper.MergeConfigMap(settings))
+
+	t.Run("list marks configured default separately from override", func(t *testing.T) {
+		var output bytes.Buffer
+		cmd := &cobra.Command{Use: "list"}
+		cmd.SetOut(&output)
+		cmd.Flags().String("profile", "", "")
+		require.NoError(t, cmd.Flags().Set("profile", "deep"))
+		viper.Set("profile", "deep")
+		t.Cleanup(func() { viper.Set("profile", "flair") })
+
+		require.NoError(t, profileListCmd.RunE(cmd, nil))
+		assert.Regexp(t, `flair\s+global\s+Default`, output.String())
+		assert.Regexp(t, `deep\s+global\s+Selected \(command-line flag\)`, output.String())
+		assert.NotContains(t, output.String(), "built-in")
+		assert.NotRegexp(t, `(?m)^default\s`, output.String())
+	})
+
+	for _, test := range []struct{ profile, wantError string }{
+		{"", "set profile: <name>"},
+		{"missing", "profile 'missing' not found"},
+	} {
+		t.Run("invalid selection "+test.profile, func(t *testing.T) {
+			viper.Set("profile", test.profile)
+			t.Cleanup(func() { viper.Set("profile", "flair") })
+			require.ErrorContains(t, profileCurrentCmd.RunE(&cobra.Command{}, nil), test.wantError)
+		})
+	}
+
+	t.Run("default is not an implicit profile", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "show"}
+		cmd.Flags().String("format", "json", "")
+		require.ErrorContains(t, profileShowCmd.RunE(cmd, []string{"default"}), "profile 'default' not found")
+		cmd = &cobra.Command{Use: "use"}
+		cmd.Flags().Bool("global", true, "")
+		require.ErrorContains(t, profileUseCmd.RunE(cmd, []string{"default"}), "profile 'default' not found")
+	})
+
+	t.Run("explicit default profile can be shown", func(t *testing.T) {
+		profiles := settings["profiles"].(map[string]any)
+		profiles["default"] = map[string]any{"provider": "openai", "model": "named-default-model"}
+		viper.Set("profiles", profiles)
+		require.NoError(t, writeYAMLConfig(path, settings, true))
+		var output bytes.Buffer
+		cmd := &cobra.Command{Use: "show"}
+		cmd.Flags().String("format", "json", "")
+		cmd.SetOut(&output)
+		require.NoError(t, profileShowCmd.RunE(cmd, []string{"default"}))
+		var shown struct {
+			Profile string `json:"profile"`
+			Model   string `json:"model"`
+		}
+		require.NoError(t, json.Unmarshal(output.Bytes(), &shown))
+		assert.Equal(t, "default", shown.Profile)
+		assert.Equal(t, "named-default-model", shown.Model)
 	})
 }
 
@@ -230,7 +319,7 @@ func TestUpdateProfileInConfig(t *testing.T) {
 		withTempHomeAndCWD(t, home, t.TempDir())
 		path := filepath.Join(home, ".kodelet", "config.yaml")
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-		require.NoError(t, os.WriteFile(path, []byte("provider: openai\nprofile: old\n"), 0o644))
+		require.NoError(t, os.WriteFile(path, []byte("extensions:\n  enabled: true\nprofile: old\n"), 0o644))
 
 		require.NoError(t, updateProfileInConfig(true, "new"))
 
@@ -239,7 +328,7 @@ func TestUpdateProfileInConfig(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, yaml.Unmarshal(data, &config))
 		assert.Equal(t, "new", config["profile"])
-		assert.Equal(t, "openai", config["provider"])
+		assert.Equal(t, map[string]any{"enabled": true}, config["extensions"])
 		if runtime.GOOS != "windows" {
 			info, statErr := os.Stat(path)
 			require.NoError(t, statErr)

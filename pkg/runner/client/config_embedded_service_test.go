@@ -96,7 +96,7 @@ func TestEmbeddedProfilesReachRunAndDiscoveryManifests(t *testing.T) {
 	wg.Wait()
 	_, _, cached = service.HeartbeatSnapshot()
 	assert.Equal(t, initial, cached, "profile-specific runs must not replace the default heartbeat digest")
-	manifest, err := service.ProbeManifestForProfile(t.Context(), root, "default", "", nil)
+	manifest, err := service.ProbeManifestForProfile(t.Context(), root, "", "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, llmtypes.ToolModeFull, manifest.Config.ToolMode)
 	assert.Empty(t, manifest.Config.SystemPromptContent)

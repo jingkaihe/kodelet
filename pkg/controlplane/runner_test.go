@@ -675,6 +675,11 @@ func (r *embeddedSelectionResolver) ResolveEnvironment(_ context.Context, reques
 }
 
 func TestEmbeddedRunnerDefaultSelectionPrecedence(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "work-model"})
 	for _, scenario := range []string{"default", "explicit", "affinity", "unavailable", "explicit while default offline", "affinity while default offline"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Setenv("KODELET_BASE_PATH", t.TempDir())
@@ -1128,6 +1133,14 @@ func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testin
 }
 
 func TestRunnerDiscoveryRoutesModelProfilesIndependentlyOfEnvironmentProfiles(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profile", "model-profile")
+	viper.Set("profiles", map[string]any{
+		"default":       map[string]any{"provider": "openai", "model": "default-model"},
+		"model-profile": map[string]any{"provider": "openai", "model": "named-model"},
+	})
 	snapshotMetadata := func(profile string) map[string]any {
 		metadata, err := conversations.AddConfigSnapshot(map[string]any{"profile": "legacy-ignored"}, llmtypes.Config{Profile: profile, Provider: "openai", Model: "stored-model", ReasoningEffort: "medium"})
 		require.NoError(t, err)
@@ -1155,18 +1168,19 @@ func TestRunnerDiscoveryRoutesModelProfilesIndependentlyOfEnvironmentProfiles(t 
 				want     string
 				status   int
 			}{
-				{name: "daemon default"},
+				{name: "daemon default", want: "model-profile"},
 				{name: "explicit default", profile: "default", want: "default"},
 				{name: "named", profile: " model-profile ", want: "model-profile"},
-				{name: "default spelling", profile: " DEFAULT ", want: "default"},
+				{name: "unknown name", profile: "missing", status: http.StatusBadRequest},
+				{name: "no reserved spelling", profile: " DEFAULT ", status: http.StatusBadRequest},
 				{name: "snapshot wins", metadata: snapshotMetadata("stored-profile"), want: "stored-profile"},
 				{name: "matching snapshot", profile: "stored-profile", metadata: snapshotMetadata("stored-profile"), want: "stored-profile"},
 				{name: "snapshot default", metadata: snapshotMetadata("default"), want: "default"},
-				{name: "snapshot empty pins base", metadata: snapshotMetadata(""), want: "default"},
+				{name: "snapshot empty uses shared settings", metadata: snapshotMetadata("")},
 				{name: "legacy named", metadata: map[string]any{"profile": "legacy-profile"}, want: "legacy-profile"},
 				{name: "legacy default", metadata: map[string]any{"profile": "default"}, want: "default"},
-				{name: "legacy empty pins base", metadata: map[string]any{"profile": ""}, want: "default"},
-				{name: "legacy missing inherits daemon default", metadata: map[string]any{}},
+				{name: "legacy empty uses shared settings", metadata: map[string]any{"profile": ""}},
+				{name: "legacy missing inherits daemon default", metadata: map[string]any{}, want: "model-profile"},
 				{name: "conflicting named", profile: "other", metadata: snapshotMetadata("stored-profile"), status: http.StatusBadRequest},
 				{name: "conflicting default", profile: "default", metadata: snapshotMetadata("stored-profile"), status: http.StatusBadRequest},
 				{name: "conflicting base", profile: "other", metadata: snapshotMetadata(""), status: http.StatusBadRequest},
@@ -1989,13 +2003,11 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
-	viper.Set("provider", "openai")
-	viper.Set("model", "base-model")
 	viper.Set("profile", "deep")
 	viper.Set("tool_mode", "full")
 	viper.Set("extensions.enabled", false)
 	viper.Set("profiles", map[string]any{
-		"deep": map[string]any{"model": "active-model", "tool_mode": "patch"},
+		"deep": map[string]any{"provider": "openai", "model": "active-model", "tool_mode": "patch"},
 	})
 	viper.Set("environment_profiles", map[string]any{"review": map[string]any{"sysprompt_args": map[string]any{"scope": "review"}}})
 	for _, test := range []struct {
@@ -2007,11 +2019,11 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 		selector   string
 		mode       llmtypes.ToolMode
 	}{
-		{name: "removed snapshot", snapshot: new("removed"), identity: "removed", selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "removed snapshot", snapshot: new("removed"), identity: "removed", mode: llmtypes.ToolModeFull},
 		{name: "existing snapshot", snapshot: new("deep"), identity: "deep", selector: "deep", mode: llmtypes.ToolModePatch},
-		{name: "empty snapshot", snapshot: new(""), selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "empty snapshot", snapshot: new(""), mode: llmtypes.ToolModeFull},
 		{name: "legacy missing profile", identity: "deep", selector: "deep", mode: llmtypes.ToolModePatch},
-		{name: "legacy empty profile", legacy: map[string]any{"profile": ""}, identity: "default", selector: "default", mode: llmtypes.ToolModeFull},
+		{name: "legacy empty profile", legacy: map[string]any{"profile": ""}, mode: llmtypes.ToolModeFull},
 		{name: "standalone removed snapshot", standalone: true, snapshot: new("removed"), identity: "removed", selector: "removed", mode: llmtypes.ToolModePatch},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -2118,8 +2130,8 @@ func TestServerChatRunnerSavedProfileEnvironmentSelection(t *testing.T) {
 				recorder := httptest.NewRecorder()
 				query := url.Values{"runnerId": {registration.RunnerID}, "profile": {"removed"}}
 				server.handleGetSlashCommands(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil))
-				assert.Equal(t, http.StatusBadGateway, recorder.Code)
-				assert.Contains(t, recorder.Body.String(), "could not load the runner's available commands and tools", "unknown new discovery must not receive snapshot fallback")
+				assert.Equal(t, http.StatusBadRequest, recorder.Code)
+				assert.Contains(t, recorder.Body.String(), "could not resolve model profile", "unknown new discovery must not receive snapshot fallback")
 				unknown := config.Clone()
 				unknown.Profile = "removed"
 				environment, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, "new", unknown, root)

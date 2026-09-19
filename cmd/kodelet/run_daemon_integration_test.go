@@ -57,15 +57,18 @@ echo '%s'
 `, output)
 		require.NoError(t, os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700))
 	}
-	config := fmt.Sprintf(`provider: openai
-model: gpt-4o
-weak_model: gpt-4o
-max_tokens: 256
-openai:
-  platform: openai
-  base_url: %s
-  api_mode: chat_completions
-  api_key_env_var: KODELET_TEST_PROVIDER_KEY
+	config := fmt.Sprintf(`profile: work
+profiles:
+  work:
+    provider: openai
+    model: gpt-4o
+    weak_model: gpt-4o
+    max_tokens: 256
+    openai:
+      platform: openai
+      base_url: %s
+      api_mode: chat_completions
+      api_key_env_var: KODELET_TEST_PROVIDER_KEY
 extensions:
   enabled: false
 skills:
@@ -294,15 +297,18 @@ echo '%s'
 			port := reservation.Addr().(*net.TCPAddr).Port
 			t.Cleanup(func() { _ = reservation.Close() })
 			const webURL = "https://kodelet.example.test"
-			config := fmt.Sprintf(`provider: openai
-model: gpt-4o
-weak_model: gpt-4o
-max_tokens: 256
-openai:
-  platform: openai
-  base_url: %s
-  api_mode: chat_completions
-  api_key_env_var: KODELET_TEST_PROVIDER_KEY
+			config := fmt.Sprintf(`profile: work
+profiles:
+  work:
+    provider: openai
+    model: gpt-4o
+    weak_model: gpt-4o
+    max_tokens: 256
+    openai:
+      platform: openai
+      base_url: %s
+      api_mode: chat_completions
+      api_key_env_var: KODELET_TEST_PROVIDER_KEY
 extensions:
   enabled: false
 skills:
@@ -798,22 +804,13 @@ KODELET_TEST_ACP_EXTENSION=1 exec %q -test.run '^TestDaemonACPSearchExtensionPro
 			viper.Set(key, value)
 		}
 	})
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4o")
-	viper.Set("weak_model", "gpt-4o")
-	viper.Set("max_tokens", 256)
-	viper.Set("reasoning_effort", "medium")
-	viper.Set("profiles", map[string]any{"deep": map[string]any{
-		"provider":                  "openai",
-		"model":                     "gpt-4o",
-		"reasoning_effort":          "xhigh",
-		"allowed_reasoning_efforts": []string{"high", "xhigh"},
-	}})
-	viper.Set("openai", map[string]any{
-		"platform":        "openai",
-		"base_url":        provider.URL,
-		"api_key_env_var": "KODELET_TEST_PROVIDER_KEY",
-		"api_mode":        "chat_completions",
+	viper.Set("profile", "work")
+	deep := daemonTestModelProfile(provider.URL, "KODELET_TEST_PROVIDER_KEY")
+	deep["reasoning_effort"] = "xhigh"
+	deep["allowed_reasoning_efforts"] = []string{"high", "xhigh"}
+	viper.Set("profiles", map[string]any{
+		"work": daemonTestModelProfile(provider.URL, "KODELET_TEST_PROVIDER_KEY"),
+		"deep": deep,
 	})
 	viper.Set("extensions.enabled", true)
 	viper.Set("skills.enabled", false)
@@ -1438,6 +1435,22 @@ func daemonCLIProcess(ctx context.Context, t *testing.T, cwd string, environment
 	}
 	command.WaitDelay = 5 * time.Second
 	return command
+}
+
+func daemonTestModelProfile(providerURL, keyEnv string) map[string]any {
+	return map[string]any{
+		"provider":         "openai",
+		"model":            "gpt-4o",
+		"weak_model":       "gpt-4o",
+		"max_tokens":       256,
+		"reasoning_effort": "medium",
+		"openai": map[string]any{
+			"platform":        "openai",
+			"base_url":        providerURL,
+			"api_key_env_var": keyEnv,
+			"api_mode":        "chat_completions",
+		},
+	}
 }
 
 func daemonTestProvider(

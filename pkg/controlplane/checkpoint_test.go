@@ -72,9 +72,10 @@ func checkpointTestModelPolicy(t *testing.T) {
 	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "checkpoint-local-presence-only")
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "checkpoint-main")
-	viper.Set("weak_model", "checkpoint-weak")
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{
+		"provider": "anthropic", "model": "checkpoint-main", "weak_model": "checkpoint-weak",
+	})
 	viper.Set("anthropic_api_access", "api-key")
 }
 
@@ -94,10 +95,10 @@ func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing
 				_, _ = fmt.Fprint(w, "data: "+`{"id":"reply","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"checkpoint complete"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`+"\n\ndata: [DONE]\n\n")
 			}))
 			defer provider.Close()
-			viper.Set("provider", "openai")
-			viper.Set("model", "gpt-4o")
-			viper.Set("weak_model", "gpt-4o")
-			viper.Set("openai", map[string]any{"base_url": provider.URL, "api_mode": "chat_completions", "api_key_env_var": "OPENAI_API_KEY"})
+			viper.Set("profiles.work", map[string]any{
+				"provider": "openai", "model": "gpt-4o", "weak_model": "gpt-4o",
+				"openai": map[string]any{"base_url": provider.URL, "api_mode": "chat_completions", "api_key_env_var": "OPENAI_API_KEY"},
+			})
 			workspace := config.EmbeddedRunner.Workspace
 			config.EmbeddedRunner.Settings["extensions"] = map[string]any{"enabled": true}
 			directory := filepath.Join(workspace, ".kodelet", "extensions")

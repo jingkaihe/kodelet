@@ -239,8 +239,8 @@ func TestRemoteExtensionSnapshotUsesMatchingLiveProvider(t *testing.T) {
 			} else {
 				assert.Equal(t, "https://daemon.invalid", resumed.OpenAI.BaseURL)
 				assert.Equal(t, "DAEMON_KEY", resumed.OpenAI.APIKeyEnvVar)
-				assert.Equal(t, new(true), resumed.OpenAI.WebSocketMode)
-				assert.Equal(t, new(true), resumed.OpenAI.EnableSearch)
+				assert.Equal(t, saved.OpenAI.WebSocketMode, resumed.OpenAI.WebSocketMode)
+				assert.Equal(t, saved.OpenAI.EnableSearch, resumed.OpenAI.EnableSearch)
 			}
 			assert.Equal(t, "gpt-5.5", live.Model)
 			assert.Equal(t, llmtypes.OpenAIServiceTierDefault, live.OpenAI.ServiceTier)
@@ -488,12 +488,14 @@ func TestExecutionOptionsRejectedBeforeEnvironmentEffects(t *testing.T) {
 		}
 	})
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "private-main")
-	viper.Set("weak_model", "private-weak")
-	viper.Set("max_tokens", 4096)
-	viper.Set("thinking_budget_tokens", 1024)
-	viper.Set("profiles", map[string]any{"work": map[string]any{}, "other": map[string]any{}})
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider": "anthropic", "model": "private-main", "weak_model": "private-weak",
+			"max_tokens": 4096, "thinking_budget_tokens": 1024,
+		},
+		"other": map[string]any{"provider": "anthropic", "model": "other-model"},
+	})
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	metadata, err := conversationservice.AddConfigSnapshot(nil, llmtypes.Config{

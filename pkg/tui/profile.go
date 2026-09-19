@@ -10,20 +10,19 @@ import (
 
 func loadProfileOptions() []string {
 	profileSources := llm.ProfileSources()
-	options := make([]string, 0, len(profileSources)+1)
+	options := make([]string, 0, len(profileSources))
 	seen := map[string]bool{}
 
 	appendOption := func(profile string) {
 		profile = displayProfile(profile)
 		key := strings.ToLower(profile)
-		if seen[key] {
+		if profile == "" || seen[key] {
 			return
 		}
 		seen[key] = true
 		options = append(options, profile)
 	}
 
-	appendOption("default")
 	names := make([]string, 0, len(profileSources))
 	for name := range profileSources {
 		names = append(names, name)

@@ -107,14 +107,14 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 	}
 	current := settings.CurrentProfile
 	if current == "" {
-		current = "default"
+		return errors.New("the server returned no model profile; configure profile: <name> on the daemon host and restart 'kodelet serve'")
 	}
 	switch cmd.Name() {
 	case "current":
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), current)
 	case "list":
 		writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(writer, "NAME\tSCOPE\tACTIVE")
+		fmt.Fprintln(writer, "NAME\tSCOPE\tDEFAULT")
 		for _, option := range settings.Profiles {
 			fmt.Fprintf(writer, "%s\t%s\t%t\n", option.Name, option.Scope, option.Active)
 		}

@@ -137,7 +137,7 @@ test("remote profiles validate names independently of extension metadata", () =>
     assert.throws(() => ext.registerProfile({ ...registration, name }), /slug/);
   }
   for (const name of ["default", "DEFAULT", "Default"]) {
-    assert.throws(() => ext.registerProfile({ ...registration, name }), /reserved/);
+    assert.equal(ext.registerProfile({ ...registration, name }), name);
   }
   const profile = ext.registerProfile(registration);
   assert.equal(profile, "search");
@@ -152,7 +152,7 @@ test("remote profiles validate names independently of extension metadata", () =>
     const updated = ext.initialize(params);
     assert.equal(updated.name, name ?? "installed-id");
     assert.deepEqual(updated.profiles, manifest.profiles);
-    assert.equal(updated.profiles?.[0].name, profile);
+    assert.ok(updated.profiles?.some((entry) => entry.name === profile));
   }
   assert.throws(() => ext.registerProfile({ ...registration, model: "different" }), /Duplicate/);
   assert.deepEqual(ext.initialize(params).profiles, manifest.profiles);

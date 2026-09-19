@@ -346,6 +346,7 @@ export interface ForkConversationResponse {
 export interface ChatProfileOption {
   name: string;
   scope: string;
+  /** Whether this is the daemon's configured default, not the current selection. */
   active?: boolean;
   hidden?: boolean;
 }
@@ -369,7 +370,8 @@ export interface RunnerDiscoveryTarget {
 }
 
 export interface ChatSettings {
-  currentProfile?: string;
+  /** Concrete profile resolved for this request, or the configured default when omitted. */
+  currentProfile: string;
   profiles: ChatProfileOption[];
   reasoningEffort: string;
   reasoningEffortOptions: string[];

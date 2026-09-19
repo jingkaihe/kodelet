@@ -215,7 +215,7 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 		response := chatpkg.ControlPlaneChatSettings{
 			CurrentProfile: "work",
 			Profiles: []chatpkg.ControlPlaneProfileOption{
-				{Name: "default"},
+				{Name: "default", Active: true},
 				{Name: "work"},
 			},
 			ReasoningEffort:        "high",
@@ -238,10 +238,29 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	assert.Equal(t, "work", profile)
 	assert.Equal(t, []string{"default", "work"}, options)
 	assert.Equal(t, "high", settings["work"].ReasoningEffort)
+	assert.False(t, settings["work"].Default, "the selected profile is not necessarily the configured default")
+	assert.True(t, settings["default"].Default, "a configured profile named default is an ordinary profile")
 	assert.Equal(t, []string{"low", "medium"}, settings["default"].ReasoningEffortOptions)
 	assert.Equal(t, "/control-plane/workspace", defaultCWD)
 	require.NoError(t, validateRemoteReasoningEffort("high", settings["work"].ReasoningEffortOptions))
 	require.ErrorContains(t, validateRemoteReasoningEffort("max", settings["work"].ReasoningEffortOptions), "not allowed")
+}
+
+func TestPrepareRemoteChatSettingsRequiresResolvedProfile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+			Profiles: []chatpkg.ControlPlaneProfileOption{{Name: "flair", Active: true}},
+		}))
+	}))
+	t.Cleanup(server.Close)
+	runner, err := chatpkg.NewClient(server.URL, "", "runner-1")
+	require.NoError(t, err)
+
+	profile, options, settings, _, err := prepareRemoteChatSettings(t.Context(), runner, "")
+	require.ErrorContains(t, err, "did not return a model profile")
+	assert.Empty(t, profile)
+	assert.Empty(t, options)
+	assert.Empty(t, settings)
 }
 
 func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
@@ -280,6 +299,7 @@ func TestPrepareDaemonChatUsesConnectedServerURL(t *testing.T) {
 					}))
 				case test.prefix + "/api/chat/settings":
 					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+						CurrentProfile:     "flair",
 						DefaultRunnerID:    "runner",
 						DefaultRunnerReady: true,
 					}))

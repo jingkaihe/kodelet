@@ -385,15 +385,9 @@ exit 1
 			viper.Set(key, value)
 		}
 	})
-	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-4o")
-	viper.Set("weak_model", "gpt-4o")
-	viper.Set("max_tokens", 256)
-	viper.Set("openai", map[string]any{
-		"platform":        "openai",
-		"base_url":        provider.URL,
-		"api_key_env_var": "KODELET_TEST_CHAT_PROVIDER_KEY",
-		"api_mode":        "chat_completions",
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": daemonTestModelProfile(provider.URL, "KODELET_TEST_CHAT_PROVIDER_KEY"),
 	})
 	viper.Set("extensions.enabled", true)
 	viper.Set("skills.enabled", false)

@@ -696,7 +696,7 @@ describe('ApiService', () => {
         json: async () => ({
           currentProfile: 'work',
           defaultCWD: '/workspace/default',
-          profiles: [{ name: 'default', scope: 'built-in' }],
+          profiles: [{ name: 'work', scope: 'global', active: true }],
           reasoningEffort: 'high',
           reasoningEffortOptions: ['low', 'medium', 'high'],
         }),

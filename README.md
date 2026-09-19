@@ -42,11 +42,14 @@ The install script defaults to package-based installation: Homebrew on macOS and
 
 ### Connect a model
 
-For a fresh installation using the default OpenAI provider, set your API key **before starting Kodelet**:
+For a fresh installation, generate named model profiles and set your API key **before starting Kodelet**:
 
 ```bash
+kodelet setup
 export OPENAI_API_KEY="your-api-key"
 ```
+
+Setup creates `openai` and `anthropic` profiles and selects `profile: openai`. Model settings live inside `profiles`; the top-level `profile` selects the default for new conversations. Choose another configured profile with `kodelet chat --profile anthropic`. Shared extension, tracing, and workspace settings remain top-level.
 
 See the [provider guide](docs/MANUAL.md#llm-providers) and [sample configuration](config.sample.yaml) for other providers, authentication options, and model profiles. Model configuration and provider credentials belong to the daemon; if it is already running, finish active work and run `kodelet server restart` from the shell with the updated environment.
 

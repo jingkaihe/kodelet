@@ -299,8 +299,8 @@ describe('ChatPage', () => {
         currentProfile: selectedProfile,
         defaultCWD: '/workspace/default',
         profiles: [
-          { name: 'default', scope: 'built-in' },
-          { name: 'work', scope: 'repo' },
+          { name: 'default', scope: 'global' },
+          { name: 'work', scope: 'global', active: true },
           { name: 'anthropic', scope: 'global' },
           { name: 'restricted', scope: 'global' },
         ],
@@ -1751,20 +1751,42 @@ describe('ChatPage', () => {
     expect(mockGetSlashCommands).not.toHaveBeenCalled();
   });
 
-  it('prevents starting a chat when initial settings fail', async () => {
+  it.each([
+    { name: 'request failure', error: 'settings unavailable' },
+    { name: 'missing profile', profile: undefined },
+    { name: 'empty profile', profile: '' },
+    { name: 'blank profile', profile: '  ' },
+  ])('prevents starting a chat with invalid initial settings: $name', async (test) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    mockGetChatSettings.mockRejectedValue(new Error('settings unavailable'));
+    if (test.error) {
+      mockGetChatSettings.mockRejectedValue(new Error(test.error));
+    } else {
+      mockGetChatSettings.mockResolvedValue({
+        currentProfile: test.profile,
+        profiles: [{ name: 'flair', scope: 'global', active: true }],
+        reasoningEffort: 'medium',
+        reasoningEffortOptions: ['medium'],
+      });
+    }
     mockStreamChat.mockResolvedValue(undefined);
 
     try {
       render(<ChatPage />);
 
       await waitFor(() =>
-        expect(consoleError).toHaveBeenCalledWith('Failed to load chat settings', expect.any(Error))
+        expect(consoleError).toHaveBeenCalledWith(
+          'Failed to load chat settings',
+          expect.objectContaining({
+            message: test.error || 'Chat settings did not return a model profile',
+          })
+        )
       );
       expect(screen.getByTestId('composer-textarea')).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+      const profile = screen.getByRole('combobox', { name: 'Profile' });
+      expect(profile).toHaveTextContent('Select a profile');
+      expect(profile).toBeDisabled();
       selectWorkspaceRunner();
       expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
       expect(mockStreamChat).not.toHaveBeenCalled();
@@ -1772,6 +1794,45 @@ describe('ChatPage', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it.each([
+    { selected: 'deep', hidden: false },
+    { selected: 'hidden-search', hidden: true },
+  ])('shows the resolved $selected profile independently of the configured default', async ({
+    selected,
+    hidden,
+  }) => {
+    mockGetChatSettings.mockImplementation((profile?: string) =>
+      Promise.resolve({
+        currentProfile: profile || (hidden ? selected : 'flair'),
+        profiles: [
+          { name: 'flair', scope: 'global', active: true },
+          ...(!hidden ? [{ name: selected, scope: 'global' }] : []),
+        ],
+        reasoningEffort: 'medium',
+        reasoningEffortOptions: ['medium'],
+      })
+    );
+
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    if (!hidden) selectNewChatOption('Profile', selected);
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveTextContent(selected));
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    const options = screen.getByRole('listbox', { name: 'Profile' });
+    expect(within(options).getAllByRole('option')).toHaveLength(2);
+    expect(within(options).getByRole('option', { name: 'flair (Default)' })).toHaveAttribute(
+      'aria-selected',
+      'false'
+    );
+    expect(within(options).getByRole('option', { name: selected })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(within(options).queryByRole('option', { name: 'default' })).not.toBeInTheDocument();
   });
 
   it('allows selecting a profile for a new conversation', async () => {
@@ -2055,7 +2116,9 @@ describe('ChatPage', () => {
 
       await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalledTimes(1));
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+      await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveTextContent('work'));
       selectWorkspaceRunner();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled());
       mockGetChatSettings.mockRejectedValueOnce(new Error('profile settings unavailable'));
       selectNewChatOption('Profile', 'restricted');
 

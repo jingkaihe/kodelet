@@ -496,13 +496,14 @@ const ChatPage: React.FC = () => {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
   const [chatSettings, setChatSettings] = useState<ChatSettings>({
+    currentProfile: '',
     profiles: [],
     reasoningEffort: DEFAULT_REASONING_EFFORT,
     reasoningEffortOptions: [DEFAULT_REASONING_EFFORT],
   });
   const [chatSettingsLoaded, setChatSettingsLoaded] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState('default');
-  const [newChatProfileDraft, setNewChatProfileDraft] = useState('default');
+  const [selectedProfile, setSelectedProfile] = useState('');
+  const [newChatProfileDraft, setNewChatProfileDraft] = useState('');
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(DEFAULT_REASONING_EFFORT);
   const [selectedReasoningEffortOptions, setSelectedReasoningEffortOptions] = useState<string[]>([
     DEFAULT_REASONING_EFFORT,
@@ -1146,11 +1147,15 @@ const ChatPage: React.FC = () => {
     void apiService
       .getChatSettings()
       .then((settings) => {
+        const profile = settings.currentProfile?.trim();
+        if (!profile) {
+          throw new Error('Chat settings did not return a model profile');
+        }
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
         setChatSettings(settings);
         setChatSettingsLoaded(true);
-        setSelectedProfile(settings.currentProfile || 'default');
-        setNewChatProfileDraft(settings.currentProfile || 'default');
+        setSelectedProfile(profile);
+        setNewChatProfileDraft(profile);
         setSelectedReasoningEffort(reasoningSettings.effort);
         setSelectedReasoningEffortOptions(reasoningSettings.options);
         setSelectedReasoningEffortExplicit(false);
@@ -1362,7 +1367,7 @@ const ChatPage: React.FC = () => {
   }, [conversationId]);
 
   const onDismissNewChatDialog = useEffectEvent(() => {
-    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
+    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
     cwdSuggestionSkipQueryRef.current = null;
     requestCwdSuggestions.cancel();
     cwdSuggestionRequestRef.current += 1;
@@ -2035,8 +2040,8 @@ const ChatPage: React.FC = () => {
     setExtensionWidgets({});
     setConversationError(null);
     setStreamError(null);
-    setSelectedProfile(chatSettings.currentProfile || 'default');
-    setNewChatProfileDraft(chatSettings.currentProfile || 'default');
+    setSelectedProfile(chatSettings.currentProfile || '');
+    setNewChatProfileDraft(chatSettings.currentProfile || '');
     const reasoningSettings = reasoningSettingsFromChatSettings(chatSettings);
     setSelectedReasoningEffort(reasoningSettings.effort);
     setSelectedReasoningEffortOptions(reasoningSettings.options);
@@ -3008,9 +3013,9 @@ const ChatPage: React.FC = () => {
 
   const currentProfileLabel = useMemo(() => {
     if (conversationId) {
-      return conversation?.profile || 'default';
+      return conversation?.profile || '';
     }
-    return selectedProfile || 'default';
+    return selectedProfile;
   }, [conversation?.profile, conversationId, selectedProfile]);
 
   const currentReasoningEffortLabel = useMemo(() => {
@@ -3352,12 +3357,16 @@ const ChatPage: React.FC = () => {
           return;
         }
 
+        const profile = settings.currentProfile?.trim();
+        if (!profile) {
+          throw new Error('Chat settings did not return a model profile');
+        }
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
         const preserveExplicitEffort =
           previousEffortWasExplicit && reasoningSettings.options.includes(previousEffort);
 
         setChatSettings((current) => ({ ...current, profiles: settings.profiles }));
-        setNewChatProfileDraft(settings.currentProfile || profileName || 'default');
+        setNewChatProfileDraft(profile);
         setNewChatReasoningEffortOptions(reasoningSettings.options);
         setNewChatReasoningEffortDraft(
           preserveExplicitEffort ? previousEffort : reasoningSettings.effort
@@ -3399,7 +3408,7 @@ const ChatPage: React.FC = () => {
   const availableProfiles = useMemo(() => {
     const configuredProfiles = chatSettings.profiles || [];
     const profileName = newChatDialogOpen ? newChatProfileDraft : currentProfileLabel;
-    if (configuredProfiles.some((profile) => profile.name === profileName)) {
+    if (!profileName || configuredProfiles.some((profile) => profile.name === profileName)) {
       return configuredProfiles;
     }
 
@@ -3424,7 +3433,7 @@ const ChatPage: React.FC = () => {
       : currentCWDLabel
         ? truncateMiddle(currentCWDLabel, 46)
         : 'Default directory';
-    const contextParts = [currentProfileLabel];
+    const contextParts = currentProfileLabel ? [currentProfileLabel] : [];
     if (currentReasoningEffortLabel) {
       contextParts.push(`effort:${currentReasoningEffortLabel}`);
     }
@@ -3554,7 +3563,7 @@ const ChatPage: React.FC = () => {
   const handleCloseNewChatDialog = () => {
     reasoningSettingsRequestRef.current += 1;
     setReasoningSettingsLoading(false);
-    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || 'default');
+    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
     setNewChatReasoningEffortDraft(selectedReasoningEffort);
     setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
     setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
@@ -3653,11 +3662,16 @@ const ChatPage: React.FC = () => {
   };
 
   const handleCommitNewChatContext = () => {
-    if (reasoningSettingsLoading || !chatSettingsLoaded || !newChatRunnerDraft) {
+    if (
+      reasoningSettingsLoading ||
+      !chatSettingsLoaded ||
+      !newChatRunnerDraft ||
+      !newChatProfileDraft.trim()
+    ) {
       return;
     }
 
-    const nextProfile = newChatProfileDraft || 'default';
+    const nextProfile = newChatProfileDraft.trim();
     const nextEnvironmentProfile = newChatEnvironmentProfileDraft.trim();
     const nextCWD = cwdQuery.trim();
     const optimisticConversation = optimisticRemoteConversationRef.current;

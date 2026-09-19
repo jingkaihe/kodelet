@@ -67,21 +67,6 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 }
 
 func init() {
-	viper.SetDefault("max_tokens", 8192)
-	viper.SetDefault("weak_model_max_tokens", 8192)
-	viper.SetDefault("thinking_budget_tokens", 4048)
-	// Resolve the model after platform, profile, and explicit overrides are loaded.
-	viper.SetDefault("model", "")
-	viper.SetDefault("weak_model", "gpt-5.4-mini")
-	viper.SetDefault("provider", "openai")
-	viper.SetDefault("openai.api_mode", "responses")
-	// Keep the configured value empty so request construction can distinguish an
-	// explicit opt-in from the upstream API default.
-	viper.SetDefault("openai.text_verbosity", "")
-	viper.SetDefault("openai.enable_search", true)
-	viper.SetDefault("openai.websocket_mode", true)
-	viper.SetDefault("reasoning_effort", "medium")
-	viper.SetDefault("allowed_reasoning_efforts", []string{})
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("bash.timeout", "120s")
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
@@ -348,11 +333,11 @@ func main() {
 	})
 
 	addRunFlags(rootCmd)
-	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides config; defaults to gpt-6-astra for OpenAI and Codex)")
+	rootCmd.PersistentFlags().String("provider", "", "LLM provider to use (anthropic, openai; overrides selected profile)")
+	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides selected profile)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Thinking budget for non-adaptive Claude models; adaptive Claude models ignore this and use reasoning-effort instead (overrides config)")
-	rootCmd.PersistentFlags().String("weak-model", "gpt-5.4-mini", "Weak model to use (overrides config)")
+	rootCmd.PersistentFlags().String("weak-model", "", "Weak model to use (overrides selected profile)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for supported models (provider-specific; e.g. OpenAI none|minimal|low|medium|high|xhigh|max; Anthropic adaptive none|low|medium|high|xhigh|max)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")

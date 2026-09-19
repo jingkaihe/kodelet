@@ -1309,7 +1309,7 @@ type conversationHistoryResponse struct {
 type ChatProfileOption struct {
 	Name   string `json:"name"`
 	Scope  string `json:"scope"`
-	Active bool   `json:"active,omitempty"`
+	Active bool   `json:"active,omitempty"` // Configured default, independent of the requested selection.
 	Hidden bool   `json:"hidden,omitempty"`
 }
 
@@ -1327,7 +1327,6 @@ type ChatSettingsResponse struct {
 }
 
 const (
-	webUIBuiltInProfileScope       = "built-in"
 	webUIRepoProfileScope          = "repo"
 	webUIGlobalProfileScope        = "global"
 	webUIOverrideProfileScope      = "override"
@@ -1425,11 +1424,7 @@ func resolveConversationProfile(metadata map[string]any) string {
 		return ""
 	}
 	if snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(metadata); err == nil && hasSnapshot {
-		profile := strings.TrimSpace(snapshot.Profile)
-		if profile == "" || strings.EqualFold(profile, "default") {
-			return ""
-		}
-		return profile
+		return strings.TrimSpace(snapshot.Profile)
 	}
 	rawProfile, ok := metadata["profile"]
 	if !ok {
@@ -1439,11 +1434,7 @@ func resolveConversationProfile(metadata map[string]any) string {
 	if !ok {
 		return ""
 	}
-	profile = strings.TrimSpace(profile)
-	if profile == "" || strings.EqualFold(profile, "default") {
-		return ""
-	}
-	return profile
+	return strings.TrimSpace(profile)
 }
 
 func resolveConversationReasoningEffort(response *conversations.GetConversationResponse) string {
@@ -1468,29 +1459,21 @@ func resolveConversationReasoningEffort(response *conversations.GetConversationR
 func getWebUIProfileOptions() []ChatProfileOption {
 	profileSources := llm.ProfileSources()
 	activeProfile := strings.TrimSpace(viper.GetString("profile"))
-	if strings.EqualFold(activeProfile, "default") {
-		activeProfile = ""
-	}
+	configured := viper.GetStringMap("profiles")
+	profiles := make([]ChatProfileOption, 0, len(configured))
 
-	profiles := []ChatProfileOption{{
-		Name:   "default",
-		Scope:  webUIBuiltInProfileScope,
-		Active: activeProfile == "",
-	}}
-
-	names := make([]string, 0, len(profileSources))
-	for name := range profileSources {
+	names := make([]string, 0, len(configured))
+	for name := range configured {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	for _, name := range names {
-		if llm.IsProfileHidden(name) {
-			continue
-		}
 		source := profileSources[name]
-		scope := webUIRepoProfileScope
+		scope := "configured"
 		switch source {
+		case llm.ProfileSourceRepo:
+			scope = webUIRepoProfileScope
 		case llm.ProfileSourceRepoOverridesGlobal:
 			scope = webUIRepoOverridesProfileScope
 		case llm.ProfileSourceGlobal:
@@ -1503,6 +1486,7 @@ func getWebUIProfileOptions() []ChatProfileOption {
 			Name:   name,
 			Scope:  scope,
 			Active: name == activeProfile,
+			Hidden: llm.IsProfileHidden(name),
 		})
 	}
 
@@ -1510,11 +1494,7 @@ func getWebUIProfileOptions() []ChatProfileOption {
 }
 
 func getCurrentWebUIProfile() string {
-	profile := strings.TrimSpace(viper.GetString("profile"))
-	if profile == "" || strings.EqualFold(profile, "default") {
-		return "default"
-	}
-	return profile
+	return strings.TrimSpace(viper.GetString("profile"))
 }
 
 // handleGetChatSettings handles GET /api/chat/settings.
@@ -1522,8 +1502,6 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if profile == "" {
 		profile = getCurrentWebUIProfile()
-	} else if strings.EqualFold(profile, "default") {
-		profile = "default"
 	}
 
 	runnerID := strings.TrimSpace(r.URL.Query().Get("runnerId"))
@@ -1546,8 +1524,8 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSONResponse(w, ChatSettingsResponse{
 		ConversationHierarchyVersion: 1,
-		CurrentProfile:               profile,
-		Profiles:                     s.modelProfileOptions(r.Context(), runnerID, profile, r.URL.Query().Get("includeHidden") == "true"),
+		CurrentProfile:               config.Profile,
+		Profiles:                     s.modelProfileOptions(r.Context(), runnerID, config.Profile, r.URL.Query().Get("includeHidden") == "true"),
 		ReasoningEffort:              config.ReasoningEffort,
 		ReasoningEffortOptions:       llmtypes.ReasoningEffortOptions(config),
 		DefaultCWD:                   defaultCWD,

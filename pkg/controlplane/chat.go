@@ -130,7 +130,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	var profileOption agentenv.RemoteEnvironmentOption
 	if config.ExtensionProfile {
 		// Registered profiles carry model settings only, never runner preferences.
-		profileOption = agentenv.WithRemoteModelProfile("default")
+		profileOption = agentenv.WithRemoteModelProfile("")
 	} else if r.server.missingEmbeddedModelProfile(runnerID, config.Profile) {
 		if r.server.conversationService == nil {
 			return nil, errors.New("conversation service is unavailable")
@@ -145,7 +145,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 				return nil, errors.Wrap(err, "failed to load the conversation's saved settings")
 			}
 			if hasSnapshot && strings.TrimSpace(snapshot.Profile) == strings.TrimSpace(config.Profile) {
-				profileOption = agentenv.WithRemoteModelProfile("default")
+				profileOption = agentenv.WithRemoteModelProfile("")
 			}
 		}
 	}

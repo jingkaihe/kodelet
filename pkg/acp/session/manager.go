@@ -180,7 +180,7 @@ func (m *Manager) buildLLMConfigForRecord(record convtypes.ConversationRecord, p
 	if hasSnapshot {
 		profileName := strings.TrimSpace(snapshot.Profile)
 		var config llmtypes.Config
-		if profileName != "" && !strings.EqualFold(profileName, "default") && llm.HasConfiguredProfile(profileName) {
+		if profileName != "" && llm.HasConfiguredProfile(profileName) {
 			config, err = llm.GetConfigFromViperWithProfile(profileName)
 		} else {
 			config, err = llm.GetConfigFromViperWithoutProfile()

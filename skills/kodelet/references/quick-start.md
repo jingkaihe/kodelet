@@ -18,6 +18,8 @@ kodelet version
 
 ## Core usage modes
 
+On a fresh daemon host, run `kodelet setup` and configure provider credentials before starting a local server. Setup creates named `openai` and `anthropic` model profiles with `profile: openai`; use `--profile` to choose another configured name. Shared extension, tracing, and workspace settings stay top-level. See [configuration](configuration.md).
+
 ### One-shot mode
 
 ```bash

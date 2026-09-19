@@ -178,10 +178,10 @@ func TestEmbeddedConfigModelProfilesConcurrent(t *testing.T) {
 		mode    llmtypes.ToolMode
 		search  bool
 	}{
-		{"", "deep", llmtypes.ToolModePatch, false},
-		{"  ", "deep", llmtypes.ToolModePatch, false},
-		{"default", "base", llmtypes.ToolModeFull, false},
-		{" DEFAULT ", "base", llmtypes.ToolModeFull, false},
+		{"", "base", llmtypes.ToolModeFull, false},
+		{"  ", "base", llmtypes.ToolModeFull, false},
+		{"default", "not-the-default", llmtypes.ToolModeFull, false},
+		{" default ", "not-the-default", llmtypes.ToolModeFull, false},
 		{"deep", "deep", llmtypes.ToolModePatch, false},
 		{"flair", "flair", llmtypes.ToolModeFull, true},
 	}
@@ -292,28 +292,26 @@ func TestEmbeddedConfigServeOverridesWinModelProfile(t *testing.T) {
 	overrides["enable_fs_search_tools"] = false
 	loader, err := NewEmbeddedConfigLoader(defaults, overrides)
 	require.NoError(t, err)
-	for _, profile := range []string{"", "deep"} {
-		config, err := loader(cwd, profile, "")
-		require.NoError(t, err)
-		assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
-		assert.False(t, config.EnableFSSearchTools, "explicit false must override a profile's true")
-		assert.Equal(t, filepath.Join(cwd, "prompt.tmpl"), config.Sysprompt)
-		assert.Equal(t, map[string]string{
-			"origin": "daemon", "purpose": "review", "base_only": "retained", "model_only": "retained",
-		}, config.SyspromptArgs)
-		assert.Equal(t, 45*time.Second, config.BashTimeout())
-		require.NotNil(t, config.Context)
-		assert.Equal(t, []string{"AGENTS.md", "CONTRIBUTING.md"}, config.Context.Patterns)
-		assert.Equal(t, []string{"file_read", "bash"}, config.AllowedTools)
-		assert.Equal(t, []string{"git diff"}, config.AllowedCommands)
-		assert.Equal(t, new([]string{"bash"}), config.ExecutionOptions.AllowedTools, "runner overrides cannot relax inherited model permissions")
-		require.NotNil(t, config.Skills)
-		assert.Equal(t, []string{"review", "build"}, config.Skills.Allowed)
-		extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"inspect", "format"}, extensionConfig.Allow)
-		assert.Equal(t, new(false), extensionConfig.Tools["write"].Enabled)
-	}
+	config, err := loader(cwd, "deep", "")
+	require.NoError(t, err)
+	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.False(t, config.EnableFSSearchTools, "explicit false must override a profile's true")
+	assert.Equal(t, filepath.Join(cwd, "prompt.tmpl"), config.Sysprompt)
+	assert.Equal(t, map[string]string{
+		"origin": "daemon", "purpose": "review", "base_only": "retained", "model_only": "retained",
+	}, config.SyspromptArgs)
+	assert.Equal(t, 45*time.Second, config.BashTimeout())
+	require.NotNil(t, config.Context)
+	assert.Equal(t, []string{"AGENTS.md", "CONTRIBUTING.md"}, config.Context.Patterns)
+	assert.Equal(t, []string{"file_read", "bash"}, config.AllowedTools)
+	assert.Equal(t, []string{"git diff"}, config.AllowedCommands)
+	assert.Equal(t, new([]string{"bash"}), config.ExecutionOptions.AllowedTools, "runner overrides cannot relax inherited model permissions")
+	require.NotNil(t, config.Skills)
+	assert.Equal(t, []string{"review", "build"}, config.Skills.Allowed)
+	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inspect", "format"}, extensionConfig.Allow)
+	assert.Equal(t, new(false), extensionConfig.Tools["write"].Enabled)
 }
 
 func TestEmbeddedConfigEnvironmentProfiles(t *testing.T) {
@@ -366,7 +364,7 @@ environment_profiles:
 		t.Run(name, func(t *testing.T) {
 			loader, err := NewEmbeddedConfigLoader(defaults, overrides)
 			require.NoError(t, err)
-			for _, modelProfile := range []string{"default", "deep"} {
+			for _, modelProfile := range []string{"", "deep"} {
 				config, err := loader(cwd, modelProfile, "review")
 				require.NoError(t, err)
 				assert.Equal(t, origin, config.SyspromptArgs["origin"])
