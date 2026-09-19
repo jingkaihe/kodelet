@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,18 +18,15 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
-	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
@@ -1128,14 +1126,7 @@ func TestChatCompletionTracing(t *testing.T) {
 		{name: "cancellation", cancel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := tracetest.NewSpanRecorder()
-			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-			previous := otel.GetTracerProvider()
-			otel.SetTracerProvider(provider)
-			t.Cleanup(func() {
-				_ = provider.Shutdown(context.Background())
-				otel.SetTracerProvider(previous)
-			})
+			recorder, provider := telemetrytest.NewRecorder(t, false)
 			attempts := 0
 			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
 				attempts++
@@ -1193,60 +1184,27 @@ func (*privacyOpenAITool) Execute(context.Context, tooltypes.State, string) tool
 
 func TestOpenAIToolLoopTracingPrivacy(t *testing.T) {
 	for _, capture := range []bool{false, true} {
-		recorder := tracetest.NewSpanRecorder()
-		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-		previous, previousContent := otel.GetTracerProvider(), telemetry.ContentEnabled()
-		otel.SetTracerProvider(provider)
-		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
-			_ = provider.Shutdown(context.Background())
-			otel.SetTracerProvider(previous)
-		})
-		client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(*http.Request) (*http.Response, error) {
-			return jsonOpenAIResponse(http.StatusOK, `{
+		t.Run("capture="+strconv.FormatBool(capture), func(t *testing.T) {
+			recorder, provider := telemetrytest.NewRecorder(t, capture)
+			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(*http.Request) (*http.Response, error) {
+				return jsonOpenAIResponse(http.StatusOK, `{
   "id":"response", "model":"model",
   "choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"privacy_tool","arguments":"{\"value\":\"private-tool-input\"}"}}]},"finish_reason":"tool_calls"}],
   "usage":{"prompt_tokens":1,"completion_tokens":1}
 }`), nil
-		}))
-		thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "model"})
-		thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
-			&privacyOpenAITool{testOpenAITool{name: "privacy_tool"}},
-		})))
-		ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llm.MessageOpt{})
-		_, toolsUsed, err := thread.processMessageExchange(ctx, &captureOpenAIMessageHandler{}, "model", 100, llm.MessageOpt{DisableUsageLog: true})
-		require.NoError(t, err)
-		require.True(t, toolsUsed)
-		assert.Contains(t, thread.messages[len(thread.messages)-1].Content, "private-tool-output")
-		thread.FinalizeMessageSpan(invocation, nil)
-		var sawStart, sawComplete, sawTool bool
-		for _, span := range recorder.Ended() {
-			if span.Name() == "invoke_agent kodelet" {
-				encoded, err := json.Marshal(span.Events())
-				require.NoError(t, err)
-				assert.NotContains(t, string(encoded), "private-tool-input")
-				assert.NotContains(t, string(encoded), "private-tool-output")
-				for _, event := range span.Events() {
-					sawStart = sawStart || event.Name == "tool_execution_start"
-					sawComplete = sawComplete || event.Name == "tool_execution_complete"
-				}
-			}
-			if span.Name() == "execute_tool privacy_tool" {
-				sawTool = true
-				attributes, err := json.Marshal(span.Attributes())
-				require.NoError(t, err)
-				if capture {
-					assert.Contains(t, string(attributes), "private-tool-input")
-					assert.Contains(t, string(attributes), "private-tool-output")
-				} else {
-					assert.NotContains(t, string(attributes), "private-tool-input")
-					assert.NotContains(t, string(attributes), "private-tool-output")
-				}
-			}
-		}
-		assert.True(t, sawStart && sawComplete && sawTool)
+			}))
+			thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "model"})
+			thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
+				&privacyOpenAITool{testOpenAITool{name: "privacy_tool"}},
+			})))
+			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llm.MessageOpt{})
+			_, toolsUsed, err := thread.processMessageExchange(ctx, &captureOpenAIMessageHandler{}, "model", 100, llm.MessageOpt{DisableUsageLog: true})
+			require.NoError(t, err)
+			require.True(t, toolsUsed)
+			assert.Contains(t, thread.messages[len(thread.messages)-1].Content, "private-tool-output")
+			thread.FinalizeMessageSpan(invocation, nil)
+			telemetrytest.AssertToolTracePrivacy(t, recorder.Ended(), "privacy_tool", "private-tool-input", "private-tool-output", capture)
+		})
 	}
 }
 

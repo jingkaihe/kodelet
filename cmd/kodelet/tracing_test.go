@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -19,8 +20,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -41,9 +40,13 @@ func TestInitTracingDisabled(t *testing.T) {
 	viper.Set("tracing.sampler", "never")
 	viper.Set("tracing.ratio", 0.25)
 	viper.Set("tracing.internal_rpc_spans", true)
-	previousInternalRPC := telemetry.InternalRPCSpansEnabled()
+	previousPolicy := telemetry.Config{
+		CaptureContent:   telemetry.ContentEnabled(),
+		InternalRPCSpans: telemetry.InternalRPCSpansEnabled(),
+	}
 	t.Cleanup(func() {
-		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{InternalRPCSpans: previousInternalRPC})
+		_, err := telemetry.InitTracer(context.Background(), previousPolicy)
+		assert.NoError(t, err)
 	})
 
 	shutdown, err := initTracing(context.Background())
@@ -54,17 +57,10 @@ func TestInitTracingDisabled(t *testing.T) {
 }
 
 func TestWithTracingWrapsCommandAndCapturesNonSensitiveFlags(t *testing.T) {
-	spanRecorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	previousProvider := otel.GetTracerProvider()
+	spanRecorder, provider := telemetrytest.NewRecorder(t, false)
 	previousTracer := tracer
-	otel.SetTracerProvider(provider)
 	tracer = provider.Tracer("kodelet.cli.test")
-	t.Cleanup(func() {
-		_ = provider.Shutdown(context.Background())
-		otel.SetTracerProvider(previousProvider)
-		tracer = previousTracer
-	})
+	t.Cleanup(func() { tracer = previousTracer })
 
 	var ran bool
 	var sawSpanContext bool
@@ -101,18 +97,10 @@ func TestWithTracingWrapsCommandAndCapturesNonSensitiveFlags(t *testing.T) {
 }
 
 func TestWithTracingRunERecordsErrorAndOptionalContent(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	recorder, provider := telemetrytest.NewRecorder(t, true)
 	previousTracer := tracer
 	tracer = provider.Tracer("kodelet.cli.test")
-	previousContent := telemetry.ContentEnabled()
-	_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: true})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		tracer = previousTracer
-		_ = provider.Shutdown(context.Background())
-		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
-	})
+	t.Cleanup(func() { tracer = previousTracer })
 	cmd := &cobra.Command{
 		Use: "run",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -212,12 +200,20 @@ func TestDistributedTraceFromCLIThroughDaemonAndRunner(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "")
 	previousProvider := otel.GetTracerProvider()
 	previousPropagator := otel.GetTextMapPropagator()
+	previousPolicy := telemetry.Config{
+		CaptureContent:   telemetry.ContentEnabled(),
+		InternalRPCSpans: telemetry.InternalRPCSpansEnabled(),
+	}
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		_, err := telemetry.InitTracer(context.Background(), previousPolicy)
+		assert.NoError(t, err)
+	})
 	shutdown, err := telemetry.InitTracer(t.Context(), telemetry.Config{Enabled: true, ServiceName: "kodelet-test-daemon", SamplerType: "always"})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		assert.NoError(t, shutdown(context.Background()))
-		otel.SetTracerProvider(previousProvider)
-		otel.SetTextMapPropagator(previousPropagator)
 	})
 	fixture := newDaemonRunFixture(t, "standalone",
 		"KODELET_TRACING_ENABLED=true",

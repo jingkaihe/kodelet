@@ -25,27 +25,6 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
-// processStream processes the streaming response from the Responses API.
-// It handles text deltas, tool calls, and response completion.
-// Returns stream processing outcome and any error.
-func (t *Thread) processStream(
-	ctx context.Context,
-	stream *ssestream.Stream[responses.ResponseStreamEventUnion],
-	handler llmtypes.MessageHandler,
-	model string,
-	opt llmtypes.MessageOpt,
-) (processStreamResult, error) {
-	result, err := t.readStream(ctx, stream, handler, model, opt)
-	if result.complete != nil {
-		var completionErr error
-		result, completionErr = result.complete(ctx)
-		if completionErr != nil {
-			return result, completionErr
-		}
-	}
-	return result, err
-}
-
 // readStream separates model generation from tool execution so their spans are siblings.
 func (t *Thread) readStream(
 	ctx context.Context,

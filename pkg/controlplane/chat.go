@@ -19,11 +19,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -538,15 +538,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if runErr != nil {
 		// A streamed failure can still have HTTP 200. Do not attach the
 		// error message: provider/tool errors may contain user content.
-		errorType := "chat_run_error"
-		switch {
-		case errors.Is(runErr, context.Canceled), errors.Is(runErr, io.ErrClosedPipe):
-			errorType = "cancelled"
-		case errors.Is(runErr, context.DeadlineExceeded):
-			errorType = "timeout"
+		spanErr := runErr
+		if errors.Is(runErr, io.ErrClosedPipe) {
+			spanErr = context.Canceled
 		}
-		span.SetAttributes(attribute.String("error.type", errorType))
-		span.SetStatus(codes.Error, errorType)
+		telemetry.SetSpanError(span, telemetry.ErrorType(spanErr, "chat_run_error"))
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
 			s.unregisterActiveChat(registeredConversationID, run)
 			completionEvent := chat.ChatEvent{

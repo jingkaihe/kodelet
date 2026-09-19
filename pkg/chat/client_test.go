@@ -17,29 +17,20 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
 func TestClientRunTraceLifetimeAndParentage(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-	})
+	recorder, _ := telemetrytest.NewRecorder(t, false)
 
 	parents := make(chan trace.SpanContext, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,14 +93,6 @@ func TestClientRunTraceLifetimeAndParentage(t *testing.T) {
 }
 
 func TestClientRunTraceOutcomes(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-	})
 	for _, test := range []struct {
 		name, body, errorType string
 		status                int
@@ -125,42 +108,46 @@ func TestClientRunTraceOutcomes(t *testing.T) {
 		{"timeout", "", "timeout", http.StatusOK, true},
 		{"pending", `{"conversationId":"conversation","turnId":"turn","runId":"run","status":"running"}`, "", http.StatusAccepted, true},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			recorder.Reset()
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(test.status)
-				_, _ = fmt.Fprintln(w, test.body)
-			}))
-			t.Cleanup(server.Close)
-			client, err := NewClient(server.URL, "secret-token", "")
-			require.NoError(t, err)
-			ctx := t.Context()
-			if test.name == "cancelled request" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithCancel(ctx)
-				cancel()
-			}
-			if test.name == "timeout" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
-				defer cancel()
-			}
-			_, err = client.Run(ctx, ChatRequest{ConversationID: "conversation", TurnID: "turn", Message: "secret-prompt"}, &collectingChatSink{})
-			assert.Equal(t, test.wantErr, err != nil)
-			spans := recorder.Ended()
-			require.Len(t, spans, 1)
-			span := spans[0]
-			if test.errorType == "" {
-				assert.Equal(t, codes.Unset, span.Status().Code)
-			} else {
-				assert.Equal(t, codes.Error, span.Status().Code)
-				assert.Contains(t, span.Attributes(), attribute.String("error.type", test.errorType))
-			}
-			if test.name == "pending" {
-				assert.Contains(t, span.Attributes(), attribute.String("kodelet.run.id", "run"))
-			}
-			assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
-		})
+		for _, capture := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/capture=%t", test.name, capture), func(t *testing.T) {
+				recorder, _ := telemetrytest.NewRecorder(t, capture)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(test.status)
+					_, _ = fmt.Fprintln(w, test.body)
+				}))
+				t.Cleanup(server.Close)
+				client, err := NewClient(server.URL, "secret-token", "")
+				require.NoError(t, err)
+				ctx := t.Context()
+				if test.name == "cancelled request" {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithCancel(ctx)
+					cancel()
+				}
+				if test.name == "timeout" {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+					defer cancel()
+				}
+				_, err = client.Run(ctx, ChatRequest{ConversationID: "conversation", TurnID: "turn", Message: "secret-prompt"}, &collectingChatSink{})
+				assert.Equal(t, test.wantErr, err != nil)
+				spans := recorder.Ended()
+				require.Len(t, spans, 1)
+				span := spans[0]
+				if test.errorType == "" {
+					assert.Equal(t, codes.Unset, span.Status().Code)
+				} else {
+					assert.Equal(t, codes.Error, span.Status().Code)
+					assert.Equal(t, test.errorType, span.Status().Description)
+					assert.Contains(t, span.Attributes(), attribute.String("error.type", test.errorType))
+				}
+				if test.name == "pending" {
+					assert.Contains(t, span.Attributes(), attribute.String("kodelet.run.id", "run"))
+				}
+				assert.Empty(t, span.Events(), "HTTP spans stay metadata-only even with content capture")
+				assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
+			})
+		}
 	}
 }
 

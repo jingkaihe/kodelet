@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -290,7 +291,7 @@ func TestPeerPropagatesRPCErrors(t *testing.T) {
 					assert.Equal(t, "exception", span.Events()[0].Name)
 					assert.Contains(t, span.Events()[0].Attributes, attribute.String("exception.message", rpcErr.Error()))
 				} else {
-					assert.Equal(t, "*protocol.RPCError", span.Status().Description)
+					assert.Equal(t, "rpc_error", span.Status().Description)
 					assert.Empty(t, span.Events(), "raw exception messages must not bypass content policy")
 					attrs, err := json.Marshal(span.Attributes())
 					require.NoError(t, err)
@@ -338,7 +339,8 @@ func TestPeerCancellationCancelsRemoteRequest(t *testing.T) {
 	require.Eventually(t, func() bool { return len(recorder.Ended()) == 2 }, time.Second, time.Millisecond)
 	for _, span := range recorder.Ended() {
 		assert.Equal(t, codes.Error, span.Status().Code)
-		assert.Contains(t, span.Attributes(), attribute.String("error.type", "canceled"))
+		assert.Contains(t, span.Attributes(), attribute.String("error.type", "cancelled"))
+		assert.Equal(t, "cancelled", span.Status().Description)
 		assert.Empty(t, span.Events())
 		assert.Equal(t, "runner.rpc _OTHER", span.Name())
 		assert.Contains(t, span.Attributes(), attribute.String("rpc.method", "_OTHER"))
@@ -832,29 +834,14 @@ func TestInternalRPCDiagnosticsWithoutParentAndOnCancellation(t *testing.T) {
 	require.Len(t, recorder.Ended(), 2)
 	span = recorder.Ended()[1]
 	require.Len(t, span.Events(), 1)
-	assert.Contains(t, span.Events()[0].Attributes, attribute.String("error.type", "canceled"))
+	assert.Contains(t, span.Events()[0].Attributes, attribute.String("error.type", "cancelled"))
 }
 
 func recordPeerSpans(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
-	previousContent := telemetry.ContentEnabled()
-	previousInternalRPC := telemetry.InternalRPCSpansEnabled()
-	_, err := telemetry.InitTracer(t.Context(), telemetry.Config{})
-	require.NoError(t, err)
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previousProvider := otel.GetTracerProvider()
-	previousPropagator := otel.GetTextMapPropagator()
-	otel.SetTracerProvider(provider)
+	recorder, _ := telemetrytest.NewRecorder(t, false)
 	// RPC propagation must work even without global propagator initialization.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
-	t.Cleanup(func() {
-		require.NoError(t, provider.Shutdown(context.Background()))
-		otel.SetTracerProvider(previousProvider)
-		otel.SetTextMapPropagator(previousPropagator)
-		_, err := telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent, InternalRPCSpans: previousInternalRPC})
-		require.NoError(t, err)
-	})
 	return recorder
 }
 

@@ -35,6 +35,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// processStream eagerly completes streams for direct stream tests. Production
+// completion belongs to processMessageExchangeWithStreamRetries.
+func (t *Thread) processStream(
+	ctx context.Context,
+	stream *ssestream.Stream[openairesponses.ResponseStreamEventUnion],
+	handler llmtypes.MessageHandler,
+	model string,
+	opt llmtypes.MessageOpt,
+) (processStreamResult, error) {
+	result, err := t.readStream(ctx, stream, handler, model, opt)
+	if result.complete != nil {
+		var completionErr error
+		result, completionErr = result.complete(ctx)
+		if completionErr != nil {
+			return result, completionErr
+		}
+	}
+	return result, err
+}
+
 type recordingRetryTimer struct {
 	delays []time.Duration
 }
@@ -4162,7 +4182,6 @@ func TestProcessMessageExchangeHTTPRetryOwnership(t *testing.T) {
 			}
 			thread.SetState(tools.NewBasicState(context.Background()))
 			thread.newStreamingFunc = thread.client.Responses.NewStreaming
-			thread.processStreamFunc = thread.processStream
 
 			handler := &llmtypes.StringCollectorHandler{Silent: true}
 			_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})

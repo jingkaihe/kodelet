@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -25,7 +26,6 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -178,18 +178,16 @@ func (r *Client) Run(ctx context.Context, request ChatRequest, sink ChatEventSin
 		}
 		// Error strings can contain response bodies or secrets. Export only a
 		// bounded classification, not the underlying error or exception text.
-		errorType := "chat_request_error"
+		fallback := "chat_request_error"
 		var httpErr *ControlPlaneHTTPError
-		switch {
-		case cancelled || errors.Is(err, context.Canceled):
-			errorType = "cancelled"
-		case errors.Is(err, context.DeadlineExceeded):
-			errorType = "timeout"
-		case errors.As(err, &httpErr):
-			errorType = strconv.Itoa(httpErr.StatusCode)
+		if errors.As(err, &httpErr) {
+			fallback = strconv.Itoa(httpErr.StatusCode)
 		}
-		span.SetAttributes(attribute.String("error.type", errorType))
-		span.SetStatus(codes.Error, errorType)
+		spanErr := err
+		if cancelled {
+			spanErr = context.Canceled
+		}
+		telemetry.SetSpanError(span, telemetry.ErrorType(spanErr, fallback))
 	}()
 	capabilities := controlPlaneClientCapabilities(ctx)
 	request.ClientCapabilities = &capabilities

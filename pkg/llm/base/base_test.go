@@ -3,22 +3,20 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -55,14 +53,7 @@ func TestNewThread(t *testing.T) {
 }
 
 func TestInvocationAndModelSpans(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		_ = provider.Shutdown(context.Background())
-		otel.SetTracerProvider(previous)
-	})
+	recorder, provider := telemetrytest.NewRecorder(t, false)
 	thread := NewThread(llmtypes.Config{Model: "primary"}, "conversation-1")
 	thread.Usage.InputTokens = 1000 // Historical usage must not become model-call usage.
 	ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private prompt", llmtypes.MessageOpt{})
@@ -94,37 +85,28 @@ func TestInvocationAndModelSpans(t *testing.T) {
 }
 
 func TestInvocationAndModelErrorsRespectContentPolicy(t *testing.T) {
-	previousContent := telemetry.ContentEnabled()
-	t.Cleanup(func() {
-		_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
-	})
 	for _, capture := range []bool{false, true} {
-		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
-		require.NoError(t, err)
-		recorder := tracetest.NewSpanRecorder()
-		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-		previous := otel.GetTracerProvider()
-		otel.SetTracerProvider(provider)
-		thread := NewThread(llmtypes.Config{}, "conversation")
-		ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
-		_, model := thread.StartModelSpan(ctx, "openai", "model")
-		providerErr := errors.New("provider echoed private prompt")
-		FinishModelSpan(model, providerErr)
-		thread.FinalizeMessageSpan(invocation, providerErr)
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-		for _, span := range recorder.Ended() {
-			assert.Equal(t, codes.Error, span.Status().Code)
-			events, err := json.Marshal(span.Events())
-			require.NoError(t, err)
-			if capture {
-				assert.Contains(t, span.Status().Description, providerErr.Error())
-				assert.Contains(t, string(events), providerErr.Error())
-			} else {
-				assert.NotContains(t, span.Status().Description, providerErr.Error())
-				assert.NotContains(t, string(events), providerErr.Error())
+		t.Run("capture="+strconv.FormatBool(capture), func(t *testing.T) {
+			recorder, provider := telemetrytest.NewRecorder(t, capture)
+			thread := NewThread(llmtypes.Config{}, "conversation")
+			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
+			_, model := thread.StartModelSpan(ctx, "openai", "model")
+			providerErr := errors.New("provider echoed private prompt")
+			FinishModelSpan(model, providerErr)
+			thread.FinalizeMessageSpan(invocation, providerErr)
+			for _, span := range recorder.Ended() {
+				assert.Equal(t, codes.Error, span.Status().Code)
+				events, err := json.Marshal(span.Events())
+				require.NoError(t, err)
+				if capture {
+					assert.Contains(t, span.Status().Description, providerErr.Error())
+					assert.Contains(t, string(events), providerErr.Error())
+				} else {
+					assert.NotContains(t, span.Status().Description, providerErr.Error())
+					assert.NotContains(t, string(events), providerErr.Error())
+				}
 			}
-		}
+		})
 	}
 }
 

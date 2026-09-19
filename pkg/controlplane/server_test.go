@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -33,24 +35,15 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
 func TestChatTraceClientToDaemon(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-	})
+	recorder, provider := telemetrytest.NewRecorder(t, false)
 	server := &Server{
 		conversationService: &mockConversationService{},
 		runCtx:              t.Context(),
@@ -114,14 +107,7 @@ func TestChatTraceClientToDaemon(t *testing.T) {
 }
 
 func TestChatTraceMiddlewareScopeAndParentage(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-	})
+	recorder, _ := telemetrytest.NewRecorder(t, false)
 	state, err := trace.ParseTraceState("test=value")
 	require.NoError(t, err)
 	parent := trace.NewSpanContext(trace.SpanContextConfig{
@@ -199,41 +185,38 @@ func TestChatExecutionContextRetainsTraceWithoutRequestCancellation(t *testing.T
 }
 
 func TestChatTraceStreamFailures(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
-		require.NoError(t, provider.Shutdown(context.Background()))
-	})
 	for _, test := range []struct {
 		name, errorType string
 		err             error
 	}{
 		{"run failure", "chat_run_error", errors.New("secret-provider-error")},
 		{"cancelled", "cancelled", context.Canceled},
+		{"closed pipe", "cancelled", io.ErrClosedPipe},
 		{"timeout", "timeout", context.DeadlineExceeded},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			recorder.Reset()
-			server := &Server{
-				conversationService: &mockConversationService{},
-				chatRunner: &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
-					return req.ConversationID, test.err
-				}},
-			}
-			response := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"secret-prompt"}`))
-			server.loggingMiddleware(http.HandlerFunc(server.handleChat)).ServeHTTP(response, req)
-			assert.Equal(t, http.StatusOK, response.Code)
-			spans := recorder.Ended()
-			require.Len(t, spans, 1)
-			span := spans[0]
-			assert.Equal(t, codes.Error, span.Status().Code)
-			assert.Contains(t, span.Attributes(), attribute.String("error.type", test.errorType))
-			assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
-		})
+		for _, capture := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/capture=%t", test.name, capture), func(t *testing.T) {
+				recorder, _ := telemetrytest.NewRecorder(t, capture)
+				server := &Server{
+					conversationService: &mockConversationService{},
+					chatRunner: &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+						return req.ConversationID, test.err
+					}},
+				}
+				response := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"secret-prompt"}`))
+				server.loggingMiddleware(http.HandlerFunc(server.handleChat)).ServeHTTP(response, req)
+				assert.Equal(t, http.StatusOK, response.Code)
+				spans := recorder.Ended()
+				require.Len(t, spans, 1)
+				span := spans[0]
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, test.errorType, span.Status().Description)
+				assert.Contains(t, span.Attributes(), attribute.String("error.type", test.errorType))
+				assert.Empty(t, span.Events(), "HTTP spans stay metadata-only even with content capture")
+				assert.NotContains(t, fmt.Sprint(span.Attributes(), span.Events(), span.Status()), "secret-")
+			})
+		}
 	}
 }
 

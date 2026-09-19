@@ -210,7 +210,6 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	}
 	thread.processMessageExchangeFunc = thread.processMessageExchange
 	thread.newStreamingFunc = thread.client.Responses.NewStreaming
-	thread.processStreamFunc = thread.processStream
 	thread.compactWithSummaryFunc = thread.compactContextWithSummary
 
 	// Set the LoadConversation callback for provider-specific loading

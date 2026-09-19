@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,15 +17,12 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/steer"
-	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -84,18 +82,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 		{name: "truncated stream", partial: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := tracetest.NewSpanRecorder()
-			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-			previous := otel.GetTracerProvider()
-			previousContent := telemetry.ContentEnabled()
-			otel.SetTracerProvider(provider)
-			_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: tc.content})
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
-				_ = provider.Shutdown(context.Background())
-				otel.SetTracerProvider(previous)
-			})
+			recorder, provider := telemetrytest.NewRecorder(t, tc.content)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, streamStart)
@@ -110,7 +97,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 			}
 			thread.Usage.InputTokens = 999
 			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "secret", llmtypes.MessageOpt{})
-			_, err = thread.NewMessage(ctx, anthropic.MessageNewParams{
+			_, err := thread.NewMessage(ctx, anthropic.MessageNewParams{
 				Model: "requested-model", MaxTokens: 100,
 				System:   []anthropic.TextBlockParam{{Text: "private system"}},
 				Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("private input"))},
@@ -939,57 +926,24 @@ func (privacyAnthropicTool) Execute(context.Context, tooltypes.State, string) to
 
 func TestAnthropicToolLoopTracingPrivacy(t *testing.T) {
 	for _, capture := range []bool{false, true} {
-		recorder := tracetest.NewSpanRecorder()
-		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-		previous, previousContent := otel.GetTracerProvider(), telemetry.ContentEnabled()
-		otel.SetTracerProvider(provider)
-		_, err := telemetry.InitTracer(t.Context(), telemetry.Config{CaptureContent: capture})
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			_, _ = telemetry.InitTracer(context.Background(), telemetry.Config{CaptureContent: previousContent})
-			_ = provider.Shutdown(context.Background())
-			otel.SetTracerProvider(previous)
+		t.Run("capture="+strconv.FormatBool(capture), func(t *testing.T) {
+			recorder, provider := telemetrytest.NewRecorder(t, capture)
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conversation")}
+			thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
+				privacyAnthropicTool{testTool{name: "privacy_tool"}},
+			})))
+			block := anthropicToolUseBlockForTest(t, "call-1", map[string]any{"value": "private-tool-input"}, "privacy_tool")
+			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
+			results, err := thread.executeToolsParallel(ctx, &captureAnthropicToolHandler{}, []struct {
+				block   anthropic.ContentBlockUnion
+				variant anthropic.ToolUseBlock
+			}{{block: block, variant: block.AsToolUse()}}, llmtypes.MessageOpt{})
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Contains(t, results[0].output.AssistantFacing(), "private-tool-output")
+			thread.FinalizeMessageSpan(invocation, nil)
+			telemetrytest.AssertToolTracePrivacy(t, recorder.Ended(), "privacy_tool", "private-tool-input", "private-tool-output", capture)
 		})
-		thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conversation")}
-		thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{
-			privacyAnthropicTool{testTool{name: "privacy_tool"}},
-		})))
-		block := anthropicToolUseBlockForTest(t, "call-1", map[string]any{"value": "private-tool-input"}, "privacy_tool")
-		ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "", llmtypes.MessageOpt{})
-		results, err := thread.executeToolsParallel(ctx, &captureAnthropicToolHandler{}, []struct {
-			block   anthropic.ContentBlockUnion
-			variant anthropic.ToolUseBlock
-		}{{block: block, variant: block.AsToolUse()}}, llmtypes.MessageOpt{})
-		require.NoError(t, err)
-		require.Len(t, results, 1)
-		assert.Contains(t, results[0].output.AssistantFacing(), "private-tool-output")
-		thread.FinalizeMessageSpan(invocation, nil)
-		var sawStart, sawComplete, sawTool bool
-		for _, span := range recorder.Ended() {
-			if span.Name() == "invoke_agent kodelet" {
-				encoded, err := json.Marshal(span.Events())
-				require.NoError(t, err)
-				assert.NotContains(t, string(encoded), "private-tool-input")
-				assert.NotContains(t, string(encoded), "private-tool-output")
-				for _, event := range span.Events() {
-					sawStart = sawStart || event.Name == "tool_execution_start"
-					sawComplete = sawComplete || event.Name == "tool_execution_complete"
-				}
-			}
-			if span.Name() == "execute_tool privacy_tool" {
-				sawTool = true
-				attributes, err := json.Marshal(span.Attributes())
-				require.NoError(t, err)
-				if capture {
-					assert.Contains(t, string(attributes), "private-tool-input")
-					assert.Contains(t, string(attributes), "private-tool-output")
-				} else {
-					assert.NotContains(t, string(attributes), "private-tool-input")
-					assert.NotContains(t, string(attributes), "private-tool-output")
-				}
-			}
-		}
-		assert.True(t, sawStart && sawComplete && sawTool)
 	}
 }
 

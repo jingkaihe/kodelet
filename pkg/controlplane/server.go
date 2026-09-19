@@ -35,6 +35,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -43,7 +44,6 @@ import (
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -533,19 +533,11 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			r = r.WithContext(ctx)
 			defer func() {
 				span.SetAttributes(attribute.Int("http.response.status_code", rw.statusCode))
-				errorType := ""
-				switch {
-				case errors.Is(ctx.Err(), context.Canceled):
-					errorType = "cancelled"
-				case errors.Is(ctx.Err(), context.DeadlineExceeded):
-					errorType = "timeout"
-				case rw.statusCode >= http.StatusInternalServerError:
-					errorType = strconv.Itoa(rw.statusCode)
+				fallback := ""
+				if rw.statusCode >= http.StatusInternalServerError {
+					fallback = strconv.Itoa(rw.statusCode)
 				}
-				if errorType != "" {
-					span.SetAttributes(attribute.String("error.type", errorType))
-					span.SetStatus(codes.Error, errorType)
-				}
+				telemetry.SetSpanError(span, telemetry.ErrorType(ctx.Err(), fallback))
 				span.End()
 			}()
 		}

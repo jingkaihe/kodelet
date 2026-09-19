@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -148,7 +146,7 @@ func TestCanStreamToolUpdatesRequiresMatchingResultExtensionSubscription(t *test
 }
 
 func TestEventTracingSkipsNoopDispatch(t *testing.T) {
-	recorder := recordExtensionEventSpans(t, false)
+	recorder, _ := telemetrytest.NewRecorder(t, false)
 	t.Run("nil runtime", func(t *testing.T) {
 		var runtime *Runtime
 		runtime.DispatchAgentStart(t.Context(), ExtensionCallContext{})
@@ -179,7 +177,7 @@ func TestEventTracingSkipsNoopDispatch(t *testing.T) {
 func TestEventTracingHandlerSetupFailures(t *testing.T) {
 	for _, name := range []string{"disconnected session", "failed restart", "missing rpc session", "startup cancellation", "startup deadline"} {
 		t.Run(name, func(t *testing.T) {
-			recorder := recordExtensionEventSpans(t, false)
+			recorder, _ := telemetrytest.NewRecorder(t, false)
 			ctx, parent := telemetry.Tracer("test").Start(t.Context(), "invoke_agent kodelet")
 			defer parent.End()
 			process := &Process{Extension: Extension{ID: "unavailable"}}
@@ -224,7 +222,7 @@ func TestEventTracingHandlerSetupFailures(t *testing.T) {
 }
 
 func TestEventTracingHandlerParentageAndReverseCalls(t *testing.T) {
-	recorder := recordExtensionEventSpans(t, false)
+	recorder, _ := telemetrytest.NewRecorder(t, false)
 	process, sdk, reader := newEventTraceProcess(t)
 	runtime := EmptyRuntime()
 	runtime.eventHandlersByName[EventUserMessage] = []eventHandler{{process: process}}
@@ -310,7 +308,7 @@ func TestEventTracingFailuresPreservePolicyAndPrivacy(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			recorder := recordExtensionEventSpans(t, test.captureContent)
+			recorder, _ := telemetrytest.NewRecorder(t, test.captureContent)
 			process, sdk, reader := newEventTraceProcess(t)
 			runtime := EmptyRuntime()
 			runtime.eventHandlersByName[test.event] = []eventHandler{{process: process}}
@@ -353,7 +351,7 @@ func TestEventTracingFailuresPreservePolicyAndPrivacy(t *testing.T) {
 func TestEventTracingCancellation(t *testing.T) {
 	for _, completionErr := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(completionErr.Error(), func(t *testing.T) {
-			recorder := recordExtensionEventSpans(t, false)
+			recorder, _ := telemetrytest.NewRecorder(t, false)
 			process, _, reader := newEventTraceProcess(t)
 			done := make(chan struct{})
 			ctx := completedCallContext{Context: t.Context(), done: done, err: completionErr}
@@ -389,31 +387,6 @@ func (eventTraceInputBroker) Input(ctx context.Context, _ UIInputRequest) (UIInp
 	_, span := telemetry.Tracer("test").Start(ctx, "reverse request")
 	defer span.End()
 	return UIInputResponse{Status: UIInputStatusSubmitted, Value: "private answer"}, nil
-}
-
-func recordExtensionEventSpans(t *testing.T, captureContent bool) *tracetest.SpanRecorder {
-	t.Helper()
-	previousContent := telemetry.ContentEnabled()
-	previousInternalRPCSpans := telemetry.InternalRPCSpansEnabled()
-	_, err := telemetry.InitTracer(t.Context(), telemetry.Config{
-		CaptureContent:   captureContent,
-		InternalRPCSpans: previousInternalRPCSpans,
-	})
-	require.NoError(t, err)
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previousProvider := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		require.NoError(t, provider.Shutdown(context.Background()))
-		otel.SetTracerProvider(previousProvider)
-		_, err := telemetry.InitTracer(context.Background(), telemetry.Config{
-			CaptureContent:   previousContent,
-			InternalRPCSpans: previousInternalRPCSpans,
-		})
-		require.NoError(t, err)
-	})
-	return recorder
 }
 
 func newEventTraceProcess(t *testing.T) (*Process, net.Conn, *bufio.Reader) {

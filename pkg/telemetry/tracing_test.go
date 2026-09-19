@@ -20,7 +20,17 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
+func preserveTracingPolicy(t *testing.T) {
+	t.Helper()
+	previousContent, previousInternalRPC := ContentEnabled(), InternalRPCSpansEnabled()
+	t.Cleanup(func() {
+		captureContent.Store(previousContent)
+		internalRPCSpans.Store(previousInternalRPC)
+	})
+}
+
 func TestInitTracerDisabled(t *testing.T) {
+	preserveTracingPolicy(t)
 	shutdown, err := InitTracer(context.Background(), Config{Enabled: false})
 	require.NoError(t, err)
 	require.NotNil(t, shutdown)
@@ -28,8 +38,7 @@ func TestInitTracerDisabled(t *testing.T) {
 }
 
 func TestContentCaptureIsExplicit(t *testing.T) {
-	previous := ContentEnabled()
-	t.Cleanup(func() { captureContent.Store(previous) })
+	preserveTracingPolicy(t)
 	for _, enabled := range []bool{false, true, false} {
 		shutdown, err := InitTracer(t.Context(), Config{CaptureContent: enabled})
 		require.NoError(t, err)
@@ -39,8 +48,7 @@ func TestContentCaptureIsExplicit(t *testing.T) {
 }
 
 func TestInternalRPCSpansAreOptIn(t *testing.T) {
-	previous := InternalRPCSpansEnabled()
-	t.Cleanup(func() { internalRPCSpans.Store(previous) })
+	preserveTracingPolicy(t)
 	for _, enabled := range []bool{false, true, false} {
 		shutdown, err := InitTracer(t.Context(), Config{InternalRPCSpans: enabled})
 		require.NoError(t, err)
@@ -50,6 +58,7 @@ func TestInternalRPCSpansAreOptIn(t *testing.T) {
 }
 
 func TestTracerShutdownFlushesPendingSpans(t *testing.T) {
+	preserveTracingPolicy(t)
 	requests := make(chan []byte, 1)
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/traces", r.URL.Path)
@@ -128,6 +137,8 @@ func TestGetSampler(t *testing.T) {
 }
 
 func TestSpanHelpers(t *testing.T) {
+	preserveTracingPolicy(t)
+	captureContent.Store(false)
 	spanRecorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
 	previousProvider := otel.GetTracerProvider()
@@ -173,6 +184,21 @@ func TestSpanHelpers(t *testing.T) {
 	assert.Empty(t, span.Events(), "error text may contain content and requires opt-in")
 
 	spanRecorder.Reset()
+	captureContent.Store(true)
+	_, classified := Tracer("test").Start(ctx, "classified-error")
+	RecordSpanErrorWithType(classified, wantErr, "rpc_error", oteltrace.WithAttributes(attribute.String("source", "test")))
+	classified.End()
+	ended = spanRecorder.Ended()
+	require.Len(t, ended, 1)
+	span = ended[0]
+	assert.Contains(t, span.Attributes(), attribute.String("error.type", "rpc_error"))
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, wantErr.Error(), span.Status().Description)
+	require.Len(t, span.Events(), 1)
+	assert.Contains(t, span.Events()[0].Attributes, attribute.String("exception.message", wantErr.Error()))
+	assert.Contains(t, span.Events()[0].Attributes, attribute.String("source", "test"))
+
+	spanRecorder.Reset()
 	WithSpanFunc(ctx, "func-operation", func(ctx context.Context) {
 		SetAttributes(ctx, attribute.Bool("called", true))
 	})
@@ -201,4 +227,25 @@ func TestTracerDefaultName(t *testing.T) {
 	ended := spanRecorder.Ended()
 	require.Len(t, ended, 1)
 	assert.Equal(t, "kodelet", ended[0].InstrumentationScope().Name)
+}
+
+func TestErrorType(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		fallback string
+		want     string
+	}{
+		{name: "no error"},
+		{name: "status without error", fallback: "500", want: "500"},
+		{name: "Go type", err: errors.New("private error"), want: "*errors.errorString"},
+		{name: "protocol fallback", err: errors.New("private error"), fallback: "rpc_error", want: "rpc_error"},
+		{name: "wrapped cancellation", err: errors.Join(errors.New("private error"), context.Canceled), fallback: "rpc_error", want: "cancelled"},
+		{name: "wrapped timeout", err: errors.Join(errors.New("private error"), context.DeadlineExceeded), fallback: "500", want: "timeout"},
+		{name: "cancellation takes precedence", err: errors.Join(context.DeadlineExceeded, context.Canceled), want: "cancelled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, ErrorType(test.err, test.fallback))
+		})
+	}
 }

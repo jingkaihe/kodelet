@@ -19,12 +19,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sys/unix"
 )
@@ -58,9 +57,7 @@ func (e *tracedToolEnvironment) ExecuteTool(ctx context.Context, _ agentenv.Tool
 func TestServiceToolRetainsRPCTraceAndCancellation(t *testing.T) {
 	for _, cancellation := range []string{"request", "run"} {
 		t.Run(cancellation, func(t *testing.T) {
-			recorder := tracetest.NewSpanRecorder()
-			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+			recorder, provider := telemetrytest.NewRecorder(t, false)
 			tracer := provider.Tracer("test")
 			runCtx, runSpan := tracer.Start(t.Context(), "run-lifetime")
 			defer runSpan.End()

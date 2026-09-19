@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -22,11 +23,9 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -174,33 +173,41 @@ func responseStreamFromMaps(t *testing.T, events []map[string]any) *ssestream.St
 }
 
 func TestResponsesTracing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	websocketMode := false
 	for _, tc := range []struct {
 		name      string
 		websocket bool
 		retry     bool
 		partial   bool
 		cancel    bool
+		toolErr   error
 	}{
 		{name: "HTTP with tool"},
 		{name: "websocket retry with tool", websocket: true, retry: true},
 		{name: "incomplete HTTP", partial: true},
 		{name: "cancelled websocket", websocket: true, cancel: true},
+		{name: "tool failure preserves successful model", toolErr: assert.AnError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := tracetest.NewSpanRecorder()
-			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-			previous := otel.GetTracerProvider()
-			otel.SetTracerProvider(provider)
-			t.Cleanup(func() {
-				_ = provider.Shutdown(context.Background())
-				otel.SetTracerProvider(previous)
+			recorder, provider := telemetrytest.NewRecorder(t, false)
+			thread, err := NewThread(llmtypes.Config{
+				Provider: "openai",
+				Model:    "primary",
+				Retry:    llmtypes.RetryConfig{Attempts: 2, InitialDelay: 1, MaxDelay: 1},
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform:      "openai",
+					WebSocketMode: &websocketMode,
+				},
 			})
-			thread := &Thread{Thread: base.NewThread(llmtypes.Config{
-				Provider: "openai", Model: "primary",
-				Retry: llmtypes.RetryConfig{Attempts: 2, InitialDelay: 1, MaxDelay: 1},
-			}, "trace-conversation")}
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, thread.Close()) })
 			thread.Usage.InputTokens = 999
 			thread.SetState(tools.NewBasicState(t.Context(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+			if tc.toolErr != nil {
+				thread.SetEnvironment(&failingResponsesToolEnvironment{err: tc.toolErr})
+			}
 			attempts := 0
 			var requestSpanIDs []trace.SpanID
 			newStream := func(ctx context.Context, params responses.ResponseNewParams) *ssestream.Stream[responses.ResponseStreamEventUnion] {
@@ -238,10 +245,11 @@ func TestResponsesTracing(t *testing.T) {
 				}
 			}
 			ctx, invocation := thread.CreateMessageSpan(t.Context(), provider.Tracer("test"), "private", llmtypes.MessageOpt{})
-			_, _, _, err := thread.processMessageExchange(ctx, &captureStreamHandler{}, "weak", 100, "private system", llmtypes.MessageOpt{DisableUsageLog: true})
+			_, toolsUsed, completed, err := thread.processMessageExchange(ctx, &captureStreamHandler{}, "weak", 100, "private system", llmtypes.MessageOpt{DisableUsageLog: true})
 			thread.FinalizeMessageSpan(invocation, err)
 			var model, tool sdktrace.ReadOnlySpan
 			modelCount := 0
+			toolCount := 0
 			for _, span := range recorder.Ended() {
 				switch span.Name() {
 				case "chat weak":
@@ -249,6 +257,7 @@ func TestResponsesTracing(t *testing.T) {
 					modelCount++
 				case "execute_tool ok_tool":
 					tool = span
+					toolCount++
 				}
 			}
 			require.Equal(t, 1, modelCount, "all retries share the logical model span")
@@ -261,8 +270,17 @@ func TestResponsesTracing(t *testing.T) {
 				assert.Equal(t, codes.Error, model.Status().Code)
 				assert.Nil(t, tool)
 			} else {
-				require.NoError(t, err)
+				if tc.toolErr != nil {
+					require.ErrorIs(t, err, tc.toolErr)
+					assert.Equal(t, 1, attempts, "tool failures must not retry the model request")
+				} else {
+					require.NoError(t, err)
+					assert.True(t, toolsUsed)
+					assert.True(t, completed)
+				}
+				require.Equal(t, 1, toolCount, "tool completion must execute exactly once")
 				require.NotNil(t, tool)
+				assert.Equal(t, tc.toolErr != nil, tool.Status().Code == codes.Error)
 				assert.Equal(t, codes.Ok, model.Status().Code)
 				assert.Equal(t, invocation.SpanContext().SpanID(), tool.Parent().SpanID())
 				assert.False(t, tool.StartTime().Before(model.EndTime()), "model span must finish before tool execution")
@@ -280,14 +298,7 @@ func TestResponsesTracing(t *testing.T) {
 }
 
 func TestRemoteCompactionFallbackSharesModelSpan(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		_ = provider.Shutdown(context.Background())
-		otel.SetTracerProvider(previous)
-	})
+	recorder, provider := telemetrytest.NewRecorder(t, false)
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{
 			Model: "primary", Retry: llmtypes.RetryConfig{Attempts: 1, InitialDelay: 1, MaxDelay: 1},

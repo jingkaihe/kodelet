@@ -8,12 +8,11 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -208,9 +207,7 @@ func TestModelHelperCancellationAndCleanup(t *testing.T) {
 	for _, action := range []string{"RPC cancellation", "parent cancellation", "tool completion", "run cancellation", "run close", "disconnect", "reconnect", "registry close"} {
 		t.Run(action, func(t *testing.T) {
 			registry, _, session := newModelHelperRegistry(t)
-			recorder := tracetest.NewSpanRecorder()
-			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+			recorder, provider := telemetrytest.NewRecorder(t, false)
 			tracer := provider.Tracer("test")
 			parentCtx, parentSpan := tracer.Start(t.Context(), "tool owner")
 			defer parentSpan.End()

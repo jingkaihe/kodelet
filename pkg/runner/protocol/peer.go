@@ -730,7 +730,11 @@ func startRPCTrace(ctx context.Context, method string, kind trace.SpanKind) (con
 			if err == nil {
 				return
 			}
-			attrs := append(rpcErrorAttributes(err), attribute.String("rpc.method", method))
+			errorType, attrs := rpcErrorDetails(err)
+			attrs = append(attrs,
+				attribute.String("error.type", errorType),
+				attribute.String("rpc.method", method),
+			)
 			if telemetry.ContentEnabled() {
 				attrs = append(attrs, attribute.String("exception.message", err.Error()))
 			}
@@ -789,25 +793,20 @@ func finishRPCSpan(span trace.Span, err error) {
 	if err == nil {
 		return
 	}
-	telemetry.RecordSpanError(span, err)
-	span.SetAttributes(rpcErrorAttributes(err)...)
+	errorType, attrs := rpcErrorDetails(err)
+	telemetry.RecordSpanErrorWithType(span, err, errorType)
+	span.SetAttributes(attrs...)
 }
 
-func rpcErrorAttributes(err error) []attribute.KeyValue {
-	errorType := fmt.Sprintf("%T", err)
+func rpcErrorDetails(err error) (string, []attribute.KeyValue) {
+	fallback := ""
+	var attrs []attribute.KeyValue
 	var rpcErr *RPCError
-	switch {
-	case errors.Is(err, context.Canceled):
-		errorType = "canceled"
-	case errors.Is(err, context.DeadlineExceeded):
-		errorType = "timeout"
-	case errors.As(err, &rpcErr):
-		return []attribute.KeyValue{
-			attribute.String("error.type", "rpc_error"),
-			attribute.Int("rpc.jsonrpc.error_code", rpcErr.Code),
-		}
+	if errors.As(err, &rpcErr) {
+		fallback = "rpc_error"
+		attrs = append(attrs, attribute.Int("rpc.jsonrpc.error_code", rpcErr.Code))
 	}
-	return []attribute.KeyValue{attribute.String("error.type", errorType)}
+	return telemetry.ErrorType(err, fallback), attrs
 }
 
 func (p *Peer) startWorker(worker func()) bool {

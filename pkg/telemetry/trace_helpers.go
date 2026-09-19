@@ -68,21 +68,45 @@ func RecordError(ctx context.Context, err error, opts ...trace.EventOption) {
 // RecordSpanError records an error without exporting arbitrary provider responses
 // or tool output unless content capture is explicitly enabled in this process.
 func RecordSpanError(span trace.Span, err error, opts ...trace.EventOption) {
+	RecordSpanErrorWithType(span, err, ErrorType(err, ""), opts...)
+}
+
+// ErrorType classifies cancellation and timeouts before using a caller-supplied
+// fallback. Without a fallback, other errors are classified by their Go type.
+func ErrorType(err error, fallback string) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case fallback != "":
+		return fallback
+	case err != nil:
+		return fmt.Sprintf("%T", err)
+	default:
+		return ""
+	}
+}
+
+// SetSpanError records only a bounded classification, never exception text,
+// regardless of the content-capture policy. An empty classification is a no-op.
+func SetSpanError(span trace.Span, errorType string) {
+	if errorType == "" {
+		return
+	}
+	span.SetAttributes(attribute.String("error.type", errorType))
+	span.SetStatus(codes.Error, errorType)
+}
+
+// RecordSpanErrorWithType uses an already-classified error while retaining the
+// same content-capture policy as RecordSpanError.
+func RecordSpanErrorWithType(span trace.Span, err error, errorType string, opts ...trace.EventOption) {
 	if err == nil {
 		return
 	}
-	errorType := fmt.Sprintf("%T", err)
-	switch {
-	case errors.Is(err, context.Canceled):
-		errorType = "cancelled"
-	case errors.Is(err, context.DeadlineExceeded):
-		errorType = "timeout"
-	}
-	span.SetAttributes(attribute.String("error.type", errorType))
+	SetSpanError(span, errorType)
 	if ContentEnabled() {
 		span.RecordError(err, opts...)
 		span.SetStatus(codes.Error, err.Error())
-	} else {
-		span.SetStatus(codes.Error, errorType)
 	}
 }
