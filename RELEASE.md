@@ -2,6 +2,8 @@
 
 ## 0.6.17-beta
 
+Added distributed OpenTelemetry tracing across clients, the daemon, and runners, with model and tool spans, privacy-preserving defaults, and opt-in content capture and internal RPC diagnostics.
+
 Added `allowedTools` to extension `agent.init` events and the TypeScript SDK, exposing the current tool allowlist including patches from earlier init handlers. An empty list means no tools are allowed; older hosts may omit the field.
 
 **Breaking change:** Removed built-in thread goals, including the `/goal` command, `get_goal` and `update_goal` tools, automatic goal continuation, and goal-specific transcript rendering.
