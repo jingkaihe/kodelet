@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.6.18-beta
+
+**Breaking changes:** The daemon now requires named model profiles with an explicit default selection and a `provider` and `model` in every profile. Top-level model settings and model-valued environment variables such as `KODELET_MODEL`, `KODELET_PROVIDER`, and `KODELET_REASONING_EFFORT` are rejected at startup. `default` is no longer a special fallback; it is an ordinary name for configured or extension-registered profiles. `KODELET_PROFILE`, provider credentials, and supported explicit CLI model overrides remain available.
+
+**Upgrade:** Move model settings, including weak-model, token, reasoning, and model-specific provider options, under `profiles.<name>`; set `profile: <name>`, unset removed model environment variables, and restart the daemon. Shared settings such as extensions, skills, tracing, tools, aliases, and provider connections remain top-level. For fresh installations, `kodelet setup` creates named `openai` and `anthropic` profiles and selects `openai`. Clients and standalone runners do not require model profiles.
+
+Added per-conversation model selection in the native TUI and Web UI. Use `Ctrl+T`, `/model`, or the clickable model label for a searchable TUI `profile/model` picker, or choose a model in the Web UI's new-chat settings. `/model <profile/model>` selects directly, while `/model <id>` uses the current profile. Selections leave configuration unchanged and lock after the first message.
+
+Added profile-aware model choices from configured model lists, pricing catalogs, provider defaults, and compatible GitHub Copilot models, while preserving configured main and weak models and respecting custom endpoints.
+
+Added a dedicated Web UI workspace header and streamlined composer labels around the selected profile, model, and reasoning effort. Made native TUI context usage more compact and removed default-profile labels in favor of the current selection across profile commands and pickers.
+
+Fixed TUI model selection to preserve other CLI execution options and keep the selected model across retries and follow-up messages, including when `--model` was supplied at startup.
+
+Preserved saved model settings when resuming conversations and preloaded model choices for `/new` without requiring the saved profile to remain configured or model discovery to succeed. Persisted OpenAI native-search and WebSocket settings in conversation snapshots, and kept removed profiles on the shared runner environment rather than applying the new default profile's environment.
+
+Fixed configuration decoding to preserve literal dots in model aliases and pricing catalog keys.
+
 ## 0.6.17-beta
 
 Added distributed OpenTelemetry tracing across clients, the daemon, and runners, with model and tool spans, privacy-preserving defaults, and opt-in content capture and internal RPC diagnostics.
