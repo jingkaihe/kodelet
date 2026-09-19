@@ -106,9 +106,9 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 	return []slashcommands.Command{
 		{
 			Name:        "model",
-			Description: "Select a model for a new conversation",
-			Hint:        "id (optional)",
-			Placeholder: "/model [id]",
+			Description: "Select a profile/model for a new conversation",
+			Hint:        "profile/model or id (optional)",
+			Placeholder: "/model [profile/model or id]",
 		},
 		{
 			Name:        "stop",

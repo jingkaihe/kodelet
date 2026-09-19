@@ -1079,7 +1079,7 @@ func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
 		return false
 	}
 
-	aboveTop := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.profilePickerHeight() + m.reasoningPickerHeight()
+	aboveTop := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.modelPickerHeight() + m.reasoningPickerHeight()
 	aboveHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	belowTop := aboveTop + aboveHeight + inputHeight + 2
 	belowHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)

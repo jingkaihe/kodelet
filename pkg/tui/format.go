@@ -71,7 +71,21 @@ func formatUsage(usage llmtypes.Usage) string {
 		return fmt.Sprintf("$%.2f", cost)
 	}
 	pct := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
-	return fmt.Sprintf("%s/%s (%.0f%%) · $%.2f", formatTokenCount(usage.CurrentContextWindow), formatTokenCount(usage.MaxContextWindow), pct, cost)
+	return fmt.Sprintf("ctx %.0f%%/%s · $%.2f", pct, formatContextCapacity(usage.MaxContextWindow), cost)
+}
+
+func formatContextCapacity(tokens int) string {
+	var value float64
+	var suffix string
+	switch {
+	case tokens >= 1_000_000:
+		value, suffix = float64(tokens)/1_000_000, "m"
+	case tokens >= 1_000:
+		value, suffix = float64(tokens)/1_000, "k"
+	default:
+		return fmt.Sprintf("%d", tokens)
+	}
+	return strings.TrimSuffix(fmt.Sprintf("%.1f", value), ".0") + suffix
 }
 
 func renderExitSummary(conversationID string, usage llmtypes.Usage) string {

@@ -124,7 +124,6 @@ func (m *model) openReasoningPicker() {
 	if !m.canChangeReasoningEffort() {
 		return
 	}
-	m.profilePickerOpen = false
 	m.modelPickerOpen = false
 	m.reasoningPickerOpen = true
 	m.reasoningPickerIndex = m.reasoningEffortIndex

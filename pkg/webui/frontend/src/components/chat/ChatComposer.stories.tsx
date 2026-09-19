@@ -12,6 +12,7 @@ import { showToast } from '../../utils';
 import ChatComposer from './ChatComposer';
 import ChatSidebar from './ChatSidebar';
 import ChatTranscript from './ChatTranscript';
+import ChatWorkspaceHeader from './ChatWorkspaceHeader';
 import ExtensionWidgets from './ExtensionWidgets';
 
 type ChatComposerStoryProps = React.ComponentProps<typeof ChatComposer> & {
@@ -50,6 +51,16 @@ const meta = {
     const canvas = within(canvasElement);
     await waitFor(() => {
       const editor = canvas.getByTestId('composer-textarea');
+      const workspace = canvas.queryByTestId('chat-workspace-header');
+      if (workspace) {
+        const location = workspace.querySelector('.chat-workspace-location');
+        expect(location).not.toBeNull();
+        const styles = getComputedStyle(location as HTMLElement);
+        const headerStyles = getComputedStyle(workspace);
+        expect(styles.fontFamily).toBe(getComputedStyle(editor).fontFamily);
+        expect(styles.fontWeight).toBe(headerStyles.fontWeight);
+        expect(styles.letterSpacing).toBe(headerStyles.letterSpacing);
+      }
       const leading = canvas.getByRole('button', { name: 'Add image' }).getBoundingClientRect();
       const submit = canvas
         .getByRole('button', { name: args.submitActionLabel })
@@ -68,7 +79,10 @@ const meta = {
           })
           .getBoundingClientRect();
         expect(context.left).toBeGreaterThanOrEqual(leading.right);
-        expect(context.right).toBeLessThanOrEqual(actions.left);
+        const minimumGap = Number.parseFloat(
+          getComputedStyle(canvasElement.ownerDocument.documentElement).fontSize
+        );
+        expect(actions.left - context.right).toBeGreaterThanOrEqual(minimumGap - 1);
       }
 
       if (window.matchMedia('(max-width: 600px)').matches) {
@@ -99,7 +113,7 @@ const meta = {
     canStop: false,
     contextDisabled: false,
     contextIsStatic: false,
-    contextText: 'model:claude-sonnet-4-6 · default · effort:medium · kodelet',
+    contextText: 'flair/claude-sonnet-4-6 · medium',
     dragActive: false,
     draft: 'Extract the reusable component and add a story.',
     placeholder: 'Ask kodelet anything...',
@@ -154,7 +168,7 @@ export const WithSlashSuggestions: Story = {
 export const SteeringActiveConversation: Story = {
   args: {
     contextIsStatic: true,
-    contextText: 'code-review · /home/jingkaihe/workspace/kodelet',
+    contextText: 'flair/claude-sonnet-4-6 · high',
     draft: 'Focus the review on the extracted components.',
     showStop: true,
     canStop: true,
@@ -166,7 +180,7 @@ export const SteeringActiveConversation: Story = {
 export const RepeatedPunctuation: Story = {
   args: {
     ...SteeringActiveConversation.args,
-    contextText: 'deep · effort:xhigh · /home/jingkaihe/workspace/kodelet',
+    contextText: 'deep/gpt-6-astra · xhigh',
     draft: '',
     placeholder: 'Steer the active conversation…',
   },
@@ -244,6 +258,10 @@ export const InWorkspace: Story = {
         />
       </div>
       <main className="chat-main-panel flex min-w-0 flex-1 flex-col overflow-hidden">
+        <ChatWorkspaceHeader
+          cwd="/home/jingkaihe/workspace/kodelet"
+          onWorkspaceOpen={args.contextIsStatic ? undefined : args.onContextOpen}
+        />
         <div className="chat-main-scroll min-h-0 flex-1 overflow-y-auto">
           <ChatTranscript
             isStreaming={false}
@@ -264,13 +282,23 @@ export const InWorkspace: Story = {
   ),
 };
 
+export const NewWorkspace: Story = {
+  ...InWorkspace,
+  args: {
+    ...meta.args,
+    draft: '',
+  },
+};
+
 export const NarrowWorkspace: Story = {
   args: {
     ...InWorkspace.args,
+    contextText: 'deep/custom-provider/very-long-model-name-for-coding · xhigh',
   },
   // Both side panels can leave a narrow composer even at desktop viewport widths.
   render: (args) => (
     <div className="chat-main-panel w-full max-w-[25rem]">
+      <ChatWorkspaceHeader cwd="/home/jingkaihe/workspace/projects/a-long-workspace-name" />
       <InteractiveComposer {...args} />
     </div>
   ),

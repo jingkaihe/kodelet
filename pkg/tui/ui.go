@@ -493,7 +493,6 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 			respondUIPrompt(previous, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 	}
-	state.profilePickerOpen = false
 	state.reasoningPickerOpen = false
 	state.modelPickerOpen = false
 	state.slashCommandIndex = -1

@@ -266,7 +266,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
-			m.profilePickerOpen = false
 			m.reasoningPickerOpen = false
 			m.modelPickerOpen = false
 			m.entries = append(m.entries, chatEntry{
@@ -289,7 +288,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
-				m.profilePickerOpen = false
 				m.selectedModel = strings.TrimSpace(msg.model)
 				m.modelOptions = normalizeModelOptions(nil, m.selectedModel)
 				m.modelPickerOpen = false
@@ -762,11 +760,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+l" {
 			return m, m.openConversationPicker("")
 		}
-		if m.modelPickerOpen && key != "ctrl+t" && key != "ctrl+y" {
-			m.updateModelPickerKey(msg)
+		if m.modelPickerOpen && key != "ctrl+y" {
+			cmd := m.updateModelPickerKey(msg)
 			m.resize()
 			m.refreshViewport(false)
-			return m, nil
+			return m, cmd
 		}
 		if key != "ctrl+c" && key != "ctrl+d" {
 			if cmd, handled := m.routeExtensionSurfaceKey(msg); handled {
@@ -811,12 +809,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.profilePickerOpen {
-				m.closeProfilePicker()
-				m.resize()
-				m.refreshViewport(false)
-				return m, nil
-			}
 			if m.reasoningPickerOpen {
 				m.closeReasoningPicker()
 				m.resize()
@@ -828,10 +820,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+t":
-			if m.canChangeProfile() {
-				cmd := m.toggleProfilePickerFromKeyboard()
-				m.resize()
-				m.refreshViewport(false)
+			if m.canChangeModel() {
+				cmd := m.handleModelCommand("")
 				return m, cmd
 			}
 			return m, nil
@@ -867,11 +857,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.profilePickerOpen {
-				m.moveProfilePicker(-1)
-				m.refreshViewport(false)
-				return m, nil
-			}
 			if m.reasoningPickerOpen {
 				m.moveReasoningPicker(-1)
 				m.refreshViewport(false)
@@ -889,11 +874,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.profilePickerOpen {
-				m.moveProfilePicker(1)
-				m.refreshViewport(false)
-				return m, nil
-			}
 			if m.reasoningPickerOpen {
 				m.moveReasoningPicker(1)
 				m.refreshViewport(false)
@@ -908,12 +888,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
-			}
-			if m.profilePickerOpen {
-				cmd := m.selectProfilePickerOption(m.profilePickerIndex)
-				m.resize()
-				m.refreshViewport(false)
-				return m, cmd
 			}
 			if m.reasoningPickerOpen {
 				m.selectReasoningPickerOption(m.reasoningPickerIndex)
@@ -963,19 +937,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
 			if optionIndex, ok := m.modelPickerOptionAt(mouse.X, mouse.Y); ok {
-				m.selectModelPickerOption(optionIndex)
-				m.resize()
-				m.refreshViewport(false)
-				return m, nil
-			}
-			if optionIndex, ok := m.profilePickerOptionAt(mouse.X, mouse.Y); ok {
-				cmd := m.selectProfilePickerOption(optionIndex)
+				cmd := m.selectModelPickerOption(optionIndex)
 				m.resize()
 				m.refreshViewport(false)
 				return m, cmd
 			}
-			if m.profileComposerRegionContains(mouse.X, mouse.Y) {
-				m.toggleProfilePickerFromClick()
+			if m.modelComposerRegionContains(mouse.X, mouse.Y) {
+				if !m.modelPickerOpen {
+					cmd := m.handleModelCommand("")
+					return m, cmd
+				}
+				m.modelPickerOpen = false
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
@@ -988,12 +960,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.reasoningComposerRegionContains(mouse.X, mouse.Y) {
 				m.toggleReasoningPickerFromClick()
-				m.resize()
-				m.refreshViewport(false)
-				return m, nil
-			}
-			if m.profilePickerOpen {
-				m.closeProfilePicker()
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
@@ -1408,7 +1374,6 @@ func (m *model) openShortcutsDialog() tea.Cmd {
 	if oldFocused {
 		oldFocus = m.extensionSurfaces[oldFocusKey]
 	}
-	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
@@ -1441,7 +1406,6 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		_ = os.Remove(path)
 		return m.notifyEditorError("Failed to launch $EDITOR: " + err.Error())
 	}
-	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
@@ -1687,7 +1651,7 @@ func (m *model) resize() {
 	inputOuterHeight := inputHeight + 2
 	historySearchHeight := m.historySearchHeight()
 	slashCommandHeight := m.slashCommandSuggestionsHeight()
-	settingsPickerHeight := m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight()
+	settingsPickerHeight := m.reasoningPickerHeight() + m.modelPickerHeight()
 	extensionWidgetHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer) + m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	footerHeight := 0
 	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - extensionWidgetHeight - footerHeight
@@ -1808,7 +1772,6 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 
 	currentState := m.conversationState
 	m.conversationState = state
-	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	if clearComposer {
@@ -1910,7 +1873,7 @@ func (m model) slashCommandQuery() (string, bool) {
 }
 
 func (m model) slashCommandSuggestionsOpen() bool {
-	if m.profilePickerOpen || m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil {
+	if m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil {
 		return false
 	}
 	if m.textarea.Value() == m.slashDismissedDraft {

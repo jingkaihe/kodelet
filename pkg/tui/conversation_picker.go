@@ -78,7 +78,6 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	if oldFocused {
 		oldFocus = m.extensionSurfaces[oldFocusKey]
 	}
-	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()

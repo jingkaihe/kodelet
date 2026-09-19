@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip, RotateCw, Square, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Paperclip, RotateCw, Square, X } from 'lucide-react';
 import React from 'react';
 import type { PendingImageAttachment, SlashCommandOption } from '../../types';
 import { cn } from '../../utils';
@@ -314,7 +314,10 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                 </div>
               ) : (
                 <button
+                  aria-haspopup="dialog"
+                  aria-label={`Model settings: ${contextText}`}
                   className="composer-inline-context"
+                  data-testid="composer-context-button"
                   disabled={contextDisabled}
                   onClick={onContextOpen}
                   type="button"
@@ -322,6 +325,11 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   <span className="composer-inline-context-value" title={contextText}>
                     {contextText}
                   </span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="ml-1 h-3 w-3 shrink-0"
+                    strokeWidth={1.6}
+                  />
                 </button>
               )}
             </div>

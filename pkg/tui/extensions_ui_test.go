@@ -604,6 +604,7 @@ func TestTUIExtensionWidgetsRenderOnlyForActiveConversation(t *testing.T) {
 func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) {
 	m := newModel(context.Background(), Config{
 		Profile:                "work",
+		Model:                  "test",
 		ProfileOptions:         []string{"default", "work"},
 		ReasoningEffort:        "medium",
 		ReasoningEffortOptions: []string{"low", "medium", "high"},
@@ -622,15 +623,26 @@ func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) 
 	m.resize()
 
 	composerTop := m.viewport.Height() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
-	profileStart, _, ok := m.profileLabelBoundsInBlock()
+	modelStart, _, ok := m.modelLabelBoundsInBlock()
 	require.True(t, ok)
 	reasoningStart, _, ok := m.reasoningEffortLabelBoundsInBlock()
 	require.True(t, ok)
 
-	assert.False(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, m.viewport.Height()))
-	assert.True(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, composerTop))
+	assert.False(t, m.modelComposerRegionContains(tuiLeftMargin+modelStart, m.viewport.Height()))
+	assert.True(t, m.modelComposerRegionContains(tuiLeftMargin+modelStart, composerTop))
 	assert.False(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, m.viewport.Height()))
 	assert.True(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, composerTop))
+
+	updated, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin + modelStart, Y: composerTop})
+	m = updated.(model)
+	require.True(t, m.modelPickerOpen)
+	composerTop = m.viewport.Height() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	assert.True(t, m.modelComposerRegionContains(tuiLeftMargin+modelStart, composerTop))
+	assert.True(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, composerTop))
+	updated, _ = m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin + reasoningStart, Y: composerTop})
+	m = updated.(model)
+	assert.False(t, m.modelPickerOpen)
+	assert.True(t, m.reasoningPickerOpen)
 }
 
 func TestTUIExtensionWidgetsFoldFromFirstLine(t *testing.T) {
@@ -774,12 +786,12 @@ func TestToggleAllDetailsOnlyChangesVisibleConversationWidgets(t *testing.T) {
 }
 
 func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
-	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work"}})
+	m := newModel(context.Background(), Config{Profile: "default", Model: "main", ModelOptions: []string{"main", "second"}})
 	t.Cleanup(m.cancel)
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.width = 80
 	m.height = 40
-	m.profilePickerOpen = true
+	m.modelPickerOpen = true
 	owner := extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}
 	for placementIndex, placement := range []string{extensions.UIWidgetPlacementAboveComposer, extensions.UIWidgetPlacementBelowComposer} {
 		for widgetIndex, id := range []string{"a", "b"} {
@@ -803,8 +815,8 @@ func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
 	assert.Contains(t, rendered[0], "0-0-0")
 	assert.Contains(t, rendered[9], "0-1-1")
 
-	require.Positive(t, m.profilePickerHeight())
-	aboveY := m.viewport.Height() + m.profilePickerHeight()
+	require.Positive(t, m.modelPickerHeight())
+	aboveY := m.viewport.Height() + m.modelPickerHeight()
 	m.viewport.SetYOffset(6)
 	updated, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)

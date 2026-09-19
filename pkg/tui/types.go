@@ -152,8 +152,6 @@ type conversationState struct {
 	reasoningEffortIndex    int
 	reasoningEffortExplicit bool
 
-	profilePickerOpen    bool
-	profilePickerIndex   int
 	reasoningPickerOpen  bool
 	reasoningPickerIndex int
 	modelPickerOpen      bool

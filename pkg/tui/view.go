@@ -162,7 +162,6 @@ func (m model) View() tea.View {
 		transcript := m.renderTranscriptPlaceholders(m.viewport.View(), time.Now())
 		historySearch := m.renderHistorySearch()
 		slashSuggestions := m.renderSlashCommandSuggestions()
-		profilePicker := m.renderProfilePicker()
 		reasoningPicker := m.renderReasoningPicker()
 		modelPicker := m.renderModelPicker()
 		widgetsAbove := m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)
@@ -174,9 +173,6 @@ func (m model) View() tea.View {
 		}
 		if strings.TrimSpace(slashSuggestions) != "" {
 			parts = append(parts, slashSuggestions)
-		}
-		if strings.TrimSpace(profilePicker) != "" {
-			parts = append(parts, profilePicker)
 		}
 		if strings.TrimSpace(reasoningPicker) != "" {
 			parts = append(parts, reasoningPicker)
@@ -296,7 +292,7 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+L", description: "Browse and switch conversations"},
-		{shortcut: "Ctrl+T", description: "Change profile before starting"},
+		{shortcut: "Ctrl+T", description: "Select profile/model before starting"},
 		{shortcut: "Ctrl+Y", description: "Change reasoning effort before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
@@ -709,7 +705,7 @@ func (m model) historySearchHeight() int {
 }
 
 func (m model) maxSlashCommandSuggestions() int {
-	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.reasoningPickerHeight() - m.modelPickerHeight() - m.historySearchHeight() - 1
+	availableHeight := m.height - inputHeight - 2 - m.reasoningPickerHeight() - m.modelPickerHeight() - m.historySearchHeight() - 1
 	if availableHeight < 1 {
 		return 1
 	}
@@ -819,6 +815,8 @@ type styledLabelPart struct {
 	style lipgloss.Style
 }
 
+const composerSettingSeparator = " · "
+
 func (m model) renderInputTopBorder() string {
 	outerWidth := m.inputOuterWidth()
 	if outerWidth <= 2 {
@@ -848,7 +846,7 @@ func (m model) renderInputTopBorder() string {
 }
 
 func (m model) renderInputTopLabel(visibleLabel string) string {
-	fullLabel := m.inputTopRightLabel()
+	fullLabel, showModel, showEffort := m.inputTopLabelLayout()
 	if visibleLabel != fullLabel {
 		return inputLabelStyle.Render(visibleLabel)
 	}
@@ -856,21 +854,15 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 	parts := []styledLabelPart{
 		{text: formatUsage(m.usage), style: inputLabelStyle},
 	}
-	if m.profile != "" {
+	if showModel {
 		parts = append(parts,
-			styledLabelPart{text: " - ", style: inputLabelStyle},
-			styledLabelPart{text: m.profile, style: m.profileStyle(m.profileIndex)},
+			styledLabelPart{text: composerSettingSeparator, style: inputLabelStyle},
+			styledLabelPart{text: m.modelLabel(), style: m.profileStyle(m.profileIndex)},
 		)
 	}
-	if m.selectedModel != "" && strings.Contains(fullLabel, " - "+m.modelLabel()) {
+	if showEffort {
 		parts = append(parts,
-			styledLabelPart{text: " - ", style: inputLabelStyle},
-			styledLabelPart{text: m.modelLabel(), style: inputLabelStyle},
-		)
-	}
-	if strings.HasSuffix(fullLabel, " - "+m.reasoningEffortLabel()) {
-		parts = append(parts,
-			styledLabelPart{text: " - ", style: inputLabelStyle},
+			styledLabelPart{text: composerSettingSeparator, style: inputLabelStyle},
 			styledLabelPart{text: m.reasoningEffortLabel(), style: m.reasoningEffortStyle(m.reasoningEffortIndex)},
 		)
 	}
@@ -883,52 +875,6 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 		b.WriteString(renderPersistentStyle(part.style, part.text))
 	}
 	return b.String()
-}
-
-func (m model) renderProfilePicker() string {
-	if !m.profilePickerOpen || len(m.profileOptions) == 0 {
-		return ""
-	}
-
-	_, profileEnd, ok := m.profileLabelBoundsInBlock()
-	if !ok {
-		profileEnd = m.inputOuterWidth() - 1
-	}
-	optionWidth := m.profilePickerWidth()
-	start := profileEnd - optionWidth
-	if start < 0 {
-		start = 0
-	}
-	if start+optionWidth > m.inputOuterWidth() {
-		start = max(0, m.inputOuterWidth()-optionWidth)
-	}
-
-	lines := make([]string, 0, len(m.profileOptions))
-	for index, profile := range m.profileOptions {
-		label := fitVisible(profile, optionWidth)
-		style := m.profileStyle(index)
-		if index == m.profilePickerIndex {
-			style = style.Background(themeColor(m.theme.ProfileSelected))
-		}
-		line := strings.Repeat(" ", start) + renderPersistentStyle(style, padVisible(label, optionWidth))
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m model) profilePickerWidth() int {
-	width := lipgloss.Width(m.profile)
-	for _, profile := range m.profileOptions {
-		width = max(width, lipgloss.Width(profile))
-	}
-	return max(1, min(width, m.inputOuterWidth()))
-}
-
-func (m model) profilePickerHeight() int {
-	if !m.profilePickerOpen || len(m.profileOptions) == 0 {
-		return 0
-	}
-	return len(m.profileOptions)
 }
 
 func (m model) renderReasoningPicker() string {
@@ -1017,7 +963,7 @@ func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -1025,51 +971,16 @@ func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
 	return ok && blockX >= startX && blockX < endX
 }
 
-func (m model) profilePickerBoundsInBlock() (startX, endX int, ok bool) {
-	if !m.profilePickerOpen || len(m.profileOptions) == 0 {
-		return 0, 0, false
-	}
-	_, profileEnd, profileOK := m.profileLabelBoundsInBlock()
-	if !profileOK {
-		profileEnd = m.inputOuterWidth() - 1
-	}
-	width := m.profilePickerWidth()
-	start := profileEnd - width
-	if start < 0 {
-		start = 0
-	}
-	if start+width > m.inputOuterWidth() {
-		start = max(0, m.inputOuterWidth()-width)
-	}
-	return start, start + width, width > 0
-}
-
-func (m model) profilePickerOptionAt(screenX, screenY int) (int, bool) {
-	if !m.profilePickerOpen {
-		return 0, false
-	}
-	blockX := screenX - tuiLeftMargin
-	startX, endX, ok := m.profilePickerBoundsInBlock()
-	if !ok || blockX < startX || blockX >= endX {
-		return 0, false
-	}
-	optionIndex := screenY - m.viewport.Height()
-	if optionIndex < 0 || optionIndex >= len(m.profileOptions) {
-		return 0, false
-	}
-	return optionIndex, true
-}
-
-func (m model) profileComposerRegionContains(screenX, screenY int) bool {
-	if !m.canChangeProfile() {
+func (m model) modelComposerRegionContains(screenX, screenY int) bool {
+	if !m.canChangeModel() {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
-	startX, endX, ok := m.profileLabelBoundsInBlock()
+	startX, endX, ok := m.modelLabelBoundsInBlock()
 	return ok && blockX >= startX && blockX < endX
 }
 
@@ -1211,30 +1122,38 @@ func renderComposerBottomLeftLabel(label string) string {
 }
 
 func (m model) inputTopRightLabel() string {
-	base := formatUsage(m.usage)
-	if m.profile != "" {
-		base += " - " + m.profile
-	}
+	label, _, _ := m.inputTopLabelLayout()
+	return label
+}
+
+// Keep visibility explicit: a model may have the same name as an effort.
+func (m model) inputTopLabelLayout() (label string, showModel, showEffort bool) {
+	label = formatUsage(m.usage)
 	if m.selectedModel != "" {
-		withModel := base + " - " + m.modelLabel()
+		withModel := label + composerSettingSeparator + m.modelLabel()
 		if lipgloss.Width(withModel) <= max(1, m.inputOuterWidth()-6) {
-			base = withModel
+			label = withModel
+			showModel = true
 		}
 	}
-	full := base + " - " + m.reasoningEffortLabel()
+	full := label + composerSettingSeparator + m.reasoningEffortLabel()
 	if lipgloss.Width(full) <= max(1, m.inputOuterWidth()-6) {
-		return full
+		label = full
+		showEffort = true
 	}
-	return base
+	return label, showModel, showEffort
 }
 
 func (m model) modelLabel() string {
-	return "model:" + normalizeSingleLinePaste(m.selectedModel)
+	if m.selectedModel == "" {
+		return ""
+	}
+	return normalizeSingleLinePaste(modelOption{profile: m.profile, model: m.selectedModel}.label())
 }
 
-func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
+func (m model) modelLabelBoundsInBlock() (startX, endX int, ok bool) {
 	outerWidth := m.inputOuterWidth()
-	if outerWidth <= 2 || strings.TrimSpace(m.profile) == "" {
+	if outerWidth <= 2 {
 		return 0, 0, false
 	}
 
@@ -1243,9 +1162,12 @@ func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
 		return 0, 0, false
 	}
 
-	plainLabel := m.inputTopRightLabel()
+	plainLabel, showModel, _ := m.inputTopLabelLayout()
+	if !showModel {
+		return 0, 0, false
+	}
 	visibleLabel := fitVisible(plainLabel, fillWidth-2)
-	prefix := formatUsage(m.usage) + " - "
+	prefix := formatUsage(m.usage) + composerSettingSeparator
 	if visibleLabel != plainLabel {
 		return 0, 0, false
 	}
@@ -1255,14 +1177,13 @@ func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
 	if labelStart < 0 {
 		labelStart = 0
 	}
-	profileOffset := lipgloss.Width(prefix)
-	startX = 1 + labelStart + 1 + profileOffset
-	endX = startX + lipgloss.Width(m.profile)
+	startX = 1 + labelStart + 1 + lipgloss.Width(prefix)
+	endX = startX + lipgloss.Width(m.modelLabel())
 	return startX, endX, startX < endX
 }
 
 func (m model) reasoningEffortLabel() string {
-	return "effort:" + normalizeReasoningEffort(m.reasoningEffort)
+	return normalizeReasoningEffort(m.reasoningEffort)
 }
 
 func (m model) reasoningEffortLabelBoundsInBlock() (startX, endX int, ok bool) {
@@ -1275,8 +1196,8 @@ func (m model) reasoningEffortLabelBoundsInBlock() (startX, endX int, ok bool) {
 		return 0, 0, false
 	}
 
-	plainLabel := m.inputTopRightLabel()
-	if !strings.HasSuffix(plainLabel, " - "+m.reasoningEffortLabel()) {
+	plainLabel, _, showEffort := m.inputTopLabelLayout()
+	if !showEffort {
 		return 0, 0, false
 	}
 	visibleLabel := fitVisible(plainLabel, fillWidth-2)

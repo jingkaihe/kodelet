@@ -374,7 +374,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 px-3 pb-6 pt-16 sm:space-y-5 sm:px-4 md:px-8 lg:py-6">
+    <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-6 sm:space-y-5 sm:px-4 md:px-8">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
         const isActiveStreamingAssistant = !isUser && isStreaming && index === messages.length - 1;

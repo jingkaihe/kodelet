@@ -11,7 +11,7 @@ const renderComposer = (overrides: Partial<React.ComponentProps<typeof ChatCompo
     canStop: false,
     contextDisabled: false,
     contextIsStatic: false,
-    contextText: 'default · kodelet',
+    contextText: 'gpt-5 · medium',
     dragActive: false,
     draft: 'hello',
     placeholder: 'Ask kodelet anything...',
@@ -58,8 +58,11 @@ describe('ChatComposer', () => {
       target: { value: 'next draft' },
     });
     fireEvent.click(screen.getByLabelText('Send'));
-    fireEvent.click(screen.getByText('default · kodelet'));
+    const contextButton = screen.getByRole('button', { name: 'Model settings: gpt-5 · medium' });
+    fireEvent.click(contextButton);
 
+    expect(contextButton).toBe(screen.getByTestId('composer-context-button'));
+    expect(contextButton).toHaveTextContent(/^gpt-5 · medium$/);
     expect(screen.getByLabelText('Send')).toHaveAttribute('title', 'Send (Shift+Enter)');
     expect(addImageButton.querySelector('svg')).toHaveClass('lucide-paperclip');
     expect(screen.getByTestId('composer-textarea').parentElement).toHaveClass(
@@ -70,6 +73,25 @@ describe('ChatComposer', () => {
     expect(props.onDraftChange).toHaveBeenCalledWith('next draft');
     expect(props.onSubmit).toHaveBeenCalledTimes(1);
     expect(props.onContextOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders saved model settings without an editable context button', () => {
+    renderComposer({ contextIsStatic: true, contextText: 'saved-claude · high' });
+
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+      /^saved-claude · high$/
+    );
+    expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Model settings:/ })).not.toBeInTheDocument();
+  });
+
+  it('disables model settings while context changes are unavailable', () => {
+    const props = renderComposer({ contextDisabled: true });
+
+    const contextButton = screen.getByTestId('composer-context-button');
+    expect(contextButton).toBeDisabled();
+    fireEvent.click(contextButton);
+    expect(props.onContextOpen).not.toHaveBeenCalled();
   });
 
   it('uses the automatic multiline layout for drafts with line breaks', () => {
@@ -185,7 +207,7 @@ describe('ChatComposer', () => {
   });
 
   it.each([
-    { contextText: 'review · another-workspace' },
+    { contextText: 'claude-sonnet-4-6 · high' },
     { showStop: true },
   ])('remeasures the editor when surrounding controls change: %j', (overrides) => {
     const composer = renderComposer({ draft: 'same draft' });

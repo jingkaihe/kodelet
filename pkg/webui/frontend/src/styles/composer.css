@@ -220,6 +220,7 @@
   align-items: center;
   gap: 0.52rem;
   margin: 0;
+  margin-inline-start: 0.5rem;
 }
 
 .transcript-meta-strip-shell {

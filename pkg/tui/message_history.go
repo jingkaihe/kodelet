@@ -201,7 +201,6 @@ func userMessagesFromEntries(entries []chatEntry) []string {
 }
 
 func (m *model) openHistorySearch() {
-	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()

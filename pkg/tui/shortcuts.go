@@ -25,7 +25,7 @@ var overridableTUIShortcutKeys = map[string]string{
 	"ctrl+g": "edit the draft in $EDITOR",
 	"ctrl+o": "toggle thought and tool details",
 	"ctrl+r": "search previous sent messages",
-	"ctrl+t": "change profile before starting",
+	"ctrl+t": "select profile/model before starting",
 	"ctrl+y": "change reasoning effort before starting",
 }
 
@@ -69,7 +69,7 @@ func reportTUIShortcutDiagnostic(ctx context.Context, extensionID, message strin
 }
 
 func (m model) extensionShortcutForKey(key string) (extensions.Shortcut, bool) {
-	if m.profilePickerOpen || m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil || m.slashCommandSuggestionsOpen() {
+	if m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil || m.slashCommandSuggestionsOpen() {
 		return extensions.Shortcut{}, false
 	}
 	normalized, err := extensions.NormalizeShortcutKey(key)

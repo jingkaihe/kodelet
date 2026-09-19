@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func modelOptionLabels(options []modelOption) []string {
+	labels := make([]string, len(options))
+	for index, option := range options {
+		labels[index] = option.label()
+	}
+	return labels
+}
+
 func TestModelOptionsKeepSelectionFirstThenSortVersionsDescending(t *testing.T) {
 	options := []string{" model-2.9 ", "model-2.10", "model-10", "model-2", "model-2.10", ""}
 	assert.Equal(t, []string{"model-2", "model-10", "model-2.10", "model-2.9"}, normalizeModelOptions(options, " model-2 "))
@@ -24,7 +32,7 @@ func TestModelOptionsKeepSelectionFirstThenSortVersionsDescending(t *testing.T) 
 	m.handleModelCommand("model-2.9")
 	m.handleModelCommand("")
 	assert.Zero(t, m.modelPickerIndex)
-	assert.Equal(t, []string{"model-2.9", "model-10", "model-2.10", "model-2"}, m.filteredModelOptions())
+	assert.Equal(t, []string{"model-2.9", "model-10", "model-2.10", "model-2"}, modelOptionLabels(m.filteredModelOptions()))
 	updated, _ := m.Update(keyPress(tea.KeyDown))
 	*m = updated.(model)
 	updated, _ = m.Update(keyPress(tea.KeyEnter))
@@ -40,7 +48,6 @@ func TestModelSlashCommandIsLocalBeforeDiscoveryReadiness(t *testing.T) {
 	m.extensionLifecyclePending = true
 	m.initialHistoryPending = true
 	m.deferSubmitUntilHistory = true
-	m.profilePickerOpen = true
 	m.reasoningPickerOpen = true
 	m.textarea.SetValue("/model")
 
@@ -48,7 +55,6 @@ func TestModelSlashCommandIsLocalBeforeDiscoveryReadiness(t *testing.T) {
 	*m = updated.(model)
 	assert.Nil(t, cmd)
 	assert.True(t, m.modelPickerOpen)
-	assert.False(t, m.profilePickerOpen)
 	assert.False(t, m.reasoningPickerOpen)
 	assert.False(t, m.slashCommandSuggestionsOpen())
 	assert.Empty(t, m.textarea.Value())
@@ -57,7 +63,7 @@ func TestModelSlashCommandIsLocalBeforeDiscoveryReadiness(t *testing.T) {
 	assert.Empty(t, m.conversationID)
 	assert.False(t, m.running)
 	assert.Empty(t, runner.req.Message)
-	assert.Contains(t, xansi.Strip(m.View().Content), "Model:")
+	assert.Contains(t, xansi.Strip(m.View().Content), "Profile/model:")
 }
 
 func TestModelSlashCommandDirectSelectionAndErrors(t *testing.T) {
@@ -80,6 +86,161 @@ func TestModelSlashCommandDirectSelectionAndErrors(t *testing.T) {
 	assert.NotNil(t, m.submit())
 	assert.False(t, m.modelPickerOpen)
 	assert.Equal(t, "No models available", m.uiNotifications[len(m.uiNotifications)-1].title)
+}
+
+func TestModelPickerUsesVisibleProfilesAndExactPairs(t *testing.T) {
+	m := newThemeTestModel(t, Config{
+		Remote: true, Profile: "private", Model: "cli-model",
+		ProfileOptions: []string{"deep", "flair"},
+		ProfileSettings: map[string]ProfileSettings{
+			"private": {Model: "model-2"},
+			"deep":    {Model: "model-2", ModelOptions: []string{"model-10", "model-2.9", "model-2.10"}},
+			"flair":   {Model: "model-2"},
+			"hidden":  {Model: "model-99"},
+		},
+	})
+	m.handleModelCommand("")
+	assert.Equal(t, []string{
+		"private/cli-model", "deep/model-10", "deep/model-2.10", "deep/model-2.9",
+		"deep/model-2", "flair/model-2", "private/model-2",
+	}, modelOptionLabels(m.filteredModelOptions()))
+	m.modelPickerQuery = "FLAIR"
+	assert.Equal(t, []modelOption{{profile: "flair", model: "model-2"}}, m.filteredModelOptions())
+	m.selectModelPickerOption(0)
+	assert.Equal(t, "flair", m.profile)
+	assert.Equal(t, "model-2", m.selectedModel)
+	m.handleModelCommand("")
+	assert.Equal(t, modelOption{profile: "flair", model: "model-2"}, m.filteredModelOptions()[0])
+	assert.NotContains(t, xansi.Strip(m.renderModelPicker()), "hidden/model-99")
+}
+
+func TestModelPickerOpensWhenOnlyAnotherProfileHasModels(t *testing.T) {
+	for _, profile := range []string{"empty", ""} {
+		t.Run("profile="+profile, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{
+				Remote: true, Profile: profile, ProfileOptions: []string{"deep"},
+				ProfileSettings: map[string]ProfileSettings{"deep": {Model: "vendor/model"}},
+			})
+			assert.Nil(t, m.handleModelCommand(""))
+			assert.True(t, m.modelPickerOpen)
+			assert.Equal(t, []modelOption{{profile: "deep", model: "vendor/model"}}, m.filteredModelOptions())
+			m.selectModelPickerOption(0)
+			assert.Equal(t, "deep/vendor/model", m.modelLabel())
+		})
+	}
+}
+
+func TestModelCommandPreservesSlashIDsAndRejectsAmbiguousQualifiedLabels(t *testing.T) {
+	m := newThemeTestModel(t, Config{
+		Remote: true, Profile: "current", Model: "current-model",
+		ProfileOptions: []string{"current", "team", "team/vendor"},
+		ProfileSettings: map[string]ProfileSettings{
+			"current":     {Model: "current-model", ModelOptions: []string{"vendor/model"}},
+			"team":        {Model: "vendor/model"},
+			"team/vendor": {Model: "model"},
+		},
+	})
+	assert.NotNil(t, m.handleModelCommand("team/vendor/model"))
+	assert.Equal(t, "current", m.profile)
+	assert.Equal(t, "current-model", m.selectedModel)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, "Ambiguous profile/model", m.uiNotifications[0].title)
+	m.handleModelCommand("")
+	picker := xansi.Strip(m.renderModelPicker())
+	assert.Contains(t, picker, "team/vendor/model (profile: team)")
+	assert.Contains(t, picker, "team/vendor/model (profile: team/vendor)")
+	assert.NotContains(t, picker, "current/current-model (profile:")
+	for index, option := range m.filteredModelOptions() {
+		if option.profile == "team/vendor" {
+			m.selectModelPickerOption(index)
+			break
+		}
+	}
+	assert.Equal(t, "team/vendor", m.profile)
+	assert.Equal(t, "model", m.selectedModel)
+	m.handleModelCommand("current/vendor/model")
+	assert.Equal(t, "current", m.profile)
+	assert.Equal(t, "vendor/model", m.selectedModel)
+	m.handleModelCommand("current-model")
+	m.handleModelCommand("vendor/model")
+	assert.Equal(t, "current", m.profile, "slash-containing raw IDs retain current-profile shorthand semantics")
+	assert.Equal(t, "vendor/model", m.selectedModel)
+	m.modelOptions = append(m.modelOptions, "team/vendor/model")
+	assert.Nil(t, m.handleModelCommand("team/vendor/model"))
+	assert.Equal(t, "current", m.profile, "exact raw current-profile IDs take precedence over qualified labels")
+	assert.Equal(t, "team/vendor/model", m.selectedModel)
+}
+
+func TestModelPickerProfileAndExplicitEffortReachRequest(t *testing.T) {
+	for _, effort := range []struct {
+		name     string
+		initial  string
+		want     string
+		explicit bool
+	}{
+		{"supported", "high", "high", true},
+		{"unsupported", "minimal", "medium", false},
+	} {
+		t.Run(effort.name, func(t *testing.T) {
+			runner := &recordingRunner{}
+			m := newThemeTestModel(t, Config{
+				Remote: true, Runner: runner, Profile: "flair", Model: "shared-model",
+				ProfileOptions:  []string{"flair", "deep"},
+				ReasoningEffort: effort.initial, ReasoningEffortExplicit: true,
+				ProfileSettings: map[string]ProfileSettings{
+					"flair": {Model: "shared-model", ReasoningEffort: "low", ReasoningEffortOptions: []string{"minimal", "low", "high"}},
+					"deep":  {Model: "deep-default", ModelOptions: []string{"shared-model"}, ReasoningEffort: "medium", ReasoningEffortOptions: []string{"medium", "high"}},
+				},
+			})
+			m.textarea.SetValue("/model deep/shared-model")
+			updated, cmd := m.Update(keyPress(tea.KeyEnter))
+			*m = updated.(model)
+			assert.Nil(t, cmd)
+			assert.Empty(t, runner.req.Message, "model selection must never invoke the runner")
+			assert.Equal(t, "deep/shared-model", m.modelLabel())
+			assert.Equal(t, []string{"medium", "high"}, m.reasoningEffortOptions)
+			assert.Equal(t, effort.want, m.reasoningEffort)
+			assert.Equal(t, effort.explicit, m.reasoningEffortExplicit)
+			m.textarea.SetValue("hello")
+			cmd = m.submit()
+			require.NotNil(t, cmd)
+			assert.Nil(t, cmd())
+			receiveRunMsg(t, m.runCh)
+			receiveRunMsg(t, m.runCh)
+			assert.Equal(t, "deep", runner.req.Profile)
+			require.NotNil(t, runner.req.Options)
+			require.NotNil(t, runner.req.Options.Model)
+			assert.Equal(t, "shared-model", *runner.req.Options.Model)
+			assert.Equal(t, effort.want, runner.req.ReasoningEffort)
+		})
+	}
+}
+
+func TestModelSelectionRefreshesLiveEffortsForNewDraftAfterResume(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			m := newThemeTestModel(t, Config{
+				Remote: true, ConversationID: "saved", Profile: "deep", Model: "saved-model",
+				ReasoningEffort: "high", ReasoningEffortOptions: []string{"high"}, ReasoningEffortExplicit: explicit,
+				ProfileSettings: map[string]ProfileSettings{
+					"deep": {Model: "live-model", ReasoningEffort: "medium", ReasoningEffortOptions: []string{"low", "medium", "high"}},
+				},
+			})
+			assert.False(t, m.canChangeModel())
+			m.createNewConversation()
+			assert.True(t, m.canChangeModel())
+			assert.Equal(t, []string{"high"}, m.reasoningEffortOptions)
+			m.handleModelCommand("live-model")
+			assert.Equal(t, "deep/live-model", m.modelLabel())
+			assert.Equal(t, []string{"low", "medium", "high"}, m.reasoningEffortOptions)
+			if explicit {
+				assert.Equal(t, "high", m.reasoningEffort)
+			} else {
+				assert.Equal(t, "medium", m.reasoningEffort)
+			}
+			assert.Equal(t, explicit, m.reasoningEffortExplicit)
+		})
+	}
 }
 
 func TestModelPickerSearchKeyboardAndEscape(t *testing.T) {
@@ -127,7 +288,7 @@ func TestModelPickerSearchKeyboardAndEscape(t *testing.T) {
 	updated, _ = m.Update(tea.PasteMsg{Content: "\x1b[31mBETA\n\x1b[0m"})
 	*m = updated.(model)
 	assert.Equal(t, "BETA", m.modelPickerQuery)
-	assert.Equal(t, []string{"beta"}, m.filteredModelOptions())
+	assert.Equal(t, []string{"beta"}, modelOptionLabels(m.filteredModelOptions()))
 	updated, _ = m.Update(keyPressWithMod(tea.KeyEnter, tea.ModShift))
 	*m = updated.(model)
 	assert.Equal(t, "keep this draft", m.textarea.Value())
@@ -194,8 +355,8 @@ func TestModelPickerMouseSelectionAndOtherPickers(t *testing.T) {
 	m.handleModelCommand("")
 	updated, _ = m.Update(keyPressWithMod('t', tea.ModCtrl))
 	*m = updated.(model)
-	assert.True(t, m.profilePickerOpen)
 	assert.False(t, m.modelPickerOpen)
+	assert.Equal(t, "second", m.selectedModel, "Ctrl+T confirms the highlighted pair")
 	m.handleModelCommand("")
 	updated, _ = m.Update(keyPressWithMod('y', tea.ModCtrl))
 	*m = updated.(model)
@@ -224,22 +385,20 @@ func TestModelPickerProfileResetAndDraftIsolation(t *testing.T) {
 	assert.Equal(t, []string{"cli-model", "other-model", "default-model"}, m.modelOptions)
 	settings["WORK"].ModelOptions[0] = "mutated"
 	m.handleModelCommand("other-model")
-	m.openProfilePicker()
-	m.selectProfilePickerOption(m.profileIndex)
-	assert.Equal(t, "other-model", m.selectedModel, "reselecting the profile should preserve its draft choice")
-	m.openProfilePicker()
-	m.selectProfilePickerOption(profileOptionIndex(m.profileOptions, "work"))
-	assert.Equal(t, "work-model", m.selectedModel)
-	assert.Equal(t, []string{"work-model", "work-other"}, m.modelOptions)
-	m.openProfilePicker()
-	m.selectProfilePickerOption(profileOptionIndex(m.profileOptions, "default"))
-	assert.Equal(t, "default-model", m.selectedModel, "profile changes should restore configured defaults, not the CLI override")
+	m.handleModelCommand("")
+	m.selectModelPickerOption(0)
+	assert.Equal(t, "other-model", m.selectedModel, "confirming the selected pair should preserve its draft choice")
+	m.handleModelCommand("work/work-other")
+	assert.Equal(t, "work-other", m.selectedModel)
+	assert.Equal(t, []string{"work-other", "work-model"}, m.modelOptions)
+	m.handleModelCommand("default/default-model")
+	assert.Equal(t, "default-model", m.selectedModel, "switching profiles must select the chosen model, not the CLI override")
 	m.handleModelCommand("other-model")
 	firstDraft := m.conversationState
 	m.createNewConversation()
 	assert.Equal(t, "cli-model", m.selectedModel, "new drafts use startup defaults")
 	m.modelOptions[0] = "new-draft-only"
-	assert.Equal(t, "default-model", firstDraft.modelOptions[0])
+	assert.Equal(t, "other-model", firstDraft.modelOptions[0])
 	assert.Equal(t, "cli-model", m.conversationDefaults.modelOptions[0])
 	m.activateConversation(firstDraft.key)
 	assert.Equal(t, "other-model", m.selectedModel)
@@ -319,12 +478,11 @@ func TestModelPickerDeferredInitializationAndComposerLabel(t *testing.T) {
 	assert.Equal(t, "configured", m.modelOptions[2])
 	m.width = 140
 	m.resize()
-	assert.Contains(t, m.inputTopRightLabel(), "model:cli-model")
+	assert.Equal(t, "$0.00 · cli-model · medium", m.inputTopRightLabel())
 	assert.Equal(t, m.inputTopRightLabel(), xansi.Strip(m.renderInputTopLabel(m.inputTopRightLabel())))
 	start, end, ok := m.reasoningEffortLabelBoundsInBlock()
 	require.True(t, ok)
 	assert.Equal(t, m.reasoningEffortLabel(), xansi.Cut(xansi.Strip(m.renderInputTopBorder()), start, end))
 	m.selectedModel = strings.Repeat("long-model-id", 20)
-	assert.NotContains(t, m.inputTopRightLabel(), "model:")
-	assert.Contains(t, m.inputTopRightLabel(), "effort:")
+	assert.Equal(t, "$0.00 · medium", m.inputTopRightLabel())
 }

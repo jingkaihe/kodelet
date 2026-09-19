@@ -326,20 +326,22 @@ func TestInitialHistoryUpdatesDisplayedProfileAndLocksPicker(t *testing.T) {
 	m.width = 100
 	m.height = 30
 	m.resize()
-	m.profilePickerOpen = true
+	m.modelPickerOpen = true
 
 	updated, _ := m.Update(initialHistoryMsg{
 		loaded:          true,
 		entries:         []chatEntry{{kind: entryUser, content: "old prompt"}},
 		profile:         "stored",
+		model:           "saved-model",
 		reasoningEffort: "max",
 	})
 	m = updated.(model)
 
 	assert.Equal(t, "stored", m.profile)
 	assert.Equal(t, 2, m.profileIndex)
-	assert.False(t, m.profilePickerOpen)
-	assert.False(t, m.canChangeProfile())
+	assert.Equal(t, "saved-model", m.selectedModel)
+	assert.False(t, m.modelPickerOpen)
+	assert.False(t, m.canChangeModel())
 	assert.Equal(t, "max", m.reasoningEffort)
 	assert.False(t, m.reasoningPickerOpen)
 	assert.False(t, m.canChangeReasoningEffort())

@@ -125,7 +125,7 @@ const selectWorkspaceRunner = () => selectNewChatOption('Environment', 'runner-1
 const renderChatWithRunner = async () => {
   const result = render(<ChatPage />);
   await flushAsyncUpdates();
-  fireEvent.click(screen.getByRole('button', { name: /Workspace runner required/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
   selectWorkspaceRunner();
   await flushAsyncUpdates();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
@@ -905,6 +905,9 @@ describe('ChatPage', () => {
       await flushAsyncUpdates();
       await flushAsyncUpdates();
 
+      fireEvent.click(screen.getByTestId('transcript-meta-strip'));
+      const details = within(screen.getByTestId('transcript-meta-details'));
+      expect(details.getByText('Runner').nextElementSibling).toHaveTextContent('kodelet-gpu');
       const startNode = screen.getByText('Keep this question selected.').firstChild;
       const endNode = screen.getByText('Keep this answer selected.').firstChild;
       assert(startNode);
@@ -924,9 +927,7 @@ describe('ChatPage', () => {
         });
 
         expect(mockGetRunners).toHaveBeenCalledTimes(index + 2);
-        expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
-          `kodelet-gpu · ${status}`
-        );
+        expect(details.getByText('Status').nextElementSibling).toHaveTextContent(status);
         expect(selection.toString()).toBe(selectedText);
         expect(selection.anchorNode).toBe(startNode);
         expect(selection.focusNode).toBe(endNode);
@@ -1925,23 +1926,23 @@ describe('ChatPage', () => {
     }));
 
     const { rerender } = await renderChatWithRunner();
-    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
-      'model:gpt-5 ·'
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+      /^work\/gpt-5 · medium$/
     );
-    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     selectNewChatOption('Model', 'gpt-5-mini');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
-      'model:gpt-5-mini ·'
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+      /^work\/gpt-5-mini · medium$/
     );
-    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5-mini');
     selectNewChatOption('Model', 'gpt-5');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
-      'model:gpt-5-mini ·'
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+      /^work\/gpt-5-mini · medium$/
     );
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello' },
@@ -1957,8 +1958,10 @@ describe('ChatPage', () => {
     rerender(<ChatPage />);
     await flushAsyncUpdates();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('model:gpt-5-mini ·');
-    expect(screen.queryByRole('button', { name: /work · effort:medium/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+      /^work\/gpt-5-mini · medium$/
+    );
+    expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'continue' },
     });
@@ -1981,7 +1984,7 @@ describe('ChatPage', () => {
     mockStreamChat.mockResolvedValue(undefined);
 
     await renderChatWithRunner();
-    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     selectNewChatOption('Model', 'gpt-5-mini');
     selectNewChatOption('Profile', 'anthropic');
@@ -2005,6 +2008,9 @@ describe('ChatPage', () => {
     selectNewChatOption('Profile', 'anthropic');
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+      /^anthropic\/custom-claude · max$/
+    );
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello' },
     });
@@ -2026,7 +2032,7 @@ describe('ChatPage', () => {
     }));
 
     await renderChatWithRunner();
-    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
@@ -2037,7 +2043,7 @@ describe('ChatPage', () => {
     expect(screen.getByLabelText('Model')).not.toHaveTextContent('gpt-5-mini');
     selectNewChatOption('Model', 'gpt-5-mini');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     expect(screen.getByLabelText('Model')).not.toHaveTextContent('gpt-5-mini');
   });
@@ -2047,7 +2053,7 @@ describe('ChatPage', () => {
 
     try {
       await renderChatWithRunner();
-      fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+      fireEvent.click(screen.getByTestId('composer-context-button'));
       await flushAsyncUpdates();
       act(() => vi.advanceTimersByTime(0));
       const profileSelect = screen.getByLabelText('Profile');
@@ -2070,7 +2076,7 @@ describe('ChatPage', () => {
       await runCwdSuggestionDebounce();
 
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /work · effort:medium/ })).toBeInTheDocument();
+      expect(screen.getByTestId('composer-context-button')).toHaveTextContent(/^medium$/);
       expect(mockGetCWDHints).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -2239,7 +2245,7 @@ describe('ChatPage', () => {
     selectNewChatOption('Reasoning effort', 'high');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await flushAsyncUpdates();
-    fireEvent.click(screen.getByRole('button', { name: /effort:high/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Model settings: high' }));
     await flushAsyncUpdates();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
@@ -2267,6 +2273,7 @@ describe('ChatPage', () => {
     try {
       render(<ChatPage />);
 
+      await flushAsyncUpdates();
       await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalledTimes(1));
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveTextContent('work'));
@@ -2342,7 +2349,7 @@ describe('ChatPage', () => {
       expect(mockGetCWDHints).not.toHaveBeenLastCalledWith('/workspace/kodelet', expect.anything());
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-      expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -2383,7 +2390,7 @@ describe('ChatPage', () => {
       fireEvent.keyDown(cwdInput, { key: 'Enter' });
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-      expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -2424,7 +2431,7 @@ describe('ChatPage', () => {
       expect(cwdInput).toHaveValue('/workspace/kodelet');
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-      expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/kodelet');
       await flushCwdBlurTimer();
     } finally {
       vi.useRealTimers();
@@ -2643,13 +2650,7 @@ describe('ChatPage', () => {
 
       const cwd = '/runner/kodelet';
       for (const profile of ['anthropic', 'default']) {
-        const contextButton = document.querySelector<HTMLButtonElement>(
-          'button.composer-inline-context'
-        );
-        if (!contextButton) {
-          throw new Error('expected new conversation context to remain editable');
-        }
-        fireEvent.click(contextButton);
+        fireEvent.click(screen.getByTestId('composer-context-button'));
         mockGetSlashCommands.mockClear();
         selectNewChatOption('Profile', profile);
         await flushAsyncUpdates();
@@ -2998,13 +2999,7 @@ describe('ChatPage', () => {
     expect(mockGetConversations).toHaveBeenCalledTimes(listRequests + 1);
     expect(screen.getByTestId(`conversation-row-${preallocatedId}`)).toBe(row);
 
-    const contextButton = document.querySelector<HTMLButtonElement>(
-      'button.composer-inline-context'
-    );
-    if (!contextButton) {
-      throw new Error('expected optimistic conversation context to remain editable');
-    }
-    fireEvent.click(contextButton);
+    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
     await screen.findByTestId('new-chat-dialog');
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../corrected-project' },
@@ -3053,10 +3048,12 @@ describe('ChatPage', () => {
       });
     });
 
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent(
       '/runner/canonical-project'
     );
-    expect(document.querySelector('button.composer-inline-context')).toBeNull();
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^medium$/);
+    expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Change workspace:/ })).not.toBeInTheDocument();
   });
 
   it('keeps optimistic context editable until the server supplies a canonical cwd', async () => {
@@ -3077,7 +3074,8 @@ describe('ChatPage', () => {
       });
     });
 
-    expect(document.querySelector('button.composer-inline-context')).not.toBeNull();
+    expect(screen.getByTestId('composer-context-button')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Change workspace:/ })).toBeInTheDocument();
   });
 
   it('clears confirmed optimistic parameters when the stream later reports an error', async () => {
@@ -3214,7 +3212,7 @@ describe('ChatPage', () => {
   it.each([
     undefined,
     'saved-local-model',
-  ])('hides stale model and remote workspace tools while loading a conversation with model %s', async (model) => {
+  ])('hides stale model, workspace path, and tools while loading a conversation with model %s', async (model) => {
     routeParams = { id: 'conv-remote' };
     const defaults: ChatSettings = await mockGetChatSettings();
     mockGetChatSettings.mockResolvedValue({ ...defaults, model: 'profile-default-model' });
@@ -3230,6 +3228,7 @@ describe('ChatPage', () => {
           messageCount: 1,
           cwd: '/runner/kodelet',
           runnerId: runner.id,
+          profile: 'remote-profile',
           model: 'saved-remote-model',
           runner,
           messages: [{ role: 'user', content: 'remote' }],
@@ -3244,15 +3243,23 @@ describe('ChatPage', () => {
     const { rerender } = render(<ChatPage />);
     await waitFor(() => expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument());
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
-      'model:saved-remote-model'
+      /^remote-profile\/saved-remote-model$/
     );
+    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/runner/kodelet');
 
     routeParams = { id: 'conv-local' };
     rerender(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-local'));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
-    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('model:');
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
+    const header = screen.getByTestId('chat-workspace-header');
+    expect(header).toHaveTextContent('Loading workspace…');
+    expect(header).not.toHaveTextContent('/runner/kodelet');
+    expect(within(header).queryByTitle('/runner/kodelet')).not.toBeInTheDocument();
+    expect(
+      within(header).queryByRole('button', { name: /^Change workspace:/ })
+    ).not.toBeInTheDocument();
 
     await act(async () => {
       resolveLocalConversation?.({
@@ -3269,11 +3276,15 @@ describe('ChatPage', () => {
     });
     const context = screen.getByTestId('composer-inline-context');
     if (model) {
-      expect(context).toHaveTextContent(`model:${model}`);
+      expect(context.textContent).toBe(model);
     } else {
-      expect(context).not.toHaveTextContent('model:');
+      expect(context).toHaveTextContent(/^Saved settings$/);
     }
-    expect(context).not.toHaveTextContent('model:profile-default-model');
+    expect(context).not.toHaveTextContent('profile-default-model');
+    expect(context).not.toHaveTextContent('remote-profile');
+    expect(header).toHaveTextContent('/workspace/local');
+    expect(header).not.toHaveTextContent('/runner/kodelet');
+    expect(context).not.toHaveTextContent('/workspace/local');
   });
 
   describe('embedded runner defaults', () => {
@@ -3504,9 +3515,14 @@ describe('ChatPage', () => {
     expect(screen.getByText('hello')).toBeVisible();
     expect(screen.queryByText('Loading conversation…')).not.toBeInTheDocument();
     expect(mockGetConversation).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
-      'Workspace runner required'
-    );
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
+    const header = screen.getByTestId('chat-workspace-header');
+    expect(header).toHaveTextContent('/workspace/project');
+    expect(within(header).getByTitle('/workspace/project')).toBeInTheDocument();
+    expect(
+      within(header).queryByRole('button', { name: /^Change workspace:/ })
+    ).not.toBeInTheDocument();
+    expect(within(header).queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('This local conversation is read-only')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
@@ -3551,17 +3567,30 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    const meta = await screen.findByTestId('transcript-meta-strip');
+    expect(meta).not.toHaveTextContent('kodelet');
+    expect(meta).not.toHaveTextContent('active');
+    expect(meta).not.toHaveTextContent('gpu');
+    fireEvent.click(meta);
+    const details = within(screen.getByTestId('transcript-meta-details'));
+    expect(details.getByText('Runner').nextElementSibling).toHaveTextContent('kodelet');
     await waitFor(() =>
-      expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('kodelet · 2 active')
+      expect(details.getByText('Status').nextElementSibling).toHaveTextContent('2 active')
     );
-    expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('env gpu');
-    expect(screen.getByTestId('transcript-meta-strip')).not.toHaveTextContent('kodelet · idle');
-    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('runner:kodelet');
-    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('env:gpu');
+    expect(details.getByText('Runner profile').nextElementSibling).toHaveTextContent('gpu');
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
   });
 
-  it('shows the profile inside the inline context for existing conversations', async () => {
+  it.each([
+    { profile: 'anthropic', model: 'saved-claude', label: 'anthropic/saved-claude · high' },
+    { profile: ' deep ', model: ' provider/model ', label: 'deep/provider/model · high' },
+    { profile: undefined, model: 'saved-model', label: 'saved-model · high' },
+    { profile: 'legacy', model: undefined, label: 'high' },
+  ])('shows saved settings as $label in the read-only composer', async ({
+    profile,
+    model,
+    label,
+  }) => {
     const defaults: ChatSettings = await mockGetChatSettings();
     mockGetChatSettings.mockResolvedValue({
       ...defaults,
@@ -3575,8 +3604,8 @@ describe('ChatPage', () => {
       createdAt: '2023-01-01T00:00:00Z',
       updatedAt: '2023-01-02T00:00:00Z',
       messageCount: 1,
-      profile: 'anthropic',
-      model: 'saved-claude',
+      profile,
+      model,
       profileLocked: true,
       reasoningEffort: 'high',
       reasoningEffortLocked: true,
@@ -3594,11 +3623,9 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    expect(screen.getByTestId('composer-inline-context')).toBeInTheDocument();
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('anthropic');
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('model:saved-claude ·');
-    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('model:gpt-5');
-    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('effort:high');
+    expect(screen.getByTestId('composer-inline-context').textContent).toBe(label);
+    expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Change workspace:/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Reasoning effort')).not.toBeInTheDocument();
@@ -3974,9 +4001,11 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    fireEvent.click(await screen.findByTestId('transcript-meta-strip'));
     await waitFor(() =>
-      expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('kodelet · 1 active')
+      expect(
+        within(screen.getByTestId('transcript-meta-details')).getByText('Status').nextElementSibling
+      ).toHaveTextContent('1 active')
     );
     await waitFor(() => expect(streamListener).not.toBeNull());
 
@@ -5222,12 +5251,13 @@ describe('ChatPage', () => {
     routeParams = { id: 'conv-456' };
     rerender(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-456'));
+    const secondComposer = await screen.findByPlaceholderText('Ask kodelet anything...');
+    expect(secondComposer).toBeEnabled();
 
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(secondComposer, {
       target: { value: 'start second task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -5582,7 +5612,8 @@ describe('ChatPage', () => {
     routeParams = { id: 'conv-123' };
     rerender(<ChatPage />);
 
-    expect(screen.getByText(/work · effort:medium · \/workspace\/alt/)).toBeInTheDocument();
+    expect(screen.getByTestId('chat-workspace-header')).toHaveTextContent('/workspace/alt');
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(/^medium$/);
     expect(screen.queryByTestId('workspace-tools-toggle')).not.toBeInTheDocument();
     expect(mockGetGitDiff).not.toHaveBeenCalled();
   });
@@ -6199,23 +6230,87 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: 'Show 10 more' })).toBeInTheDocument();
   });
 
-  it('shows compact new chat context text in the composer', async () => {
+  it('shows only effort for legacy model settings and keeps workspace context above the transcript', async () => {
     await renderChatWithRunner();
 
-    await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
-    expect(screen.getByText(/work · effort:medium · \/runner\/kodelet/)).toBeInTheDocument();
+    const header = screen.getByTestId('chat-workspace-header');
+    const transcript = screen.getByTestId('chat-transcript-scroll');
+    expect(header).toBe(screen.getByRole('region', { name: 'Workspace' }));
+    expect(header).toHaveTextContent(/^\/runner\/kodelet$/);
+    expect(within(header).getAllByRole('button')).toHaveLength(1);
+    expect(transcript).not.toContainElement(header);
+    expect(header.parentElement).toBe(transcript.parentElement);
+    expect(
+      header.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    const contextButton = screen.getByRole('button', { name: 'Model settings: medium' });
+    expect(contextButton).toHaveTextContent(/^medium$/);
+    expect(contextButton).not.toHaveTextContent('/runner/kodelet');
+    expect(screen.queryByTestId('transcript-meta-strip')).not.toBeInTheDocument();
     expect(screen.queryByText('Shift+Enter to send')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
       'title',
       'Send (Shift+Enter)'
     );
-    fireEvent.click(screen.getByText(/work · effort:medium · \/runner\/kodelet/));
+    fireEvent.click(contextButton);
     const cwdInput = screen.getByLabelText('Working directory');
     await waitFor(() => {
       expect(cwdInput).toHaveValue('');
       expect(cwdInput).toHaveAttribute('placeholder', '/runner/kodelet');
       expect(cwdInput).toHaveFocus();
     });
+  });
+
+  it('shows the full workspace path title and reopens settings without losing the draft or selection', async () => {
+    const user = userEvent.setup();
+    const cwd = '/runner/a-very-long-workspace-name/another-long-directory/kodelet';
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockResolvedValue({
+      ...defaults,
+      model: 'gpt-5',
+      modelOptions: ['gpt-5', 'gpt-5-mini'],
+    });
+
+    await renderChatWithRunner();
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Keep this unsent message' },
+    });
+    await user.click(screen.getByTestId('composer-context-button'));
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeEnabled());
+    selectNewChatOption('Model', 'gpt-5-mini');
+    selectNewChatOption('Reasoning effort', 'high');
+    fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: cwd } });
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+
+    const header = screen.getByTestId('chat-workspace-header');
+    expect(within(header).getByTitle(cwd)).toHaveTextContent(cwd);
+    const workspaceButton = within(header).getByRole('button', {
+      name: `Change workspace: ${cwd}`,
+    });
+    const contextButton = screen.getByTestId('composer-context-button');
+    expect(contextButton).toHaveTextContent(/^work\/gpt-5-mini · high$/);
+    expect(contextButton).not.toHaveTextContent(cwd);
+
+    await user.click(workspaceButton);
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeEnabled());
+    expect(screen.getByLabelText('Working directory')).toHaveValue(cwd);
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('work');
+    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5-mini');
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep this unsent message');
+    selectNewChatOption('Model', 'gpt-5');
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '/cancelled' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(workspaceButton).toHaveFocus());
+    expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
+    expect(within(header).getByTitle(cwd)).toHaveTextContent(cwd);
+    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+      /^work\/gpt-5-mini · high$/
+    );
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep this unsent message');
   });
 
   it('shows compact statistics with expandable exact usage and cost', async () => {

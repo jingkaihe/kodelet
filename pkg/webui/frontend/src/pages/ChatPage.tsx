@@ -27,6 +27,7 @@ import ChatSidebar, {
   ConversationSearchDialog,
 } from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
+import ChatWorkspaceHeader from '../components/chat/ChatWorkspaceHeader';
 import ExtensionWidgets from '../components/chat/ExtensionWidgets';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
@@ -59,7 +60,6 @@ import {
   formatCost,
   formatRunnerStatus,
   showToast,
-  truncateMiddle,
 } from '../utils';
 
 const GitDiffModal = lazy(() => import('../components/workspace/GitDiffModal'));
@@ -3044,20 +3044,6 @@ const ChatPage: React.FC = () => {
     await appendAttachments(files);
   };
 
-  const currentProfileLabel = useMemo(() => {
-    if (conversationId) {
-      return conversation?.profile || '';
-    }
-    return selectedProfile;
-  }, [conversation?.profile, conversationId, selectedProfile]);
-
-  const currentReasoningEffortLabel = useMemo(() => {
-    if (conversationId) {
-      return conversation?.reasoningEffort || '';
-    }
-    return selectedReasoningEffort;
-  }, [conversation?.reasoningEffort, conversationId, selectedReasoningEffort]);
-
   const isStartedConversationPending =
     Boolean(conversationId) && conversationPathOverrideRef.current === `/c/${conversationId}`;
   const isStartedConversationAwaitingLoad =
@@ -3070,9 +3056,15 @@ const ChatPage: React.FC = () => {
   const conversationMatchesRoute = !conversationId || conversation?.id === conversationId;
   const workspaceConversation =
     conversationMatchesRoute || isStartedConversationAwaitingLoad ? conversation : null;
+  const currentProfileLabel = conversationId
+    ? workspaceConversation?.profile?.trim() || ''
+    : selectedProfile;
   const currentModelLabel = conversationId
     ? workspaceConversation?.model?.trim() || ''
     : selectedModel;
+  const currentReasoningEffortLabel = conversationId
+    ? workspaceConversation?.reasoningEffort || ''
+    : selectedReasoningEffort;
   const currentRunnerID = conversationId ? workspaceConversation?.runnerId || '' : selectedRunnerID;
   const currentRunner = useMemo(
     () => runners.find((runner) => runner.id === currentRunnerID) || workspaceConversation?.runner,
@@ -3478,29 +3470,29 @@ const ChatPage: React.FC = () => {
     newChatProfileDraft,
   ]);
 
-  const composerContextText = useMemo(() => {
-    const directoryLabel = !isRemoteConversation
-      ? 'Workspace runner required'
-      : currentCWDLabel
-        ? truncateMiddle(currentCWDLabel, 46)
-        : 'Default directory';
-    const contextParts = currentModelLabel ? [`model:${currentModelLabel}`] : [];
-    if (currentProfileLabel) {
-      contextParts.push(currentProfileLabel);
-    }
-    if (currentReasoningEffortLabel) {
-      contextParts.push(`effort:${currentReasoningEffortLabel}`);
-    }
-    contextParts.push(directoryLabel);
-
-    return contextParts.join(' · ');
-  }, [
-    currentCWDLabel,
-    currentModelLabel,
-    currentProfileLabel,
-    currentReasoningEffortLabel,
-    isRemoteConversation,
-  ]);
+  const composerModelLabel = currentModelLabel
+    ? [currentProfileLabel, currentModelLabel].filter(Boolean).join('/')
+    : '';
+  const composerContextText =
+    [composerModelLabel, currentReasoningEffortLabel].filter(Boolean).join(' · ') ||
+    (conversationId ? 'Saved settings' : 'Model settings');
+  const contextIsStatic = Boolean(conversationId) && !optimisticConversationContextEditable;
+  const openChatContext = () => {
+    newChatReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setNewChatProfileDraft(currentProfileLabel);
+    setNewChatModelDraft(selectedModel);
+    setNewChatModelOptions(selectedModelOptions);
+    setNewChatReasoningEffortDraft(selectedReasoningEffort);
+    setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
+    setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
+    reasoningSettingsRequestRef.current += 1;
+    setReasoningSettingsLoading(false);
+    setNewChatRunnerDraft(selectedRunnerID);
+    setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
+    setCwdQuery(selectedRunnerID ? selectedCWD : '');
+    setNewChatDialogOpen(true);
+  };
 
   const hasActiveConversationTarget = Boolean(activeRunningConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget;
@@ -3547,16 +3539,13 @@ const ChatPage: React.FC = () => {
       const runnerName =
         currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
       const runnerStatus = formatRunnerStatus(currentRunner);
-      const runnerParts = [runnerName, runnerStatus];
       details.push(
         { label: 'Runner', value: runnerName },
         { label: 'Status', value: runnerStatus }
       );
       if (currentEnvironmentProfile) {
-        runnerParts.push(`env ${currentEnvironmentProfile}`);
         details.push({ label: 'Runner profile', value: currentEnvironmentProfile });
       }
-      groups.push({ label: 'Runner', value: runnerParts.join(' · ') });
     }
     if (!conversation) {
       return { groups, details };
@@ -3985,6 +3974,18 @@ const ChatPage: React.FC = () => {
           className="chat-main-panel relative flex h-full min-w-0 flex-1 flex-col overflow-hidden"
           inert={workspaceOverlayOpen || sidebarOverlayOpen || undefined}
         >
+          <ChatWorkspaceHeader
+            cwd={
+              conversationId
+                ? workspaceConversation?.cwd || currentRunner?.workspace.path || ''
+                : currentRunnerID
+                  ? currentCWDLabel
+                  : ''
+            }
+            loading={Boolean(conversationId && !workspaceConversation && !conversationError)}
+            disabled={currentConversationIsStreaming || steering}
+            onWorkspaceOpen={contextIsStatic ? undefined : openChatContext}
+          />
           <div
             className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
             data-testid="chat-transcript-scroll"
@@ -3997,7 +3998,7 @@ const ChatPage: React.FC = () => {
                 </div>
               </div>
             ) : conversationError ? (
-              <div className="px-3 pb-8 pt-16 sm:px-4 md:px-8 lg:py-8">
+              <div className="px-3 py-8 sm:px-4 md:px-8">
                 <div className="surface-panel max-w-3xl rounded-3xl border-kodelet-orange/20 px-6 py-5 text-kodelet-dark">
                   <p className="eyebrow-label text-kodelet-orange">Load error</p>
                   <p className="mt-3 text-sm leading-7">{conversationError}</p>
@@ -4066,7 +4067,7 @@ const ChatPage: React.FC = () => {
             attachments={attachments}
             canStop={canStopActiveConversation}
             contextDisabled={currentConversationIsStreaming || steering}
-            contextIsStatic={Boolean(conversationId) && !optimisticConversationContextEditable}
+            contextIsStatic={contextIsStatic}
             contextText={composerContextText}
             dragActive={dragActive}
             draft={draft}
@@ -4087,22 +4088,7 @@ const ChatPage: React.FC = () => {
             }
             textareaDisabled={steering || !isRemoteConversation}
             onAttachImages={appendAttachments}
-            onContextOpen={() => {
-              newChatReturnFocusRef.current =
-                document.activeElement instanceof HTMLElement ? document.activeElement : null;
-              setNewChatProfileDraft(currentProfileLabel);
-              setNewChatModelDraft(selectedModel);
-              setNewChatModelOptions(selectedModelOptions);
-              setNewChatReasoningEffortDraft(selectedReasoningEffort);
-              setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
-              setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
-              reasoningSettingsRequestRef.current += 1;
-              setReasoningSettingsLoading(false);
-              setNewChatRunnerDraft(selectedRunnerID);
-              setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
-              setCwdQuery(selectedRunnerID ? selectedCWD : '');
-              setNewChatDialogOpen(true);
-            }}
+            onContextOpen={openChatContext}
             onDragLeave={handleDragLeave}
             onDragOver={handleDragOver}
             onDrop={handleDrop}

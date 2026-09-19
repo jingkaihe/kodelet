@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 )
 
@@ -36,10 +35,6 @@ func loadProfileOptions() []string {
 	return options
 }
 
-func (m model) canChangeProfile() bool {
-	return strings.TrimSpace(m.conversationID) == "" && !m.running && len(m.profileOptions) > 1
-}
-
 func (m *model) setProfile(profile string) {
 	profile = displayProfile(profile)
 	m.profileOptions = normalizeProfileOptions(m.profileOptions, profile)
@@ -48,69 +43,4 @@ func (m *model) setProfile(profile string) {
 	if m.profileIndex < 0 {
 		m.profileIndex = 0
 	}
-	m.profilePickerIndex = m.profileIndex
-}
-
-func (m *model) toggleProfilePickerFromKeyboard() tea.Cmd {
-	if m.profilePickerOpen {
-		return m.selectProfilePickerOption(m.profilePickerIndex)
-	}
-	m.openProfilePicker()
-	return nil
-}
-
-func (m *model) toggleProfilePickerFromClick() {
-	if m.profilePickerOpen {
-		m.closeProfilePicker()
-		return
-	}
-	m.openProfilePicker()
-}
-
-func (m *model) openProfilePicker() {
-	if !m.canChangeProfile() {
-		return
-	}
-	m.reasoningPickerOpen = false
-	m.modelPickerOpen = false
-	m.profilePickerOpen = true
-	m.profilePickerIndex = m.profileIndex
-}
-
-func (m *model) closeProfilePicker() {
-	m.profilePickerOpen = false
-	m.profilePickerIndex = m.profileIndex
-}
-
-func (m *model) moveProfilePicker(delta int) {
-	if !m.profilePickerOpen || len(m.profileOptions) == 0 {
-		return
-	}
-	m.profilePickerIndex = (m.profilePickerIndex + delta) % len(m.profileOptions)
-	if m.profilePickerIndex < 0 {
-		m.profilePickerIndex += len(m.profileOptions)
-	}
-}
-
-func (m *model) selectProfilePickerOption(index int) tea.Cmd {
-	if !m.profilePickerOpen || index < 0 || index >= len(m.profileOptions) {
-		return nil
-	}
-	previousProfile := m.profile
-	m.setProfile(m.profileOptions[index])
-	if m.profile != previousProfile {
-		m.refreshModelSettingsForProfile()
-	}
-	m.refreshReasoningSettingsForProfile()
-	m.profilePickerOpen = false
-	if m.remote && m.profile != previousProfile {
-		m.slashCommands = withTUIBuiltInSlashCommands(nil)
-		m.extensionShortcuts = nil
-		m.shortcutDigest = ""
-		m.slashCommandErr = nil
-		m.slashCommandIndex = -1
-		m.slashDismissedDraft = ""
-		return m.loadRemoteSlashCommands(m.conversationState)
-	}
-	return nil
 }

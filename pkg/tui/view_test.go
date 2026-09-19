@@ -21,7 +21,7 @@ import (
 )
 
 func TestViewAndFormattingHelpers(t *testing.T) {
-	m := newModel(context.Background(), Config{Profile: " work ", CWD: ""})
+	m := newModel(context.Background(), Config{Profile: " work ", Model: "test", CWD: ""})
 	t.Cleanup(m.cancel)
 
 	emptyView := m.View()
@@ -42,8 +42,8 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	plainLines := strings.Split(view, "\n")
 
 	assert.Contains(t, view, "draft")
-	assert.Contains(t, view, "1.5K/3.0K (50%)")
-	assert.Contains(t, view, "work")
+	assert.Contains(t, view, "ctx 50%/3k")
+	assert.Contains(t, view, "work/test")
 	assert.Equal(t, 3, m.textarea.Height())
 	assert.True(t, strings.HasPrefix(plainLines[0], strings.Repeat(" ", tuiLeftMargin)))
 	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
@@ -71,6 +71,38 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo"))
 	assert.Equal(t, 2, lineCount("one\ntwo"))
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
+}
+
+func TestCompactUsageAndQualifiedComposerLabel(t *testing.T) {
+	for _, tt := range []struct {
+		capacity int
+		want     string
+	}{
+		{0, "$0.10"},
+		{999, "ctx 5%/999 · $0.10"},
+		{3_200, "ctx 5%/3.2k · $0.10"},
+		{272_000, "ctx 5%/272k · $0.10"},
+		{1_000_000, "ctx 5%/1m · $0.10"},
+		{1_200_000, "ctx 5%/1.2m · $0.10"},
+	} {
+		t.Run(fmt.Sprintf("capacity=%d", tt.capacity), func(t *testing.T) {
+			usage := llmtypes.Usage{MaxContextWindow: tt.capacity, CurrentContextWindow: tt.capacity / 20, InputCost: 0.10}
+			assert.Equal(t, tt.want, formatUsage(usage))
+		})
+	}
+	m := newThemeTestModel(t, Config{
+		Remote: true, Profile: "deep", Model: "gpt-6-astra",
+		ReasoningEffort: "xhigh", ReasoningEffortOptions: []string{"high", "xhigh"},
+	})
+	m.usage = llmtypes.Usage{CurrentContextWindow: 13_600, MaxContextWindow: 272_000, InputCost: 0.10}
+	label := "ctx 5%/272k · $0.10 · deep/gpt-6-astra · xhigh"
+	assert.Equal(t, label, m.inputTopRightLabel())
+	border := xansi.Strip(m.renderInputTopBorder())
+	assert.True(t, strings.HasSuffix(border, " "+label+" ─╮"))
+	start, end, ok := m.modelLabelBoundsInBlock()
+	require.True(t, ok)
+	assert.Equal(t, "deep/gpt-6-astra", xansi.Cut(border, start, end))
+	assert.Contains(t, renderExitSummary("saved", m.usage), "Context window: 13.6K/272.0K (5%)")
 }
 
 func TestShortcutsDialogIncludesExtensionShortcuts(t *testing.T) {
@@ -226,19 +258,24 @@ func TestNotificationSeverityUsesThemeColors(t *testing.T) {
 	}
 }
 
-func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
+func TestProfileModelPickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	m := newModel(context.Background(), Config{
 		Remote:         true,
 		Profile:        "work",
 		ProfileOptions: []string{"default", "work", "prod"},
-		Theme:          "tokyo-night",
+		ProfileSettings: map[string]ProfileSettings{
+			"default": {Model: "default-model"},
+			"work":    {Model: "work-model"},
+			"prod":    {Model: "prod-model"},
+		},
+		Theme: "tokyo-night",
 	})
 	t.Cleanup(m.cancel)
 	m.width = 80
 	m.height = 24
 	m.resize()
-	m.openProfilePicker()
-	m.profilePickerIndex = 2
+	m.handleModelCommand("")
+	m.modelPickerIndex = 1
 	m.resize()
 	m.refreshViewport(true)
 
@@ -246,29 +283,29 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	view := xansi.Strip(rawView)
 	lines := strings.Split(view, "\n")
 	pickerLine := lines[m.viewport.Height()+2]
-	composerTop := lines[m.viewport.Height()+m.profilePickerHeight()]
+	composerTop := lines[m.viewport.Height()+m.modelPickerHeight()]
 
-	assert.Contains(t, pickerLine, "prod")
+	assert.Contains(t, pickerLine, "prod/prod-model")
 	assert.NotContains(t, view, "(Default)")
-	assert.Equal(t, lipgloss.Width("default"), m.profilePickerWidth())
-	assert.Contains(t, composerTop, "work")
+	assert.Contains(t, composerTop, "$0.00 · work/work-model · medium")
 	profileStart, _ := styleSequences(m.profileStyle(m.profileIndex))
-	selectedStart, _ := styleSequences(m.profileStyle(m.profilePickerIndex).Background(themeColor(m.theme.ProfileSelected)))
-	assert.Contains(t, rawView, profileStart+"work")
+	selectedStart, _ := styleSequences(inputLabelStyle.Background(themeColor(m.theme.ProfileSelected)))
+	assert.Contains(t, rawView, profileStart+"work/work-model")
 	assert.Contains(t, rawView, selectedStart)
 	assert.NotContains(t, view, "→")
 	assert.NotContains(t, view, "ACTIVE")
 	assert.NotContains(t, view, "repo")
 
-	m.selectProfilePickerOption(0)
+	m.handleModelCommand("default/default-model")
 	assert.Equal(t, "default", m.profile)
-	m.openProfilePicker()
-	assert.Contains(t, xansi.Strip(m.renderProfilePicker()), "prod")
+	m.handleModelCommand("")
+	assert.Contains(t, xansi.Strip(m.renderModelPicker()), "prod/prod-model")
 }
 
-func TestReasoningPickerRendersBesideProfile(t *testing.T) {
+func TestReasoningPickerRendersBesideModel(t *testing.T) {
 	m := newModel(context.Background(), Config{
 		Profile:                "work",
+		Model:                  "model-a",
 		ProfileOptions:         []string{"default", "work"},
 		ReasoningEffort:        "medium",
 		ReasoningEffortOptions: []string{"low", "medium", "high"},
@@ -290,11 +327,118 @@ func TestReasoningPickerRendersBesideProfile(t *testing.T) {
 
 	assert.Contains(t, pickerLine, "high")
 	assert.Contains(t, composerTop, "work")
-	assert.Contains(t, composerTop, "effort:medium")
+	assert.Contains(t, composerTop, "$0.00 · work/model-a · medium")
+}
+
+func TestComposerTopLabelVisibilityAndClickBounds(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		profile       string
+		selectedModel string
+		outerWidth    int
+		want          string
+		modelShown    bool
+		effortShown   bool
+	}{
+		{"full", "flair", "claude-opus-5", 80, "$0.00 · flair/claude-opus-5 · medium", true, true},
+		{"same names visible", "medium", "medium", 60, "$0.00 · medium/medium · medium", true, true},
+		{"same names with effort hidden", "medium", "medium", 27, "$0.00 · medium/medium", true, false},
+		{"same names with model hidden", "medium", "medium", 20, "$0.00 · medium", false, true},
+		{"model hidden but effort visible", "medium", "a-very-long-model-name", 29, "$0.00 · medium", false, true},
+		{"no profile and effort hidden", "", "medium", 20, "$0.00 · medium", true, false},
+		{"no profile and effort visible", "", "medium", 29, "$0.00 · medium · medium", true, true},
+		{"only cost fits", "medium", "medium", 11, "$0.00", false, false},
+		{"wide characters", "开发", "模型", 40, "$0.00 · 开发/模型 · medium", true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newThemeTestModel(t, Config{
+				Remote:                 true,
+				Profile:                tt.profile,
+				ProfileOptions:         []string{tt.profile, "other"},
+				Model:                  tt.selectedModel,
+				ReasoningEffort:        "medium",
+				ReasoningEffortOptions: []string{"low", "medium", "high"},
+				Theme:                  "tokyo-night",
+			})
+			m.width = tt.outerWidth + tuiLeftMargin + tuiRightMargin
+			m.resize()
+			assert.Equal(t, tt.want, m.inputTopRightLabel())
+			assert.Equal(t, tt.want, xansi.Strip(m.renderInputTopLabel(tt.want)), "hidden values must not be rendered through matching text")
+			border := xansi.Strip(m.renderInputTopBorder())
+			assert.Equal(t, tt.outerWidth, lipgloss.Width(border))
+			assert.Equal(t, border, strings.Split(xansi.Strip(m.renderInputBox()), "\n")[0], "cost and settings remain on the top border")
+			visible := fitVisible(tt.want, tt.outerWidth-4)
+			assert.Contains(t, border, visible)
+			if visible == tt.want {
+				assert.True(t, strings.HasSuffix(border, " "+tt.want+" ─╮"), "cost and settings stay right-aligned")
+			}
+			modelStart, modelEnd, modelOK := m.modelLabelBoundsInBlock()
+			effortStart, effortEnd, effortOK := m.reasoningEffortLabelBoundsInBlock()
+			assert.Equal(t, tt.modelShown, modelOK)
+			assert.Equal(t, tt.effortShown, effortOK)
+
+			var expectedModelStart, expectedModelEnd, expectedEffortStart, expectedEffortEnd int
+			if tt.modelShown {
+				label := (modelOption{profile: tt.profile, model: tt.selectedModel}).label()
+				labelStart := strings.Index(border, "$0.00")
+				expectedModelStart = lipgloss.Width(border[:labelStart] + "$0.00 · ")
+				expectedModelEnd = expectedModelStart + lipgloss.Width(label)
+				assert.Equal(t, expectedModelStart, modelStart)
+				assert.Equal(t, expectedModelEnd, modelEnd)
+				assert.Equal(t, label, xansi.Cut(border, modelStart, modelEnd))
+				assert.Contains(t, m.renderInputTopBorder(), renderPersistentStyle(m.profileStyle(m.profileIndex), label))
+			}
+			if tt.effortShown {
+				effortByteIndex := strings.LastIndex(border, "medium")
+				expectedEffortStart = lipgloss.Width(border[:effortByteIndex])
+				expectedEffortEnd = expectedEffortStart + len("medium")
+				assert.Equal(t, expectedEffortStart, effortStart)
+				assert.Equal(t, expectedEffortEnd, effortEnd)
+				assert.Equal(t, "medium", xansi.Cut(border, effortStart, effortEnd))
+				assert.Contains(t, m.renderInputTopBorder(), renderPersistentStyle(m.reasoningEffortStyle(m.reasoningEffortIndex), "medium"))
+			}
+			// Exercise actual mouse routing, including separators, model text, and
+			// duplicate names that must not acquire a hidden setting's click region.
+			for x := 0; x < tt.outerWidth; x++ {
+				updated, _ := m.Update(tea.MouseClickMsg{
+					Button: tea.MouseLeft,
+					X:      tuiLeftMargin + x,
+					Y:      m.viewport.Height(),
+				})
+				*m = updated.(model)
+				assert.Equal(t, tt.modelShown && x >= expectedModelStart && x < expectedModelEnd, m.modelPickerOpen, "model click at column %d", x)
+				assert.Equal(t, tt.effortShown && x >= expectedEffortStart && x < expectedEffortEnd, m.reasoningPickerOpen, "effort click at column %d", x)
+				m.modelPickerOpen = false
+				m.closeReasoningPicker()
+				m.resize()
+			}
+		})
+	}
+}
+
+func TestComposerSettingsKeyboardShortcutsWithHiddenLabels(t *testing.T) {
+	m := newThemeTestModel(t, Config{
+		Remote:                 true,
+		Profile:                "medium",
+		ProfileOptions:         []string{"medium", "work"},
+		Model:                  "medium",
+		ReasoningEffort:        "medium",
+		ReasoningEffortOptions: []string{"low", "medium", "high"},
+	})
+	m.width = 20 + tuiLeftMargin + tuiRightMargin
+	m.resize()
+	assert.Equal(t, "$0.00 · medium", m.inputTopRightLabel())
+	updated, _ := m.Update(keyPressWithMod('t', tea.ModCtrl))
+	*m = updated.(model)
+	assert.True(t, m.modelPickerOpen)
+	updated, _ = m.Update(keyPressWithMod('y', tea.ModCtrl))
+	*m = updated.(model)
+	assert.False(t, m.modelPickerOpen)
+	assert.True(t, m.reasoningPickerOpen)
 }
 
 func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T) {
-	m := newModel(context.Background(), Config{Theme: "tokyo-night", Profile: "flair"})
+	m := newModel(context.Background(), Config{Theme: "tokyo-night", Profile: "flair", Model: "test-model"})
 	t.Cleanup(m.cancel)
 	m.width = 160
 	m.height = 24
@@ -319,7 +463,7 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	assert.NotContains(t, suggestionsTop, "objective")
 	assert.Contains(t, view, "/review")
 	assert.NotContains(t, view, "target")
-	assert.Contains(t, composerTop, "flair")
+	assert.Contains(t, composerTop, "flair/test-model")
 	assert.Equal(t, tuiLeftMargin+m.inputOuterWidth(), lipgloss.Width(suggestionsTop))
 	nameStart, _ := styleSequences(slashCommandNameStyle)
 	selectedStart, _ := styleSequences(slashCommandSelectedStyle)

@@ -441,6 +441,9 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 			assert.False(t, r.URL.Query().Has("profile"), "saved discovery must use the server's pinned profile")
 			assert.False(t, r.URL.Query().Has("options"))
 			require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only/saved"}))
+		case "/api/chat/settings":
+			assert.False(t, r.URL.Query().Has("profile"), "optional model choices use the current default, not the removed saved profile")
+			http.Error(w, "current default unavailable", http.StatusServiceUnavailable)
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)
 			http.Error(w, "current default unavailable", http.StatusServiceUnavailable)
@@ -453,11 +456,113 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 	assert.Equal(t, "saved-model", config.Model)
 	assert.Equal(t, "high", config.ReasoningEffort)
 	assert.Equal(t, "/runner-only/saved", config.CWD)
+	assert.Equal(t, []string{"removed-profile"}, config.ProfileOptions)
+	assert.Equal(t, []string{"saved-model"}, config.ModelOptions)
+	assert.Nil(t, config.ProfileSettings)
 	for _, flags := range [][]string{{"--cwd=/replacement"}, {"--profile=replacement"}, {"--runner-profile="}, {"--reasoning-effort=low"}} {
 		_, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, append([]string{"--server=" + daemon.URL, "--resume=saved"}, flags...)...))
 		require.Error(t, err)
 	}
 	assert.EqualValues(t, 1, resolutions.Load(), "resume replacements fail before directory resolution")
+}
+
+func TestPrepareDaemonChatResumePreloadsModelChoicesWithoutChangingSavedSettings(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		savedProfile string
+		catalogFails bool
+	}{
+		{name: "saved profile deleted", savedProfile: "removed-profile"},
+		{name: "saved profile changed", savedProfile: "live"},
+		{name: "another profile catalog unavailable", savedProfile: "removed-profile", catalogFails: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var settingsCalls atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer client", r.Header.Get("Authorization"))
+				switch r.URL.Path {
+				case "/api/conversations/saved":
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"id":                 "saved",
+						"cwd":                "/runner-only/saved",
+						"runnerId":           "stored-runner",
+						"profile":            test.savedProfile,
+						"model":              "saved-model",
+						"environmentProfile": "stored-environment",
+						"reasoningEffort":    "high",
+					}))
+				case "/api/chat/cwd-suggestions":
+					assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
+					assert.False(t, r.URL.Query().Has("profile"))
+					assert.False(t, r.URL.Query().Has("runnerId"))
+					assert.False(t, r.URL.Query().Has("environmentProfile"))
+					assert.False(t, r.URL.Query().Has("options"))
+					require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/runner-only/saved"}))
+				case "/api/chat/settings":
+					call := settingsCalls.Add(1)
+					profile := r.URL.Query().Get("profile")
+					if call == 1 {
+						assert.Empty(t, profile, "load choices from the daemon's default rather than the saved profile")
+						profile = "live"
+					} else {
+						assert.Equal(t, "other", profile)
+					}
+					if test.catalogFails && profile == "other" {
+						http.Error(w, "catalog unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+						CurrentProfile:         profile,
+						Profiles:               []chatpkg.ControlPlaneProfileOption{{Name: "live", Active: true}, {Name: "other"}},
+						Model:                  profile + "-model",
+						ModelOptions:           []string{profile + "-model", profile + "-alternative"},
+						ReasoningEffort:        "low",
+						ReasoningEffortOptions: []string{"low", "medium"},
+						DefaultCWD:             "/different/current/workspace",
+						DefaultRunnerID:        "different-runner",
+						DefaultRunnerReady:     false,
+					}))
+				default:
+					t.Errorf("unexpected endpoint: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer daemon.Close()
+
+			config, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, "--server="+daemon.URL, "--resume=saved", "--no-tools"))
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, settingsCalls.Load())
+			assert.Equal(t, "saved", config.ConversationID)
+			assert.Equal(t, test.savedProfile, config.Profile)
+			assert.Equal(t, "saved-model", config.Model)
+			assert.Equal(t, []string{"saved-model"}, config.ModelOptions)
+			assert.Equal(t, "high", config.ReasoningEffort)
+			assert.Equal(t, []string{"high"}, config.ReasoningEffortOptions)
+			assert.False(t, config.ReasoningEffortExplicit)
+			assert.Equal(t, "stored-environment", config.EnvironmentProfile)
+			assert.Equal(t, "/runner-only/saved", config.CWD)
+			assert.Equal(t, "/runner-only/saved", config.DefaultCWD)
+			runner := config.Runner.(*configuredChatRunner)
+			assert.Equal(t, "stored-runner", runner.runnerID)
+			assert.Equal(t, "/runner-only/saved", runner.defaultCWD)
+			assert.Equal(t, &llmtypes.ExecutionOptions{NoTools: new(true)}, runner.options)
+			if test.catalogFails {
+				assert.Equal(t, []string{test.savedProfile}, config.ProfileOptions)
+				assert.Nil(t, config.ProfileSettings)
+				return
+			}
+			assert.Equal(t, []string{"live", "other"}, config.ProfileOptions)
+			require.Len(t, config.ProfileSettings, 2)
+			for _, profile := range config.ProfileOptions {
+				assert.Equal(t, tui.ProfileSettings{
+					Model:                  profile + "-model",
+					ModelOptions:           []string{profile + "-model", profile + "-alternative"},
+					ReasoningEffort:        "low",
+					ReasoningEffortOptions: []string{"low", "medium"},
+				}, config.ProfileSettings[profile])
+			}
+		})
+	}
 }
 
 func TestConfiguredChatRunnerPreservesPickedModelWithoutCLIOptions(t *testing.T) {

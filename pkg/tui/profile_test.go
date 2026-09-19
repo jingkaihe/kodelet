@@ -16,14 +16,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRemoteProfilePickerRefreshesDiscoveryAndClearsStaleResources(t *testing.T) {
-	for _, confirm := range []string{"enter", "ctrl+t", "click"} {
+func TestRemoteModelPickerRefreshesDiscoveryAndClearsStaleResources(t *testing.T) {
+	for _, confirm := range []string{"enter", "ctrl+t", "click", "command"} {
 		t.Run(confirm, func(t *testing.T) {
 			runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{
 				Commands:  []slashcommands.Command{{Name: "old-profile-command"}},
 				Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "old", Generation: 1}}, Digest: "old-digest",
 			}}
-			m := newModel(t.Context(), Config{Remote: true, Runner: runner, CWD: "/runner/project", Profile: "default", ProfileOptions: []string{"default", "work"}})
+			m := newModel(t.Context(), Config{
+				Remote: true, Runner: runner, CWD: "/runner/project",
+				Profile: "default", ProfileOptions: []string{"default", "work"},
+				ProfileSettings: map[string]ProfileSettings{
+					"default": {Model: "default-model"},
+					"work":    {Model: "work-model", ModelOptions: []string{"work-other"}},
+				},
+			})
 			t.Cleanup(m.cancel)
 			m.width, m.height = 80, 24
 			m.resize()
@@ -39,8 +46,9 @@ func TestRemoteProfilePickerRefreshesDiscoveryAndClearsStaleResources(t *testing
 			updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
 			m = updated.(model)
 			require.Nil(t, cmd)
-			require.True(t, m.profilePickerOpen)
-			m.profilePickerIndex = 1
+			require.True(t, m.modelPickerOpen)
+			m.modelPickerQuery = "work/work-other"
+			m.resize()
 			var input tea.Msg
 			switch confirm {
 			case "enter":
@@ -48,15 +56,18 @@ func TestRemoteProfilePickerRefreshesDiscoveryAndClearsStaleResources(t *testing
 			case "ctrl+t":
 				input = keyPressWithMod('t', tea.ModCtrl)
 			case "click":
-				start, _, ok := m.profilePickerBoundsInBlock()
-				require.True(t, ok)
-				input = tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin + start, Y: m.viewport.Height() + 1}
+				input = tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin, Y: m.viewport.Height() + 1}
 			}
-			updated, cmd = m.Update(input)
-			m = updated.(model)
+			if confirm == "command" {
+				cmd = m.handleModelCommand("work/work-other")
+			} else {
+				updated, cmd = m.Update(input)
+				m = updated.(model)
+			}
 			require.NotNil(t, cmd, "every profile confirmation path must schedule discovery")
 			assert.Equal(t, "work", m.profile)
-			assert.False(t, m.profilePickerOpen)
+			assert.Equal(t, "work-other", m.selectedModel, "selection must not revert to the new profile's default model")
+			assert.False(t, m.modelPickerOpen)
 			assert.Equal(t, withTUIBuiltInSlashCommands(nil), m.slashCommands)
 			assert.Empty(t, m.extensionShortcuts)
 			assert.Empty(t, m.shortcutDigest)
@@ -95,8 +106,7 @@ func TestRemoteProfilePickerRefreshesDiscoveryAndClearsStaleResources(t *testing
 			assert.Equal(t, "work-digest", m.shortcutDigest)
 			assert.NoError(t, m.slashCommandErr, "late failures must not overwrite fresh discovery")
 
-			m.openProfilePicker()
-			cmd = m.selectProfilePickerOption(0)
+			cmd = m.handleModelCommand("default/default-model")
 			require.NotNil(t, cmd)
 			assert.Empty(t, m.extensionShortcuts)
 			assert.Empty(t, m.shortcutDigest)
@@ -108,7 +118,7 @@ func TestRemoteProfilePickerRefreshesDiscoveryAndClearsStaleResources(t *testing
 	}
 }
 
-func TestProfilePickerPreservesResourcesWithoutRemoteProfileChange(t *testing.T) {
+func TestModelPickerPreservesResourcesWithoutRemoteProfileChange(t *testing.T) {
 	for _, remote := range []bool{false, true} {
 		t.Run(map[bool]string{false: "local change", true: "remote unchanged"}[remote], func(t *testing.T) {
 			m := newModel(t.Context(), Config{Remote: remote, Runner: &remoteDiscoveryRunner{}, Profile: "default", ProfileOptions: []string{"default", "work"}})
@@ -116,12 +126,11 @@ func TestProfilePickerPreservesResourcesWithoutRemoteProfileChange(t *testing.T)
 			m.slashCommands = []slashcommands.Command{{Name: "keep-command"}}
 			m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", ExtensionID: "keep"}}
 			m.shortcutDigest = "keep-digest"
-			m.openProfilePicker()
-			index := 1
+			profile := "work"
 			if remote {
-				index = 0
+				profile = "default"
 			}
-			assert.Nil(t, m.selectProfilePickerOption(index))
+			assert.Nil(t, m.selectModelOption(modelOption{profile: profile, model: "picked-model"}))
 			assert.Equal(t, []string{"keep-command"}, slashCommandNames(m.slashCommands))
 			assert.Len(t, m.extensionShortcuts, 1)
 			assert.Equal(t, "keep-digest", m.shortcutDigest)
@@ -238,7 +247,7 @@ func TestLoadProfileOptionsHidesProfilesWithoutLosingExplicitOrSavedSelection(t 
 			assert.Equal(t, "hidden-search", m.profile)
 			assert.Equal(t, "hidden-search", m.profileOptions[m.profileIndex])
 			assert.Equal(t, "hidden-search", profileForRequest(m.profile))
-			assert.Equal(t, conversationID == "", m.canChangeProfile())
+			assert.Equal(t, conversationID == "", m.canChangeModel())
 		})
 	}
 }

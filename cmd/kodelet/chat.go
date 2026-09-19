@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -359,6 +360,17 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 	if config.ResumeConvID == "" {
 		result.EnvironmentProfile = chatpkg.NormalizeEnvironmentProfile(target.EnvironmentProfile)
 		runner.runnerID = target.RunnerID
+	} else {
+		// Preload choices for /new without replacing the resumed conversation's
+		// saved settings or requiring its profile to still exist in daemon config.
+		settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_, options, settings, _, settingsErr := prepareRemoteChatSettings(settingsCtx, client, "")
+		if settingsErr != nil {
+			logger.G(ctx).WithError(settingsErr).Warn("could not load model choices for new conversations; keeping saved settings")
+		} else {
+			result.ProfileOptions, result.ProfileSettings = options, settings
+		}
 	}
 	return result, nil
 }
