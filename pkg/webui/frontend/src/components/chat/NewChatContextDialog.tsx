@@ -474,24 +474,9 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                       {directorySuggestions}
                     </div>
                     <span className="new-chat-recent-workspace-parent">
-                      Optional. Relative paths and ~ are resolved on the runner host.
-                    </span>
-                  </div>
-                  <div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
-                    <span className="new-chat-field-label">Default runner workspace</span>
-                    <div className="new-chat-directory-shell">
-                      <FolderOpen
-                        aria-hidden="true"
-                        className="new-chat-directory-icon"
-                        strokeWidth={1.6}
-                      />
-                      <div className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control">
-                        {selectedRunner.workspace.path}
-                      </div>
-                    </div>
-                    <span className="new-chat-recent-workspace-parent">
-                      {selectedRunner.host.hostname} · {selectedRunner.status}
-                      {selectedRunner.manifestChanged ? ' · manifest changed' : ''}
+                      Optional. Defaults to the runner workspace. Relative paths and ~ are resolved
+                      on the runner host.
+                      {selectedRunner.manifestChanged ? ' Runner manifest changed.' : ''}
                     </span>
                   </div>
                 </>

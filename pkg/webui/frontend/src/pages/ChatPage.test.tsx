@@ -2592,8 +2592,8 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Runner profile'), {
       target: { value: 'gpu' },
     });
-    expect(screen.getByText('/runner/kodelet')).toBeVisible();
     const cwdInput = screen.getByLabelText('Working directory');
+    expect(cwdInput).toHaveAttribute('placeholder', '/runner/kodelet');
     fireEvent.change(cwdInput, { target: { value: '/runner/other-project' } });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));

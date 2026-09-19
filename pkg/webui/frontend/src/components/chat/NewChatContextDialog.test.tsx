@@ -58,7 +58,8 @@ describe('NewChatContextDialog', () => {
     const props = renderDialog();
 
     expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('aria-modal', 'true');
-    expect(screen.getByText('/workspace/kodelet')).toBeVisible();
+    expect(screen.getByTestId('cwd-input')).toHaveAttribute('placeholder', '/workspace/kodelet');
+    expect(screen.queryByText('Default runner workspace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('recent-workspaces')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
@@ -240,7 +241,7 @@ describe('NewChatContextDialog', () => {
       cwdQuery: '',
     });
 
-    expect(screen.getByText('/workspace/kodelet')).toBeVisible();
+    expect(screen.getByText(/Runner manifest changed\./)).toBeVisible();
     expect(screen.getByLabelText('Runner profile')).toBeVisible();
     const cwdInput = screen.getByTestId('cwd-input');
     expect(cwdInput).toHaveAttribute('placeholder', '/workspace/kodelet');
