@@ -171,6 +171,16 @@ func (m *model) configure(config Config) {
 		}
 	}
 	profileOptions := normalizeProfileOptions(profileOptionsInput, profile)
+	selectedModel := strings.TrimSpace(config.Model)
+	modelOptions := config.ModelOptions
+	if settings, ok := profileSettingsFor(m.profileSettings, profile); ok {
+		if selectedModel == "" {
+			selectedModel = strings.TrimSpace(settings.Model)
+		}
+		if len(modelOptions) == 0 {
+			modelOptions = settings.ModelOptions
+		}
+	}
 	reasoningEffort := strings.TrimSpace(config.ReasoningEffort)
 	reasoningEffortOptions := append([]string(nil), config.ReasoningEffortOptions...)
 	if config.Remote {
@@ -199,6 +209,8 @@ func (m *model) configure(config Config) {
 	defaults := conversationDefaults{
 		profile:                 profile,
 		profileOptions:          append([]string(nil), profileOptions...),
+		selectedModel:           selectedModel,
+		modelOptions:            normalizeModelOptions(modelOptions, selectedModel),
 		reasoningEffort:         reasoningEffort,
 		reasoningEffortOptions:  append([]string(nil), reasoningEffortOptions...),
 		reasoningEffortExplicit: config.ReasoningEffortExplicit,

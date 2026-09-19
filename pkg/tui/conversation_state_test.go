@@ -339,6 +339,7 @@ func TestRemoteConversationStreamRefreshesCompletedHistoryWithoutOverwritingNewT
 			conversationKey:      m.activeConversationKey,
 			conversationID:       m.conversationID,
 			parentConversationID: "parent-id",
+			model:                "saved-model",
 			loaded:               true,
 			entries:              canonicalEntries,
 		},
@@ -346,6 +347,7 @@ func TestRemoteConversationStreamRefreshesCompletedHistoryWithoutOverwritingNewT
 	m = updated.(model)
 	assert.Equal(t, canonicalEntries, m.entries)
 	assert.Equal(t, "parent-id", m.parentConversationID)
+	assert.Equal(t, "saved-model", m.selectedModel)
 
 	m.beginObservedConversationRun(m.conversationState, runID)
 	updated, _ = m.Update(conversationHistoryRefreshMsg{

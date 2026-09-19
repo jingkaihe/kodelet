@@ -68,6 +68,18 @@ const BrowserPanel = lazy(() => import('../components/workspace/BrowserPanel'));
 
 const DEFAULT_REASONING_EFFORT = 'medium';
 
+const modelSettingsFromChatSettings = (
+  settings: Partial<ChatSettings>
+): { model: string; options: string[] } => {
+  const model = settings.model?.trim() || '';
+  const options = Array.from(
+    new Set(
+      [model, ...(settings.modelOptions || [])].map((option) => option.trim()).filter(Boolean)
+    )
+  );
+  return { model, options };
+};
+
 const reasoningSettingsFromChatSettings = (
   settings: Partial<ChatSettings>
 ): { effort: string; options: string[] } => {
@@ -504,6 +516,10 @@ const ChatPage: React.FC = () => {
   const [chatSettingsLoaded, setChatSettingsLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState('');
   const [newChatProfileDraft, setNewChatProfileDraft] = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
+  const [selectedModelOptions, setSelectedModelOptions] = useState<string[]>([]);
+  const [newChatModelDraft, setNewChatModelDraft] = useState('');
+  const [newChatModelOptions, setNewChatModelOptions] = useState<string[]>([]);
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(DEFAULT_REASONING_EFFORT);
   const [selectedReasoningEffortOptions, setSelectedReasoningEffortOptions] = useState<string[]>([
     DEFAULT_REASONING_EFFORT,
@@ -1156,6 +1172,11 @@ const ChatPage: React.FC = () => {
         setChatSettingsLoaded(true);
         setSelectedProfile(profile);
         setNewChatProfileDraft(profile);
+        const modelSettings = modelSettingsFromChatSettings(settings);
+        setSelectedModel(modelSettings.model);
+        setSelectedModelOptions(modelSettings.options);
+        setNewChatModelDraft(modelSettings.model);
+        setNewChatModelOptions(modelSettings.options);
         setSelectedReasoningEffort(reasoningSettings.effort);
         setSelectedReasoningEffortOptions(reasoningSettings.options);
         setSelectedReasoningEffortExplicit(false);
@@ -1368,6 +1389,8 @@ const ChatPage: React.FC = () => {
 
   const onDismissNewChatDialog = useEffectEvent(() => {
     setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
+    setNewChatModelDraft(selectedModel);
+    setNewChatModelOptions(selectedModelOptions);
     cwdSuggestionSkipQueryRef.current = null;
     requestCwdSuggestions.cancel();
     cwdSuggestionRequestRef.current += 1;
@@ -2042,6 +2065,11 @@ const ChatPage: React.FC = () => {
     setStreamError(null);
     setSelectedProfile(chatSettings.currentProfile || '');
     setNewChatProfileDraft(chatSettings.currentProfile || '');
+    const modelSettings = modelSettingsFromChatSettings(chatSettings);
+    setSelectedModel(modelSettings.model);
+    setSelectedModelOptions(modelSettings.options);
+    setNewChatModelDraft(modelSettings.model);
+    setNewChatModelOptions(modelSettings.options);
     const reasoningSettings = reasoningSettingsFromChatSettings(chatSettings);
     setSelectedReasoningEffort(reasoningSettings.effort);
     setSelectedReasoningEffortOptions(reasoningSettings.options);
@@ -2588,6 +2616,7 @@ const ChatPage: React.FC = () => {
         environmentProfile: requestRunnerID ? requestEnvironmentProfile || undefined : undefined,
         runner: requestRunnerID ? currentRunner : undefined,
         profile: selectedProfile,
+        model: selectedModel || undefined,
         reasoningEffort: chatSettingsLoaded ? selectedReasoningEffort : undefined,
         isRunning: true,
         messages: [{ role: 'user' as const, content: initialUserContent }],
@@ -2628,6 +2657,10 @@ const ChatPage: React.FC = () => {
               : undefined,
           profile:
             conversationId && !existingOptimisticRemoteConversation ? undefined : selectedProfile,
+          options:
+            (conversationId && !existingOptimisticRemoteConversation) || !selectedModel
+              ? undefined
+              : { model: selectedModel },
           reasoningEffort:
             (conversationId && !existingOptimisticRemoteConversation) || !chatSettingsLoaded
               ? undefined
@@ -3037,6 +3070,9 @@ const ChatPage: React.FC = () => {
   const conversationMatchesRoute = !conversationId || conversation?.id === conversationId;
   const workspaceConversation =
     conversationMatchesRoute || isStartedConversationAwaitingLoad ? conversation : null;
+  const currentModelLabel = conversationId
+    ? workspaceConversation?.model?.trim() || ''
+    : selectedModel;
   const currentRunnerID = conversationId ? workspaceConversation?.runnerId || '' : selectedRunnerID;
   const currentRunner = useMemo(
     () => runners.find((runner) => runner.id === currentRunnerID) || workspaceConversation?.runner,
@@ -3325,6 +3361,8 @@ const ChatPage: React.FC = () => {
     discoverProfiles = false
   ) => {
     const previousProfile = newChatProfileDraft;
+    const previousModel = newChatModelDraft;
+    const previousModelOptions = newChatModelOptions;
     const previousEffort = newChatReasoningEffortDraft;
     const previousOptions = newChatReasoningEffortOptions;
     const previousEffortWasExplicit = newChatReasoningEffortExplicit;
@@ -3333,6 +3371,10 @@ const ChatPage: React.FC = () => {
 
     if (!discoverProfiles) {
       setNewChatProfileDraft(profileName);
+    }
+    if (profileName !== previousProfile || runnerID !== selectedRunnerID) {
+      setNewChatModelDraft('');
+      setNewChatModelOptions([]);
     }
     setReasoningSettingsLoading(true);
 
@@ -3364,9 +3406,16 @@ const ChatPage: React.FC = () => {
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
         const preserveExplicitEffort =
           previousEffortWasExplicit && reasoningSettings.options.includes(previousEffort);
+        const modelSettings = modelSettingsFromChatSettings(settings);
+        const preserveModel =
+          profile === previousProfile &&
+          runnerID === selectedRunnerID &&
+          modelSettings.options.includes(previousModel);
 
         setChatSettings((current) => ({ ...current, profiles: settings.profiles }));
         setNewChatProfileDraft(profile);
+        setNewChatModelDraft(preserveModel ? previousModel : modelSettings.model);
+        setNewChatModelOptions(modelSettings.options);
         setNewChatReasoningEffortOptions(reasoningSettings.options);
         setNewChatReasoningEffortDraft(
           preserveExplicitEffort ? previousEffort : reasoningSettings.effort
@@ -3384,6 +3433,8 @@ const ChatPage: React.FC = () => {
           setNewChatRunnerDraft(selectedRunnerID);
         }
         setNewChatProfileDraft(previousProfile);
+        setNewChatModelDraft(discoverProfiles ? selectedModel : previousModel);
+        setNewChatModelOptions(discoverProfiles ? selectedModelOptions : previousModelOptions);
         setNewChatReasoningEffortDraft(previousEffort);
         setNewChatReasoningEffortOptions(previousOptions);
         setNewChatReasoningEffortExplicit(previousEffortWasExplicit);
@@ -3433,14 +3484,23 @@ const ChatPage: React.FC = () => {
       : currentCWDLabel
         ? truncateMiddle(currentCWDLabel, 46)
         : 'Default directory';
-    const contextParts = currentProfileLabel ? [currentProfileLabel] : [];
+    const contextParts = currentModelLabel ? [`model:${currentModelLabel}`] : [];
+    if (currentProfileLabel) {
+      contextParts.push(currentProfileLabel);
+    }
     if (currentReasoningEffortLabel) {
       contextParts.push(`effort:${currentReasoningEffortLabel}`);
     }
     contextParts.push(directoryLabel);
 
     return contextParts.join(' · ');
-  }, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel, isRemoteConversation]);
+  }, [
+    currentCWDLabel,
+    currentModelLabel,
+    currentProfileLabel,
+    currentReasoningEffortLabel,
+    isRemoteConversation,
+  ]);
 
   const hasActiveConversationTarget = Boolean(activeRunningConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget;
@@ -3564,6 +3624,8 @@ const ChatPage: React.FC = () => {
     reasoningSettingsRequestRef.current += 1;
     setReasoningSettingsLoading(false);
     setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
+    setNewChatModelDraft(selectedModel);
+    setNewChatModelOptions(selectedModelOptions);
     setNewChatReasoningEffortDraft(selectedReasoningEffort);
     setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
     setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
@@ -3684,6 +3746,7 @@ const ChatPage: React.FC = () => {
       const effectiveCWD = nextCWD || nextRunner?.workspace.path || '';
       const contextUpdate = {
         profile: nextProfile,
+        model: newChatModelDraft || undefined,
         reasoningEffort: newChatReasoningEffortDraft || undefined,
         cwd: effectiveCWD,
         runnerId: newChatRunnerDraft || undefined,
@@ -3711,6 +3774,8 @@ const ChatPage: React.FC = () => {
     }
 
     setSelectedProfile(nextProfile);
+    setSelectedModel(newChatModelDraft);
+    setSelectedModelOptions(newChatModelOptions);
     setSelectedReasoningEffort(newChatReasoningEffortDraft);
     setSelectedReasoningEffortOptions(newChatReasoningEffortOptions);
     setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
@@ -3763,6 +3828,8 @@ const ChatPage: React.FC = () => {
           cwdSuggestions={cwdSuggestions}
           cwdSuggestionsOpen={cwdSuggestionsOpen}
           profileDraft={newChatProfileDraft}
+          modelDraft={newChatModelDraft}
+          modelOptions={newChatModelOptions}
           reasoningEffortDraft={newChatReasoningEffortDraft}
           reasoningEffortLoading={reasoningSettingsLoading || !chatSettingsLoaded}
           reasoningEffortOptions={newChatReasoningEffortOptions}
@@ -3786,11 +3853,16 @@ const ChatPage: React.FC = () => {
           }}
           onCwdInputKeyDown={handleCwdInputKeyDown}
           onProfileDraftChange={handleNewChatProfileDraftChange}
+          onModelDraftChange={setNewChatModelDraft}
           onReasoningEffortDraftChange={(reasoningEffort) => {
             setNewChatReasoningEffortDraft(reasoningEffort);
             setNewChatReasoningEffortExplicit(true);
           }}
           onRunnerDraftChange={(runnerId) => {
+            if (runnerId !== newChatRunnerDraft) {
+              setNewChatModelDraft('');
+              setNewChatModelOptions([]);
+            }
             setNewChatRunnerDraft(runnerId);
             setCwdQuery('');
             cwdSuggestionSkipQueryRef.current = '';
@@ -4019,6 +4091,8 @@ const ChatPage: React.FC = () => {
               newChatReturnFocusRef.current =
                 document.activeElement instanceof HTMLElement ? document.activeElement : null;
               setNewChatProfileDraft(currentProfileLabel);
+              setNewChatModelDraft(selectedModel);
+              setNewChatModelOptions(selectedModelOptions);
               setNewChatReasoningEffortDraft(selectedReasoningEffort);
               setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
               setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);

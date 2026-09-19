@@ -236,6 +236,8 @@ interface NewChatContextDialogProps {
   cwdSuggestions: CWDHint[];
   cwdSuggestionsOpen: boolean;
   profileDraft: string;
+  modelDraft: string;
+  modelOptions: string[];
   reasoningEffortDraft: string;
   reasoningEffortLoading: boolean;
   reasoningEffortOptions: string[];
@@ -249,6 +251,7 @@ interface NewChatContextDialogProps {
   onCwdInputFocus: () => void;
   onCwdInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   onProfileDraftChange: (profileName: string) => void;
+  onModelDraftChange: (model: string) => void;
   onReasoningEffortDraftChange: (reasoningEffort: string) => void;
   onRunnerDraftChange: (runnerId: string) => void;
   onEnvironmentProfileDraftChange: (profileName: string) => void;
@@ -265,6 +268,8 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       cwdSuggestions,
       cwdSuggestionsOpen,
       profileDraft,
+      modelDraft,
+      modelOptions,
       reasoningEffortDraft,
       reasoningEffortLoading,
       reasoningEffortOptions,
@@ -278,6 +283,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       onCwdInputFocus,
       onCwdInputKeyDown,
       onProfileDraftChange,
+      onModelDraftChange,
       onReasoningEffortDraftChange,
       onRunnerDraftChange,
       onEnvironmentProfileDraftChange,
@@ -364,6 +370,24 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                 onChange={onReasoningEffortDraftChange}
                 value={reasoningEffortDraft}
                 options={reasoningEffortOptions.map((effort) => ({ value: effort, label: effort }))}
+              />
+              <NewChatSelect
+                label="Model"
+                testId="new-chat-model-select"
+                placeholder="Profile default"
+                busy={reasoningEffortLoading}
+                disabled={reasoningEffortLoading || modelOptions.length <= 1}
+                onChange={onModelDraftChange}
+                value={modelDraft}
+                wide
+                options={[...modelOptions]
+                  .sort((a, b) => {
+                    if (a === b) return 0;
+                    if (a === modelDraft) return -1;
+                    if (b === modelDraft) return 1;
+                    return b.localeCompare(a, 'en', { numeric: true });
+                  })
+                  .map((model) => ({ value: model, label: model }))}
               />
               <NewChatSelect
                 label="Environment"

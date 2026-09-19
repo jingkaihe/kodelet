@@ -1088,6 +1088,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 						"platform":     "codex",
 						"api_mode":     "responses",
 						"profile":      "legacy-profile",
+						"model":        "legacy-model",
 						"service_tier": "fast",
 						conversations.ConfigSnapshotMetadataKey: map[string]any{
 							"version":          llmtypes.ConversationConfigSnapshotVersion,
@@ -1124,6 +1125,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
 	assert.Equal(t, "OpenAI", response.Provider)
+	assert.Equal(t, "gpt-test", response.Model)
 	assert.Equal(t, conversationCWD, response.CWD)
 	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "codex", response.Profile)
@@ -1211,6 +1213,13 @@ func TestServer_handleGetConversationStreamFormatReturnsAuthoritativeEntries(t *
 	metadata := conversations.AddSlashCommandDisplay(map[string]any{
 		"platform": "openai",
 		"api_mode": "responses",
+		"model":    "legacy-model",
+		conversations.ConfigSnapshotMetadataKey: map[string]any{
+			"version":          llmtypes.ConversationConfigSnapshotVersion,
+			"provider":         "openai",
+			"model":            "frozen-model",
+			"reasoning_effort": "high",
+		},
 	}, expandedPrompt, "/review target=main", "review")
 	server := &Server{
 		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
@@ -1233,6 +1242,7 @@ func TestServer_handleGetConversationStreamFormatReturnsAuthoritativeEntries(t *
 	var response conversationHistoryResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, conversationCWD, response.CWD)
+	assert.Equal(t, "frozen-model", response.Model)
 	require.Len(t, response.Entries, 1)
 	assert.Equal(t, "/review target=main", response.Entries[0].Content)
 }
@@ -1682,6 +1692,8 @@ func TestGetWebUIProfileOptionsPreservesOverridePrecedence(t *testing.T) {
 }
 
 func TestServer_handleGetChatSettings(t *testing.T) {
+	t.Setenv("OPENAI_API_BASE", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -1720,6 +1732,11 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "work", response.CurrentProfile)
+	assert.Equal(t, "work-model", response.Model)
+	require.NotEmpty(t, response.ModelOptions)
+	assert.Equal(t, "work-model", response.ModelOptions[0])
+	assert.Contains(t, response.ModelOptions, "gpt-4.1")
+	assert.NotContains(t, response.ModelOptions, "anthropic-model")
 	assert.Equal(t, "high", response.ReasoningEffort)
 	assert.Equal(t, []string{"low", "high"}, response.ReasoningEffortOptions)
 	require.NotEmpty(t, response.Profiles)
@@ -1734,10 +1751,107 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", response.CurrentProfile)
+	assert.Equal(t, "anthropic-model", response.Model)
+	require.NotEmpty(t, response.ModelOptions)
+	assert.Equal(t, "anthropic-model", response.ModelOptions[0])
+	assert.Contains(t, response.ModelOptions, "claude-sonnet-4-5")
+	assert.NotContains(t, response.ModelOptions, "gpt-4.1")
 	assert.Equal(t, "max", response.ReasoningEffort)
 	assert.Equal(t, []string{"medium", "max"}, response.ReasoningEffortOptions)
 	for _, option := range response.Profiles {
 		assert.Equal(t, option.Name == "work", option.Active, "the default badge must not follow the requested selection")
+	}
+}
+
+func TestServer_handleGetChatSettingsProfileModelOptions(t *testing.T) {
+	t.Setenv("OPENAI_API_BASE", "")
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("profile", "work")
+	viper.Set("aliases", map[string]string{"work-alias": "z-work", "foreign": "foreign-model"})
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider": "openai",
+			"model":    "work-alias",
+			"openai": map[string]any{
+				"models": map[string]any{"reasoning": []string{"b-work", "z-work", "a-work", "b-work"}},
+			},
+		},
+		"local": map[string]any{
+			"provider":   "openai",
+			"model":      "local-main",
+			"weak_model": "local-weak",
+			"openai":     map[string]any{"base_url": "https://custom.example/v1"},
+		},
+		"priced": map[string]any{
+			"provider": "openai",
+			"model":    "priced-main",
+			"openai": map[string]any{
+				"pricing": map[string]any{"priced.1": map[string]any{"input": 0}},
+			},
+		},
+	})
+	for _, tt := range []struct {
+		profile string
+		model   string
+		options []string
+	}{
+		{profile: "work", model: "z-work", options: []string{"z-work", "a-work", "b-work"}},
+		{profile: "local", model: "local-main", options: []string{"local-main", "local-weak"}},
+		{profile: "priced", model: "priced-main", options: []string{"priced-main", "priced.1"}},
+	} {
+		t.Run(tt.profile, func(t *testing.T) {
+			server := &Server{router: mux.NewRouter()}
+			request := httptest.NewRequest(http.MethodGet, "/api/chat/settings?profile="+tt.profile, nil)
+			recorder := httptest.NewRecorder()
+			server.handleGetChatSettings(recorder, request)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response ChatSettingsResponse
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, tt.profile, response.CurrentProfile)
+			assert.Equal(t, tt.model, response.Model)
+			assert.Equal(t, tt.options, response.ModelOptions)
+			assert.Equal(t, "work", viper.GetString("profile"), "request selection must not change the global profile")
+		})
+	}
+}
+
+func TestResolveConversationModel(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		metadata map[string]any
+		want     string
+	}{
+		{name: "missing metadata"},
+		{name: "missing model", metadata: map[string]any{"profile": "work"}},
+		{name: "legacy model", metadata: map[string]any{"model": " legacy-model "}, want: "legacy-model"},
+		{name: "invalid legacy model", metadata: map[string]any{"model": 123}},
+		{
+			name: "saved snapshot takes precedence",
+			metadata: map[string]any{
+				"model": "legacy-model",
+				conversations.ConfigSnapshotMetadataKey: map[string]any{
+					"version":          llmtypes.ConversationConfigSnapshotVersion,
+					"provider":         "openai",
+					"model":            " frozen-model ",
+					"reasoning_effort": "high",
+				},
+			},
+			want: "frozen-model",
+		},
+		{
+			name: "invalid snapshot falls back to recorded model",
+			metadata: map[string]any{
+				"model":                                 "legacy-model",
+				conversations.ConfigSnapshotMetadataKey: "invalid",
+			},
+			want: "legacy-model",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resolveConversationModel(tt.metadata))
+		})
 	}
 }
 

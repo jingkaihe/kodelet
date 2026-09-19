@@ -53,6 +53,8 @@ func newConversationState(key, conversationID string, resumed bool, defaults con
 		profileOptions:          profileOptions,
 		profileIndex:            profileIndex,
 		profilePickerIndex:      profileIndex,
+		selectedModel:           strings.TrimSpace(defaults.selectedModel),
+		modelOptions:            normalizeModelOptions(defaults.modelOptions, defaults.selectedModel),
 		reasoningEffort:         reasoningEffort,
 		reasoningEffortOptions:  reasoningOptions,
 		reasoningEffortIndex:    reasoningIndex,

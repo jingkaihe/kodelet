@@ -105,6 +105,12 @@ func normalizedThemeSelection(name string) string {
 func tuiBuiltInSlashCommands() []slashcommands.Command {
 	return []slashcommands.Command{
 		{
+			Name:        "model",
+			Description: "Select a model for a new conversation",
+			Hint:        "id (optional)",
+			Placeholder: "/model [id]",
+		},
+		{
 			Name:        "stop",
 			Description: "Stop the active conversation turn",
 			Placeholder: "/stop",
@@ -142,6 +148,10 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	}
 
 	switch command {
+	case "model":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		return m.handleModelCommand(args), true
 	case "stop":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()

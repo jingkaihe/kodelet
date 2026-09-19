@@ -21,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -61,7 +62,7 @@ func normalizeSingleLinePaste(text string) string {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
-	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
+	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
 		return m, m.insertTextareaNewline()
 	}
 
@@ -267,6 +268,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "history load failed"
 			m.profilePickerOpen = false
 			m.reasoningPickerOpen = false
+			m.modelPickerOpen = false
 			m.entries = append(m.entries, chatEntry{
 				kind: entryAssistant,
 				blocks: []assistantBlock{{
@@ -288,6 +290,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
+				m.selectedModel = strings.TrimSpace(msg.model)
+				m.modelOptions = normalizeModelOptions(nil, m.selectedModel)
+				m.modelPickerOpen = false
 				if strings.TrimSpace(msg.reasoningEffort) != "" {
 					m.reasoningEffortOptions = []string{msg.reasoningEffort}
 					m.setReasoningEffort(msg.reasoningEffort, false)
@@ -475,6 +480,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if strings.TrimSpace(history.profile) != "" {
 			m.setProfile(history.profile)
+		}
+		if strings.TrimSpace(history.model) != "" {
+			m.selectedModel = strings.TrimSpace(history.model)
+			m.modelOptions = normalizeModelOptions(nil, m.selectedModel)
 		}
 		if strings.TrimSpace(history.reasoningEffort) != "" {
 			m.reasoningEffortOptions = []string{history.reasoningEffort}
@@ -691,6 +700,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendConversationPickerQuery(normalizeSingleLinePaste(msg.Content))
 			return m, nil
 		}
+		if m.modelPickerOpen {
+			m.modelPickerQuery += normalizeSingleLinePaste(msg.Content)
+			m.modelPickerIndex = 0
+			m.resize()
+			m.refreshViewport(false)
+			return m, nil
+		}
 		if key, ok := m.focusedExtensionSurfaceKey(); ok {
 			surface := m.extensionSurfaces[key]
 			// Bubble Tea v1 wrapped pasted key strings in brackets. Preserve that
@@ -745,6 +761,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key == "ctrl+l" {
 			return m, m.openConversationPicker("")
+		}
+		if m.modelPickerOpen && key != "ctrl+t" && key != "ctrl+y" {
+			m.updateModelPickerKey(msg)
+			m.resize()
+			m.refreshViewport(false)
+			return m, nil
 		}
 		if key != "ctrl+c" && key != "ctrl+d" {
 			if cmd, handled := m.routeExtensionSurfaceKey(msg); handled {
@@ -940,6 +962,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
+			if optionIndex, ok := m.modelPickerOptionAt(mouse.X, mouse.Y); ok {
+				m.selectModelPickerOption(optionIndex)
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if optionIndex, ok := m.profilePickerOptionAt(mouse.X, mouse.Y); ok {
 				cmd := m.selectProfilePickerOption(optionIndex)
 				m.resize()
@@ -972,6 +1000,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.reasoningPickerOpen {
 				m.closeReasoningPicker()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.modelPickerOpen {
+				m.modelPickerOpen = false
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
@@ -1376,6 +1410,7 @@ func (m *model) openShortcutsDialog() tea.Cmd {
 	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
+	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = true
 	m.resize()
@@ -1408,6 +1443,7 @@ func (m *model) openComposerInEditor() tea.Cmd {
 	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
+	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = false
 	m.steerError = ""
@@ -1651,7 +1687,7 @@ func (m *model) resize() {
 	inputOuterHeight := inputHeight + 2
 	historySearchHeight := m.historySearchHeight()
 	slashCommandHeight := m.slashCommandSuggestionsHeight()
-	settingsPickerHeight := m.profilePickerHeight() + m.reasoningPickerHeight()
+	settingsPickerHeight := m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight()
 	extensionWidgetHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer) + m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	footerHeight := 0
 	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - extensionWidgetHeight - footerHeight
@@ -1774,6 +1810,7 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	m.conversationState = state
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
+	m.modelPickerOpen = false
 	if clearComposer {
 		if active {
 			m.dismissSlashCommandSuggestions()
@@ -1828,6 +1865,11 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 		CWD:            state.requestedCWD,
 	}
 	if !state.conversationWasResumed {
+		// The ID is allocated before the first request. Keep resending the frozen
+		// draft model on retries and follow-ups so a CLI --model cannot replace it.
+		if selected := strings.TrimSpace(state.selectedModel); selected != "" {
+			req.Options = &llmtypes.ExecutionOptions{Model: &selected}
+		}
 		req.ReasoningEffort = state.reasoningEffort
 		if m.remote {
 			req.EnvironmentProfile = m.environmentProfile
@@ -1868,7 +1910,7 @@ func (m model) slashCommandQuery() (string, bool) {
 }
 
 func (m model) slashCommandSuggestionsOpen() bool {
-	if m.profilePickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
+	if m.profilePickerOpen || m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil {
 		return false
 	}
 	if m.textarea.Value() == m.slashDismissedDraft {

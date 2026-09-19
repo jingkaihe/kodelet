@@ -114,6 +114,8 @@ type ControlPlaneChatSettings struct {
 	ConversationHierarchyVersion int                         `json:"conversationHierarchyVersion,omitempty"`
 	CurrentProfile               string                      `json:"currentProfile,omitempty"`
 	Profiles                     []ControlPlaneProfileOption `json:"profiles"`
+	Model                        string                      `json:"model"`
+	ModelOptions                 []string                    `json:"modelOptions"`
 	ReasoningEffort              string                      `json:"reasoningEffort"`
 	ReasoningEffortOptions       []string                    `json:"reasoningEffortOptions"`
 	DefaultCWD                   string                      `json:"defaultCWD,omitempty"`
@@ -595,6 +597,7 @@ func (r *Client) LoadConversation(ctx context.Context, conversationID string) (C
 		CWD:                  strings.TrimSpace(result.CWD),
 		Title:                title,
 		Provider:             strings.TrimSpace(result.Provider),
+		Model:                strings.TrimSpace(result.Model),
 		Profile:              strings.TrimSpace(result.Profile),
 		ReasoningEffort:      strings.TrimSpace(result.ReasoningEffort),
 		RunnerID:             strings.TrimSpace(result.RunnerID),
@@ -610,6 +613,7 @@ type controlPlaneConversationResponse struct {
 	ParentConversationID string                                    `json:"parentConversationId,omitempty"`
 	UpdatedAt            time.Time                                 `json:"updatedAt"`
 	Provider             string                                    `json:"provider"`
+	Model                string                                    `json:"model"`
 	CWD                  string                                    `json:"cwd"`
 	Profile              string                                    `json:"profile"`
 	ReasoningEffort      string                                    `json:"reasoningEffort"`

@@ -69,7 +69,7 @@ func reportTUIShortcutDiagnostic(ctx context.Context, extensionID, message strin
 }
 
 func (m model) extensionShortcutForKey(key string) (extensions.Shortcut, bool) {
-	if m.profilePickerOpen || m.reasoningPickerOpen || m.historySearch != nil || m.slashCommandSuggestionsOpen() {
+	if m.profilePickerOpen || m.reasoningPickerOpen || m.modelPickerOpen || m.historySearch != nil || m.slashCommandSuggestionsOpen() {
 		return extensions.Shortcut{}, false
 	}
 	normalized, err := extensions.NormalizeShortcutKey(key)

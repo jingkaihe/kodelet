@@ -94,6 +94,7 @@ export interface Conversation {
   messageCount: number;
   summary?: string;
   provider?: string;
+  model?: string;
   cwd?: string;
   cwdLocked?: boolean;
   profile?: string;
@@ -261,6 +262,9 @@ export interface ChatRequest {
   environmentProfile?: string;
   profile?: string;
   reasoningEffort?: string;
+  options?: {
+    model?: string;
+  };
   cwd?: string;
   clientCapabilities?: {
     interactiveUI: boolean;
@@ -373,6 +377,8 @@ export interface ChatSettings {
   /** Concrete profile resolved for this request, or the configured default when omitted. */
   currentProfile: string;
   profiles: ChatProfileOption[];
+  model?: string;
+  modelOptions?: string[];
   reasoningEffort: string;
   reasoningEffortOptions: string[];
   defaultCWD?: string;

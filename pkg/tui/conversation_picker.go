@@ -80,6 +80,7 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
+	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.cancelHistorySearch()
 	m.shortcutsOpen = false

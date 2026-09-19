@@ -15,6 +15,8 @@ const renderDialog = (
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
     profileDraft: 'flair',
+    modelDraft: 'claude-opus-5',
+    modelOptions: ['claude-opus-5', 'claude-sonnet-4-6'],
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
@@ -38,6 +40,7 @@ const renderDialog = (
     onCwdInputFocus: vi.fn(),
     onCwdInputKeyDown: vi.fn(),
     onProfileDraftChange: vi.fn(),
+    onModelDraftChange: vi.fn(),
     onReasoningEffortDraftChange: vi.fn(),
     onRunnerDraftChange: vi.fn(),
     onEnvironmentProfileDraftChange: vi.fn(),
@@ -152,8 +155,50 @@ describe('NewChatContextDialog', () => {
   it('prevents starting while reasoning settings are loading', () => {
     renderDialog({ reasoningEffortLoading: true });
 
+    expect(screen.getByLabelText('Model')).toBeDisabled();
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+  });
+
+  it('emits profile-scoped model choices without owning page state', () => {
+    const props = renderDialog();
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }));
+    const models = screen.getByRole('listbox', { name: 'Model' });
+    expect(within(models).getByRole('option', { name: 'claude-opus-5' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    fireEvent.click(within(models).getByRole('option', { name: 'claude-sonnet-4-6' }));
+
+    expect(props.onModelDraftChange).toHaveBeenCalledWith('claude-sonnet-4-6');
+  });
+
+  it('uses the profile default when the server does not advertise model options', () => {
+    renderDialog({ modelDraft: '', modelOptions: [] });
+
+    expect(screen.getByLabelText('Model')).toHaveTextContent('Profile default');
+    expect(screen.getByLabelText('Model')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+  });
+
+  it('keeps the selected model first, then orders model versions descending without mutating props', () => {
+    const modelOptions = ['model-2.9', 'model-2', 'model-10', 'model-2.10'];
+    const props = renderDialog({ modelDraft: 'model-2', modelOptions });
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }));
+    const models = within(screen.getByRole('listbox', { name: 'Model' }));
+    expect(
+      models.getAllByRole('option').map((option) => option.getAttribute('data-value'))
+    ).toEqual(['model-2', 'model-10', 'model-2.10', 'model-2.9']);
+    expect(models.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+    expect(modelOptions).toEqual(['model-2.9', 'model-2', 'model-10', 'model-2.10']);
+
+    const picker = screen.getByRole('combobox', { name: 'Model' });
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    fireEvent.keyDown(picker, { key: 'Enter' });
+    expect(props.onModelDraftChange).toHaveBeenCalledWith('model-10');
+    expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument();
   });
 
   it('requires a workspace runner', () => {
@@ -317,7 +362,7 @@ describe('NewChatContextDialog', () => {
     await user.keyboard('{End}{Tab}');
     expect(props.onReasoningEffortDraftChange).toHaveBeenCalledWith('high');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveFocus();
   });
 
   it('keeps a single reasoning option disabled and handles an empty runner list', async () => {

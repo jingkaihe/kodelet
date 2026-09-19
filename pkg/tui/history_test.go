@@ -195,6 +195,7 @@ func TestLoadInitialHistoryUsesInjectedSource(t *testing.T) {
 	source := &conversationSourceRunner{history: chat.ConversationHistory{
 		ID: "conversation-history", CWD: "/only/on/runner", Profile: "stored", Provider: "anthropic", ReasoningEffort: "high",
 		ParentConversationID: " parent-id ",
+		Model:                " saved-model ",
 		Usage:                llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100},
 		Messages: []conversations.StreamableMessage{
 			{Kind: "text", Role: "user", Content: "old prompt"},
@@ -211,6 +212,7 @@ func TestLoadInitialHistoryUsesInjectedSource(t *testing.T) {
 	assert.Equal(t, "parent-id", msg.parentConversationID)
 	assert.Equal(t, "stored", msg.profile)
 	assert.Equal(t, "anthropic", msg.provider)
+	assert.Equal(t, "saved-model", msg.model)
 	assert.Equal(t, "high", msg.reasoningEffort)
 	assert.Equal(t, 42, msg.usage.CurrentContextWindow)
 	require.Len(t, msg.entries, 2)

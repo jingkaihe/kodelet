@@ -1271,6 +1271,7 @@ type WebConversationResponse struct {
 	CreatedAt             time.Time              `json:"createdAt"`
 	UpdatedAt             time.Time              `json:"updatedAt"`
 	Provider              string                 `json:"provider"`
+	Model                 string                 `json:"model,omitempty"`
 	CWD                   string                 `json:"cwd,omitempty"`
 	CWDLocked             bool                   `json:"cwdLocked,omitempty"`
 	Profile               string                 `json:"profile,omitempty"`
@@ -1294,6 +1295,7 @@ type conversationHistoryResponse struct {
 	ParentConversationID string                                    `json:"parentConversationId,omitempty"`
 	UpdatedAt            time.Time                                 `json:"updatedAt"`
 	Provider             string                                    `json:"provider"`
+	Model                string                                    `json:"model,omitempty"`
 	CWD                  string                                    `json:"cwd,omitempty"`
 	Profile              string                                    `json:"profile,omitempty"`
 	ReasoningEffort      string                                    `json:"reasoningEffort,omitempty"`
@@ -1318,6 +1320,8 @@ type ChatSettingsResponse struct {
 	ConversationHierarchyVersion int                 `json:"conversationHierarchyVersion,omitempty"`
 	CurrentProfile               string              `json:"currentProfile,omitempty"`
 	Profiles                     []ChatProfileOption `json:"profiles"`
+	Model                        string              `json:"model"`
+	ModelOptions                 []string            `json:"modelOptions"`
 	ReasoningEffort              string              `json:"reasoningEffort"`
 	ReasoningEffortOptions       []string            `json:"reasoningEffortOptions"`
 	DefaultCWD                   string              `json:"defaultCWD,omitempty"`
@@ -1437,6 +1441,14 @@ func resolveConversationProfile(metadata map[string]any) string {
 	return strings.TrimSpace(profile)
 }
 
+func resolveConversationModel(metadata map[string]any) string {
+	if snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(metadata); err == nil && hasSnapshot {
+		return strings.TrimSpace(snapshot.Model)
+	}
+	model, _ := metadata["model"].(string)
+	return strings.TrimSpace(model)
+}
+
 func resolveConversationReasoningEffort(response *conversations.GetConversationResponse) string {
 	if response == nil {
 		return ""
@@ -1526,6 +1538,8 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		ConversationHierarchyVersion: 1,
 		CurrentProfile:               config.Profile,
 		Profiles:                     s.modelProfileOptions(r.Context(), runnerID, config.Profile, r.URL.Query().Get("includeHidden") == "true"),
+		Model:                        config.Model,
+		ModelOptions:                 llm.ModelOptions(r.Context(), config),
 		ReasoningEffort:              config.ReasoningEffort,
 		ReasoningEffortOptions:       llmtypes.ReasoningEffortOptions(config),
 		DefaultCWD:                   defaultCWD,
@@ -1604,6 +1618,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:             response.CreatedAt,
 		UpdatedAt:             response.UpdatedAt,
 		Provider:              providerLabel,
+		Model:                 resolveConversationModel(response.Metadata),
 		CWD:                   response.CWD,
 		CWDLocked:             response.ID != "" && strings.TrimSpace(response.CWD) != "",
 		Profile:               resolveConversationProfile(response.Metadata),
@@ -1647,6 +1662,7 @@ func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http
 		ID:                   response.ID,
 		UpdatedAt:            response.UpdatedAt,
 		Provider:             response.Provider,
+		Model:                resolveConversationModel(response.Metadata),
 		CWD:                  response.CWD,
 		Profile:              resolveConversationProfile(response.Metadata),
 		ReasoningEffort:      resolveConversationReasoningEffort(response),

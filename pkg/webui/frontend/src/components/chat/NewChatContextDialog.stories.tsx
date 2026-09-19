@@ -8,6 +8,7 @@ type NewChatContextDialogStoryProps = React.ComponentProps<typeof NewChatContext
 
 const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
   const [profileDraft, setProfileDraft] = React.useState(args.profileDraft);
+  const [modelDraft, setModelDraft] = React.useState(args.modelDraft);
   const [reasoningEffortDraft, setReasoningEffortDraft] = React.useState(args.reasoningEffortDraft);
   const [cwdQuery, setCwdQuery] = React.useState(args.cwdQuery);
   const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = React.useState(args.cwdSuggestionsOpen);
@@ -19,6 +20,7 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
       cwdQuery={cwdQuery}
       cwdSuggestionsOpen={cwdSuggestionsOpen}
       profileDraft={profileDraft}
+      modelDraft={modelDraft}
       reasoningEffortDraft={reasoningEffortDraft}
       runnerIdDraft={runnerIdDraft}
       onRunnerDraftChange={(runnerId) => {
@@ -41,6 +43,10 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
       onProfileDraftChange={(profileName) => {
         setProfileDraft(profileName);
         args.onProfileDraftChange(profileName);
+      }}
+      onModelDraftChange={(model) => {
+        setModelDraft(model);
+        args.onModelDraftChange(model);
       }}
       onReasoningEffortDraftChange={(reasoningEffort) => {
         setReasoningEffortDraft(reasoningEffort);
@@ -69,6 +75,8 @@ const meta = {
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
     profileDraft: 'flair',
+    modelDraft: 'claude-opus-5',
+    modelOptions: ['claude-opus-5', 'claude-sonnet-4-6'],
     reasoningEffortDraft: 'medium',
     reasoningEffortLoading: false,
     reasoningEffortOptions: ['low', 'medium', 'high'],
@@ -92,6 +100,7 @@ const meta = {
     onCwdInputFocus: fn(),
     onCwdInputKeyDown: fn(),
     onProfileDraftChange: fn(),
+    onModelDraftChange: fn(),
     onReasoningEffortDraftChange: fn(),
     onRunnerDraftChange: fn(),
     onEnvironmentProfileDraftChange: fn(),

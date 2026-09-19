@@ -113,6 +113,7 @@ func cloneProfileSettings(settings map[string]ProfileSettings) map[string]Profil
 	}
 	cloned := make(map[string]ProfileSettings, len(settings))
 	for profile, value := range settings {
+		value.ModelOptions = append([]string(nil), value.ModelOptions...)
 		value.ReasoningEffortOptions = append([]string(nil), value.ReasoningEffortOptions...)
 		cloned[profile] = value
 	}
@@ -124,6 +125,7 @@ func (m *model) openReasoningPicker() {
 		return
 	}
 	m.profilePickerOpen = false
+	m.modelPickerOpen = false
 	m.reasoningPickerOpen = true
 	m.reasoningPickerIndex = m.reasoningEffortIndex
 }

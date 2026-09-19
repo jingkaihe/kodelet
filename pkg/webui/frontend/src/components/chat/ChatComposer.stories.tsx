@@ -99,7 +99,7 @@ const meta = {
     canStop: false,
     contextDisabled: false,
     contextIsStatic: false,
-    contextText: 'default · kodelet',
+    contextText: 'model:claude-sonnet-4-6 · default · effort:medium · kodelet',
     dragActive: false,
     draft: 'Extract the reusable component and add a story.',
     placeholder: 'Ask kodelet anything...',

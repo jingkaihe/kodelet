@@ -632,6 +632,7 @@ func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 				"id":                 "conversation-bound",
 				"updatedAt":          updatedAt,
 				"provider":           "OpenAI",
+				"model":              " gpt-frozen ",
 				"cwd":                "/Users/jingkaihe/Workspace/kodelet",
 				"profile":            "deep",
 				"reasoningEffort":    "max",
@@ -683,6 +684,7 @@ func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 	history, err := runner.LoadConversation(t.Context(), "conversation-bound")
 	require.NoError(t, err)
 	assert.Equal(t, "/Users/jingkaihe/Workspace/kodelet", history.CWD)
+	assert.Equal(t, "gpt-frozen", history.Model)
 	assert.Equal(t, "deep", history.Profile)
 	assert.Equal(t, "max", history.ReasoningEffort)
 	assert.Equal(t, "runner-1", history.RunnerID)
@@ -715,6 +717,8 @@ func TestClientSettingsSteeringAndStop(t *testing.T) {
 			require.NoError(t, json.NewEncoder(w).Encode(ControlPlaneChatSettings{
 				CurrentProfile:         "work",
 				Profiles:               []ControlPlaneProfileOption{{Name: "default"}, {Name: "work"}},
+				Model:                  "work-model",
+				ModelOptions:           []string{"work-model", "other-model"},
 				ReasoningEffort:        "high",
 				ReasoningEffortOptions: []string{"low", "high"},
 			}))
@@ -739,6 +743,8 @@ func TestClientSettingsSteeringAndStop(t *testing.T) {
 	settings, err := runner.ChatSettings(t.Context(), "work")
 	require.NoError(t, err)
 	assert.Equal(t, "work", settings.CurrentProfile)
+	assert.Equal(t, "work-model", settings.Model)
+	assert.Equal(t, []string{"work-model", "other-model"}, settings.ModelOptions)
 	assert.Equal(t, []string{"low", "high"}, settings.ReasoningEffortOptions)
 	queued, err := runner.SteerConversation(t.Context(), "conversation-1", "focus", nil)
 	require.NoError(t, err)

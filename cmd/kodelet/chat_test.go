@@ -214,6 +214,8 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 		profile := request.URL.Query().Get("profile")
 		response := chatpkg.ControlPlaneChatSettings{
 			CurrentProfile: "work",
+			Model:          "work-model",
+			ModelOptions:   []string{"work-model", "work-alternative"},
 			Profiles: []chatpkg.ControlPlaneProfileOption{
 				{Name: "default", Active: true},
 				{Name: "work"},
@@ -224,6 +226,8 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 		}
 		if profile == "default" {
 			response.CurrentProfile = "default"
+			response.Model = "default-model"
+			response.ModelOptions = []string{"default-model", "default-alternative"}
 			response.ReasoningEffort = "medium"
 			response.ReasoningEffortOptions = []string{"low", "medium"}
 		}
@@ -237,6 +241,10 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "work", profile)
 	assert.Equal(t, []string{"default", "work"}, options)
+	assert.Equal(t, "work-model", settings["work"].Model)
+	assert.Equal(t, []string{"work-model", "work-alternative"}, settings["work"].ModelOptions)
+	assert.Equal(t, "default-model", settings["default"].Model)
+	assert.Equal(t, []string{"default-model", "default-alternative"}, settings["default"].ModelOptions)
 	assert.Equal(t, "high", settings["work"].ReasoningEffort)
 	assert.Equal(t, []string{"low", "medium"}, settings["default"].ReasoningEffortOptions)
 	assert.Equal(t, "/control-plane/workspace", defaultCWD)
@@ -375,6 +383,7 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.True(t, config.Remote)
 	assert.Equal(t, "/runner-only/selected", config.CWD)
 	assert.Equal(t, "daemon", config.Profile)
+	assert.Equal(t, "central", config.Model, "the picker starts from the explicit CLI model")
 	assert.Equal(t, "environment", config.EnvironmentProfile)
 	assert.Empty(t, submissions, "preparing the TUI must not start a provider turn")
 	assert.Zero(t, discoveries.Load(), "preparing chat must not initialize extensions for command discovery")
@@ -390,6 +399,26 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.EqualValues(t, 1, discoveries.Load())
 	_, ok := config.Runner.(chatpkg.ConversationStreamer)
 	assert.True(t, ok, "wrapper promotes shared stream and UI transport methods")
+
+	selectedModel := "picked-model"
+	_, err = config.Runner.Run(t.Context(), chatpkg.ChatRequest{
+		ConversationID: "picked",
+		TurnID:         "picked-turn",
+		Message:        "work",
+		CWD:            config.CWD,
+		Profile:        config.Profile,
+		Options: &llmtypes.ExecutionOptions{
+			Model:   &selectedModel,
+			NoTools: new(true),
+		},
+	}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
+	require.NoError(t, err)
+	require.Len(t, submissions, 2)
+	assert.Equal(t, new("picked-model"), submissions[1].Options.Model)
+	assert.Equal(t, new(false), submissions[1].Options.NoTools, "picker changes must preserve CLI execution options")
+	assert.Equal(t, new(true), submissions[1].Options.NoSkills)
+	assert.Equal(t, new([]string{}), submissions[1].Options.AllowedTools)
+	assert.Equal(t, new("central"), config.Runner.(*configuredChatRunner).options.Model, "selection must not mutate shared CLI defaults")
 }
 
 func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T) {
@@ -397,7 +426,15 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/conversations/saved":
-			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "saved", "cwd": "/runner-only/saved", "runnerId": "stored", "profile": "removed-profile", "environmentProfile": "stored-environment", "reasoningEffort": "high"}))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"id":                 "saved",
+				"cwd":                "/runner-only/saved",
+				"runnerId":           "stored",
+				"profile":            "removed-profile",
+				"model":              "saved-model",
+				"environmentProfile": "stored-environment",
+				"reasoningEffort":    "high",
+			}))
 		case "/api/chat/cwd-suggestions":
 			resolutions.Add(1)
 			assert.Equal(t, "saved", r.URL.Query().Get("conversationId"))
@@ -413,6 +450,7 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 	config, err := prepareDaemonChat(t.Context(), daemonChatCommandForTest(t, "--server="+daemon.URL, "--resume=saved"))
 	require.NoError(t, err)
 	assert.Equal(t, "removed-profile", config.Profile)
+	assert.Equal(t, "saved-model", config.Model)
 	assert.Equal(t, "high", config.ReasoningEffort)
 	assert.Equal(t, "/runner-only/saved", config.CWD)
 	for _, flags := range [][]string{{"--cwd=/replacement"}, {"--profile=replacement"}, {"--runner-profile="}, {"--reasoning-effort=low"}} {
@@ -420,6 +458,40 @@ func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T)
 		require.Error(t, err)
 	}
 	assert.EqualValues(t, 1, resolutions.Load(), "resume replacements fail before directory resolution")
+}
+
+func TestConfiguredChatRunnerPreservesPickedModelWithoutCLIOptions(t *testing.T) {
+	var submitted chatpkg.ChatRequest
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations/saved":
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"id":       "saved",
+				"cwd":      "/workspace",
+				"runnerId": "runner",
+				"model":    "picked-model",
+			}))
+		case "/api/chat":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ChatEvent{Kind: "done", ConversationID: "saved"}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer daemon.Close()
+	client, err := chatpkg.NewClient(daemon.URL, "", "")
+	require.NoError(t, err)
+	runner := &configuredChatRunner{Client: client}
+	_, err = runner.Run(t.Context(), chatpkg.ChatRequest{
+		ConversationID: "saved",
+		Message:        "continue",
+		Options:        &llmtypes.ExecutionOptions{Model: new("picked-model")},
+	}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
+	require.NoError(t, err)
+	require.NotNil(t, submitted.Options)
+	assert.Equal(t, new("picked-model"), submitted.Options.Model)
+	assert.Nil(t, runner.options)
 }
 
 func TestPrepareDaemonChatFollowResolvesDirectoryWithoutLoadingExtensions(t *testing.T) {

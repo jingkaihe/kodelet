@@ -495,6 +495,7 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 	}
 	state.profilePickerOpen = false
 	state.reasoningPickerOpen = false
+	state.modelPickerOpen = false
 	state.slashCommandIndex = -1
 	if prompt.mode == uiPromptInput {
 		prompt = newInputPromptModel(prompt, m.uiDialogInputWidth())

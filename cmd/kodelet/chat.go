@@ -161,7 +161,17 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 }
 
 func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
+	var selectedModel *string
+	if request.Options != nil && request.Options.Model != nil {
+		selectedModel = new(*request.Options.Model)
+	}
 	request.Options = r.options.Clone()
+	if selectedModel != nil {
+		if request.Options == nil {
+			request.Options = &llmtypes.ExecutionOptions{}
+		}
+		request.Options.Model = selectedModel
+	}
 	var history chatpkg.ConversationHistory
 	var err error
 	if request.ConversationID != "" {
@@ -301,9 +311,11 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 			return result, errors.New("the runner profile cannot be changed when resuming; start a new conversation to use another profile")
 		}
 		result.Profile, result.EnvironmentProfile, result.ReasoningEffort = history.Profile, history.EnvironmentProfile, history.ReasoningEffort
+		result.Model = history.Model
 		result.CWD = history.CWD
 		runner.runnerID = history.RunnerID
 		result.ProfileOptions = []string{history.Profile}
+		result.ModelOptions = []string{history.Model}
 		result.ReasoningEffortOptions = []string{history.ReasoningEffort}
 		target.ConversationID = history.ID
 	} else {
@@ -313,6 +325,10 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		}
 		settings, _ := remoteProfileSettings(result.ProfileSettings, result.Profile)
 		result.ReasoningEffort, result.ReasoningEffortOptions = settings.ReasoningEffort, settings.ReasoningEffortOptions
+		result.Model, result.ModelOptions = settings.Model, append([]string(nil), settings.ModelOptions...)
+		if config.Options != nil && config.Options.Model != nil {
+			result.Model = strings.TrimSpace(*config.Options.Model)
+		}
 		target = chatpkg.WorkspaceTarget{CWD: config.CWD, Profile: result.Profile, EnvironmentProfile: config.RunnerProfile}
 	}
 	if result.ReasoningEffortExplicit {
@@ -474,6 +490,8 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 			}
 		}
 		settings[name] = tui.ProfileSettings{
+			Model:                  profileSettings.Model,
+			ModelOptions:           append([]string(nil), profileSettings.ModelOptions...),
 			ReasoningEffort:        profileSettings.ReasoningEffort,
 			ReasoningEffortOptions: append([]string(nil), profileSettings.ReasoningEffortOptions...),
 		}
@@ -481,6 +499,8 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 	if _, ok := remoteProfileSettings(settings, profile); !ok {
 		options = append(options, profile)
 		settings[profile] = tui.ProfileSettings{
+			Model:                  selected.Model,
+			ModelOptions:           append([]string(nil), selected.ModelOptions...),
 			ReasoningEffort:        selected.ReasoningEffort,
 			ReasoningEffortOptions: append([]string(nil), selected.ReasoningEffortOptions...),
 		}

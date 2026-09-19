@@ -72,6 +72,7 @@ func (m *model) openProfilePicker() {
 		return
 	}
 	m.reasoningPickerOpen = false
+	m.modelPickerOpen = false
 	m.profilePickerOpen = true
 	m.profilePickerIndex = m.profileIndex
 }
@@ -97,6 +98,9 @@ func (m *model) selectProfilePickerOption(index int) tea.Cmd {
 	}
 	previousProfile := m.profile
 	m.setProfile(m.profileOptions[index])
+	if m.profile != previousProfile {
+		m.refreshModelSettingsForProfile()
+	}
 	m.refreshReasoningSettingsForProfile()
 	m.profilePickerOpen = false
 	if m.remote && m.profile != previousProfile {

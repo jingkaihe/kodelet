@@ -164,6 +164,7 @@ func (m model) View() tea.View {
 		slashSuggestions := m.renderSlashCommandSuggestions()
 		profilePicker := m.renderProfilePicker()
 		reasoningPicker := m.renderReasoningPicker()
+		modelPicker := m.renderModelPicker()
 		widgetsAbove := m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)
 		input := m.renderInputBox()
 		widgetsBelow := m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer)
@@ -179,6 +180,9 @@ func (m model) View() tea.View {
 		}
 		if strings.TrimSpace(reasoningPicker) != "" {
 			parts = append(parts, reasoningPicker)
+		}
+		if strings.TrimSpace(modelPicker) != "" {
+			parts = append(parts, modelPicker)
 		}
 		if widgetsAbove != "" {
 			parts = append(parts, widgetsAbove)
@@ -705,7 +709,7 @@ func (m model) historySearchHeight() int {
 }
 
 func (m model) maxSlashCommandSuggestions() int {
-	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.reasoningPickerHeight() - m.historySearchHeight() - 1
+	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.reasoningPickerHeight() - m.modelPickerHeight() - m.historySearchHeight() - 1
 	if availableHeight < 1 {
 		return 1
 	}
@@ -858,6 +862,12 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 			styledLabelPart{text: m.profile, style: m.profileStyle(m.profileIndex)},
 		)
 	}
+	if m.selectedModel != "" && strings.Contains(fullLabel, " - "+m.modelLabel()) {
+		parts = append(parts,
+			styledLabelPart{text: " - ", style: inputLabelStyle},
+			styledLabelPart{text: m.modelLabel(), style: inputLabelStyle},
+		)
+	}
 	if strings.HasSuffix(fullLabel, " - "+m.reasoningEffortLabel()) {
 		parts = append(parts,
 			styledLabelPart{text: " - ", style: inputLabelStyle},
@@ -1007,7 +1017,7 @@ func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -1055,7 +1065,7 @@ func (m model) profileComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	inputTopY := m.viewport.Height() + m.profilePickerHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -1205,11 +1215,21 @@ func (m model) inputTopRightLabel() string {
 	if m.profile != "" {
 		base += " - " + m.profile
 	}
+	if m.selectedModel != "" {
+		withModel := base + " - " + m.modelLabel()
+		if lipgloss.Width(withModel) <= max(1, m.inputOuterWidth()-6) {
+			base = withModel
+		}
+	}
 	full := base + " - " + m.reasoningEffortLabel()
 	if lipgloss.Width(full) <= max(1, m.inputOuterWidth()-6) {
 		return full
 	}
 	return base
+}
+
+func (m model) modelLabel() string {
+	return "model:" + normalizeSingleLinePaste(m.selectedModel)
 }
 
 func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
@@ -1268,7 +1288,7 @@ func (m model) reasoningEffortLabelBoundsInBlock() (startX, endX int, ok bool) {
 	if labelStart < 0 {
 		labelStart = 0
 	}
-	prefix := formatUsage(m.usage) + " - " + m.profile + " - "
+	prefix := strings.TrimSuffix(plainLabel, m.reasoningEffortLabel())
 	startX = 1 + labelStart + 1 + lipgloss.Width(prefix)
 	endX = startX + lipgloss.Width(m.reasoningEffortLabel())
 	return startX, endX, startX < endX

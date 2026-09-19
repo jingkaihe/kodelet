@@ -109,7 +109,7 @@ const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
 });
 
 const selectNewChatOption = (
-  label: 'Profile' | 'Reasoning effort' | 'Environment',
+  label: 'Profile' | 'Model' | 'Reasoning effort' | 'Environment',
   value: string
 ) => {
   fireEvent.click(screen.getByRole('combobox', { name: label }));
@@ -1899,6 +1899,149 @@ describe('ChatPage', () => {
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
   });
 
+  it('preserves a chosen model when reopening setup and only sends it for the first turn', async () => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockResolvedValue({
+      ...defaults,
+      model: 'gpt-5',
+      modelOptions: ['gpt-5', 'gpt-5-mini'],
+    });
+    mockStreamChat.mockImplementation(async (request, { onEvent }) => {
+      onEvent({
+        kind: 'conversation',
+        conversation_id: request.conversationId,
+        cwd: '/runner/kodelet',
+      });
+    });
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      runnerId: 'runner-1',
+      cwd: '/runner/kodelet',
+      profile: 'work',
+      model: 'gpt-5-mini',
+      reasoningEffort: 'medium',
+      messages: [{ role: 'user', content: 'hello' }],
+      toolResults: {},
+    }));
+
+    const { rerender } = await renderChatWithRunner();
+    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
+      'model:gpt-5 ·'
+    );
+    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    await flushAsyncUpdates();
+    selectNewChatOption('Model', 'gpt-5-mini');
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
+      'model:gpt-5-mini ·'
+    );
+    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5-mini');
+    selectNewChatOption('Model', 'gpt-5');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: /work · effort:medium/ })).toHaveTextContent(
+      'model:gpt-5-mini ·'
+    );
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    expect(mockStreamChat.mock.calls[0][0]).toMatchObject({
+      profile: 'work',
+      options: { model: 'gpt-5-mini' },
+    });
+
+    routeParams = { id: mockStreamChat.mock.calls[0][0].conversationId };
+    rerender(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('model:gpt-5-mini ·');
+    expect(screen.queryByRole('button', { name: /work · effort:medium/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'continue' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
+    expect(mockStreamChat.mock.calls[1][0].options).toBeUndefined();
+  });
+
+  it('replaces model options and resets to the profile default, including custom configured models', async () => {
+    const defaultSettings = mockGetChatSettings.getMockImplementation();
+    mockGetChatSettings.mockImplementation(async (profile?: string) => ({
+      ...(await defaultSettings?.(profile)),
+      ...(profile === 'anthropic'
+        ? {
+            model: 'custom-claude',
+            modelOptions: ['claude-sonnet-4-6'],
+          }
+        : { model: 'gpt-5', modelOptions: ['gpt-5', 'gpt-5-mini'] }),
+    }));
+    mockStreamChat.mockResolvedValue(undefined);
+
+    await renderChatWithRunner();
+    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    await flushAsyncUpdates();
+    selectNewChatOption('Model', 'gpt-5-mini');
+    selectNewChatOption('Profile', 'anthropic');
+    expect(screen.getByLabelText('Model')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).toHaveTextContent('custom-claude');
+    fireEvent.click(screen.getByLabelText('Model'));
+    const models = within(screen.getByRole('listbox', { name: 'Model' }));
+    expect(models.getAllByRole('option')).toHaveLength(2);
+    expect(models.getByRole('option', { name: 'custom-claude' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(models.getByRole('option', { name: 'claude-sonnet-4-6' })).toBeInTheDocument();
+    expect(models.queryByRole('option', { name: 'gpt-5-mini' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }));
+    selectNewChatOption('Profile', 'work');
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5');
+    selectNewChatOption('Profile', 'anthropic');
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    expect(mockStreamChat.mock.calls[0][0]).toMatchObject({
+      profile: 'anthropic',
+      options: { model: 'custom-claude' },
+    });
+  });
+
+  it('resets the model on every runner change even when both runners offer the same models', async () => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner(), makeRunner({ id: 'runner-2' })] });
+    mockGetChatSettings.mockImplementation(async (_profile?: string, runnerId?: string) => ({
+      ...defaults,
+      model: runnerId === 'runner-2' ? 'gpt-5-mini' : 'gpt-5',
+      modelOptions: ['gpt-5', 'gpt-5-mini'],
+    }));
+
+    await renderChatWithRunner();
+    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    await flushAsyncUpdates();
+    selectNewChatOption('Environment', 'runner-2');
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5-mini');
+    selectNewChatOption('Environment', 'runner-1');
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5');
+    expect(screen.getByLabelText('Model')).not.toHaveTextContent('gpt-5-mini');
+    selectNewChatOption('Model', 'gpt-5-mini');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: /work · effort:medium/ }));
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Model')).not.toHaveTextContent('gpt-5-mini');
+  });
+
   it('keeps dialog focus and discovery stable on profile changes and cancels pending suggestions', async () => {
     vi.useFakeTimers();
 
@@ -1953,6 +2096,8 @@ describe('ChatPage', () => {
       if (runnerId === 'runner-1') return oldRequest;
       return Promise.resolve({
         ...defaults,
+        model: 'new-model',
+        modelOptions: ['new-model', 'new-model-mini'],
         profiles: [
           ...defaults.profiles,
           ...(runnerId ? [{ name: 'new-runner/search', scope: 'extension' }] : []),
@@ -1966,6 +2111,7 @@ describe('ChatPage', () => {
     selectWorkspaceRunner();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-1');
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(screen.getByLabelText('Model')).toBeDisabled();
     selectNewChatOption('Environment', 'runner-2');
     await flushAsyncUpdates();
     expect(mockGetChatSettings).toHaveBeenLastCalledWith(undefined, 'runner-2');
@@ -1984,6 +2130,8 @@ describe('ChatPage', () => {
       } else {
         resolveOld({
           ...defaults,
+          model: 'old-model',
+          modelOptions: ['old-model'],
           profiles: [{ name: 'old-runner/search', scope: 'extension' }],
           reasoningEffort: 'none',
           reasoningEffortOptions: ['none'],
@@ -1997,6 +2145,11 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
     expect(screen.getByLabelText('Environment')).toHaveTextContent('second-runner — worker — idle');
+    expect(screen.getByLabelText('Model')).toHaveTextContent('new-model');
+    fireEvent.click(screen.getByLabelText('Model'));
+    const models = within(screen.getByRole('listbox', { name: 'Model' }));
+    expect(models.queryByRole('option', { name: 'old-model' })).not.toBeInTheDocument();
+    expect(models.getByRole('option', { name: 'new-model-mini' })).toBeInTheDocument();
     expect(mockGetChatSettings).toHaveBeenCalledTimes(3);
   });
 
@@ -3058,8 +3211,13 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalled());
   });
 
-  it('hides stale remote workspace tools while a different conversation is loading', async () => {
+  it.each([
+    undefined,
+    'saved-local-model',
+  ])('hides stale model and remote workspace tools while loading a conversation with model %s', async (model) => {
     routeParams = { id: 'conv-remote' };
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockResolvedValue({ ...defaults, model: 'profile-default-model' });
     const runner = makeRunner({ workspaceGitDiff: true, workspaceTerminal: true });
     mockGetRunners.mockResolvedValue({ runners: [runner] });
     let resolveLocalConversation: ((value: unknown) => void) | undefined;
@@ -3072,6 +3230,7 @@ describe('ChatPage', () => {
           messageCount: 1,
           cwd: '/runner/kodelet',
           runnerId: runner.id,
+          model: 'saved-remote-model',
           runner,
           messages: [{ role: 'user', content: 'remote' }],
           toolResults: {},
@@ -3084,12 +3243,16 @@ describe('ChatPage', () => {
 
     const { rerender } = render(<ChatPage />);
     await waitFor(() => expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument());
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+      'model:saved-remote-model'
+    );
 
     routeParams = { id: 'conv-local' };
     rerender(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-local'));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('model:');
 
     await act(async () => {
       resolveLocalConversation?.({
@@ -3098,11 +3261,19 @@ describe('ChatPage', () => {
         updatedAt: '2026-08-19T00:00:00Z',
         messageCount: 1,
         cwd: '/workspace/local',
+        model,
         messages: [{ role: 'user', content: 'local' }],
         toolResults: {},
       });
       await Promise.resolve();
     });
+    const context = screen.getByTestId('composer-inline-context');
+    if (model) {
+      expect(context).toHaveTextContent(`model:${model}`);
+    } else {
+      expect(context).not.toHaveTextContent('model:');
+    }
+    expect(context).not.toHaveTextContent('model:profile-default-model');
   });
 
   describe('embedded runner defaults', () => {
@@ -3391,6 +3562,12 @@ describe('ChatPage', () => {
   });
 
   it('shows the profile inside the inline context for existing conversations', async () => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockResolvedValue({
+      ...defaults,
+      model: 'gpt-5',
+      modelOptions: ['gpt-5', 'gpt-5-mini'],
+    });
     routeParams = { id: 'conv-123' };
     mockGetConversation.mockResolvedValue({
       runnerId: 'runner-1',
@@ -3399,6 +3576,7 @@ describe('ChatPage', () => {
       updatedAt: '2023-01-02T00:00:00Z',
       messageCount: 1,
       profile: 'anthropic',
+      model: 'saved-claude',
       profileLocked: true,
       reasoningEffort: 'high',
       reasoningEffortLocked: true,
@@ -3418,8 +3596,11 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('composer-inline-context')).toBeInTheDocument();
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('anthropic');
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('model:saved-claude ·');
+    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('model:gpt-5');
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent('effort:high');
     expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Reasoning effort')).not.toBeInTheDocument();
     await waitFor(() =>
       expect(mockGetSlashCommands).toHaveBeenLastCalledWith(undefined, {
@@ -3444,6 +3625,7 @@ describe('ChatPage', () => {
       expect.not.objectContaining({ reasoningEffort: expect.anything() }),
       expect.any(Object)
     );
+    expect(mockStreamChat.mock.calls[0][0].options).toBeUndefined();
   });
 
   it('streams a future TUI turn into an already-open conversation', async () => {
@@ -5920,6 +6102,12 @@ describe('ChatPage', () => {
   });
 
   it('shows a compact home cwd label in recent chats and hides sidebar metadata', async () => {
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      cwd: '~/workspace/kodelet',
+      messages: [],
+      toolResults: {},
+    });
     mockGetConversations.mockResolvedValue({
       conversations: [
         {
@@ -5940,8 +6128,9 @@ describe('ChatPage', () => {
     routeParams = { id: 'conv-123' };
     render(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: /~\/workspace\/kodelet 1/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /~\/workspace\/kodelet 1/i })
+    ).toBeInTheDocument();
     expect(screen.queryByText(/^ID:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Mode:/)).not.toBeInTheDocument();
   });

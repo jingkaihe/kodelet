@@ -23,6 +23,8 @@ type Config struct {
 	Profile                 string
 	ProfileOptions          []string
 	ProfileSettings         map[string]ProfileSettings
+	Model                   string
+	ModelOptions            []string
 	EnvironmentProfile      string
 	ReasoningEffort         string
 	ReasoningEffortOptions  []string
@@ -38,8 +40,10 @@ type Config struct {
 	Remote     bool // Deprecated: exported Run always uses daemon-backed discovery and history.
 }
 
-// ProfileSettings contains control-plane-owned reasoning policy for one model profile.
+// ProfileSettings contains control-plane-owned model and reasoning settings for one profile.
 type ProfileSettings struct {
+	Model                  string
+	ModelOptions           []string
 	ReasoningEffort        string
 	ReasoningEffortOptions []string
 }
@@ -141,6 +145,8 @@ type conversationState struct {
 	profile                 string
 	profileOptions          []string
 	profileIndex            int
+	selectedModel           string
+	modelOptions            []string
 	reasoningEffort         string
 	reasoningEffortOptions  []string
 	reasoningEffortIndex    int
@@ -150,6 +156,9 @@ type conversationState struct {
 	profilePickerIndex   int
 	reasoningPickerOpen  bool
 	reasoningPickerIndex int
+	modelPickerOpen      bool
+	modelPickerIndex     int
+	modelPickerQuery     string
 	cwd                  string
 	requestedCWD         string
 	slashCommands        []slashcommands.Command
@@ -209,6 +218,8 @@ type conversationState struct {
 type conversationDefaults struct {
 	profile                 string
 	profileOptions          []string
+	selectedModel           string
+	modelOptions            []string
 	reasoningEffort         string
 	reasoningEffortOptions  []string
 	reasoningEffortExplicit bool

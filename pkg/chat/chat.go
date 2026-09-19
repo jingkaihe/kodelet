@@ -201,6 +201,7 @@ type ConversationHistory struct {
 	CWD                  string
 	Title                string
 	Provider             string
+	Model                string
 	Profile              string
 	ReasoningEffort      string
 	RunnerID             string
