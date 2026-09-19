@@ -238,8 +238,6 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	assert.Equal(t, "work", profile)
 	assert.Equal(t, []string{"default", "work"}, options)
 	assert.Equal(t, "high", settings["work"].ReasoningEffort)
-	assert.False(t, settings["work"].Default, "the selected profile is not necessarily the configured default")
-	assert.True(t, settings["default"].Default, "a configured profile named default is an ordinary profile")
 	assert.Equal(t, []string{"low", "medium"}, settings["default"].ReasoningEffortOptions)
 	assert.Equal(t, "/control-plane/workspace", defaultCWD)
 	require.NoError(t, validateRemoteReasoningEffort("high", settings["work"].ReasoningEffortOptions))

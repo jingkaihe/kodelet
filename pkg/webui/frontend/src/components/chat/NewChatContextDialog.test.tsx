@@ -76,7 +76,7 @@ describe('NewChatContextDialog', () => {
     expect(profile).toHaveFocus();
     const options = screen.getByRole('listbox', { name: 'Profile' });
     expect(within(options).getAllByRole('option')).toHaveLength(4);
-    expect(within(options).getByRole('option', { name: 'flair (Default)' })).toHaveAttribute(
+    expect(within(options).getByRole('option', { name: 'flair' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -283,7 +283,7 @@ describe('NewChatContextDialog', () => {
     profile.focus();
     await user.keyboard('{ArrowDown}');
     const menu = screen.getByRole('listbox', { name: 'Profile' });
-    const selected = within(menu).getByRole('option', { name: 'flair (Default)' });
+    const selected = within(menu).getByRole('option', { name: 'flair' });
     expect(profile).toHaveFocus();
     expect(profile).toHaveAttribute('aria-controls', menu.id);
     expect(profile).toHaveAttribute('aria-activedescendant', selected.id);

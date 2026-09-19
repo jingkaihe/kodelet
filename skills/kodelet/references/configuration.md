@@ -135,7 +135,7 @@ Model-valued environment variables such as `KODELET_MODEL`, `KODELET_PROVIDER`, 
 
 Model fields, including weak-model settings, token limits, reasoning settings, and model-specific provider options, belong inside profiles, not at the top level. Optional model fields use built-in field defaults. Shared non-model settings such as extensions, skills, tracing, tools, aliases, and connection/authentication settings remain top-level. Supported profile overrides deep-merge nested maps, replace scalar and list values, and preserve omitted shared fields. This does not change daemon/runner ownership or make process-startup settings dynamically switchable.
 
-Pickers list actual profile names and mark the configured default separately from the current selection. Changing `profile:` does not change an explicitly selected profile's model settings. Restart the daemon after changing its configuration; existing conversations retain their saved model configuration. `kodelet setup` generates named `openai` and `anthropic` profiles and selects `openai`.
+Pickers display plain profile names and indicate the current selection without a default label. Changing `profile:` does not change an explicitly selected profile's model settings. Restart the daemon after changing its configuration; existing conversations retain their saved model configuration. `kodelet setup` generates named `openai` and `anthropic` profiles and selects `openai`.
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 

@@ -474,7 +474,6 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 			}
 		}
 		settings[name] = tui.ProfileSettings{
-			Default:                option.Active,
 			ReasoningEffort:        profileSettings.ReasoningEffort,
 			ReasoningEffortOptions: append([]string(nil), profileSettings.ReasoningEffortOptions...),
 		}

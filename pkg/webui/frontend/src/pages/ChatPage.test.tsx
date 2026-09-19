@@ -1824,7 +1824,7 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     const options = screen.getByRole('listbox', { name: 'Profile' });
     expect(within(options).getAllByRole('option')).toHaveLength(2);
-    expect(within(options).getByRole('option', { name: 'flair (Default)' })).toHaveAttribute(
+    expect(within(options).getByRole('option', { name: 'flair' })).toHaveAttribute(
       'aria-selected',
       'false'
     );

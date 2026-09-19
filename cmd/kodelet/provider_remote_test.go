@@ -143,7 +143,8 @@ func TestRemoteProviderAndProfileProcessesNeverUseClientState(t *testing.T) {
 			}
 			assert.Contains(t, string(output), test.want)
 			if test.name == "profile-list" {
-				assert.Contains(t, string(output), "DEFAULT")
+				assert.Regexp(t, `central\s+global\s+Selected`, string(output))
+				assert.NotContains(t, string(output), "DEFAULT")
 				assert.NotRegexp(t, `(?m)^default\s`, string(output))
 			}
 			assert.NotContains(t, string(output), "client-credential-marker")

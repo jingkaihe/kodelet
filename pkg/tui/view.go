@@ -895,7 +895,7 @@ func (m model) renderProfilePicker() string {
 
 	lines := make([]string, 0, len(m.profileOptions))
 	for index, profile := range m.profileOptions {
-		label := fitVisible(m.profileOptionLabel(profile), optionWidth)
+		label := fitVisible(profile, optionWidth)
 		style := m.profileStyle(index)
 		if index == m.profilePickerIndex {
 			style = style.Background(themeColor(m.theme.ProfileSelected))
@@ -906,17 +906,10 @@ func (m model) renderProfilePicker() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) profileOptionLabel(profile string) string {
-	if settings, ok := profileSettingsFor(m.profileSettings, profile); ok && settings.Default {
-		return profile + "  (Default)"
-	}
-	return profile
-}
-
 func (m model) profilePickerWidth() int {
 	width := lipgloss.Width(m.profile)
 	for _, profile := range m.profileOptions {
-		width = max(width, lipgloss.Width(m.profileOptionLabel(profile)))
+		width = max(width, lipgloss.Width(profile))
 	}
 	return max(1, min(width, m.inputOuterWidth()))
 }

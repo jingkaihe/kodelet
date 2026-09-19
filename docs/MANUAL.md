@@ -1052,9 +1052,7 @@ Existing conversations keep their saved model configuration, even when the confi
 
 ### Default Profile Selection
 
-“Default” describes which named profile is selected implicitly; it is not a separate model configuration. Pickers list actual profile names and mark the configured default separately from the current selection. Choosing another profile for one conversation does not change the daemon's default.
-
-There is no synthetic `default` entry, unnamed fallback model, or reserved model-profile name. `--profile default` is valid only when `profiles.default` is explicitly defined, and resolves it like any other profile.
+“Default” describes which named profile is selected implicitly; it is not a separate model configuration. Pickers display plain profile names and indicate the current selection without a default label. Choosing another profile for one conversation does not change the daemon's default.
 
 `kodelet setup` writes named `openai` and `anthropic` profiles and sets `profile: openai`. The default selector is required even with a single configured profile; Kodelet never chooses a profile based on its name or order.
 

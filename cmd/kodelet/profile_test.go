@@ -169,7 +169,7 @@ profiles:
 	require.NoError(t, yaml.Unmarshal([]byte(content), &settings))
 	require.NoError(t, viper.MergeConfigMap(settings))
 
-	t.Run("list marks configured default separately from override", func(t *testing.T) {
+	t.Run("list marks only the selected profile", func(t *testing.T) {
 		var output bytes.Buffer
 		cmd := &cobra.Command{Use: "list"}
 		cmd.SetOut(&output)
@@ -179,8 +179,9 @@ profiles:
 		t.Cleanup(func() { viper.Set("profile", "flair") })
 
 		require.NoError(t, profileListCmd.RunE(cmd, nil))
-		assert.Regexp(t, `flair\s+global\s+Default`, output.String())
+		assert.Regexp(t, `(?m)^flair\s+global\s*$`, output.String())
 		assert.Regexp(t, `deep\s+global\s+Selected \(command-line flag\)`, output.String())
+		assert.NotContains(t, output.String(), "Default")
 		assert.NotContains(t, output.String(), "built-in")
 		assert.NotRegexp(t, `(?m)^default\s`, output.String())
 	})

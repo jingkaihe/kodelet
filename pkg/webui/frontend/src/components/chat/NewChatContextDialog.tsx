@@ -353,7 +353,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                 value={profileDraft}
                 options={availableProfiles.map((profile) => ({
                   value: profile.name,
-                  label: profile.active ? `${profile.name} (Default)` : profile.name,
+                  label: profile.name,
                 }))}
               />
               <NewChatSelect

@@ -38,9 +38,8 @@ type Config struct {
 	Remote     bool // Deprecated: exported Run always uses daemon-backed discovery and history.
 }
 
-// ProfileSettings contains control-plane-owned metadata and reasoning policy for one model profile.
+// ProfileSettings contains control-plane-owned reasoning policy for one model profile.
 type ProfileSettings struct {
-	Default                bool // Configured daemon default, independent of the selected profile.
 	ReasoningEffort        string
 	ReasoningEffortOptions []string
 }

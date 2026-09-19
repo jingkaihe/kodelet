@@ -89,7 +89,6 @@ var profileListCmd = &cobra.Command{
 			return errors.New("no model profiles configured; run 'kodelet setup' on the daemon host")
 		}
 		activeProfile, location := effectiveProfileSetting(cmd)
-		configuredProfile, _ := llm.ActiveProfileSetting()
 
 		presenter.Section("Available Profiles")
 
@@ -105,14 +104,11 @@ var profileListCmd = &cobra.Command{
 		sort.Strings(names)
 		for _, name := range names {
 			status := ""
-			if name == configuredProfile {
-				status = "Default"
-			}
-			if name == activeProfile && (location == "command-line flag" || location == "environment") {
-				if status != "" {
-					status += ", "
+			if name == activeProfile {
+				status = "Selected"
+				if location == "command-line flag" || location == "environment" {
+					status += " (" + location + ")"
 				}
-				status += "Selected (" + location + ")"
 			}
 
 			scope := ""

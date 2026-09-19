@@ -114,9 +114,13 @@ func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), current)
 	case "list":
 		writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(writer, "NAME\tSCOPE\tDEFAULT")
+		fmt.Fprintln(writer, "NAME\tSCOPE\tSTATUS")
 		for _, option := range settings.Profiles {
-			fmt.Fprintf(writer, "%s\t%s\t%t\n", option.Name, option.Scope, option.Active)
+			status := ""
+			if option.Name == current {
+				status = "Selected"
+			}
+			fmt.Fprintf(writer, "%s\t%s\t%s\n", option.Name, option.Scope, status)
 		}
 		err = writer.Flush()
 	case "show":
