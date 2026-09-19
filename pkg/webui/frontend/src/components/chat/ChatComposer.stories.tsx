@@ -149,6 +149,41 @@ type Story = StoryObj<typeof meta>;
 
 export const ReadyToSend: Story = {};
 
+export const QuickPick: Story = {
+  args: {
+    contextText: 'deep/gpt-6-astra · xhigh',
+    quickPick: {
+      modelValue: 'deep\u0000gpt-6-astra',
+      modelOptions: [
+        { value: 'deep\u0000gpt-6-astra', label: 'deep/gpt-6-astra' },
+        { value: 'deep\u0000gpt-6', label: 'deep/gpt-6' },
+        { value: 'flair\u0000claude-sonnet-4-6', label: 'flair/claude-sonnet-4-6' },
+        { value: 'flair\u0000claude-opus-4-6', label: 'flair/claude-opus-4-6' },
+        { value: 'private\u0000qwen3-coder-next', label: 'private/qwen3-coder-next' },
+      ],
+      modelOptionsLoading: false,
+      reasoningEffort: 'xhigh',
+      reasoningEffortOptions: ['none', 'low', 'medium', 'high', 'xhigh'],
+      onModelChange: fn(),
+      onModelMenuOpen: fn(),
+      onReasoningEffortChange: fn(),
+    },
+  },
+  play: async (context) => {
+    await meta.play(context);
+    const canvas = within(context.canvasElement);
+    await userEvent.click(canvas.getByRole('combobox', { name: 'Model quick pick' }));
+    await waitFor(() => {
+      expect(canvas.getByRole('listbox', { name: 'Model quick pick' })).toBeVisible();
+    });
+    await userEvent.click(canvas.getByRole('option', { name: 'flair/claude-opus-4-6' }));
+    expect(context.args.quickPick?.onModelChange).toHaveBeenCalledWith(
+      'flair\u0000claude-opus-4-6'
+    );
+    await userEvent.click(canvas.getByRole('combobox', { name: 'Model quick pick' }));
+  },
+};
+
 export const Multiline: Story = {
   args: {
     draft: 'Review these points:\n- mobile layout\n- terminal behavior',

@@ -12,6 +12,8 @@ Added profile-aware model choices from configured model lists, pricing catalogs,
 
 Added a dedicated Web UI workspace header and streamlined composer labels around the selected profile, model, and reasoning effort. Made native TUI context usage more compact and removed default-profile labels in favor of the current selection across profile commands and pickers.
 
+Added Web UI composer quick picks for `profile/model` and reasoning effort before a conversation starts, listing models across visible profiles like the TUI picker, with a gear button for the full settings dialog.
+
 Fixed TUI model selection to preserve other CLI execution options and keep the selected model across retries and follow-up messages, including when `--model` was supplied at startup.
 
 Preserved saved model settings when resuming conversations and preloaded model choices for `/new` without requiring the saved profile to remain configured or model discovery to succeed. Persisted OpenAI native-search and WebSocket settings in conversation snapshots, and kept removed profiles on the shared runner environment rather than applying the new default profile's environment.

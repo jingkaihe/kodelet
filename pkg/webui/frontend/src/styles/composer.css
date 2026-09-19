@@ -210,6 +210,95 @@
   color: var(--kodelet-muted);
 }
 
+.composer-quick-pick {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.composer-quick-pick-separator {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--kodelet-muted);
+}
+
+.composer-select-shell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.composer-select-shell.is-open {
+  z-index: 3;
+}
+
+.composer-select-shell:first-child {
+  flex: 0 1 auto;
+}
+
+.composer-select-shell + .composer-quick-pick-separator + .composer-select-shell {
+  flex: none;
+}
+
+.composer-select-trigger {
+  width: 100%;
+  cursor: pointer;
+}
+
+.composer-select-trigger[aria-expanded="true"] .composer-inline-context-value,
+.composer-select-trigger[aria-expanded="true"] .composer-select-chevron {
+  color: var(--kodelet-dark);
+}
+
+.composer-select-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: 0.25rem;
+  color: var(--kodelet-muted);
+  transition: color 140ms ease;
+}
+
+.composer-inline-context:hover:not(:disabled) .composer-select-chevron {
+  color: var(--kodelet-dark);
+}
+
+/* Outranks dialogs.css, which is imported later. */
+.composer-select-shell .composer-select-menu {
+  inset-inline: 0 auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(28rem, calc(100vw - 2rem));
+}
+
+.composer-select-shell .composer-select-menu.is-align-end {
+  inset-inline: auto 0;
+}
+
+.composer-select-shell .composer-select-option {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.composer-quick-pick-settings {
+  flex: none;
+  justify-content: center;
+  width: 1.75rem;
+  color: var(--kodelet-muted);
+  border-radius: 2px;
+  transition: color 140ms ease;
+}
+
+.composer-quick-pick-settings:hover:not(:disabled),
+.composer-quick-pick-settings:focus-visible {
+  color: var(--kodelet-dark);
+}
+
 .composer-status-actions {
   display: flex;
   grid-column: 4;

@@ -1926,14 +1926,12 @@ describe('ChatPage', () => {
     }));
 
     const { rerender } = await renderChatWithRunner();
-    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
-      /^work\/gpt-5 · medium$/
-    );
+    expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(/^work\/gpt-5 · medium$/);
     fireEvent.click(screen.getByTestId('composer-context-button'));
     await flushAsyncUpdates();
     selectNewChatOption('Model', 'gpt-5-mini');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+    expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^work\/gpt-5-mini · medium$/
     );
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -1960,6 +1958,94 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
     expect(mockStreamChat.mock.calls[1][0].options).toBeUndefined();
+  });
+
+  it('quick picks a profile/model and reasoning effort from the composer', async () => {
+    const defaults: ChatSettings = await mockGetChatSettings();
+    mockGetChatSettings.mockImplementation((profile?: string, runnerId?: string) => {
+      const selectedProfile = profile || 'work';
+      const models =
+        selectedProfile === 'anthropic'
+          ? { model: 'claude-opus-4-6', modelOptions: ['claude-sonnet-4-6', 'claude-opus-4-6'] }
+          : selectedProfile === 'work'
+            ? { model: 'gpt-5', modelOptions: ['gpt-5', 'gpt-5-mini'] }
+            : { model: `${selectedProfile}-model`, modelOptions: [] };
+      const reasoning =
+        selectedProfile === 'anthropic'
+          ? { reasoningEffort: 'max', reasoningEffortOptions: ['medium', 'high', 'max'] }
+          : { reasoningEffort: 'medium', reasoningEffortOptions: ['low', 'medium', 'high'] };
+      return Promise.resolve({
+        ...defaults,
+        currentProfile: selectedProfile,
+        profiles: [
+          { name: 'work', scope: 'global', active: true },
+          { name: 'anthropic', scope: 'global' },
+          { name: 'secret', scope: 'global', hidden: true },
+        ],
+        ...models,
+        ...reasoning,
+        runnerId,
+      });
+    });
+
+    await renderChatWithRunner();
+    const quickPick = screen.getByTestId('composer-quick-pick');
+    expect(quickPick).toHaveTextContent(/^work\/gpt-5 · medium$/);
+    expect(quickPick.querySelector('svg.lucide-settings')).not.toBeNull();
+    mockGetChatSettings.mockClear();
+
+    // Opening the model picker loads every visible profile for the selected runner.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model quick pick' }));
+    await flushAsyncUpdates();
+    expect(mockGetChatSettings.mock.calls).toEqual([
+      ['work', 'runner-1'],
+      ['anthropic', 'runner-1'],
+    ]);
+    const modelList = screen.getByRole('listbox', { name: 'Model quick pick' });
+    expect(
+      within(modelList)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual([
+      'work/gpt-5',
+      'work/gpt-5-mini',
+      'anthropic/claude-sonnet-4-6',
+      'anthropic/claude-opus-4-6',
+    ]);
+    fireEvent.click(within(modelList).getByRole('option', { name: 'anthropic/claude-opus-4-6' }));
+
+    // Switching profile adopts that profile's reasoning defaults.
+    expect(quickPick).toHaveTextContent(/^anthropic\/claude-opus-4-6 · max$/);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort quick pick' }));
+    const effortList = screen.getByRole('listbox', { name: 'Reasoning effort quick pick' });
+    expect(
+      within(effortList)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['medium', 'high', 'max']);
+    fireEvent.click(within(effortList).getByRole('option', { name: 'high' }));
+    expect(quickPick).toHaveTextContent(/^anthropic\/claude-opus-4-6 · high$/);
+
+    // The gear still opens the full dialog, seeded from the quick pick.
+    fireEvent.click(screen.getByRole('button', { name: 'Model settings' }));
+    await flushAsyncUpdates();
+    expect(screen.getByLabelText('Profile')).toHaveTextContent('anthropic');
+    expect(screen.getByLabelText('Model')).toHaveTextContent('claude-opus-4-6');
+    expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
+    fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    expect(mockStreamChat.mock.calls[0][0]).toMatchObject({
+      profile: 'anthropic',
+      options: { model: 'claude-opus-4-6' },
+      reasoningEffort: 'high',
+    });
   });
 
   it('replaces model options and resets to the profile default, including custom configured models', async () => {
@@ -2000,7 +2086,7 @@ describe('ChatPage', () => {
     selectNewChatOption('Profile', 'anthropic');
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+    expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^anthropic\/custom-claude · max$/
     );
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -6279,7 +6365,7 @@ describe('ChatPage', () => {
     const workspaceButton = within(header).getByRole('button', {
       name: `Change workspace: ${cwd}`,
     });
-    const contextButton = screen.getByTestId('composer-context-button');
+    const contextButton = screen.getByTestId('composer-quick-pick');
     expect(contextButton).toHaveTextContent(/^work\/gpt-5-mini · high$/);
     expect(contextButton).not.toHaveTextContent(cwd);
 
@@ -6299,7 +6385,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(workspaceButton).toHaveFocus());
     expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
     expect(within(header).getByTitle(cwd)).toHaveTextContent(cwd);
-    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
+    expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^work\/gpt-5-mini · high$/
     );
     expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep this unsent message');

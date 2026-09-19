@@ -1,7 +1,30 @@
-import { ArrowUp, ChevronDown, Paperclip, RotateCw, Square, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Paperclip, RotateCw, Settings, Square, X } from 'lucide-react';
 import React from 'react';
 import type { PendingImageAttachment, SlashCommandOption } from '../../types';
 import { cn } from '../../utils';
+import ListboxSelect, { type ListboxOption } from '../ListboxSelect';
+
+export interface ComposerQuickPick {
+  /** Selected `profile/model` option value; empty when unknown. */
+  modelValue: string;
+  /** Options labelled `profile/model`, ordered like the TUI picker. */
+  modelOptions: ListboxOption[];
+  modelOptionsLoading: boolean;
+  reasoningEffort: string;
+  reasoningEffortOptions: string[];
+  onModelChange: (value: string) => void;
+  onModelMenuOpen?: () => void;
+  onReasoningEffortChange: (value: string) => void;
+}
+
+const composerSelectClassNames = {
+  shell: 'composer-select-shell',
+  trigger: 'composer-inline-context composer-select-trigger',
+  chevron: 'composer-select-chevron',
+  chevronIcon: 'h-3 w-3',
+  menu: 'new-chat-select-menu composer-select-menu',
+  option: 'new-chat-select-option composer-select-option',
+};
 
 interface ChatComposerProps {
   addImageDisabled: boolean;
@@ -13,6 +36,7 @@ interface ChatComposerProps {
   dragActive: boolean;
   draft: string;
   placeholder: string;
+  quickPick?: ComposerQuickPick;
   showStop: boolean;
   slashCommandIndex: number;
   slashCommandSuggestions: SlashCommandOption[];
@@ -48,6 +72,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   dragActive,
   draft,
   placeholder,
+  quickPick,
   showStop,
   slashCommandIndex,
   slashCommandSuggestions,
@@ -311,6 +336,76 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   <span className="composer-inline-context-value" title={contextText}>
                     {contextText}
                   </span>
+                </div>
+              ) : quickPick ? (
+                <div
+                  className="composer-quick-pick"
+                  data-testid="composer-quick-pick"
+                  title={contextText}
+                >
+                  <ListboxSelect
+                    busy={quickPick.modelOptionsLoading}
+                    classNames={composerSelectClassNames}
+                    disabled={contextDisabled}
+                    label="Model quick pick"
+                    onChange={quickPick.onModelChange}
+                    onOpen={quickPick.onModelMenuOpen}
+                    options={
+                      quickPick.modelOptions.length > 0
+                        ? quickPick.modelOptions
+                        : [
+                            {
+                              value: '',
+                              label: quickPick.modelOptionsLoading
+                                ? 'Loading models…'
+                                : 'No models available',
+                              disabled: true,
+                            },
+                          ]
+                    }
+                    renderValue={(selected) => (
+                      <span
+                        className="composer-inline-context-value"
+                        title={selected?.label ?? quickPick.modelValue}
+                      >
+                        {selected?.label ?? quickPick.modelValue}
+                      </span>
+                    )}
+                    testId="composer-model-select"
+                    value={quickPick.modelValue}
+                  />
+                  <span aria-hidden="true" className="composer-quick-pick-separator">
+                    {' · '}
+                  </span>
+                  <ListboxSelect
+                    classNames={composerSelectClassNames}
+                    disabled={contextDisabled}
+                    label="Reasoning effort quick pick"
+                    onChange={quickPick.onReasoningEffortChange}
+                    options={quickPick.reasoningEffortOptions.map((effort) => ({
+                      value: effort,
+                      label: effort,
+                    }))}
+                    renderValue={(selected) => (
+                      <span className="composer-inline-context-value">
+                        {selected?.label ?? quickPick.reasoningEffort}
+                      </span>
+                    )}
+                    testId="composer-reasoning-effort-select"
+                    value={quickPick.reasoningEffort}
+                  />
+                  <button
+                    aria-haspopup="dialog"
+                    aria-label="Model settings"
+                    className="composer-inline-context composer-quick-pick-settings"
+                    data-testid="composer-context-button"
+                    disabled={contextDisabled}
+                    onClick={onContextOpen}
+                    title="Model settings"
+                    type="button"
+                  >
+                    <Settings aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  </button>
                 </div>
               ) : (
                 <button

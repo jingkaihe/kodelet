@@ -102,6 +102,45 @@ const reasoningSettingsFromChatSettings = (
   return { effort, options };
 };
 
+interface ProfileModelOption {
+  profile: string;
+  model: string;
+  settings?: ChatSettings;
+}
+
+const profileModelKey = (profile: string, model: string): string => `${profile}\u0000${model}`;
+
+const profileModelLabel = (profile: string, model: string): string =>
+  profile ? `${profile}/${model}` : model;
+
+// Mirrors the TUI picker: selection first, then higher versions first within a family.
+const sortProfileModelOptions = (
+  options: ProfileModelOption[],
+  selected: { profile: string; model: string }
+): ProfileModelOption[] =>
+  [...options].sort((a, b) => {
+    const aSelected = a.profile === selected.profile && a.model === selected.model;
+    const bSelected = b.profile === selected.profile && b.model === selected.model;
+    if (aSelected !== bSelected) return aSelected ? -1 : 1;
+    const order = b.model.localeCompare(a.model, 'en', { numeric: true });
+    if (order !== 0) return order;
+    return a.profile.localeCompare(b.profile, 'en');
+  });
+
+const appendProfileModelOptions = (
+  options: ProfileModelOption[],
+  profile: string,
+  models: string[],
+  settings?: ChatSettings
+) => {
+  for (const candidate of models) {
+    const model = candidate.trim();
+    if (!model) continue;
+    if (options.some((option) => option.profile === profile && option.model === model)) continue;
+    options.push({ profile, model, settings });
+  }
+};
+
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
   cwd:
@@ -532,6 +571,12 @@ const ChatPage: React.FC = () => {
   ]);
   const [newChatReasoningEffortExplicit, setNewChatReasoningEffortExplicit] = useState(false);
   const [reasoningSettingsLoading, setReasoningSettingsLoading] = useState(false);
+  const [profileModelCatalog, setProfileModelCatalog] = useState<{
+    runnerId: string;
+    options: ProfileModelOption[];
+  } | null>(null);
+  const [profileModelCatalogLoading, setProfileModelCatalogLoading] = useState(false);
+  const profileModelCatalogRequestRef = useRef(0);
   const [selectedCWD, setSelectedCWD] = useState('');
   const [runners, setRunners] = useState<Runner[]>([]);
   const [selectedRunnerID, setSelectedRunnerID] = useState('');
@@ -3494,6 +3539,141 @@ const ChatPage: React.FC = () => {
     setNewChatDialogOpen(true);
   };
 
+  const patchOptimisticConversationContext = (update: Partial<Conversation>) => {
+    const optimisticConversation = optimisticRemoteConversationRef.current;
+    if (
+      !conversationId ||
+      optimisticConversation?.conversationId !== conversationId ||
+      optimisticConversation.confirmed
+    ) {
+      return;
+    }
+    setConversation((currentConversation) =>
+      currentConversation?.id === conversationId
+        ? { ...currentConversation, ...update }
+        : currentConversation
+    );
+    setConversations((currentConversations) =>
+      currentConversations.map((currentConversation) =>
+        currentConversation.id === conversationId
+          ? { ...currentConversation, ...update }
+          : currentConversation
+      )
+    );
+  };
+
+  // Like the TUI's /model picker: every visible profile's models, fetched per profile.
+  const loadProfileModelCatalog = () => {
+    if (!chatSettingsLoaded) {
+      return;
+    }
+    const runnerId = selectedRunnerID;
+    const requestId = profileModelCatalogRequestRef.current + 1;
+    profileModelCatalogRequestRef.current = requestId;
+    const profileNames = (chatSettings.profiles || [])
+      .filter((profile) => !profile.hidden)
+      .map((profile) => profile.name.trim())
+      .filter(Boolean);
+    if (selectedProfile && !profileNames.includes(selectedProfile)) {
+      profileNames.push(selectedProfile);
+    }
+    setProfileModelCatalogLoading(true);
+    void Promise.all(
+      profileNames.map((name) => apiService.getChatSettings(name, runnerId || undefined))
+    )
+      .then((settingsList) => {
+        if (profileModelCatalogRequestRef.current !== requestId) {
+          return;
+        }
+        const options: ProfileModelOption[] = [];
+        settingsList.forEach((settings, index) => {
+          const profile = settings.currentProfile?.trim() || profileNames[index];
+          const modelSettings = modelSettingsFromChatSettings(settings);
+          appendProfileModelOptions(options, profile, modelSettings.options, settings);
+        });
+        setProfileModelCatalog({ runnerId, options });
+        setProfileModelCatalogLoading(false);
+      })
+      .catch((error) => {
+        if (profileModelCatalogRequestRef.current !== requestId) {
+          return;
+        }
+        console.error('Failed to load profile models', error);
+        showToast('Failed to load models for the visible profiles', 'error');
+        setProfileModelCatalogLoading(false);
+      });
+  };
+
+  const composerProfileModelOptions = useMemo(() => {
+    const options: ProfileModelOption[] = [];
+    if (selectedModel) {
+      appendProfileModelOptions(options, selectedProfile, [selectedModel]);
+    }
+    appendProfileModelOptions(options, selectedProfile, selectedModelOptions);
+    if (profileModelCatalog?.runnerId === selectedRunnerID) {
+      for (const option of profileModelCatalog.options) {
+        appendProfileModelOptions(options, option.profile, [option.model], option.settings);
+      }
+    }
+    return sortProfileModelOptions(options, { profile: selectedProfile, model: selectedModel });
+  }, [profileModelCatalog, selectedModel, selectedModelOptions, selectedProfile, selectedRunnerID]);
+
+  const handleQuickModelChange = (value: string) => {
+    const option = composerProfileModelOptions.find(
+      (candidate) => profileModelKey(candidate.profile, candidate.model) === value
+    );
+    if (!option) {
+      return;
+    }
+    const update: Partial<Conversation> = { model: option.model };
+    if (option.profile !== selectedProfile) {
+      setSelectedProfile(option.profile);
+      setNewChatProfileDraft(option.profile);
+      update.profile = option.profile;
+      if (option.settings) {
+        const reasoningSettings = reasoningSettingsFromChatSettings(option.settings);
+        const preserveExplicitEffort =
+          selectedReasoningEffortExplicit &&
+          reasoningSettings.options.includes(selectedReasoningEffort);
+        const nextEffort = preserveExplicitEffort
+          ? selectedReasoningEffort
+          : reasoningSettings.effort;
+        setSelectedReasoningEffortOptions(reasoningSettings.options);
+        setSelectedReasoningEffort(nextEffort);
+        setSelectedReasoningEffortExplicit(preserveExplicitEffort);
+        update.reasoningEffort = nextEffort;
+      }
+    }
+    if (option.settings) {
+      setSelectedModelOptions(modelSettingsFromChatSettings(option.settings).options);
+    }
+    setSelectedModel(option.model);
+    patchOptimisticConversationContext(update);
+  };
+
+  const handleQuickReasoningEffortChange = (effort: string) => {
+    setSelectedReasoningEffort(effort);
+    setSelectedReasoningEffortExplicit(true);
+    patchOptimisticConversationContext({ reasoningEffort: effort });
+  };
+
+  const composerQuickPick =
+    !contextIsStatic && chatSettingsLoaded && selectedModel
+      ? {
+          modelValue: profileModelKey(selectedProfile, selectedModel),
+          modelOptions: composerProfileModelOptions.map((option) => ({
+            value: profileModelKey(option.profile, option.model),
+            label: profileModelLabel(option.profile, option.model),
+          })),
+          modelOptionsLoading: profileModelCatalogLoading,
+          reasoningEffort: selectedReasoningEffort,
+          reasoningEffortOptions: selectedReasoningEffortOptions,
+          onModelChange: handleQuickModelChange,
+          onModelMenuOpen: loadProfileModelCatalog,
+          onReasoningEffortChange: handleQuickReasoningEffortChange,
+        }
+      : undefined;
+
   const hasActiveConversationTarget = Boolean(activeRunningConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget;
   const isSteeringMode = currentConversationIsStreaming && canSteerActiveConversation;
@@ -4072,6 +4252,7 @@ const ChatPage: React.FC = () => {
             dragActive={dragActive}
             draft={draft}
             placeholder={composerPlaceholder}
+            quickPick={composerQuickPick}
             showStop={currentConversationIsStreaming}
             slashCommandIndex={slashCommandIndex}
             slashCommandSuggestions={slashCommandSuggestions}

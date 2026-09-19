@@ -85,6 +85,62 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('button', { name: /^Model settings:/ })).not.toBeInTheDocument();
   });
 
+  it('offers profile/model and reasoning effort quick picks with a gear for full settings', () => {
+    const quickPick = {
+      modelValue: 'deep\u0000gpt-6-astra',
+      modelOptions: [
+        { value: 'deep\u0000gpt-6-astra', label: 'deep/gpt-6-astra' },
+        { value: 'flair\u0000claude-opus-4-6', label: 'flair/claude-opus-4-6' },
+      ],
+      modelOptionsLoading: false,
+      reasoningEffort: 'xhigh',
+      reasoningEffortOptions: ['medium', 'xhigh'],
+      onModelChange: vi.fn(),
+      onModelMenuOpen: vi.fn(),
+      onReasoningEffortChange: vi.fn(),
+    };
+    const props = renderComposer({ contextText: 'deep/gpt-6-astra · xhigh', quickPick });
+
+    expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
+      /^deep\/gpt-6-astra · xhigh$/
+    );
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    const modelTrigger = screen.getByRole('combobox', { name: 'Model quick pick' });
+    fireEvent.click(modelTrigger);
+    expect(quickPick.onModelMenuOpen).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('option', { name: 'flair/claude-opus-4-6' }));
+    expect(quickPick.onModelChange).toHaveBeenCalledWith('flair\u0000claude-opus-4-6');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reasoning effort quick pick' }));
+    fireEvent.click(screen.getByRole('option', { name: 'medium' }));
+    expect(quickPick.onReasoningEffortChange).toHaveBeenCalledWith('medium');
+
+    const gear = screen.getByRole('button', { name: 'Model settings' });
+    expect(gear).toBe(screen.getByTestId('composer-context-button'));
+    expect(gear.querySelector('svg')).toHaveClass('lucide-settings');
+    fireEvent.click(gear);
+    expect(props.onContextOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a loading placeholder while profile models are being fetched', () => {
+    renderComposer({
+      quickPick: {
+        modelValue: 'work\u0000gpt-5',
+        modelOptions: [],
+        modelOptionsLoading: true,
+        reasoningEffort: 'medium',
+        reasoningEffortOptions: ['medium'],
+        onModelChange: vi.fn(),
+        onReasoningEffortChange: vi.fn(),
+      },
+    });
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model quick pick' }));
+    expect(screen.getByRole('option', { name: 'Loading models…' })).toBeDisabled();
+  });
+
   it('uses the automatic multiline layout for drafts with line breaks', () => {
     renderComposer({ draft: 'a\nb\nc' });
 
