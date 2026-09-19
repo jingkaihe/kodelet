@@ -958,30 +958,28 @@ func (m model) reasoningPickerOptionAt(screenX, screenY int) (int, bool) {
 	return optionIndex, true
 }
 
-func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
-	if !m.canChangeReasoningEffort() {
+// composerTopY is the screen row of the composer's top border.
+func (m model) composerTopY() int {
+	return m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() +
+		m.reasoningPickerHeight() + m.modelPickerHeight() +
+		m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+}
+
+func (m model) composerTopBorderContains(screenX, screenY int, bounds func() (int, int, bool)) bool {
+	if screenY != m.composerTopY() {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
-	if screenY != inputTopY {
-		return false
-	}
-	startX, endX, ok := m.reasoningEffortLabelBoundsInBlock()
+	startX, endX, ok := bounds()
 	return ok && blockX >= startX && blockX < endX
 }
 
+func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
+	return m.canChangeReasoningEffort() && m.composerTopBorderContains(screenX, screenY, m.reasoningEffortLabelBoundsInBlock)
+}
+
 func (m model) modelComposerRegionContains(screenX, screenY int) bool {
-	if !m.canChangeModel() {
-		return false
-	}
-	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height() + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.reasoningPickerHeight() + m.modelPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
-	if screenY != inputTopY {
-		return false
-	}
-	startX, endX, ok := m.modelLabelBoundsInBlock()
-	return ok && blockX >= startX && blockX < endX
+	return m.canChangeModel() && m.composerTopBorderContains(screenX, screenY, m.modelLabelBoundsInBlock)
 }
 
 func leftMarginBlock(text string, width int) string {
@@ -1152,34 +1150,9 @@ func (m model) modelLabel() string {
 }
 
 func (m model) modelLabelBoundsInBlock() (startX, endX int, ok bool) {
-	outerWidth := m.inputOuterWidth()
-	if outerWidth <= 2 {
-		return 0, 0, false
-	}
-
-	fillWidth := outerWidth - 2
-	if fillWidth <= 2 {
-		return 0, 0, false
-	}
-
 	plainLabel, showModel, _ := m.inputTopLabelLayout()
-	if !showModel {
-		return 0, 0, false
-	}
-	visibleLabel := fitVisible(plainLabel, fillWidth-2)
 	prefix := formatUsage(m.usage) + composerSettingSeparator
-	if visibleLabel != plainLabel {
-		return 0, 0, false
-	}
-
-	labelWidth := lipgloss.Width(visibleLabel) + 2
-	labelStart := fillWidth - labelWidth - 1
-	if labelStart < 0 {
-		labelStart = 0
-	}
-	startX = 1 + labelStart + 1 + lipgloss.Width(prefix)
-	endX = startX + lipgloss.Width(m.modelLabel())
-	return startX, endX, startX < endX
+	return m.composerSettingBoundsInBlock(plainLabel, prefix, m.modelLabel(), showModel)
 }
 
 func (m model) reasoningEffortLabel() string {
@@ -1187,31 +1160,21 @@ func (m model) reasoningEffortLabel() string {
 }
 
 func (m model) reasoningEffortLabelBoundsInBlock() (startX, endX int, ok bool) {
-	outerWidth := m.inputOuterWidth()
-	if outerWidth <= 2 {
-		return 0, 0, false
-	}
-	fillWidth := outerWidth - 2
-	if fillWidth <= 2 {
-		return 0, 0, false
-	}
-
 	plainLabel, _, showEffort := m.inputTopLabelLayout()
-	if !showEffort {
-		return 0, 0, false
-	}
-	visibleLabel := fitVisible(plainLabel, fillWidth-2)
-	if visibleLabel != plainLabel {
-		return 0, 0, false
-	}
-	labelWidth := lipgloss.Width(visibleLabel) + 2
-	labelStart := fillWidth - labelWidth - 1
-	if labelStart < 0 {
-		labelStart = 0
-	}
 	prefix := strings.TrimSuffix(plainLabel, m.reasoningEffortLabel())
+	return m.composerSettingBoundsInBlock(plainLabel, prefix, m.reasoningEffortLabel(), showEffort)
+}
+
+// composerSettingBoundsInBlock locates a setting segment of the right-aligned
+// top border label. Segments are only clickable when the whole label fits.
+func (m model) composerSettingBoundsInBlock(plainLabel, prefix, segment string, shown bool) (startX, endX int, ok bool) {
+	fillWidth := m.inputOuterWidth() - 2
+	if fillWidth <= 2 || !shown || fitVisible(plainLabel, fillWidth-2) != plainLabel {
+		return 0, 0, false
+	}
+	labelStart := max(0, fillWidth-lipgloss.Width(plainLabel)-3)
 	startX = 1 + labelStart + 1 + lipgloss.Width(prefix)
-	endX = startX + lipgloss.Width(m.reasoningEffortLabel())
+	endX = startX + lipgloss.Width(segment)
 	return startX, endX, startX < endX
 }
 

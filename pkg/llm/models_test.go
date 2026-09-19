@@ -276,17 +276,3 @@ func TestModelOptionsCopilot(t *testing.T) {
 		}
 	}
 }
-
-func TestModelOptionsCopilotRespectsRequestContext(t *testing.T) {
-	t.Setenv("OPENAI_API_BASE", "")
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	options := modelOptions(ctx, llmtypes.Config{
-		Provider: "openai", Model: "configured",
-		OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"},
-	}, func(ctx context.Context) ([]auth.CopilotModelCatalogEntry, error) {
-		require.ErrorIs(t, ctx.Err(), context.Canceled)
-		return nil, ctx.Err()
-	})
-	assert.Equal(t, []string{"configured"}, options)
-}

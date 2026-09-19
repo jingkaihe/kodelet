@@ -162,17 +162,15 @@ func (r *configuredChatRunner) AppendMessageHistory(ctx context.Context, target 
 }
 
 func (r *configuredChatRunner) Run(ctx context.Context, request chatpkg.ChatRequest, sink chatpkg.ChatEventSink) (string, error) {
-	var selectedModel *string
+	// The TUI only sends the model it selected; every other option comes from the CLI.
+	options := r.options.Clone()
 	if request.Options != nil && request.Options.Model != nil {
-		selectedModel = new(*request.Options.Model)
-	}
-	request.Options = r.options.Clone()
-	if selectedModel != nil {
-		if request.Options == nil {
-			request.Options = &llmtypes.ExecutionOptions{}
+		if options == nil {
+			options = &llmtypes.ExecutionOptions{}
 		}
-		request.Options.Model = selectedModel
+		options.Model = new(*request.Options.Model)
 	}
+	request.Options = options
 	var history chatpkg.ConversationHistory
 	var err error
 	if request.ConversationID != "" {
@@ -501,23 +499,22 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requ
 				return "", nil, nil, "", errors.Wrapf(err, "failed to load profile %s", name)
 			}
 		}
-		settings[name] = tui.ProfileSettings{
-			Model:                  profileSettings.Model,
-			ModelOptions:           append([]string(nil), profileSettings.ModelOptions...),
-			ReasoningEffort:        profileSettings.ReasoningEffort,
-			ReasoningEffortOptions: append([]string(nil), profileSettings.ReasoningEffortOptions...),
-		}
+		settings[name] = tuiProfileSettings(profileSettings)
 	}
 	if _, ok := remoteProfileSettings(settings, profile); !ok {
 		options = append(options, profile)
-		settings[profile] = tui.ProfileSettings{
-			Model:                  selected.Model,
-			ModelOptions:           append([]string(nil), selected.ModelOptions...),
-			ReasoningEffort:        selected.ReasoningEffort,
-			ReasoningEffortOptions: append([]string(nil), selected.ReasoningEffortOptions...),
-		}
+		settings[profile] = tuiProfileSettings(selected)
 	}
 	return profile, options, settings, strings.TrimSpace(selected.DefaultCWD), nil
+}
+
+func tuiProfileSettings(settings chatpkg.ControlPlaneChatSettings) tui.ProfileSettings {
+	return tui.ProfileSettings{
+		Model:                  settings.Model,
+		ModelOptions:           append([]string(nil), settings.ModelOptions...),
+		ReasoningEffort:        settings.ReasoningEffort,
+		ReasoningEffortOptions: append([]string(nil), settings.ReasoningEffortOptions...),
+	}
 }
 
 func remoteProfileSettings(settings map[string]tui.ProfileSettings, profile string) (tui.ProfileSettings, bool) {

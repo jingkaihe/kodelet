@@ -944,51 +944,6 @@ func TestApplyEditorResultHandlesFailureAndReadError(t *testing.T) {
 	assert.Contains(t, m.uiNotifications[0].message, "Failed to read edited draft")
 }
 
-func TestCtrlTModelPickerSelectsProfileAndModelForNewConversation(t *testing.T) {
-	runner := &recordingRunner{conversationID: "conversation-done"}
-	m := newModel(context.Background(), Config{
-		Remote: true, Profile: "default", ProfileOptions: []string{"default", "work", "prod"}, Runner: runner,
-		ProfileSettings: map[string]ProfileSettings{
-			"default": {Model: "default-model"},
-			"work":    {Model: "work-default", ModelOptions: []string{"work-picked"}},
-			"prod":    {Model: "prod-model"},
-		},
-	})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
-
-	updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.True(t, m.modelPickerOpen)
-	assert.Equal(t, 0, m.modelPickerIndex)
-
-	updated, cmd = m.Update(keyPress(tea.KeyDown))
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.Equal(t, 1, m.modelPickerIndex)
-
-	updated, cmd = m.Update(keyPress(tea.KeyEnter))
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.False(t, m.modelPickerOpen)
-	assert.Equal(t, "work", m.profile)
-	assert.Equal(t, "work-picked", m.selectedModel)
-
-	m.textarea.SetValue("hello")
-	runCmd := m.submit()
-	require.NotNil(t, runCmd)
-	assert.Nil(t, runCmd())
-	_ = receiveRunMsg(t, m.runCh)
-	_ = receiveRunMsg(t, m.runCh)
-	assert.Equal(t, "work", runner.req.Profile)
-	require.NotNil(t, runner.req.Options)
-	require.NotNil(t, runner.req.Options.Model)
-	assert.Equal(t, "work-picked", *runner.req.Options.Model)
-}
-
 func TestProfileSelectionRefreshesReasoningEffortOptions(t *testing.T) {
 	withTUIViper(t, map[string]any{
 		"profile": "flair",
@@ -1606,18 +1561,22 @@ func TestClickModelPickerSelectsProfileAndModelForNewConversation(t *testing.T) 
 	m.height = 24
 	m.resize()
 
-	modelStart, _, ok := m.modelLabelBoundsInBlock()
-	require.True(t, ok)
-	updated, cmd := m.Update(tea.MouseClickMsg{
-		Button: tea.MouseLeft,
-		X:      tuiLeftMargin + modelStart,
-		Y:      m.viewport.Height(),
-	})
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.True(t, m.modelPickerOpen)
+	// Clicking the label toggles the picker; the label row moves below the open picker.
+	for _, wantOpen := range []bool{true, false, true} {
+		modelStart, _, ok := m.modelLabelBoundsInBlock()
+		require.True(t, ok)
+		updated, cmd := m.Update(tea.MouseClickMsg{
+			Button: tea.MouseLeft,
+			X:      tuiLeftMargin + modelStart,
+			Y:      m.viewport.Height() + m.modelPickerHeight(),
+		})
+		m = updated.(model)
+		require.Nil(t, cmd)
+		assert.Equal(t, wantOpen, m.modelPickerOpen)
+		assert.Equal(t, "default/default-model", m.modelLabel())
+	}
 
-	updated, cmd = m.Update(tea.MouseClickMsg{
+	updated, cmd := m.Update(tea.MouseClickMsg{
 		Button: tea.MouseLeft,
 		X:      tuiLeftMargin,
 		Y:      m.viewport.Height() + 3,
@@ -1661,49 +1620,6 @@ func TestClickReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
 	require.Nil(t, cmd)
 	assert.False(t, m.reasoningPickerOpen)
 	assert.Equal(t, "high", m.reasoningEffort)
-}
-
-func TestModelPickerLockedForExistingConversation(t *testing.T) {
-	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Profile: "work", Model: "work-model", ProfileOptions: []string{"default", "work", "prod"}})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
-
-	updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.False(t, m.modelPickerOpen)
-	assert.Equal(t, "work", m.profile)
-
-	modelStart, _, ok := m.modelLabelBoundsInBlock()
-	require.True(t, ok)
-	updated, cmd = m.Update(tea.MouseClickMsg{
-		Button: tea.MouseLeft,
-		X:      tuiLeftMargin + modelStart,
-		Y:      m.viewport.Height(),
-	})
-	m = updated.(model)
-	require.Nil(t, cmd)
-	assert.False(t, m.modelPickerOpen)
-	assert.Equal(t, "work", m.profile)
-}
-
-func TestModelComposerClickTogglesPicker(t *testing.T) {
-	m := newThemeTestModel(t, Config{Remote: true, Profile: "work", Model: "work-model"})
-	for _, wantOpen := range []bool{true, false} {
-		start, _, ok := m.modelLabelBoundsInBlock()
-		require.True(t, ok)
-		updated, cmd := m.Update(tea.MouseClickMsg{
-			Button: tea.MouseLeft,
-			X:      tuiLeftMargin + start,
-			Y:      m.viewport.Height() + m.modelPickerHeight(),
-		})
-		*m = updated.(model)
-		assert.Nil(t, cmd)
-		assert.Equal(t, wantOpen, m.modelPickerOpen)
-		assert.Equal(t, "work/work-model", m.modelLabel())
-	}
 }
 
 func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {

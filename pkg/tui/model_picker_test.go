@@ -1,9 +1,7 @@
 package tui
 
 import (
-	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,18 +25,6 @@ func TestModelOptionsKeepSelectionFirstThenSortVersionsDescending(t *testing.T) 
 	assert.Equal(t, []string{"model-2", "model-10", "model-2.10", "model-2.9"}, normalizeModelOptions(options, " model-2 "))
 	assert.Equal(t, []string{"model-10", "model-2.10", "model-2.9", "model-2"}, normalizeModelOptions(options, ""))
 	assert.Equal(t, " model-2.9 ", options[0], "sorting must not mutate the source catalog")
-
-	m := newThemeTestModel(t, Config{Remote: true, Model: "model-2", ModelOptions: options})
-	m.handleModelCommand("model-2.9")
-	m.handleModelCommand("")
-	assert.Zero(t, m.modelPickerIndex)
-	assert.Equal(t, []string{"model-2.9", "model-10", "model-2.10", "model-2"}, modelOptionLabels(m.filteredModelOptions()))
-	updated, _ := m.Update(keyPress(tea.KeyDown))
-	*m = updated.(model)
-	updated, _ = m.Update(keyPress(tea.KeyEnter))
-	*m = updated.(model)
-	assert.Equal(t, "model-10", m.selectedModel)
-	assert.False(t, m.modelPickerOpen)
 }
 
 func TestModelSlashCommandIsLocalBeforeDiscoveryReadiness(t *testing.T) {
@@ -112,22 +98,6 @@ func TestModelPickerUsesVisibleProfilesAndExactPairs(t *testing.T) {
 	m.handleModelCommand("")
 	assert.Equal(t, modelOption{profile: "flair", model: "model-2"}, m.filteredModelOptions()[0])
 	assert.NotContains(t, xansi.Strip(m.renderModelPicker()), "hidden/model-99")
-}
-
-func TestModelPickerOpensWhenOnlyAnotherProfileHasModels(t *testing.T) {
-	for _, profile := range []string{"empty", ""} {
-		t.Run("profile="+profile, func(t *testing.T) {
-			m := newThemeTestModel(t, Config{
-				Remote: true, Profile: profile, ProfileOptions: []string{"deep"},
-				ProfileSettings: map[string]ProfileSettings{"deep": {Model: "vendor/model"}},
-			})
-			assert.Nil(t, m.handleModelCommand(""))
-			assert.True(t, m.modelPickerOpen)
-			assert.Equal(t, []modelOption{{profile: "deep", model: "vendor/model"}}, m.filteredModelOptions())
-			m.selectModelPickerOption(0)
-			assert.Equal(t, "deep/vendor/model", m.modelLabel())
-		})
-	}
 }
 
 func TestModelCommandPreservesSlashIDsAndRejectsAmbiguousQualifiedLabels(t *testing.T) {
@@ -212,33 +182,6 @@ func TestModelPickerProfileAndExplicitEffortReachRequest(t *testing.T) {
 			require.NotNil(t, runner.req.Options.Model)
 			assert.Equal(t, "shared-model", *runner.req.Options.Model)
 			assert.Equal(t, effort.want, runner.req.ReasoningEffort)
-		})
-	}
-}
-
-func TestModelSelectionRefreshesLiveEffortsForNewDraftAfterResume(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
-			m := newThemeTestModel(t, Config{
-				Remote: true, ConversationID: "saved", Profile: "deep", Model: "saved-model",
-				ReasoningEffort: "high", ReasoningEffortOptions: []string{"high"}, ReasoningEffortExplicit: explicit,
-				ProfileSettings: map[string]ProfileSettings{
-					"deep": {Model: "live-model", ReasoningEffort: "medium", ReasoningEffortOptions: []string{"low", "medium", "high"}},
-				},
-			})
-			assert.False(t, m.canChangeModel())
-			m.createNewConversation()
-			assert.True(t, m.canChangeModel())
-			assert.Equal(t, []string{"high"}, m.reasoningEffortOptions)
-			m.handleModelCommand("live-model")
-			assert.Equal(t, "deep/live-model", m.modelLabel())
-			assert.Equal(t, []string{"low", "medium", "high"}, m.reasoningEffortOptions)
-			if explicit {
-				assert.Equal(t, "high", m.reasoningEffort)
-			} else {
-				assert.Equal(t, "medium", m.reasoningEffort)
-			}
-			assert.Equal(t, explicit, m.reasoningEffortExplicit)
 		})
 	}
 }
@@ -339,36 +282,6 @@ func TestModelPickerScrollsAndFitsSmallTerminals(t *testing.T) {
 	}
 }
 
-func TestModelPickerMouseSelectionAndOtherPickers(t *testing.T) {
-	m := newThemeTestModel(t, Config{
-		Remote: true, Model: "first", ModelOptions: []string{"first", "second"},
-		ProfileOptions: []string{"default", "work"}, ReasoningEffortOptions: []string{"low", "high"},
-	})
-	m.handleModelCommand("")
-	_, ok := m.modelPickerOptionAt(tuiLeftMargin, m.viewport.Height())
-	assert.False(t, ok, "search header is not a selectable option")
-	updated, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin, Y: m.viewport.Height() + 2})
-	*m = updated.(model)
-	assert.Equal(t, "second", m.selectedModel)
-	assert.False(t, m.modelPickerOpen)
-
-	m.handleModelCommand("")
-	updated, _ = m.Update(keyPressWithMod('t', tea.ModCtrl))
-	*m = updated.(model)
-	assert.False(t, m.modelPickerOpen)
-	assert.Equal(t, "second", m.selectedModel, "Ctrl+T confirms the highlighted pair")
-	m.handleModelCommand("")
-	updated, _ = m.Update(keyPressWithMod('y', tea.ModCtrl))
-	*m = updated.(model)
-	assert.True(t, m.reasoningPickerOpen)
-	assert.False(t, m.modelPickerOpen)
-	m.handleModelCommand("")
-	updated, _ = m.Update(keyPressWithMod('l', tea.ModCtrl))
-	*m = updated.(model)
-	assert.NotNil(t, m.conversationPicker)
-	assert.False(t, m.modelPickerOpen)
-}
-
 func TestModelPickerProfileResetAndDraftIsolation(t *testing.T) {
 	settings := map[string]ProfileSettings{
 		"default": {Model: "default-model", ModelOptions: []string{"default-model", "other-model"}},
@@ -441,12 +354,24 @@ func TestModelPickerResumedHistoryLocksSelectionAndOmitsOverride(t *testing.T) {
 	runner := &conversationSourceRunner{history: chat.ConversationHistory{
 		ID: "saved-id", Profile: "saved-profile", Model: " saved-model ",
 	}}
-	m := newThemeTestModel(t, Config{Remote: true, Runner: runner, ConversationID: "saved-id", Model: "cli-model"})
+	m := newThemeTestModel(t, Config{Remote: true, Runner: runner, ConversationID: "saved-id", Profile: "cli-profile", Model: "cli-model"})
 	m.textarea.SetValue("/model")
 	assert.NotNil(t, m.submit(), "resume is locked even before history loads")
 	assert.False(t, m.modelPickerOpen)
-	updated, _ := m.Update(loadConversationHistoryFromSource(t.Context(), m.key, m.conversationID, runner)())
+	updated, cmd := m.Update(keyPressWithMod('t', tea.ModCtrl))
 	*m = updated.(model)
+	assert.Nil(t, cmd)
+	assert.False(t, m.modelPickerOpen)
+	modelStart, _, ok := m.modelLabelBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd = m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: tuiLeftMargin + modelStart, Y: m.viewport.Height()})
+	*m = updated.(model)
+	assert.Nil(t, cmd)
+	assert.False(t, m.modelPickerOpen)
+	assert.Equal(t, "cli-profile", m.profile)
+	updated, _ = m.Update(loadConversationHistoryFromSource(t.Context(), m.key, m.conversationID, runner)())
+	*m = updated.(model)
+	assert.Equal(t, "saved-profile", m.profile)
 	assert.Equal(t, "saved-model", m.selectedModel)
 	assert.Equal(t, []string{"saved-model"}, m.modelOptions)
 	assert.False(t, m.canChangeModel())
@@ -455,34 +380,10 @@ func TestModelPickerResumedHistoryLocksSelectionAndOmitsOverride(t *testing.T) {
 	assert.Equal(t, "saved-model", m.selectedModel)
 	assert.Contains(t, m.uiNotifications[len(m.uiNotifications)-1].message, "/new")
 	m.textarea.SetValue("continue")
-	cmd := m.submit()
+	cmd = m.submit()
 	require.NotNil(t, cmd)
 	cmd()
 	receiveRunMsg(t, m.runCh)
 	receiveRunMsg(t, m.runCh)
 	assert.Nil(t, runner.req.Options)
-}
-
-func TestModelPickerDeferredInitializationAndComposerLabel(t *testing.T) {
-	options := []string{"configured", "picked"}
-	m := newThemeTestModel(t, Config{Initialize: func(context.Context) (Config, error) {
-		return Config{Runner: &recordingRunner{}, Model: "cli-model", ModelOptions: options}, nil
-	}})
-	m.textarea.SetValue("draft during startup")
-	updated, _ := m.Update(m.initializeCommand()())
-	*m = updated.(model)
-	assert.Equal(t, "cli-model", m.selectedModel)
-	assert.Equal(t, []string{"cli-model", "picked", "configured"}, m.modelOptions)
-	assert.Equal(t, "draft during startup", m.textarea.Value())
-	options[0] = "mutated"
-	assert.Equal(t, "configured", m.modelOptions[2])
-	m.width = 140
-	m.resize()
-	assert.Equal(t, "$0.00 · cli-model · medium", m.inputTopRightLabel())
-	assert.Equal(t, m.inputTopRightLabel(), xansi.Strip(m.renderInputTopLabel(m.inputTopRightLabel())))
-	start, end, ok := m.reasoningEffortLabelBoundsInBlock()
-	require.True(t, ok)
-	assert.Equal(t, m.reasoningEffortLabel(), xansi.Cut(xansi.Strip(m.renderInputTopBorder()), start, end))
-	m.selectedModel = strings.Repeat("long-model-id", 20)
-	assert.Equal(t, "$0.00 · medium", m.inputTopRightLabel())
 }

@@ -24,32 +24,48 @@ func (option modelOption) label() string {
 	return option.profile + "/" + option.model
 }
 
-func normalizeModelOptions(options []string, selected string) []string {
-	selected = strings.TrimSpace(selected)
-	normalized := make([]string, 0, len(options)+1)
-	seen := make(map[string]bool, len(options)+1)
-	for _, option := range append(append([]string(nil), options...), selected) {
-		option = strings.TrimSpace(option)
-		if option != "" && !seen[option] {
-			normalized = append(normalized, option)
-			seen[option] = true
-		}
-	}
-	// Keep the selection visible, then show higher versions first within each
-	// model family. Model IDs alone do not establish release dates across families.
+// sortModelOptions keeps the selection first, then shows higher versions first
+// within each model family. Model IDs alone do not establish release dates
+// across families.
+func sortModelOptions(options []modelOption, selected modelOption) {
 	ordering := collate.New(language.English, collate.Numeric)
-	slices.SortFunc(normalized, func(a, b string) int {
-		if a == b {
+	slices.SortFunc(options, func(a, b modelOption) int {
+		switch {
+		case a == b:
 			return 0
-		}
-		if a == selected {
+		case a == selected:
 			return -1
-		}
-		if b == selected {
+		case b == selected:
 			return 1
 		}
-		return ordering.CompareString(b, a)
+		if order := ordering.CompareString(b.model, a.model); order != 0 {
+			return order
+		}
+		return strings.Compare(a.profile, b.profile)
 	})
+}
+
+// appendModelOptions adds trimmed, non-empty, unseen IDs for one profile.
+func appendModelOptions(options []modelOption, seen map[modelOption]bool, profile string, ids ...string) []modelOption {
+	for _, id := range ids {
+		option := modelOption{profile: profile, model: strings.TrimSpace(id)}
+		if option.model != "" && !seen[option] {
+			seen[option] = true
+			options = append(options, option)
+		}
+	}
+	return options
+}
+
+func normalizeModelOptions(options []string, selected string) []string {
+	selected = strings.TrimSpace(selected)
+	ids := append(slices.Clone(options), selected)
+	entries := appendModelOptions(nil, make(map[modelOption]bool, len(ids)), "", ids...)
+	sortModelOptions(entries, modelOption{model: selected})
+	normalized := make([]string, len(entries))
+	for index, entry := range entries {
+		normalized[index] = entry.model
+	}
 	return normalized
 }
 
@@ -59,34 +75,17 @@ func (m model) availableModelOptions() []modelOption {
 		profiles = append(profiles, "")
 	}
 	var options []modelOption
+	seen := make(map[modelOption]bool)
 	for _, profile := range profiles {
 		settings, _ := profileSettingsFor(m.profileSettings, profile)
-		models := normalizeModelOptions(settings.ModelOptions, settings.Model)
+		ids := append(slices.Clone(settings.ModelOptions), settings.Model)
 		if strings.EqualFold(profile, m.profile) {
 			profile = m.profile
-			models = normalizeModelOptions(append(models, m.modelOptions...), m.selectedModel)
+			ids = append(append(ids, m.modelOptions...), m.selectedModel)
 		}
-		for _, id := range models {
-			options = append(options, modelOption{profile: profile, model: id})
-		}
+		options = appendModelOptions(options, seen, profile, ids...)
 	}
-	selected := modelOption{profile: m.profile, model: m.selectedModel}
-	ordering := collate.New(language.English, collate.Numeric)
-	slices.SortFunc(options, func(a, b modelOption) int {
-		if a == b {
-			return 0
-		}
-		if a == selected {
-			return -1
-		}
-		if b == selected {
-			return 1
-		}
-		if order := ordering.CompareString(b.model, a.model); order != 0 {
-			return order
-		}
-		return strings.Compare(a.profile, b.profile)
-	})
+	sortModelOptions(options, modelOption{profile: m.profile, model: m.selectedModel})
 	return options
 }
 

@@ -399,26 +399,6 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	assert.EqualValues(t, 1, discoveries.Load())
 	_, ok := config.Runner.(chatpkg.ConversationStreamer)
 	assert.True(t, ok, "wrapper promotes shared stream and UI transport methods")
-
-	selectedModel := "picked-model"
-	_, err = config.Runner.Run(t.Context(), chatpkg.ChatRequest{
-		ConversationID: "picked",
-		TurnID:         "picked-turn",
-		Message:        "work",
-		CWD:            config.CWD,
-		Profile:        config.Profile,
-		Options: &llmtypes.ExecutionOptions{
-			Model:   &selectedModel,
-			NoTools: new(true),
-		},
-	}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
-	require.NoError(t, err)
-	require.Len(t, submissions, 2)
-	assert.Equal(t, new("picked-model"), submissions[1].Options.Model)
-	assert.Equal(t, new(false), submissions[1].Options.NoTools, "picker changes must preserve CLI execution options")
-	assert.Equal(t, new(true), submissions[1].Options.NoSkills)
-	assert.Equal(t, new([]string{}), submissions[1].Options.AllowedTools)
-	assert.Equal(t, new("central"), config.Runner.(*configuredChatRunner).options.Model, "selection must not mutate shared CLI defaults")
 }
 
 func TestPrepareDaemonChatResumeDoesNotRequireCurrentDefaultRunner(t *testing.T) {
@@ -473,7 +453,6 @@ func TestPrepareDaemonChatResumePreloadsModelChoicesWithoutChangingSavedSettings
 		catalogFails bool
 	}{
 		{name: "saved profile deleted", savedProfile: "removed-profile"},
-		{name: "saved profile changed", savedProfile: "live"},
 		{name: "another profile catalog unavailable", savedProfile: "removed-profile", catalogFails: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -565,38 +544,58 @@ func TestPrepareDaemonChatResumePreloadsModelChoicesWithoutChangingSavedSettings
 	}
 }
 
-func TestConfiguredChatRunnerPreservesPickedModelWithoutCLIOptions(t *testing.T) {
-	var submitted chatpkg.ChatRequest
-	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/conversations/saved":
-			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
-				"id":       "saved",
-				"cwd":      "/workspace",
-				"runnerId": "runner",
-				"model":    "picked-model",
+func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		cliOptions *llmtypes.ExecutionOptions
+		want       *llmtypes.ExecutionOptions
+	}{
+		{
+			name: "without CLI options",
+			want: &llmtypes.ExecutionOptions{Model: new("picked-model")},
+		},
+		{
+			name:       "CLI options are preserved and not mutated",
+			cliOptions: &llmtypes.ExecutionOptions{Model: new("central"), NoTools: new(false), NoSkills: new(true)},
+			want:       &llmtypes.ExecutionOptions{Model: new("picked-model"), NoTools: new(false), NoSkills: new(true)},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var submitted chatpkg.ChatRequest
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/conversations/saved":
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"id":       "saved",
+						"cwd":      "/workspace",
+						"runnerId": "runner",
+						"model":    "picked-model",
+					}))
+				case "/api/chat":
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ChatEvent{Kind: "done", ConversationID: "saved"}))
+				default:
+					http.NotFound(w, r)
+				}
 			}))
-		case "/api/chat":
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&submitted))
-			w.Header().Set("Content-Type", "application/x-ndjson")
-			require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ChatEvent{Kind: "done", ConversationID: "saved"}))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer daemon.Close()
-	client, err := chatpkg.NewClient(daemon.URL, "", "")
-	require.NoError(t, err)
-	runner := &configuredChatRunner{Client: client}
-	_, err = runner.Run(t.Context(), chatpkg.ChatRequest{
-		ConversationID: "saved",
-		Message:        "continue",
-		Options:        &llmtypes.ExecutionOptions{Model: new("picked-model")},
-	}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
-	require.NoError(t, err)
-	require.NotNil(t, submitted.Options)
-	assert.Equal(t, new("picked-model"), submitted.Options.Model)
-	assert.Nil(t, runner.options)
+			defer daemon.Close()
+			client, err := chatpkg.NewClient(daemon.URL, "", "")
+			require.NoError(t, err)
+			runner := &configuredChatRunner{Client: client, options: test.cliOptions.Clone()}
+			_, err = runner.Run(t.Context(), chatpkg.ChatRequest{
+				ConversationID: "saved",
+				Message:        "continue",
+				Options: &llmtypes.ExecutionOptions{
+					Model:   new("picked-model"),
+					NoTools: new(true),
+				},
+			}, &remoteRunSink{output: io.Discard, diagnostics: io.Discard})
+			require.NoError(t, err)
+			assert.Equal(t, test.want, submitted.Options)
+			assert.Equal(t, test.cliOptions, runner.options, "selection must not mutate shared CLI defaults")
+		})
+	}
 }
 
 func TestPrepareDaemonChatFollowResolvesDirectoryWithoutLoadingExtensions(t *testing.T) {

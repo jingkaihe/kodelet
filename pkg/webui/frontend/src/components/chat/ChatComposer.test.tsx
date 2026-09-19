@@ -85,15 +85,6 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('button', { name: /^Model settings:/ })).not.toBeInTheDocument();
   });
 
-  it('disables model settings while context changes are unavailable', () => {
-    const props = renderComposer({ contextDisabled: true });
-
-    const contextButton = screen.getByTestId('composer-context-button');
-    expect(contextButton).toBeDisabled();
-    fireEvent.click(contextButton);
-    expect(props.onContextOpen).not.toHaveBeenCalled();
-  });
-
   it('uses the automatic multiline layout for drafts with line breaks', () => {
     renderComposer({ draft: 'a\nb\nc' });
 

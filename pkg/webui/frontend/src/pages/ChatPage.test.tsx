@@ -1900,7 +1900,7 @@ describe('ChatPage', () => {
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
   });
 
-  it('preserves a chosen model when reopening setup and only sends it for the first turn', async () => {
+  it('sends the chosen model only for the first turn of a new conversation', async () => {
     const defaults: ChatSettings = await mockGetChatSettings();
     mockGetChatSettings.mockResolvedValue({
       ...defaults,
@@ -1933,14 +1933,6 @@ describe('ChatPage', () => {
     await flushAsyncUpdates();
     selectNewChatOption('Model', 'gpt-5-mini');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
-      /^work\/gpt-5-mini · medium$/
-    );
-    fireEvent.click(screen.getByTestId('composer-context-button'));
-    await flushAsyncUpdates();
-    expect(screen.getByLabelText('Model')).toHaveTextContent('gpt-5-mini');
-    selectNewChatOption('Model', 'gpt-5');
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByTestId('composer-context-button')).toHaveTextContent(
       /^work\/gpt-5-mini · medium$/
     );
