@@ -393,7 +393,6 @@ func TestResponsesToolFailureTakesPrecedenceOverStreamFailure(t *testing.T) {
 			_, _, _, err := thread.processMessageExchangeWithStreamRetries(
 				ctx, &captureStreamHandler{}, "model", responses.ResponseNewParams{Model: "model"}, nil,
 				newStream,
-				func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) error { return stream.Close() },
 				thread.readStream, llmtypes.MessageOpt{DisableUsageLog: true}, func() {}, "https",
 			)
 			if tc.toolErr != nil {

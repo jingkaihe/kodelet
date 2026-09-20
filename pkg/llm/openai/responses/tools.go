@@ -28,11 +28,6 @@ func buildToolsForThread(thread llmtypes.Thread, state tooltypes.State, noToolUs
 	return buildToolsWithAllowed(state, noToolUse, currentAllowedTools(thread))
 }
 
-// buildTools creates the tool definitions for the Responses API.
-func buildTools(state tooltypes.State) []responses.ToolUnionParam {
-	return buildToolsWithAllowed(state, false, nil)
-}
-
 func buildToolsWithAllowed(state tooltypes.State, noToolUse bool, extensionAllowedTools []string) []responses.ToolUnionParam {
 	var config llmtypes.Config
 	if state != nil {

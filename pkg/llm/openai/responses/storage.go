@@ -181,11 +181,7 @@ func messageInputItemFromStoredItem(item StoredInputItem) (responses.ResponseInp
 		}
 		return outputItem, true
 	case "user", "system", "developer":
-		parsedRole, ok := parseStoredMessageRole(role)
-		if !ok {
-			return responses.ResponseInputItemUnionParam{}, false
-		}
-		return responses.ResponseInputItemParamOfMessage(item.Content, parsedRole), true
+		return responses.ResponseInputItemParamOfMessage(item.Content, responses.EasyInputMessageRole(role)), true
 	default:
 		return responses.ResponseInputItemUnionParam{}, false
 	}
