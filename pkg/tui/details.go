@@ -59,7 +59,9 @@ func (m *model) toggleAllDetails() {
 }
 
 func isDetailBlock(block assistantBlock) bool {
-	return (block.kind == blockThoughts && len(block.thoughts) > 0) || (block.kind == blockTools && len(block.tools) > 0)
+	return (block.kind == blockThoughts && len(block.thoughts) > 0) ||
+		(block.kind == blockTools && len(block.tools) > 0) ||
+		(block.kind == blockCompaction && block.compaction != nil && strings.TrimSpace(block.compaction.Summary) != "")
 }
 
 func (m *model) toggleDetailAt(screenY int) bool {

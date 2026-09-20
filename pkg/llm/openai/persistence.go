@@ -190,6 +190,10 @@ func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []o
 	if err != nil {
 		return convtypes.ConversationRecord{}, errors.Wrap(err, "error marshaling messages")
 	}
+	history := t.GetCompactionHistory()
+	if err := history.Validate(messagesJSON); err != nil {
+		return convtypes.ConversationRecord{}, err
+	}
 
 	metadata["model"] = t.Config.Model
 	metadata["api_mode"] = "chat_completions"
@@ -217,16 +221,17 @@ func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []o
 	}
 
 	return convtypes.ConversationRecord{
-		ID:          t.ConversationID,
-		CWD:         t.Config.WorkingDirectory,
-		RawMessages: messagesJSON,
-		Provider:    "openai",
-		Usage:       t.GetUsage(),
-		Metadata:    metadata,
-		Summary:     name,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ToolResults: toolResults,
+		ID:                t.ConversationID,
+		CWD:               t.Config.WorkingDirectory,
+		RawMessages:       messagesJSON,
+		CompactionHistory: history,
+		Provider:          "openai",
+		Usage:             t.GetUsage(),
+		Metadata:          metadata,
+		Summary:           name,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		ToolResults:       toolResults,
 	}, nil
 }
 
@@ -268,8 +273,12 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
 		return
 	}
+	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
+		return
+	}
 
 	t.messages = cleanedOpenAIMessages(messages)
+	t.SetCompactionHistory(record.CompactionHistory)
 	t.Usage = &record.Usage
 	t.SetMetadata(record.Metadata)
 	// Restore structured tool results

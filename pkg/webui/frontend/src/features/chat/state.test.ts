@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatRenderMessage, Conversation } from '../../types';
+import type { ChatRenderMessage, CompactionMarker, Conversation, Message } from '../../types';
 import { applyChatStreamEvent, conversationToChatMessages } from './state';
 
 describe('conversationToChatMessages', () => {
@@ -812,5 +812,165 @@ describe('applyChatStreamEvent', () => {
         },
       ],
     });
+  });
+});
+
+describe('compaction history and streaming', () => {
+  const apiCompaction: CompactionMarker = {
+    id: 'compact-1',
+    method: 'api',
+    createdAt: '2026-09-20T12:00:00Z',
+  };
+  const summaryCompaction: CompactionMarker = {
+    id: 'compact-2',
+    method: 'summary',
+    summary: '**Progress**\n\nThe repository has been inspected.',
+    createdAt: '2026-09-20T12:10:00Z',
+  };
+  const conversation: Conversation = {
+    id: 'compacted-history',
+    createdAt: '',
+    updatedAt: '',
+    messageCount: 2,
+    messages: [
+      { role: 'user', content: 'Inspect the repository.' },
+      {
+        role: 'assistant',
+        content: 'Done.',
+        thinkingTexts: ['Inspecting files.'],
+        toolCalls: [{ id: 'tool-1', function: { name: 'bash', arguments: '{"command":"ls"}' } }],
+      },
+    ],
+    toolResults: {
+      'tool-1': { toolName: 'bash', success: true, metadata: { output: 'README.md' } },
+    },
+  };
+
+  it.each([
+    false,
+    true,
+  ])('preserves all history across repeated compactions and replay (before current user: %s)', (beforeCurrentUser) => {
+    const original = conversationToChatMessages(conversation);
+    const originalSnapshot = JSON.stringify(original);
+    let live = original;
+    const persisted: Message[] = [...(conversation.messages || [])];
+
+    for (const [index, compaction] of [apiCompaction, summaryCompaction].entries()) {
+      const user: Message = { role: 'user', content: `Continue ${index + 1}.` };
+      const marker: Message = {
+        role: 'assistant',
+        kind: 'context-compacted',
+        content: 'Context compacted',
+        compaction,
+      };
+      live = applyChatStreamEvent(live, { kind: 'user-message', content: user.content });
+      const event = {
+        kind: 'context-compacted' as const,
+        compaction,
+        before_current_user: beforeCurrentUser,
+      };
+      live = applyChatStreamEvent(live, event);
+      expect(applyChatStreamEvent(live, event)).toEqual(live);
+      live = applyChatStreamEvent(live, { kind: 'text-delta', delta: 'Done.' });
+      live = applyChatStreamEvent(live, { kind: 'content-end' });
+
+      persisted.push(...(beforeCurrentUser ? [marker, user] : [user, marker]));
+      persisted.push({ role: 'assistant', content: 'Done.' });
+    }
+
+    const replayed = conversationToChatMessages({ ...conversation, messages: persisted });
+    expect(live).toEqual(replayed);
+    expect(JSON.stringify(original)).toBe(originalSnapshot);
+    expect(replayed[0]).toEqual(original[0]);
+    expect(replayed[1].blocks?.slice(0, 3)).toEqual(original[1].blocks);
+    expect(
+      replayed
+        .flatMap((message) => message.blocks || [])
+        .filter((block) => block.type === 'compaction')
+    ).toEqual([
+      { type: 'compaction', compaction: apiCompaction },
+      { type: 'compaction', compaction: summaryCompaction },
+    ]);
+
+    // An older completion arriving after reload must not move or duplicate its marker.
+    expect(
+      applyChatStreamEvent(replayed, {
+        kind: 'context-compacted',
+        compaction: apiCompaction,
+        before_current_user: true,
+      })
+    ).toEqual(replayed);
+    expect(
+      conversationToChatMessages({
+        ...conversation,
+        messages: [
+          ...persisted,
+          { role: 'assistant', kind: 'context-compacted', compaction: apiCompaction, content: '' },
+        ],
+      })
+    ).toEqual(replayed);
+  });
+
+  it('inserts a pre-turn marker before the latest user even with an assistant tail', () => {
+    const submittedUser: Message = { role: 'user', content: 'Continue.' };
+    const answer: Message = { role: 'assistant', content: 'Already streaming.' };
+    const previous = conversationToChatMessages({
+      ...conversation,
+      messages: [...(conversation.messages || []), submittedUser, answer],
+    });
+    const updated = applyChatStreamEvent(previous, {
+      kind: 'context-compacted',
+      compaction: apiCompaction,
+      before_current_user: true,
+    });
+    expect(updated[1].blocks?.[3]).toEqual({ type: 'compaction', compaction: apiCompaction });
+    expect(updated.slice(2)).toEqual(previous.slice(2));
+    expect(updated).toEqual(
+      conversationToChatMessages({
+        ...conversation,
+        messages: [
+          ...(conversation.messages || []),
+          { role: 'assistant', kind: 'context-compacted', compaction: apiCompaction, content: '' },
+          submittedUser,
+          answer,
+        ],
+      })
+    );
+  });
+
+  it('can insert a pre-turn marker before the first visible user', () => {
+    const user: ChatRenderMessage = { role: 'user', content: 'Continue.' };
+    const updated = applyChatStreamEvent([user], {
+      kind: 'context-compacted',
+      compaction: apiCompaction,
+      before_current_user: true,
+    });
+    expect(updated).toEqual([
+      { role: 'assistant', blocks: [{ type: 'compaction', compaction: apiCompaction }] },
+      user,
+    ]);
+  });
+
+  it.each([
+    'text',
+    'thinking',
+  ] as const)('does not deduplicate repeated %s across a compaction boundary', (kind) => {
+    const blockType = kind === 'text' ? 'message' : 'thinking';
+    let messages = applyChatStreamEvent([], { kind, content: 'Done.' });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'context-compacted',
+      compaction: summaryCompaction,
+    });
+    messages = applyChatStreamEvent(messages, { kind, content: 'Done.' });
+    expect(messages[0].blocks).toEqual([
+      { type: blockType, content: 'Done.', inProgress: false },
+      { type: 'compaction', compaction: summaryCompaction },
+      { type: blockType, content: 'Done.', inProgress: false },
+    ]);
+  });
+
+  it('ignores a compaction event without a marker', () => {
+    const messages = conversationToChatMessages(conversation);
+    expect(applyChatStreamEvent(messages, { kind: 'context-compacted' })).toEqual(messages);
   });
 });

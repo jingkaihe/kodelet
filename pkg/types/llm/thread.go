@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -21,6 +22,14 @@ var ErrConversationForkUnavailable = errors.New("conversation persistence is not
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+// CompactionMarker describes a completed context replacement for display, not inference.
+type CompactionMarker struct {
+	ID        string    `json:"id"`
+	Method    string    `json:"method"` // "api" or "summary"
+	Summary   string    `json:"summary,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // MessageOpt represents options for sending messages

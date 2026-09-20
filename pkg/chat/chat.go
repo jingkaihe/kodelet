@@ -91,31 +91,33 @@ type ChatImageURLSource struct {
 
 // ChatEvent is a single streaming chat event.
 type ChatEvent struct {
-	Kind             string                          `json:"kind"`
-	ConversationID   string                          `json:"conversation_id,omitempty"`
-	ConversationName string                          `json:"conversation_name,omitempty"`
-	CWD              string                          `json:"cwd,omitempty"`
-	Role             string                          `json:"role,omitempty"`
-	Delta            string                          `json:"delta,omitempty"`
-	Content          any                             `json:"content,omitempty"`
-	Usage            *llmtypes.Usage                 `json:"usage,omitempty"`
-	ToolName         string                          `json:"tool_name,omitempty"`
-	ToolCallID       string                          `json:"tool_call_id,omitempty"`
-	Input            string                          `json:"input,omitempty"`
-	ToolOutput       string                          `json:"tool_output,omitempty"`
-	ToolResult       *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
-	UIInput          *UIInputEvent                   `json:"ui_input,omitempty"`
-	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
-	UISelect         *UISelectEvent                  `json:"ui_select,omitempty"`
-	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
-	UIRequestID      string                          `json:"ui_request_id,omitempty"`
-	UIWidget         *UIWidgetEvent                  `json:"ui_widget,omitempty"`
-	UIWidgets        []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
-	UIWidgetRevision string                          `json:"ui_widget_revision,omitempty"`
-	UIPersistent     *UIPersistentEvent              `json:"ui_persistent,omitempty"`
-	Cancelled        bool                            `json:"cancelled,omitempty"`
-	Error            string                          `json:"error,omitempty"`
-	Result           *string                         `json:"result,omitempty"`
+	Kind              string                          `json:"kind"`
+	ConversationID    string                          `json:"conversation_id,omitempty"`
+	ConversationName  string                          `json:"conversation_name,omitempty"`
+	CWD               string                          `json:"cwd,omitempty"`
+	Role              string                          `json:"role,omitempty"`
+	Delta             string                          `json:"delta,omitempty"`
+	Content           any                             `json:"content,omitempty"`
+	Usage             *llmtypes.Usage                 `json:"usage,omitempty"`
+	Compaction        *llmtypes.CompactionMarker      `json:"compaction,omitempty"`
+	BeforeCurrentUser bool                            `json:"before_current_user,omitempty"`
+	ToolName          string                          `json:"tool_name,omitempty"`
+	ToolCallID        string                          `json:"tool_call_id,omitempty"`
+	Input             string                          `json:"input,omitempty"`
+	ToolOutput        string                          `json:"tool_output,omitempty"`
+	ToolResult        *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
+	UIInput           *UIInputEvent                   `json:"ui_input,omitempty"`
+	UIConfirm         *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
+	UISelect          *UISelectEvent                  `json:"ui_select,omitempty"`
+	UINotify          *UINotifyEvent                  `json:"ui_notify,omitempty"`
+	UIRequestID       string                          `json:"ui_request_id,omitempty"`
+	UIWidget          *UIWidgetEvent                  `json:"ui_widget,omitempty"`
+	UIWidgets         []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
+	UIWidgetRevision  string                          `json:"ui_widget_revision,omitempty"`
+	UIPersistent      *UIPersistentEvent              `json:"ui_persistent,omitempty"`
+	Cancelled         bool                            `json:"cancelled,omitempty"`
+	Error             string                          `json:"error,omitempty"`
+	Result            *string                         `json:"result,omitempty"`
 }
 
 // UIInputEvent describes an extension-requested input prompt.
@@ -1113,16 +1115,17 @@ func (s ServiceStoreAdapter) Load(ctx context.Context, id string) (convtypes.Con
 		return convtypes.ConversationRecord{}, err
 	}
 	return convtypes.ConversationRecord{
-		ID:          record.ID,
-		CWD:         record.CWD,
-		Provider:    record.Provider,
-		Metadata:    record.Metadata,
-		RawMessages: record.RawMessages,
-		CreatedAt:   record.CreatedAt,
-		UpdatedAt:   record.UpdatedAt,
-		Usage:       record.Usage,
-		Summary:     record.Summary,
-		ToolResults: record.ToolResults,
+		ID:                record.ID,
+		CWD:               record.CWD,
+		Provider:          record.Provider,
+		Metadata:          record.Metadata,
+		RawMessages:       record.RawMessages,
+		CompactionHistory: record.CompactionHistory,
+		CreatedAt:         record.CreatedAt,
+		UpdatedAt:         record.UpdatedAt,
+		Usage:             record.Usage,
+		Summary:           record.Summary,
+		ToolResults:       record.ToolResults,
 	}, nil
 }
 
@@ -1473,6 +1476,15 @@ func (h *chatMessageHandler) HandleText(text string) {
 		Role:           "assistant",
 	}
 	h.sendEvent(event)
+}
+
+func (h *chatMessageHandler) HandleCompaction(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
+	h.sendEvent(ChatEvent{
+		Kind:              "context-compacted",
+		ConversationID:    h.conversationID,
+		Compaction:        &marker,
+		BeforeCurrentUser: beforeCurrentUser,
+	})
 }
 
 func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {

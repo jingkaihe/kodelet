@@ -3,6 +3,7 @@ import type {
   ChatRenderMessage,
   ChatRenderToolCall,
   ChatStreamEvent,
+  CompactionMarker,
   ContentBlock,
   Conversation,
   Message,
@@ -48,6 +49,42 @@ const ensureCurrentAssistantMessage = (
   return lastMessage;
 };
 
+const insertCompactionMarker = (
+  messages: ChatRenderMessage[],
+  compaction: CompactionMarker,
+  beforeCurrentUser = false
+) => {
+  if (
+    messages.some((message) =>
+      message.blocks?.some(
+        (block) => block.type === 'compaction' && block.compaction.id === compaction.id
+      )
+    )
+  ) {
+    return;
+  }
+
+  let insertionIndex = messages.length;
+  if (beforeCurrentUser) {
+    // Responses pre-turn compaction precedes the already submitted user message,
+    // even when assistant output has since been appended to the transcript.
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        insertionIndex = i;
+        break;
+      }
+    }
+  }
+
+  const block: ChatAssistantBlock = { type: 'compaction', compaction: { ...compaction } };
+  const previousMessage = messages[insertionIndex - 1];
+  if (previousMessage?.role === 'assistant') {
+    ensureAssistantBlocks(previousMessage).push(block);
+  } else {
+    messages.splice(insertionIndex, 0, { role: 'assistant', blocks: [block] });
+  }
+};
+
 const appendAssistantBlocks = (target: ChatRenderMessage, blocks: ChatAssistantBlock[]) => {
   const targetBlocks = ensureAssistantBlocks(target);
 
@@ -80,6 +117,9 @@ const findMatchingBlock = (
 
   for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
     const block = message.blocks[i];
+    if (block.type === 'compaction') {
+      break;
+    }
     if (block.type !== type || typeof block.content !== 'string') {
       continue;
     }
@@ -206,6 +246,13 @@ export const conversationToChatMessages = (
   }
 
   return conversation.messages.reduce<ChatRenderMessage[]>((chatMessages, message: Message) => {
+    if (message.kind === 'context-compacted') {
+      if (message.compaction) {
+        insertCompactionMarker(chatMessages, message.compaction);
+      }
+      return chatMessages;
+    }
+
     if (message.role === 'user') {
       chatMessages.push({
         role: 'user',
@@ -278,6 +325,12 @@ export const applyChatStreamEvent = (
     case 'usage':
     case 'done':
     case 'error':
+      return nextMessages;
+
+    case 'context-compacted':
+      if (event.compaction) {
+        insertCompactionMarker(nextMessages, event.compaction, event.before_current_user);
+      }
       return nextMessages;
 
     case 'thinking-start': {

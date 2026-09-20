@@ -153,6 +153,10 @@ func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []a
 	if err != nil {
 		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to marshal conversation messages")
 	}
+	history := t.GetCompactionHistory()
+	if err := history.Validate(rawMessages); err != nil {
+		return convtypes.ConversationRecord{}, err
+	}
 
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
@@ -185,16 +189,17 @@ func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []a
 	}
 
 	return convtypes.ConversationRecord{
-		ID:          t.ConversationID,
-		CWD:         t.Config.WorkingDirectory,
-		RawMessages: rawMessages,
-		Provider:    "anthropic",
-		Usage:       t.GetUsage(),
-		Metadata:    metadata,
-		Summary:     name,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ToolResults: toolResults,
+		ID:                t.ConversationID,
+		CWD:               t.Config.WorkingDirectory,
+		RawMessages:       rawMessages,
+		CompactionHistory: history,
+		Provider:          "anthropic",
+		Usage:             t.GetUsage(),
+		Metadata:          metadata,
+		Summary:           name,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		ToolResults:       toolResults,
 	}, nil
 }
 
@@ -223,7 +228,11 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
+		return
+	}
 	t.messages = messages
+	t.SetCompactionHistory(record.CompactionHistory)
 
 	t.cleanupOrphanedMessages()
 	// Restore usage statistics

@@ -30,6 +30,47 @@ func setupTestDB(t *testing.T, dbPath string) {
 	require.NoError(t, runner.Run(ctx, migrations.All()))
 }
 
+func TestStoreCompactionHistoryRoundTripAndFork(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "compact.db")
+	setupTestDB(t, dbPath)
+	store, err := NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	record := conversations.NewConversationRecord("compact")
+	record.Provider = "openai"
+	record.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
+	record.CompactionHistory, err = record.CompactionHistory.Append(
+		json.RawMessage(`[{"type":"message","role":"user","content":"original"}]`),
+		1,
+		llmtypes.CompactionMarker{ID: "marker", Method: "api", CreatedAt: time.Now().UTC()},
+	)
+	require.NoError(t, err)
+	record.ToolResults["archived-tool"] = tools.StructuredToolResult{ToolName: "bash", Success: true}
+	require.NoError(t, store.Save(t.Context(), record))
+	loaded, err := store.Load(t.Context(), record.ID)
+	require.NoError(t, err)
+	assert.Equal(t, record.CompactionHistory, loaded.CompactionHistory)
+	assert.JSONEq(t, string(record.RawMessages), string(loaded.RawMessages))
+	assert.Contains(t, loaded.ToolResults, "archived-tool")
+	listed, err := store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "original"})
+	require.NoError(t, err)
+	require.Len(t, listed.ConversationSummaries, 1)
+	assert.Equal(t, "original", listed.ConversationSummaries[0].FirstMessage)
+	assert.Equal(t, 1, listed.ConversationSummaries[0].MessageCount)
+	fork := conversations.ForkConversationRecord(loaded)
+	require.NoError(t, store.SaveConversationFork(t.Context(), record.ID, fork))
+	forked, err := store.Load(t.Context(), fork.ID)
+	require.NoError(t, err)
+	assert.Equal(t, loaded.CompactionHistory, forked.CompactionHistory)
+	assert.Contains(t, forked.ToolResults, "archived-tool")
+
+	loaded.CompactionHistory.ActiveDisplayStart = 10
+	require.ErrorContains(t, store.Save(t.Context(), loaded), "invalid compaction display boundary")
+	unchanged, err := store.Load(t.Context(), record.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, unchanged.CompactionHistory.ActiveDisplayStart)
+}
+
 func TestStoreHierarchyMetadataSurvivesSaveAndFork(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hierarchy.db")
 	setupTestDB(t, dbPath)

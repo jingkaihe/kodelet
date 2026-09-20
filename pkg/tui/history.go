@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -65,7 +66,8 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 	toolIndex := map[string][2]int{}
 
 	ensureAssistant := func() int {
-		if len(entries) == 0 || entries[len(entries)-1].kind != entryAssistant {
+		if len(entries) == 0 || entries[len(entries)-1].kind != entryAssistant ||
+			(len(entries[len(entries)-1].blocks) > 0 && entries[len(entries)-1].blocks[0].kind == blockCompaction) {
 			entries = append(entries, chatEntry{kind: entryAssistant})
 		}
 		return len(entries) - 1
@@ -73,6 +75,10 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 
 	for _, msg := range messages {
 		switch msg.Kind {
+		case "context-compacted":
+			if msg.Compaction != nil && !hasCompactionMarker(entries, msg.Compaction.ID) {
+				entries = append(entries, compactionEntry(*msg.Compaction))
+			}
 		case "text":
 			switch msg.Role {
 			case "user":
@@ -137,6 +143,30 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		trimEntryBlocks(&entries[i])
 	}
 	return entries
+}
+
+func compactionEntry(marker llmtypes.CompactionMarker) chatEntry {
+	return chatEntry{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:       blockCompaction,
+			compaction: &marker,
+		}},
+	}
+}
+
+func hasCompactionMarker(entries []chatEntry, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, entry := range entries {
+		for _, block := range entry.blocks {
+			if block.kind == blockCompaction && block.compaction != nil && block.compaction.ID == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func appendTextBlock(entry *chatEntry, text string) {

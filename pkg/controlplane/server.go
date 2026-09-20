@@ -1339,11 +1339,13 @@ const (
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Role          string        `json:"role"`
-	Content       any           `json:"content"`
-	ToolCalls     []WebToolCall `json:"toolCalls,omitempty"`
-	ThinkingText  string        `json:"thinkingText,omitempty"`
-	ThinkingTexts []string      `json:"thinkingTexts,omitempty"`
+	Kind          string                     `json:"kind,omitempty"`
+	Compaction    *llmtypes.CompactionMarker `json:"compaction,omitempty"`
+	Role          string                     `json:"role"`
+	Content       any                        `json:"content"`
+	ToolCalls     []WebToolCall              `json:"toolCalls,omitempty"`
+	ThinkingText  string                     `json:"thinkingText,omitempty"`
+	ThinkingTexts []string                   `json:"thinkingTexts,omitempty"`
 }
 
 // WebContentBlock represents a typed content block rendered by the web UI.
@@ -1581,7 +1583,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 			ID: response.ID, CWD: response.CWD, Provider: response.Provider,
 			CreatedAt: response.CreatedAt, UpdatedAt: response.UpdatedAt,
 			RawMessages: response.RawMessages, Summary: response.Summary,
-			Usage: response.Usage, Metadata: response.Metadata, ToolResults: response.ToolResults,
+			CompactionHistory: response.CompactionHistory,
+			Usage:             response.Usage, Metadata: response.Metadata, ToolResults: response.ToolResults,
 		})
 		return
 	}
@@ -1599,7 +1602,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to web messages with tool call structure preserved
-	webMessages, err := s.convertToWebMessages(response.RawMessages, providerForRender, response.Metadata, response.ToolResults)
+	webMessages, err := s.convertConversationToWebMessages(response, providerForRender)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
@@ -1652,7 +1655,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http.Request, response *conversations.GetConversationResponse) {
-	entries, err := llm.ExtractConversationEntries(response.Provider, response.RawMessages, response.Metadata, response.ToolResults)
+	entries, err := llm.ExtractConversationRecordEntries(conversationtypes.ConversationRecord{
+		Provider: response.Provider, RawMessages: response.RawMessages,
+		Metadata: response.Metadata, ToolResults: response.ToolResults,
+		CompactionHistory: response.CompactionHistory,
+	})
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation history", err)
 		return
@@ -1709,6 +1716,33 @@ func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebM
 	}
 
 	return webMessages, nil
+}
+
+// convertConversationToWebMessages retains provider-specific rich rendering for every display segment.
+func (s *Server) convertConversationToWebMessages(record *conversations.GetConversationResponse, provider string) ([]WebMessage, error) {
+	var messages []WebMessage
+	if history := record.CompactionHistory; history != nil {
+		for _, segment := range history.Segments {
+			entries, err := s.convertToWebMessages(segment.RawMessages, provider, record.Metadata, record.ToolResults)
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, entries...)
+			marker := segment.Marker
+			messages = append(messages, WebMessage{
+				Kind: "context-compacted", Role: "assistant", Content: "", Compaction: &marker,
+			})
+		}
+	}
+	visible, err := record.CompactionHistory.VisibleMessages(record.RawMessages)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.convertToWebMessages(visible, provider, record.Metadata, record.ToolResults)
+	if err != nil {
+		return nil, err
+	}
+	return append(messages, entries...), nil
 }
 
 // convertToWebMessages converts raw messages to web messages with tool call structure

@@ -1560,7 +1560,7 @@ func TestCompactContextIntegration(t *testing.T) {
 
 		// Verify the compacting worked
 		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
-		assert.Equal(t, 0, len(thread.ToolResults), "Tool results should be cleared")
+		assert.Equal(t, initialToolResultCount, len(thread.ToolResults), "Historical tool results should be preserved")
 
 		// Verify the single remaining message is a user message containing a summary
 		if len(thread.messages) > 0 {

@@ -41,17 +41,18 @@ type LoadConversationFunc func(ctx context.Context)
 // Thread contains shared fields that are common across all LLM provider implementations.
 // Provider-specific Thread structs should embed this struct to inherit common functionality.
 type Thread struct {
-	Config           llmtypes.Config                           // LLM configuration
-	State            tooltypes.State                           // Tool execution state
-	Environment      agentenv.Environment                      // Run-scoped agent environment
-	Usage            *llmtypes.Usage                           // Token usage tracking
-	ConversationID   string                                    // Unique conversation identifier
-	Persisted        bool                                      // Whether conversation is being persisted
-	Metadata         map[string]any                            // Additional provider-neutral conversation metadata
-	Store            ConversationStore                         // Conversation persistence store
-	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
-	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
+	Config            llmtypes.Config                           // LLM configuration
+	State             tooltypes.State                           // Tool execution state
+	Environment       agentenv.Environment                      // Run-scoped agent environment
+	Usage             *llmtypes.Usage                           // Token usage tracking
+	ConversationID    string                                    // Unique conversation identifier
+	Persisted         bool                                      // Whether conversation is being persisted
+	Metadata          map[string]any                            // Additional provider-neutral conversation metadata
+	Store             ConversationStore                         // Conversation persistence store
+	ToolResults       map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	CompactionHistory *convtypes.CompactionHistory              // Display archive; never included in inference input
+	RendererRegistry  *renderers.RendererRegistry               // CLI renderer registry for structured tool results
+	LoadConversation  LoadConversationFunc                      // Provider-specific callback for loading conversations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -294,11 +295,11 @@ func (t *Thread) SetExtensions(runtime any) {
 	}
 }
 
-// ResetContextStateLocked clears shared state after context replacement/compaction.
+// ResetContextStateLocked resets inference-only shared state after compaction.
 // Caller must hold t.Mu.
 func (t *Thread) ResetContextStateLocked() {
-	// Clear stale tool results - they reference tool calls that no longer exist.
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+	// Structured results belong to the complete transcript. Keep them available
+	// for archived tool calls, attachment references, and conversation forks.
 }
 
 // FinalizeSwapContextLocked resets shared state after provider-specific context replacement.

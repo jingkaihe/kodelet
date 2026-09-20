@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -135,6 +136,61 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 		return nil, err
 	}
 	return conversations.ApplyDisplayToLLMMessages(messages, metadata), nil
+}
+
+// ExtractConversationRecordEntries projects full display history without changing active model input.
+func ExtractConversationRecordEntries(record convtypes.ConversationRecord) ([]conversations.StreamableMessage, error) {
+	var entries []conversations.StreamableMessage
+	if history := record.CompactionHistory; history != nil {
+		for _, segment := range history.Segments {
+			messages, err := ExtractConversationEntries(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, messages...)
+			marker := segment.Marker
+			entries = append(entries, conversations.StreamableMessage{
+				Kind: "context-compacted", Role: "assistant", Compaction: &marker,
+			})
+		}
+	}
+	visible, err := record.CompactionHistory.VisibleMessages(record.RawMessages)
+	if err != nil {
+		return nil, err
+	}
+	messages, err := ExtractConversationEntries(record.Provider, visible, record.Metadata, record.ToolResults)
+	if err != nil {
+		return nil, err
+	}
+	return append(entries, messages...), nil
+}
+
+// ExtractConversationRecordMessages provides the complete transcript for text and JSON exports.
+func ExtractConversationRecordMessages(record convtypes.ConversationRecord) ([]llmtypes.Message, error) {
+	var messages []llmtypes.Message
+	if history := record.CompactionHistory; history != nil {
+		for _, segment := range history.Segments {
+			entries, err := ExtractMessages(record.Provider, segment.RawMessages, record.Metadata, record.ToolResults)
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, entries...)
+			content := "Context compacted"
+			if segment.Marker.Summary != "" {
+				content += "\n\n" + segment.Marker.Summary
+			}
+			messages = append(messages, llmtypes.Message{Role: "assistant", Content: content})
+		}
+	}
+	visible, err := record.CompactionHistory.VisibleMessages(record.RawMessages)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := ExtractMessages(record.Provider, visible, record.Metadata, record.ToolResults)
+	if err != nil {
+		return nil, err
+	}
+	return append(messages, entries...), nil
 }
 
 // ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.

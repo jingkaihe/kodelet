@@ -1,8 +1,17 @@
 // Core types for the Kodelet Web UI
 
+export interface CompactionMarker {
+  id: string;
+  method: 'api' | 'summary';
+  summary?: string;
+  createdAt: string;
+}
+
 export interface Message {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
+  kind?: 'context-compacted';
+  compaction?: CompactionMarker;
   toolCalls?: ToolCall[];
   tool_calls?: ToolCall[]; // Alternative format
   thinkingText?: string; // For Claude thinking blocks
@@ -486,6 +495,7 @@ export interface ChatStreamEvent {
     | 'thinking-delta'
     | 'thinking-end'
     | 'thinking'
+    | 'context-compacted'
     | 'text-delta'
     | 'content-end'
     | 'text'
@@ -501,6 +511,8 @@ export interface ChatStreamEvent {
   role?: 'user' | 'assistant';
   delta?: string;
   content?: string | ContentBlock[];
+  compaction?: CompactionMarker;
+  before_current_user?: boolean;
   usage?: Usage;
   tool_name?: string;
   tool_call_id?: string;
@@ -596,6 +608,10 @@ export interface ChatRenderMessage {
 }
 
 export type ChatAssistantBlock =
+  | {
+      type: 'compaction';
+      compaction: CompactionMarker;
+    }
   | {
       type: 'thinking';
       content: string;

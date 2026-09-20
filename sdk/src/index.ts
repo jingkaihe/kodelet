@@ -15,6 +15,8 @@ export type {
   AssistantThinkingDeltaData,
   BridgeTransport,
   ClientOptions,
+  CompactionMarker,
+  ContextCompactedData,
   CreateSessionOptions,
   ProfileInput,
   RunOptions,

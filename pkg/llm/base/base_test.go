@@ -1395,6 +1395,59 @@ func TestEstimateContextWindowFromMessage(t *testing.T) {
 	assert.Greater(t, bt.Usage.CurrentContextWindow, 100, "Should be above minimum with this message length")
 }
 
+type compactionPublisherThread struct {
+	llmtypes.Thread
+	save func() error
+}
+
+func (t *compactionPublisherThread) SaveConversation(context.Context) error { return t.save() }
+
+type compactionPublisherHandler struct {
+	llmtypes.MessageHandler
+	handle func(llmtypes.CompactionMarker, bool)
+}
+
+func (h *compactionPublisherHandler) HandleCompaction(marker llmtypes.CompactionMarker, before bool) {
+	h.handle(marker, before)
+}
+
+func TestPublishCompactionRequiresDurableCheckpoint(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "conversation")
+	saved, published := 0, 0
+	var saveErr error
+	provider := &compactionPublisherThread{save: func() error {
+		saved++
+		return saveErr
+	}}
+	handler := &compactionPublisherHandler{handle: func(marker llmtypes.CompactionMarker, before bool) {
+		assert.Positive(t, saved, "save must precede publication")
+		assert.Equal(t, "api", marker.Method)
+		assert.Empty(t, marker.Summary)
+		assert.True(t, before)
+		published++
+	}}
+	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, "", true))
+	assert.Zero(t, saved)
+	thread.Mu.Lock()
+	err := thread.ArchiveCompactionLocked(json.RawMessage(`[{"role":"user","content":"original"}]`), 1, "api", "must not expose")
+	thread.Mu.Unlock()
+	require.NoError(t, err)
+	markerID := thread.CompactionMarkerID()
+	require.NotEmpty(t, markerID)
+	saveErr = errors.New("disk failure")
+	require.ErrorContains(t, thread.PublishCompaction(t.Context(), provider, handler, "", true), "disk failure")
+	assert.Zero(t, published)
+	saveErr = nil
+	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, "", true))
+	assert.Equal(t, 1, published)
+	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, markerID, true))
+	assert.Equal(t, 2, saved)
+	assert.Equal(t, 1, published)
+	copy := thread.GetCompactionHistory()
+	copy.ActiveDisplayStart = 99
+	assert.Equal(t, 1, thread.GetCompactionHistory().ActiveDisplayStart)
+}
+
 func TestFinalizeSwapContextLocked(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 	bt.ToolResults["tool-call-1"] = tooltypes.StructuredToolResult{ToolName: "test-tool"}
@@ -1405,7 +1458,7 @@ func TestFinalizeSwapContextLocked(t *testing.T) {
 	bt.FinalizeSwapContextLocked("A compact summary of earlier conversation content.")
 	bt.Mu.Unlock()
 
-	assert.Empty(t, bt.ToolResults)
+	assert.Contains(t, bt.ToolResults, "tool-call-1")
 	assert.NotNil(t, bt.ToolResults)
 	assert.GreaterOrEqual(t, bt.GetUsage().CurrentContextWindow, 100)
 }
@@ -1418,7 +1471,7 @@ func TestResetContextStateLockedHandlesNilState(t *testing.T) {
 	bt.ResetContextStateLocked()
 	bt.Mu.Unlock()
 
-	assert.Empty(t, bt.ToolResults)
+	assert.Contains(t, bt.ToolResults, "tool-call-1")
 	assert.NotNil(t, bt.ToolResults)
 }
 

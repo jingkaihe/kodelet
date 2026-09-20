@@ -78,6 +78,8 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
   messages: (conversation.messages || []).map((message) => ({
     role: message.role || 'user',
     content: message.content || '',
+    kind: message.kind,
+    compaction: message.compaction,
     toolCalls: message.toolCalls || message.tool_calls || [],
     thinkingText: message.thinkingText,
     thinkingTexts: message.thinkingTexts || [],

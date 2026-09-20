@@ -32,6 +32,31 @@ type remoteMessageHistoryRunner struct {
 	historyErr   error
 }
 
+func TestEntriesFromHistoryPreservesRepeatedCompaction(t *testing.T) {
+	first := &llmtypes.CompactionMarker{ID: "compact-1", Method: "api"}
+	second := &llmtypes.CompactionMarker{ID: "compact-2", Method: "summary", Summary: "The compact summary"}
+	entries := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "text", Role: "user", Content: "original question"},
+		{Kind: "text", Role: "assistant", Content: "original answer"},
+		{Kind: "context-compacted", Compaction: first},
+		{Kind: "text", Role: "assistant", Content: "continued answer"},
+		{Kind: "context-compacted", Compaction: second},
+		{Kind: "context-compacted", Compaction: first}, // Duplicate replay cannot move an existing marker.
+		{Kind: "context-compacted"},
+		{Kind: "text", Role: "user", Content: "Context compacted"}, // Ordinary text is not a marker.
+	})
+
+	require.Len(t, entries, 6)
+	assert.Equal(t, "original question", entries[0].content)
+	assert.Equal(t, "original answer", entries[1].content)
+	assert.Equal(t, compactionEntry(*first), entries[2])
+	assert.Equal(t, "continued answer", entries[3].content)
+	assert.Equal(t, compactionEntry(*second), entries[4])
+	assert.False(t, entries[4].blocks[0].expanded)
+	assert.Equal(t, entryUser, entries[5].kind)
+	assert.Equal(t, "Context compacted", entries[5].content)
+}
+
 func (r *remoteMessageHistoryRunner) LoadMessageHistory(ctx context.Context, target chat.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
 	_, bounded := ctx.Deadline()
 	if !bounded {

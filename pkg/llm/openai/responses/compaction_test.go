@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	openai "github.com/openai/openai-go/v3"
@@ -29,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
+func TestThreadSwapContextArchivesHistoryAndPreservesToolResults(t *testing.T) {
 	state := tools.NewBasicState(context.Background())
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "conv-swap"),
@@ -46,8 +47,128 @@ func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
 	require.Len(t, thread.inputItems, 1)
 	assert.Equal(t, "summary of prior context", extractInputItemText(thread.inputItems[0]))
 	assert.Equal(t, []StoredInputItem{{Type: "message", Role: "user", Content: "summary of prior context"}}, thread.storedItems)
-	assert.Empty(t, thread.GetStructuredToolResults())
+	assert.Contains(t, thread.GetStructuredToolResults(), "call-1")
+	require.NotNil(t, thread.CompactionHistory)
+	require.Len(t, thread.CompactionHistory.Segments, 1)
+	assert.Equal(t, 1, thread.CompactionHistory.ActiveDisplayStart)
+	segment := thread.CompactionHistory.Segments[0]
+	assert.JSONEq(t, `[{"type":"message","role":"user","content":"old message"}]`, string(segment.RawMessages))
+	assert.Equal(t, "summary", segment.Marker.Method)
+	assert.Equal(t, "summary of prior context", segment.Marker.Summary)
+	assert.NotEmpty(t, segment.Marker.ID)
+	assert.False(t, segment.Marker.CreatedAt.IsZero())
 	assert.Greater(t, thread.GetUsage().CurrentContextWindow, 0)
+}
+
+func TestRepeatedCompactionArchivesOnlyNewChat(t *testing.T) {
+	for _, method := range []string{"api", "summary"} {
+		t.Run(method, func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-5.5",
+				Retry:    llmtypes.RetryConfig{Attempts: 1},
+				OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+			}
+			thread := &Thread{Thread: base.NewThread(config, "repeated-compact")}
+			thread.AddUserMessage(t.Context(), "first request", "data:image/png;base64,aGVsbG8=")
+			firstAnswer := []StoredInputItem{
+				{Type: "reasoning", Role: "assistant", Content: "original reasoning"},
+				{Type: "message", Role: "assistant", Content: "first answer"},
+			}
+			thread.appendHistoryItems(fromStoredItems(firstAnswer), firstAnswer)
+			original := mustJSON(t, thread.snapshotHistory().storedItems)
+			var requests []openairesponses.ResponseNewParams
+			var nextEncrypted string
+			thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+				requests = append(requests, params)
+				return remoteCompactionV2Stream(t, nextEncrypted)
+			}
+			compact := func(summary string) {
+				t.Helper()
+				if method == "api" {
+					nextEncrypted = summary
+					require.NoError(t, thread.CompactContext(t.Context()))
+				} else {
+					require.NoError(t, thread.SwapContext(t.Context(), summary))
+				}
+			}
+
+			compact("first compact context")
+			firstArchive := thread.CompactionHistory.Clone()
+			require.Len(t, firstArchive.Segments, 1)
+			assert.JSONEq(t, string(original), string(firstArchive.Segments[0].RawMessages))
+			assert.Equal(t, len(thread.storedItems), firstArchive.ActiveDisplayStart)
+
+			thread.AddUserMessage(t.Context(), "second request")
+			secondAnswer := []StoredInputItem{
+				{Type: "function_call", CallID: "call-1", Name: "bash", Arguments: `{}`},
+				{Type: "function_call_output", CallID: "call-1", Output: "result"},
+				{Type: "message", Role: "assistant", Content: "second answer"},
+			}
+			thread.appendHistoryItems(fromStoredItems(secondAnswer), secondAnswer)
+			thread.SetStructuredToolResult("call-1", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
+			secondSegment := mustJSON(t, thread.storedItems[firstArchive.ActiveDisplayStart:])
+			inputBeforeSecond := thread.inputItemsSnapshot()
+
+			compact("second compact context")
+
+			history := thread.CompactionHistory
+			require.Len(t, history.Segments, 2)
+			assert.Equal(t, firstArchive.Segments[0], history.Segments[0])
+			assert.JSONEq(t, string(secondSegment), string(history.Segments[1].RawMessages))
+			assert.NotContains(t, string(history.Segments[1].RawMessages), "first compact context")
+			assert.NotEqual(t, history.Segments[0].Marker.ID, history.Segments[1].Marker.ID)
+			assert.Equal(t, method, history.Segments[1].Marker.Method)
+			assert.Contains(t, thread.GetStructuredToolResults(), "call-1")
+			assert.Equal(t, len(thread.storedItems), history.ActiveDisplayStart)
+			require.NoError(t, history.Validate(mustJSON(t, thread.storedItems)))
+
+			if method == "api" {
+				assert.Empty(t, history.Segments[0].Marker.Summary)
+				assert.Empty(t, history.Segments[1].Marker.Summary)
+				require.Len(t, requests, 2)
+				secondInput := requests[1].Input.OfInputItemList
+				require.Len(t, secondInput, len(inputBeforeSecond)+1)
+				assert.JSONEq(t, string(mustJSON(t, inputBeforeSecond)), string(mustJSON(t, secondInput[:len(inputBeforeSecond)])))
+				require.Len(t, thread.storedItems, 3)
+				assert.Equal(t, "second compact context", thread.storedItems[2].EncryptedContent)
+			} else {
+				assert.Equal(t, "first compact context", history.Segments[0].Marker.Summary)
+				assert.Equal(t, "second compact context", history.Segments[1].Marker.Summary)
+				require.Len(t, thread.storedItems, 1)
+				assert.Equal(t, "second compact context", thread.storedItems[0].Content)
+			}
+			thread.AddUserMessage(t.Context(), "third request")
+			assert.Len(t, thread.storedItems[history.ActiveDisplayStart:], 1)
+			assert.Equal(t, "third request", thread.storedItems[history.ActiveDisplayStart].Content)
+			assert.NotContains(t, string(mustJSON(t, thread.inputItemsSnapshot())), "first answer")
+			assert.NotContains(t, string(mustJSON(t, thread.inputItemsSnapshot())), "second answer")
+		})
+	}
+}
+
+func TestCompactionArchiveFailureDoesNotReplaceContext(t *testing.T) {
+	for _, method := range []string{"api", "summary"} {
+		t.Run(method, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "invalid-archive")}
+			thread.AddUserMessage(t.Context(), "original")
+			thread.CompactionHistory = &convtypes.CompactionHistory{ActiveDisplayStart: 2}
+			original := thread.snapshotHistory()
+			archive := thread.CompactionHistory.Clone()
+			usage := thread.GetUsage()
+			var err error
+			if method == "summary" {
+				err = thread.SwapContext(t.Context(), "replacement")
+			} else {
+				replacement := []StoredInputItem{{Type: "compaction", EncryptedContent: "replacement"}}
+				err = thread.replaceCompactedHistory(original.revision, fromStoredItems(replacement), replacement, 5)
+			}
+			require.Error(t, err)
+			assert.Equal(t, original, thread.snapshotHistory())
+			assert.Equal(t, archive, thread.CompactionHistory.Clone())
+			assert.Equal(t, usage, thread.GetUsage())
+		})
+	}
 }
 
 func remoteCompactionV2Stream(t *testing.T, encryptedContent string, extraOutputItems ...map[string]any) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
@@ -190,6 +311,10 @@ func TestCompactContextRemoteV2SummaryFallbackAdvancesCodexWindowOnce(t *testing
 	assert.Equal(t, 1, fakeWebSocket.resets)
 	require.Len(t, thread.inputItemsSnapshot(), 1)
 	assert.Equal(t, "summary fallback", extractInputItemText(thread.inputItemsSnapshot()[0]))
+	require.NotNil(t, thread.CompactionHistory)
+	require.Len(t, thread.CompactionHistory.Segments, 1)
+	assert.Equal(t, "summary", thread.CompactionHistory.Segments[0].Marker.Method)
+	assert.Equal(t, "summary fallback", thread.CompactionHistory.Segments[0].Marker.Summary)
 }
 
 func TestCompactContextOpenAICompatiblePlatformsUseSummaryCompaction(t *testing.T) {
@@ -251,6 +376,7 @@ func TestSummaryContextReplacementRejectsConcurrentHistoryChange(t *testing.T) {
 	require.Len(t, history, 2)
 	assert.Equal(t, "original", extractInputItemText(history[0]))
 	assert.Equal(t, "arrived while summarizing", extractInputItemText(history[1]))
+	assert.Nil(t, thread.CompactionHistory)
 }
 
 func TestSupportsRemoteCompactionV2(t *testing.T) {
@@ -896,7 +1022,7 @@ func TestCompactContextRemoteV2UpdatesContextWindowEstimate(t *testing.T) {
 		thread.Usage.CurrentContextWindow,
 	)
 	assert.Equal(t, 1047576, thread.Usage.MaxContextWindow)
-	assert.Empty(t, thread.ToolResults)
+	assert.Contains(t, thread.ToolResults, "tool-1")
 }
 
 func TestCompactContextRemoteV2UsesWebSocket(t *testing.T) {
@@ -1334,6 +1460,7 @@ func TestCompactContextRemoteV2RejectsStaleHistorySnapshot(t *testing.T) {
 	assert.Equal(t, 10, usage.OutputTokens)
 	assert.Equal(t, 55, usage.CurrentContextWindow, "stale compaction must not replace live context accounting")
 	assert.Equal(t, 100, usage.MaxContextWindow)
+	assert.Nil(t, thread.CompactionHistory)
 }
 
 // Live API tests require an explicit opt-in as well as credentials.
@@ -1388,8 +1515,10 @@ func TestIntegration_CompactContext(t *testing.T) {
 	assert.LessOrEqual(t, len(thread.inputItems), originalItemCount+1,
 		"Compacted items should be fewer or equal to original")
 
-	// Verify that tool results were cleared
-	assert.Empty(t, thread.ToolResults, "ToolResults should be cleared after compaction")
+	// The original conversation remains archived for display.
+	require.NotNil(t, thread.CompactionHistory)
+	require.Len(t, thread.CompactionHistory.Segments, 1)
+	assert.Equal(t, len(thread.storedItems), thread.CompactionHistory.ActiveDisplayStart)
 
 	// Check that we have at least one compaction item
 	hasCompactionItem := false

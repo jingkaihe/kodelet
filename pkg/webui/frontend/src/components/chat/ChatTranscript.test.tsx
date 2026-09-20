@@ -218,6 +218,97 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
   });
 
+  it.each([
+    undefined,
+    'Not a readable API summary',
+  ])('renders API compaction with only Completed details (summary: %s)', async (summary) => {
+    const user = userEvent.setup();
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'compaction',
+                compaction: { id: 'compact-api', method: 'api', summary, createdAt: '' },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const label = screen.getByText('Context compacted');
+    expect(label).toBeVisible();
+    expect(label.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Completed')).not.toBeVisible();
+    expect(screen.queryByText('Not a readable API summary')).not.toBeInTheDocument();
+
+    await user.click(label);
+    expect(screen.getByText('Completed')).toBeVisible();
+  });
+
+  it('keeps repeated summary compactions independently expandable while the chat continues', async () => {
+    const user = userEvent.setup();
+    const compaction = {
+      id: 'compact-summary-1',
+      method: 'summary' as const,
+      summary:
+        '**Progress**\n\n- Inspected files.\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))',
+      createdAt: '',
+    };
+    let messages = conversationToChatMessages({
+      id: 'compacted',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 7,
+      messages: [
+        { role: 'user', content: 'First question.' },
+        { role: 'assistant', content: 'First answer.' },
+        { role: 'assistant', kind: 'context-compacted', compaction, content: '' },
+        { role: 'user', content: 'Second question.' },
+        { role: 'assistant', content: 'Second answer.' },
+        {
+          role: 'assistant',
+          kind: 'context-compacted',
+          compaction: { ...compaction, id: 'compact-summary-2' },
+          content: '',
+        },
+        { role: 'user', content: 'Third question.' },
+      ],
+    });
+    const { container, rerender } = render(
+      <ChatTranscript messages={messages} isStreaming={false} />
+    );
+    const labels = screen.getAllByText('Context compacted');
+    const progress = screen.getAllByText('Progress');
+    expect(labels).toHaveLength(2);
+    expect(screen.getByText('First answer.')).toBeVisible();
+    expect(screen.getByText('Second answer.')).toBeVisible();
+    expect(progress[0]).not.toBeVisible();
+    expect(progress[1]).not.toBeVisible();
+    expect(progress[0].tagName).toBe('STRONG');
+    expect(container.querySelector('script')).not.toBeInTheDocument();
+    expect(container.querySelector('a[href^="javascript:"]')).not.toBeInTheDocument();
+
+    await user.click(labels[0]);
+    expect(progress[0]).toBeVisible();
+    expect(progress[1]).not.toBeVisible();
+
+    messages = applyChatStreamEvent(messages, { kind: 'context-compacted', compaction });
+    messages = applyChatStreamEvent(messages, { kind: 'text-delta', delta: 'Third answer.' });
+    rerender(<ChatTranscript messages={messages} isStreaming={true} />);
+
+    expect(screen.getAllByText('Context compacted')).toHaveLength(2);
+    expect(progress[0]).toBeVisible();
+    expect(progress[1]).not.toBeVisible();
+    expect(screen.getByText('Third answer.')).toBeVisible();
+    await user.click(screen.getAllByText('Context compacted')[1]);
+    expect(progress[1]).toBeVisible();
+  });
+
   it('normalizes persisted thinking markdown so summary headings are split onto separate paragraphs', () => {
     const { container } = render(
       <ChatTranscript

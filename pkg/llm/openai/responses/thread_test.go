@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	openai "github.com/openai/openai-go/v3"
@@ -46,6 +47,15 @@ func (t *Thread) processStream(
 
 type recordingRetryTimer struct {
 	delays []time.Duration
+}
+
+type compactionCaptureHandler struct {
+	llmtypes.StringCollectorHandler
+	onCompaction func(llmtypes.CompactionMarker, bool)
+}
+
+func (h *compactionCaptureHandler) HandleCompaction(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
+	h.onCompaction(marker, beforeCurrentUser)
 }
 
 func (t *recordingRetryTimer) After(delay time.Duration) <-chan time.Time {
@@ -185,6 +195,26 @@ func TestSendMessageAutoCompactionExcludesIncomingUserUntilReplacementInstalled(
 	thread.SetState(tools.NewBasicState(context.Background()))
 	thread.Usage.CurrentContextWindow = 90
 	thread.Usage.MaxContextWindow = 100
+	store := &mockResponsesConversationStore{}
+	thread.Store, thread.Persisted = store, true
+	require.NoError(t, thread.SavePendingUserMessage(t.Context(), "incoming user", "data:image/png;base64,aGVsbG8="))
+	require.Len(t, store.savedRecords, 1)
+	assert.Nil(t, store.savedRecords[0].CompactionHistory)
+	published := 0
+	handler := &compactionCaptureHandler{
+		StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
+		onCompaction: func(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
+			published++
+			assert.True(t, beforeCurrentUser)
+			require.Len(t, store.savedRecords, 2, "the compacted checkpoint must be saved before notification")
+			checkpoint := store.savedRecords[1]
+			require.NotNil(t, checkpoint.CompactionHistory)
+			assert.Equal(t, marker, checkpoint.CompactionHistory.Segments[0].Marker)
+			assert.Contains(t, string(checkpoint.RawMessages), "incoming user")
+			assert.Contains(t, string(checkpoint.RawMessages), "data:image/png;base64,aGVsbG8=")
+			assert.NotContains(t, string(checkpoint.CompactionHistory.Segments[0].RawMessages), "incoming user")
+		},
+	}
 
 	var compactParams openairesponses.ResponseNewParams
 	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
@@ -201,13 +231,14 @@ func TestSendMessageAutoCompactionExcludesIncomingUserUntilReplacementInstalled(
 		_ llmtypes.MessageOpt,
 	) (string, bool, bool, error) {
 		postCompactHistory = thread.inputItemsSnapshot()
+		assert.Equal(t, 1, published, "notify before starting the next inference request")
 		return "done", false, true, nil
 	}
 
 	_, err := thread.SendMessage(
 		context.Background(),
 		"incoming user",
-		&llmtypes.StringCollectorHandler{Silent: true},
+		handler,
 		llmtypes.MessageOpt{
 			Images:    []string{"data:image/png;base64,aGVsbG8="},
 			NoToolUse: true,
@@ -235,6 +266,88 @@ func TestSendMessageAutoCompactionExcludesIncomingUserUntilReplacementInstalled(
 	assert.Equal(t, "incoming user", extractInputItemText(postCompactHistory[2]))
 	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(postCompactHistory[2]))
 	assert.Equal(t, uint64(1), thread.snapshotHistory().codexWindowGeneration)
+	assert.Equal(t, 1, published)
+}
+
+func TestSendMessagePublishesMidTurnCompactionAfterCurrentUser(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry:    llmtypes.RetryConfig{Attempts: 1},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{Thread: base.NewThread(config, "mid-turn-compact")}
+	thread.SetState(tools.NewBasicState(t.Context()))
+	store := &mockResponsesConversationStore{}
+	thread.Store, thread.Persisted = store, true
+	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		return remoteCompactionV2Stream(t, "mid-turn-context")
+	}
+	published := 0
+	handler := &compactionCaptureHandler{
+		StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
+		onCompaction: func(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
+			published++
+			assert.False(t, beforeCurrentUser)
+			require.Len(t, store.savedRecords, 1)
+			assert.Equal(t, marker, store.savedRecords[0].CompactionHistory.Segments[0].Marker)
+			assert.Contains(t, string(store.savedRecords[0].CompactionHistory.Segments[0].RawMessages), "incoming user")
+		},
+	}
+	exchanges := 0
+	thread.processMessageExchangeFunc = func(context.Context, llmtypes.MessageHandler, string, int, string, llmtypes.MessageOpt) (string, bool, bool, error) {
+		exchanges++
+		if exchanges == 1 {
+			assert.Zero(t, published)
+			thread.Usage.CurrentContextWindow, thread.Usage.MaxContextWindow = 90, 100
+			return "", true, true, nil
+		}
+		assert.Equal(t, 1, published)
+		history := thread.inputItemsSnapshot()
+		require.Len(t, history, 2, "mid-turn compaction must not append the incoming user again")
+		assert.Equal(t, "incoming user", extractInputItemText(history[0]))
+		assert.NotNil(t, history[1].OfCompaction)
+		return "done", false, true, nil
+	}
+	_, err := thread.SendMessage(t.Context(), "incoming user", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 2})
+	require.NoError(t, err)
+	assert.Equal(t, 2, exchanges)
+	assert.Equal(t, 1, published)
+}
+
+func TestSendMessageDoesNotPublishCompactionWhenCheckpointFails(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry:    llmtypes.RetryConfig{Attempts: 1},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{Thread: base.NewThread(config, "failed-compact-checkpoint")}
+	thread.SetState(tools.NewBasicState(t.Context()))
+	thread.AddUserMessage(t.Context(), "original")
+	thread.Usage.CurrentContextWindow, thread.Usage.MaxContextWindow = 90, 100
+	saveErr := errors.New("save failed")
+	store := &mockResponsesConversationStore{saveFunc: func(_ context.Context, record convtypes.ConversationRecord) error {
+		assert.Contains(t, string(record.RawMessages), "incoming user", "even a failed save must include the admitted input")
+		return saveErr
+	}}
+	thread.Store, thread.Persisted = store, true
+	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		return remoteCompactionV2Stream(t, "compacted-context")
+	}
+	thread.processMessageExchangeFunc = func(context.Context, llmtypes.MessageHandler, string, int, string, llmtypes.MessageOpt) (string, bool, bool, error) {
+		t.Fatal("must not continue inference after failing to persist compaction")
+		return "", false, false, nil
+	}
+	handler := &compactionCaptureHandler{
+		StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
+		onCompaction: func(llmtypes.CompactionMarker, bool) {
+			t.Fatal("must not publish a checkpoint that failed to persist")
+		},
+	}
+	_, err := thread.SendMessage(t.Context(), "incoming user", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 1})
+	require.ErrorIs(t, err, saveErr)
+	require.Len(t, store.savedRecords, 1)
 }
 
 func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) {
@@ -286,13 +399,21 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 		require.Len(t, history, 3)
 		require.NotNil(t, history[1].OfCompaction)
 		assert.Equal(t, "incoming", extractInputItemText(history[2]))
+		require.NotNil(t, thread.CompactionHistory)
+		assert.Len(t, thread.CompactionHistory.Segments, 1)
 		return "done", false, true, nil
 	}
 
+	handler := &compactionCaptureHandler{
+		StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
+		onCompaction: func(llmtypes.CompactionMarker, bool) {
+			t.Fatal("no-save compaction must not publish temporary history")
+		},
+	}
 	_, err := thread.SendMessage(
 		context.Background(),
 		"incoming",
-		&llmtypes.StringCollectorHandler{Silent: true},
+		handler,
 		llmtypes.MessageOpt{NoSaveConversation: true, NoToolUse: true, MaxTurns: 1},
 	)
 	require.NoError(t, err)
@@ -310,6 +431,7 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	assert.Equal(t, 2, fakeWebSocket.resets, "compaction install and no-save rollback must each reset websocket identity")
 	assert.Empty(t, store.savedRecords)
 	assert.False(t, thread.ConversationForkBlocked())
+	assert.Nil(t, thread.CompactionHistory)
 }
 
 func TestSendMessageNoSaveRestoresStateAfterExchangeError(t *testing.T) {
@@ -330,6 +452,9 @@ func TestSendMessageNoSaveRestoresStateAfterExchangeError(t *testing.T) {
 		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "existing"}},
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
+	require.NoError(t, thread.SwapContext(t.Context(), "previous summary"))
+	originalArchive := thread.CompactionHistory.Clone()
+	originalHistory := thread.snapshotHistory()
 	thread.SetStructuredToolResult("old-call", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
 	thread.Usage.CurrentContextWindow = 90
 	thread.Usage.MaxContextWindow = 100
@@ -344,6 +469,8 @@ func TestSendMessageNoSaveRestoresStateAfterExchangeError(t *testing.T) {
 		_ string,
 		_ llmtypes.MessageOpt,
 	) (string, bool, bool, error) {
+		require.Len(t, thread.CompactionHistory.Segments, 2)
+		thread.AddUserMessage(t.Context(), "external append")
 		return "", false, false, errors.New("exchange failed")
 	}
 
@@ -355,10 +482,12 @@ func TestSendMessageNoSaveRestoresStateAfterExchangeError(t *testing.T) {
 	)
 	require.EqualError(t, err, "exchange failed")
 
-	assert.Equal(t, uint64(2), thread.snapshotHistory().codexWindowGeneration)
+	assert.Equal(t, originalHistory.codexWindowGeneration, thread.snapshotHistory().codexWindowGeneration)
 	history := thread.inputItemsSnapshot()
-	require.Len(t, history, 1)
-	assert.Equal(t, "existing", extractInputItemText(history[0]))
+	require.Len(t, history, 2)
+	assert.Equal(t, "previous summary", extractInputItemText(history[0]))
+	assert.Equal(t, "external append", extractInputItemText(history[1]))
+	assert.Equal(t, originalArchive, thread.CompactionHistory)
 	assert.Equal(t, 90, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, 100, thread.Usage.MaxContextWindow)
 	assert.Contains(t, thread.GetStructuredToolResults(), "old-call")

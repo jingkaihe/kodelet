@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatStreamEvent } from '../types';
+import type { ChatStreamEvent, CompactionMarker, Conversation } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
@@ -12,6 +12,84 @@ import {
 
 describe('ChatPage transcript statistics and scrolling', () => {
   setupChatPageTests();
+
+  it('preserves compaction markers and old chat through live updates and completion reload', async () => {
+    setRouteParams({ id: 'conv-123' });
+    const apiCompaction: CompactionMarker = { id: 'compact-1', method: 'api', createdAt: '' };
+    const summaryCompaction: CompactionMarker = {
+      id: 'compact-2',
+      method: 'summary',
+      summary: '**Progress**\n\nThe work continues.',
+      createdAt: '',
+    };
+    const conversation: Conversation = {
+      id: 'conv-123',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 3,
+      messages: [
+        { role: 'user', content: 'First question.' },
+        { role: 'assistant', content: 'First answer.' },
+        { role: 'assistant', kind: 'context-compacted', compaction: apiCompaction, content: '' },
+      ],
+    };
+    mockGetConversation.mockResolvedValueOnce(conversation).mockResolvedValue({
+      ...conversation,
+      messageCount: 6,
+      messages: [
+        ...(conversation.messages || []),
+        {
+          role: 'assistant',
+          kind: 'context-compacted',
+          compaction: summaryCompaction,
+          content: '',
+        },
+        { role: 'user', content: 'Second question.' },
+        { role: 'assistant', content: 'Second answer.' },
+      ],
+    });
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
+      return new Promise(() => undefined);
+    });
+
+    const { container } = render(<ChatPage />);
+    await waitFor(() => expect(streamListener).not.toBeNull());
+    expect(screen.getByText('Context compacted')).toBeVisible();
+    expect(screen.getByText('First answer.')).toBeVisible();
+
+    await act(async () => {
+      streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+      streamListener?.({ kind: 'user-message', content: 'Second question.' });
+      streamListener?.({
+        kind: 'context-compacted',
+        compaction: summaryCompaction,
+        before_current_user: true,
+      });
+      streamListener?.({ kind: 'text-delta', delta: 'Second answer.' });
+      streamListener?.({ kind: 'content-end' });
+    });
+
+    expect(screen.getAllByText('Context compacted')).toHaveLength(2);
+    expect(screen.getByText('Progress')).not.toBeVisible();
+    const marker = container.querySelector('[data-compaction-id="compact-2"]');
+    expect(marker?.compareDocumentPosition(screen.getByText('Second question.'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    await act(async () => {
+      streamListener?.({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText('Context compacted')).toHaveLength(2);
+    expect(screen.getAllByText('First question.')).toHaveLength(1);
+    expect(screen.getAllByText('First answer.')).toHaveLength(1);
+    expect(screen.getAllByText('Second question.')).toHaveLength(1);
+    expect(screen.getAllByText('Second answer.')).toHaveLength(1);
+    fireEvent.click(screen.getAllByText('Context compacted')[1]);
+    expect(screen.getByText('Progress')).toBeVisible();
+  });
 
   it('shows compact statistics with expandable exact usage and cost', async () => {
     setRouteParams({ id: 'conv-123' });

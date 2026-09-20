@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,78 @@ func TestApplyChatEventAdoptsRunnerCanonicalCWD(t *testing.T) {
 
 	assert.Equal(t, "/runner/other-project", m.cwd)
 	assert.Equal(t, "/runner/other-project", m.requestedCWD)
+}
+
+func TestApplyCompactionBeforeCurrentUserMatchesReplay(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	marker := &llmtypes.CompactionMarker{ID: "compact-1", Method: "api"}
+	for _, event := range []chat.ChatEvent{
+		{Kind: "user-message", Content: "first question"},
+		{Kind: "text", Content: "first answer"},
+		{Kind: "user-message", Content: "second question"},
+		{Kind: "context-compacted", Compaction: marker, BeforeCurrentUser: true},
+		{Kind: "context-compacted", Compaction: marker, BeforeCurrentUser: true},
+		{Kind: "text-delta", Delta: "second answer"},
+	} {
+		m.applyChatEvent(event)
+	}
+
+	expected := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "text", Role: "user", Content: "first question"},
+		{Kind: "text", Role: "assistant", Content: "first answer"},
+		{Kind: "context-compacted", Compaction: marker},
+		{Kind: "text", Role: "user", Content: "second question"},
+		{Kind: "text", Role: "assistant", Content: "second answer"},
+	})
+	require.Len(t, m.entries, 5)
+	assert.Equal(t, expected, m.entries)
+	assert.Empty(t, m.entries[2].content, "compaction is not assistant answer text")
+
+	// Replayed markers must also suppress a duplicate delivered after reconnect.
+	m.entries = expected
+	m.applyChatEvent(chat.ChatEvent{Kind: "context-compacted", Compaction: marker})
+	assert.Equal(t, expected, m.entries)
+}
+
+func TestApplyCompactionPreservesActiveAssistantWhenInsertedBeforeUser(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "question"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "answer"})
+	m.applyChatEvent(chat.ChatEvent{
+		Kind:              "context-compacted",
+		Compaction:        &llmtypes.CompactionMarker{ID: "compact-1", Method: "api"},
+		BeforeCurrentUser: true,
+	})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: " continued"})
+
+	require.Len(t, m.entries, 3)
+	assert.Equal(t, blockCompaction, m.entries[0].blocks[0].kind)
+	assert.Equal(t, entryUser, m.entries[1].kind)
+	assert.Equal(t, "answer continued", m.entries[2].content)
+}
+
+func TestApplyRepeatedCompactionSeparatesAssistantOutput(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	for _, event := range []chat.ChatEvent{
+		{Kind: "context-compacted"}, // Ignore missing payloads.
+		{Kind: "text", Content: "before"},
+		{Kind: "context-compacted", Compaction: &llmtypes.CompactionMarker{ID: "compact-1", Method: "summary", Summary: "first summary"}},
+		{Kind: "text", Content: "between"},
+		{Kind: "context-compacted", Compaction: &llmtypes.CompactionMarker{ID: "compact-2", Method: "api"}},
+		{Kind: "text", Content: "after"},
+	} {
+		m.applyChatEvent(event)
+	}
+
+	require.Len(t, m.entries, 5)
+	assert.Equal(t, "before", m.entries[0].content)
+	assert.Equal(t, "first summary", m.entries[1].blocks[0].compaction.Summary)
+	assert.Equal(t, "between", m.entries[2].content)
+	assert.Equal(t, "compact-2", m.entries[3].blocks[0].compaction.ID)
+	assert.Equal(t, "after", m.entries[4].content)
 }
 
 func TestApplyChatEventReplacesToolUpdateWithFinalResult(t *testing.T) {

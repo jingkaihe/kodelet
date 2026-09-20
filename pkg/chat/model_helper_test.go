@@ -32,6 +32,7 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 	for _, tt := range []struct {
 		name           string
 		sourceProvider string
+		compacted      bool
 	}{
 		{name: "web fetch"},
 		{
@@ -41,6 +42,11 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 		{
 			name:           "read anthropic conversation",
 			sourceProvider: "anthropic",
+		},
+		{
+			name:           "read compacted conversation",
+			sourceProvider: "openai",
+			compacted:      true,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,14 +67,19 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 			wantConversations := 1
 			if tt.sourceProvider != "" {
 				source = modelHelperSourceConversation(tt.sourceProvider)
+				if tt.compacted {
+					source.CompactionHistory, err = source.CompactionHistory.Append(
+						source.RawMessages, 1,
+						llmtypes.CompactionMarker{ID: "source-compact", Method: "api"},
+					)
+					require.NoError(t, err)
+					source.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
+				}
 				require.NoError(t, store.Save(t.Context(), source))
 				source, err = store.Load(t.Context(), source.ID)
 				require.NoError(t, err)
-				markdown, err := llm.RenderConversationMarkdownWithOptions(
-					source.Provider,
-					source.RawMessages,
-					source.Metadata,
-					source.ToolResults,
+				markdown, err := llm.RenderConversationRecordMarkdown(
+					source,
 					llm.ConversationMarkdownOptions{TruncateToolResults: true},
 				)
 				require.NoError(t, err)

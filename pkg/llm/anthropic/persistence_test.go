@@ -898,6 +898,81 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	}, forkMetadata["initiator"])
 }
 
+func TestCompactionHistoryAndResultsSurviveSaveLoadAndFork(t *testing.T) {
+	thread := createTestThread()
+	thread.messages = []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("original question")),
+		anthropic.NewAssistantMessage(anthropic.NewToolUseBlock("historic-tool", map[string]any{"command": "pwd"}, "bash")),
+		anthropic.NewUserMessage(anthropic.NewToolResultBlock("historic-tool", "/workspace", false)),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("original answer")),
+	}
+	thread.ToolResults["historic-tool"] = tooltypes.StructuredToolResult{
+		ToolName: "bash",
+		Success:  true,
+		Metadata: tooltypes.BashMetadata{Command: "pwd", Output: "/workspace"},
+		Attachments: []tooltypes.ToolAttachment{{
+			Type:       "image",
+			ArtifactID: "historic-image",
+		}},
+	}
+	original, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	require.NoError(t, thread.SwapContext(t.Context(), "replacement summary"))
+	thread.AddUserMessage(t.Context(), "continued question")
+	thread.messages = append(thread.messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock("continued answer")))
+	active, err := json.Marshal(thread.messages)
+	require.NoError(t, err)
+	store := &MockConversationStore{}
+	thread.Store, thread.Persisted = store, true
+	require.NoError(t, thread.SaveConversation(t.Context()))
+	require.Len(t, store.SavedRecords, 1)
+	saved := store.SavedRecords[0]
+	assert.JSONEq(t, string(active), string(saved.RawMessages), "persist only active inference messages, not the archive")
+	assert.NotContains(t, string(saved.RawMessages), "historic-tool")
+	require.NotNil(t, saved.CompactionHistory)
+	require.Len(t, saved.CompactionHistory.Segments, 1)
+	assert.JSONEq(t, string(original), string(saved.CompactionHistory.Segments[0].RawMessages))
+	assert.Equal(t, thread.GetStructuredToolResults(), saved.ToolResults)
+	require.Len(t, saved.ToolResults["historic-tool"].Attachments, 1)
+	assert.Equal(t, "historic-image", saved.ToolResults["historic-tool"].Attachments[0].ArtifactID)
+
+	resumed := createTestThread()
+	resumed.Store, resumed.Persisted = store, true
+	resumed.loadConversation(t.Context())
+	loadedActive, err := json.Marshal(resumed.messages)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(active), string(loadedActive))
+	assert.Equal(t, saved.CompactionHistory, resumed.GetCompactionHistory())
+	assert.Equal(t, saved.ToolResults, resumed.GetStructuredToolResults())
+	assert.NotSame(t, saved.CompactionHistory, resumed.CompactionHistory)
+
+	forkID, err := resumed.ForkConversation(t.Context())
+	require.NoError(t, err)
+	require.Len(t, store.SavedRecords, 2)
+	fork := store.SavedRecords[1]
+	assert.Equal(t, forkID, fork.ID)
+	assert.NotEqual(t, saved.ID, forkID)
+	assert.JSONEq(t, string(active), string(fork.RawMessages))
+	assert.Equal(t, saved.CompactionHistory, fork.CompactionHistory)
+	assert.Equal(t, saved.ToolResults, fork.ToolResults)
+	assert.NotSame(t, saved.CompactionHistory, fork.CompactionHistory)
+	assert.NotSame(t, resumed.CompactionHistory, fork.CompactionHistory)
+
+	// A resumed second compaction excludes the first summary and cannot mutate
+	// the persisted source or fork's archived segments.
+	require.NoError(t, resumed.SwapContext(t.Context(), "second summary"))
+	history := resumed.GetCompactionHistory()
+	require.Len(t, history.Segments, 2)
+	tail, err := saved.CompactionHistory.VisibleMessages(active)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(tail), string(history.Segments[1].RawMessages))
+	assert.Len(t, saved.CompactionHistory.Segments, 1)
+	assert.Len(t, fork.CompactionHistory.Segments, 1)
+	resumed.CompactionHistory.Segments[0].RawMessages[0] = ' '
+	assert.JSONEq(t, string(original), string(saved.CompactionHistory.Segments[0].RawMessages))
+	assert.JSONEq(t, string(original), string(fork.CompactionHistory.Segments[0].RawMessages))
+}
+
 func TestSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
 	require.NoError(t, err)

@@ -16,6 +16,7 @@ import type {
 const ACP_PROTOCOL_VERSION = 1;
 const ACP_MESSAGE_LIMIT = 64 * 1024 * 1024;
 const EXTENSION_FRAME_METHOD = "kodelet/extensionFrame";
+const CONTEXT_COMPACTED_METADATA_KEY = "kodelet/contextCompacted";
 
 export type BridgeTransport = "unix" | "tcp";
 
@@ -134,6 +135,19 @@ export interface ToolResultData {
 
 export type ToolUpdateData = ToolResultData;
 
+export interface CompactionMarker {
+  id: string;
+  method: "api" | "summary";
+  summary?: string;
+  createdAt: string;
+}
+
+export interface ContextCompactedData {
+  compaction: CompactionMarker;
+  /** Place the marker before the current submitted user message during pre-turn compaction. */
+  beforeCurrentUser: boolean;
+}
+
 export interface SessionEventMap {
   "agent.start": AgentStreamEvent<{ message: string }>;
   "agent.end": AgentStreamEvent<AgentResponse>;
@@ -144,6 +158,7 @@ export interface SessionEventMap {
   "assistant.thinking_end": AgentStreamEvent<Record<string, never>>;
   "assistant.content_end": AgentStreamEvent<Record<string, never>>;
   "user.message": AgentStreamEvent<{ content: string }>;
+  "context.compacted": AgentStreamEvent<ContextCompactedData>;
   "tool.call": AgentStreamEvent<ToolCallData>;
   "tool.update": AgentStreamEvent<ToolUpdateData>;
   "tool.result": AgentStreamEvent<ToolResultData>;
@@ -367,6 +382,7 @@ export class Session extends EventEmitter {
   private closed = false;
   private closePromise?: Promise<void>;
   private running = false;
+  private readonly seenCompactions = new Set<string>();
 
   constructor(client: Client, options: SessionInternalOptions) {
     super();
@@ -502,6 +518,14 @@ export class Session extends EventEmitter {
 
     switch (stringField(update, "sessionUpdate")) {
       case "agent_message_chunk": {
+        const compaction = compactionFromACPUpdate(update);
+        if (compaction) {
+          if (!this.seenCompactions.has(compaction.compaction.id)) {
+            this.seenCompactions.add(compaction.compaction.id);
+            this.emitSDKEvent("context.compacted", compaction, events, update);
+          }
+          break;
+        }
         const content = textFromACPContent(update.content);
         if (content !== "") {
           assistantChunks.push(content);
@@ -599,6 +623,27 @@ export class Session extends EventEmitter {
     this.emit("event", event);
     return event;
   }
+}
+
+function compactionFromACPUpdate(update: Record<string, unknown>): ContextCompactedData | undefined {
+  const meta = update._meta;
+  if (!isRecord(meta)) return undefined;
+  const data = meta[CONTEXT_COMPACTED_METADATA_KEY];
+  if (!isRecord(data) || !isRecord(data.compaction)) return undefined;
+  const marker = data.compaction;
+  if (typeof marker.id !== "string" || marker.id === "" ||
+    (marker.method !== "api" && marker.method !== "summary") || typeof marker.createdAt !== "string") {
+    return undefined;
+  }
+  return {
+    compaction: {
+      id: marker.id,
+      method: marker.method,
+      ...(typeof marker.summary === "string" ? { summary: marker.summary } : {}),
+      createdAt: marker.createdAt,
+    },
+    beforeCurrentUser: data.beforeCurrentUser === true,
+  };
 }
 
 interface ExtensionFrame {

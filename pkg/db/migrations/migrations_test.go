@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 16)
+	require.Len(t, migrations, 17)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -42,6 +42,7 @@ func TestAll(t *testing.T) {
 		20260906130000,
 		20260906160000,
 		20260910120000,
+		20260920120000,
 	}, versions)
 }
 
@@ -76,6 +77,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "user_login_authorizations")
 	assertColumnExists(t, database.DB, "conversations", "background_processes")
 	assertColumnExists(t, database.DB, "conversations", "cwd")
+	assertColumnExists(t, database.DB, "conversations", "compaction_history")
 	assertColumnExists(t, database.DB, "conversation_summaries", "provider")
 	assertColumnExists(t, database.DB, "conversation_summaries", "metadata")
 	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
@@ -132,6 +134,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260906130000,
 		20260906160000,
 		20260910120000,
+		20260920120000,
 	}, versions)
 }
 
@@ -418,6 +421,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"child steering down", Migration20260906160000ScopeChildSteering().Down},
 		{"image artifacts up", Migration20260910120000CreateImageArtifacts().Up},
 		{"image artifacts down", Migration20260910120000CreateImageArtifacts().Down},
+		{"compaction history up", Migration20260920120000AddCompactionHistory().Up},
+		{"compaction history down", Migration20260920120000AddCompactionHistory().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -432,6 +437,12 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Removing the display archive leaves active model context and artifacts intact.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertColumnMissing(t, database.DB, "conversations", "compaction_history")
+	assertColumnExists(t, database.DB, "conversations", "raw_messages")
+	assertTableExists(t, database.DB, "image_artifacts")
 
 	// Image metadata rollback leaves conversation history intact.
 	require.NoError(t, runner.Rollback(ctx, All()))

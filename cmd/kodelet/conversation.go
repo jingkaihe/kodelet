@@ -481,7 +481,7 @@ func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, 
 			Usage:     record.Usage,
 		}
 		if !config.StatsOnly {
-			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
+			messages, err := llm.ExtractConversationRecordMessages(record)
 			if err != nil {
 				return errors.Wrap(err, "failed to parse conversation messages")
 			}
@@ -501,7 +501,7 @@ func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, 
 			}
 		}
 		if showMessages {
-			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
+			messages, err := llm.ExtractConversationRecordMessages(record)
 			if err != nil {
 				return errors.Wrap(err, "failed to parse conversation messages")
 			}
@@ -517,11 +517,8 @@ func renderConversationRecord(w io.Writer, record convtypes.ConversationRecord, 
 			}
 		}
 		if showMessages {
-			markdown, err := llm.RenderConversationMarkdownWithOptions(
-				record.Provider,
-				record.RawMessages,
-				record.Metadata,
-				record.ToolResults,
+			markdown, err := llm.RenderConversationRecordMarkdown(
+				record,
 				llm.ConversationMarkdownOptions{
 					TruncateToolResults: config.TruncateToolResults,
 				},

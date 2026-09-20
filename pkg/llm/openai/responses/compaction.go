@@ -53,6 +53,18 @@ func (t *Thread) replaceWithSummary(expectedRevision *uint64, summary string) er
 		return errRemoteCompactionHistoryChanged
 	}
 
+	raw, err := json.Marshal(t.storedItems)
+	if err != nil {
+		t.historyMu.Unlock()
+		return errors.Wrap(err, "failed to archive Responses history")
+	}
+	t.Mu.Lock()
+	if err := t.ArchiveCompactionLocked(raw, 1, "summary", summary); err != nil {
+		t.Mu.Unlock()
+		t.historyMu.Unlock()
+		return err
+	}
+
 	t.inputItems = []responses.ResponseInputItemUnionParam{
 		{
 			OfMessage: &responses.EasyInputMessageParam{
@@ -75,7 +87,6 @@ func (t *Thread) replaceWithSummary(expectedRevision *uint64, summary string) er
 		t.codexWindowGeneration++
 	}
 
-	t.Mu.Lock()
 	t.FinalizeSwapContextLocked(summary)
 	t.Mu.Unlock()
 	t.historyMu.Unlock()
@@ -897,6 +908,18 @@ func (t *Thread) replaceCompactedHistory(
 		return errRemoteCompactionHistoryChanged
 	}
 
+	raw, err := json.Marshal(t.storedItems)
+	if err != nil {
+		t.historyMu.Unlock()
+		return errors.Wrap(err, "failed to archive Responses history")
+	}
+	t.Mu.Lock()
+	if err := t.ArchiveCompactionLocked(raw, len(newStoredItems), "api", ""); err != nil {
+		t.Mu.Unlock()
+		t.historyMu.Unlock()
+		return err
+	}
+
 	t.inputItems = newInputItems
 	t.storedItems = newStoredItems
 	t.historyRevision++
@@ -904,7 +927,6 @@ func (t *Thread) replaceCompactedHistory(
 		t.codexWindowGeneration++
 	}
 
-	t.Mu.Lock()
 	t.ResetContextStateLocked()
 	pricing := t.getPricing(t.Config.Model)
 	if t.Usage == nil {

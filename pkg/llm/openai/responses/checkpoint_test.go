@@ -46,6 +46,28 @@ func TestResponsesCancellationBeforeAppendPreservesAdmissionCheckpoint(t *testin
 	assert.Equal(t, "previous", extractInputItemText(history[0]))
 }
 
+func TestSavePendingUserMessagePreservesCompactionHistory(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "compacted-checkpoint")}
+	thread.AddUserMessage(t.Context(), "original request")
+	require.NoError(t, thread.SwapContext(t.Context(), "summary"))
+	archive := thread.CompactionHistory.Clone()
+	original := thread.snapshotHistory()
+	store := &mockResponsesConversationStore{}
+	thread.Store, thread.Persisted = store, true
+
+	require.NoError(t, thread.SavePendingUserMessage(t.Context(), "pending input"))
+	require.Len(t, store.savedRecords, 1)
+	saved := store.savedRecords[0]
+	assert.Equal(t, archive, saved.CompactionHistory)
+	assert.NotSame(t, thread.CompactionHistory, saved.CompactionHistory)
+	assert.Contains(t, string(saved.RawMessages), "pending input")
+	assert.NotContains(t, string(saved.CompactionHistory.Segments[0].RawMessages), "pending input")
+	require.NoError(t, saved.CompactionHistory.Validate(saved.RawMessages))
+	assert.Equal(t, archive, thread.CompactionHistory)
+	assert.Equal(t, original.storedItems, thread.snapshotHistory().storedItems)
+	assert.Equal(t, original.inputItems, thread.inputItemsSnapshot())
+}
+
 func TestSavePendingUserMessageRestoresStateAndPreservesExternalAppend(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

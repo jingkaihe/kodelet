@@ -95,6 +95,7 @@ type GetConversationResponse struct {
 	Summary              string                                `json:"summary,omitempty"`
 	Usage                llmtypes.Usage                        `json:"usage"`
 	RawMessages          json.RawMessage                       `json:"rawMessages"`
+	CompactionHistory    *conversations.CompactionHistory      `json:"compactionHistory,omitempty"`
 	Metadata             map[string]any                        `json:"metadata,omitempty"`
 	ToolResults          map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`
 	MessageCount         int                                   `json:"messageCount"`
@@ -259,6 +260,23 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 			messageCount = len(messages)
 		}
 	}
+	if history := record.CompactionHistory; history != nil {
+		visible, err := history.VisibleMessages(record.RawMessages)
+		if err != nil {
+			return nil, err
+		}
+		var messages []json.RawMessage
+		if err := json.Unmarshal(visible, &messages); err != nil {
+			return nil, err
+		}
+		messageCount = len(messages)
+		for _, segment := range history.Segments {
+			if err := json.Unmarshal(segment.RawMessages, &messages); err != nil {
+				return nil, errors.Wrap(err, "failed to decode archived messages")
+			}
+			messageCount += len(messages)
+		}
+	}
 
 	response := &GetConversationResponse{
 		ID:                   record.ID,
@@ -270,6 +288,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 		Summary:              record.Summary,
 		Usage:                record.Usage,
 		RawMessages:          record.RawMessages,
+		CompactionHistory:    record.CompactionHistory,
 		Metadata:             record.Metadata,
 		ToolResults:          record.ToolResults,
 		MessageCount:         messageCount,

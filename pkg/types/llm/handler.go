@@ -75,6 +75,12 @@ type UsageMessageHandler interface {
 	HandleUsage(usage Usage)
 }
 
+// CompactionMessageHandler receives durable context replacement notifications.
+// BeforeCurrentUser places a pre-turn marker before the already displayed input.
+type CompactionMessageHandler interface {
+	HandleCompaction(marker CompactionMarker, beforeCurrentUser bool)
+}
+
 // MessageEvent represents an event from processing a message
 type MessageEvent struct {
 	Type    string

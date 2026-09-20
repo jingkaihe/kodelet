@@ -713,6 +713,9 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 	assert.Equal(t, "message", persistedItems[0].Type)
 	assert.Equal(t, "compaction", persistedItems[1].Type)
 	assert.Equal(t, "persisted-encrypted-summary", persistedItems[1].EncryptedContent)
+	require.NotNil(t, store.savedRecords[0].CompactionHistory)
+	assert.Equal(t, thread.CompactionHistory, store.savedRecords[0].CompactionHistory)
+	assert.NotSame(t, thread.CompactionHistory, store.savedRecords[0].CompactionHistory)
 
 	loadStore := &mockResponsesConversationStore{loadedRecord: &store.savedRecords[0]}
 	restored := &Thread{Thread: base.NewThread(config, "conv-compact-lifecycle")}
@@ -725,8 +728,11 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 	require.Len(t, loadedSnapshot.inputItems, 2)
 	require.NotNil(t, loadedSnapshot.inputItems[1].OfCompaction)
 	assert.Equal(t, "persisted-encrypted-summary", loadedSnapshot.inputItems[1].OfCompaction.EncryptedContent)
+	assert.Equal(t, thread.CompactionHistory, restored.CompactionHistory)
+	assert.NotSame(t, store.savedRecords[0].CompactionHistory, restored.CompactionHistory)
 
 	restored.AddUserMessage(context.Background(), "follow up")
+	expectedInferenceInput := restored.inputItemsSnapshot()
 	var captured openairesponses.ResponseNewParams
 	restored.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		captured = params
@@ -745,10 +751,64 @@ func TestRemoteCompactionV2PersistsLoadsAndReplaysFollowUp(t *testing.T) {
 		llmtypes.MessageOpt{NoToolUse: true},
 	)
 	require.NoError(t, err)
+	assert.JSONEq(t, string(mustJSON(t, expectedInferenceInput)), string(mustJSON(t, captured.Input.OfInputItemList)))
 	require.Len(t, captured.Input.OfInputItemList, 3)
 	require.NotNil(t, captured.Input.OfInputItemList[1].OfCompaction)
 	assert.Equal(t, "persisted-encrypted-summary", captured.Input.OfInputItemList[1].OfCompaction.EncryptedContent)
 	assert.Equal(t, "follow up", extractInputItemText(captured.Input.OfInputItemList[2]))
+
+	// A compaction after resume must archive only the follow-up, not its seed.
+	restored.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		return remoteCompactionV2Stream(t, "second-encrypted-summary")
+	}
+	require.NoError(t, restored.CompactContext(t.Context()))
+	require.NoError(t, restored.SaveConversation(t.Context()))
+	require.Len(t, restored.CompactionHistory.Segments, 2)
+	assert.Equal(t, 3, restored.CompactionHistory.ActiveDisplayStart)
+	var archivedFollowUp []StoredInputItem
+	require.NoError(t, json.Unmarshal(restored.CompactionHistory.Segments[1].RawMessages, &archivedFollowUp))
+	require.Len(t, archivedFollowUp, 1)
+	assert.Equal(t, "follow up", archivedFollowUp[0].Content)
+	assert.Equal(t, restored.CompactionHistory, loadStore.savedRecords[len(loadStore.savedRecords)-1].CompactionHistory)
+	assert.Len(t, store.savedRecords[0].CompactionHistory.Segments, 1, "later compaction must not mutate the loaded record")
+}
+
+func TestLoadConversationRejectsInvalidCompactionBoundary(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		start int
+		items []StoredInputItem
+	}{
+		{name: "negative", start: -1, items: []StoredInputItem{{Type: "message", Role: "user", Content: "seed"}}},
+		{name: "past end", start: 2, items: []StoredInputItem{{Type: "message", Role: "user", Content: "seed"}}},
+		{name: "inside orphaned call", start: 2, items: []StoredInputItem{
+			{Type: "message", Role: "user", Content: "seed"},
+			{Type: "function_call", CallID: "orphan", Name: "bash", Arguments: `{}`},
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "invalid-load")}
+			thread.AddUserMessage(t.Context(), "live history")
+			original := thread.snapshotHistory()
+			record := convtypes.ConversationRecord{
+				Provider:    "openai",
+				Metadata:    map[string]any{"api_mode": "responses"},
+				RawMessages: mustJSON(t, tt.items),
+				CompactionHistory: &convtypes.CompactionHistory{
+					ActiveDisplayStart: tt.start,
+					Segments: []convtypes.CompactedSegment{{
+						RawMessages: json.RawMessage(`[]`),
+						Marker:      llmtypes.CompactionMarker{ID: "compact-1", Method: "api", CreatedAt: time.Now()},
+					}},
+				},
+			}
+			thread.Store = &mockResponsesConversationStore{loadedRecord: &record}
+			thread.LoadConversation = thread.loadConversation
+			thread.EnablePersistence(t.Context(), true)
+			assert.Equal(t, original, thread.snapshotHistory())
+			assert.Nil(t, thread.CompactionHistory)
+		})
+	}
 }
 
 func TestCodexWindowGenerationPersistsAcrossCompactionAndLoad(t *testing.T) {
@@ -885,12 +945,51 @@ func TestSaveConversationSnapshotsCompactionStateCoherently(t *testing.T) {
 	assert.Equal(t, "old history", persisted[0].Content)
 	assert.Equal(t, 50, store.savedRecords[0].Usage.CurrentContextWindow)
 	assert.Contains(t, store.savedRecords[0].ToolResults, "call-old")
+	assert.Nil(t, store.savedRecords[0].CompactionHistory)
 
 	liveSnapshot := thread.snapshotHistory()
 	require.Len(t, liveSnapshot.storedItems, 1)
 	assert.Equal(t, "compaction", liveSnapshot.storedItems[0].Type)
 	assert.Equal(t, 5, thread.GetUsage().CurrentContextWindow)
-	assert.Empty(t, thread.GetStructuredToolResults())
+	assert.Contains(t, thread.GetStructuredToolResults(), "call-old")
+	require.NoError(t, thread.SaveConversation(t.Context()))
+	require.Len(t, store.savedRecords, 2)
+	compacted := store.savedRecords[1]
+	require.NotNil(t, compacted.CompactionHistory)
+	require.Len(t, compacted.CompactionHistory.Segments, 1)
+	assert.Equal(t, 1, compacted.CompactionHistory.ActiveDisplayStart)
+	assert.Contains(t, string(compacted.CompactionHistory.Segments[0].RawMessages), "old history")
+	assert.Equal(t, 5, compacted.Usage.CurrentContextWindow)
+	assert.Contains(t, compacted.ToolResults, "call-old")
+}
+
+func TestForkConversationPreservesCompactionArchive(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "compacted-parent")}
+	thread.AddUserMessage(t.Context(), "original request")
+	thread.SetStructuredToolResult("old-tool", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
+	require.NoError(t, thread.SwapContext(t.Context(), "summary"))
+	thread.AddUserMessage(t.Context(), "follow up")
+	originalArchive := thread.CompactionHistory.Clone()
+	originalRaw := mustJSON(t, thread.snapshotHistory().storedItems)
+	store := &mockResponsesConversationStore{}
+	thread.Store, thread.Persisted = store, true
+
+	_, err := thread.ForkConversation(t.Context())
+	require.NoError(t, err)
+	require.Len(t, store.savedRecords, 1)
+	fork := store.savedRecords[0]
+	assert.Equal(t, originalArchive, fork.CompactionHistory)
+	assert.NotSame(t, thread.CompactionHistory, fork.CompactionHistory)
+	assert.JSONEq(t, string(originalRaw), string(fork.RawMessages))
+	assert.Contains(t, fork.ToolResults, "old-tool")
+	require.NoError(t, fork.CompactionHistory.Validate(fork.RawMessages))
+
+	// Snapshots and the parent must not share mutable archive bytes.
+	fork.CompactionHistory.Segments[0].RawMessages[0] = 'x'
+	assert.Equal(t, originalArchive, thread.CompactionHistory)
+	require.NoError(t, thread.SwapContext(t.Context(), "new summary"))
+	assert.Len(t, fork.CompactionHistory.Segments, 1)
+	assert.Len(t, thread.CompactionHistory.Segments, 2)
 }
 
 func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {

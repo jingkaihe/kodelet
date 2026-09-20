@@ -40,6 +40,30 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 			renderedAssistantBlock := false
 			for blockIdx, block := range entry.blocks {
 				switch block.kind {
+				case blockCompaction:
+					if block.compaction == nil {
+						continue
+					}
+					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
+					header := "✓ Context compacted"
+					if isDetailBlock(block) {
+						chevron := "▸"
+						if block.expanded {
+							chevron = "▾"
+						}
+						header += " " + chevron
+						regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailCompaction, line: line})
+					}
+					b.WriteString(thoughtHeaderStyle.Render(header))
+					b.WriteString("\n")
+					line++
+					if block.expanded && isDetailBlock(block) {
+						body := indentText(m.renderMarkdown(block.compaction.Summary, m.transcriptTextWidth()-2, markdownAssistant))
+						rendered := renderPersistentStyle(thoughtBodyStyle, body)
+						b.WriteString(rendered)
+						b.WriteString("\n")
+						line += lineCount(rendered)
+					}
 				case blockThoughts:
 					if len(block.thoughts) == 0 {
 						continue

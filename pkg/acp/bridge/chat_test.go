@@ -1,12 +1,14 @@
 package bridge
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,6 +103,85 @@ func TestReplayConversationHistory(t *testing.T) {
 	assert.Equal(t, acptypes.UpdateToolCallUpdate, sender.updates[4].(map[string]any)["sessionUpdate"])
 	assert.Equal(t, acptypes.UpdateToolCallUpdate, sender.updates[5].(map[string]any)["sessionUpdate"])
 	assert.Equal(t, acptypes.UpdateAgentMessageChunk, sender.updates[6].(map[string]any)["sessionUpdate"])
+}
+
+func TestACPCompactionLiveAndReplay(t *testing.T) {
+	for _, method := range []string{"api", "summary"} {
+		t.Run(method, func(t *testing.T) {
+			marker := &llmtypes.CompactionMarker{
+				ID:        "compact-1",
+				Method:    method,
+				CreatedAt: time.Date(2026, 9, 20, 14, 0, 0, 0, time.UTC),
+			}
+			if method == "summary" {
+				marker.Summary = "Keep the earlier implementation decisions."
+			}
+			sender := &mockSender{}
+			sink := NewACPChatEventSink(sender, "session-1")
+			event := chat.ChatEvent{Kind: "context-compacted", Compaction: marker, BeforeCurrentUser: true}
+			require.NoError(t, sink.Send(event))
+			require.NoError(t, sink.Send(event))
+			require.NoError(t, sink.Send(chat.ChatEvent{Kind: "context-compacted"}))
+			require.Len(t, sender.updates, 1)
+
+			update := sender.updates[0].(map[string]any)
+			assert.Equal(t, acptypes.UpdateAgentMessageChunk, update["sessionUpdate"])
+			text := update["content"].(acptypes.ContentBlock).Text
+			assert.Contains(t, text, "Context compacted")
+			if method == "api" {
+				assert.Equal(t, "\n\nContext compacted\n\n", text)
+			} else {
+				assert.Contains(t, text, marker.Summary)
+			}
+			meta := update["_meta"].(map[string]any)[contextCompactedMetadataKey].(map[string]any)
+			assert.Equal(t, marker, meta["compaction"])
+			assert.Equal(t, true, meta["beforeCurrentUser"])
+			payload, err := json.Marshal(update)
+			require.NoError(t, err)
+			assert.Contains(t, string(payload), `"createdAt":"2026-09-20T14:00:00Z"`)
+
+			replayed := &mockSender{}
+			require.NoError(t, ReplayConversationHistory(replayed, "session-1", []conversations.StreamableMessage{
+				{Kind: "text", Role: "assistant", Content: "earlier answer"},
+				{Kind: "context-compacted", Compaction: marker},
+				{Kind: "context-compacted", Compaction: marker},
+				{Kind: "text", Role: "user", Content: "continue"},
+			}))
+			require.Len(t, replayed.updates, 3)
+			replayedUpdate := replayed.updates[1].(map[string]any)
+			assert.Equal(t, update["content"], replayedUpdate["content"])
+			replayedMeta := replayedUpdate["_meta"].(map[string]any)[contextCompactedMetadataKey].(map[string]any)
+			assert.Equal(t, marker, replayedMeta["compaction"])
+			assert.Equal(t, false, replayedMeta["beforeCurrentUser"], "replay is already in transcript order")
+		})
+	}
+}
+
+type failingCompactionSender struct {
+	mockSender
+	err error
+}
+
+func (s *failingCompactionSender) SendUpdate(sessionID acptypes.SessionID, update any) error {
+	if s.err != nil {
+		return s.err
+	}
+	return s.mockSender.SendUpdate(sessionID, update)
+}
+
+func TestACPCompactionSendFailureCanBeRetried(t *testing.T) {
+	sender := &failingCompactionSender{err: assert.AnError}
+	sink := NewACPChatEventSink(sender, "session-1")
+	event := chat.ChatEvent{Kind: "context-compacted", Compaction: &llmtypes.CompactionMarker{ID: "compact-1", Method: "api"}}
+	require.ErrorIs(t, sink.Send(event), assert.AnError)
+	sender.err = nil
+	require.NoError(t, sink.Send(event))
+	require.Len(t, sender.updates, 1)
+
+	sender.err = assert.AnError
+	require.ErrorIs(t, ReplayConversationHistory(sender, "session-1", []conversations.StreamableMessage{
+		{Kind: "context-compacted", Compaction: event.Compaction},
+	}), assert.AnError)
 }
 
 func TestImageBlocksFromRawItemPreservesRemoteURI(t *testing.T) {

@@ -91,11 +91,8 @@ func buildModelHelperPrompt(ctx context.Context, request tooltypes.ModelHelperRe
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load conversation")
 	}
-	markdown, err := llm.RenderConversationMarkdownWithOptions(
-		record.Provider,
-		record.RawMessages,
-		record.Metadata,
-		record.ToolResults,
+	markdown, err := llm.RenderConversationRecordMarkdown(
+		record,
 		llm.ConversationMarkdownOptions{TruncateToolResults: true},
 	)
 	if err != nil {

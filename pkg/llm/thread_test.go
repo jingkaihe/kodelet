@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
@@ -37,6 +38,106 @@ func requireAnthropicIntegration(t *testing.T) {
 	}
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		t.Skip("ANTHROPIC_API_KEY environment variable not set")
+	}
+}
+
+func TestExtractConversationRecordEntriesCompaction(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		Provider: "openai",
+		Metadata: map[string]any{"api_mode": "responses"},
+		RawMessages: json.RawMessage(`[
+			{"type":"message","role":"user","content":"latest summary"},
+			{"type":"message","role":"user","content":"third question"}
+		]`),
+		CompactionHistory: &convtypes.CompactionHistory{
+			ActiveDisplayStart: 1,
+			Segments: []convtypes.CompactedSegment{
+				{
+					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"first question"},{"type":"message","role":"assistant","content":"first answer"}]`),
+					Marker:      llmtypes.CompactionMarker{ID: "one", Method: "api"},
+				},
+				{
+					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"second question"}]`),
+					Marker:      llmtypes.CompactionMarker{ID: "two", Method: "summary", Summary: "latest summary"},
+				},
+			},
+		},
+	}
+	before := append(json.RawMessage(nil), record.RawMessages...)
+	entries, err := ExtractConversationRecordEntries(record)
+	require.NoError(t, err)
+	require.Len(t, entries, 6)
+	assert.Equal(t, "first question", entries[0].Content)
+	assert.Equal(t, "first answer", entries[1].Content)
+	assert.Equal(t, "context-compacted", entries[2].Kind)
+	assert.Empty(t, entries[2].Compaction.Summary)
+	assert.Equal(t, "second question", entries[3].Content)
+	assert.Equal(t, "latest summary", entries[4].Compaction.Summary)
+	assert.Equal(t, "third question", entries[5].Content)
+	assert.Equal(t, before, record.RawMessages, "display projection must not modify inference input")
+	markdown, err := RenderConversationRecordMarkdown(record, ConversationMarkdownOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, strings.Count(markdown, "Context compacted"))
+	assert.Equal(t, 1, strings.Count(markdown, "latest summary"))
+	assert.Contains(t, markdown, "<summary>Context compacted</summary>")
+	messages, err := ExtractConversationRecordMessages(record)
+	require.NoError(t, err)
+	require.Len(t, messages, 6)
+	assert.Equal(t, "Context compacted", messages[2].Content)
+	assert.Equal(t, "Context compacted\n\nlatest summary", messages[4].Content)
+
+	record.CompactionHistory.ActiveDisplayStart = 100
+	_, err = ExtractConversationRecordEntries(record)
+	require.ErrorContains(t, err, "invalid compaction display boundary")
+}
+
+func TestCompactedExportsPreserveProviderRendering(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		provider string
+		raw      json.RawMessage
+	}{
+		{
+			name: "chat completions image", provider: "openai",
+			raw: json.RawMessage(`[{"role":"user","content":[
+				{"type":"text","text":"inspect this"},
+				{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}
+			]}]`),
+		},
+		{
+			name: "anthropic tool result", provider: "anthropic",
+			raw: json.RawMessage(`[
+				{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"bash","input":{"command":"pwd"}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":"/workspace"}]}
+			]`),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			baseline, err := ExtractMessages(tt.provider, tt.raw, nil, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, baseline)
+			var active []json.RawMessage
+			require.NoError(t, json.Unmarshal(tt.raw, &active))
+			active = append([]json.RawMessage{json.RawMessage(`{"role":"user","content":"hidden replacement"}`)}, active...)
+			raw, err := json.Marshal(active)
+			require.NoError(t, err)
+			record := convtypes.ConversationRecord{
+				Provider: tt.provider, RawMessages: raw,
+				CompactionHistory: &convtypes.CompactionHistory{
+					ActiveDisplayStart: 1,
+					Segments: []convtypes.CompactedSegment{{
+						RawMessages: tt.raw,
+						Marker:      llmtypes.CompactionMarker{ID: "one", Method: "api"},
+					}},
+				},
+			}
+			messages, err := ExtractConversationRecordMessages(record)
+			require.NoError(t, err)
+			require.Len(t, messages, 2*len(baseline)+1)
+			assert.Equal(t, baseline, messages[:len(baseline)])
+			assert.Equal(t, baseline, messages[len(baseline)+1:])
+			assert.Equal(t, "Context compacted", messages[len(baseline)].Content)
+		})
 	}
 }
 

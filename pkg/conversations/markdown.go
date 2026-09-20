@@ -9,19 +9,21 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // StreamableMessage represents a normalized entry from a persisted conversation.
 type StreamableMessage struct {
-	Kind       string          `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"
-	Role       string          `json:"role"`                 // "user", "assistant", "system"
-	Content    string          `json:"content,omitempty"`    // Text content
-	RawItem    json.RawMessage `json:"rawItem,omitempty"`    // Original provider item when needed for rich content
-	ToolName   string          `json:"toolName,omitempty"`   // For tool use/result
-	ToolCallID string          `json:"toolCallId,omitempty"` // For matching tool results
-	Input      string          `json:"input,omitempty"`      // For tool use (JSON string)
-	ToolOutput string          `json:"toolOutput,omitempty"` // Display output retained alongside structured results
+	Compaction *llmtypes.CompactionMarker `json:"compaction,omitempty"`
+	Kind       string                     `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"
+	Role       string                     `json:"role"`                 // "user", "assistant", "system"
+	Content    string                     `json:"content,omitempty"`    // Text content
+	RawItem    json.RawMessage            `json:"rawItem,omitempty"`    // Original provider item when needed for rich content
+	ToolName   string                     `json:"toolName,omitempty"`   // For tool use/result
+	ToolCallID string                     `json:"toolCallId,omitempty"` // For matching tool results
+	Input      string                     `json:"input,omitempty"`      // For tool use (JSON string)
+	ToolOutput string                     `json:"toolOutput,omitempty"` // Display output retained alongside structured results
 }
 
 const (
@@ -149,6 +151,18 @@ func RenderMarkdown(
 
 		if renderedMessages > 0 {
 			output.WriteString("\n")
+		}
+
+		if msg.Kind == "context-compacted" && msg.Compaction != nil {
+			if msg.Compaction.Summary == "" {
+				output.WriteString("### Context compacted\n")
+			} else {
+				output.WriteString("<details>\n<summary>Context compacted</summary>\n\n")
+				output.WriteString(msg.Compaction.Summary)
+				output.WriteString("\n\n</details>\n")
+			}
+			renderedMessages++
+			continue
 		}
 
 		if msg.Kind == "tool-use" {

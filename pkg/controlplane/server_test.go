@@ -1174,6 +1174,13 @@ func TestDaemonHistoryFiltersValidateAndPreserveRunnerPaths(t *testing.T) {
 
 func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
 	created := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	history := &convtypes.CompactionHistory{
+		ActiveDisplayStart: 1,
+		Segments: []convtypes.CompactedSegment{{
+			RawMessages: json.RawMessage(`[{"role":"user","content":"original"}]`),
+			Marker:      llmtypes.CompactionMarker{ID: "compact-1", Method: "summary", Summary: "hello"},
+		}},
+	}
 	server := &Server{conversationService: &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
 		if id == "missing" {
 			return nil, convtypes.ErrConversationNotFound
@@ -1182,7 +1189,8 @@ func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
 			ID: id, CWD: "/runner/not-on-daemon", CreatedAt: created, UpdatedAt: created,
 			Provider: "anthropic", RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
 			Summary: "original summary", Usage: llmtypes.Usage{InputTokens: 42, InputCost: 0.123},
-			Metadata: map[string]any{"custom": "preserved"},
+			Metadata:          map[string]any{"custom": "preserved"},
+			CompactionHistory: history,
 		}, nil
 	}}}
 	request := httptest.NewRequest(http.MethodGet, "/api/conversations/history?format=raw", nil)
@@ -1202,6 +1210,7 @@ func TestDaemonRawConversationRetainsExportFields(t *testing.T) {
 	assert.Equal(t, 0.123, record.Usage.InputCost)
 	assert.Equal(t, "preserved", record.Metadata["custom"])
 	assert.JSONEq(t, `[{"role":"user","content":"hello"}]`, string(record.RawMessages))
+	assert.Equal(t, history, record.CompactionHistory)
 	response = httptest.NewRecorder()
 	server.handleGetConversation(response, mux.SetURLVars(request, map[string]string{"id": "missing"}))
 	assert.Equal(t, http.StatusNotFound, response.Code)
@@ -3327,6 +3336,66 @@ func TestExtractProviderMetadata(t *testing.T) {
 			assert.Equal(t, tt.expectedAPIMode, apiMode)
 		})
 	}
+}
+
+func TestServerCompactionHistoryProjections(t *testing.T) {
+	server := &Server{}
+	record := &conversations.GetConversationResponse{
+		ID: "history", Provider: "openai",
+		Metadata: map[string]any{"api_mode": "responses"},
+		RawMessages: json.RawMessage(`[
+			{"type":"message","role":"user","content":"replacement summary"},
+			{"type":"message","role":"user","content":"continue"}
+		]`),
+		CompactionHistory: &convtypes.CompactionHistory{
+			ActiveDisplayStart: 1,
+			Segments: []convtypes.CompactedSegment{
+				{
+					RawMessages: json.RawMessage(`[
+						{"type":"message","role":"user","content":"original"},
+						{"type":"function_call","call_id":"tool-1","name":"bash","arguments":"{}"},
+						{"type":"function_call_output","call_id":"tool-1","output":"result"},
+						{"type":"message","role":"assistant","content":"answer"}
+					]`),
+					Marker: llmtypes.CompactionMarker{ID: "one", Method: "api"},
+				},
+				{
+					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"follow-up"}]`),
+					Marker:      llmtypes.CompactionMarker{ID: "two", Method: "summary", Summary: "replacement summary"},
+				},
+			},
+		},
+		ToolResults: map[string]tools.StructuredToolResult{
+			"tool-1": {ToolName: "bash", Success: true},
+		},
+	}
+	before := append(json.RawMessage(nil), record.RawMessages...)
+	messages, err := server.convertConversationToWebMessages(record, "openai-responses")
+	require.NoError(t, err)
+	require.Len(t, messages, 7)
+	assert.Equal(t, "original", messages[0].Content)
+	require.Len(t, messages[1].ToolCalls, 1)
+	assert.Equal(t, "tool-1", messages[1].ToolCalls[0].ID)
+	assert.Equal(t, "answer", messages[2].Content)
+	assert.Equal(t, "context-compacted", messages[3].Kind)
+	assert.Empty(t, messages[3].Compaction.Summary)
+	assert.Equal(t, "follow-up", messages[4].Content)
+	assert.Equal(t, "replacement summary", messages[5].Compaction.Summary)
+	assert.Equal(t, "continue", messages[6].Content)
+	response := httptest.NewRecorder()
+	server.writeConversationHistoryResponse(response, httptest.NewRequest(http.MethodGet, "/", nil), record)
+	require.Equal(t, http.StatusOK, response.Code)
+	var history conversationHistoryResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &history))
+	require.Len(t, history.Entries, 8)
+	assert.Equal(t, "tool-result", history.Entries[2].Kind)
+	assert.Equal(t, messages[3].Compaction, history.Entries[4].Compaction)
+	assert.Equal(t, messages[5].Compaction, history.Entries[6].Compaction)
+	assert.Equal(t, before, record.RawMessages)
+
+	record.CompactionHistory.ActiveDisplayStart = 3
+	_, err = server.convertConversationToWebMessages(record, "openai-responses")
+	require.ErrorContains(t, err, "invalid compaction display boundary")
 }
 
 func TestServer_convertToWebMessages(t *testing.T) {

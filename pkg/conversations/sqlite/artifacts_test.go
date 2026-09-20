@@ -2,14 +2,17 @@ package sqlite
 
 import (
 	"bytes"
+	"encoding/json"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,7 +47,22 @@ func TestArtifactConversationLifecycle(t *testing.T) {
 		Success:     true,
 		Attachments: []tooltypes.ToolAttachment{attachment},
 	}
+	parent.CompactionHistory, err = parent.CompactionHistory.Append(
+		json.RawMessage(`[{"type":"function_call","call_id":"generate","name":"generate"}]`),
+		1,
+		llmtypes.CompactionMarker{ID: "compact", Method: "api"},
+	)
+	require.NoError(t, err)
+	parent.RawMessages = json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)
 	require.NoError(t, store.Save(t.Context(), parent))
+	// Startup collection must still find attachments belonging to archived calls.
+	_, err = store.db.Exec(`UPDATE image_artifacts SET created_at = ?`, time.Now().Add(-48*time.Hour))
+	require.NoError(t, err)
+	reopened, err := artifacts.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	_, _, err = reopened.Get(t.Context(), parent.ID, attachment.ArtifactID)
+	require.NoError(t, err)
+	require.NoError(t, reopened.Close())
 	loaded, err := store.Load(t.Context(), parent.ID)
 	require.NoError(t, err)
 	assert.Empty(t, loaded.ToolResults["generate"].Attachments[0].ViewURL)

@@ -5,7 +5,7 @@ import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
 import { Client, Profile, createTestHarness, defineExtension, type ToolContext } from "./index.js";
-import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
+import type { ContextCompactedData, SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
   jsonrpc?: "2.0";
@@ -409,6 +409,94 @@ test("Client rejects child spawn failures without crashing the process", async (
   const client = new Client({ spawn });
 
   await assert.rejects(() => client.createSession(), /spawn failed/);
+});
+
+test("Session emits typed compaction events without adding notices or summaries to output", async (t) => {
+  const markers: ContextCompactedData[] = [
+    {
+      compaction: { id: "compact-1", method: "api", createdAt: "2026-09-20T14:00:00Z" },
+      beforeCurrentUser: true,
+    },
+    {
+      compaction: { id: "compact-2", method: "summary", summary: "Earlier decisions", createdAt: "2026-09-20T15:00:00Z" },
+      beforeCurrentUser: false,
+    },
+  ];
+  const process = new FakeACPProcess({
+    onPrompt(_request, child) {
+      for (const data of [...markers, ...markers]) {
+        child.notify("session/update", {
+          sessionId: "conv-1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `\n\nContext compacted\n\n${data.compaction.summary ?? ""}` },
+            _meta: { "kodelet/contextCompacted": data },
+          },
+        });
+      }
+      child.notify("session/update", {
+        sessionId: "conv-1",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "The answer" } },
+      });
+    },
+  });
+  const client = new Client({ spawn: () => process });
+  t.after(() => client.close());
+  const session = await client.createSession();
+  const received: ContextCompactedData[] = [];
+  const deltas: string[] = [];
+  const messages: string[] = [];
+  session.on("context.compacted", (event) => received.push(event.data));
+  session.on("assistant.message_delta", (event) => deltas.push(event.data.deltaContent));
+  session.on("assistant.message", (event) => messages.push(event.data.content));
+
+  const response = await session.runAndWait({ message: "continue" });
+
+  assert.deepEqual(received, markers);
+  assert.equal(response.content, "The answer");
+  assert.deepEqual(deltas, ["The answer"]);
+  assert.deepEqual(messages, ["The answer"]);
+  assert.deepEqual(response.events.filter((event) => event.type === "context.compacted").map((event) => event.data), markers);
+
+  // Replayed markers on a later run remain deduplicated without becoming answer text.
+  const next = await session.runAndWait({ message: "continue again" });
+  assert.equal(next.content, "The answer");
+  assert.deepEqual(received, markers);
+  assert.equal(next.events.filter((event) => event.type === "context.compacted").length, 0);
+});
+
+test("Compaction-only output stays empty, while ordinary notice text remains answer text", async (t) => {
+  let promptCount = 0;
+  const process = new FakeACPProcess({
+    onPrompt(_request, child) {
+      promptCount++;
+      child.notify("session/update", {
+        sessionId: "conv-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Context compacted" },
+          ...(promptCount === 1 ? {
+            _meta: {
+              "kodelet/contextCompacted": {
+                compaction: { id: "compact-1", method: "api", createdAt: "2026-09-20T14:00:00Z" },
+              },
+            },
+          } : {}),
+        },
+      });
+    },
+  });
+  const client = new Client({ spawn: () => process });
+  t.after(() => client.close());
+  const session = await client.createSession();
+  const response = await session.runAndWait({ message: "compact" });
+  assert.equal(response.content, "");
+  assert.equal(response.events.some((event) => event.type === "assistant.message"), false);
+  assert.equal((response.events.find((event) => event.type === "context.compacted")?.data as ContextCompactedData).beforeCurrentUser, false);
+
+  const next = await session.runAndWait({ message: "say Context compacted" });
+  assert.equal(next.content, "Context compacted");
+  assert.equal(next.events.some((event) => event.type === "context.compacted"), false);
 });
 
 test("ACP handles large replay and live messages from a real subprocess", { timeout: 5000 }, async (t) => {

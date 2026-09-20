@@ -26,5 +26,6 @@ func All() []db.Migration {
 		Migration20260906130000CreateChatTurns(),
 		Migration20260906160000ScopeChildSteering(),
 		Migration20260910120000CreateImageArtifacts(),
+		Migration20260920120000AddCompactionHistory(),
 	}
 }

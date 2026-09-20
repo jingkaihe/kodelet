@@ -342,6 +342,13 @@ func (t *Thread) SendMessage(
 	if opt.NoSaveConversation {
 		originalMessages = make([]anthropic.MessageParam, len(t.messages))
 		copy(originalMessages, t.messages)
+		originalHistory := t.GetCompactionHistory()
+		originalResults := t.GetStructuredToolResults()
+		defer func() {
+			t.messages = originalMessages
+			t.SetCompactionHistory(originalHistory)
+			t.SetStructuredToolResults(originalResults)
+		}()
 	}
 
 	message, err = base.ProcessUserMessage(ctx, t, message)
@@ -382,7 +389,13 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered before each exchange
+			previousMarkerID := t.CompactionMarkerID()
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
+			if !opt.NoSaveConversation {
+				if err := t.PublishCompaction(ctx, t, handler, previousMarkerID, false); err != nil {
+					return "", err
+				}
+			}
 
 			// Regenerate the system prompt from the context snapshot pinned when this run opened.
 			contexts := base.EnvironmentContexts(t)
@@ -1297,6 +1310,13 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 
+	raw, err := json.Marshal(t.messages)
+	if err != nil {
+		return errors.Wrap(err, "failed to archive context")
+	}
+	if err := t.ArchiveCompactionLocked(raw, 1, "summary", summary); err != nil {
+		return err
+	}
 	t.messages = []anthropic.MessageParam{
 		{
 			Role: anthropic.MessageParamRoleUser,
@@ -1313,6 +1333,9 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
+	if len(t.messages) == 0 {
+		return nil
+	}
 	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
 }
 

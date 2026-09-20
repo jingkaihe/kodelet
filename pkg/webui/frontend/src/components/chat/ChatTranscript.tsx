@@ -291,6 +291,42 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const block = blocks[blockIndex];
 
+      if (block.type === 'compaction') {
+        const { compaction } = block;
+        renderedBlocks.push(
+          <div
+            key={`compaction-${compaction.id}`}
+            className="activity-stack"
+            data-compaction-id={compaction.id}
+          >
+            <details className="activity-card activity-card-thinking">
+              <summary className="tool-summary activity-summary" title="Context compacted">
+                <span className="activity-marker" aria-hidden="true">
+                  <Check size={14} />
+                </span>
+                <span className="tool-summary-text">
+                  <span className="tool-summary-label">Context compacted</span>
+                </span>
+                <span className="tool-summary-chevron" aria-hidden="true">
+                  <ChevronRight size={12} />
+                </span>
+              </summary>
+              <div className="activity-detail-content">
+                {compaction.method === 'summary' && compaction.summary?.trim() ? (
+                  <MarkdownContent
+                    className="chat-prose max-w-none text-kodelet-dark"
+                    html={renderContent(compaction.summary)}
+                  />
+                ) : (
+                  <p className="text-sm text-kodelet-dark">Completed</p>
+                )}
+              </div>
+            </details>
+          </div>
+        );
+        continue;
+      }
+
       if (block.type === 'thinking') {
         if (!block.inProgress) {
           const thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>> = [block];

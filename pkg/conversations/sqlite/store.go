@@ -105,6 +105,9 @@ func (s *Store) SaveConversationFork(ctx context.Context, sourceConversationID s
 }
 
 func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversations.ConversationRecord) error {
+	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
+		return err
+	}
 	// Ensure UpdatedAt is set to current time for saves
 	record.UpdatedAt = time.Now()
 
@@ -116,10 +119,10 @@ func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversatio
 	conversationQuery := `
 		INSERT INTO conversations (
 			id, cwd, raw_messages, provider, usage,
-			summary, created_at, updated_at, metadata, tool_results
+			summary, created_at, updated_at, metadata, tool_results, compaction_history
 		) VALUES (
 			:id, :cwd, :raw_messages, :provider, :usage,
-			:summary, :created_at, :updated_at, :metadata, :tool_results
+			:summary, :created_at, :updated_at, :metadata, :tool_results, :compaction_history
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			cwd = excluded.cwd,
@@ -129,7 +132,8 @@ func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversatio
 			summary = excluded.summary,
 			updated_at = excluded.updated_at,
 			metadata = excluded.metadata,
-			tool_results = excluded.tool_results
+			tool_results = excluded.tool_results,
+			compaction_history = excluded.compaction_history
 	`
 	_, err := tx.NamedExecContext(ctx, conversationQuery, dbRecord)
 	if err != nil {
@@ -177,7 +181,7 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 	var dbRecord dbConversationRecord
 
 	query := `SELECT id, cwd, raw_messages, provider, usage,
-		summary, created_at, updated_at, metadata, tool_results
+		summary, created_at, updated_at, metadata, tool_results, compaction_history
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {

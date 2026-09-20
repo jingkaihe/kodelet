@@ -9,6 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,37 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 	content, _ = m.renderTranscript()
 	assert.Contains(t, content, "$ pwd")
 	assert.Contains(t, content, "ok")
+}
+
+func TestRenderCompactionDetails(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 100, 40
+	m.resize()
+	m.entries = []chatEntry{
+		compactionEntry(llmtypes.CompactionMarker{ID: "compact-1", Method: "api"}),
+		compactionEntry(llmtypes.CompactionMarker{ID: "compact-2", Method: "summary", Summary: "Important summary details"}),
+	}
+	m.refreshViewport(true)
+	content, regions := m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Equal(t, 2, strings.Count(plain, "Context compacted"))
+	assert.Contains(t, plain, "✓ Context compacted\n")
+	assert.Contains(t, plain, "✓ Context compacted ▸")
+	assert.NotContains(t, plain, "Important summary details")
+	require.Len(t, regions, 1, "API compaction has no summary to expand")
+	assert.Equal(t, detailCompaction, regions[0].kind)
+
+	assert.True(t, m.toggleDetailAt(regions[0].line))
+	content, _ = m.renderTranscript()
+	assert.Contains(t, xansi.Strip(content), "Important summary details")
+	assert.Contains(t, xansi.Strip(content), "✓ Context compacted ▾")
+	m.toggleAllDetails()
+	content, _ = m.renderTranscript()
+	assert.NotContains(t, xansi.Strip(content), "Important summary details")
+	m.toggleAllDetails()
+	assert.True(t, m.entries[1].blocks[0].expanded)
+	assert.False(t, m.entries[0].blocks[0].expanded)
 }
 
 func TestRenderTranscriptImageAttachments(t *testing.T) {

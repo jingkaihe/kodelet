@@ -68,13 +68,12 @@ type Thread struct {
 	// compactWithSummaryFunc allows overriding summary-based compaction in tests.
 	compactWithSummaryFunc func(context.Context) error
 
-	// inputItems holds the complete conversation history as Responses API input items
-	// This is used for persistence and display purposes
+	// inputItems holds only the active Responses API inference context.
 	inputItems []responses.ResponseInputItemUnionParam
 
-	// storedItems is the canonical conversation history for persistence
-	// It includes all items (messages, function calls, reasoning) in order
-	// This mirrors how Anthropic stores thinking blocks inline with messages
+	// storedItems is the canonical active context for persistence. Earlier chat
+	// is retained in CompactionHistory; the replacement prefix is inference-only.
+	// It includes messages, function calls, and display-only reasoning in order.
 	storedItems []StoredInputItem
 	// historyRevision is guarded by historyMu and changes whenever either
 	// history representation changes.
@@ -373,6 +372,7 @@ func (t *Thread) snapshotHistory() responsesHistorySnapshot {
 
 type responsesNoSaveSnapshot struct {
 	history               responsesHistorySnapshot
+	compactionHistory     *convtypes.CompactionHistory
 	currentContextWindow  int
 	maxContextWindow      int
 	structuredToolResults map[string]tooltypes.StructuredToolResult
@@ -413,6 +413,7 @@ func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
 		snapshot.maxContextWindow = t.Usage.MaxContextWindow
 	}
 	snapshot.structuredToolResults = maps.Clone(t.ToolResults)
+	snapshot.compactionHistory = t.CompactionHistory.Clone()
 	t.Mu.Unlock()
 	return snapshot
 }
@@ -441,6 +442,7 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 	t.Usage.CurrentContextWindow = snapshot.currentContextWindow
 	t.Usage.MaxContextWindow = snapshot.maxContextWindow
 	t.ToolResults = maps.Clone(snapshot.structuredToolResults)
+	t.CompactionHistory = snapshot.compactionHistory.Clone()
 	if t.ToolResults == nil {
 		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 	}
@@ -571,12 +573,21 @@ OUTER:
 			if incomingUserAppended {
 				autoCompactionMetadata = remoteCompactionV2MidTurnAutoMetadata
 			}
+			previousMarkerID := t.CompactionMarkerID()
+			beforeCurrentUser := !incomingUserAppended
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), func(ctx context.Context) error {
 				return t.compactContext(ctx, autoCompactionMetadata)
 			})
 			if !incomingUserAppended {
 				t.AddUserMessage(ctx, message, opt.Images...)
 				incomingUserAppended = true
+			}
+			if !opt.NoSaveConversation {
+				// Preserve admitted input when checkpointing a pre-turn compaction;
+				// publishing before AddUserMessage would overwrite that checkpoint.
+				if err := t.PublishCompaction(ctx, t, handler, previousMarkerID, beforeCurrentUser); err != nil {
+					return "", errors.Wrap(err, "failed to publish Responses compaction")
+				}
 			}
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
@@ -1375,11 +1386,12 @@ func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
 }
 
 type conversationStateSnapshot struct {
-	storedItems      []StoredInputItem
-	windowGeneration uint64
-	usage            llmtypes.Usage
-	toolResults      map[string]tooltypes.StructuredToolResult
-	metadata         map[string]any
+	storedItems       []StoredInputItem
+	compactionHistory *convtypes.CompactionHistory
+	windowGeneration  uint64
+	usage             llmtypes.Usage
+	toolResults       map[string]tooltypes.StructuredToolResult
+	metadata          map[string]any
 }
 
 func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSnapshot {
@@ -1402,14 +1414,16 @@ func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSn
 	}
 	toolResults := maps.Clone(t.ToolResults)
 	metadata := maps.Clone(t.Metadata)
+	compactionHistory := t.CompactionHistory.Clone()
 	t.Mu.Unlock()
 	t.historyMu.Unlock()
 	return conversationStateSnapshot{
-		storedItems:      storedItems,
-		windowGeneration: windowGeneration,
-		usage:            usage,
-		toolResults:      toolResults,
-		metadata:         metadata,
+		storedItems:       storedItems,
+		compactionHistory: compactionHistory,
+		windowGeneration:  windowGeneration,
+		usage:             usage,
+		toolResults:       toolResults,
+		metadata:          metadata,
 	}
 }
 
@@ -1442,6 +1456,9 @@ func (t *Thread) buildConversationRecord(ctx context.Context, snapshot conversat
 	if err != nil {
 		return convtypes.ConversationRecord{}, errors.Wrap(err, "error marshaling input items")
 	}
+	if err := snapshot.compactionHistory.Validate(inputItemsJSON); err != nil {
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "invalid Responses compaction history")
+	}
 
 	// Build the conversation record
 	metadata["model"] = t.Config.Model
@@ -1473,16 +1490,17 @@ func (t *Thread) buildConversationRecord(ctx context.Context, snapshot conversat
 	}
 
 	return convtypes.ConversationRecord{
-		ID:          t.ConversationID,
-		CWD:         t.Config.WorkingDirectory,
-		RawMessages: inputItemsJSON,
-		Provider:    "openai",
-		Usage:       snapshot.usage,
-		Metadata:    metadata,
-		Summary:     name,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ToolResults: toolResults,
+		ID:                t.ConversationID,
+		CWD:               t.Config.WorkingDirectory,
+		RawMessages:       inputItemsJSON,
+		CompactionHistory: snapshot.compactionHistory,
+		Provider:          "openai",
+		Usage:             snapshot.usage,
+		Metadata:          metadata,
+		Summary:           name,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		ToolResults:       toolResults,
 	}, nil
 }
 
@@ -1514,6 +1532,14 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	if err := json.Unmarshal(record.RawMessages, &storedItems); err != nil {
 		return
 	}
+	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
+		logger.G(ctx).WithError(err).Error("failed to load Responses compaction history")
+		return
+	}
+	if record.CompactionHistory != nil && record.CompactionHistory.ActiveDisplayStart > len(cleanedStoredInputItems(storedItems)) {
+		logger.G(ctx).Error("Responses compaction boundary includes incomplete tool calls")
+		return
+	}
 
 	windowGeneration := persistedCodexWindowGeneration(record.Metadata)
 
@@ -1532,6 +1558,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		t.Metadata = make(map[string]any)
 	}
 	t.ToolResults = maps.Clone(record.ToolResults)
+	t.CompactionHistory = record.CompactionHistory.Clone()
 	if t.ToolResults == nil {
 		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 	}

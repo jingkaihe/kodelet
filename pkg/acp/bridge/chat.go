@@ -11,19 +11,23 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+const contextCompactedMetadataKey = "kodelet/contextCompacted"
+
 // ACPChatEventSink translates streamed chat events into ACP session updates.
 type ACPChatEventSink struct {
-	handler   *ACPMessageHandler
-	sender    UpdateSender
-	sessionID acptypes.SessionID
+	handler     *ACPMessageHandler
+	sender      UpdateSender
+	sessionID   acptypes.SessionID
+	compactions map[string]struct{}
 }
 
 // NewACPChatEventSink creates a chat event sink for one ACP session.
 func NewACPChatEventSink(sender UpdateSender, sessionID acptypes.SessionID) *ACPChatEventSink {
 	return &ACPChatEventSink{
-		handler:   NewACPMessageHandler(sender, sessionID),
-		sender:    sender,
-		sessionID: sessionID,
+		handler:     NewACPMessageHandler(sender, sessionID),
+		sender:      sender,
+		sessionID:   sessionID,
+		compactions: make(map[string]struct{}),
 	}
 }
 
@@ -33,6 +37,35 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		return nil
 	}
 	switch event.Kind {
+	case "context-compacted":
+		if event.Compaction == nil || s.sender == nil {
+			return nil
+		}
+		if _, seen := s.compactions[event.Compaction.ID]; seen {
+			return nil
+		}
+		text := "\n\nContext compacted"
+		if summary := strings.TrimSpace(event.Compaction.Summary); summary != "" {
+			text += "\n\n" + summary
+		}
+		if err := s.sender.SendUpdate(s.sessionID, map[string]any{
+			"sessionUpdate": acptypes.UpdateAgentMessageChunk,
+			"content": acptypes.ContentBlock{
+				Type: acptypes.ContentTypeText,
+				Text: text + "\n\n",
+			},
+			"_meta": map[string]any{
+				contextCompactedMetadataKey: map[string]any{
+					"compaction":        event.Compaction,
+					"beforeCurrentUser": event.BeforeCurrentUser,
+				},
+			},
+		}); err != nil {
+			return err
+		}
+		if event.Compaction.ID != "" {
+			s.compactions[event.Compaction.ID] = struct{}{}
+		}
 	case "text":
 		if text := chatEventText(event); text != "" {
 			s.handler.HandleText(text)
@@ -76,6 +109,10 @@ func ReplayConversationHistory(sender UpdateSender, sessionID acptypes.SessionID
 	sink := NewACPChatEventSink(sender, sessionID)
 	for _, message := range messages {
 		switch message.Kind {
+		case "context-compacted":
+			if err := sink.Send(chat.ChatEvent{Kind: "context-compacted", Compaction: message.Compaction}); err != nil {
+				return err
+			}
 		case "text":
 			if message.Role == "user" {
 				if err := replayUserMessage(sender, sessionID, message); err != nil {

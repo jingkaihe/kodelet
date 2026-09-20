@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,25 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 	switch event.Kind {
 	case "conversation":
 		return
+	case "context-compacted":
+		if event.Compaction == nil || hasCompactionMarker(m.entries, event.Compaction.ID) {
+			return
+		}
+		entry := compactionEntry(*event.Compaction)
+		if event.BeforeCurrentUser {
+			for index := len(m.entries) - 1; index >= 0; index-- {
+				if m.entries[index].kind != entryUser {
+					continue
+				}
+				m.entries = slices.Insert(m.entries, index, entry)
+				if m.hasActiveAssistantEntry && m.activeAssistantEntry >= index {
+					m.activeAssistantEntry++
+				}
+				return
+			}
+		}
+		m.entries = append(m.entries, entry)
+		m.clearActiveAssistantEntry()
 	case "user-message-display":
 		content := userMessageContentText(event.Content)
 		if content == "" {

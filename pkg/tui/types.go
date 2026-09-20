@@ -61,6 +61,7 @@ type detailKind int
 const (
 	detailThoughts detailKind = iota
 	detailTools
+	detailCompaction
 )
 
 type thoughtBlock struct {
@@ -87,6 +88,7 @@ const (
 	blockText assistantBlockKind = iota
 	blockThoughts
 	blockTools
+	blockCompaction
 )
 
 type markdownKind int
@@ -97,11 +99,12 @@ const (
 )
 
 type assistantBlock struct {
-	kind     assistantBlockKind
-	text     string
-	thoughts []thoughtBlock
-	tools    []toolCall
-	expanded bool
+	kind       assistantBlockKind
+	text       string
+	thoughts   []thoughtBlock
+	tools      []toolCall
+	expanded   bool
+	compaction *llmtypes.CompactionMarker
 }
 
 type chatEntry struct {
