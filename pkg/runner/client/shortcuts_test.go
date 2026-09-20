@@ -78,7 +78,7 @@ func TestRunnerShortcutDiscoveryMatchesIdleRunWithTools(t *testing.T) {
 	service.profileConfigLoader = loader
 	probe, err := service.ProbeManifestForCWD(t.Context(), workspace, "")
 	require.NoError(t, err)
-	discovery := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
+	discovery := callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
 	manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "shortcut-run", ConversationID: "conversation", CWD: workspace})
 	require.NoError(t, err)
 	assert.Equal(t, probe.Config, manifest.Config)

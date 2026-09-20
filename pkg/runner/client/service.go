@@ -397,7 +397,13 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return rpcResult(nil, err)
 		}
 		digest, err := runnerpayload.ComputeDiscoveryDigest(manifest)
-		return rpcResult(protocol.WorkspaceDiscoverResult{CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile), Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts, ExtensionCount: manifest.ExtensionCount}, err)
+		return rpcResult(runnerpayload.WorkspaceDiscoverResult{
+			WorkspaceDiscoverResult: protocol.WorkspaceDiscoverResult{
+				CWD: manifest.WorkingDirectory, EnvironmentProfile: normalizeEnvironmentProfile(value.EnvironmentProfile),
+				Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts, ExtensionCount: manifest.ExtensionCount,
+			},
+			Profiles: manifest.Profiles,
+		}, err)
 	case protocol.MethodWorkspaceCWDHints:
 		value, rpcErr := decodeParams[protocol.WorkspaceCWDHintsParams](params)
 		if rpcErr != nil {

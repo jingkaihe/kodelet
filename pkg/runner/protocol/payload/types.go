@@ -82,6 +82,13 @@ type Manifest struct {
 	Capabilities        EnvironmentCapabilities       `json:"capabilities"`
 }
 
+// WorkspaceDiscoverResult carries runner-owned profile definitions to the daemon.
+// Public discovery responses expose only the embedded transport metadata.
+type WorkspaceDiscoverResult struct {
+	protocol.WorkspaceDiscoverResult
+	Profiles []extensions.Profile `json:"profiles,omitempty"`
+}
+
 // ComputeManifestDigest returns a stable digest when callers provide deterministically ordered slices.
 func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.RunnerID = ""

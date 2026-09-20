@@ -1081,7 +1081,7 @@ func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testin
 				assert.True(t, bounded)
 				if method == protocol.MethodWorkspaceDiscover {
 					assert.Equal(t, protocol.WorkspaceDiscoverParams{CWD: "/runner/selected", EnvironmentProfile: "review", Options: expectedOptions}, params)
-					*result.(*protocol.WorkspaceDiscoverResult) = protocol.WorkspaceDiscoverResult{CWD: "/runner/selected", EnvironmentProfile: "review", Digest: "sha256:selected"}
+					result.(*runnerpayload.WorkspaceDiscoverResult).WorkspaceDiscoverResult = protocol.WorkspaceDiscoverResult{CWD: "/runner/selected", EnvironmentProfile: "review", Digest: "sha256:selected"}
 				} else {
 					assert.Equal(t, protocol.WorkspaceCWDHintsParams{CWD: "/runner/selected", EnvironmentProfile: "review", Query: "project"}, params)
 					*result.(*protocol.WorkspaceCWDHintsResult) = protocol.WorkspaceCWDHintsResult{Hints: []protocol.DirectoryHint{{Path: "/runner/selected/project"}}}
@@ -1211,7 +1211,11 @@ func TestRunnerDiscoveryRoutesModelProfilesIndependentlyOfEnvironmentProfiles(t 
 					server.handleRunnerDiscovery(recorder, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil), method)
 					if test.status != 0 {
 						assert.Equal(t, test.status, recorder.Code, recorder.Body.String())
-						assert.Zero(t, calls)
+						if method == protocol.MethodWorkspaceDiscover && (test.name == "unknown name" || test.name == "no reserved spelling") {
+							assert.Equal(t, 1, calls, "discover installed profiles before rejecting an unknown name")
+						} else {
+							assert.Zero(t, calls)
+						}
 					} else {
 						assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 						assert.Equal(t, 1, calls)

@@ -13,9 +13,12 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
+
+var errExtensionProfileNotRegistered = errors.New("not registered for this caller and runner; initialize its extension on this runner first")
 
 // Definitions are live runner resources, not mutations to global daemon config.
 // A new runner generation must register again; conversations keep their snapshots.
@@ -138,9 +141,55 @@ func (s *Server) resolveModelProfile(ctx context.Context, runnerID, name, effort
 	}
 	profile, exists := s.registeredProfile(extensionProfileKey{principal.ID, runnerID, name}, runner.Generation)
 	if !exists {
-		return llmtypes.Config{}, errors.Errorf("extension profile %q is not registered for this caller and runner; initialize its extension on this runner first", name)
+		return llmtypes.Config{}, errors.Wrapf(errExtensionProfileNotRegistered, "extension profile %q", name)
 	}
 	return chat.ResolveExtensionProfile(profile, effort)
+}
+
+// resolveChatModelProfile bootstraps direct chat requests and registrations lost
+// to a runner reconnect, using the same discovery path as ACP session setup.
+func (s *Server) resolveChatModelProfile(ctx context.Context, req chat.ChatRequest, name, effort string) (llmtypes.Config, error) {
+	config, err := s.resolveModelProfile(ctx, req.RunnerID, name, effort)
+	if !errors.Is(err, errExtensionProfileNotRegistered) {
+		return config, err
+	}
+	if err := req.Options.Validate(); err != nil {
+		return llmtypes.Config{}, err
+	}
+	params := protocol.WorkspaceDiscoverParams{
+		CWD:                strings.TrimSpace(req.CWD),
+		EnvironmentProfile: chat.NormalizeEnvironmentProfile(req.EnvironmentProfile),
+		Options:            req.Options.Restrictions(),
+	}
+	if req.ConversationID != "" {
+		if s.conversationService == nil {
+			return llmtypes.Config{}, errors.New("conversation service is unavailable")
+		}
+		record, err := s.conversationService.GetConversation(ctx, req.ConversationID)
+		if err != nil && !errors.Is(err, convtypes.ErrConversationNotFound) {
+			return llmtypes.Config{}, err
+		}
+		if err == nil {
+			if strings.TrimSpace(record.CWD) == "" || (params.CWD != "" && params.CWD != record.CWD) {
+				return llmtypes.Config{}, errors.New("profile discovery requires the conversation's saved working directory")
+			}
+			params.CWD = record.CWD
+			stored, _ := record.Metadata[chat.EnvironmentProfileMetadataKey].(string)
+			stored = chat.NormalizeEnvironmentProfile(stored)
+			if params.EnvironmentProfile != "" && params.EnvironmentProfile != stored {
+				return llmtypes.Config{}, errors.New("the runner profile differs from the conversation's saved profile")
+			}
+			params.EnvironmentProfile = stored
+		}
+	}
+	runner, ok := s.runnerRegistry.Runner(req.RunnerID)
+	if !ok || !runner.Connected {
+		return llmtypes.Config{}, errors.New("the selected runner is unavailable")
+	}
+	if _, err := s.discoverWorkspace(ctx, runner, params); err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "failed to discover extension profiles")
+	}
+	return s.resolveModelProfile(ctx, req.RunnerID, name, effort)
 }
 
 func (s *Server) registeredProfile(key extensionProfileKey, generation int64) (extensions.Profile, bool) {

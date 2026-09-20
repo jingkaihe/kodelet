@@ -102,7 +102,9 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		return "", err
 	}
 	if parentID != "" {
-		settings, err := client.ChatSettings(ctx, m.config.Profile)
+		// Capabilities must not depend on a profile that workspace discovery
+		// has not registered for this caller yet.
+		settings, err := client.ChatSettings(ctx, "")
 		if err != nil {
 			return "", errors.Wrap(err, "failed to check daemon conversation hierarchy support")
 		}
@@ -111,7 +113,7 @@ func (m *remoteSessionManager) newSession(ctx context.Context, request acptypes.
 		}
 	}
 	if runnerID == "" {
-		settings, err := client.ChatSettings(ctx, m.config.Profile)
+		settings, err := client.ChatSettings(ctx, "")
 		if err != nil {
 			return "", errors.Wrap(err, "could not connect to the server; start 'kodelet serve' or check --server and your authentication settings")
 		}

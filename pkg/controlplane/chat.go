@@ -88,7 +88,7 @@ func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink c
 	}
 	profileCtx := ctx
 	ctx = chat.ContextWithProfileResolver(ctx, func(profile, effort string) (llmtypes.Config, error) {
-		return r.server.resolveModelProfile(profileCtx, req.RunnerID, profile, effort)
+		return r.server.resolveChatModelProfile(profileCtx, req, profile, effort)
 	})
 	resultConversationID, runErr := r.runner.Run(ctx, req, sink)
 	if strings.TrimSpace(resultConversationID) == "" {

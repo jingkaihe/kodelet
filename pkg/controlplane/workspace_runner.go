@@ -22,6 +22,7 @@ type workspaceRunnerTarget struct {
 	CWD                string
 	Profile            string
 	EnvironmentProfile string
+	ExtensionProfile   string
 }
 
 type workspaceRunnerTargetError struct {
@@ -45,6 +46,10 @@ func (s *Server) resolveWorkspaceRunnerTarget(r *http.Request) (*workspaceRunner
 }
 
 func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *workspaceRunnerTargetError) {
+	return s.resolveRunnerDiscoveryTarget(r, false)
+}
+
+func (s *Server) resolveRunnerDiscoveryTarget(r *http.Request, discoverProfiles bool) (*workspaceRunnerTarget, *workspaceRunnerTargetError) {
 	if r == nil {
 		return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "invalid workspace target", err: errors.New("request is required")}
 	}
@@ -105,7 +110,7 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the model profile differs from the conversation's saved profile"}
 			}
 			profile = storedProfile
-			if hasSnapshot && s.missingEmbeddedModelProfile(runnerID, storedProfile) {
+			if hasSnapshot && !extensionProfile && s.missingEmbeddedModelProfile(runnerID, storedProfile) {
 				profile = ""
 			}
 			if strings.TrimSpace(record.CWD) == "" {
@@ -128,17 +133,19 @@ func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *
 		return nil, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "runner is offline"}
 	}
 	if conversationID == "" && chat.NormalizeRequestedProfile(profile) != "" && !llm.HasConfiguredProfile(profile) {
-		config, err := s.resolveModelProfile(r.Context(), runnerID, profile, "")
-		if err != nil {
-			return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "could not resolve model profile", err: err}
+		if !discoverProfiles {
+			if _, err := s.resolveModelProfile(r.Context(), runnerID, profile, ""); err != nil {
+				return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "could not resolve model profile", err: err}
+			}
 		}
-		extensionProfile = config.ExtensionProfile
+		extensionProfile = true
 	}
+	target := &workspaceRunnerTarget{Runner: runner, CWD: cwd, Profile: profile, EnvironmentProfile: environmentProfile}
 	if extensionProfile {
 		// Registered model profiles have no runner-local environment overlay.
-		profile = ""
+		target.ExtensionProfile, target.Profile = profile, ""
 	}
-	return &workspaceRunnerTarget{Runner: runner, CWD: cwd, Profile: profile, EnvironmentProfile: environmentProfile}, nil
+	return target, nil
 }
 
 // Missing profiles may fall back only for validated saved snapshots, matching
@@ -173,7 +180,7 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 			return
 		}
 	}
-	target, targetErr := s.resolveRunnerTarget(r)
+	target, targetErr := s.resolveRunnerDiscoveryTarget(r, method == protocol.MethodWorkspaceDiscover)
 	if targetErr != nil {
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
 		return
@@ -200,18 +207,26 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 			return
 		}
 	}
-	var result any
-	var params any
-	if method == protocol.MethodWorkspaceDiscover {
-		result = &protocol.WorkspaceDiscoverResult{}
-		params = protocol.WorkspaceDiscoverParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options}
-	} else {
-		result = &protocol.WorkspaceCWDHintsResult{}
-		params = protocol.WorkspaceCWDHintsParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Query: r.URL.Query().Get("q")}
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	if err := s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, method, params, result); err != nil {
+	var result any
+	var err error
+	if method == protocol.MethodWorkspaceDiscover {
+		result, err = s.discoverWorkspace(ctx, target.Runner, protocol.WorkspaceDiscoverParams{
+			CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Options: options,
+		})
+		if err == nil && target.ExtensionProfile != "" {
+			if _, err := s.resolveModelProfile(ctx, target.Runner.ID, target.ExtensionProfile, ""); err != nil {
+				s.writeErrorResponse(w, http.StatusBadRequest, "could not resolve model profile", err)
+				return
+			}
+		}
+	} else {
+		result = &protocol.WorkspaceCWDHintsResult{}
+		params := protocol.WorkspaceCWDHintsParams{CWD: target.CWD, Profile: target.Profile, EnvironmentProfile: target.EnvironmentProfile, Query: r.URL.Query().Get("q")}
+		err = s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, method, params, result)
+	}
+	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
 			status = http.StatusNotImplemented
@@ -220,6 +235,26 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 		return
 	}
 	s.writeJSONResponse(w, result)
+}
+
+func (s *Server) discoverWorkspace(ctx context.Context, runner runnerregistry.Runner, params protocol.WorkspaceDiscoverParams) (protocol.WorkspaceDiscoverResult, error) {
+	if err := params.Validate(); err != nil {
+		return protocol.WorkspaceDiscoverResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var result runnerpayload.WorkspaceDiscoverResult
+	if err := s.runnerRegistry.CallRunner(ctx, runner.ID, runner.Generation, protocol.MethodWorkspaceDiscover, params, &result); err != nil {
+		return protocol.WorkspaceDiscoverResult{}, err
+	}
+	// The authenticated runner supplies definitions; the requesting caller owns
+	// the registration. Never borrow another caller's cached profiles.
+	if err := s.registerExtensionProfiles(ctx, runnerpayload.Manifest{
+		RunnerID: runner.ID, Generation: runner.Generation, Profiles: result.Profiles,
+	}); err != nil {
+		return protocol.WorkspaceDiscoverResult{}, err
+	}
+	return result.WorkspaceDiscoverResult, nil
 }
 
 func (s *Server) writeWorkspaceRunnerTargetError(w http.ResponseWriter, targetErr *workspaceRunnerTargetError) {

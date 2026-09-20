@@ -673,8 +673,13 @@ func runBackgroundExtensionHelper() {
 				acquire(request.ID)
 			}
 			noTimeout := float64(0)
+			var profiles []extensions.ProfileRegistration
+			if mode == "profiles" {
+				profiles = []extensions.ProfileRegistration{{Name: "code-search", Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-4o"}}}
+			}
 			result = extensions.InitializeResult{
 				Name: "lifetime", Version: "1",
+				Profiles:      profiles,
 				Tools:         []extensions.ToolRegistration{{Name: "lifetime", Description: "Inspect and release extension lifetime", InputSchema: map[string]any{"type": "object"}}},
 				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart, TimeoutInSec: &noTimeout}, {Event: extensions.EventSessionEnd, TimeoutInSec: &noTimeout}, {Event: extensions.EventAgentEnd}},
 			}

@@ -45,7 +45,7 @@ func TestEmbeddedProfilesReachRunAndDiscoveryManifests(t *testing.T) {
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "embedded", Generation: 1}))
 	initial, err := service.ProbeManifestDigest(t.Context())
 	require.NoError(t, err)
-	probe := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{Profile: "flair"})
+	probe := callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{Profile: "flair"})
 	assert.NotEqual(t, initial, probe.Digest)
 	_, _, cached := service.HeartbeatSnapshot()
 	assert.Equal(t, initial, cached, "named profile probes must not replace the default heartbeat digest")

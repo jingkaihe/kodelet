@@ -69,24 +69,28 @@ func (p staticRemoteChatProvider) WaitForRemoteChat(context.Context) (RemoteChat
 type fakeRemoteChatClient struct {
 	mu sync.Mutex
 
-	history  chat.ConversationHistory
-	run      func(context.Context, chat.ChatRequest, chat.ChatEventSink) (string, error)
-	stop     func(string)
-	stopTurn func(string, string)
-	stopErr  error
-	requests []chat.ChatRequest
-	stopped  []string
-	steered  []string
-	discover func(chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
-	targets  []chat.WorkspaceTarget
-	settings chat.ControlPlaneChatSettings
+	history          chat.ConversationHistory
+	run              func(context.Context, chat.ChatRequest, chat.ChatEventSink) (string, error)
+	stop             func(string)
+	stopTurn         func(string, string)
+	stopErr          error
+	requests         []chat.ChatRequest
+	stopped          []string
+	steered          []string
+	discover         func(chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error)
+	targets          []chat.WorkspaceTarget
+	settings         chat.ControlPlaneChatSettings
+	settingsProfiles []string
 
 	steerStarted   chan struct{}
 	steerRelease   chan struct{}
 	steerCancelled bool
 }
 
-func (c *fakeRemoteChatClient) ChatSettings(context.Context, string) (chat.ControlPlaneChatSettings, error) {
+func (c *fakeRemoteChatClient) ChatSettings(_ context.Context, profile string) (chat.ControlPlaneChatSettings, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.settingsProfiles = append(c.settingsProfiles, profile)
 	return c.settings, nil
 }
 
@@ -328,6 +332,33 @@ func TestRemoteACPParentSurvivesCancelledFirstTurn(t *testing.T) {
 	}
 	_, err = server.remoteSessions.loadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: sessionID, Meta: meta})
 	require.ErrorContains(t, err, "only supported by session/new")
+}
+
+func TestRemoteACPDiscoversProfileAfterCapabilityChecks(t *testing.T) {
+	for _, runnerID := range []string{"runner-1", ""} {
+		t.Run("runner="+runnerID, func(t *testing.T) {
+			client := &fakeRemoteChatClient{settings: chat.ControlPlaneChatSettings{
+				ConversationHierarchyVersion: 1, DefaultRunnerID: "runner-1", DefaultRunnerReady: true,
+			}}
+			client.discover = func(target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+				require.NotEmpty(t, client.settingsProfiles)
+				for _, profile := range client.settingsProfiles {
+					assert.Empty(t, profile, "capability checks must not resolve the child's unregistered profile")
+				}
+				assert.Equal(t, "runner-1", target.RunnerID)
+				assert.Equal(t, "code-search", target.Profile)
+				return protocol.WorkspaceDiscoverResult{CWD: "/workspace"}, nil
+			}
+			manager := newRemoteSessionManager(RemoteSessionConfig{
+				Provider: staticRemoteChatProvider{client: client, runnerID: runnerID}, Profile: "code-search",
+			})
+			_, err := manager.newSession(t.Context(), acptypes.NewSessionRequest{
+				CWD: "/workspace", Meta: map[string]any{"conversationHierarchy": map[string]any{"version": 1, "parentConversationId": "parent"}},
+			})
+			require.NoError(t, err)
+			assert.Len(t, client.targets, 1)
+		})
+	}
 }
 
 func TestACPConversationHierarchyMetadataValidation(t *testing.T) {

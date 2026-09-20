@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ func TestRunnerDiscoveryUsesRequestedDirectoryAndProfile(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	initial, err := service.ProbeManifestDigest(t.Context())
 	require.NoError(t, err)
-	result := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: selected, EnvironmentProfile: "review"})
+	result := callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: selected, EnvironmentProfile: "review"})
 	assert.Equal(t, selected, result.CWD)
 	assert.Equal(t, selected, loadedDirectory)
 	assert.Equal(t, "review", loadedProfile)
@@ -80,7 +81,7 @@ func TestRunnerDirectoryHintsResolveOnRunnerHost(t *testing.T) {
 }
 
 func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
-	service, workspace := newBackgroundTestService(t, "plain")
+	service, workspace := newBackgroundTestService(t, "profiles")
 	service.configLoader = func(string) (llmtypes.Config, error) {
 		return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: true}}, nil
 	}
@@ -98,9 +99,10 @@ func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrNotExist)
 	}
 	params := protocol.WorkspaceDiscoverParams{CWD: workspace, Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true)}}
-	result := callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, params)
+	result := callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, params)
 	assert.NotEmpty(t, result.Digest)
 	assert.Equal(t, new(0), result.ExtensionCount)
+	assert.Empty(t, result.Profiles)
 	_, err := os.Stat(marker)
 	require.ErrorIs(t, err, os.ErrNotExist, "no-extensions discovery must not start an extension process")
 	for _, command := range result.Commands {
@@ -115,8 +117,12 @@ func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 	unrestricted, err := service.ProbeManifestForCWD(t.Context(), workspace, "")
 	require.NoError(t, err)
 	assert.Equal(t, new(1), unrestricted.ExtensionCount)
-	result = callService[protocol.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
+	result = callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
 	assert.Equal(t, new(1), result.ExtensionCount)
+	require.Len(t, result.Profiles, 1)
+	assert.Equal(t, "code-search", result.Profiles[0].Name)
+	assert.NotEmpty(t, result.Profiles[0].ExtensionID)
+	assert.Equal(t, "gpt-4o", result.Profiles[0].Options["model"])
 	var skillNames []string
 	for _, skill := range unrestricted.Skills {
 		skillNames = append(skillNames, skill.Name)
