@@ -67,6 +67,14 @@ func TestSwapContext_ReplacesMessages(t *testing.T) {
 	textBlock := thread.messages[0].Content[0]
 	require.NotNil(t, textBlock.OfText)
 	assert.Equal(t, summary, textBlock.OfText.Text)
+
+	messages, history, usage := thread.messages, thread.GetCompactionHistory(), thread.GetUsage()
+	for _, empty := range []string{"", " \n\t "} {
+		require.ErrorContains(t, thread.SwapContext(t.Context(), empty), "compact summary is empty")
+		assert.Equal(t, messages, thread.messages)
+		assert.Equal(t, history, thread.GetCompactionHistory())
+		assert.Equal(t, usage, thread.GetUsage())
+	}
 }
 
 func TestSwapContext_PreservesToolResults(t *testing.T) {
@@ -113,28 +121,6 @@ func TestSwapContext_HandlesNilState(t *testing.T) {
 	// Should not panic with nil state
 	err := thread.SwapContext(context.Background(), "summary")
 	require.NoError(t, err)
-}
-
-func TestSwapContext_RejectsEmptySummaryWithoutChangingHistory(t *testing.T) {
-	for _, summary := range []string{"", " \n\t "} {
-		t.Run(summary, func(t *testing.T) {
-			thread := createTestThread()
-			thread.AddUserMessage(t.Context(), "original request")
-			require.NoError(t, thread.SwapContext(t.Context(), "valid summary"))
-			thread.AddUserMessage(t.Context(), "next request")
-			messages := append([]anthropic.MessageParam(nil), thread.messages...)
-			history := thread.GetCompactionHistory()
-			usage := thread.GetUsage()
-
-			require.ErrorContains(t, thread.SwapContext(t.Context(), summary), "compact summary is empty")
-			assert.Equal(t, messages, thread.messages)
-			assert.Equal(t, history, thread.GetCompactionHistory())
-			assert.Equal(t, usage, thread.GetUsage())
-			thread.Store = &MockConversationStore{}
-			thread.Persisted = true
-			require.NoError(t, thread.SaveConversation(t.Context()))
-		})
-	}
 }
 
 func TestRepeatedCompactionArchivesOnlyVisibleSuffix(t *testing.T) {

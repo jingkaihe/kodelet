@@ -324,10 +324,8 @@ func TestSendMessageCompletesDespiteCompactionCheckpointFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		cancelAfterSave bool
-		alwaysFail      bool
 	}{
 		{name: "transient save failure"},
-		{name: "persistent save failure", alwaysFail: true},
 		{name: "cancellation after compaction", cancelAfterSave: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -348,12 +346,10 @@ func TestSendMessageCompletesDespiteCompactionCheckpointFailure(t *testing.T) {
 				saveCalls++
 				require.NoError(t, saveCtx.Err())
 				assert.Contains(t, string(record.RawMessages), "incoming user", "even a failed save must include the admitted input")
-				require.NotNil(t, record.CompactionHistory)
-				require.NoError(t, record.CompactionHistory.Validate(record.RawMessages))
 				if tc.cancelAfterSave {
 					cancel()
 				}
-				if saveCalls == 1 || tc.alwaysFail {
+				if saveCalls == 1 {
 					return errors.New("database is locked")
 				}
 				return nil

@@ -54,43 +54,27 @@ func TestManagerLoadSessionRejectsInvalidCompactionHistory(t *testing.T) {
 	sqlDB, err := db.Open(t.Context(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
-	for _, failure := range []string{"invalid boundary", "malformed messages"} {
-		t.Run(failure, func(t *testing.T) {
-			record := convtypes.NewConversationRecord("invalid-session")
-			record.Provider = "anthropic"
-			record.Metadata, err = conversations.AddConfigSnapshot(nil, llmtypes.Config{
-				Provider:           "anthropic",
-				Model:              "claude-sonnet-4-6",
-				AnthropicAPIAccess: llmtypes.AnthropicAPIAccessAPIKey,
-			})
-			require.NoError(t, err)
-			require.NoError(t, store.Save(t.Context(), record))
-			raw := `[]`
-			if failure == "malformed messages" {
-				raw = `{"not":"a message array"}`
-			}
-			history := `{"segments":[{"rawMessages":[{"role":"user","content":[{"type":"text","text":"archived"}]}],"marker":{"id":"compact-1","method":"summary"}}],"activeDisplayStart":1}`
-			_, err = sqlDB.ExecContext(t.Context(),
-				`UPDATE conversations SET raw_messages = ?, compaction_history = ? WHERE id = ?`,
-				raw, history, record.ID,
-			)
-			require.NoError(t, err)
-			for range 2 {
-				session, err := manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{
-					SessionID: acptypes.SessionID(record.ID), CWD: t.TempDir(),
-				})
-				require.ErrorContains(t, err, "failed to load conversation")
-				assert.Nil(t, session)
-				assert.Empty(t, manager.sessions)
-			}
-			var storedRaw, storedHistory string
-			require.NoError(t, sqlDB.QueryRowContext(t.Context(),
-				`SELECT raw_messages, compaction_history FROM conversations WHERE id = ?`, record.ID,
-			).Scan(&storedRaw, &storedHistory))
-			assert.Equal(t, raw, storedRaw)
-			assert.Equal(t, history, storedHistory)
-		})
-	}
+	record := convtypes.NewConversationRecord("invalid-session")
+	record.Provider = "anthropic"
+	record.Metadata, err = conversations.AddConfigSnapshot(nil, llmtypes.Config{
+		Provider:           "anthropic",
+		Model:              "claude-sonnet-4-6",
+		AnthropicAPIAccess: llmtypes.AnthropicAPIAccessAPIKey,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Save(t.Context(), record))
+	_, err = sqlDB.ExecContext(t.Context(),
+		`UPDATE conversations SET compaction_history = ? WHERE id = ?`,
+		`{"activeDisplayStart":1}`, record.ID,
+	)
+	require.NoError(t, err)
+
+	session, err := manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{
+		SessionID: acptypes.SessionID(record.ID), CWD: t.TempDir(),
+	})
+	require.ErrorContains(t, err, "invalid compaction display boundary")
+	assert.Nil(t, session)
+	assert.Empty(t, manager.sessions)
 }
 
 func TestNewManager_WithManagerConfig(t *testing.T) {

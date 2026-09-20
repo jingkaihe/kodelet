@@ -148,30 +148,28 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 					Retry:            llmtypes.RetryConfig{Attempts: 1},
 					OpenAI:           &llmtypes.OpenAIConfig{BaseURL: api.URL, APIMode: llmtypes.OpenAIAPIMode(provider)},
 				}
-				raw := `[{"role":"user","content":"seed"}]`
-				switch provider {
-				case "anthropic":
+				if provider == "anthropic" {
 					config.Provider, config.Model, config.OpenAI = "anthropic", "claude-sonnet-4-6", nil
 					config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAPIKey
 					config.Anthropic = &llmtypes.AnthropicConfig{BaseURL: api.URL}
-					raw = `[{"role":"user","content":[{"type":"text","text":"seed"}]}]`
-				case "responses":
-					raw = `[{"type":"message","role":"user","content":"seed"}]`
 				}
-				record := convtypes.NewConversationRecord(provider + "-" + failure)
-				record.Provider, record.CWD = config.Provider, config.WorkingDirectory
-				record.RawMessages = json.RawMessage(raw)
-				record.Metadata, err = conversations.AddConfigSnapshot(map[string]any{"api_mode": provider}, config)
+				thread, err := llm.NewThread(config)
 				require.NoError(t, err)
-				record.CompactionHistory = &convtypes.CompactionHistory{
-					ActiveDisplayStart: 1,
-					Segments: []convtypes.CompactedSegment{{
-						RawMessages: json.RawMessage(raw),
-						Marker:      llmtypes.CompactionMarker{ID: "compact-1", Method: "summary", Summary: "seed"},
-					}},
-				}
-				require.NoError(t, store.Save(t.Context(), record))
+				defer llm.CloseThread(thread)
+				thread.SetConversationID(provider + "-" + failure)
+				require.NoError(t, thread.EnablePersistence(t.Context(), true))
+				thread.AddUserMessage(t.Context(), "archived input")
+				compactor, ok := thread.(interface {
+					SwapContext(context.Context, string) error
+				})
+				require.True(t, ok)
+				require.NoError(t, compactor.SwapContext(t.Context(), "summary"))
+				require.NoError(t, thread.SaveConversation(t.Context()))
+				record, err := store.Load(t.Context(), thread.GetConversationID())
+				require.NoError(t, err)
+
 				// Simulate an older/corrupt stored record, bypassing save-time validation.
+				raw := string(record.RawMessages)
 				if failure == "invalid boundary" {
 					record.CompactionHistory.ActiveDisplayStart = 99
 				} else {
@@ -185,10 +183,6 @@ func TestResumeLoadFailurePreservesDurableTranscript(t *testing.T) {
 				)
 				require.NoError(t, err)
 
-				thread, err := llm.NewThread(config)
-				require.NoError(t, err)
-				defer llm.CloseThread(thread)
-				thread.SetConversationID(record.ID)
 				require.ErrorContains(t, thread.EnablePersistence(t.Context(), true), "failed to load conversation")
 				assert.False(t, thread.IsPersisted())
 				thread.AddUserMessage(t.Context(), "must not overwrite the archive")

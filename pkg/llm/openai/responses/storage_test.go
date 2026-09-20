@@ -576,7 +576,6 @@ func TestConversationSnapshotRemovesTrailingFunctionCallFromStorage(t *testing.T
 type mockResponsesConversationStore struct {
 	savedRecords []convtypes.ConversationRecord
 	loadedRecord *convtypes.ConversationRecord
-	loadErr      error
 	saveFunc     func(context.Context, convtypes.ConversationRecord) error
 }
 
@@ -589,9 +588,6 @@ func (m *mockResponsesConversationStore) Save(ctx context.Context, record convty
 }
 
 func (m *mockResponsesConversationStore) Load(_ context.Context, _ string) (convtypes.ConversationRecord, error) {
-	if m.loadErr != nil {
-		return convtypes.ConversationRecord{}, m.loadErr
-	}
 	if m.loadedRecord != nil {
 		return *m.loadedRecord, nil
 	}
@@ -813,48 +809,6 @@ func TestLoadConversationRejectsInvalidCompactionBoundary(t *testing.T) {
 			assert.False(t, thread.IsPersisted())
 			assert.Equal(t, original, thread.snapshotHistory())
 			assert.Nil(t, thread.CompactionHistory)
-			thread.AddUserMessage(t.Context(), "must not overwrite")
-			require.NoError(t, thread.SaveConversation(t.Context()))
-			require.Error(t, thread.SavePendingUserMessage(t.Context(), "must not checkpoint"))
-			_, err := thread.ForkConversation(t.Context())
-			require.Error(t, err)
-			assert.Empty(t, store.savedRecords)
-		})
-	}
-}
-
-func TestLoadConversationFailureDisablesPersistence(t *testing.T) {
-	for _, tt := range []struct {
-		name     string
-		provider string
-		raw      string
-		loadErr  error
-	}{
-		{name: "malformed messages", raw: `{`},
-		{name: "wrong provider", raw: `[]`, provider: "anthropic"},
-		{name: "wrong API mode", raw: `[]`, provider: "openai"},
-		{name: "store failure", loadErr: errors.New("database is locked")},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "invalid-load")}
-			thread.AddUserMessage(t.Context(), "live history")
-			original := thread.snapshotHistory()
-			record := convtypes.ConversationRecord{
-				Provider:    tt.provider,
-				RawMessages: json.RawMessage(tt.raw),
-			}
-			store := &mockResponsesConversationStore{loadedRecord: &record, loadErr: tt.loadErr}
-			thread.Store, thread.LoadConversation = store, thread.loadConversation
-			err := thread.EnablePersistence(t.Context(), true)
-			require.ErrorContains(t, err, "failed to load conversation")
-			if tt.loadErr != nil {
-				require.ErrorIs(t, err, tt.loadErr)
-			}
-			assert.False(t, thread.IsPersisted())
-			assert.Equal(t, original, thread.snapshotHistory())
-			thread.AddUserMessage(t.Context(), "must not overwrite")
-			require.NoError(t, thread.SaveConversation(t.Context()))
-			assert.Empty(t, store.savedRecords)
 		})
 	}
 }

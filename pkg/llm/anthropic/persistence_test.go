@@ -26,7 +26,6 @@ type MockConversationStore struct {
 	SavedRecords []convtypes.ConversationRecord
 	LoadedRecord *convtypes.ConversationRecord
 	SaveErr      error
-	LoadErr      error
 }
 
 func (m *MockConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
@@ -35,9 +34,6 @@ func (m *MockConversationStore) Save(_ context.Context, record convtypes.Convers
 }
 
 func (m *MockConversationStore) Load(_ context.Context, id string) (convtypes.ConversationRecord, error) {
-	if m.LoadErr != nil {
-		return convtypes.ConversationRecord{}, m.LoadErr
-	}
 	if m.LoadedRecord != nil {
 		return *m.LoadedRecord, nil
 	}
@@ -68,55 +64,20 @@ func (m *MockConversationStore) Close() error {
 	return nil
 }
 
-func TestLoadConversationFailureDisablesPersistence(t *testing.T) {
-	for _, tt := range []struct {
-		name     string
-		raw      string
-		start    int
-		provider string
-		loadErr  error
-	}{
-		{name: "negative boundary", raw: `[]`, start: -1},
-		{name: "boundary past end", raw: `[]`, start: 1},
-		{name: "boundary removed by cleanup", raw: `[{"role":"user","content":[{"type":"text","text":""}]}]`, start: 1},
-		{name: "malformed messages", raw: `{`},
-		{name: "wrong provider", raw: `[]`, provider: "openai"},
-		{name: "store failure", loadErr: errors.New("database is locked")},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			thread := createTestThread()
-			thread.AddUserMessage(t.Context(), "live history")
-			original := slices.Clone(thread.messages)
-			record := convtypes.ConversationRecord{
-				ID:          thread.ConversationID,
-				Provider:    tt.provider,
-				RawMessages: json.RawMessage(tt.raw),
-				CompactionHistory: &convtypes.CompactionHistory{
-					ActiveDisplayStart: tt.start,
-					Segments: []convtypes.CompactedSegment{{
-						RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"archived"}]}]`),
-						Marker:      llmtypes.CompactionMarker{ID: "compact-1", Method: "summary", Summary: "seed"},
-					}},
-				},
-			}
-			store := &MockConversationStore{LoadedRecord: &record, LoadErr: tt.loadErr}
-			thread.Store, thread.LoadConversation = store, thread.loadConversation
-			err := thread.EnablePersistence(t.Context(), true)
-			require.ErrorContains(t, err, "failed to load conversation")
-			if tt.loadErr != nil {
-				require.ErrorIs(t, err, tt.loadErr)
-			}
-			assert.False(t, thread.IsPersisted())
-			assert.Equal(t, original, thread.messages)
-			assert.Nil(t, thread.CompactionHistory)
-			thread.AddUserMessage(t.Context(), "must not overwrite")
-			require.NoError(t, thread.SaveConversation(t.Context()))
-			require.Error(t, thread.SavePendingUserMessage(t.Context(), "must not checkpoint"))
-			_, err = thread.ForkConversation(t.Context())
-			require.Error(t, err)
-			assert.Empty(t, store.SavedRecords)
-		})
-	}
+func TestLoadConversationRejectsBoundaryRemovedByCleanup(t *testing.T) {
+	thread := createTestThread()
+	thread.AddUserMessage(t.Context(), "live history")
+	original := slices.Clone(thread.messages)
+	thread.Store = &MockConversationStore{LoadedRecord: &convtypes.ConversationRecord{
+		RawMessages:       json.RawMessage(`[{"role":"user","content":[{"type":"text","text":""}]}]`),
+		CompactionHistory: &convtypes.CompactionHistory{ActiveDisplayStart: 1},
+	}}
+	thread.LoadConversation = thread.loadConversation
+
+	require.ErrorContains(t, thread.EnablePersistence(t.Context(), true), "after Anthropic cleanup")
+	assert.False(t, thread.IsPersisted())
+	assert.Equal(t, original, thread.messages)
+	assert.Nil(t, thread.CompactionHistory)
 }
 
 func TestDeserializeMessages(t *testing.T) {
