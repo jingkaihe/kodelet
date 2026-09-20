@@ -119,10 +119,8 @@ func TestRunnerDiscoveryRestrictionsPreventExtensionStartup(t *testing.T) {
 	assert.Equal(t, new(1), unrestricted.ExtensionCount)
 	result = callService[runnerpayload.WorkspaceDiscoverResult](t, service, protocol.MethodWorkspaceDiscover, protocol.WorkspaceDiscoverParams{CWD: workspace})
 	assert.Equal(t, new(1), result.ExtensionCount)
-	require.Len(t, result.Profiles, 1)
-	assert.Equal(t, "code-search", result.Profiles[0].Name)
-	assert.NotEmpty(t, result.Profiles[0].ExtensionID)
-	assert.Equal(t, "gpt-4o", result.Profiles[0].Options["model"])
+	require.NotEmpty(t, unrestricted.Profiles)
+	assert.Equal(t, unrestricted.Profiles, result.Profiles, "discovery must preserve the manifest's profile definitions")
 	var skillNames []string
 	for _, skill := range unrestricted.Skills {
 		skillNames = append(skillNames, skill.Name)

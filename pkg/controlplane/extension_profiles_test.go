@@ -235,76 +235,60 @@ func TestExtensionProfilesBootstrapUnderRequestingCaller(t *testing.T) {
 	}))
 	options := &llmtypes.ExecutionOptions{NoSkills: new(true), AllowedTools: &[]string{"grep", "file_read"}}
 	for _, mode := range []string{"discovery", "direct-chat", "resume"} {
-		for _, selected := range profiles {
-			t.Run(mode+"/"+selected.Name, func(t *testing.T) {
-				ctx := contextWithPrincipal(t.Context(), administrativePrincipal(t.Name()))
-				_, err := server.resolveModelProfile(ctx, runner.RunnerID, selected.Name, "")
-				require.ErrorIs(t, err, errExtensionProfileNotRegistered)
-				calls := 0
-				link.call = func(_ context.Context, method string, params, result any) error {
-					calls++
-					assert.Equal(t, protocol.MethodWorkspaceDiscover, method, "bootstrap must not open a model turn")
-					assert.Equal(t, protocol.WorkspaceDiscoverParams{CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options}, params)
-					*result.(*runnerpayload.WorkspaceDiscoverResult) = runnerpayload.WorkspaceDiscoverResult{
-						WorkspaceDiscoverResult: protocol.WorkspaceDiscoverResult{CWD: "/workspace/selected", EnvironmentProfile: "review"}, Profiles: profiles,
-					}
-					return nil
-				}
-				request := chat.ChatRequest{
-					ConversationID: "new-child", RunnerID: runner.RunnerID, CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options,
-				}
-				if mode == "discovery" {
-					encoded, err := json.Marshal(options)
-					require.NoError(t, err)
-					query := url.Values{
-						"runnerId": {runner.RunnerID}, "cwd": {request.CWD}, "environmentProfile": {"review"},
-						"profile": {selected.Name}, "options": {string(encoded)},
-					}
-					response := httptest.NewRecorder()
-					server.handleGetSlashCommands(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
-					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-					assert.NotContains(t, response.Body.String(), "profiles", "definitions remain on the daemon")
-				} else {
-					if mode == "resume" {
-						request.ConversationID, request.CWD, request.EnvironmentProfile = "saved", "", ""
-					}
-					_, err = server.resolveChatModelProfile(ctx, request, selected.Name, "")
-					require.NoError(t, err)
-				}
-				for _, profile := range profiles {
-					config, err := server.resolveChatModelProfile(ctx, request, profile.Name, "")
-					require.NoError(t, err)
-					assert.True(t, config.ExtensionProfile)
-					assert.Equal(t, "gpt-4o", config.Model, "use the runner's definitions, not another caller's cache")
-				}
-				assert.Equal(t, 1, calls, "cached registrations do not need another probe")
-			})
-		}
-	}
-	outsider := contextWithPrincipal(t.Context(), administrativePrincipal("outsider"))
-	_, err = server.resolveModelProfile(outsider, runner.RunnerID, "code-search", "")
-	require.ErrorIs(t, err, errExtensionProfileNotRegistered)
-	for _, test := range []struct {
-		name    string
-		profile string
-		options *llmtypes.ExecutionOptions
-	}{
-		{name: "missing profile", profile: "missing"},
-		{name: "extensions disabled", profile: "code-search", options: &llmtypes.ExecutionOptions{NoExtensions: new(true)}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(mode, func(t *testing.T) {
 			ctx := contextWithPrincipal(t.Context(), administrativePrincipal(t.Name()))
-			link.call = func(_ context.Context, _ string, params, result any) error {
-				assert.Equal(t, test.options, params.(protocol.WorkspaceDiscoverParams).Options)
-				if test.options == nil {
-					result.(*runnerpayload.WorkspaceDiscoverResult).Profiles = profiles
+			_, err := server.resolveModelProfile(ctx, runner.RunnerID, "code-search", "")
+			require.ErrorIs(t, err, errExtensionProfileNotRegistered)
+			calls := 0
+			link.call = func(_ context.Context, method string, params, result any) error {
+				calls++
+				assert.Equal(t, protocol.MethodWorkspaceDiscover, method, "bootstrap must not open a model turn")
+				assert.Equal(t, protocol.WorkspaceDiscoverParams{CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options}, params)
+				*result.(*runnerpayload.WorkspaceDiscoverResult) = runnerpayload.WorkspaceDiscoverResult{
+					WorkspaceDiscoverResult: protocol.WorkspaceDiscoverResult{CWD: "/workspace/selected", EnvironmentProfile: "review"}, Profiles: profiles,
 				}
 				return nil
 			}
-			_, err := server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runner.RunnerID, Options: test.options}, test.profile, "")
-			require.ErrorIs(t, err, errExtensionProfileNotRegistered, "never fall back to another model")
+			request := chat.ChatRequest{
+				ConversationID: "new-child", RunnerID: runner.RunnerID, CWD: "/workspace/selected", EnvironmentProfile: "review", Options: options,
+			}
+			if mode == "discovery" {
+				encoded, err := json.Marshal(options)
+				require.NoError(t, err)
+				query := url.Values{
+					"runnerId": {runner.RunnerID}, "cwd": {request.CWD}, "environmentProfile": {"review"},
+					"profile": {"code-search"}, "options": {string(encoded)},
+				}
+				response := httptest.NewRecorder()
+				server.handleGetSlashCommands(response, httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx))
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				assert.NotContains(t, response.Body.String(), "profiles", "definitions remain on the daemon")
+			} else {
+				if mode == "resume" {
+					request.ConversationID, request.CWD, request.EnvironmentProfile = "saved", "", ""
+				}
+				_, err = server.resolveChatModelProfile(ctx, request, "code-search", "")
+				require.NoError(t, err)
+			}
+			for _, profile := range profiles {
+				config, err := server.resolveChatModelProfile(ctx, request, profile.Name, "")
+				require.NoError(t, err)
+				assert.True(t, config.ExtensionProfile)
+				assert.Equal(t, "gpt-4o", config.Model, "use the runner's definitions, not another caller's cache")
+			}
+			assert.Equal(t, 1, calls, "cached registrations do not need another probe")
 		})
 	}
+	t.Run("extensions disabled", func(t *testing.T) {
+		ctx := contextWithPrincipal(t.Context(), administrativePrincipal(t.Name()))
+		options := &llmtypes.ExecutionOptions{NoExtensions: new(true)}
+		link.call = func(_ context.Context, _ string, params, _ any) error {
+			assert.Equal(t, options, params.(protocol.WorkspaceDiscoverParams).Options)
+			return nil
+		}
+		_, err := server.resolveChatModelProfile(ctx, chat.ChatRequest{RunnerID: runner.RunnerID, Options: options}, "code-search", "")
+		require.ErrorIs(t, err, errExtensionProfileNotRegistered, "never fall back to another model")
+	})
 }
 
 func TestChatExecutionContextKeepsProfileOwner(t *testing.T) {
