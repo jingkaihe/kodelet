@@ -1446,6 +1446,9 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 
 func newACPTestExtensionWorkspace(t *testing.T) string {
 	t.Helper()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+
 	workspace := t.TempDir()
 	writeACPTestExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
 	return workspace
