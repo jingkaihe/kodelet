@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.6.19-beta
+
+**Breaking change:** Removed the built-in `read_conversation` tool. Conversation reading now requires a runner extension that registers the tool and is subject to runner `allowed_tools` policy and extension lifecycle hooks. Install and enable a conversation-reader extension to retain this capability; saved results from the former built-in tool remain readable.
+
+Added streaming remote context compaction for native OpenAI and Codex Responses API conversations, with retries, WebSocket-to-HTTPS recovery, and summary-compaction fallback. Other compatible providers continue using summary compaction.
+
+Preserved conversation transcripts across context compaction, keeping archived messages separate from active model input and retaining history across saves, resumes, forks, and text, JSON, and Markdown exports.
+
+Added context-compaction markers to live and saved native TUI, Web UI, and ACP transcripts, with expandable summaries in both UIs when available. Added typed `context.compacted` events to the TypeScript SDK without mixing compaction notices into assistant response text.
+
+Fixed conversation loading to stop on storage, decoding, provider-mismatch, and invalid compaction-history errors rather than silently continuing with incomplete state.
+
+Fixed workspace discovery and direct chat to register installed extension profiles for the requesting caller, including ACP child sessions and recovery after runner reconnects, while preserving saved workspace and environment-profile settings.
+
+Added terminal, changes, and browser shortcuts to the collapsed desktop workspace panel, with a narrower tool rail and more compact workspace header.
+
+Fixed native TUI history rendering to preserve boundaries between complete assistant text blocks instead of joining them as streaming fragments.
+
 ## 0.6.18-beta
 
 **Breaking changes:** The daemon now requires named model profiles with an explicit default selection and a `provider` and `model` in every profile. Top-level model settings and model-valued environment variables such as `KODELET_MODEL`, `KODELET_PROVIDER`, and `KODELET_REASONING_EFFORT` are rejected at startup. `default` is no longer a special fallback; it is an ordinary name for configured or extension-registered profiles. `KODELET_PROFILE`, provider credentials, and supported explicit CLI model overrides remain available.
