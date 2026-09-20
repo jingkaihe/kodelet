@@ -1,7 +1,7 @@
 .workspace-tools-shell {
   position: relative;
   display: flex;
-  flex: 0 0 3.25rem;
+  flex: 0 0 2.75rem;
   height: 100%;
   min-width: 0;
   align-self: stretch;
@@ -15,11 +15,11 @@
 .workspace-tools-shell.is-open {
   flex-basis: var(
     --workspace-width,
-    min(calc(clamp(30rem, 38vw, 46rem) + 3.25rem), calc(48vw + 3.25rem))
+    min(calc(clamp(30rem, 38vw, 46rem) + 2.75rem), calc(48vw + 2.75rem))
   );
   width: var(
     --workspace-width,
-    min(calc(clamp(30rem, 38vw, 46rem) + 3.25rem), calc(48vw + 3.25rem))
+    min(calc(clamp(30rem, 38vw, 46rem) + 2.75rem), calc(48vw + 2.75rem))
   );
 }
 
@@ -69,20 +69,8 @@
 }
 
 .workspace-tools-rail {
-  display: flex;
-  flex: 0 0 3.25rem;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 1rem;
-}
-
-.workspace-tools-toggle {
-  display: inline-flex;
-  width: 2.15rem;
-  height: 2.15rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
+  flex: 0 0 calc(2.75rem - 1px);
+  justify-content: flex-start;
 }
 
 .workspace-tools-tabs {

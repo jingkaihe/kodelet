@@ -64,8 +64,18 @@
 
 @media (min-width: 1024px) {
   .chat-workspace-header {
-    min-height: 3rem;
+    min-height: 2.5rem;
     padding: 0 1rem;
+  }
+
+  .chat-workspace-location {
+    min-height: 2.3rem;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .chat-workspace-location {
+    min-height: 2.75rem;
   }
 }
 

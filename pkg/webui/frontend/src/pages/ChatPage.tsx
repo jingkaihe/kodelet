@@ -3209,7 +3209,7 @@ const ChatPage: React.FC = () => {
       // Match the previous desktop default, unless chat needs more room.
       const defaultWidth =
         Math.min(Math.max(30 * rem, window.innerWidth * 0.38), 46 * rem, window.innerWidth * 0.48) +
-        3.25 * rem;
+        2.75 * rem;
       const width = Math.round(
         Math.min(
           max,
@@ -3965,6 +3965,53 @@ const ChatPage: React.FC = () => {
     : sidebarVisible
       ? '[data-testid="sidebar-search-toggle"]'
       : '[data-testid="sidebar-collapsed-search"]';
+  const workspaceViewButtons = [
+    {
+      view: 'terminal',
+      label: 'Terminal',
+      Icon: SquareTerminal,
+      available: workspaceTerminalAvailable,
+      onClick: handleSelectTerminalPanel,
+    },
+    {
+      view: 'diff',
+      label: 'Changes',
+      Icon: GitCompareArrows,
+      available: workspaceGitDiffAvailable,
+      onClick: handleSelectGitDiffPanel,
+    },
+    {
+      view: 'browser',
+      label: 'Browser',
+      Icon: Globe,
+      available: workspaceBrowserAvailable,
+      onClick: () => setWorkspacePanelView('browser'),
+    },
+  ].map(({ view, label, Icon, available, onClick }) =>
+    available ? (
+      <button
+        {...(workspacePanelOpen
+          ? {
+              role: 'tab',
+              'aria-selected': workspacePanelView === view,
+              'data-testid': `workspace-tools-${view}-tab`,
+            }
+          : { 'aria-controls': 'workspace-tools', title: label })}
+        aria-label={`Show ${label.toLowerCase()}`}
+        className={cn(
+          workspacePanelOpen ? 'workspace-tools-tab' : 'sidebar-toggle-button',
+          workspacePanelView === view && 'is-active'
+        )}
+        key={view}
+        onClick={onClick}
+        type="button"
+      >
+        <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+        {workspacePanelOpen ? <span>{label}</span> : null}
+      </button>
+    ) : null
+  );
+
   return (
     <div className="relative h-full bg-transparent">
       {uiRequestDialog ? (
@@ -4328,58 +4375,7 @@ const ChatPage: React.FC = () => {
             {workspacePanelOpen ? (
               <div className="workspace-tools-dock" data-testid="workspace-tools-dock">
                 <div className="workspace-tools-tabs" role="tablist" aria-label="Workspace views">
-                  {workspaceTerminalAvailable ? (
-                    <button
-                      aria-label="Show terminal"
-                      aria-selected={workspacePanelView === 'terminal'}
-                      className={cn(
-                        'workspace-tools-tab',
-                        workspacePanelView === 'terminal' && 'is-active'
-                      )}
-                      data-testid="workspace-tools-terminal-tab"
-                      onClick={handleSelectTerminalPanel}
-                      role="tab"
-                      type="button"
-                    >
-                      <SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                      <span>Terminal</span>
-                    </button>
-                  ) : null}
-
-                  {workspaceGitDiffAvailable ? (
-                    <button
-                      aria-label="Show changes"
-                      aria-selected={workspacePanelView === 'diff'}
-                      className={cn(
-                        'workspace-tools-tab',
-                        workspacePanelView === 'diff' && 'is-active'
-                      )}
-                      data-testid="workspace-tools-diff-tab"
-                      onClick={handleSelectGitDiffPanel}
-                      role="tab"
-                      type="button"
-                    >
-                      <GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                      <span>Changes</span>
-                    </button>
-                  ) : null}
-                  {workspaceBrowserAvailable ? (
-                    <button
-                      aria-label="Show browser"
-                      aria-selected={workspacePanelView === 'browser'}
-                      className={cn(
-                        'workspace-tools-tab',
-                        workspacePanelView === 'browser' && 'is-active'
-                      )}
-                      data-testid="workspace-tools-browser-tab"
-                      onClick={() => setWorkspacePanelView('browser')}
-                      role="tab"
-                      type="button"
-                    >
-                      <Globe aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                      <span>Browser</span>
-                    </button>
-                  ) : null}
+                  {workspaceViewButtons}
                 </div>
 
                 <div className="workspace-tools-content">
@@ -4427,6 +4423,7 @@ const ChatPage: React.FC = () => {
               >
                 <PanelRight aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
               </button>
+              {!workspacePanelOpen && !workspaceOverlayLayout ? workspaceViewButtons : null}
             </div>
           </aside>
         ) : null}

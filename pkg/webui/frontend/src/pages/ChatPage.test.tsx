@@ -576,6 +576,9 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
     await waitForTerminalAccess();
 
+    expect(within(screen.getByTestId('workspace-tools-rail')).getAllByRole('button')).toHaveLength(
+      1
+    );
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await screen.findByTestId('terminal-panel');
 
@@ -678,6 +681,9 @@ describe('ChatPage', () => {
     });
     await renderChatWithRunner();
     await waitForTerminalAccess();
+    expect(screen.queryAllByRole('button', { name: 'Show browser' })).toHaveLength(
+      available ? 1 : 0
+    );
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await flushAsyncUpdates();
     if (!available) {
@@ -819,6 +825,10 @@ describe('ChatPage', () => {
       return;
     }
 
+    expect(screen.queryAllByRole('button', { name: 'Show terminal' })).toHaveLength(
+      terminal ? 1 : 0
+    );
+    expect(screen.queryAllByRole('button', { name: 'Show changes' })).toHaveLength(diff ? 1 : 0);
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     if (terminal) {
       expect(screen.getByTestId('workspace-tools-terminal-tab')).toBeInTheDocument();
@@ -1223,33 +1233,33 @@ describe('ChatPage', () => {
         hasPointerCapture: () => true,
         releasePointerCapture,
       });
-      expect(separator).toHaveAttribute('aria-valuenow', '660');
+      expect(separator).toHaveAttribute('aria-valuenow', '652');
       fireEvent.pointerDown(separator, { clientX: 940, button: 0, pointerId: 7 });
       expect(setPointerCapture).toHaveBeenCalledWith(7);
       expect(separator).toHaveFocus();
       expect(document.body.style.cursor).toBe('col-resize');
       expect(document.querySelector('.workspace-resize-shield')).toBeInTheDocument();
       fireEvent.pointerMove(window, { clientX: 10, pointerId: 8 });
-      expect(shell).toHaveStyle({ '--workspace-width': '660px' });
+      expect(shell).toHaveStyle({ '--workspace-width': '652px' });
       fireEvent.pointerMove(window, { clientX: 840, pointerId: 7 });
-      expect(shell).toHaveStyle({ '--workspace-width': '760px' });
+      expect(shell).toHaveStyle({ '--workspace-width': '752px' });
       fireEvent.pointerMove(window, { clientX: -5000, pointerId: 7 });
       expect(shell).toHaveStyle({ '--workspace-width': '880px' });
       fireEvent.pointerMove(window, { clientX: 5000, pointerId: 7 });
       expect(shell).toHaveStyle({ '--workspace-width': '360px' });
       fireEvent.pointerMove(window, { clientX: 980, pointerId: 7 });
-      expect(shell).toHaveStyle({ '--workspace-width': '620px' });
+      expect(shell).toHaveStyle({ '--workspace-width': '612px' });
       expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBeNull();
       fireEvent.pointerUp(window, { pointerId: 7 });
       expect(screen.getByTestId('terminal-panel')).toBe(terminal);
-      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('620');
+      expect(window.localStorage.getItem('kodelet.chat.workspace.width')).toBe('612');
       expect(releasePointerCapture).toHaveBeenCalledWith(7);
       expect(document.body.style.cursor).toBe('');
       expect(document.querySelector('.workspace-resize-shield')).not.toBeInTheDocument();
       unmount();
       await openWorkspace();
       expect(screen.getByTestId('workspace-tools-shell')).toHaveStyle({
-        '--workspace-width': '620px',
+        '--workspace-width': '612px',
       });
     });
 
@@ -1262,8 +1272,8 @@ describe('ChatPage', () => {
       expect(separator).toHaveAttribute('aria-valuemax', '880');
       separator.focus();
       for (const [key, width] of [
-        ['ArrowLeft', 670],
-        ['ArrowRight', 660],
+        ['ArrowLeft', 662],
+        ['ArrowRight', 652],
         ['Home', 360],
         ['ArrowRight', 360],
         ['End', 880],
@@ -1311,18 +1321,18 @@ describe('ChatPage', () => {
       for (const reason of ['pointercancel', 'lostpointercapture', 'blur', 'Escape']) {
         fireEvent.pointerDown(separator, { clientX: 940, button: 0 });
         fireEvent.pointerMove(window, { clientX: 840 });
-        expect(separator).toHaveAttribute('aria-valuenow', '760');
+        expect(separator).toHaveAttribute('aria-valuenow', '752');
         if (reason === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
         else if (reason === 'pointercancel') fireEvent.pointerCancel(window);
         else fireEvent(reason === 'lostpointercapture' ? separator : window, new Event(reason));
         expect(screen.getByTestId('workspace-tools-shell'), reason).toHaveStyle({
-          '--workspace-width': '660px',
+          '--workspace-width': '652px',
         });
         expect(document.body.style.cursor, reason).toBe('');
         expect(document.body.style.userSelect, reason).toBe('');
         expect(window.localStorage.getItem('kodelet.chat.workspace.width'), reason).toBeNull();
         fireEvent.pointerMove(window, { clientX: 500 });
-        expect(separator, reason).toHaveAttribute('aria-valuenow', '660');
+        expect(separator, reason).toHaveAttribute('aria-valuenow', '652');
       }
     });
 
@@ -1647,6 +1657,34 @@ describe('ChatPage', () => {
     expect(await screen.findByTestId('terminal-panel')).toBeInTheDocument();
     expect(screen.getByTestId('composer-textarea')).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
+  });
+
+  it('opens each workspace view directly from the folded rail', async () => {
+    const user = userEvent.setup();
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        makeRunner({ workspaceTerminal: true, workspaceGitDiff: true, workspaceBrowser: true }),
+      ],
+    });
+    await renderChatWithRunner();
+
+    const rail = within(screen.getByTestId('workspace-tools-rail'));
+    for (const [name, panel] of [
+      ['terminal', 'terminal-panel'],
+      ['changes', 'git-diff-panel'],
+      ['browser', 'browser-panel'],
+    ]) {
+      rail.getByRole('button', { name: `Show ${name}` }).focus();
+      await user.keyboard('{Enter}');
+      expect(await screen.findByTestId(panel)).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: `Show ${name}` })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      expect(rail.getAllByRole('button')).toHaveLength(1);
+      await user.click(rail.getByRole('button', { name: 'Hide workspace panel' }));
+    }
+    expect(rail.getAllByRole('button')).toHaveLength(4);
   });
 
   it('switches to changes in the workspace side panel', async () => {
