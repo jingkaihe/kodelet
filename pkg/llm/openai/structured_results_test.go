@@ -301,7 +301,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 
 	// loadConversation expects the caller to hold ConversationMu lock
 	thread2.ConversationMu.Lock()
-	thread2.loadConversation(context.Background())
+	require.NoError(t, thread2.loadConversation(context.Background()))
 	thread2.ConversationMu.Unlock()
 
 	// Verify loaded structured results

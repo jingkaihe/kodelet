@@ -981,7 +981,7 @@ func TestEnablePersistence_DisablePersistence(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "conv-123")
 	bt.Persisted = true // Start with persistence enabled
 
-	bt.EnablePersistence(context.Background(), false)
+	require.NoError(t, bt.EnablePersistence(context.Background(), false))
 
 	assert.False(t, bt.Persisted)
 }
@@ -1023,11 +1023,12 @@ func TestEnablePersistence_WithExistingStore(t *testing.T) {
 	bt.Store = mockStore
 
 	loadCalled := false
-	bt.LoadConversation = func(_ context.Context) {
+	bt.LoadConversation = func(_ context.Context) error {
 		loadCalled = true
+		return nil
 	}
 
-	bt.EnablePersistence(context.Background(), true)
+	require.NoError(t, bt.EnablePersistence(context.Background(), true))
 
 	assert.True(t, bt.Persisted)
 	assert.True(t, loadCalled, "LoadConversation callback should be called")
@@ -1040,7 +1041,7 @@ func TestEnablePersistence_WithExistingStore_NoCallback(t *testing.T) {
 	bt.Store = mockStore
 	bt.LoadConversation = nil // Explicitly no callback
 
-	bt.EnablePersistence(context.Background(), true)
+	require.NoError(t, bt.EnablePersistence(context.Background(), true))
 
 	assert.True(t, bt.Persisted)
 	assert.Equal(t, mockStore, bt.Store)
@@ -1052,11 +1053,12 @@ func TestEnablePersistence_DisableDoesNotCallLoadConversation(t *testing.T) {
 	bt.Store = mockStore
 
 	loadCalled := false
-	bt.LoadConversation = func(_ context.Context) {
+	bt.LoadConversation = func(_ context.Context) error {
 		loadCalled = true
+		return nil
 	}
 
-	bt.EnablePersistence(context.Background(), false)
+	require.NoError(t, bt.EnablePersistence(context.Background(), false))
 
 	assert.False(t, bt.Persisted)
 	assert.False(t, loadCalled, "LoadConversation callback should NOT be called when disabling")
@@ -1068,12 +1070,13 @@ func TestEnablePersistence_MultipleEnableCallsDoNotReinitializeStore(t *testing.
 	bt.Store = mockStore
 
 	loadCallCount := 0
-	bt.LoadConversation = func(_ context.Context) {
+	bt.LoadConversation = func(_ context.Context) error {
 		loadCallCount++
+		return nil
 	}
 
-	bt.EnablePersistence(context.Background(), true)
-	bt.EnablePersistence(context.Background(), true)
+	require.NoError(t, bt.EnablePersistence(context.Background(), true))
+	require.NoError(t, bt.EnablePersistence(context.Background(), true))
 
 	assert.Equal(t, 2, loadCallCount, "LoadConversation should be called each time persistence is enabled")
 	assert.Same(t, mockStore, bt.Store, "Store should not be reinitialized")
@@ -1088,12 +1091,13 @@ func TestEnablePersistence_LoadConversationCallback(t *testing.T) {
 	bt.Store = mockStore
 
 	var receivedCtx context.Context
-	bt.LoadConversation = func(ctx context.Context) {
+	bt.LoadConversation = func(ctx context.Context) error {
 		receivedCtx = ctx
+		return nil
 	}
 
 	testCtx := context.WithValue(context.Background(), contextKey("test-key"), "test-value")
-	bt.EnablePersistence(testCtx, true)
+	require.NoError(t, bt.EnablePersistence(testCtx, true))
 
 	assert.Equal(t, testCtx, receivedCtx, "LoadConversation should receive the correct context")
 }
@@ -1102,23 +1106,23 @@ func TestEnablePersistence_EnableThenDisable(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "conv-123")
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
-	bt.LoadConversation = func(_ context.Context) {}
+	bt.LoadConversation = func(_ context.Context) error { return nil }
 
-	bt.EnablePersistence(context.Background(), true)
+	require.NoError(t, bt.EnablePersistence(context.Background(), true))
 	assert.True(t, bt.Persisted)
 
-	bt.EnablePersistence(context.Background(), false)
+	require.NoError(t, bt.EnablePersistence(context.Background(), false))
 	assert.False(t, bt.Persisted)
 
 	// Store should still be present even after disabling
 	assert.NotNil(t, bt.Store)
 }
 
-func TestEnablePersistence_ConcurrentAccess(_ *testing.T) {
+func TestEnablePersistence_ConcurrentAccess(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "conv-123")
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
-	bt.LoadConversation = func(_ context.Context) {}
+	bt.LoadConversation = func(_ context.Context) error { return nil }
 
 	var wg sync.WaitGroup
 	const numGoroutines = 50
@@ -1127,12 +1131,39 @@ func TestEnablePersistence_ConcurrentAccess(_ *testing.T) {
 		wg.Add(1)
 		go func(enable bool) {
 			defer wg.Done()
-			bt.EnablePersistence(context.Background(), enable)
+			assert.NoError(t, bt.EnablePersistence(context.Background(), enable))
 		}(i%2 == 0)
 	}
 
 	wg.Wait()
 	// Just verify no panic occurs during concurrent access
+}
+
+func TestEnablePersistence_LoadErrorsFailClosed(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123")
+	bt.Store = &mockConversationStore{}
+	loadErr := errors.New("database is locked")
+	bt.LoadConversation = func(context.Context) error { return loadErr }
+
+	err := bt.EnablePersistence(t.Context(), true)
+	require.ErrorIs(t, err, loadErr)
+	assert.ErrorContains(t, err, "failed to load conversation conv-123")
+	assert.False(t, bt.IsPersisted())
+
+	// Missing records are expected when creating a new conversation.
+	loadErr = errors.Wrap(convtypes.ErrConversationNotFound, "conv-123")
+	require.NoError(t, bt.EnablePersistence(t.Context(), true))
+	assert.True(t, bt.IsPersisted())
+
+	loadErr = context.Canceled
+	require.ErrorIs(t, bt.EnablePersistence(t.Context(), true), context.Canceled)
+	assert.False(t, bt.IsPersisted())
+	require.NoError(t, bt.EnablePersistence(t.Context(), false))
+	assert.False(t, bt.IsPersisted())
+
+	loadErr = nil
+	require.NoError(t, bt.EnablePersistence(t.Context(), true))
+	assert.True(t, bt.IsPersisted(), "a successful retry can enable persistence")
 }
 
 // === Additional Comprehensive Tests ===
@@ -1397,10 +1428,10 @@ func TestEstimateContextWindowFromMessage(t *testing.T) {
 
 type compactionPublisherThread struct {
 	llmtypes.Thread
-	save func() error
+	save func(context.Context) error
 }
 
-func (t *compactionPublisherThread) SaveConversation(context.Context) error { return t.save() }
+func (t *compactionPublisherThread) SaveConversation(ctx context.Context) error { return t.save(ctx) }
 
 type compactionPublisherHandler struct {
 	llmtypes.MessageHandler
@@ -1411,22 +1442,23 @@ func (h *compactionPublisherHandler) HandleCompaction(marker llmtypes.Compaction
 	h.handle(marker, before)
 }
 
-func TestPublishCompactionRequiresDurableCheckpoint(t *testing.T) {
+func TestPublishCompactionIsIndependentOfPersistenceFailureAndCancellation(t *testing.T) {
 	thread := NewThread(llmtypes.Config{}, "conversation")
 	saved, published := 0, 0
 	var saveErr error
-	provider := &compactionPublisherThread{save: func() error {
+	provider := &compactionPublisherThread{save: func(ctx context.Context) error {
+		require.NoError(t, ctx.Err(), "checkpoint saves must not inherit cancellation")
 		saved++
 		return saveErr
 	}}
 	handler := &compactionPublisherHandler{handle: func(marker llmtypes.CompactionMarker, before bool) {
-		assert.Positive(t, saved, "save must precede publication")
+		assert.Positive(t, saved, "a save attempt must precede publication")
 		assert.Equal(t, "api", marker.Method)
 		assert.Empty(t, marker.Summary)
 		assert.True(t, before)
 		published++
 	}}
-	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, "", true))
+	thread.PublishCompaction(t.Context(), provider, handler, "", true)
 	assert.Zero(t, saved)
 	thread.Mu.Lock()
 	err := thread.ArchiveCompactionLocked(json.RawMessage(`[{"role":"user","content":"original"}]`), 1, "api", "must not expose")
@@ -1434,15 +1466,18 @@ func TestPublishCompactionRequiresDurableCheckpoint(t *testing.T) {
 	require.NoError(t, err)
 	markerID := thread.CompactionMarkerID()
 	require.NotEmpty(t, markerID)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
 	saveErr = errors.New("disk failure")
-	require.ErrorContains(t, thread.PublishCompaction(t.Context(), provider, handler, "", true), "disk failure")
-	assert.Zero(t, published)
+	thread.PublishCompaction(ctx, provider, handler, "", true)
+	assert.Equal(t, 1, published, "installed compaction must be announced even if persistence fails")
 	saveErr = nil
-	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, "", true))
+	thread.PublishCompaction(t.Context(), provider, handler, markerID, true)
+	assert.Equal(t, 1, saved)
 	assert.Equal(t, 1, published)
-	require.NoError(t, thread.PublishCompaction(t.Context(), provider, handler, markerID, true))
+	thread.PublishCompaction(t.Context(), provider, handler, "", true)
 	assert.Equal(t, 2, saved)
-	assert.Equal(t, 1, published)
+	assert.Equal(t, 2, published)
 	copy := thread.GetCompactionHistory()
 	copy.ActiveDisplayStart = 99
 	assert.Equal(t, 1, thread.GetCompactionHistory().ActiveDisplayStart)

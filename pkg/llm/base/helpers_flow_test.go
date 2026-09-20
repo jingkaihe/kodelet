@@ -62,13 +62,16 @@ func (t *threadStub) AddUserMessage(_ context.Context, message string, imagePath
 func (t *threadStub) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
 	return "", nil
 }
-func (t *threadStub) GetUsage() llmtypes.Usage                          { return t.usage }
-func (t *threadStub) GetConversationID() string                         { return t.conversationID }
-func (t *threadStub) SetConversationID(id string)                       { t.conversationID = id }
-func (t *threadStub) SaveConversation(context.Context) error            { return nil }
-func (t *threadStub) IsPersisted() bool                                 { return t.persisted }
-func (t *threadStub) EnablePersistence(_ context.Context, enabled bool) { t.persisted = enabled }
-func (t *threadStub) Provider() string                                  { return "test" }
+func (t *threadStub) GetUsage() llmtypes.Usage               { return t.usage }
+func (t *threadStub) GetConversationID() string              { return t.conversationID }
+func (t *threadStub) SetConversationID(id string)            { t.conversationID = id }
+func (t *threadStub) SaveConversation(context.Context) error { return nil }
+func (t *threadStub) IsPersisted() bool                      { return t.persisted }
+func (t *threadStub) EnablePersistence(_ context.Context, enabled bool) error {
+	t.persisted = enabled
+	return nil
+}
+func (t *threadStub) Provider() string { return "test" }
 func (t *threadStub) GetMessages() ([]llmtypes.Message, error) {
 	if t.getMessagesErr != nil {
 		return nil, t.getMessagesErr

@@ -2,11 +2,14 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
@@ -31,6 +34,63 @@ func TestManagerLoadSessionRejectsRunnerBoundConversation(t *testing.T) {
 		CWD:       t.TempDir(),
 	})
 	require.ErrorContains(t, err, "conversation is bound to runner runner-1")
+}
+
+func TestManagerLoadSessionRejectsInvalidCompactionHistory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	store, err := conversations.GetConversationStore(t.Context())
+	require.NoError(t, err)
+	manager := &Manager{
+		config:   ManagerConfig{NoExtensions: true},
+		sessions: make(map[acptypes.SessionID]*Session),
+		store:    store,
+	}
+	t.Cleanup(func() { require.NoError(t, manager.Close(t.Context())) })
+	dbPath, err := db.DefaultDBPath()
+	require.NoError(t, err)
+	sqlDB, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	for _, failure := range []string{"invalid boundary", "malformed messages"} {
+		t.Run(failure, func(t *testing.T) {
+			record := convtypes.NewConversationRecord("invalid-session")
+			record.Provider = "anthropic"
+			record.Metadata, err = conversations.AddConfigSnapshot(nil, llmtypes.Config{
+				Provider:           "anthropic",
+				Model:              "claude-sonnet-4-6",
+				AnthropicAPIAccess: llmtypes.AnthropicAPIAccessAPIKey,
+			})
+			require.NoError(t, err)
+			require.NoError(t, store.Save(t.Context(), record))
+			raw := `[]`
+			if failure == "malformed messages" {
+				raw = `{"not":"a message array"}`
+			}
+			history := `{"segments":[{"rawMessages":[{"role":"user","content":[{"type":"text","text":"archived"}]}],"marker":{"id":"compact-1","method":"summary"}}],"activeDisplayStart":1}`
+			_, err = sqlDB.ExecContext(t.Context(),
+				`UPDATE conversations SET raw_messages = ?, compaction_history = ? WHERE id = ?`,
+				raw, history, record.ID,
+			)
+			require.NoError(t, err)
+			for range 2 {
+				session, err := manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{
+					SessionID: acptypes.SessionID(record.ID), CWD: t.TempDir(),
+				})
+				require.ErrorContains(t, err, "failed to load conversation")
+				assert.Nil(t, session)
+				assert.Empty(t, manager.sessions)
+			}
+			var storedRaw, storedHistory string
+			require.NoError(t, sqlDB.QueryRowContext(t.Context(),
+				`SELECT raw_messages, compaction_history FROM conversations WHERE id = ?`, record.ID,
+			).Scan(&storedRaw, &storedHistory))
+			assert.Equal(t, raw, storedRaw)
+			assert.Equal(t, history, storedHistory)
+		})
+	}
 }
 
 func TestNewManager_WithManagerConfig(t *testing.T) {
@@ -169,14 +229,20 @@ func TestManagerCreatesAndLoadsSessionsWithLocalEnvironment(t *testing.T) {
 	viper.Set("model", "claude-sonnet-4-6")
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 
 	store := &fakeConversationStore{loads: map[string]convtypes.ConversationRecord{
 		"loaded-session": {
-			ID:       "loaded-session",
-			Provider: "anthropic",
-			Metadata: map[string]any{"model": "claude-sonnet-4-6"},
+			ID:          "loaded-session",
+			Provider:    "anthropic",
+			Metadata:    map[string]any{"model": "claude-sonnet-4-6"},
+			RawMessages: json.RawMessage(`[]`),
 		},
 	}}
+	persistedStore, err := conversations.GetConversationStore(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, persistedStore.Save(t.Context(), store.loads["loaded-session"]))
+	require.NoError(t, persistedStore.Close())
 	manager := &Manager{
 		config: ManagerConfig{
 			Provider:     "anthropic",

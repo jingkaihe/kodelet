@@ -497,6 +497,7 @@ func runDefaultChat(
 	var thread llmtypes.Thread
 	releaseThread := func() {}
 	checkpointSaved := false
+	loadFailed := false
 	prepareThread := func(ctx context.Context) error {
 		if thread != nil {
 			return nil
@@ -507,8 +508,11 @@ func runDefaultChat(
 			return errors.Wrap(err, "failed to create LLM thread")
 		}
 		thread.SetConversationID(sessionID)
-		if newThread {
-			thread.EnablePersistence(ctx, true)
+		if newThread || !thread.IsPersisted() {
+			if err := thread.EnablePersistence(ctx, true); err != nil {
+				loadFailed = true
+				return err
+			}
 		}
 		// Another turn may have persisted this ID while we waited for its thread lock.
 		if err := validateParent(ctx); err != nil {
@@ -525,9 +529,10 @@ func runDefaultChat(
 	}
 	defer func() {
 		releaseThread()
+		// Never cache a thread whose durable history failed to load.
 		// A failed opening/user-message hook can leave admitted input only in the
 		// durable checkpoint. Reload it rather than reuse the pre-input live cache.
-		if checkpointSaved && (resultErr != nil || ctx.Err() != nil) && threadOwner != nil {
+		if threadOwner != nil && (loadFailed || (checkpointSaved && (resultErr != nil || ctx.Err() != nil))) {
 			_ = threadOwner.CloseConversation(sessionID)
 		}
 	}()
@@ -704,7 +709,13 @@ func persistDirectCommandResponse(
 	if err != nil {
 		return errors.Wrap(err, "failed to create conversation thread for command response")
 	}
-	defer releaseThread()
+	loadFailed := false
+	defer func() {
+		releaseThread()
+		if loadFailed && owner != nil {
+			_ = owner.CloseConversation(conversationID)
+		}
+	}()
 
 	thread.SetConversationID(conversationID)
 	if strings.TrimSpace(runnerID) != "" {
@@ -712,7 +723,10 @@ func persistDirectCommandResponse(
 	}
 	thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
 	if !thread.IsPersisted() {
-		thread.EnablePersistence(ctx, true)
+		if err := thread.EnablePersistence(ctx, true); err != nil {
+			loadFailed = true
+			return err
+		}
 	}
 	return saveDirectCommandResponse(ctx, thread, message, response, images)
 }

@@ -95,10 +95,11 @@ func (f *fakeThread) IsPersisted() bool {
 	return f.persistenceEnabled
 }
 
-func (f *fakeThread) EnablePersistence(_ context.Context, enabled bool) {
+func (f *fakeThread) EnablePersistence(_ context.Context, enabled bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.persistenceEnabled = enabled
+	return nil
 }
 
 func (f *fakeThread) Provider() string { return "fake" }

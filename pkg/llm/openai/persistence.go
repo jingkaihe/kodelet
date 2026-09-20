@@ -252,37 +252,46 @@ func streamMessagesForName(messages []openai.ChatCompletionMessage, toolResults 
 // loadConversation loads a conversation from the store.
 // This method is called by the base.Thread.EnablePersistence via the LoadConversation callback.
 // NOTE: This function expects the caller to hold ConversationMu lock.
-func (t *Thread) loadConversation(ctx context.Context) {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
-		return
+		return nil
 	}
 
 	// Try to load the conversation
 	record, err := t.Store.Load(ctx, t.ConversationID)
 	if err != nil {
-		return
+		return err
 	}
 
 	// Check if this is an OpenAI model conversation
 	if record.Provider != "" && record.Provider != "openai" {
-		return
+		return errors.Errorf("cannot load provider %q conversation into OpenAI Chat Completions thread", record.Provider)
+	}
+	if RecordUsesResponsesMode(record.Metadata, record.RawMessages) {
+		return errors.New("cannot load Responses API conversation into OpenAI Chat Completions thread")
 	}
 
 	// Deserialize the messages
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
-		return
+		return errors.Wrap(err, "failed to decode OpenAI Chat Completions messages")
 	}
 	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
-		return
+		return errors.Wrap(err, "invalid OpenAI Chat Completions compaction history")
+	}
+	messages = cleanedOpenAIMessages(messages)
+	if history := record.CompactionHistory; history != nil && history.ActiveDisplayStart > len(messages) {
+		return errors.Errorf("invalid compaction display boundary %d for %d items after OpenAI Chat Completions cleanup",
+			history.ActiveDisplayStart, len(messages))
 	}
 
-	t.messages = cleanedOpenAIMessages(messages)
+	t.messages = messages
 	t.SetCompactionHistory(record.CompactionHistory)
 	t.Usage = &record.Usage
 	t.SetMetadata(record.Metadata)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
+	return nil
 }
 
 // StreamableMessage contains parsed message data for streaming

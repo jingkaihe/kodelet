@@ -392,9 +392,7 @@ OUTER:
 			previousMarkerID := t.CompactionMarkerID()
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
 			if !opt.NoSaveConversation {
-				if err := t.PublishCompaction(ctx, t, handler, previousMarkerID, false); err != nil {
-					return "", err
-				}
+				t.PublishCompaction(ctx, t, handler, previousMarkerID, false)
 			}
 
 			// Regenerate the system prompt from the context snapshot pinned when this run opened.

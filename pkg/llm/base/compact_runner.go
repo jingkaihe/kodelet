@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/pkg/errors"
@@ -17,6 +18,9 @@ func CompactContextWithSummary(
 	summary, err := runUtilityPrompt(ctx, prompts.CompactPrompt, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate compact summary")
+	}
+	if strings.TrimSpace(summary) == "" {
+		return errors.New("compact summary is empty")
 	}
 
 	return swapContext(ctx, summary)

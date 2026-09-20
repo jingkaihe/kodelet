@@ -3,8 +3,10 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -13,6 +15,9 @@ import (
 // ArchiveCompactionLocked preserves the visible tail before replacing model context.
 // The caller must hold Mu and the provider's history lock, when applicable.
 func (t *Thread) ArchiveCompactionLocked(raw json.RawMessage, replacementCount int, method, summary string) error {
+	if method == "summary" && strings.TrimSpace(summary) == "" {
+		return errors.New("compact summary is empty")
+	}
 	marker := llmtypes.CompactionMarker{
 		ID:        convtypes.GenerateID(),
 		Method:    method,
@@ -53,24 +58,25 @@ func (t *Thread) CompactionMarkerID() string {
 	return t.CompactionHistory.Segments[len(t.CompactionHistory.Segments)-1].Marker.ID
 }
 
-// PublishCompaction saves an installed checkpoint before announcing it to clients.
+// PublishCompaction attempts to save an installed checkpoint before announcing it.
+// Persistence failures must not hide the in-memory compaction or abort the turn;
+// the regular conversation saves can retry persisting the same archive later.
 // Providers call this after admitting incoming input, and never for no-save turns.
-func (t *Thread) PublishCompaction(ctx context.Context, provider llmtypes.Thread, handler llmtypes.MessageHandler, previousMarkerID string, beforeCurrentUser bool) error {
+func (t *Thread) PublishCompaction(ctx context.Context, provider llmtypes.Thread, handler llmtypes.MessageHandler, previousMarkerID string, beforeCurrentUser bool) {
 	t.Mu.Lock()
 	if t.CompactionHistory == nil || len(t.CompactionHistory.Segments) == 0 {
 		t.Mu.Unlock()
-		return nil
+		return
 	}
 	marker := t.CompactionHistory.Segments[len(t.CompactionHistory.Segments)-1].Marker
 	t.Mu.Unlock()
 	if marker.ID == previousMarkerID {
-		return nil
+		return
 	}
-	if err := provider.SaveConversation(ctx); err != nil {
-		return errors.Wrap(err, "failed to save compacted context")
+	if err := provider.SaveConversation(context.Background()); err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to save compacted context")
 	}
 	if receiver, ok := handler.(llmtypes.CompactionMessageHandler); ok {
 		receiver.HandleCompaction(marker, beforeCurrentUser)
 	}
-	return nil
 }

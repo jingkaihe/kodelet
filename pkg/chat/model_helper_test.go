@@ -218,7 +218,7 @@ func TestCentralModelHelperUsesFrozenToolFreeProvider(t *testing.T) {
 			parentEnvironment := &struct{ agentenv.Environment }{}
 			parent.SetEnvironment(parentEnvironment)
 			parent.AddUserMessage(t.Context(), "PARENT_ONLY")
-			parent.EnablePersistence(t.Context(), true)
+			require.NoError(t, parent.EnablePersistence(t.Context(), true))
 			require.True(t, parent.IsPersisted())
 			t.Cleanup(func() { require.NoError(t, parent.Store.Close()) })
 			require.NoError(t, parent.SaveConversation(t.Context()))

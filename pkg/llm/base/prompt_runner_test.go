@@ -43,12 +43,15 @@ func (t *promptRunnerThread) SendMessage(_ context.Context, prompt string, handl
 	handler.HandleText("collected output")
 	return "ignored final output", nil
 }
-func (t *promptRunnerThread) GetUsage() llmtypes.Usage                 { return t.usage }
-func (t *promptRunnerThread) GetConversationID() string                { return t.conversationID }
-func (t *promptRunnerThread) SetConversationID(id string)              { t.conversationID = id }
-func (t *promptRunnerThread) SaveConversation(context.Context) error   { return nil }
-func (t *promptRunnerThread) IsPersisted() bool                        { return t.persisted }
-func (t *promptRunnerThread) EnablePersistence(context.Context, bool)  {}
+func (t *promptRunnerThread) GetUsage() llmtypes.Usage  { return t.usage }
+func (t *promptRunnerThread) GetConversationID() string { return t.conversationID }
+
+func (t *promptRunnerThread) SetConversationID(id string)            { t.conversationID = id }
+func (t *promptRunnerThread) SaveConversation(context.Context) error { return nil }
+func (t *promptRunnerThread) IsPersisted() bool                      { return t.persisted }
+func (t *promptRunnerThread) EnablePersistence(context.Context, bool) error {
+	return nil
+}
 func (t *promptRunnerThread) Provider() string                         { return "test" }
 func (t *promptRunnerThread) GetMessages() ([]llmtypes.Message, error) { return nil, nil }
 func (t *promptRunnerThread) GetConfig() llmtypes.Config               { return t.config }

@@ -52,10 +52,15 @@ type recordingRetryTimer struct {
 type compactionCaptureHandler struct {
 	llmtypes.StringCollectorHandler
 	onCompaction func(llmtypes.CompactionMarker, bool)
+	done         bool
 }
 
 func (h *compactionCaptureHandler) HandleCompaction(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
 	h.onCompaction(marker, beforeCurrentUser)
+}
+
+func (h *compactionCaptureHandler) HandleDone() {
+	h.done = true
 }
 
 func (t *recordingRetryTimer) After(delay time.Duration) <-chan time.Time {
@@ -315,39 +320,79 @@ func TestSendMessagePublishesMidTurnCompactionAfterCurrentUser(t *testing.T) {
 	assert.Equal(t, 1, published)
 }
 
-func TestSendMessageDoesNotPublishCompactionWhenCheckpointFails(t *testing.T) {
-	config := llmtypes.Config{
-		Provider: "openai",
-		Model:    "gpt-5.5",
-		Retry:    llmtypes.RetryConfig{Attempts: 1},
-		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+func TestSendMessageCompletesDespiteCompactionCheckpointFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		cancelAfterSave bool
+		alwaysFail      bool
+	}{
+		{name: "transient save failure"},
+		{name: "persistent save failure", alwaysFail: true},
+		{name: "cancellation after compaction", cancelAfterSave: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			config := llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-5.5",
+				Retry:    llmtypes.RetryConfig{Attempts: 1},
+				OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+			}
+			thread := &Thread{Thread: base.NewThread(config, "failed-compact-checkpoint")}
+			thread.SetState(tools.NewBasicState(ctx))
+			thread.AddUserMessage(ctx, "original")
+			thread.Usage.CurrentContextWindow, thread.Usage.MaxContextWindow = 90, 100
+			saveCalls := 0
+			store := &mockResponsesConversationStore{saveFunc: func(saveCtx context.Context, record convtypes.ConversationRecord) error {
+				saveCalls++
+				require.NoError(t, saveCtx.Err())
+				assert.Contains(t, string(record.RawMessages), "incoming user", "even a failed save must include the admitted input")
+				require.NotNil(t, record.CompactionHistory)
+				require.NoError(t, record.CompactionHistory.Validate(record.RawMessages))
+				if tc.cancelAfterSave {
+					cancel()
+				}
+				if saveCalls == 1 || tc.alwaysFail {
+					return errors.New("database is locked")
+				}
+				return nil
+			}}
+			thread.Store, thread.Persisted = store, true
+			thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+				return remoteCompactionV2Stream(t, "compacted-context")
+			}
+			published := 0
+			thread.processMessageExchangeFunc = func(ctx context.Context, _ llmtypes.MessageHandler, _ string, _ int, _ string, _ llmtypes.MessageOpt) (string, bool, bool, error) {
+				assert.Equal(t, 1, published, "compaction is announced even when its checkpoint save fails")
+				if err := ctx.Err(); err != nil {
+					return "", false, false, err
+				}
+				thread.AddAssistantMessage(ctx, "done")
+				return "done", false, true, nil
+			}
+			handler := &compactionCaptureHandler{
+				StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
+				onCompaction: func(marker llmtypes.CompactionMarker, beforeCurrentUser bool) {
+					published++
+					assert.True(t, beforeCurrentUser)
+					assert.Equal(t, thread.CompactionMarkerID(), marker.ID)
+				},
+			}
+			output, err := thread.SendMessage(ctx, "incoming user", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 1})
+			require.NoError(t, err)
+			assert.True(t, handler.done, "checkpoint failures must not skip HandleDone")
+			assert.Equal(t, 1, published)
+			require.Len(t, store.savedRecords, 2, "end-of-turn save must retry persistence")
+			assert.Equal(t, store.savedRecords[0].CompactionHistory, store.savedRecords[1].CompactionHistory)
+			if tc.cancelAfterSave {
+				assert.Empty(t, output)
+			} else {
+				assert.Equal(t, "done", output)
+				assert.Contains(t, string(store.savedRecords[1].RawMessages), "done")
+			}
+		})
 	}
-	thread := &Thread{Thread: base.NewThread(config, "failed-compact-checkpoint")}
-	thread.SetState(tools.NewBasicState(t.Context()))
-	thread.AddUserMessage(t.Context(), "original")
-	thread.Usage.CurrentContextWindow, thread.Usage.MaxContextWindow = 90, 100
-	saveErr := errors.New("save failed")
-	store := &mockResponsesConversationStore{saveFunc: func(_ context.Context, record convtypes.ConversationRecord) error {
-		assert.Contains(t, string(record.RawMessages), "incoming user", "even a failed save must include the admitted input")
-		return saveErr
-	}}
-	thread.Store, thread.Persisted = store, true
-	thread.newStreamingFunc = func(context.Context, openairesponses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
-		return remoteCompactionV2Stream(t, "compacted-context")
-	}
-	thread.processMessageExchangeFunc = func(context.Context, llmtypes.MessageHandler, string, int, string, llmtypes.MessageOpt) (string, bool, bool, error) {
-		t.Fatal("must not continue inference after failing to persist compaction")
-		return "", false, false, nil
-	}
-	handler := &compactionCaptureHandler{
-		StringCollectorHandler: llmtypes.StringCollectorHandler{Silent: true},
-		onCompaction: func(llmtypes.CompactionMarker, bool) {
-			t.Fatal("must not publish a checkpoint that failed to persist")
-		},
-	}
-	_, err := thread.SendMessage(t.Context(), "incoming user", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 1})
-	require.ErrorIs(t, err, saveErr)
-	require.Len(t, store.savedRecords, 1)
 }
 
 func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) {

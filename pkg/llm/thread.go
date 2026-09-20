@@ -98,7 +98,9 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, 
 		_ = CloseThread(thread)
 	}()
 	thread.SetState(state)
-	thread.EnablePersistence(ctx, !opt.NoSaveConversation)
+	if err := thread.EnablePersistence(ctx, !opt.NoSaveConversation); err != nil {
+		return fmt.Sprintf("Error: %v", err), llmtypes.Usage{}
+	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: silent}
 	_, err = thread.SendMessage(ctx, query, handler, opt)

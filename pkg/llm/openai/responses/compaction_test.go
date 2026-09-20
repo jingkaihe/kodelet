@@ -60,6 +60,28 @@ func TestThreadSwapContextArchivesHistoryAndPreservesToolResults(t *testing.T) {
 	assert.Greater(t, thread.GetUsage().CurrentContextWindow, 0)
 }
 
+func TestSwapContextRejectsEmptySummaryWithoutChangingHistory(t *testing.T) {
+	for _, summary := range []string{"", " \n\t "} {
+		t.Run(summary, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "empty-summary")}
+			thread.AddUserMessage(t.Context(), "original request")
+			require.NoError(t, thread.SwapContext(t.Context(), "valid summary"))
+			thread.AddUserMessage(t.Context(), "next request")
+			history := thread.snapshotHistory()
+			archive := thread.GetCompactionHistory()
+			usage := thread.GetUsage()
+
+			require.ErrorContains(t, thread.SwapContext(t.Context(), summary), "compact summary is empty")
+			assert.Equal(t, history, thread.snapshotHistory())
+			assert.Equal(t, archive, thread.GetCompactionHistory())
+			assert.Equal(t, usage, thread.GetUsage())
+			thread.Store = &mockResponsesConversationStore{}
+			thread.Persisted = true
+			require.NoError(t, thread.SaveConversation(t.Context()))
+		})
+	}
+}
+
 func TestRepeatedCompactionArchivesOnlyNewChat(t *testing.T) {
 	for _, method := range []string{"api", "summary"} {
 		t.Run(method, func(t *testing.T) {

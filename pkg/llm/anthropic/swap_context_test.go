@@ -115,6 +115,28 @@ func TestSwapContext_HandlesNilState(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSwapContext_RejectsEmptySummaryWithoutChangingHistory(t *testing.T) {
+	for _, summary := range []string{"", " \n\t "} {
+		t.Run(summary, func(t *testing.T) {
+			thread := createTestThread()
+			thread.AddUserMessage(t.Context(), "original request")
+			require.NoError(t, thread.SwapContext(t.Context(), "valid summary"))
+			thread.AddUserMessage(t.Context(), "next request")
+			messages := append([]anthropic.MessageParam(nil), thread.messages...)
+			history := thread.GetCompactionHistory()
+			usage := thread.GetUsage()
+
+			require.ErrorContains(t, thread.SwapContext(t.Context(), summary), "compact summary is empty")
+			assert.Equal(t, messages, thread.messages)
+			assert.Equal(t, history, thread.GetCompactionHistory())
+			assert.Equal(t, usage, thread.GetUsage())
+			thread.Store = &MockConversationStore{}
+			thread.Persisted = true
+			require.NoError(t, thread.SaveConversation(t.Context()))
+		})
+	}
+}
+
 func TestRepeatedCompactionArchivesOnlyVisibleSuffix(t *testing.T) {
 	thread := createTestThread()
 	thread.AddUserMessage(t.Context(), "first question")

@@ -129,8 +129,9 @@ func (f *fakeMetadataThread) SaveConversation(context.Context) error {
 
 func (f *fakeMetadataThread) IsPersisted() bool { return f.persisted }
 
-func (f *fakeMetadataThread) EnablePersistence(_ context.Context, enabled bool) {
+func (f *fakeMetadataThread) EnablePersistence(_ context.Context, enabled bool) error {
 	f.persisted = enabled
+	return nil
 }
 
 func (f *fakeMetadataThread) Provider() string { return "" }

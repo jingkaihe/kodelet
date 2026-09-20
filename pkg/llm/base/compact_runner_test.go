@@ -28,6 +28,22 @@ func TestCompactContextWithSummary(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to generate compact summary")
 	})
 
+	for _, summary := range []string{"", " \n\t "} {
+		t.Run("empty summary "+summary, func(t *testing.T) {
+			err := CompactContextWithSummary(
+				ctx,
+				func(context.Context, string, bool) (string, error) {
+					return summary, nil
+				},
+				func(context.Context, string) error {
+					t.Fatal("swapContext must not be called with an empty summary")
+					return nil
+				},
+			)
+			require.ErrorContains(t, err, "compact summary is empty")
+		})
+	}
+
 	t.Run("swap failure is returned", func(t *testing.T) {
 		swapErr := errors.New("swap error")
 		err := CompactContextWithSummary(

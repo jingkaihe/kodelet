@@ -262,7 +262,13 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		}
 		return nil, pkgerrors.Wrap(err, "failed to configure agent environment")
 	}
-	thread.EnablePersistence(ctx, true)
+	if err := thread.EnablePersistence(ctx, true); err != nil {
+		_ = llm.CloseThread(thread)
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
+		return nil, pkgerrors.Wrap(err, "failed to enable conversation persistence")
+	}
 	if parentID != "" {
 		thread.SetMetadataValue(convtypes.ParentConversationIDMetadataKey, parentID)
 	}
@@ -322,7 +328,13 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		}
 		return nil, pkgerrors.Wrap(err, "failed to configure agent environment")
 	}
-	thread.EnablePersistence(ctx, true)
+	if err := thread.EnablePersistence(ctx, true); err != nil {
+		_ = llm.CloseThread(thread)
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
+		return nil, pkgerrors.Wrap(err, "failed to enable conversation persistence")
+	}
 
 	session := &Session{
 		ID:           req.SessionID,

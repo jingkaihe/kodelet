@@ -119,8 +119,9 @@ type Thread interface {
 	SaveConversation(ctx context.Context) error
 	// IsPersisted returns whether this thread is being persisted
 	IsPersisted() bool
-	// EnablePersistence enables conversation persistence for this thread
-	EnablePersistence(ctx context.Context, enabled bool)
+	// EnablePersistence loads existing state and enables persistence, or returns an error with persistence disabled.
+	// Disabling persistence cannot fail.
+	EnablePersistence(ctx context.Context, enabled bool) error
 	// Provider returns the provider of the thread
 	Provider() string
 	// GetMessages returns the messages from the thread

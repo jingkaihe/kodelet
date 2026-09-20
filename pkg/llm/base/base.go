@@ -36,7 +36,7 @@ type ConversationStore = conversations.ConversationStore
 
 // LoadConversationFunc is a callback function type for provider-specific conversation loading.
 // This is called by EnablePersistence when persistence is enabled and a store is available.
-type LoadConversationFunc func(ctx context.Context)
+type LoadConversationFunc func(ctx context.Context) error
 
 // Thread contains shared fields that are common across all LLM provider implementations.
 // Provider-specific Thread structs should embed this struct to inherit common functionality.
@@ -206,11 +206,12 @@ func (t *Thread) IsPersisted() bool {
 //   - Initializes the conversation store if not already initialized
 //   - Calls the LoadConversation callback to load any existing conversation
 //
-// If store initialization fails, persistence is disabled and the error is logged.
+// If store initialization or loading fails, persistence is disabled and the error is returned.
+// A missing conversation is normal for a new thread. Disabling persistence cannot fail.
 // The LoadConversation callback must be set by the provider before calling this method
 // if provider-specific conversation loading is needed.
 // This method is thread-safe and uses mutex locking.
-func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
+func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) error {
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
@@ -220,10 +221,8 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	if enabled && t.Store == nil {
 		store, err := conversations.GetConversationStore(ctx)
 		if err != nil {
-			// Log the error but continue without persistence
-			logger.G(ctx).WithError(err).Error("Error initializing conversation store")
 			t.Persisted = false
-			return
+			return errors.Wrap(err, "failed to initialize conversation store")
 		}
 		t.Store = store
 	}
@@ -231,8 +230,12 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store using the provider-specific callback
 	if enabled && t.Store != nil && t.LoadConversation != nil {
-		t.LoadConversation(ctx)
+		if err := t.LoadConversation(ctx); err != nil && !errors.Is(err, convtypes.ErrConversationNotFound) {
+			t.Persisted = false
+			return errors.Wrapf(err, "failed to load conversation %s", t.ConversationID)
+		}
 	}
+	return nil
 }
 
 // SavePendingUserMessage checkpoints admitted input using provider-specific state isolation.
@@ -278,7 +281,7 @@ func (t *Thread) ForkConversation(ctx context.Context, snapshot func(context.Con
 // PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
 // Utility mode disables persistence and uses an explicit workspace-free environment.
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
-	t.EnablePersistence(ctx, false)
+	_ = t.EnablePersistence(ctx, false)
 	t.Config.Extensions = nil
 	// A seeded helper may reference its parent's environment or state. Neither
 	// mutate nor close those resources: only the parent owns their lifetime.

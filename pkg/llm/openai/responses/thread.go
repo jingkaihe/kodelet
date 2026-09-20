@@ -585,9 +585,7 @@ OUTER:
 			if !opt.NoSaveConversation {
 				// Preserve admitted input when checkpointing a pre-turn compaction;
 				// publishing before AddUserMessage would overwrite that checkpoint.
-				if err := t.PublishCompaction(ctx, t, handler, previousMarkerID, beforeCurrentUser); err != nil {
-					return "", errors.Wrap(err, "failed to publish Responses compaction")
-				}
+				t.PublishCompaction(ctx, t, handler, previousMarkerID, beforeCurrentUser)
 			}
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
@@ -1506,23 +1504,23 @@ func (t *Thread) buildConversationRecord(ctx context.Context, snapshot conversat
 
 // loadConversation loads a conversation from the store.
 // NOTE: This function expects the caller to hold ConversationMu lock.
-func (t *Thread) loadConversation(ctx context.Context) {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
-		return
+		return nil
 	}
 
 	record, err := t.Store.Load(ctx, t.ConversationID)
 	if err != nil {
-		return
+		return err
 	}
 
 	if record.Provider != "" {
 		if record.Provider != "openai-responses" {
 			if record.Provider != "openai" {
-				return
+				return errors.Errorf("cannot load provider %q conversation into Responses thread", record.Provider)
 			}
 			if !recordUsesResponsesAPI(record.Metadata) {
-				return
+				return errors.New("cannot load non-Responses API conversation into Responses thread")
 			}
 		}
 	}
@@ -1530,15 +1528,13 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	// Deserialize from storage format
 	var storedItems []StoredInputItem
 	if err := json.Unmarshal(record.RawMessages, &storedItems); err != nil {
-		return
+		return errors.Wrap(err, "failed to decode Responses messages")
 	}
 	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
-		logger.G(ctx).WithError(err).Error("failed to load Responses compaction history")
-		return
+		return errors.Wrap(err, "invalid Responses compaction history")
 	}
 	if record.CompactionHistory != nil && record.CompactionHistory.ActiveDisplayStart > len(cleanedStoredInputItems(storedItems)) {
-		logger.G(ctx).Error("Responses compaction boundary includes incomplete tool calls")
-		return
+		return errors.New("invalid Responses compaction display boundary after cleanup of incomplete tool calls")
 	}
 
 	windowGeneration := persistedCodexWindowGeneration(record.Metadata)
@@ -1564,6 +1560,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	}
 	t.Mu.Unlock()
 	t.historyMu.Unlock()
+	return nil
 }
 
 func persistedCodexWindowGeneration(metadata map[string]any) uint64 {

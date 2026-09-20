@@ -206,40 +206,44 @@ func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []a
 // loadConversation loads a conversation from the store into the thread.
 // This method is used as a callback for the base.Thread's EnablePersistence method.
 // Note: The base thread's ConversationMu is already locked when this is called.
-func (t *Thread) loadConversation(ctx context.Context) {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
-		return
+		return nil
 	}
 
 	// Try to load the conversation
 	record, err := t.Store.Load(ctx, t.ConversationID)
 	if err != nil {
-		// Log error but don't return - caller expects void return
-		return
+		return err
 	}
 
 	// Check if this is an Anthropic model conversation
 	if record.Provider != "" && record.Provider != "anthropic" {
-		return
+		return errors.Errorf("cannot load provider %q conversation into Anthropic thread", record.Provider)
 	}
 
-	// Reset current messages
+	// Validate and clean the loaded messages before changing any live state.
 	messages, err := DeserializeMessages(record.RawMessages)
 	if err != nil {
-		return
+		return err
 	}
 	if err := record.CompactionHistory.Validate(record.RawMessages); err != nil {
-		return
+		return errors.Wrap(err, "invalid Anthropic compaction history")
+	}
+	messages = cleanedAnthropicMessages(messages)
+	if history := record.CompactionHistory; history != nil && history.ActiveDisplayStart > len(messages) {
+		return errors.Errorf("invalid compaction display boundary %d for %d items after Anthropic cleanup",
+			history.ActiveDisplayStart, len(messages))
 	}
 	t.messages = messages
 	t.SetCompactionHistory(record.CompactionHistory)
 
-	t.cleanupOrphanedMessages()
 	// Restore usage statistics
 	t.Usage = &record.Usage
 	t.SetMetadata(record.Metadata)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
+	return nil
 }
 
 // DeserializeMessages deserializes a JSON byte array into Anthropic message parameters

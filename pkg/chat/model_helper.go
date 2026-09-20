@@ -58,7 +58,7 @@ func contextWithCentralModelHelper(ctx context.Context, parent llmtypes.Thread) 
 		if err := llm.SetEnvironment(thread, &agentenv.UtilityEnvironment{}); err != nil {
 			return "", err
 		}
-		thread.EnablePersistence(ctx, false)
+		_ = thread.EnablePersistence(ctx, false)
 		opt := llmbase.UtilityPromptOptions(true)
 		opt.MaxTurns = 1
 		result, err := thread.SendMessage(ctx, prompt, &llmtypes.StringCollectorHandler{Silent: true}, opt)
