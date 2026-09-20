@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
@@ -463,6 +464,35 @@ func TestInitialHistoryPrependsUserMessagesToSearchHistory(t *testing.T) {
 	assert.Equal(t, []string{"old prompt", "newer persisted prompt"}, m.messageHistory)
 }
 
+func TestEntriesFromHistoryPreservesAssistantTextBoundaries(t *testing.T) {
+	for _, first := range []string{"Context compacted", "First answer."} {
+		t.Run(first, func(t *testing.T) {
+			const answer = "This machine has:\n\n- **CPU:** 24 logical cores."
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width, m.height = 100, 30
+			m.resize()
+			m.entries = entriesFromHistory([]conversations.StreamableMessage{
+				{Kind: "text", Role: "assistant", Content: first},
+				{Kind: "text", Role: "assistant", Content: ""},
+				{Kind: "text", Role: "assistant", Content: answer},
+			})
+
+			require.Len(t, m.entries, 1)
+			assert.Equal(t, []assistantBlock{
+				{kind: blockText, text: first},
+				{kind: blockText, text: answer},
+			}, m.entries[0].blocks)
+			assert.Equal(t, first+"\n\n"+answer, m.entries[0].content)
+			rendered, _ := m.renderTranscript()
+			plain := xansi.Strip(rendered)
+			assert.Contains(t, plain, first)
+			assert.NotContains(t, plain, first+"This machine has:")
+			assert.Regexp(t, `\n[\t ]*\n[\t ]*This machine has:`, plain)
+		})
+	}
+}
+
 func TestEntriesFromHistoryBuildsTextThinkingAndToolBlocks(t *testing.T) {
 	entries := entriesFromHistory([]conversations.StreamableMessage{
 		{Kind: "text", Role: "user", Content: "  hello  "},
@@ -477,18 +507,19 @@ func TestEntriesFromHistoryBuildsTextThinkingAndToolBlocks(t *testing.T) {
 	require.Len(t, entries, 2)
 	assert.Equal(t, entryUser, entries[0].kind)
 	assert.Equal(t, "hello", entries[0].content)
-	require.Len(t, entries[1].blocks, 3)
-	assert.Equal(t, "first second", entries[1].blocks[0].text)
-	assert.Equal(t, "first second", entries[1].content)
-	assert.Equal(t, blockThoughts, entries[1].blocks[1].kind)
-	assert.Equal(t, []thoughtBlock{{text: "considering", done: true}}, entries[1].blocks[1].thoughts)
-	assert.Equal(t, blockTools, entries[1].blocks[2].kind)
-	assert.Equal(t, "bash", entries[1].blocks[2].tools[0].name)
-	assert.Equal(t, "Saturday", entries[1].blocks[2].tools[0].result)
-	assert.True(t, entries[1].blocks[2].tools[0].done)
-	require.Len(t, entries[1].blocks[2].tools, 2)
-	assert.Equal(t, "grep", entries[1].blocks[2].tools[1].name)
-	assert.Equal(t, "orphan result", entries[1].blocks[2].tools[1].result)
+	require.Len(t, entries[1].blocks, 4)
+	assert.Equal(t, "first", entries[1].blocks[0].text)
+	assert.Equal(t, "second", entries[1].blocks[1].text)
+	assert.Equal(t, "first\n\nsecond", entries[1].content)
+	assert.Equal(t, blockThoughts, entries[1].blocks[2].kind)
+	assert.Equal(t, []thoughtBlock{{text: "considering", done: true}}, entries[1].blocks[2].thoughts)
+	assert.Equal(t, blockTools, entries[1].blocks[3].kind)
+	assert.Equal(t, "bash", entries[1].blocks[3].tools[0].name)
+	assert.Equal(t, "Saturday", entries[1].blocks[3].tools[0].result)
+	assert.True(t, entries[1].blocks[3].tools[0].done)
+	require.Len(t, entries[1].blocks[3].tools, 2)
+	assert.Equal(t, "grep", entries[1].blocks[3].tools[1].name)
+	assert.Equal(t, "orphan result", entries[1].blocks[3].tools[1].result)
 }
 
 func TestEntriesFromHistoryPreservesStructuredToolResultMetadata(t *testing.T) {

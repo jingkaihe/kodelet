@@ -78,8 +78,17 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 			case "user":
 				entries = append(entries, chatEntry{kind: entryUser, content: strings.TrimSpace(msg.Content)})
 			case "assistant":
+				text := strings.TrimSpace(msg.Content)
+				if text == "" {
+					continue
+				}
 				idx := ensureAssistant()
-				appendTextBlock(&entries[idx], msg.Content)
+				// History contains complete text blocks, not streaming deltas.
+				entries[idx].blocks = append(entries[idx].blocks, assistantBlock{kind: blockText, text: text})
+				if entries[idx].content != "" {
+					entries[idx].content += "\n\n"
+				}
+				entries[idx].content += text
 			}
 		case "thinking":
 			idx := ensureAssistant()
