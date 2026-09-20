@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -325,6 +325,7 @@ describe('NewChatContextDialog', () => {
   it('supports keyboard navigation, typeahead, selection, and Escape without changing the draft', async () => {
     const user = userEvent.setup();
     const props = renderDialog({ cwdSuggestionsOpen: false });
+    await waitFor(() => expect(screen.getByLabelText('Working directory')).toHaveFocus());
     const profile = screen.getByRole('combobox', { name: 'Profile' });
     profile.focus();
     await user.keyboard('{ArrowDown}');
@@ -348,6 +349,22 @@ describe('NewChatContextDialog', () => {
     expect(props.onCancel).not.toHaveBeenCalled();
     expect(profile).toHaveFocus();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('focuses the directory at its end and wraps keyboard focus within the dialog', async () => {
+    renderDialog({ cwdSuggestionsOpen: false });
+    const input = screen.getByRole('combobox', { name: 'Working directory' });
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveProperty('selectionStart', input.getAttribute('value')?.length);
+    expect(input).toHaveProperty('selectionEnd', input.getAttribute('value')?.length);
+
+    const firstButton = screen.getByRole('button', { name: 'Close new chat dialog' });
+    const lastButton = screen.getByRole('button', { name: 'Start' });
+    firstButton.focus();
+    fireEvent.keyDown(firstButton, { key: 'Tab', shiftKey: true });
+    expect(lastButton).toHaveFocus();
+    fireEvent.keyDown(lastButton, { key: 'Tab' });
+    expect(firstButton).toHaveFocus();
   });
 
   it('dismisses on outside clicks and blur, and commits keyboard selection on Tab', async () => {

@@ -1,21 +1,10 @@
-import {
-  ChevronDown,
-  GitCompareArrows,
-  Globe,
-  PanelLeft,
-  PanelRight,
-  RotateCw,
-  SquareTerminal,
-} from 'lucide-react';
+import { PanelLeft, RotateCw } from 'lucide-react';
 import type React from 'react';
 import {
-  lazy,
-  Suspense,
   startTransition,
   useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,118 +17,45 @@ import ChatSidebar, {
 } from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
 import ChatWorkspaceHeader from '../components/chat/ChatWorkspaceHeader';
+import ChatWorkspacePanel from '../components/chat/ChatWorkspacePanel';
+import ConversationStatistics from '../components/chat/ConversationStatistics';
 import ExtensionWidgets from '../components/chat/ExtensionWidgets';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
 import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
+import { buildUserContent, useChatAttachments } from '../features/chat/useChatAttachments';
+import {
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  useChatLayout,
+} from '../features/chat/useChatLayout';
+import { useChatSettings } from '../features/chat/useChatSettings';
+import {
+  SIDEBAR_CONVERSATION_LIMIT,
+  upsertConversationSummary,
+  useConversationList,
+} from '../features/chat/useConversationList';
+import { useConversationSearch } from '../features/chat/useConversationSearch';
+import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
+import { useSlashCommands } from '../features/chat/useSlashCommands';
+import { useWorkspaceResize } from '../features/chat/useWorkspaceResize';
 import apiService from '../services/api';
 import type {
   AuthPrincipal,
   BrowserTarget,
-  ChatSettings,
   ChatStreamEvent,
-  ContentBlock,
   Conversation,
-  CWDHint,
   GitDiffResponse,
   PendingImageAttachment,
   Runner,
-  SlashCommandOption,
   UIConfirmRequestEvent,
   UIInputRequestEvent,
   UISelectRequestEvent,
-  UIWidgetEvent,
   WorkspaceTarget,
 } from '../types';
-import {
-  cn,
-  debounce,
-  formatCompactRelativeTime,
-  formatCost,
-  formatRunnerStatus,
-  showToast,
-} from '../utils';
-
-const GitDiffModal = lazy(() => import('../components/workspace/GitDiffModal'));
-const TerminalModal = lazy(() => import('../components/workspace/TerminalModal'));
-const BrowserPanel = lazy(() => import('../components/workspace/BrowserPanel'));
-
-const DEFAULT_REASONING_EFFORT = 'medium';
-
-const modelSettingsFromChatSettings = (
-  settings: Partial<ChatSettings>
-): { model: string; options: string[] } => {
-  const model = settings.model?.trim() || '';
-  const options = Array.from(
-    new Set(
-      [model, ...(settings.modelOptions || [])].map((option) => option.trim()).filter(Boolean)
-    )
-  );
-  return { model, options };
-};
-
-const reasoningSettingsFromChatSettings = (
-  settings: Partial<ChatSettings>
-): { effort: string; options: string[] } => {
-  const effort =
-    typeof settings.reasoningEffort === 'string' && settings.reasoningEffort.trim()
-      ? settings.reasoningEffort.trim().toLowerCase()
-      : DEFAULT_REASONING_EFFORT;
-  const options = Array.from(
-    new Set(
-      (settings.reasoningEffortOptions || [])
-        .map((option) => option.trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
-
-  if (!options.includes(effort)) {
-    options.push(effort);
-  }
-
-  return { effort, options };
-};
-
-interface ProfileModelOption {
-  profile: string;
-  model: string;
-  settings?: ChatSettings;
-}
-
-const profileModelKey = (profile: string, model: string): string => `${profile}\u0000${model}`;
-
-const profileModelLabel = (profile: string, model: string): string =>
-  profile ? `${profile}/${model}` : model;
-
-// Mirrors the TUI picker: selection first, then higher versions first within a family.
-const sortProfileModelOptions = (
-  options: ProfileModelOption[],
-  selected: { profile: string; model: string }
-): ProfileModelOption[] =>
-  [...options].sort((a, b) => {
-    const aSelected = a.profile === selected.profile && a.model === selected.model;
-    const bSelected = b.profile === selected.profile && b.model === selected.model;
-    if (aSelected !== bSelected) return aSelected ? -1 : 1;
-    const order = b.model.localeCompare(a.model, 'en', { numeric: true });
-    if (order !== 0) return order;
-    return a.profile.localeCompare(b.profile, 'en');
-  });
-
-const appendProfileModelOptions = (
-  options: ProfileModelOption[],
-  profile: string,
-  models: string[],
-  settings?: ChatSettings
-) => {
-  for (const candidate of models) {
-    const model = candidate.trim();
-    if (!model) continue;
-    if (options.some((option) => option.profile === profile && option.model === model)) continue;
-    options.push({ profile, model, settings });
-  }
-};
+import { cn, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
@@ -187,42 +103,11 @@ const mergeConversationUsage = (
   };
 };
 
-const DEFAULT_SIDEBAR_WIDTH = 320;
-const MIN_SIDEBAR_WIDTH = 260;
-const MAX_SIDEBAR_WIDTH = 520;
-const SIDEBAR_WIDTH_STORAGE_KEY = 'kodelet.chat.sidebar.width';
-const SIDEBAR_VISIBLE_STORAGE_KEY = 'kodelet.chat.sidebar.visible';
-const WORKSPACE_WIDTH_STORAGE_KEY = 'kodelet.chat.workspace.width';
-const MIN_WORKSPACE_WIDTH = 360;
-const MIN_CHAT_WIDTH = 400;
-const MOBILE_LAYOUT_MEDIA_QUERY = '(max-width: 1023px)';
-const WORKSPACE_OVERLAY_MEDIA_QUERY = '(max-width: 1180px)';
-const OVERLAY_FOCUSABLE_SELECTOR = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(',');
-const MAX_IMAGE_ATTACHMENTS = 10;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const SIDEBAR_CONVERSATION_LIMIT = 100;
-const CONVERSATION_POLL_INTERVAL_MS = 5000;
-const CONVERSATION_POLL_MAX_DELAY_MS = 30000;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
-const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 type UIRequestDialogState =
   | { mode: 'input'; request: UIInputRequestEvent }
   | { mode: 'confirm'; request: UIConfirmRequestEvent }
   | { mode: 'select'; request: UISelectRequestEvent };
-type WorkspacePanelView = 'diff' | 'terminal' | 'browser';
-const attachmentId = (): string =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
 const randomHex = (byteCount: number): string => {
   const bytes = new Uint8Array(byteCount);
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -244,61 +129,8 @@ const generateConversationId = (): string => {
   return `${timestamp}-${randomHex(8)}`;
 };
 
-const readFileAsDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Failed to read image data'));
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read image data'));
-    reader.readAsDataURL(file);
-  });
-
-const fileToPendingAttachment = async (file: File): Promise<PendingImageAttachment> => {
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
-    throw new Error('Only PNG, JPEG, GIF, and WebP images are supported');
-  }
-
-  if (file.size > MAX_IMAGE_BYTES) {
-    throw new Error('Each image must be 5MB or smaller');
-  }
-
-  const dataUrl = await readFileAsDataUrl(file);
-  const [, base64 = ''] = dataUrl.split(',', 2);
-
-  return {
-    id: attachmentId(),
-    name: file.name || 'Pasted image',
-    mediaType: file.type,
-    data: base64,
-    previewUrl: dataUrl,
-    size: file.size,
-  };
-};
-
-const buildUserContent = (
-  prompt: string,
-  attachments: PendingImageAttachment[]
-): ContentBlock[] => [
-  ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
-  ...attachments.map((attachment) => ({
-    type: 'image' as const,
-    source: {
-      data: attachment.data,
-      media_type: attachment.mediaType,
-    },
-  })),
-];
-
 const isScrolledNearBottom = (element: HTMLElement): boolean =>
   element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
-
-const clampSidebarWidth = (width: number): number =>
-  Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
 
 const buildConversationPreview = (
   prompt: string,
@@ -344,282 +176,41 @@ const reconcileStreamCWDForDisplay = (
   return canonical;
 };
 
-const getConversationTimestamp = (conversation: Conversation): number => {
-  const timestamp =
-    conversation.updatedAt ??
-    conversation.updated_at ??
-    conversation.createdAt ??
-    conversation.created_at;
-
-  return timestamp ? new Date(timestamp).getTime() : 0;
-};
-
-const getSlashCommandQuery = (draft: string): string | null => {
-  const trimmedStart = draft.trimStart();
-  if (!trimmedStart.startsWith('/')) {
-    return null;
-  }
-
-  const withoutSlash = trimmedStart.slice(1);
-  if (withoutSlash.includes(' ')) {
-    return null;
-  }
-
-  return withoutSlash.toLowerCase();
-};
-
-const filterSlashCommands = (
-  commands: SlashCommandOption[],
-  draft: string
-): SlashCommandOption[] => {
-  const query = getSlashCommandQuery(draft);
-  if (query === null) {
-    return [];
-  }
-
-  return commands.filter((command) => {
-    if (!query) {
-      return true;
-    }
-    return (
-      command.name.toLowerCase().includes(query) ||
-      command.description.toLowerCase().includes(query)
-    );
-  });
-};
-
-const insertSlashCommand = (draft: string, commandName: string): string => {
-  const leadingWhitespace = draft.match(/^\s*/)?.[0] || '';
-  return `${leadingWhitespace}/${commandName} `;
-};
-
-const getDraftSlashCommand = (draft: string): string | null => {
-  const trimmedStart = draft.trimStart();
-  if (!trimmedStart.startsWith('/')) {
-    return null;
-  }
-
-  const command = trimmedStart.slice(1).split(/\s+/, 1)[0];
-  return command || null;
-};
-
-const getSlashCommandPlaceholder = (command: SlashCommandOption): string =>
-  command.placeholder || `/${command.name}${command.hint ? ` ${command.hint}` : ''}`;
-
 const isBlockingUIRequestEvent = (event: ChatStreamEvent): boolean =>
   event.kind === 'ui-input-request' ||
   event.kind === 'ui-confirm-request' ||
   event.kind === 'ui-select-request' ||
   event.kind === 'ui-request-end';
 
-const widgetsFromSnapshot = (widgets: UIWidgetEvent[] | undefined): Record<string, UIWidgetEvent> =>
-  Object.fromEntries(
-    (widgets || []).filter((widget) => !widget.removed).map((widget) => [widget.key, widget])
-  );
-
-interface UIWidgetVersion {
-  generation: string;
-  sequence: number;
-}
-
-const numericVersionParts = (version: string | undefined): [bigint, bigint] => {
-  const [major = '0', minor = '0'] = (version || '0:0').split(':', 2);
-  try {
-    return [BigInt(major), BigInt(minor)];
-  } catch {
-    return [0n, 0n];
-  }
-};
-
-const compareNumericVersions = (left: string | undefined, right: string | undefined): number => {
-  const [leftMajor, leftMinor] = numericVersionParts(left);
-  const [rightMajor, rightMinor] = numericVersionParts(right);
-  if (leftMajor !== rightMajor) {
-    return leftMajor > rightMajor ? 1 : -1;
-  }
-  if (leftMinor === rightMinor) {
-    return 0;
-  }
-  return leftMinor > rightMinor ? 1 : -1;
-};
-
-const upsertConversationSummary = (
-  conversations: Conversation[],
-  nextConversation: Conversation
-): Conversation[] => {
-  const merged = conversations.filter((conversation) => conversation.id !== nextConversation.id);
-  merged.unshift(nextConversation);
-
-  merged.sort((left, right) => {
-    const leftTime = getConversationTimestamp(left);
-    const rightTime = getConversationTimestamp(right);
-    return rightTime - leftTime;
-  });
-
-  return merged;
-};
-
-const readStoredSidebarVisible = (): boolean => {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-
-  return window.localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY) !== 'false';
-};
-
-const isMobileLayoutViewport = (): boolean =>
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia(MOBILE_LAYOUT_MEDIA_QUERY).matches;
-
-const useMediaQuery = (query: string): boolean => {
-  const [matches, setMatches] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia(query).matches
-  );
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia(query);
-    const handleChange = (event: MediaQueryListEvent) => {
-      setMatches(event.matches);
-    };
-
-    setMatches(mediaQuery.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    return () => {
-      mediaQuery.removeEventListener('change', handleChange);
-    };
-  }, [query]);
-
-  return matches;
-};
-
-const readInitialSidebarVisible = (): boolean =>
-  isMobileLayoutViewport() ? false : readStoredSidebarVisible();
-
-const readStoredSidebarWidth = (): number => {
-  if (typeof window === 'undefined') {
-    return DEFAULT_SIDEBAR_WIDTH;
-  }
-
-  const storedWidth = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-  if (storedWidth === null) {
-    return DEFAULT_SIDEBAR_WIDTH;
-  }
-
-  const parsedWidth = Number(storedWidth);
-  return Number.isFinite(parsedWidth) ? clampSidebarWidth(parsedWidth) : DEFAULT_SIDEBAR_WIDTH;
-};
-
-const readStoredWorkspaceWidth = (): number | null => {
-  if (typeof window === 'undefined') return null;
-  const width = Number(window.localStorage.getItem(WORKSPACE_WIDTH_STORAGE_KEY));
-  return Number.isFinite(width) && width > 0 ? width : null;
-};
-
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const conversationId = id || null;
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [conversationTotal, setConversationTotal] = useState(0);
-  const [conversationSearchTerm, setConversationSearchTerm] = useState('');
-  const [conversationSearchResults, setConversationSearchResults] = useState<Conversation[]>([]);
-  const [conversationSearchError, setConversationSearchError] = useState<string | null>(null);
-  const [conversationSearchHasMore, setConversationSearchHasMore] = useState(false);
-  const [conversationSearchLoading, setConversationSearchLoading] = useState(false);
-  const [conversationSearchLoadingMore, setConversationSearchLoadingMore] = useState(false);
-  const [conversationSearchOffset, setConversationSearchOffset] = useState(0);
-  const [conversationSearchTotal, setConversationSearchTotal] = useState(0);
-  const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
-  const [conversationCWDFilter, setConversationCWDFilter] = useState('');
-  const [conversationCWDOptions, setConversationCWDOptions] = useState<string[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
-  const [extensionWidgets, setExtensionWidgets] = useState<Record<string, UIWidgetEvent>>({});
+  const {
+    widgets: extensionWidgets,
+    handleEvent: handleExtensionWidgetEvent,
+    reset: resetExtensionWidgets,
+  } = useExtensionWidgets();
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
-  const [chatSettings, setChatSettings] = useState<ChatSettings>({
-    currentProfile: '',
-    profiles: [],
-    reasoningEffort: DEFAULT_REASONING_EFFORT,
-    reasoningEffortOptions: [DEFAULT_REASONING_EFFORT],
-  });
-  const [chatSettingsLoaded, setChatSettingsLoaded] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState('');
-  const [newChatProfileDraft, setNewChatProfileDraft] = useState('');
-  const [selectedModel, setSelectedModel] = useState('');
-  const [selectedModelOptions, setSelectedModelOptions] = useState<string[]>([]);
-  const [newChatModelDraft, setNewChatModelDraft] = useState('');
-  const [newChatModelOptions, setNewChatModelOptions] = useState<string[]>([]);
-  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(DEFAULT_REASONING_EFFORT);
-  const [selectedReasoningEffortOptions, setSelectedReasoningEffortOptions] = useState<string[]>([
-    DEFAULT_REASONING_EFFORT,
-  ]);
-  const [selectedReasoningEffortExplicit, setSelectedReasoningEffortExplicit] = useState(false);
-  const [newChatReasoningEffortDraft, setNewChatReasoningEffortDraft] =
-    useState(DEFAULT_REASONING_EFFORT);
-  const [newChatReasoningEffortOptions, setNewChatReasoningEffortOptions] = useState<string[]>([
-    DEFAULT_REASONING_EFFORT,
-  ]);
-  const [newChatReasoningEffortExplicit, setNewChatReasoningEffortExplicit] = useState(false);
-  const [reasoningSettingsLoading, setReasoningSettingsLoading] = useState(false);
-  const [profileModelCatalog, setProfileModelCatalog] = useState<{
-    runnerId: string;
-    options: ProfileModelOption[];
-  } | null>(null);
-  const [profileModelCatalogLoading, setProfileModelCatalogLoading] = useState(false);
-  const profileModelCatalogRequestRef = useRef(0);
-  const [selectedCWD, setSelectedCWD] = useState('');
   const [runners, setRunners] = useState<Runner[]>([]);
-  const [selectedRunnerID, setSelectedRunnerID] = useState('');
-  const [newChatRunnerDraft, setNewChatRunnerDraft] = useState('');
-  const [selectedEnvironmentProfile, setSelectedEnvironmentProfile] = useState('');
-  const [newChatEnvironmentProfileDraft, setNewChatEnvironmentProfileDraft] = useState('');
-  const [cwdQuery, setCwdQuery] = useState('');
-  const [cwdSuggestions, setCwdSuggestions] = useState<CWDHint[]>([]);
-  const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = useState(false);
-  const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
   const [draft, setDraft] = useState('');
-  const [slashCommands, setSlashCommands] = useState<SlashCommandOption[]>([]);
-  const [slashCommandIndex, setSlashCommandIndex] = useState(-1);
-  const [slashSuggestionsDismissedDraft, setSlashSuggestionsDismissedDraft] = useState<
-    string | null
-  >(null);
-  const [sidebarLoading, setSidebarLoading] = useState(true);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [conversationStreamVersion, setConversationStreamVersion] = useState(0);
   const [steering, setSteering] = useState(false);
-  const [startingNewConversation, setStartingNewConversation] = useState(false);
   const [locallyRunningConversationIds, setLocallyRunningConversationIds] = useState<string[]>([]);
-  const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
-  const [dragActive, setDragActive] = useState(false);
+  const { attachments, setAttachments, composerProps: attachmentProps } = useChatAttachments();
   const [gitDiffLoading, setGitDiffLoading] = useState(false);
   const [gitDiffError, setGitDiffError] = useState<string | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
-  const [workspacePanelView, setWorkspacePanelView] = useState<WorkspacePanelView | null>(null);
-  const mobileLayout = useMediaQuery(MOBILE_LAYOUT_MEDIA_QUERY);
-  const workspaceOverlayLayout = useMediaQuery(WORKSPACE_OVERLAY_MEDIA_QUERY);
-  const [sidebarVisible, setSidebarVisible] = useState(readInitialSidebarVisible);
-  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
-  const [workspaceWidth, setWorkspaceWidth] = useState(readStoredWorkspaceWidth);
-  const [workspaceSize, setWorkspaceSize] = useState({ width: 0, min: 0, max: 0 });
-  const [isResizingWorkspace, setIsResizingWorkspace] = useState(false);
-  const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
-  const [statusTick, setStatusTick] = useState(0);
   const loadedConversationId = conversation?.id ?? null;
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -628,18 +219,23 @@ const ChatPage: React.FC = () => {
   const runningSubscriptionControllersRef = useRef<Record<string, AbortController>>({});
   const resumeControllerRef = useRef<AbortController | null>(null);
   const resumeStreamRef = useRef(0);
-  const reasoningSettingsRequestRef = useRef(0);
-  const cwdSuggestionRequestRef = useRef(0);
   const gitDiffRequestRef = useRef(0);
   const workspaceTargetKeyRef = useRef('');
-  const conversationListControllerRef = useRef<AbortController | null>(null);
-  const conversationListRunningUpdatesRef = useRef<Record<string, boolean>>({});
-  const conversationSearchRequestRef = useRef(0);
-  const conversationSearchTermRef = useRef('');
-  const conversationCWDFilterRef = useRef('');
-  const cwdInputFocusedRef = useRef(false);
-  const cwdSuggestionSkipQueryRef = useRef<string | null>(null);
   const viewedConversationIdRef = useRef<string | null>(conversationId);
+  const contextSettings = useChatSettings({ conversationId, viewedConversationIdRef, runners });
+  const {
+    settings: chatSettings,
+    loaded: chatSettingsLoaded,
+    dialogOpen: newChatDialogOpen,
+    selected: {
+      profile: selectedProfile,
+      model: selectedModel,
+      reasoningEffort: selectedReasoningEffort,
+      runnerId: selectedRunnerID,
+      environmentProfile: selectedEnvironmentProfile,
+      cwd: selectedCWD,
+    },
+  } = contextSettings;
   const conversationPathOverrideRef = useRef<string | null>(null);
   const optimisticRemoteConversationRef = useRef<{
     conversationId: string;
@@ -648,124 +244,45 @@ const ChatPage: React.FC = () => {
     cwd?: string;
     confirmed: boolean;
   } | null>(null);
-  const extensionWidgetVersionsRef = useRef<Record<string, UIWidgetVersion>>({});
-  const extensionWidgetRevisionRef = useRef<string | null>(null);
-  const extensionWidgetSnapshotRevisionRef = useRef<string | null>(null);
   const routerConversationIdRef = useRef<string | null>(conversationId);
-  const sidebarResizeStartRef = useRef<{
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-  const desktopSidebarVisibleRef = useRef(readStoredSidebarVisible());
-  const restoringDesktopSidebarRef = useRef(false);
-  const sidebarWidthRef = useRef(sidebarWidth);
-  const sidebarShellRef = useRef<HTMLElement | null>(null);
-  const sidebarReturnFocusRef = useRef<HTMLElement | null>(null);
-  const workspaceToolsRef = useRef<HTMLElement | null>(null);
-  const workspaceResizerRef = useRef<HTMLHRElement | null>(null);
-  const workspaceSizeRef = useRef(workspaceSize);
-  const workspaceResizeStartRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-  const cwdInputRef = useRef<HTMLInputElement | null>(null);
-  const newChatDialogRef = useRef<HTMLDivElement | null>(null);
-  const newChatReturnFocusRef = useRef<HTMLElement | null>(null);
-  const closeMobileSidebar = useCallback(() => {
-    if (mobileLayout) {
-      setSidebarVisible(false);
-    }
-  }, [mobileLayout]);
-  const workspacePanelOpen = workspacePanelView !== null;
-  const sidebarOverlayOpen = mobileLayout && sidebarVisible;
-  const workspaceOverlayOpen = workspaceOverlayLayout && workspacePanelOpen;
+  const {
+    conversations,
+    setConversations,
+    total: conversationTotal,
+    cwdOptions: conversationCWDOptions,
+    setCWDOptions: setConversationCWDOptions,
+    loading: sidebarLoading,
+    refresh: refreshConversations,
+    setRunning,
+  } = useConversationList({ sendControllersRef, optimisticRemoteConversationRef });
+  const conversationSearch = useConversationSearch({
+    conversations,
+    total: conversationTotal,
+    loading: sidebarLoading,
+    limit: SIDEBAR_CONVERSATION_LIMIT,
+    setCWDOptions: setConversationCWDOptions,
+  });
+  const { isOpen: sidebarSearchOpen, close: handleCloseConversationSearch } = conversationSearch;
   const higherPriorityDialogOpen =
     uiRequestDialog !== null || newChatDialogOpen || providerSettingsOpen || sidebarSearchOpen;
-
-  const handleExtensionWidgetEvent = useCallback((event: ChatStreamEvent): boolean => {
-    if (event.kind === 'ui-widgets') {
-      const incomingRevision = event.ui_widget_revision;
-      const currentRevision = extensionWidgetRevisionRef.current;
-      if (
-        incomingRevision &&
-        currentRevision &&
-        compareNumericVersions(incomingRevision, currentRevision) < 0
-      ) {
-        return true;
-      }
-      const widgets = widgetsFromSnapshot(event.ui_widgets);
-      if (incomingRevision) {
-        extensionWidgetRevisionRef.current = incomingRevision;
-        extensionWidgetSnapshotRevisionRef.current = incomingRevision;
-      }
-      extensionWidgetVersionsRef.current = Object.fromEntries(
-        Object.values(widgets).map((widget) => [
-          widget.key,
-          { generation: widget.generation || '0:0', sequence: widget.frame.sequence },
-        ])
-      );
-      setExtensionWidgets(widgets);
-      return true;
-    }
-    if (event.kind !== 'ui-widget' || !event.ui_widget) {
-      return false;
-    }
-
-    const incomingRevision = event.ui_widget_revision;
-    if (
-      incomingRevision &&
-      extensionWidgetSnapshotRevisionRef.current &&
-      compareNumericVersions(incomingRevision, extensionWidgetSnapshotRevisionRef.current) <= 0
-    ) {
-      return true;
-    }
-    if (
-      incomingRevision &&
-      (!extensionWidgetRevisionRef.current ||
-        compareNumericVersions(incomingRevision, extensionWidgetRevisionRef.current) > 0)
-    ) {
-      extensionWidgetRevisionRef.current = incomingRevision;
-    }
-
-    const widget = event.ui_widget;
-    if (!widget.frame || typeof widget.frame.sequence !== 'number') {
-      return true;
-    }
-    const incomingVersion: UIWidgetVersion = {
-      generation: widget.generation || '0:0',
-      sequence: widget.frame.sequence,
-    };
-    const currentVersion = extensionWidgetVersionsRef.current[widget.key];
-    if (currentVersion) {
-      const generationOrder = compareNumericVersions(
-        incomingVersion.generation,
-        currentVersion.generation
-      );
-      if (
-        generationOrder < 0 ||
-        (generationOrder === 0 && incomingVersion.sequence <= currentVersion.sequence)
-      ) {
-        return true;
-      }
-    }
-    extensionWidgetVersionsRef.current = {
-      ...extensionWidgetVersionsRef.current,
-      [widget.key]: incomingVersion,
-    };
-    setExtensionWidgets((currentWidgets) => {
-      if (widget.removed) {
-        if (!currentWidgets[widget.key]) {
-          return currentWidgets;
-        }
-        const nextWidgets = { ...currentWidgets };
-        delete nextWidgets[widget.key];
-        return nextWidgets;
-      }
-      return { ...currentWidgets, [widget.key]: widget };
-    });
-    return true;
-  }, []);
+  const layout = useChatLayout(higherPriorityDialogOpen);
+  const {
+    mobileLayout,
+    workspaceOverlayLayout,
+    sidebarVisible,
+    setSidebarVisible,
+    sidebarWidth,
+    isResizingSidebar,
+    sidebarShellRef,
+    workspacePanelView,
+    setWorkspacePanelView,
+    sidebarOverlayOpen,
+    workspaceOverlayOpen,
+    closeMobileSidebar,
+    handleSidebarToggle,
+    handleSidebarResizeStart,
+    handleSidebarResizeKeyDown,
+  } = layout;
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -773,8 +290,7 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      // Preserve live transitions when an older list snapshot arrives.
-      conversationListRunningUpdatesRef.current[id] = isRunning;
+      setRunning(id, isRunning);
       setLocallyRunningConversationIds((currentIds) => {
         if (isRunning) {
           return currentIds.includes(id) ? currentIds : [...currentIds, id];
@@ -783,39 +299,20 @@ const ChatPage: React.FC = () => {
         return currentIds.filter((currentId) => currentId !== id);
       });
 
-      setConversations((currentConversations) =>
-        currentConversations.map((currentConversation) =>
-          currentConversation.id === id
-            ? { ...currentConversation, isRunning }
-            : currentConversation
-        )
-      );
       setConversation((currentConversation) =>
         currentConversation?.id === id ? { ...currentConversation, isRunning } : currentConversation
       );
     },
-    []
+    [setRunning]
   );
 
   const markConversationRunning = useCallback(
-    (id: string | null | undefined) => {
-      if (!id) {
-        return;
-      }
-
-      setConversationRunning(id, true);
-    },
+    (id: string | null | undefined) => setConversationRunning(id, true),
     [setConversationRunning]
   );
 
   const clearRunningConversation = useCallback(
-    (id: string | null | undefined) => {
-      if (!id) {
-        return;
-      }
-
-      setConversationRunning(id, false);
-    },
+    (id: string | null | undefined) => setConversationRunning(id, false),
     [setConversationRunning]
   );
 
@@ -852,290 +349,6 @@ const ChatPage: React.FC = () => {
     [clearRunningConversation]
   );
 
-  const refreshConversations = useCallback(async ({ silent = false } = {}) => {
-    if (silent && conversationListControllerRef.current) {
-      return true;
-    }
-
-    // Explicit refreshes take precedence over an older background snapshot.
-    conversationListControllerRef.current?.abort();
-    const controller = new AbortController();
-    conversationListControllerRef.current = controller;
-    const runningUpdates: Record<string, boolean> = {};
-    conversationListRunningUpdatesRef.current = runningUpdates;
-
-    if (!silent) {
-      setSidebarLoading(true);
-    }
-    try {
-      const response = await apiService.getConversations(
-        {
-          limit: SIDEBAR_CONVERSATION_LIMIT,
-          sortBy: 'updated',
-          sortOrder: 'desc',
-        },
-        controller.signal
-      );
-      if (controller.signal.aborted) {
-        return true;
-      }
-
-      const nextConversations = response.conversations || [];
-      setConversations((currentConversations) => {
-        const listedIds = new Set(nextConversations.map((conversation) => conversation.id));
-        const optimisticConversation = optimisticRemoteConversationRef.current;
-        // Keep new local sends, including failed attempts still available for retry.
-        const pendingConversations = currentConversations.filter(
-          (conversation) =>
-            !listedIds.has(conversation.id) &&
-            (sendControllersRef.current[conversation.id] ||
-              (optimisticConversation?.conversationId === conversation.id &&
-                !optimisticConversation.confirmed))
-        );
-        const mergedConversations = [
-          ...pendingConversations,
-          ...nextConversations.map((conversation) => {
-            const isRunning = sendControllersRef.current[conversation.id]
-              ? true
-              : runningUpdates[conversation.id];
-            return isRunning === undefined ? conversation : { ...conversation, isRunning };
-          }),
-        ];
-        // Keep the same array for unchanged snapshots: no tree rebuild or subscription churn.
-        return JSON.stringify(currentConversations) === JSON.stringify(mergedConversations)
-          ? currentConversations
-          : mergedConversations;
-      });
-      setConversationTotal(response.total ?? nextConversations.length);
-      const responseCWDs = (
-        response.cwds?.length
-          ? response.cwds
-          : nextConversations.map((nextConversation) => nextConversation.cwd)
-      )
-        .map((cwd) => cwd?.trim())
-        .filter((cwd): cwd is string => Boolean(cwd));
-      const nextCWDs = Array.from(new Set(responseCWDs));
-      setConversationCWDOptions((currentCWDs) =>
-        currentCWDs.length === nextCWDs.length &&
-        currentCWDs.every((cwd, index) => cwd === nextCWDs[index])
-          ? currentCWDs
-          : nextCWDs
-      );
-      return true;
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        console.error('Failed to load conversations', error);
-        return false;
-      }
-      return true;
-    } finally {
-      if (conversationListControllerRef.current === controller) {
-        conversationListControllerRef.current = null;
-        if (!silent) {
-          setSidebarLoading(false);
-        }
-      }
-    }
-  }, []);
-
-  const refreshConversationSearch = useCallback(async (offset = 0) => {
-    const requestId = conversationSearchRequestRef.current + 1;
-    conversationSearchRequestRef.current = requestId;
-    const searchTerm = conversationSearchTermRef.current.trim();
-    const cwdFilter = conversationCWDFilterRef.current.trim();
-    const loadingMore = offset > 0;
-
-    setConversationSearchError(null);
-    if (loadingMore) {
-      setConversationSearchLoadingMore(true);
-    } else {
-      setConversationSearchLoading(true);
-    }
-    try {
-      const response = await apiService.getConversations({
-        searchTerm,
-        cwd: cwdFilter,
-        limit: SIDEBAR_CONVERSATION_LIMIT,
-        offset: offset || undefined,
-        sortBy: 'updated',
-        sortOrder: 'desc',
-      });
-      if (conversationSearchRequestRef.current !== requestId) {
-        return;
-      }
-
-      const nextConversations = response.conversations || [];
-      if (loadingMore) {
-        setConversationSearchResults((currentResults) => {
-          const seen = new Set(currentResults.map((conversation) => conversation.id));
-          return [
-            ...currentResults,
-            ...nextConversations.filter((conversation) => {
-              if (seen.has(conversation.id)) {
-                return false;
-              }
-              seen.add(conversation.id);
-              return true;
-            }),
-          ];
-        });
-      } else {
-        setConversationSearchResults(nextConversations);
-      }
-      const nextTotal = response.total ?? offset + nextConversations.length;
-      setConversationSearchOffset(offset + nextConversations.length);
-      setConversationSearchTotal(nextTotal);
-      setConversationSearchHasMore(
-        response.hasMore ?? offset + nextConversations.length < nextTotal
-      );
-      const responseCWDs = (
-        response.cwds?.length
-          ? response.cwds
-          : nextConversations.map((nextConversation) => nextConversation.cwd)
-      )
-        .map((cwd) => cwd?.trim())
-        .filter((cwd): cwd is string => Boolean(cwd));
-      setConversationCWDOptions((currentOptions) => {
-        const seen = new Set<string>();
-        return [...currentOptions, cwdFilter, ...responseCWDs].filter((cwd) => {
-          if (!cwd || seen.has(cwd)) {
-            return false;
-          }
-          seen.add(cwd);
-          return true;
-        });
-      });
-    } catch (error) {
-      if (conversationSearchRequestRef.current === requestId) {
-        console.error('Failed to search conversations', error);
-        if (!loadingMore) {
-          setConversationSearchResults([]);
-          setConversationSearchHasMore(false);
-          setConversationSearchOffset(0);
-          setConversationSearchTotal(0);
-        }
-        setConversationSearchError(
-          error instanceof Error ? error.message : 'Failed to search conversations'
-        );
-      }
-    } finally {
-      if (conversationSearchRequestRef.current === requestId) {
-        if (loadingMore) {
-          setConversationSearchLoadingMore(false);
-        } else {
-          setConversationSearchLoading(false);
-        }
-      }
-    }
-  }, []);
-
-  const requestConversationFilterRefresh = useMemo(
-    () =>
-      debounce(() => {
-        void refreshConversationSearch();
-      }, 200),
-    [refreshConversationSearch]
-  );
-
-  useEffect(() => {
-    return () => {
-      requestConversationFilterRefresh.cancel();
-      conversationSearchRequestRef.current += 1;
-    };
-  }, [requestConversationFilterRefresh]);
-
-  const handleConversationSearchTermChange = useCallback(
-    (searchTerm: string) => {
-      setConversationSearchTerm(searchTerm);
-      conversationSearchTermRef.current = searchTerm;
-      conversationSearchRequestRef.current += 1;
-      setConversationSearchError(null);
-      setConversationSearchHasMore(false);
-      setConversationSearchLoadingMore(false);
-      setConversationSearchOffset(0);
-      requestConversationFilterRefresh.cancel();
-      if (!searchTerm.trim() && !conversationCWDFilterRef.current.trim()) {
-        setConversationSearchResults(conversations);
-        setConversationSearchLoading(sidebarLoading);
-        setConversationSearchTotal(conversationTotal);
-        return;
-      }
-      setConversationSearchResults([]);
-      setConversationSearchTotal(0);
-      setConversationSearchLoading(true);
-      requestConversationFilterRefresh();
-    },
-    [conversationTotal, conversations, requestConversationFilterRefresh, sidebarLoading]
-  );
-
-  const handleConversationCWDFilterChange = useCallback(
-    (cwd: string) => {
-      setConversationCWDFilter(cwd);
-      conversationCWDFilterRef.current = cwd;
-      conversationSearchRequestRef.current += 1;
-      setConversationSearchError(null);
-      setConversationSearchHasMore(false);
-      setConversationSearchLoadingMore(false);
-      setConversationSearchOffset(0);
-      requestConversationFilterRefresh.cancel();
-      if (!cwd.trim() && !conversationSearchTermRef.current.trim()) {
-        setConversationSearchResults(conversations);
-        setConversationSearchLoading(sidebarLoading);
-        setConversationSearchTotal(conversationTotal);
-        return;
-      }
-      setConversationSearchResults([]);
-      setConversationSearchTotal(0);
-      setConversationSearchLoading(true);
-      void refreshConversationSearch();
-    },
-    [
-      conversationTotal,
-      conversations,
-      refreshConversationSearch,
-      requestConversationFilterRefresh,
-      sidebarLoading,
-    ]
-  );
-
-  const handleCloseConversationSearch = useCallback(() => {
-    setSidebarSearchOpen(false);
-    requestConversationFilterRefresh.cancel();
-    conversationSearchRequestRef.current += 1;
-    setConversationSearchTerm('');
-    conversationSearchTermRef.current = '';
-    setConversationCWDFilter('');
-    conversationCWDFilterRef.current = '';
-    setConversationSearchResults([]);
-    setConversationSearchError(null);
-    setConversationSearchHasMore(false);
-    setConversationSearchLoading(false);
-    setConversationSearchLoadingMore(false);
-    setConversationSearchOffset(0);
-    setConversationSearchTotal(0);
-  }, [requestConversationFilterRefresh]);
-
-  useEffect(() => {
-    if (!sidebarSearchOpen || conversationSearchTerm.trim() || conversationCWDFilter.trim()) {
-      return;
-    }
-
-    setConversationSearchResults(conversations);
-    setConversationSearchError(null);
-    setConversationSearchHasMore(false);
-    setConversationSearchLoading(sidebarLoading);
-    setConversationSearchLoadingMore(false);
-    setConversationSearchOffset(conversations.length);
-    setConversationSearchTotal(conversationTotal);
-  }, [
-    conversations,
-    conversationCWDFilter,
-    conversationSearchTerm,
-    conversationTotal,
-    sidebarLoading,
-    sidebarSearchOpen,
-  ]);
-
   const refreshRunners = useCallback(async () => {
     try {
       const response = await apiService.getRunners();
@@ -1144,54 +357,6 @@ const ChatPage: React.FC = () => {
       console.error('Failed to load runners', error);
     }
   }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let pending = false;
-    let refreshQueued = false;
-    let timer: number | undefined;
-    let delay = CONVERSATION_POLL_INTERVAL_MS;
-
-    const refresh = async (silent = true) => {
-      if (disposed || pending || (silent && document.visibilityState === 'hidden')) {
-        return;
-      }
-
-      pending = true;
-      refreshQueued = false;
-      const succeeded = await refreshConversations({ silent });
-      pending = false;
-      delay = succeeded
-        ? CONVERSATION_POLL_INTERVAL_MS
-        : Math.min(delay * 2, CONVERSATION_POLL_MAX_DELAY_MS);
-      if (!disposed && document.visibilityState !== 'hidden') {
-        if (refreshQueued) {
-          void refresh();
-        } else {
-          timer = window.setTimeout(() => void refresh(), delay);
-        }
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      window.clearTimeout(timer);
-      if (document.visibilityState !== 'hidden') {
-        delay = CONVERSATION_POLL_INTERVAL_MS;
-        refreshQueued = pending;
-        void refresh();
-      }
-    };
-
-    void refresh(false);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      disposed = true;
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      conversationListControllerRef.current?.abort();
-      conversationListControllerRef.current = null;
-    };
-  }, [refreshConversations]);
 
   useEffect(() => {
     void refreshRunners();
@@ -1204,39 +369,6 @@ const ChatPage: React.FC = () => {
         setAuthPrincipal(null);
       });
 
-    // Bootstrap defaults once; runner-specific settings are discovered in the new-chat dialog.
-    void apiService
-      .getChatSettings()
-      .then((settings) => {
-        const profile = settings.currentProfile?.trim();
-        if (!profile) {
-          throw new Error('Chat settings did not return a model profile');
-        }
-        const reasoningSettings = reasoningSettingsFromChatSettings(settings);
-        setChatSettings(settings);
-        setChatSettingsLoaded(true);
-        setSelectedProfile(profile);
-        setNewChatProfileDraft(profile);
-        const modelSettings = modelSettingsFromChatSettings(settings);
-        setSelectedModel(modelSettings.model);
-        setSelectedModelOptions(modelSettings.options);
-        setNewChatModelDraft(modelSettings.model);
-        setNewChatModelOptions(modelSettings.options);
-        setSelectedReasoningEffort(reasoningSettings.effort);
-        setSelectedReasoningEffortOptions(reasoningSettings.options);
-        setSelectedReasoningEffortExplicit(false);
-        setNewChatReasoningEffortDraft(reasoningSettings.effort);
-        setNewChatReasoningEffortOptions(reasoningSettings.options);
-        setNewChatReasoningEffortExplicit(false);
-        setReasoningSettingsLoading(false);
-        setSelectedCWD('');
-        setCwdQuery('');
-      })
-      .catch((error) => {
-        console.error('Failed to load chat settings', error);
-        setChatSettingsLoaded(false);
-      });
-
     const runnerRefresh = window.setInterval(() => {
       void refreshRunners();
     }, 5000);
@@ -1244,28 +376,9 @@ const ChatPage: React.FC = () => {
     return () => window.clearInterval(runnerRefresh);
   }, [refreshRunners]);
 
-  const defaultRunner = runners.find((runner) => runner.id === chatSettings.defaultRunnerId);
-  const defaultRunnerID =
-    chatSettings.defaultRunnerReady &&
-    defaultRunner?.connected &&
-    (defaultRunner.status === 'idle' ||
-      (defaultRunner.status === 'busy' && defaultRunner.concurrentRuns))
-      ? defaultRunner.id
-      : '';
-
-  useEffect(() => {
-    if (conversationId || selectedRunnerID || newChatRunnerDraft || !defaultRunnerID) {
-      return;
-    }
-
-    setSelectedRunnerID(defaultRunnerID);
-    setNewChatRunnerDraft(defaultRunnerID);
-  }, [conversationId, defaultRunnerID, selectedRunnerID, newChatRunnerDraft]);
-
   useEffect(() => {
     return () => {
       resumeStreamRef.current += 1;
-      reasoningSettingsRequestRef.current += 1;
       abortControllerRef.current?.abort();
       Object.values(sendControllersRef.current).forEach((controller) => {
         controller.abort();
@@ -1373,47 +486,7 @@ const ChatPage: React.FC = () => {
       (conversation?.id === selectedConversationId && conversation.isRunning))
       ? selectedConversationId
       : null;
-  const currentConversationIsStarting = startingNewConversation && !selectedConversationId;
-  const currentConversationIsStreaming =
-    Boolean(activeRunningConversationId) || currentConversationIsStarting;
-
-  const slashCommandSuggestions = useMemo(
-    () => filterSlashCommands(slashCommands, draft),
-    [draft, slashCommands]
-  );
-  const slashCommandSuggestionsOpen =
-    !currentConversationIsStreaming &&
-    !steering &&
-    slashSuggestionsDismissedDraft !== draft &&
-    slashCommandSuggestions.length > 0;
-  const activeSlashCommand = useMemo(() => {
-    const selectedSuggestion = slashCommandSuggestionsOpen
-      ? slashCommandSuggestions[slashCommandIndex]
-      : undefined;
-    if (selectedSuggestion) {
-      return selectedSuggestion;
-    }
-
-    const draftCommand = getDraftSlashCommand(draft);
-    if (!draftCommand) {
-      return null;
-    }
-
-    return slashCommands.find((command) => command.name === draftCommand) || null;
-  }, [
-    draft,
-    slashCommands,
-    slashCommandIndex,
-    slashCommandSuggestions,
-    slashCommandSuggestionsOpen,
-  ]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies(slashCommands): Refreshing the command list must reset its selected suggestion even when the draft is unchanged.
-  useEffect(() => {
-    setSlashCommandIndex(-1);
-    setSlashSuggestionsDismissedDraft((dismissedDraft) =>
-      dismissedDraft && dismissedDraft !== draft ? null : dismissedDraft
-    );
-  }, [draft, slashCommands]);
+  const currentConversationIsStreaming = Boolean(activeRunningConversationId);
 
   useEffect(() => {
     viewedConversationIdRef.current = conversationId;
@@ -1423,431 +496,6 @@ const ChatPage: React.FC = () => {
       draftId === conversationId ? generateConversationId() : draftId
     );
   }, [conversationId]);
-
-  useEffect(() => {
-    if (!conversationId) {
-      return;
-    }
-
-    cwdSuggestionRequestRef.current += 1;
-  }, [conversationId]);
-
-  const onDismissNewChatDialog = useEffectEvent(() => {
-    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
-    setNewChatModelDraft(selectedModel);
-    setNewChatModelOptions(selectedModelOptions);
-    cwdSuggestionSkipQueryRef.current = null;
-    requestCwdSuggestions.cancel();
-    cwdSuggestionRequestRef.current += 1;
-    setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
-    setNewChatDialogOpen(false);
-  });
-
-  useEffect(() => {
-    if (!newChatDialogOpen) {
-      return undefined;
-    }
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const returnFocus = newChatReturnFocusRef.current || previousFocus;
-
-    const focusInput = window.setTimeout(() => {
-      const input = cwdInputRef.current;
-      if (!input) {
-        return;
-      }
-
-      input.focus();
-      const valueLength = input.value.length;
-      input.setSelectionRange(valueLength, valueLength);
-    }, 0);
-
-    const handlePointerDown = (event: MouseEvent) => {
-      const dialog = newChatDialogRef.current;
-      if (!dialog) {
-        return;
-      }
-
-      const eventPath = typeof event.composedPath === 'function' ? event.composedPath() : [];
-      if (eventPath.includes(dialog) || dialog.contains(event.target as Node | null)) {
-        return;
-      }
-
-      onDismissNewChatDialog();
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        // Let an expanded select dismiss its menu before dismissing the dialog.
-        if (
-          event.target instanceof Element &&
-          event.target.closest('.new-chat-select-trigger[aria-expanded="true"]')
-        ) {
-          return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        onDismissNewChatDialog();
-        return;
-      }
-      if (event.key !== 'Tab' || !newChatDialogRef.current) {
-        return;
-      }
-
-      const focusableElements = Array.from(
-        newChatDialogRef.current.querySelectorAll<HTMLElement>(OVERLAY_FOCUSABLE_SELECTOR)
-      ).filter((element) => !element.hasAttribute('disabled'));
-      if (focusableElements.length === 0) {
-        event.preventDefault();
-        newChatDialogRef.current.focus();
-        return;
-      }
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      if (event.shiftKey && document.activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-        return;
-      }
-      if (!event.shiftKey && document.activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown, true);
-
-    return () => {
-      window.clearTimeout(focusInput);
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown, true);
-      window.setTimeout(() => {
-        if (returnFocus?.isConnected) {
-          returnFocus.focus();
-          return;
-        }
-        document.querySelector<HTMLElement>('button.composer-inline-context')?.focus();
-      }, 0);
-    };
-  }, [newChatDialogOpen]);
-
-  useEffect(() => {
-    return () => {
-      attachments.forEach((attachment) => {
-        if (attachment.previewUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(attachment.previewUrl);
-        }
-      });
-    };
-  }, [attachments]);
-
-  useEffect(() => {
-    if (mobileLayout) {
-      setSidebarVisible(false);
-      return;
-    }
-
-    restoringDesktopSidebarRef.current = true;
-    setSidebarVisible(desktopSidebarVisibleRef.current);
-  }, [mobileLayout]);
-
-  useEffect(() => {
-    if (mobileLayout) {
-      return;
-    }
-
-    if (restoringDesktopSidebarRef.current) {
-      if (sidebarVisible === desktopSidebarVisibleRef.current) {
-        restoringDesktopSidebarRef.current = false;
-      }
-      return;
-    }
-
-    desktopSidebarVisibleRef.current = sidebarVisible;
-    window.localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, String(sidebarVisible));
-  }, [mobileLayout, sidebarVisible]);
-
-  useEffect(() => {
-    if (higherPriorityDialogOpen) {
-      return undefined;
-    }
-
-    const overlay = workspaceOverlayOpen
-      ? workspaceToolsRef.current
-      : sidebarOverlayOpen
-        ? sidebarShellRef.current
-        : null;
-    if (!overlay) {
-      return undefined;
-    }
-
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const returnFocus = sidebarOverlayOpen ? sidebarReturnFocusRef.current : previousFocus;
-    const focusOverlay = window.setTimeout(() => {
-      const initialFocus = overlay.querySelector<HTMLElement>(
-        workspaceOverlayOpen
-          ? '[data-testid="workspace-tools-toggle"]'
-          : '[data-testid="sidebar-hide-button"]'
-      );
-      if (initialFocus && !initialFocus.hasAttribute('disabled')) {
-        initialFocus.focus();
-        return;
-      }
-      overlay.focus();
-    }, 0);
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && sidebarOverlayOpen) {
-        // Let a nested menu handle Escape before dismissing the entire drawer.
-        if (event.target instanceof Element && event.target.closest('[role="menu"]')) {
-          return;
-        }
-        event.preventDefault();
-        setSidebarVisible(false);
-        return;
-      }
-      if (event.key !== 'Tab') {
-        return;
-      }
-
-      const focusableElements = Array.from(
-        overlay.querySelectorAll<HTMLElement>(OVERLAY_FOCUSABLE_SELECTOR)
-      ).filter((element) => !element.hasAttribute('disabled') && !element.closest('[inert]'));
-      if (focusableElements.length === 0) {
-        event.preventDefault();
-        overlay.focus();
-        return;
-      }
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      const activeElement = document.activeElement;
-      if (!activeElement || !overlay.contains(activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? lastElement : firstElement).focus();
-        return;
-      }
-      if (event.shiftKey && activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-        return;
-      }
-      if (!event.shiftKey && activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      window.clearTimeout(focusOverlay);
-      window.removeEventListener('keydown', handleKeyDown, true);
-      window.setTimeout(() => {
-        if (returnFocus?.isConnected) {
-          returnFocus.focus();
-          return;
-        }
-        if (sidebarOverlayOpen) {
-          document
-            .querySelector<HTMLElement>('[data-testid="sidebar-attached-toggle-mobile"]')
-            ?.focus();
-        }
-      }, 0);
-    };
-  }, [higherPriorityDialogOpen, sidebarOverlayOpen, workspaceOverlayOpen]);
-
-  useEffect(() => {
-    if (workspacePanelView !== 'terminal' || higherPriorityDialogOpen || sidebarOverlayOpen) {
-      return undefined;
-    }
-
-    const workspace = workspaceToolsRef.current;
-    if (!workspace) {
-      return undefined;
-    }
-
-    const handleTerminalExitKey = (event: KeyboardEvent) => {
-      if (event.key !== 'F6') {
-        return;
-      }
-
-      const terminalHost = workspace.querySelector<HTMLElement>('.workspace-terminal-host');
-      const activeElement = document.activeElement;
-      if (
-        !terminalHost ||
-        !(activeElement instanceof HTMLElement) ||
-        !terminalHost.contains(activeElement)
-      ) {
-        return;
-      }
-
-      const target = event.shiftKey
-        ? workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-diff-tab"]') ||
-          workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-terminal-tab"]')
-        : workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-toggle"]');
-      if (!target) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      target.focus();
-    };
-
-    window.addEventListener('keydown', handleTerminalExitKey, true);
-    return () => {
-      window.removeEventListener('keydown', handleTerminalExitKey, true);
-    };
-  }, [higherPriorityDialogOpen, sidebarOverlayOpen, workspacePanelView]);
-
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    if (workspaceWidth !== null) {
-      window.localStorage.setItem(WORKSPACE_WIDTH_STORAGE_KEY, String(workspaceWidth));
-    }
-  }, [workspaceWidth]);
-
-  const applyWorkspaceWidth = useCallback((width: number) => {
-    const size = workspaceSizeRef.current;
-    const nextWidth = Math.round(Math.min(size.max, Math.max(size.min, width)));
-    workspaceSizeRef.current = { ...size, width: nextWidth };
-    workspaceToolsRef.current?.style.setProperty('--workspace-width', `${nextWidth}px`);
-    workspaceResizerRef.current?.setAttribute('aria-valuenow', String(nextWidth));
-    workspaceResizerRef.current?.setAttribute('aria-valuetext', `${nextWidth} pixels`);
-    return nextWidth;
-  }, []);
-
-  useEffect(() => {
-    if (!isResizingWorkspace) return undefined;
-    const start = workspaceResizeStartRef.current;
-    const separator = workspaceResizerRef.current;
-    if (
-      !start ||
-      !separator ||
-      !workspacePanelOpen ||
-      workspaceOverlayLayout ||
-      higherPriorityDialogOpen
-    ) {
-      workspaceResizeStartRef.current = null;
-      if (start && separator?.hasPointerCapture?.(start.pointerId)) {
-        separator.releasePointerCapture(start.pointerId);
-      }
-      setIsResizingWorkspace(false);
-      return undefined;
-    }
-
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-
-    const finish = (commit: boolean) => {
-      if (workspaceResizeStartRef.current !== start) return;
-      workspaceResizeStartRef.current = null;
-      if (commit) setWorkspaceWidth(workspaceSizeRef.current.width);
-      else applyWorkspaceWidth(start.startWidth);
-      setWorkspaceSize(workspaceSizeRef.current);
-      setIsResizingWorkspace(false);
-    };
-    const move = (event: PointerEvent) => {
-      if (event.pointerId !== start.pointerId) return;
-      applyWorkspaceWidth(start.startWidth + start.startX - event.clientX);
-    };
-    const end = (event: PointerEvent) => {
-      if (event.pointerId === start.pointerId) finish(event.type === 'pointerup');
-    };
-    const cancel = () => finish(false);
-    const keyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      cancel();
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    window.addEventListener('blur', cancel);
-    window.addEventListener('keydown', keyDown);
-    separator.addEventListener('lostpointercapture', cancel);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      window.removeEventListener('blur', cancel);
-      window.removeEventListener('keydown', keyDown);
-      separator.removeEventListener('lostpointercapture', cancel);
-      if (separator.hasPointerCapture?.(start.pointerId)) {
-        separator.releasePointerCapture(start.pointerId);
-      }
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (workspaceResizeStartRef.current === start) {
-        workspaceResizeStartRef.current = null;
-        applyWorkspaceWidth(start.startWidth);
-      }
-    };
-  }, [
-    applyWorkspaceWidth,
-    higherPriorityDialogOpen,
-    isResizingWorkspace,
-    workspaceOverlayLayout,
-    workspacePanelOpen,
-  ]);
-
-  useEffect(() => {
-    if (!isResizingSidebar) {
-      return undefined;
-    }
-
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const resizeStart = sidebarResizeStartRef.current;
-      if (!resizeStart) {
-        return;
-      }
-
-      const nextWidth = clampSidebarWidth(
-        resizeStart.startWidth + (event.clientX - resizeStart.startX)
-      );
-      sidebarWidthRef.current = nextWidth;
-      sidebarShellRef.current?.style.setProperty('--sidebar-width', `${nextWidth}px`);
-    };
-
-    const stopResizing = () => {
-      sidebarResizeStartRef.current = null;
-      setSidebarWidth(sidebarWidthRef.current);
-      setIsResizingSidebar(false);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', stopResizing);
-
-    return () => {
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', stopResizing);
-    };
-  }, [isResizingSidebar]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setStatusTick((current) => current + 1);
-    }, 30000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, []);
 
   useEffect(() => {
     const optimisticRemoteConversation = optimisticRemoteConversationRef.current;
@@ -1869,10 +517,7 @@ const ChatPage: React.FC = () => {
 
     resumeStreamRef.current += 1;
     setActiveConversationId(conversationId);
-    extensionWidgetRevisionRef.current = null;
-    extensionWidgetSnapshotRevisionRef.current = null;
-    extensionWidgetVersionsRef.current = {};
-    setExtensionWidgets({});
+    resetExtensionWidgets();
     setSteering(false);
     setStreamError(null);
 
@@ -1904,7 +549,7 @@ const ChatPage: React.FC = () => {
       .finally(() => {
         setConversationLoading(false);
       });
-  }, [conversationId]);
+  }, [conversationId, resetExtensionWidgets]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(conversationStreamVersion): Completing a submitted stream must reattach the conversation watcher even when its ID is unchanged.
   useEffect(() => {
@@ -2090,149 +735,20 @@ const ChatPage: React.FC = () => {
   }, [messages, currentConversationIsStreaming]);
 
   const handleNewChat = () => {
-    if (currentConversationIsStarting) {
-      return;
-    }
     closeMobileSidebar();
-    newChatReturnFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
     setConversation(null);
     optimisticRemoteConversationRef.current = null;
     setActiveConversationId(null);
     setDraftConversationId(generateConversationId());
     setMessages([]);
-    extensionWidgetRevisionRef.current = null;
-    extensionWidgetSnapshotRevisionRef.current = null;
-    extensionWidgetVersionsRef.current = {};
-    setExtensionWidgets({});
+    resetExtensionWidgets();
     setConversationError(null);
     setStreamError(null);
-    setSelectedProfile(chatSettings.currentProfile || '');
-    setNewChatProfileDraft(chatSettings.currentProfile || '');
-    const modelSettings = modelSettingsFromChatSettings(chatSettings);
-    setSelectedModel(modelSettings.model);
-    setSelectedModelOptions(modelSettings.options);
-    setNewChatModelDraft(modelSettings.model);
-    setNewChatModelOptions(modelSettings.options);
-    const reasoningSettings = reasoningSettingsFromChatSettings(chatSettings);
-    setSelectedReasoningEffort(reasoningSettings.effort);
-    setSelectedReasoningEffortOptions(reasoningSettings.options);
-    setSelectedReasoningEffortExplicit(false);
-    setNewChatReasoningEffortDraft(reasoningSettings.effort);
-    setNewChatReasoningEffortOptions(reasoningSettings.options);
-    setNewChatReasoningEffortExplicit(false);
-    setSelectedRunnerID(defaultRunnerID);
-    setNewChatRunnerDraft(defaultRunnerID);
-    setSelectedEnvironmentProfile('');
-    setNewChatEnvironmentProfileDraft('');
-    reasoningSettingsRequestRef.current += 1;
-    setReasoningSettingsLoading(false);
-    setSelectedCWD('');
-    cwdSuggestionSkipQueryRef.current = '';
-    requestCwdSuggestions.cancel();
-    cwdSuggestionRequestRef.current += 1;
-    setCwdQuery('');
-    cwdInputFocusedRef.current = false;
-    setCwdSuggestions([]);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
+    contextSettings.resetForNewChat();
     startTransition(() => {
       navigate('/');
     });
-    setNewChatDialogOpen(true);
   };
-
-  const requestCwdSuggestions = useMemo(
-    () =>
-      debounce((query: string) => {
-        const requestId = cwdSuggestionRequestRef.current + 1;
-        cwdSuggestionRequestRef.current = requestId;
-
-        void apiService
-          .getCWDHints(query, {
-            runnerId: newChatRunnerDraft,
-            environmentProfile: newChatEnvironmentProfileDraft,
-            profile: newChatProfileDraft,
-          })
-          .then((response) => {
-            if (cwdSuggestionRequestRef.current !== requestId || viewedConversationIdRef.current) {
-              return;
-            }
-
-            setCwdSuggestions(response.hints || []);
-            setCwdSuggestionsOpen(cwdInputFocusedRef.current && (response.hints || []).length > 0);
-            setCwdSuggestionIndex(-1);
-          })
-          .catch((error) => {
-            if (cwdSuggestionRequestRef.current !== requestId || viewedConversationIdRef.current) {
-              return;
-            }
-
-            console.error('Failed to load cwd suggestions', error);
-            setCwdSuggestions([]);
-            setCwdSuggestionsOpen(false);
-          });
-      }, 150),
-    [newChatRunnerDraft, newChatEnvironmentProfileDraft, newChatProfileDraft]
-  );
-
-  useEffect(() => {
-    return () => {
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
-    };
-  }, [requestCwdSuggestions]);
-
-  useEffect(() => {
-    cwdSuggestionRequestRef.current += 1;
-    setCwdSuggestions([]);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
-    const runner = runners.find((candidate) => candidate.id === newChatRunnerDraft);
-    const discoveryAvailable =
-      newChatRunnerDraft &&
-      runner?.connected &&
-      runner.workspaceDiscovery &&
-      (runner.status === 'idle' || runner.status === 'busy');
-    if (!newChatDialogOpen || conversationId || !discoveryAvailable) {
-      requestCwdSuggestions.cancel();
-      cwdInputFocusedRef.current = false;
-      setCwdSuggestions([]);
-      setCwdSuggestionsOpen(false);
-      setCwdSuggestionIndex(-1);
-      return;
-    }
-
-    if (!cwdQuery.trim()) {
-      cwdSuggestionSkipQueryRef.current = null;
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
-      setCwdSuggestions([]);
-      setCwdSuggestionsOpen(false);
-      setCwdSuggestionIndex(-1);
-      return;
-    }
-
-    if (cwdSuggestionSkipQueryRef.current === cwdQuery) {
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
-      setCwdSuggestions([]);
-      setCwdSuggestionsOpen(false);
-      setCwdSuggestionIndex(-1);
-      return;
-    }
-    cwdSuggestionSkipQueryRef.current = null;
-
-    requestCwdSuggestions(cwdQuery);
-  }, [
-    conversationId,
-    cwdQuery,
-    newChatRunnerDraft,
-    newChatDialogOpen,
-    runners,
-    requestCwdSuggestions,
-  ]);
 
   const handleSelectConversation = (nextConversationId: string) => {
     closeMobileSidebar();
@@ -2247,7 +763,7 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSelectSearchResult = (nextConversationId: string) => {
-    const selectedConversation = conversationSearchResults.find(
+    const selectedConversation = conversationSearch.results.find(
       (searchResult) => searchResult.id === nextConversationId
     );
     if (selectedConversation) {
@@ -2325,118 +841,9 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleSidebarToggle = () => {
-    if (workspaceOverlayLayout && !sidebarVisible) {
-      setWorkspacePanelView(null);
-    }
-    if (!sidebarVisible) {
-      const activeElement =
-        document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-          ? document.activeElement
-          : null;
-      sidebarReturnFocusRef.current =
-        activeElement ||
-        document.querySelector<HTMLElement>('[data-testid="sidebar-attached-toggle-mobile"]') ||
-        document.querySelector<HTMLElement>('[data-testid="sidebar-attached-toggle"]');
-    }
-    setSidebarVisible(!sidebarVisible);
-  };
-
   const handleOpenSidebarSearch = () => {
     closeMobileSidebar();
-    setConversationSearchResults(conversations);
-    setConversationSearchError(null);
-    setConversationSearchHasMore(false);
-    setConversationSearchLoading(false);
-    setConversationSearchLoadingMore(false);
-    setConversationSearchOffset(conversations.length);
-    setConversationSearchTotal(conversationTotal);
-    setSidebarSearchOpen(true);
-  };
-
-  const handleLoadMoreConversationSearch = () => {
-    if (
-      conversationSearchLoading ||
-      conversationSearchLoadingMore ||
-      !conversationSearchHasMore ||
-      (!conversationSearchTermRef.current.trim() && !conversationCWDFilterRef.current.trim())
-    ) {
-      return;
-    }
-
-    void refreshConversationSearch(conversationSearchOffset);
-  };
-
-  const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    sidebarWidthRef.current = sidebarWidth;
-    sidebarResizeStartRef.current = {
-      startX: event.clientX,
-      startWidth: sidebarWidth,
-    };
-    setIsResizingSidebar(true);
-  };
-
-  const handleSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLHRElement>) => {
-    let nextWidth: number;
-    switch (event.key) {
-      case 'ArrowLeft':
-        nextWidth = sidebarWidth - 10;
-        break;
-      case 'ArrowRight':
-        nextWidth = sidebarWidth + 10;
-        break;
-      case 'Home':
-        nextWidth = MIN_SIDEBAR_WIDTH;
-        break;
-      case 'End':
-        nextWidth = MAX_SIDEBAR_WIDTH;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-    sidebarWidthRef.current = clampSidebarWidth(nextWidth);
-    setSidebarWidth(sidebarWidthRef.current);
-  };
-
-  const handleWorkspaceResizeStart = (event: React.PointerEvent<HTMLHRElement>) => {
-    if (event.button !== 0 || workspaceResizeStartRef.current) return;
-    event.preventDefault();
-    event.currentTarget.focus();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    workspaceResizeStartRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startWidth: workspaceSizeRef.current.width,
-    };
-    setIsResizingWorkspace(true);
-  };
-
-  const handleWorkspaceResizeKeyDown = (event: React.KeyboardEvent<HTMLHRElement>) => {
-    if (workspaceResizeStartRef.current) return;
-    const size = workspaceSizeRef.current;
-    let width: number;
-    switch (event.key) {
-      case 'ArrowLeft':
-        width = size.width + 10;
-        break;
-      case 'ArrowRight':
-        width = size.width - 10;
-        break;
-      case 'Home':
-        width = size.min;
-        break;
-      case 'End':
-        width = size.max;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    setWorkspaceWidth(applyWorkspaceWidth(width));
-    setWorkspaceSize(workspaceSizeRef.current);
+    conversationSearch.open();
   };
 
   const updatePathForStartedConversation = (streamedId: string) => {
@@ -2466,13 +873,8 @@ const ChatPage: React.FC = () => {
       return true;
     }
     if (isBlockingUIRequestEvent(event)) {
-      reasoningSettingsRequestRef.current += 1;
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
+      contextSettings.interruptDialog();
       handleCloseConversationSearch();
-      setNewChatDialogOpen(false);
-      setCwdSuggestionsOpen(false);
-      setCwdSuggestionIndex(-1);
     }
 
     if (event.kind === 'ui-input-request' && event.ui_input) {
@@ -2549,22 +951,17 @@ const ChatPage: React.FC = () => {
 
   const handleSubmit = async () => {
     const prompt = draft.trim();
-    const steeringSubmission = currentConversationIsStreaming && canSteerActiveConversation;
-    const attachmentsForSubmit = attachments;
+    const attachmentsForSend = attachments;
     if ((!prompt && attachments.length === 0) || steering) {
       return;
     }
-    if (steeringSubmission && !prompt) {
+    if (currentConversationIsStreaming && !prompt) {
       showToast('Steering requires a text message', 'error');
       return;
     }
 
     if (currentConversationIsStreaming) {
       const targetConversationId = activeRunningConversationId;
-      if (!canSteerActiveConversation) {
-        return;
-      }
-
       if (!targetConversationId) {
         return;
       }
@@ -2573,7 +970,7 @@ const ChatPage: React.FC = () => {
       setStreamError(null);
 
       try {
-        const queuedContent = buildUserContent(prompt, attachmentsForSubmit);
+        const queuedContent = buildUserContent(prompt, attachmentsForSend);
         await apiService.steerConversation(targetConversationId, prompt, queuedContent);
         setConversation((currentConversation) =>
           currentConversation?.id === targetConversationId
@@ -2602,7 +999,6 @@ const ChatPage: React.FC = () => {
 
     setDraft('');
     setStreamError(null);
-    const attachmentsForSend = attachmentsForSubmit;
     const initialUserContent = buildUserContent(prompt, attachmentsForSend);
     setAttachments([]);
     setMessages((currentMessages) => [
@@ -2626,7 +1022,6 @@ const ChatPage: React.FC = () => {
       : isNewConversation
         ? selectedCWD.trim() || undefined
         : undefined;
-    setStartingNewConversation(false);
     if (isNewConversation) {
       optimisticRemoteConversationRef.current = requestRunnerID
         ? {
@@ -2768,7 +1163,6 @@ const ChatPage: React.FC = () => {
               }
               registerSendController(streamedId, controller);
               replaceRunningConversation(previousStreamedId, streamedId);
-              setStartingNewConversation(false);
               if (shouldUpdatePath) {
                 updatePathForStartedConversation(streamedId);
               }
@@ -2932,60 +1326,8 @@ const ChatPage: React.FC = () => {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
-      if (!streamedConversationId) {
-        setStartingNewConversation(false);
-      }
       clearRunningConversationForController(streamedConversationId, controller);
       setConversationStreamVersion((currentVersion) => currentVersion + 1);
-    }
-  };
-
-  const handleSelectSlashCommand = (commandName: string) => {
-    setDraft((currentDraft) => insertSlashCommand(currentDraft, commandName));
-    setSlashCommandIndex(-1);
-    setSlashSuggestionsDismissedDraft(null);
-  };
-
-  const handleDraftKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (slashCommandSuggestionsOpen && slashCommandSuggestions.length > 0) {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        setSlashCommandIndex((current) =>
-          current >= slashCommandSuggestions.length - 1 ? -1 : current + 1
-        );
-        return;
-      }
-
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        setSlashCommandIndex((current) =>
-          current < 0 ? slashCommandSuggestions.length - 1 : current <= 0 ? -1 : current - 1
-        );
-        return;
-      }
-
-      if (event.key === 'Tab' || event.key === 'Enter') {
-        event.preventDefault();
-        const command =
-          slashCommandSuggestions[slashCommandIndex >= 0 ? slashCommandIndex : 0] ||
-          slashCommandSuggestions[0];
-        if (command) {
-          handleSelectSlashCommand(command.name);
-        }
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setSlashCommandIndex(-1);
-        setSlashSuggestionsDismissedDraft(draft);
-        return;
-      }
-    }
-
-    if (event.key === 'Enter' && event.shiftKey) {
-      event.preventDefault();
-      void handleSubmit();
     }
   };
 
@@ -3006,87 +1348,12 @@ const ChatPage: React.FC = () => {
       resumeControllerRef.current?.abort();
     }
     setSteering(false);
-    setStartingNewConversation(false);
     clearRunningConversation(conversationToStop);
     setUIRequestDialog(null);
     void apiService.stopConversation(conversationToStop).catch((error) => {
       console.error('Failed to stop conversation', error);
     });
     showToast('Stopped the active conversation', 'info');
-  };
-
-  const appendAttachments = async (files: File[]) => {
-    if (files.length === 0) {
-      return;
-    }
-
-    const remainingSlots = Math.max(MAX_IMAGE_ATTACHMENTS - attachments.length, 0);
-    if (remainingSlots === 0) {
-      showToast(`You can attach up to ${MAX_IMAGE_ATTACHMENTS} images`, 'error');
-      return;
-    }
-
-    try {
-      const nextAttachments = await Promise.all(
-        files.slice(0, remainingSlots).map(fileToPendingAttachment)
-      );
-      setAttachments((currentAttachments) => [...currentAttachments, ...nextAttachments]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to add image';
-      showToast(message, 'error');
-    }
-  };
-
-  const handleRemoveAttachment = (attachmentIdToRemove: string) => {
-    setAttachments((currentAttachments) =>
-      currentAttachments.filter((attachment) => attachment.id !== attachmentIdToRemove)
-    );
-  };
-
-  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = Array.from(event.clipboardData?.items || []);
-    const imageFiles = items
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null);
-
-    if (imageFiles.length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-    await appendAttachments(imageFiles);
-  };
-
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    if (currentConversationIsStreaming && !canSteerActiveConversation) {
-      return;
-    }
-
-    if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === 'file')) {
-      event.preventDefault();
-      setDragActive(true);
-    }
-  };
-
-  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setDragActive(false);
-
-    if (currentConversationIsStreaming && !canSteerActiveConversation) {
-      return;
-    }
-
-    const files = Array.from(event.dataTransfer.files || []).filter((file) =>
-      file.type.startsWith('image/')
-    );
-    await appendAttachments(files);
   };
 
   const isStartedConversationPending =
@@ -3182,67 +1449,11 @@ const ChatPage: React.FC = () => {
   const workspaceToolsAvailable =
     workspaceTerminalAvailable || workspaceGitDiffAvailable || workspaceBrowserAvailable;
 
-  useLayoutEffect(() => {
-    const shell = workspaceToolsRef.current;
-    const layout = shell?.parentElement;
-    if (
-      !shell ||
-      !layout ||
-      !workspaceToolsAvailable ||
-      !workspacePanelOpen ||
-      workspaceOverlayLayout
-    ) {
-      return undefined;
-    }
-    const sidebar = sidebarVisible
-      ? sidebarShellRef.current
-      : layout.querySelector('.sidebar-collapsed-rail');
-    const measure = () => {
-      const layoutWidth = layout.getBoundingClientRect().width;
-      if (layoutWidth <= 0) return;
-      const max = Math.max(
-        1,
-        Math.floor(layoutWidth - (sidebar?.getBoundingClientRect().width || 0) - MIN_CHAT_WIDTH)
-      );
-      const min = Math.min(MIN_WORKSPACE_WIDTH, max);
-      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      // Match the previous desktop default, unless chat needs more room.
-      const defaultWidth =
-        Math.min(Math.max(30 * rem, window.innerWidth * 0.38), 46 * rem, window.innerWidth * 0.48) +
-        2.75 * rem;
-      const width = Math.round(
-        Math.min(
-          max,
-          Math.max(
-            min,
-            workspaceResizeStartRef.current
-              ? workspaceSizeRef.current.width
-              : (workspaceWidth ?? defaultWidth)
-          )
-        )
-      );
-      const size = { width, min, max };
-      workspaceSizeRef.current = size;
-      setWorkspaceSize((current) =>
-        current.width === width && current.min === min && current.max === max ? current : size
-      );
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(layout);
-    if (sidebar) observer.observe(sidebar);
-    window.addEventListener('resize', measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [
-    sidebarVisible,
-    workspaceOverlayLayout,
-    workspacePanelOpen,
+  const workspaceResize = useWorkspaceResize(
+    layout,
     workspaceToolsAvailable,
-    workspaceWidth,
-  ]);
+    higherPriorityDialogOpen
+  );
 
   const workspaceTarget = useMemo<WorkspaceTarget>(
     () => ({
@@ -3262,46 +1473,21 @@ const ChatPage: React.FC = () => {
   );
   const browserTargetKey = `runner:${currentRunnerID}:conversation:${browserConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies(currentRunner?.generation): A reconnected runner must rediscover commands even when its workspace is unchanged.
-  useEffect(() => {
-    setSlashCommands([]);
-    if (!isRemoteConversation || !runnerWorkspaceAvailable || !currentRunner?.workspaceDiscovery) {
-      return undefined;
-    }
-    let cancelled = false;
-
-    void apiService
-      .getSlashCommands(remoteWorkspaceConversationID ? undefined : currentCWDLabel || undefined, {
-        runnerId: currentRunnerID,
-        conversationId: remoteWorkspaceConversationID,
-        environmentProfile: currentEnvironmentProfile,
-        profile: discoveryProfile,
-      })
-      .then((response) => {
-        if (!cancelled) {
-          setSlashCommands(response.commands || []);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error('Failed to load slash commands', error);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    currentCWDLabel,
-    isRemoteConversation,
-    runnerWorkspaceAvailable,
-    currentRunner?.workspaceDiscovery,
-    currentRunner?.generation,
-    currentRunnerID,
-    remoteWorkspaceConversationID,
-    currentEnvironmentProfile,
-    discoveryProfile,
-  ]);
+  const slashCommands = useSlashCommands({
+    draft,
+    setDraft,
+    disabled: currentConversationIsStreaming || steering,
+    discoveryAvailable: Boolean(
+      isRemoteConversation && runnerWorkspaceAvailable && currentRunner?.workspaceDiscovery
+    ),
+    runnerId: currentRunnerID,
+    generation: currentRunner?.generation,
+    conversationId: remoteWorkspaceConversationID,
+    cwd: currentCWDLabel,
+    environmentProfile: currentEnvironmentProfile,
+    profile: discoveryProfile,
+    onSubmit: handleSubmit,
+  });
 
   useEffect(() => {
     if (
@@ -3313,206 +1499,12 @@ const ChatPage: React.FC = () => {
       setWorkspacePanelView(null);
     }
   }, [
+    setWorkspacePanelView,
     workspaceBrowserAvailable,
     workspaceGitDiffAvailable,
     workspacePanelView,
     workspaceTerminalAvailable,
     workspaceToolsAvailable,
-  ]);
-
-  const applyCwdSuggestion = (path: string) => {
-    cwdSuggestionSkipQueryRef.current = path;
-    requestCwdSuggestions.cancel();
-    cwdSuggestionRequestRef.current += 1;
-    setCwdQuery(path);
-    setCwdSuggestions([]);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
-  };
-
-  const handleCwdInputChange = (value: string) => {
-    cwdSuggestionSkipQueryRef.current = null;
-    setCwdQuery(value);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
-  };
-
-  const handleCwdInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (cwdSuggestionsOpen && cwdSuggestions.length > 0 && event.key === 'ArrowDown') {
-      event.preventDefault();
-      setCwdSuggestionIndex((current) => (current >= cwdSuggestions.length - 1 ? 0 : current + 1));
-      return;
-    }
-
-    if (cwdSuggestionsOpen && cwdSuggestions.length > 0 && event.key === 'ArrowUp') {
-      event.preventDefault();
-      setCwdSuggestionIndex((current) => (current <= 0 ? cwdSuggestions.length - 1 : current - 1));
-      return;
-    }
-
-    if (!event.shiftKey && event.key === 'Tab' && cwdSuggestionsOpen && cwdSuggestions.length > 0) {
-      event.preventDefault();
-      const suggestion = cwdSuggestions[cwdSuggestionIndex >= 0 ? cwdSuggestionIndex : 0];
-      if (suggestion) {
-        applyCwdSuggestion(suggestion.path);
-      }
-      return;
-    }
-
-    if (
-      event.key === 'Enter' &&
-      cwdSuggestionsOpen &&
-      cwdSuggestions.length > 0 &&
-      cwdSuggestionIndex >= 0
-    ) {
-      event.preventDefault();
-      applyCwdSuggestion(cwdSuggestions[cwdSuggestionIndex].path);
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const trimmedQuery = cwdQuery.trim();
-      cwdSuggestionSkipQueryRef.current = trimmedQuery;
-      requestCwdSuggestions.cancel();
-      cwdSuggestionRequestRef.current += 1;
-      setCwdQuery(trimmedQuery);
-      setCwdSuggestions([]);
-      setCwdSuggestionsOpen(false);
-      setCwdSuggestionIndex(-1);
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      if (cwdSuggestionsOpen) {
-        setCwdSuggestionsOpen(false);
-        setCwdSuggestionIndex(-1);
-        return;
-      }
-    }
-  };
-
-  const handleNewChatProfileDraftChange = (
-    profileName: string,
-    runnerID = newChatRunnerDraft,
-    discoverProfiles = false
-  ) => {
-    const previousProfile = newChatProfileDraft;
-    const previousModel = newChatModelDraft;
-    const previousModelOptions = newChatModelOptions;
-    const previousEffort = newChatReasoningEffortDraft;
-    const previousOptions = newChatReasoningEffortOptions;
-    const previousEffortWasExplicit = newChatReasoningEffortExplicit;
-    const requestId = reasoningSettingsRequestRef.current + 1;
-    reasoningSettingsRequestRef.current = requestId;
-
-    if (!discoverProfiles) {
-      setNewChatProfileDraft(profileName);
-    }
-    if (profileName !== previousProfile || runnerID !== selectedRunnerID) {
-      setNewChatModelDraft('');
-      setNewChatModelOptions([]);
-    }
-    setReasoningSettingsLoading(true);
-
-    void apiService
-      .getChatSettings(discoverProfiles ? undefined : profileName, runnerID || undefined)
-      .then((settings) => {
-        if (reasoningSettingsRequestRef.current !== requestId) {
-          return;
-        }
-        // The previous runner's profile may not exist on this runner.
-        if (
-          discoverProfiles &&
-          profileName !== settings.currentProfile &&
-          settings.profiles.some((profile) => profile.name === profileName)
-        ) {
-          return apiService.getChatSettings(profileName, runnerID || undefined);
-        }
-        return settings;
-      })
-      .then((settings) => {
-        if (!settings || reasoningSettingsRequestRef.current !== requestId) {
-          return;
-        }
-
-        const profile = settings.currentProfile?.trim();
-        if (!profile) {
-          throw new Error('Chat settings did not return a model profile');
-        }
-        const reasoningSettings = reasoningSettingsFromChatSettings(settings);
-        const preserveExplicitEffort =
-          previousEffortWasExplicit && reasoningSettings.options.includes(previousEffort);
-        const modelSettings = modelSettingsFromChatSettings(settings);
-        const preserveModel =
-          profile === previousProfile &&
-          runnerID === selectedRunnerID &&
-          modelSettings.options.includes(previousModel);
-
-        setChatSettings((current) => ({ ...current, profiles: settings.profiles }));
-        setNewChatProfileDraft(profile);
-        setNewChatModelDraft(preserveModel ? previousModel : modelSettings.model);
-        setNewChatModelOptions(modelSettings.options);
-        setNewChatReasoningEffortOptions(reasoningSettings.options);
-        setNewChatReasoningEffortDraft(
-          preserveExplicitEffort ? previousEffort : reasoningSettings.effort
-        );
-        setNewChatReasoningEffortExplicit(preserveExplicitEffort);
-        setReasoningSettingsLoading(false);
-      })
-      .catch((error) => {
-        if (reasoningSettingsRequestRef.current !== requestId) {
-          return;
-        }
-
-        console.error('Failed to load profile reasoning settings', error);
-        if (discoverProfiles) {
-          setNewChatRunnerDraft(selectedRunnerID);
-        }
-        setNewChatProfileDraft(previousProfile);
-        setNewChatModelDraft(discoverProfiles ? selectedModel : previousModel);
-        setNewChatModelOptions(discoverProfiles ? selectedModelOptions : previousModelOptions);
-        setNewChatReasoningEffortDraft(previousEffort);
-        setNewChatReasoningEffortOptions(previousOptions);
-        setNewChatReasoningEffortExplicit(previousEffortWasExplicit);
-        setReasoningSettingsLoading(false);
-      });
-  };
-
-  const onDiscoverNewChatRunnerProfile = useEffectEvent((runnerId: string) => {
-    handleNewChatProfileDraftChange(newChatProfileDraft, runnerId, true);
-  });
-
-  useEffect(() => {
-    if (!newChatDialogOpen || !newChatRunnerDraft || !chatSettingsLoaded) {
-      return;
-    }
-    onDiscoverNewChatRunnerProfile(newChatRunnerDraft);
-    return () => {
-      reasoningSettingsRequestRef.current += 1;
-    };
-  }, [newChatDialogOpen, newChatRunnerDraft, chatSettingsLoaded]);
-
-  const availableProfiles = useMemo(() => {
-    const configuredProfiles = chatSettings.profiles || [];
-    const profileName = newChatDialogOpen ? newChatProfileDraft : currentProfileLabel;
-    if (!profileName || configuredProfiles.some((profile) => profile.name === profileName)) {
-      return configuredProfiles;
-    }
-
-    return [
-      ...configuredProfiles,
-      {
-        name: profileName,
-        scope: conversationId ? 'conversation' : 'selected',
-      },
-    ];
-  }, [
-    chatSettings.profiles,
-    conversationId,
-    currentProfileLabel,
-    newChatDialogOpen,
-    newChatProfileDraft,
   ]);
 
   const composerModelLabel = currentModelLabel
@@ -3522,22 +1514,7 @@ const ChatPage: React.FC = () => {
     [composerModelLabel, currentReasoningEffortLabel].filter(Boolean).join(' · ') ||
     (conversationId ? 'Saved settings' : 'Model settings');
   const contextIsStatic = Boolean(conversationId) && !optimisticConversationContextEditable;
-  const openChatContext = () => {
-    newChatReturnFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setNewChatProfileDraft(currentProfileLabel);
-    setNewChatModelDraft(selectedModel);
-    setNewChatModelOptions(selectedModelOptions);
-    setNewChatReasoningEffortDraft(selectedReasoningEffort);
-    setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
-    setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
-    reasoningSettingsRequestRef.current += 1;
-    setReasoningSettingsLoading(false);
-    setNewChatRunnerDraft(selectedRunnerID);
-    setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
-    setCwdQuery(selectedRunnerID ? selectedCWD : '');
-    setNewChatDialogOpen(true);
-  };
+  const openChatContext = () => contextSettings.openDialog(currentProfileLabel);
 
   const patchOptimisticConversationContext = (update: Partial<Conversation>) => {
     const optimisticConversation = optimisticRemoteConversationRef.current;
@@ -3562,253 +1539,47 @@ const ChatPage: React.FC = () => {
     );
   };
 
-  // Like the TUI's /model picker: every visible profile's models, fetched per profile.
-  const loadProfileModelCatalog = () => {
-    if (!chatSettingsLoaded) {
-      return;
-    }
-    const runnerId = selectedRunnerID;
-    const requestId = profileModelCatalogRequestRef.current + 1;
-    profileModelCatalogRequestRef.current = requestId;
-    const profileNames = (chatSettings.profiles || [])
-      .filter((profile) => !profile.hidden)
-      .map((profile) => profile.name.trim())
-      .filter(Boolean);
-    if (selectedProfile && !profileNames.includes(selectedProfile)) {
-      profileNames.push(selectedProfile);
-    }
-    setProfileModelCatalogLoading(true);
-    void Promise.all(
-      profileNames.map((name) => apiService.getChatSettings(name, runnerId || undefined))
-    )
-      .then((settingsList) => {
-        if (profileModelCatalogRequestRef.current !== requestId) {
-          return;
-        }
-        const options: ProfileModelOption[] = [];
-        settingsList.forEach((settings, index) => {
-          const profile = settings.currentProfile?.trim() || profileNames[index];
-          const modelSettings = modelSettingsFromChatSettings(settings);
-          appendProfileModelOptions(options, profile, modelSettings.options, settings);
-        });
-        setProfileModelCatalog({ runnerId, options });
-        setProfileModelCatalogLoading(false);
-      })
-      .catch((error) => {
-        if (profileModelCatalogRequestRef.current !== requestId) {
-          return;
-        }
-        console.error('Failed to load profile models', error);
-        showToast('Failed to load models for the visible profiles', 'error');
-        setProfileModelCatalogLoading(false);
-      });
-  };
-
-  const composerProfileModelOptions = useMemo(() => {
-    const options: ProfileModelOption[] = [];
-    if (selectedModel) {
-      appendProfileModelOptions(options, selectedProfile, [selectedModel]);
-    }
-    appendProfileModelOptions(options, selectedProfile, selectedModelOptions);
-    if (profileModelCatalog?.runnerId === selectedRunnerID) {
-      for (const option of profileModelCatalog.options) {
-        appendProfileModelOptions(options, option.profile, [option.model], option.settings);
-      }
-    }
-    return sortProfileModelOptions(options, { profile: selectedProfile, model: selectedModel });
-  }, [profileModelCatalog, selectedModel, selectedModelOptions, selectedProfile, selectedRunnerID]);
-
   const handleQuickModelChange = (value: string) => {
-    const option = composerProfileModelOptions.find(
-      (candidate) => profileModelKey(candidate.profile, candidate.model) === value
-    );
-    if (!option) {
-      return;
-    }
-    const update: Partial<Conversation> = { model: option.model };
-    if (option.profile !== selectedProfile) {
-      setSelectedProfile(option.profile);
-      setNewChatProfileDraft(option.profile);
-      update.profile = option.profile;
-      if (option.settings) {
-        const reasoningSettings = reasoningSettingsFromChatSettings(option.settings);
-        const preserveExplicitEffort =
-          selectedReasoningEffortExplicit &&
-          reasoningSettings.options.includes(selectedReasoningEffort);
-        const nextEffort = preserveExplicitEffort
-          ? selectedReasoningEffort
-          : reasoningSettings.effort;
-        setSelectedReasoningEffortOptions(reasoningSettings.options);
-        setSelectedReasoningEffort(nextEffort);
-        setSelectedReasoningEffortExplicit(preserveExplicitEffort);
-        update.reasoningEffort = nextEffort;
-      }
-    }
-    if (option.settings) {
-      setSelectedModelOptions(modelSettingsFromChatSettings(option.settings).options);
-    }
-    setSelectedModel(option.model);
-    patchOptimisticConversationContext(update);
+    const update = contextSettings.selectModel(value);
+    if (update) patchOptimisticConversationContext(update);
   };
 
   const handleQuickReasoningEffortChange = (effort: string) => {
-    setSelectedReasoningEffort(effort);
-    setSelectedReasoningEffortExplicit(true);
-    patchOptimisticConversationContext({ reasoningEffort: effort });
+    patchOptimisticConversationContext(contextSettings.selectReasoningEffort(effort));
   };
 
   const composerQuickPick =
-    !contextIsStatic && chatSettingsLoaded && selectedModel
+    !contextIsStatic && contextSettings.quickPick
       ? {
-          modelValue: profileModelKey(selectedProfile, selectedModel),
-          modelOptions: composerProfileModelOptions.map((option) => ({
-            value: profileModelKey(option.profile, option.model),
-            label: profileModelLabel(option.profile, option.model),
-          })),
-          modelOptionsLoading: profileModelCatalogLoading,
-          reasoningEffort: selectedReasoningEffort,
-          reasoningEffortOptions: selectedReasoningEffortOptions,
+          ...contextSettings.quickPick,
           onModelChange: handleQuickModelChange,
-          onModelMenuOpen: loadProfileModelCatalog,
           onReasoningEffortChange: handleQuickReasoningEffortChange,
         }
       : undefined;
 
-  const hasActiveConversationTarget = Boolean(activeRunningConversationId);
-  const canSteerActiveConversation = hasActiveConversationTarget;
-  const isSteeringMode = currentConversationIsStreaming && canSteerActiveConversation;
   const canSubmit =
     isRemoteConversation &&
-    (isSteeringMode ? draft.trim().length > 0 : draft.trim().length > 0 || attachments.length > 0);
-  const canStopActiveConversation =
-    currentConversationIsStreaming && Boolean(activeRunningConversationId);
-  const canStartNewChat = !currentConversationIsStarting;
+    (currentConversationIsStreaming
+      ? draft.trim().length > 0
+      : draft.trim().length > 0 || attachments.length > 0);
   const composerPlaceholder = !isRemoteConversation
     ? conversationId
       ? 'This local conversation is read-only'
       : 'Select a workspace runner to start'
     : currentConversationIsStreaming
-      ? !activeRunningConversationId
-        ? 'Waiting for conversation to start…'
-        : canSteerActiveConversation
-          ? 'Steer the active conversation…'
-          : 'Add your guidance here...'
-      : activeSlashCommand
-        ? getSlashCommandPlaceholder(activeSlashCommand)
-        : 'Ask kodelet anything...';
+      ? 'Steer the active conversation…'
+      : slashCommands.placeholder || 'Ask kodelet anything...';
   const workspaceExecutionMessage = !isRemoteConversation
     ? conversationId
       ? 'This conversation uses the disabled control-plane workspace and is read-only.'
       : 'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
     : null;
-  const composerSlashUsageHint =
-    !currentConversationIsStreaming && !steering && activeSlashCommand
-      ? getSlashCommandPlaceholder(activeSlashCommand)
-      : '';
   const submitActionLabel = steering
     ? 'Queueing…'
     : currentConversationIsStreaming
       ? 'Steer'
       : 'Send';
-  const stopActionLabel = canStopActiveConversation ? 'Stop' : 'Starting…';
-  // biome-ignore lint/correctness/useExhaustiveDependencies(statusTick): The clock tick intentionally recomputes relative timestamps without new conversation data.
-  const composerMeta = useMemo(() => {
-    const groups: Array<{ label: string; value: string }> = [];
-    const details: Array<{ label: string; value: string }> = [];
-    if (currentRunnerID) {
-      const runnerName =
-        currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
-      const runnerStatus = formatRunnerStatus(currentRunner);
-      details.push(
-        { label: 'Runner', value: runnerName },
-        { label: 'Status', value: runnerStatus }
-      );
-      if (currentEnvironmentProfile) {
-        details.push({ label: 'Runner profile', value: currentEnvironmentProfile });
-      }
-    }
-    if (!conversation) {
-      return { groups, details };
-    }
-
-    const usage = conversation.usage;
-    const compactNumber = Intl.NumberFormat('en-US', {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    });
-    const exactNumber = Intl.NumberFormat('en-US');
-    const usageParts: string[] = [];
-    if (
-      usage?.currentContextWindow !== undefined &&
-      usage.maxContextWindow &&
-      usage.maxContextWindow > 0
-    ) {
-      const percentage = Math.max(
-        0,
-        Math.min(100, Math.round((usage.currentContextWindow / usage.maxContextWindow) * 100))
-      );
-      usageParts.push(`ctx ${percentage}%`);
-      details.push({
-        label: 'Context window',
-        value: `${exactNumber.format(usage.currentContextWindow)} / ${exactNumber.format(usage.maxContextWindow)} tokens (${percentage}%)`,
-      });
-    }
-
-    for (const [label, shortLabel, tokens] of [
-      ['Input tokens', 'in', usage?.inputTokens],
-      ['Output tokens', 'out', usage?.outputTokens],
-      ['Cache read tokens', 'cache', usage?.cacheReadInputTokens],
-      ['Cache write tokens', 'cache write', usage?.cacheCreationInputTokens],
-    ] as const) {
-      if (tokens && tokens > 0) {
-        usageParts.push(`${shortLabel} ${compactNumber.format(tokens)}`);
-        details.push({ label, value: exactNumber.format(tokens) });
-      }
-    }
-    if (usageParts.length > 0) {
-      groups.push({ label: 'Usage', value: usageParts.join(' · ') });
-    }
-
-    const totalCost =
-      (usage?.inputCost || 0) +
-      (usage?.outputCost || 0) +
-      (usage?.cacheCreationCost || 0) +
-      (usage?.cacheReadCost || 0);
-    const costParts = [
-      totalCost > 0 && totalCost < 0.01
-        ? '<$0.01'
-        : Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalCost),
-    ];
-    details.push({ label: 'Total cost', value: formatCost(usage) });
-
-    if (conversation.updatedAt) {
-      costParts.push(formatCompactRelativeTime(conversation.updatedAt));
-    }
-    groups.push({ label: 'Cost and time', value: costParts.join(' · ') });
-    return { groups, details };
-  }, [conversation, currentEnvironmentProfile, currentRunner, currentRunnerID, statusTick]);
   const pendingSteerMessages = conversation?.pendingSteer || [];
-
-  const handleCloseNewChatDialog = () => {
-    reasoningSettingsRequestRef.current += 1;
-    setReasoningSettingsLoading(false);
-    setNewChatProfileDraft(selectedProfile || chatSettings.currentProfile || '');
-    setNewChatModelDraft(selectedModel);
-    setNewChatModelOptions(selectedModelOptions);
-    setNewChatReasoningEffortDraft(selectedReasoningEffort);
-    setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
-    setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
-    setNewChatRunnerDraft(selectedRunnerID);
-    setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
-    cwdSuggestionSkipQueryRef.current = null;
-    requestCwdSuggestions.cancel();
-    cwdSuggestionRequestRef.current += 1;
-    setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
-    setCwdSuggestions([]);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
-    setNewChatDialogOpen(false);
-  };
 
   const fetchGitDiff = async () => {
     const requestID = ++gitDiffRequestRef.current;
@@ -3893,71 +1664,33 @@ const ChatPage: React.FC = () => {
   };
 
   const handleCommitNewChatContext = () => {
-    if (
-      reasoningSettingsLoading ||
-      !chatSettingsLoaded ||
-      !newChatRunnerDraft ||
-      !newChatProfileDraft.trim()
-    ) {
-      return;
-    }
-
-    const nextProfile = newChatProfileDraft.trim();
-    const nextEnvironmentProfile = newChatEnvironmentProfileDraft.trim();
-    const nextCWD = cwdQuery.trim();
+    const context = contextSettings.commitDialog();
+    if (!context) return;
     const optimisticConversation = optimisticRemoteConversationRef.current;
     if (
       conversationId &&
       optimisticConversation?.conversationId === conversationId &&
       !optimisticConversation.confirmed
     ) {
-      const nextRunner = runners.find((runner) => runner.id === newChatRunnerDraft);
-      const effectiveCWD = nextCWD || nextRunner?.workspace.path || '';
+      const nextRunner = runners.find((runner) => runner.id === context.runnerId);
+      const effectiveCWD = context.cwd || nextRunner?.workspace.path || '';
       const contextUpdate = {
-        profile: nextProfile,
-        model: newChatModelDraft || undefined,
-        reasoningEffort: newChatReasoningEffortDraft || undefined,
+        profile: context.profile,
+        model: context.model || undefined,
+        reasoningEffort: context.reasoningEffort || undefined,
         cwd: effectiveCWD,
-        runnerId: newChatRunnerDraft || undefined,
-        environmentProfile: nextEnvironmentProfile || undefined,
+        runnerId: context.runnerId || undefined,
+        environmentProfile: context.environmentProfile || undefined,
         runner: nextRunner,
       };
       optimisticRemoteConversationRef.current = {
         ...optimisticConversation,
-        runnerId: newChatRunnerDraft,
-        environmentProfile: nextEnvironmentProfile || undefined,
-        cwd: nextCWD || undefined,
+        runnerId: context.runnerId,
+        environmentProfile: context.environmentProfile || undefined,
+        cwd: context.cwd || undefined,
       };
-      setConversation((currentConversation) =>
-        currentConversation?.id === conversationId
-          ? { ...currentConversation, ...contextUpdate }
-          : currentConversation
-      );
-      setConversations((currentConversations) =>
-        currentConversations.map((currentConversation) =>
-          currentConversation.id === conversationId
-            ? { ...currentConversation, ...contextUpdate }
-            : currentConversation
-        )
-      );
+      patchOptimisticConversationContext(contextUpdate);
     }
-
-    setSelectedProfile(nextProfile);
-    setSelectedModel(newChatModelDraft);
-    setSelectedModelOptions(newChatModelOptions);
-    setSelectedReasoningEffort(newChatReasoningEffortDraft);
-    setSelectedReasoningEffortOptions(newChatReasoningEffortOptions);
-    setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
-    setSelectedRunnerID(newChatRunnerDraft);
-    setSelectedEnvironmentProfile(nextEnvironmentProfile);
-    setSelectedCWD(nextCWD);
-    cwdSuggestionSkipQueryRef.current = null;
-    requestCwdSuggestions.cancel();
-    cwdSuggestionRequestRef.current += 1;
-    setCwdSuggestions([]);
-    setCwdSuggestionsOpen(false);
-    setCwdSuggestionIndex(-1);
-    setNewChatDialogOpen(false);
   };
 
   const conversationSearchReturnFocusSelector = mobileLayout
@@ -3965,53 +1698,6 @@ const ChatPage: React.FC = () => {
     : sidebarVisible
       ? '[data-testid="sidebar-search-toggle"]'
       : '[data-testid="sidebar-collapsed-search"]';
-  const workspaceViewButtons = [
-    {
-      view: 'terminal',
-      label: 'Terminal',
-      Icon: SquareTerminal,
-      available: workspaceTerminalAvailable,
-      onClick: handleSelectTerminalPanel,
-    },
-    {
-      view: 'diff',
-      label: 'Changes',
-      Icon: GitCompareArrows,
-      available: workspaceGitDiffAvailable,
-      onClick: handleSelectGitDiffPanel,
-    },
-    {
-      view: 'browser',
-      label: 'Browser',
-      Icon: Globe,
-      available: workspaceBrowserAvailable,
-      onClick: () => setWorkspacePanelView('browser'),
-    },
-  ].map(({ view, label, Icon, available, onClick }) =>
-    available ? (
-      <button
-        {...(workspacePanelOpen
-          ? {
-              role: 'tab',
-              'aria-selected': workspacePanelView === view,
-              'data-testid': `workspace-tools-${view}-tab`,
-            }
-          : { 'aria-controls': 'workspace-tools', title: label })}
-        aria-label={`Show ${label.toLowerCase()}`}
-        className={cn(
-          workspacePanelOpen ? 'workspace-tools-tab' : 'sidebar-toggle-button',
-          workspacePanelView === view && 'is-active'
-        )}
-        key={view}
-        onClick={onClick}
-        type="button"
-      >
-        <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-        {workspacePanelOpen ? <span>{label}</span> : null}
-      </button>
-    ) : null
-  );
-
   return (
     <div className="relative h-full bg-transparent">
       {uiRequestDialog ? (
@@ -4037,78 +1723,17 @@ const ChatPage: React.FC = () => {
 
       {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen ? (
         <NewChatContextDialog
-          availableProfiles={availableProfiles}
-          cwdInputRef={cwdInputRef}
-          cwdQuery={cwdQuery}
-          cwdSuggestionIndex={cwdSuggestionIndex}
-          cwdSuggestions={cwdSuggestions}
-          cwdSuggestionsOpen={cwdSuggestionsOpen}
-          profileDraft={newChatProfileDraft}
-          modelDraft={newChatModelDraft}
-          modelOptions={newChatModelOptions}
-          reasoningEffortDraft={newChatReasoningEffortDraft}
-          reasoningEffortLoading={reasoningSettingsLoading || !chatSettingsLoaded}
-          reasoningEffortOptions={newChatReasoningEffortOptions}
-          runners={runners}
-          runnerIdDraft={newChatRunnerDraft}
-          environmentProfileDraft={newChatEnvironmentProfileDraft}
-          ref={newChatDialogRef}
-          onCancel={handleCloseNewChatDialog}
+          {...contextSettings.dialogProps}
           onCommit={handleCommitNewChatContext}
-          onCwdInputBlur={() => {
-            cwdInputFocusedRef.current = false;
-            window.setTimeout(() => {
-              setCwdSuggestionsOpen(false);
-              setCwdSuggestionIndex(-1);
-            }, 120);
-          }}
-          onCwdInputChange={handleCwdInputChange}
-          onCwdInputFocus={() => {
-            cwdInputFocusedRef.current = true;
-            setCwdSuggestionsOpen(cwdQuery.trim().length > 0 && cwdSuggestions.length > 0);
-          }}
-          onCwdInputKeyDown={handleCwdInputKeyDown}
-          onProfileDraftChange={handleNewChatProfileDraftChange}
-          onModelDraftChange={setNewChatModelDraft}
-          onReasoningEffortDraftChange={(reasoningEffort) => {
-            setNewChatReasoningEffortDraft(reasoningEffort);
-            setNewChatReasoningEffortExplicit(true);
-          }}
-          onRunnerDraftChange={(runnerId) => {
-            if (runnerId !== newChatRunnerDraft) {
-              setNewChatModelDraft('');
-              setNewChatModelOptions([]);
-            }
-            setNewChatRunnerDraft(runnerId);
-            setCwdQuery('');
-            cwdSuggestionSkipQueryRef.current = '';
-            requestCwdSuggestions.cancel();
-            setCwdSuggestions([]);
-            setCwdSuggestionsOpen(false);
-            setCwdSuggestionIndex(-1);
-          }}
-          onEnvironmentProfileDraftChange={setNewChatEnvironmentProfileDraft}
-          onSelectCwdSuggestion={applyCwdSuggestion}
         />
       ) : null}
 
       {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen && !providerSettingsOpen ? (
         <ConversationSearchDialog
-          conversations={conversationSearchResults}
-          cwdFilter={conversationCWDFilter}
+          {...conversationSearch.dialogProps}
           cwdOptions={conversationCWDOptions}
-          error={conversationSearchError}
-          hasMore={conversationSearchHasMore}
-          loading={conversationSearchLoading}
-          loadingMore={conversationSearchLoadingMore}
-          onClose={handleCloseConversationSearch}
-          onCwdFilterChange={handleConversationCWDFilterChange}
-          onLoadMore={handleLoadMoreConversationSearch}
-          onSearchTermChange={handleConversationSearchTermChange}
           onSelectConversation={handleSelectSearchResult}
           returnFocusSelector={conversationSearchReturnFocusSelector}
-          searchTerm={conversationSearchTerm}
-          total={conversationSearchTotal}
         />
       ) : null}
 
@@ -4144,7 +1769,6 @@ const ChatPage: React.FC = () => {
               activeConversationId={conversationId}
               authPrincipal={authPrincipal}
               conversations={conversations}
-              disabled={!canStartNewChat}
               loading={sidebarLoading}
               onDeleteConversation={handleDeleteConversation}
               onForkConversation={handleForkConversation}
@@ -4175,7 +1799,6 @@ const ChatPage: React.FC = () => {
         {!sidebarVisible ? (
           <>
             <ChatSidebarCollapsedRail
-              disabled={!canStartNewChat}
               inert={workspaceOverlayOpen}
               onNewChat={handleNewChat}
               onOpen={handleSidebarToggle}
@@ -4242,190 +1865,69 @@ const ChatPage: React.FC = () => {
             ) : (
               <>
                 <ChatTranscript isStreaming={currentConversationIsStreaming} messages={messages} />
-                {composerMeta.groups.length > 0 ? (
-                  <div className="transcript-meta-strip-shell">
-                    <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
-                      <details className="transcript-meta" key={conversationId || 'new-chat'}>
-                        <summary
-                          aria-label="Conversation statistics"
-                          className="transcript-meta-strip"
-                          data-testid="transcript-meta-strip"
-                          title="Show detailed conversation statistics"
-                        >
-                          <span className="transcript-meta-groups">
-                            {composerMeta.groups.map(({ label, value }) => (
-                              <span key={label}>{value}</span>
-                            ))}
-                          </span>
-                          <ChevronDown
-                            aria-hidden="true"
-                            className="transcript-meta-chevron"
-                            strokeWidth={1.6}
-                          />
-                        </summary>
-                        <dl
-                          className="transcript-meta-details"
-                          data-testid="transcript-meta-details"
-                        >
-                          {composerMeta.details.map(({ label, value }) => (
-                            <div key={label}>
-                              <dt>{label}</dt>
-                              <dd>{value}</dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </details>
-                    </div>
-                  </div>
-                ) : null}
+                <ConversationStatistics
+                  conversation={conversation}
+                  conversationId={conversationId}
+                  runner={currentRunner}
+                  runnerId={currentRunnerID}
+                  environmentProfile={currentEnvironmentProfile}
+                />
                 <PendingSteerList messages={pendingSteerMessages} />
                 <div ref={transcriptEndRef} />
               </>
             )}
           </div>
 
-          <ExtensionWidgets placement="aboveComposer" widgets={Object.values(extensionWidgets)} />
+          <ExtensionWidgets placement="aboveComposer" widgets={extensionWidgets} />
           <ChatComposer
-            addImageDisabled={
-              !isRemoteConversation ||
-              (currentConversationIsStreaming && !canSteerActiveConversation) ||
-              steering
-            }
-            attachments={attachments}
-            canStop={canStopActiveConversation}
+            {...attachmentProps}
+            {...slashCommands.composerProps}
+            addImageDisabled={!isRemoteConversation || steering}
+            canStop={currentConversationIsStreaming}
             contextDisabled={currentConversationIsStreaming || steering}
             contextIsStatic={contextIsStatic}
             contextText={composerContextText}
-            dragActive={dragActive}
             draft={draft}
             placeholder={composerPlaceholder}
             quickPick={composerQuickPick}
             showStop={currentConversationIsStreaming}
-            slashCommandIndex={slashCommandIndex}
-            slashCommandSuggestions={slashCommandSuggestions}
-            slashCommandSuggestionsOpen={slashCommandSuggestionsOpen}
-            slashUsageHint={composerSlashUsageHint}
-            stopActionLabel={stopActionLabel}
+            stopActionLabel="Stop"
             streamError={streamError || workspaceExecutionMessage}
             submitActionLabel={submitActionLabel}
-            submitDisabled={
-              steering ||
-              !isRemoteConversation ||
-              !canSubmit ||
-              (currentConversationIsStreaming && !canSteerActiveConversation)
-            }
+            submitDisabled={steering || !canSubmit}
             textareaDisabled={steering || !isRemoteConversation}
-            onAttachImages={appendAttachments}
             onContextOpen={openChatContext}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
             onDraftChange={setDraft}
-            onDraftKeyDown={handleDraftKeyDown}
-            onPaste={handlePaste}
             onReload={streamError ? () => window.location.reload() : undefined}
-            onRemoveAttachment={handleRemoveAttachment}
-            onSelectSlashCommand={handleSelectSlashCommand}
             onStop={handleStop}
             onSubmit={handleSubmit}
           />
-          <ExtensionWidgets placement="belowComposer" widgets={Object.values(extensionWidgets)} />
+          <ExtensionWidgets placement="belowComposer" widgets={extensionWidgets} />
         </main>
 
         {workspaceToolsAvailable ? (
-          <aside
-            aria-label="Workspace tools"
-            {...(workspaceOverlayOpen ? { role: 'dialog', 'aria-modal': true } : {})}
-            className={cn(
-              'workspace-tools-shell',
-              workspacePanelOpen && 'is-open',
-              sidebarVisible && 'is-obscured'
-            )}
-            data-testid="workspace-tools-shell"
-            id="workspace-tools"
-            inert={sidebarOverlayOpen || undefined}
-            ref={workspaceToolsRef}
-            style={
-              workspacePanelOpen && !workspaceOverlayLayout && workspaceSize.width > 0
-                ? ({ '--workspace-width': `${workspaceSize.width}px` } as React.CSSProperties)
-                : undefined
-            }
-            tabIndex={workspaceOverlayOpen ? -1 : undefined}
-          >
-            {workspacePanelOpen && !workspaceOverlayLayout ? (
-              <hr
-                aria-controls="workspace-tools"
-                aria-label="Resize workspace panel"
-                aria-orientation="vertical"
-                aria-valuemax={workspaceSize.max}
-                aria-valuemin={workspaceSize.min}
-                aria-valuenow={workspaceSize.width}
-                aria-valuetext={`${workspaceSize.width} pixels`}
-                className="workspace-tools-resizer"
-                data-testid="workspace-tools-resizer"
-                onKeyDown={handleWorkspaceResizeKeyDown}
-                onPointerDown={handleWorkspaceResizeStart}
-                ref={workspaceResizerRef}
-                tabIndex={0}
-              />
-            ) : null}
-            {isResizingWorkspace && !workspaceOverlayLayout ? (
-              <div aria-hidden="true" className="workspace-resize-shield" />
-            ) : null}
-            {workspacePanelOpen ? (
-              <div className="workspace-tools-dock" data-testid="workspace-tools-dock">
-                <div className="workspace-tools-tabs" role="tablist" aria-label="Workspace views">
-                  {workspaceViewButtons}
-                </div>
-
-                <div className="workspace-tools-content">
-                  <Suspense
-                    fallback={
-                      <output className="workspace-modal-placeholder">
-                        Loading workspace tool…
-                      </output>
-                    }
-                  >
-                    {workspacePanelView === 'terminal' ? (
-                      <TerminalModal
-                        key={workspaceTargetKey}
-                        cwdLabel={currentRunner?.workspace.path || ''}
-                        open
-                        onClose={handleToggleWorkspacePanel}
-                        target={workspaceTarget}
-                      />
-                    ) : workspacePanelView === 'browser' ? (
-                      <BrowserPanel key={browserTargetKey} target={browserTarget} />
-                    ) : (
-                      <GitDiffModal
-                        error={gitDiffError}
-                        gitDiff={gitDiff}
-                        loading={gitDiffLoading}
-                        open
-                        onRefresh={() => {
-                          void fetchGitDiff();
-                        }}
-                      />
-                    )}
-                  </Suspense>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="workspace-tools-rail" data-testid="workspace-tools-rail">
-              <button
-                aria-label={workspacePanelOpen ? 'Hide workspace panel' : 'Show workspace panel'}
-                aria-pressed={workspacePanelOpen}
-                className="sidebar-toggle-button workspace-tools-toggle"
-                data-testid="workspace-tools-toggle"
-                onClick={handleToggleWorkspacePanel}
-                type="button"
-              >
-                <PanelRight aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-              </button>
-              {!workspacePanelOpen && !workspaceOverlayLayout ? workspaceViewButtons : null}
-            </div>
-          </aside>
+          <ChatWorkspacePanel
+            layout={layout}
+            resize={workspaceResize}
+            terminalAvailable={workspaceTerminalAvailable}
+            gitDiffAvailable={workspaceGitDiffAvailable}
+            browserAvailable={workspaceBrowserAvailable}
+            workspaceTarget={workspaceTarget}
+            workspaceTargetKey={workspaceTargetKey}
+            browserTarget={browserTarget}
+            browserTargetKey={browserTargetKey}
+            cwdLabel={currentRunner?.workspace.path || ''}
+            gitDiff={gitDiff}
+            gitDiffError={gitDiffError}
+            gitDiffLoading={gitDiffLoading}
+            onToggle={handleToggleWorkspacePanel}
+            onSelectTerminal={handleSelectTerminalPanel}
+            onSelectGitDiff={handleSelectGitDiffPanel}
+            onSelectBrowser={() => setWorkspacePanelView('browser')}
+            onRefreshGitDiff={() => {
+              void fetchGitDiff();
+            }}
+          />
         ) : null}
       </div>
     </div>

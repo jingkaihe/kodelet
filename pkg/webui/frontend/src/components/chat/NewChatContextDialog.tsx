@@ -4,6 +4,16 @@ import type { ChatProfileOption, CWDHint, Runner } from '../../types';
 import { cn, formatRunnerStatus } from '../../utils';
 import ListboxSelect from '../ListboxSelect';
 
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  "[contenteditable='true']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(',');
+
 interface NewChatSelectProps {
   label: string;
   testId: string;
@@ -53,6 +63,7 @@ const NewChatSelect = ({
 interface NewChatContextDialogProps {
   availableProfiles: ChatProfileOption[];
   cwdInputRef?: React.Ref<HTMLInputElement>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   cwdQuery: string;
   cwdSuggestionIndex: number;
   cwdSuggestions: CWDHint[];
@@ -85,6 +96,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     {
       availableProfiles,
       cwdInputRef,
+      returnFocusRef,
       cwdQuery,
       cwdSuggestionIndex,
       cwdSuggestions,
@@ -113,6 +125,85 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     },
     ref
   ) => {
+    const dialogRef = React.useRef<HTMLDivElement | null>(null);
+    const onDismiss = React.useEffectEvent(onCancel);
+    const setDialogRef = React.useCallback(
+      (element: HTMLDivElement | null) => {
+        dialogRef.current = element;
+        if (typeof ref === 'function') return ref(element);
+        if (ref) ref.current = element;
+      },
+      [ref]
+    );
+
+    React.useEffect(() => {
+      const previousFocus =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const returnFocus = returnFocusRef?.current || previousFocus;
+      const focusInput = window.setTimeout(() => {
+        const input = dialogRef.current?.querySelector<HTMLInputElement>('#new-chat-cwd');
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }, 0);
+
+      const handlePointerDown = (event: MouseEvent) => {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const eventPath = typeof event.composedPath === 'function' ? event.composedPath() : [];
+        if (eventPath.includes(dialog) || dialog.contains(event.target as Node | null)) return;
+        onDismiss();
+      };
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          // An expanded select gets the first Escape; the next dismisses the dialog.
+          if (
+            event.target instanceof Element &&
+            event.target.closest('.new-chat-select-trigger[aria-expanded="true"]')
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          onDismiss();
+          return;
+        }
+        const dialog = dialogRef.current;
+        if (event.key !== 'Tab' || !dialog) return;
+        const focusableElements = Array.from(
+          dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        ).filter((element) => !element.hasAttribute('disabled'));
+        if (focusableElements.length === 0) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+        if (event.shiftKey && document.activeElement === firstElement) {
+          event.preventDefault();
+          lastElement.focus();
+        } else if (!event.shiftKey && document.activeElement === lastElement) {
+          event.preventDefault();
+          firstElement.focus();
+        }
+      };
+
+      window.addEventListener('mousedown', handlePointerDown);
+      window.addEventListener('keydown', handleKeyDown, true);
+      return () => {
+        window.clearTimeout(focusInput);
+        window.removeEventListener('mousedown', handlePointerDown);
+        window.removeEventListener('keydown', handleKeyDown, true);
+        window.setTimeout(() => {
+          if (returnFocus?.isConnected) {
+            returnFocus.focus();
+            return;
+          }
+          document.querySelector<HTMLElement>('button.composer-inline-context')?.focus();
+        }, 0);
+      };
+    }, [returnFocusRef]);
+
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
     const selectedRunnerAvailable = Boolean(
       runnerIdDraft &&
@@ -153,7 +244,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
           aria-modal="true"
           className="new-chat-dialog new-chat-context-dialog surface-panel"
           data-testid="new-chat-dialog"
-          ref={ref}
+          ref={setDialogRef}
           role="dialog"
         >
           <header className="new-chat-context-header">
