@@ -285,27 +285,26 @@ func TestExecuteToolWithHandlerForwardsUpdatesAndRejectsLateCallbacks(t *testing
 	assert.Equal(t, []string{"running"}, handler.updates)
 }
 
-func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironment(t *testing.T) {
-	ctx := tooltypes.ContextWithModelHelper(t.Context(), func(_ context.Context, request tooltypes.ModelHelperRequest) (string, error) {
-		assert.Equal(t, tooltypes.ModelHelperReadConversationExtract, request.Operation)
-		assert.Equal(t, "saved-conversation", request.ConversationID)
-		assert.Equal(t, "extract phase one", request.Prompt)
-		return "phase one context", nil
-	})
+func TestExecuteEnvironmentToolAllowsExtensionConversationReader(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	environment := agentenv.NewLocalEnvironment(t.TempDir(), nil, namedTool("read_conversation"))
 	thread := &environmentThreadStub{
 		threadStub: &threadStub{
-			config:         llmtypes.Config{WorkingDirectory: t.TempDir()},
-			conversationID: "conv-control-plane-tool",
-			state:          &toolState{tools: []tooltypes.Tool{namedTool("file_read"), namedTool("read_conversation")}},
+			conversationID: "conv-extension-tool",
 		},
+		environment: environment,
 	}
 
-	_, err := OpenEnvironment(context.Background(), thread)
+	manifest, err := OpenEnvironment(t.Context(), thread)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = CloseEnvironment(context.Background(), thread) })
+	t.Cleanup(func() { require.NoError(t, CloseEnvironment(t.Context(), thread)) })
+	definition, ok := manifest.ToolDefinition("read_conversation")
+	require.True(t, ok)
+	assert.Equal(t, agentenv.ToolPlacementEnvironment, definition.Placement)
+	assert.Equal(t, "test tool", definition.Description)
 
 	execution := ExecuteEnvironmentTool(
-		ctx,
+		t.Context(),
 		thread,
 		renderers.NewRendererRegistry(),
 		"read_conversation",
@@ -313,9 +312,10 @@ func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironmen
 		"call-conversation",
 	)
 
+	require.NoError(t, execution.Err)
 	require.NotNil(t, execution.Result)
 	assert.False(t, execution.Result.IsError())
-	assert.Equal(t, "phase one context", execution.Result.GetResult())
+	assert.Equal(t, "ok", execution.Result.GetResult())
 }
 
 func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
@@ -451,18 +451,13 @@ func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T)
 	assert.Len(t, handler.updates, 2)
 }
 
-func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing.T) {
+func TestExecuteEnvironmentToolHandlesFailedAndMissingRunnerResults(t *testing.T) {
 	environment := &recordingAgentEnvironment{
 		open:     true,
 		manifest: agentenv.Manifest{WorkingDirectory: "/runner/workspace"},
 	}
 	thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
 	registry := renderers.NewRendererRegistry()
-
-	unavailable := ExecuteEnvironmentTool(t.Context(), thread, registry, "read_conversation", `{}`, "call-conversation")
-	require.NotNil(t, unavailable.Result)
-	assert.True(t, unavailable.Result.IsError())
-	assert.Contains(t, unavailable.Result.GetError(), "not available in the current run")
 
 	sentinel := errors.New("runner link closed")
 	environment.manifest.Tools = []agentenv.ToolDefinition{{Name: "remote", Placement: agentenv.ToolPlacementEnvironment}}
@@ -482,23 +477,29 @@ func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing
 	assert.Contains(t, missing.Result.GetError(), "returned no tool result")
 }
 
-func TestExecuteControlPlaneToolHonorsEnvironmentPolicyAndResultMutation(t *testing.T) {
-	mutated := tooltypes.StructuredToolResult{ToolName: "read_conversation", Success: false, Error: "redacted by runner policy"}
+func TestExecuteEnvironmentToolHonorsResultMutation(t *testing.T) {
+	mutated := tooltypes.StructuredToolResult{ToolName: "remote_tool", Success: false, Error: "redacted by runner policy"}
 	environment := &recordingAgentEnvironment{
 		open: true,
 		manifest: agentenv.Manifest{
 			WorkingDirectory: "/runner/workspace",
 			Tools: []agentenv.ToolDefinition{{
-				Name:      "read_conversation",
-				Placement: agentenv.ToolPlacementControlPlane,
+				Name:      "remote_tool",
+				Placement: agentenv.ToolPlacementEnvironment,
 			}},
 		},
-		toolCallDecision:   agentenv.ToolCallDecision{Blocked: true, Reason: "policy denied", Input: `{"changed":true}`},
-		toolResultDecision: agentenv.ToolOutputDecision{StructuredResult: mutated, Modified: true, Accepted: true},
+		executeTool: func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+			return agentenv.ToolExecution{
+				Input:            `{"changed":true}`,
+				Result:           tooltypes.NewBlockedToolResult(request.Name, "policy denied"),
+				StructuredResult: mutated,
+				Modified:         true,
+			}, nil
+		},
 	}
 	thread := &environmentThreadStub{threadStub: &threadStub{conversationID: "conversation"}, environment: environment}
 
-	execution := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "read_conversation", `{}`, "call-conversation")
+	execution := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "remote_tool", `{}`, "call-remote")
 
 	require.NoError(t, execution.Err)
 	assert.Equal(t, `{"changed":true}`, execution.Input)
@@ -507,20 +508,7 @@ func TestExecuteControlPlaneToolHonorsEnvironmentPolicyAndResultMutation(t *test
 	assert.Equal(t, mutated, execution.StructuredResult)
 }
 
-func TestControlPlaneStateAndStructuredResultAdapter(t *testing.T) {
-	environment := &recordingAgentEnvironment{
-		open:     true,
-		manifest: agentenv.Manifest{WorkingDirectory: "/runner/workspace"},
-	}
-	state := controlPlaneToolState(&threadStub{config: llmtypes.Config{Model: "test-model"}}, environment)
-	assert.NotEmpty(t, state.BasicTools())
-	assert.NotEmpty(t, state.Tools())
-	assert.Nil(t, state.DiscoverContexts())
-	assert.Equal(t, "test-model", state.GetLLMConfig().(llmtypes.Config).Model)
-	assert.Equal(t, "/runner/workspace", state.WorkingDirectory())
-	state.LockFile("file")
-	state.UnlockFile("file")
-
+func TestStructuredResultAdapter(t *testing.T) {
 	result := StructuredResultToolResult{
 		Result: tooltypes.StructuredToolResult{ToolName: "remote", Success: false, Error: "failed"},
 	}

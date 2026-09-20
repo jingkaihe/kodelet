@@ -10,41 +10,24 @@ import (
 // ModelHelperWebFetchExtract is the only runner-delegated utility operation.
 const ModelHelperWebFetchExtract = "web_fetch.extract"
 
-// ModelHelperReadConversationExtract reads central history without runner delegation.
-const ModelHelperReadConversationExtract = "read_conversation.extract"
-
-// ModelHelperRequest supplies a document or a central conversation ID for an
-// internal model utility. It accepts no configuration, paths, or persistence mode.
+// ModelHelperRequest supplies a document for an internal model utility.
+// It accepts no configuration, paths, or persistence mode.
 type ModelHelperRequest struct {
-	Operation      string `json:"operation"`
-	URL            string `json:"url"`
-	Content        string `json:"content"`
-	Prompt         string `json:"prompt"`
-	ConversationID string `json:"conversationId,omitempty"`
+	Operation string `json:"operation"`
+	URL       string `json:"url"`
+	Content   string `json:"content"`
+	Prompt    string `json:"prompt"`
 }
 
 // Validate rejects unsupported operations and bounds input below the RPC limit.
 func (r ModelHelperRequest) Validate() error {
-	switch r.Operation {
-	case ModelHelperWebFetchExtract:
-		if strings.TrimSpace(r.URL) == "" || strings.TrimSpace(r.Prompt) == "" {
-			return errors.New("model helper URL and extraction prompt are required")
-		}
-		if r.ConversationID != "" {
-			return errors.New("web extraction does not accept a conversation ID")
-		}
-	case ModelHelperReadConversationExtract:
-		if strings.TrimSpace(r.ConversationID) == "" || strings.TrimSpace(r.Prompt) == "" {
-			return errors.New("model helper conversation ID and extraction prompt are required")
-		}
-		if r.URL != "" || r.Content != "" {
-			return errors.New("conversation extraction reads central history, not supplied URL or content")
-		}
-	default:
+	if r.Operation != ModelHelperWebFetchExtract {
 		return errors.New("unsupported internal model helper operation")
 	}
+	if strings.TrimSpace(r.URL) == "" || strings.TrimSpace(r.Prompt) == "" {
+		return errors.New("model helper URL and extraction prompt are required")
+	}
 	if len(r.URL) > 8192 ||
-		len(r.ConversationID) > 8192 ||
 		len(r.Prompt) > 64*1024 ||
 		len(r.Content) > 512*1024 {
 		return errors.New("model helper input exceeds the extraction limit")

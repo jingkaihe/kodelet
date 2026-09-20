@@ -364,12 +364,6 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	state, _, _ := e.executionContext()
 	spec := e.runSpec()
 	effectiveInput := request.Input
-	if tools.IsControlPlaneTool(request.Name) {
-		result := tooltypes.BaseToolResult{Error: "server tool cannot execute in the workspace environment: " + request.Name}
-		structured := result.StructuredData()
-		structured.ToolName = request.Name
-		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured}, nil
-	}
 	if state == nil {
 		result := tooltypes.BaseToolResult{Error: "agent environment is not open"}
 		structured := result.StructuredData()
@@ -566,7 +560,7 @@ func snapshotManifest(ctx context.Context, state tooltypes.State, runtime *exten
 			Name:        tool.Name(),
 			Description: tool.Description(),
 			InputSchema: tooltypes.JSONSchemaForTool(tool),
-			Placement:   placementForTool(tool.Name()),
+			Placement:   ToolPlacementEnvironment,
 			Tool:        tool,
 		})
 	}
@@ -601,13 +595,6 @@ func runtimeCommands(runtime *extensions.Runtime) []extensions.Command {
 		return nil
 	}
 	return runtime.Commands()
-}
-
-func placementForTool(name string) ToolPlacement {
-	if tools.IsControlPlaneTool(name) {
-		return ToolPlacementControlPlane
-	}
-	return ToolPlacementEnvironment
 }
 
 func extensionCallContext(spec RunSpec) extensions.ExtensionCallContext {

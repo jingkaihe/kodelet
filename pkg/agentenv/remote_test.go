@@ -217,12 +217,21 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 			Content: contextContent,
 			Digest:  remoteContentDigest(contextContent),
 		}},
-		Tools: []runnerpayload.ToolDefinition{{
-			Name:        "file_read",
-			Description: "Read a runner file",
-			InputSchema: map[string]any{"type": "object"},
-			Placement:   string(ToolPlacementEnvironment),
-		}},
+		Tools: []runnerpayload.ToolDefinition{
+			{
+				Name:        "file_read",
+				Description: "Read a runner file",
+				InputSchema: map[string]any{"type": "object"},
+				Placement:   string(ToolPlacementEnvironment),
+			},
+			{
+				Name:        "read_conversation",
+				Description: "Read a conversation using an extension",
+				InputSchema: map[string]any{"type": "object"},
+				Placement:   string(ToolPlacementEnvironment),
+				ExtensionID: "conversation-reader",
+			},
+		},
 		Config: runnerpayload.EnvironmentConfig{
 			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
@@ -269,7 +278,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, "workspace", controller.openParams.Agent.Profile)
 	assert.Equal(t, "runner-workspace", controller.openParams.Agent.EnvironmentProfile)
 	assert.Equal(t, "subagent", controller.openParams.Agent.InvokedBy)
-	assert.ElementsMatch(t, []string{"read_conversation"}, controller.openParams.ReservedToolNames)
+	assert.Empty(t, controller.openParams.ReservedToolNames)
+	assert.Len(t, manifest.Tools, len(controller.manifest.Tools))
 	assert.Equal(t, contextContent, manifest.Contexts["/runner/workspace/AGENTS.md"])
 	require.NotNil(t, manifest.Config)
 	assert.Equal(t, "/runner/custom.tmpl", manifest.Config.SystemPromptPath)
@@ -285,7 +295,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, ToolPlacementEnvironment, fileDefinition.Placement)
 	conversationDefinition, ok := manifest.ToolDefinition("read_conversation")
 	require.True(t, ok)
-	assert.Equal(t, ToolPlacementControlPlane, conversationDefinition.Placement)
+	assert.Equal(t, ToolPlacementEnvironment, conversationDefinition.Placement)
+	assert.Equal(t, "Read a conversation using an extension", conversationDefinition.Description)
 
 	command, err := environment.ExecuteCommand(t.Context(), CommandRequest{Message: "/review"})
 	require.NoError(t, err)
@@ -303,7 +314,7 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, []string{"file_read"}, initDecision.AllowedTools)
 	assert.True(t, initDecision.ToolsModified)
 
-	callDecision, err := environment.DispatchToolCall(t.Context(), ToolRequest{Name: "read_conversation", Input: `{}`, ToolCallID: "control-1"})
+	callDecision, err := environment.DispatchToolCall(t.Context(), ToolRequest{Name: "file_read", Input: `{}`, ToolCallID: "tool-1"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"path":"changed"}`, callDecision.Input)
 
@@ -325,6 +336,15 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	rich, ok := execution.Result.(tooltypes.MultiModalToolResult)
 	require.True(t, ok)
 	assert.Equal(t, "rich", rich.ContentParts()[0].Text)
+
+	readerExecution, err := environment.ExecuteTool(t.Context(), ToolRequest{
+		Name:       "read_conversation",
+		Input:      `{"conversation_id":"saved","goal":"extract changes"}`,
+		ToolCallID: "tool-reader",
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "read_conversation", controller.toolParams.Name)
+	assert.True(t, readerExecution.StructuredResult.Success)
 
 	require.NoError(t, environment.CloseWithError(t.Context(), context.Canceled))
 	assert.False(t, environment.IsOpen())

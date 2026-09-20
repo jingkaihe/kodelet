@@ -15,7 +15,6 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -150,7 +149,6 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		},
 		ClientCapabilities: e.clientCapabilities,
 		SessionExtensions:  e.sessionExtensions,
-		ReservedToolNames:  tools.ControlPlaneToolNames(),
 		Options:            spec.Config.RunnerOptions(),
 	}
 	wireManifest, err := e.controller.OpenRun(ctx, e.runnerID, params)
@@ -307,7 +305,7 @@ func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llm
 	return slices.Clone(result.FollowUpMessages), nil
 }
 
-// DispatchToolCall proxies extension policy for a control-plane tool call.
+// DispatchToolCall proxies tool.call extension policy without executing the tool.
 func (e *RemoteEnvironment) DispatchToolCall(ctx context.Context, request ToolRequest) (ToolCallDecision, error) {
 	input, err := rawToolInput(request.Input)
 	if err != nil {
@@ -329,12 +327,12 @@ func (e *RemoteEnvironment) DispatchToolCall(ctx context.Context, request ToolRe
 	return ToolCallDecision{Blocked: result.Blocked, Reason: result.Reason, Input: effectiveInput}, nil
 }
 
-// DispatchToolUpdate proxies extension policy for a transient control-plane tool result.
+// DispatchToolUpdate proxies extension policy for a transient tool result.
 func (e *RemoteEnvironment) DispatchToolUpdate(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error) {
 	return e.dispatchToolOutput(ctx, runnerpayload.LifecycleToolUpdate, request)
 }
 
-// DispatchToolResult proxies extension policy for an authoritative control-plane tool result.
+// DispatchToolResult proxies extension policy for an authoritative tool result.
 func (e *RemoteEnvironment) DispatchToolResult(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error) {
 	return e.dispatchToolOutput(ctx, runnerpayload.LifecycleToolResult, request)
 }
@@ -512,17 +510,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 		contexts[path] = contextFile.Content
 	}
 
-	controlPlaneTools := allowedControlPlaneTools(config)
-	definitions := make([]ToolDefinition, 0, len(wire.Tools)+len(controlPlaneTools))
-	for _, tool := range controlPlaneTools {
-		definitions = append(definitions, ToolDefinition{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			InputSchema: tooltypes.JSONSchemaForTool(tool),
-			Placement:   ToolPlacementControlPlane,
-			Tool:        tool,
-		})
-	}
+	definitions := make([]ToolDefinition, 0, len(wire.Tools))
 	for _, definition := range wire.Tools {
 		if !config.EnvironmentOptions().ToolAllowed(definition.Name) {
 			continue
@@ -553,32 +541,6 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 			SystemInformation:   wire.Config.SystemInformation.Clone(),
 		}).Clone(),
 	}, nil
-}
-
-func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
-	available := tools.ControlPlaneTools()
-	if len(config.AllowedTools) == 0 && config.ExecutionOptions == nil {
-		return available
-	}
-
-	allowed := make(map[string]struct{}, len(config.AllowedTools))
-	for _, name := range config.AllowedTools {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			allowed[name] = struct{}{}
-		}
-	}
-	filtered := make([]tooltypes.Tool, 0, len(available))
-	for _, tool := range available {
-		if tool == nil {
-			continue
-		}
-		_, explicitlyAllowed := allowed[tool.Name()]
-		if (len(config.AllowedTools) == 0 || explicitlyAllowed) && config.ExecutionOptions.ToolAllowed(tool.Name()) {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
 }
 
 func rawToolInput(input string) (json.RawMessage, error) {

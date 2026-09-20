@@ -2352,6 +2352,7 @@ func TestSQLitePersistenceReadsConversationAffinity(t *testing.T) {
 
 func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 	params := testRunOpenParams("run-one", "conversation-one")
+	params.ReservedToolNames = []string{"reserved_tool"}
 	base := runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         "runner-one",
@@ -2386,7 +2387,7 @@ func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 		}(), wantError: "without a name"},
 		{name: "reserved collision", manifest: func() runnerpayload.Manifest {
 			value := base
-			value.Tools = []runnerpayload.ToolDefinition{{Name: "read_conversation", Placement: "environment"}}
+			value.Tools = []runnerpayload.ToolDefinition{{Name: "reserved_tool", Placement: "environment"}}
 			return withDigest(value)
 		}(), wantError: "reserved"},
 		{name: "placement", manifest: func() runnerpayload.Manifest {
@@ -2600,9 +2601,8 @@ func testEnrollmentStartRequest(t *testing.T, hostInstanceID, workspace string) 
 
 func testRunOpenParams(runID, conversationID string) protocol.RunOpenParams {
 	return protocol.RunOpenParams{
-		RunID:             runID,
-		ConversationID:    conversationID,
-		ReservedToolNames: []string{"read_conversation"},
+		RunID:          runID,
+		ConversationID: conversationID,
 	}
 }
 

@@ -68,21 +68,11 @@ func TestGetAvailableToolNames(t *testing.T) {
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
 	assert.Contains(t, tools, "openai_web_search")
+	assert.NotContains(t, tools, "read_conversation")
+	assert.NotContains(t, defaultMainTools, "read_conversation")
 
 	// Should have the expected number of tools (registry tools plus virtual tools)
 	assert.Equal(t, len(toolRegistry)+len(virtualToolNames), len(tools))
-}
-
-func TestControlPlaneToolClassification(t *testing.T) {
-	assert.Equal(t, []string{"read_conversation"}, ControlPlaneToolNames())
-	assert.True(t, IsControlPlaneTool("read_conversation"))
-	assert.False(t, IsControlPlaneTool("bash"))
-
-	tool, ok := ControlPlaneTool("read_conversation")
-	require.True(t, ok)
-	assert.Equal(t, "read_conversation", tool.Name())
-	_, ok = ControlPlaneTool("bash")
-	assert.False(t, ok)
 }
 
 func TestValidateTools_ValidTools(t *testing.T) {

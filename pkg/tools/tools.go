@@ -31,67 +31,26 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 
 // toolRegistry holds all available tools mapped by their names
 var toolRegistry = map[string]tooltypes.Tool{
-	"bash":              &BashTool{},
-	"apply_patch":       &ApplyPatchTool{},
-	"file_read":         &FileReadTool{},
-	"file_write":        &FileWriteTool{},
-	"file_edit":         &FileEditTool{},
-	"read_conversation": NewReadConversationTool(),
-	"grep_tool":         &GrepTool{},
-	"glob_tool":         &GlobTool{},
-	"web_fetch":         &WebFetchTool{},
-	"view_image":        NewViewImageTool("", ""),
-	"skill":             NewSkillTool(nil, false, false),
+	"bash":        &BashTool{},
+	"apply_patch": &ApplyPatchTool{},
+	"file_read":   &FileReadTool{},
+	"file_write":  &FileWriteTool{},
+	"file_edit":   &FileEditTool{},
+	"grep_tool":   &GrepTool{},
+	"glob_tool":   &GlobTool{},
+	"web_fetch":   &WebFetchTool{},
+	"view_image":  NewViewImageTool("", ""),
+	"skill":       NewSkillTool(nil, false, false),
 }
 
 var virtualToolNames = []string{
 	"openai_web_search",
 }
 
-var controlPlaneToolNames = []string{
-	"read_conversation",
-}
-
 // VirtualToolNames returns tool names that are exposed directly by providers
 // rather than through the executable tool registry.
 func VirtualToolNames() []string {
 	return append([]string(nil), virtualToolNames...)
-}
-
-// ControlPlaneToolNames returns host tools that execute beside central conversation state.
-func ControlPlaneToolNames() []string {
-	return append([]string(nil), controlPlaneToolNames...)
-}
-
-// IsControlPlaneTool reports whether a registered host tool belongs to the control plane.
-func IsControlPlaneTool(name string) bool {
-	name = strings.TrimSpace(name)
-	for _, candidate := range controlPlaneToolNames {
-		if name == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-// ControlPlaneTool returns a registered control-plane tool by name.
-func ControlPlaneTool(name string) (tooltypes.Tool, bool) {
-	if !IsControlPlaneTool(name) {
-		return nil, false
-	}
-	tool, ok := toolRegistry[strings.TrimSpace(name)]
-	return tool, ok
-}
-
-// ControlPlaneTools returns all registered control-plane tool implementations.
-func ControlPlaneTools() []tooltypes.Tool {
-	result := make([]tooltypes.Tool, 0, len(controlPlaneToolNames))
-	for _, name := range controlPlaneToolNames {
-		if tool, ok := toolRegistry[name]; ok {
-			result = append(result, tool)
-		}
-	}
-	return result
 }
 
 // NoToolsMarker is a special value indicating no tools should be enabled
@@ -108,7 +67,6 @@ var defaultMainTools = []string{
 	"bash",
 	"file_write",
 	"file_edit",
-	"read_conversation",
 	"grep_tool",
 	"glob_tool",
 	"web_fetch",

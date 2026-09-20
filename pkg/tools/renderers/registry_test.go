@@ -1,12 +1,14 @@
 package renderers
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRendererRegistry_ExactMatches(t *testing.T) {
@@ -54,22 +56,31 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 
 func TestRendererRegistry_ExtensionToolMetadata(t *testing.T) {
 	registry := NewRendererRegistry()
-	result := tools.StructuredToolResult{
-		ToolName:  "get_weather",
-		Success:   true,
-		Timestamp: time.Now(),
-		Metadata: &tools.ExtensionToolMetadata{
-			ExtensionID:   "weather",
-			ToolName:      "get_weather",
-			Output:        "Cloudy, 18C",
-			ExecutionTime: time.Second,
-		},
+	for _, name := range []string{"get_weather", "read_conversation"} {
+		t.Run(name, func(t *testing.T) {
+			result := tools.StructuredToolResult{
+				ToolName: name,
+				Success:  true,
+				Metadata: &tools.ExtensionToolMetadata{
+					ExtensionID: name,
+					ToolName:    name,
+					Output:      "Extracted evidence",
+				},
+			}
+			assert.Contains(t, registry.Render(result), "Extracted evidence")
+			// Persisted results must use extension metadata, even for a former built-in name.
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(encoded, &result))
+			for _, render := range []func(tools.StructuredToolResult) string{
+				registry.Render, registry.RenderMarkdown, registry.RenderMergedMarkdown,
+			} {
+				output := render(result)
+				assert.Contains(t, output, "Extension Tool: "+name)
+				assert.Contains(t, output, "Extracted evidence")
+			}
+		})
 	}
-
-	output := registry.Render(result)
-
-	assert.Contains(t, output, "Extension Tool: get_weather (weather)")
-	assert.Contains(t, output, "Cloudy, 18C")
 }
 
 func TestRendererRegistry_BrowserActionsRetainOutputAndErrors(t *testing.T) {

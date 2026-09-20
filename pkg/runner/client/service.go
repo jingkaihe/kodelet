@@ -1082,7 +1082,7 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
 	}
-	wire, err := buildWireManifest(manifest, config, runtime, runnerID, "runner-manifest-probe", generation, tools.ControlPlaneToolNames())
+	wire, err := buildWireManifest(manifest, config, runtime, runnerID, "runner-manifest-probe", generation, nil)
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, err)
 	}

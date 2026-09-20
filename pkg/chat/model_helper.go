@@ -1,24 +1,15 @@
 package chat
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
-	"strings"
-	"text/template"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/pkg/errors"
 )
-
-//go:embed prompts/read_conversation.txt
-var readConversationPromptTemplate string
 
 func contextWithCentralModelHelper(ctx context.Context, parent llmtypes.Thread) context.Context {
 	config := parent.GetConfig().Clone()
@@ -44,10 +35,12 @@ func contextWithCentralModelHelper(ctx context.Context, parent llmtypes.Thread) 
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		prompt, err := buildModelHelperPrompt(ctx, request)
-		if err != nil {
-			return "", err
-		}
+		prompt := fmt.Sprintf(
+			"Extraction request:\n%s\n\nSource URL: %s\n\nDocument:\n%s",
+			request.Prompt,
+			request.URL,
+			request.Content,
+		)
 		// A helper has a private, unpersisted thread but no alternative workspace
 		// executor. Both provider configuration and usage remain daemon-owned.
 		thread, err := llm.NewThread(config.Clone())
@@ -70,57 +63,4 @@ func contextWithCentralModelHelper(ctx context.Context, parent llmtypes.Thread) 
 		}
 		return result, err
 	})
-}
-
-func buildModelHelperPrompt(ctx context.Context, request tooltypes.ModelHelperRequest) (string, error) {
-	if request.Operation == tooltypes.ModelHelperWebFetchExtract {
-		return fmt.Sprintf(
-			"Extraction request:\n%s\n\nSource URL: %s\n\nDocument:\n%s",
-			request.Prompt,
-			request.URL,
-			request.Content,
-		), nil
-	}
-
-	store, err := conversations.GetConversationStore(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to open conversation store")
-	}
-	defer func() { _ = store.Close() }()
-	record, err := store.Load(ctx, strings.TrimSpace(request.ConversationID))
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load conversation")
-	}
-	markdown, err := llm.RenderConversationRecordMarkdown(
-		record,
-		llm.ConversationMarkdownOptions{TruncateToolResults: true},
-	)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to render conversation markdown")
-	}
-	return buildReadConversationPrompt(
-		conversations.RenderHeaderMarkdown(record)+"\n"+markdown,
-		request.Prompt,
-	)
-}
-
-func buildReadConversationPrompt(markdown string, goal string) (string, error) {
-	data := struct {
-		Conversation string
-		Goal         string
-	}{
-		Conversation: strings.TrimSpace(markdown),
-		Goal:         strings.TrimSpace(goal),
-	}
-
-	tmpl, err := template.New("read_conversation_prompt").Parse(readConversationPromptTemplate)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse read_conversation prompt template")
-	}
-
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, data); err != nil {
-		return "", errors.Wrap(err, "failed to execute read_conversation prompt template")
-	}
-	return rendered.String(), nil
 }

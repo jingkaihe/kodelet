@@ -119,11 +119,9 @@ func TestModelHelperAuthorization(t *testing.T) {
 				wantCode = protocol.ErrorCodeInvalidParams
 			case "central conversation operation":
 				params.Request = tooltypes.ModelHelperRequest{
-					Operation:      tooltypes.ModelHelperReadConversationExtract,
-					ConversationID: "conversation-one",
-					Prompt:         "Extract title",
+					Operation: "read_conversation.extract",
+					Prompt:    "Extract title",
 				}
-				require.NoError(t, params.Request.Validate(), "valid central requests must still be rejected over runner RPC")
 				wantCode = protocol.ErrorCodeInvalidParams
 			case "missing prompt":
 				params.Request.Prompt = ""

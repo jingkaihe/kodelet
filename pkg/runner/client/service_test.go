@@ -513,7 +513,6 @@ Review the runner workspace.`), 0o600))
 			Profile:            "control-work",
 			EnvironmentProfile: "runner-work",
 		},
-		ReservedToolNames: []string{"read_conversation"},
 	})
 	assert.Equal(t, "runner-1", manifest.RunnerID)
 	assert.Equal(t, "runner-work", loadedEnvironmentProfile)
@@ -1078,7 +1077,7 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 		AllowedCommands:     []string{"go test ./..."},
 		EnableFSSearchTools: true,
 		SyspromptArgs:       map[string]string{"audience": "developer"},
-	}, nil, "runner-1", "run-1", 4, []string{"read_conversation", " "})
+	}, nil, "runner-1", "run-1", 4, []string{"reserved_tool", " "})
 	require.NoError(t, err)
 	assert.Equal(t, new(0), manifest.ExtensionCount, "no runtime is an explicitly known zero")
 	require.Len(t, manifest.ContextFiles, 2)
@@ -1103,11 +1102,29 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 	_, err = buildWireManifest(agentenv.Manifest{
 		WorkingDirectory: workspace,
 		Tools: []agentenv.ToolDefinition{{
-			Name:      "read_conversation",
+			Name:      "reserved_tool",
 			Placement: agentenv.ToolPlacementEnvironment,
 		}},
-	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"read_conversation"})
+	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"reserved_tool"})
 	require.ErrorContains(t, err, "collides with a reserved server tool")
+}
+
+func TestServiceAllowsExtensionConversationReader(t *testing.T) {
+	service, peer := newSessionTestService(t, llmtypes.Config{AllowedTools: []string{"read_conversation"}})
+	peer.registration.Tools = []extensions.ToolRegistration{{
+		Name:        "read_conversation",
+		Description: "Read a conversation using an extension",
+		InputSchema: map[string]any{"type": "object"},
+	}}
+
+	manifest, err := service.openRun(t.Context(), sessionTestOpen("reader-run"))
+	require.NoError(t, err)
+	require.Len(t, manifest.Tools, 1)
+	assert.Equal(t, "read_conversation", manifest.Tools[0].Name)
+	assert.Equal(t, "Read a conversation using an extension", manifest.Tools[0].Description)
+	assert.Equal(t, "session:inline-1", manifest.Tools[0].ExtensionID)
+	assert.Equal(t, string(agentenv.ToolPlacementEnvironment), manifest.Tools[0].Placement)
+	require.NoError(t, service.closeRun(t.Context(), "reader-run"))
 }
 
 func TestServiceRemoteProfileCapabilityFollowsServerRegistration(t *testing.T) {

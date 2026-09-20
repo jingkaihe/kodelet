@@ -55,7 +55,7 @@ func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {
 	environment := NewLocalEnvironment(workspace, nil)
 	config := llmtypes.Config{
 		WorkingDirectory: workspace,
-		AllowedTools:     []string{"file_read", "read_conversation"},
+		AllowedTools:     []string{"file_read"},
 	}
 	manifest, err := environment.Open(context.Background(), RunSpec{ConversationID: "conv-1", Config: config})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 
 	manifest, err := environment.Open(context.Background(), RunSpec{Config: llmtypes.Config{
 		WorkingDirectory: workspace,
-		AllowedTools:     []string{"file_read", "read_conversation"},
+		AllowedTools:     []string{"file_read"},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = environment.Close(context.Background()) })
@@ -91,9 +91,8 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 	assert.Equal(t, "object", fileRead.InputSchema["type"])
 	require.NotNil(t, fileRead.Tool)
 
-	readConversation, ok := manifest.ToolDefinition("read_conversation")
-	require.True(t, ok)
-	assert.Equal(t, ToolPlacementControlPlane, readConversation.Placement)
+	_, ok = manifest.ToolDefinition("read_conversation")
+	assert.False(t, ok)
 
 	fileRead.InputSchema["type"] = "changed"
 	unchanged, ok := environment.Manifest().ToolDefinition("file_read")
@@ -304,11 +303,6 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	require.NoError(t, err)
 	assert.True(t, blocked.Result.IsError())
 	assert.Contains(t, blocked.Result.GetError(), "not allowed")
-
-	controlPlane, err := environment.ExecuteTool(t.Context(), ToolRequest{Name: "read_conversation", Input: `{}`, ToolCallID: "call-control"}, nil)
-	require.NoError(t, err)
-	assert.True(t, controlPlane.Result.IsError())
-	assert.Contains(t, controlPlane.Result.GetError(), "server tool")
 
 	environment.ApplyCommandResult(CommandResult{
 		Matched:         true,

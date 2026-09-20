@@ -37,7 +37,7 @@ This boundary is richer than a remote tool API because Kodelet extensions partic
 
 The design is feasible, but it is a medium-to-large architectural change rather than primarily a transport feature. Kodelet already has useful seams in its provider `Thread` implementations, `BasicState`, extension runtime, and `ChatRunner`; however, provider loops currently reach directly into local context discovery, tool execution, and extension helpers. Extracting those dependencies behind one environment contract is the critical path.
 
-WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while allowing some tools to execute centrally and others remotely. Implementing `agentenv.LocalEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
+WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while executing tools in the runner environment. Implementing `agentenv.LocalEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
 
 The runner provides logical same-workspace parallelism without imposing a capacity flag or workspace-wide run mutex. This is appropriate for trusted cooperating agents such as a main agent plus code-search, review, or editing subagents, but it is not isolation: concurrent mutations, commands, services, and port use can interfere. A future execution-instance backend can add stronger isolation without changing the run protocol.
 
@@ -55,8 +55,8 @@ Kodelet will use the following model:
 8. The runner keeps the existing extension subprocess protocol local: extensions continue using stdio JSON-RPC, while the runner proxies aggregate lifecycle and tool behavior to the control plane.
 9. The control plane and runner communicate over one runner-initiated WebSocket using JSON-RPC 2.0 messages.
 10. Each run begins with a full environment manifest that is pinned for the duration of that run.
-11. Host-executed model tools have an explicit placement: control-plane tools execute beside central conversation state and are governed by control-plane model policy, while runner tools execute in the workspace environment and are governed by runner environment policy. Provider-native capabilities remain provider-owned.
-12. Runner-owned extensions retain visibility over lifecycle events for host-executed tools, including control-plane tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
+11. Host-executed model tools execute in the runner environment and are governed by runner environment policy. Placement remains explicit in tool manifests, while provider-native capabilities remain provider-owned. There are no built-in control-plane-only tools.
+12. Runner-owned extensions retain visibility over lifecycle events for runner-executed tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
 13. The runner executes directly in its workspace and accepts multiple concurrent run leases; one active run per conversation is still enforced.
 14. A future runner implementation creates one fresh ephemeral execution instance per top-level run without changing control-plane ownership of the agent loop.
 
@@ -214,7 +214,7 @@ When ephemeral execution support is introduced, every top-level run receives a n
                                                    │ central agent loop           │
                                                    │ conversation persistence     │
                                                    │ steering                     │
-                                                   │ control-plane tools          │
+                                                   │ provider-native capabilities │
                                                    │ client event fan-out         │
                                                    └──────────────┬───────────────┘
                                                                   │ WebSocket + JSON-RPC 2.0
@@ -271,7 +271,7 @@ The mechanism used to provision the environment is deliberately unspecified.
 | Model-facing system information (git status, OS/version, date) | Consumes pinned snapshot | Discovers and snapshots |
 | Runner-global and workspace skills | Consumes definitions/results | Discovers and executes |
 | Workspace tools | Routes model calls | Executes |
-| Host-executed control-plane tools | Executes | Applies extension lifecycle policy where required |
+| Conversation reader extension | Serves conversation and model APIs | Executes through the extension tool lifecycle |
 | Provider-native tools | Configures and receives provider events | Applies catalog policy where supported; does not execute |
 | Extensions | Proxies lifecycle operations | Discovers, starts, and hosts processes |
 | Extension UI | Routes to clients | Proxies extension requests |
@@ -324,7 +324,7 @@ runner snapshots context, skills, tools, commands, extensions, and config
     ↓
 runner → control plane: pinned environment manifest
     ↓
-control plane merges runner and control-plane tools
+control plane builds the tool catalog from the runner manifest and provider-native capabilities
     ↓
 control plane proxies a matching workspace or extension command when the message invokes one
     ↓
@@ -339,7 +339,7 @@ for each provider turn:
     construct system prompt from pinned context
     agent.init lifecycle and tool-list patch
     call model
-    route model tool calls by placement
+    execute model tool calls through the runner environment
     turn.end lifecycle
     ↓
 agent.end lifecycle may return follow-up messages
@@ -464,13 +464,11 @@ authoritative assistant-facing and structured result
 
 Only post-policy updates and results cross the runner boundary.
 
-### Host-executed control-plane tool lifecycle
+### Tool lifecycle protocol compatibility
 
-Control-plane tools execute beside central conversation state, but runner-owned extensions must retain the opportunity to observe, block, or sanitize them when they subscribe to the relevant tool events.
+The environment and runner protocol retain individual `tool.call`, `tool.update`, and `tool.result` lifecycle operations for extension dispatch. Runner-side `tool.execute` applies the complete lifecycle locally; the central agent loop does not execute a separate class of built-in control-plane tools or proxy a second tool lifecycle around them.
 
-For a control-plane tool, the control plane therefore proxies `tool.call` to the runner before execution, proxies transient `tool.update` values through the runner before client display, and proxies `tool.result` before inserting the authoritative result into provider history.
-
-This adds network calls for central tools but preserves the current rule that workspace extension policy applies to every host-executed model tool. A later explicit policy may exempt trusted internal tools, but that is not the default behavior in this design.
+The conversation reader follows the same runner-side extension lifecycle as other extension tools, including input blocking and result mutation.
 
 ### Provider-native tool lifecycle
 
@@ -493,19 +491,17 @@ The control plane routes interactive requests to the client attached to the run 
 
 ## Tool Placement
 
-The control plane builds one model-facing tool catalog by merging central tool definitions with the pinned runner manifest.
+The control plane builds the executable model-facing tool catalog from the pinned runner manifest. Provider integrations may also offer provider-native capabilities. There is no additional built-in host tool registry in the control plane.
 
-### Initial host-executed control-plane tools
+### Conversation reader extension
 
-Tools that operate on central conversation or provider state execute in the control plane:
+`read_conversation` is supplied by a Python skills extension rather than a built-in Go tool. The runner discovers its definition and executes it as an ordinary extension tool. The extension uses conversation and model APIs to retrieve and extract relevant saved context; the daemon remains authoritative for conversation storage and provider credentials.
 
-| Tool | Reason |
-|---|---|
-| `read_conversation` | Reads the authoritative conversation store and invokes a utility model |
+The name is not reserved, the tool is not included in the built-in default catalog, and it is available only when an extension registers it and runner policy permits it. Legacy input and result metadata and renderers remain available so saved conversations containing the former built-in result remain readable.
 
 ### Provider-native capabilities
 
-Provider-native capabilities such as OpenAI web search are configured by the control plane and execute inside the provider API. They are not runner tools or host-executed control-plane tools, even when represented by a name in Kodelet's allowed-tool configuration.
+Provider-native capabilities such as OpenAI web search are configured by the control plane and execute inside the provider API. They do not use the runner's tool executor, even when represented by a name in Kodelet's allowed-tool configuration.
 
 ### Initial runner tools
 
@@ -523,7 +519,7 @@ Tools that operate on the workspace or runner environment execute on the runner:
 
 Every tool definition carries placement internally, but placement is not exposed to the model.
 
-Tool names must be unique across the merged catalog. A collision between a control-plane tool and a runner tool fails `run.open` rather than silently selecting one implementation.
+Tool names must be unique across the runner catalog. The protocol retains caller-supplied `reservedToolNames` collision checks, including for session extensions, but the current daemon does not reserve any built-in control-plane tool names. A collision with an explicitly reserved name fails `run.open` rather than silently selecting one implementation.
 
 ## Configuration Ownership
 
@@ -533,7 +529,7 @@ The runner is authoritative for workspace and runner-local configuration affecti
 
 Model profiles and runner environment profiles are separate namespaces:
 
-- `profile` selects a control-plane model profile. The control plane resolves provider, model, reasoning policy, provider-native capabilities, and control-plane tool policy from its own configuration.
+- `profile` selects a control-plane model profile. The control plane resolves provider, model, reasoning policy, and provider-native capabilities from its own configuration.
 - `environmentProfile` selects a runner-local configuration profile. The runner resolves that name from its own global and workspace configuration before discovering the run manifest. Blank or `default` selects the runner's base configuration.
 - Selecting a model profile never implicitly selects a same-named runner profile, and the runner never uses the model profile as a local configuration lookup key.
 - After runner identity, readiness, availability, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The runner returns the effective canonical CWD, which conversation persistence locks alongside the runner and environment profile. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and CWD and reuse them but cannot select a different runner, environment profile, or working directory.
@@ -559,7 +555,7 @@ Runner-local system information is excluded from the protocol-v1 resource digest
 
 Workspace-derived prompt inputs that the central model requires, such as a custom system-prompt file, must be loaded by the runner and included as content in the manifest. The control plane must not interpret runner-local paths as server-local paths.
 
-Runner `allowed_tools` policy filters runner-owned tools while the manifest is built. An explicit list is currently a strict allowlist: unknown names do not cause a fallback to the full default tool catalog. It does not suppress `read_conversation` or other control-plane-owned tools, whose availability is resolved centrally. Runner extensions receive the effective merged tool list in `agent.init` as `allowedTools` and retain the lifecycle visibility described above for host-executed control-plane tools.
+Runner `allowed_tools` policy filters runner-owned tools while the manifest is built, including an extension-provided `read_conversation`. An explicit list is currently a strict allowlist: unknown names do not cause a fallback to the full default tool catalog. Runner extensions receive the effective tool list in `agent.init` as `allowedTools` and retain the lifecycle visibility described above for runner-executed tools.
 
 Recipe-backed commands carry a digest of their raw content and metadata in the pinned manifest. If a recipe changes or disappears during an active run, command execution fails and asks the user to start a new run rather than executing content that was not part of the pinned snapshot.
 
@@ -673,7 +669,7 @@ The control plane opens a run with a request:
       "interactiveUI": true,
       "persistentSurfaces": true
     },
-    "reservedToolNames": ["read_conversation"]
+    "reservedToolNames": []
   }
 }
 ```
@@ -1081,7 +1077,7 @@ The provider thread remains in the control plane and continues owning provider-n
 
 ### `pkg/tools`
 
-Keep existing tool implementations for `agentenv.LocalEnvironment`. Add serializable tool definitions and proxy tool implementations for runner manifests. Split central conversation tools from workspace tools without exposing placement to the model.
+Keep workspace tool implementations for `agentenv.LocalEnvironment` and serializable tool definitions and proxy implementations for runner manifests. Conversation reading is extension-owned rather than a built-in tool; preserve legacy input and result metadata for saved conversations without exposing placement to the model.
 
 ### `pkg/extensions`
 
@@ -1129,7 +1125,7 @@ The transport package remains a dependency leaf: `agentenv` does not import the 
 
 - Extract the `agentenv.Environment` abstraction from provider turn flow and tool execution.
 - Implement `agentenv.LocalEnvironment` with existing context, skills, tools, commands, and extensions.
-- Split control-plane tools from environment tools.
+- Route executable tools through the environment, including extension-provided conversation reading.
 - Snapshot context and tool definitions once per run.
 - Preserve current direct-local behavior with focused provider and extension tests.
 

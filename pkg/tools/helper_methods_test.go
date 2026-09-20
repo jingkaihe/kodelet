@@ -388,48 +388,6 @@ func TestApplyPatchValidationAndPureHelpers(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to find expected lines")
 }
 
-func TestReadConversationToolMetadataAndTracing(t *testing.T) {
-	tool := NewReadConversationTool()
-	assert.Equal(t, "read_conversation", tool.Name())
-	assert.Contains(t, tool.Description(), "Read a saved conversation by ID")
-
-	schema := tool.GenerateSchema()
-	require.NotNil(t, schema)
-	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/read-conversation-input", string(schema.ID))
-
-	kvs, err := tool.TracingKVs(`{"conversation_id":" conv_123 ","goal":" extract fix "}`)
-	require.NoError(t, err)
-	attrs := attributeMap(kvs)
-	assert.Equal(t, "conv_123", attrs["conversation_id"])
-	assert.Equal(t, "extract fix", attrs["goal"])
-
-	kvs, err = tool.TracingKVs(`{`)
-	require.Error(t, err)
-	assert.Nil(t, kvs)
-
-	result := &ReadConversationToolResult{conversationID: "conv_123", goal: "extract fix", content: "relevant details"}
-	assert.Equal(t, "relevant details", result.GetResult())
-	assert.Empty(t, result.GetError())
-	assert.False(t, result.IsError())
-	assert.Contains(t, result.AssistantFacing(), "relevant details")
-
-	structured := result.StructuredData()
-	assert.Equal(t, "read_conversation", structured.ToolName)
-	assert.True(t, structured.Success)
-	var meta tooltypes.ReadConversationMetadata
-	require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &meta))
-	assert.Equal(t, "conv_123", meta.ConversationID)
-	assert.Equal(t, "extract fix", meta.Goal)
-	assert.Equal(t, "relevant details", meta.Content)
-
-	errorResult := &ReadConversationToolResult{conversationID: "conv_123", goal: "extract fix", err: "missing conversation"}
-	assert.True(t, errorResult.IsError())
-	assert.Equal(t, "missing conversation", errorResult.GetError())
-	structured = errorResult.StructuredData()
-	assert.False(t, structured.Success)
-	assert.Equal(t, "missing conversation", structured.Error)
-}
-
 func TestStateDeterministicHelpers(t *testing.T) {
 	assert.Nil(t, allowedToolNameSet(llmtypes.Config{}))
 	assert.Equal(t, map[string]struct{}{"bash": {}, "file_read": {}}, allowedToolNameSet(llmtypes.Config{

@@ -41,6 +41,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("view_image", &ViewImageRenderer{})
 	registry.Register("openai_web_search", &OpenAIWebSearchRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
+	// Preserve rendering of results saved before read_conversation became an extension.
 	registry.Register("read_conversation", &ReadConversationRenderer{})
 	registry.Register("skill", &SkillRenderer{})
 
@@ -62,15 +63,10 @@ func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer)
 // Render finds the appropriate renderer and renders the result
 func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
 	var output string
-	switch result.Metadata.(type) {
-	case *tools.ExtensionToolMetadata, tools.ExtensionToolMetadata:
-		output = (&ExtensionToolRenderer{}).RenderCLI(result)
-	default:
-		if renderer, exists := r.resolveRenderer(result.ToolName); exists {
-			output = renderer.RenderCLI(result)
-		} else {
-			output = r.renderFallback(result)
-		}
+	if renderer, exists := r.resultRenderer(result); exists {
+		output = renderer.RenderCLI(result)
+	} else {
+		output = r.renderFallback(result)
 	}
 	if images := ImageAttachmentLines(result, ""); len(images) > 0 {
 		return strings.TrimSpace(strings.Join(images, "\n") + "\n\n" + output)
@@ -80,7 +76,7 @@ func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
 
 // RenderMarkdown finds the appropriate renderer and renders the result as markdown.
 func (r *RendererRegistry) RenderMarkdown(result tools.StructuredToolResult) string {
-	renderer, exists := r.resolveRenderer(result.ToolName)
+	renderer, exists := r.resultRenderer(result)
 	if !exists {
 		return r.renderFallbackMarkdown(result)
 	}
@@ -110,7 +106,7 @@ func (r *RendererRegistry) RenderToolUseMarkdown(toolName string, rawInput strin
 
 // RenderMergedMarkdown renders a tool result for the merged tool-call view.
 func (r *RendererRegistry) RenderMergedMarkdown(result tools.StructuredToolResult) string {
-	renderer, exists := r.resolveRenderer(result.ToolName)
+	renderer, exists := r.resultRenderer(result)
 	if !exists {
 		return r.renderFallbackMergedMarkdown(result)
 	}
@@ -125,6 +121,15 @@ func (r *RendererRegistry) RenderMergedMarkdown(result tools.StructuredToolResul
 		"Tool":    {},
 		"Call ID": {},
 	})
+}
+
+func (r *RendererRegistry) resultRenderer(result tools.StructuredToolResult) (CLIRenderer, bool) {
+	switch result.Metadata.(type) {
+	case *tools.ExtensionToolMetadata, tools.ExtensionToolMetadata:
+		return &ExtensionToolRenderer{}, true
+	default:
+		return r.resolveRenderer(result.ToolName)
+	}
 }
 
 func (r *RendererRegistry) resolveRenderer(toolName string) (CLIRenderer, bool) {
