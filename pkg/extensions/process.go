@@ -51,6 +51,8 @@ type Process struct {
 // RuntimeCapabilities describes host capabilities available to an extension process.
 type RuntimeCapabilities struct {
 	BackgroundTasks bool
+	// Browser reports local CDP acquisition support, not authorization for a run.
+	Browser bool
 	// ConversationHierarchy reports negotiated support for explicit child forks.
 	ConversationHierarchy bool
 	// RemoteProfiles reports negotiated daemon support for profile manifests.
@@ -317,6 +319,7 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 	if p.transport != nil {
 		capabilities := RuntimeCapabilitiesFromContext(ctx)
 		capabilities.BackgroundTasks = false
+		capabilities.Browser = false
 		ctx = ContextWithRuntimeCapabilities(ctx, capabilities)
 	}
 	if source != nil {
@@ -403,6 +406,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 		},
 	}
 
+	if runtimeCapabilities.Browser {
+		params.Capabilities["browser"] = map[string]any{"version": 1}
+	}
 	var result InitializeResult
 	if client == nil || source == nil {
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
@@ -486,7 +492,14 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 		extensionID: p.Extension.ID,
 		toolName:    name,
 	}
+	if acquire := BrowserAcquirerFromContext(ctx); p.transport == nil && acquire != nil {
+		handler.browser = newBrowserToolCall(ctx, acquire)
+		defer handler.browser.close()
+	}
 	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, handler); err != nil {
+		if handler.browser != nil {
+			handler.browser.close()
+		}
 		if shouldRestartAfterCallError(err) {
 			p.failClientGeneration(client)
 		}
@@ -500,9 +513,13 @@ type toolExecutionHostHandler struct {
 	onUpdate    func(ToolExecutionResult)
 	extensionID string
 	toolName    string
+	browser     *browserToolCall
 }
 
 func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
+	if method == BrowserAcquireMethod || method == BrowserReleaseMethod {
+		return h.browser.request(method, params)
+	}
 	if method == ConversationForkMethod {
 		var forkParams conversationForkParams
 		if len(params) > 0 && string(params) != "null" {

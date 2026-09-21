@@ -141,6 +141,7 @@ type activeRun struct {
 	conversationID       string
 	invokedBy            string
 	clientCaps           protocol.ClientCapabilities
+	browserEnabled       bool
 	config               llmtypes.Config
 	runtime              *extensions.Runtime
 	instance             ExecutionInstance
@@ -565,6 +566,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		conversationID: params.ConversationID,
 		invokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
 		clientCaps:     params.ClientCapabilities,
+		browserEnabled: params.BrowserEnabled,
 		resources:      resources,
 		ctx:            runCtx,
 		cancel:         cancel,
@@ -1277,6 +1279,14 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID, hierarchy: extensions.RuntimeCapabilitiesFromContext(operationCtx).ConversationHierarchy}
 	}
 	operationCtx = tools.ContextWithToolContext(operationCtx, toolContext)
+	if run.browserEnabled && s.browserManager != nil && s.browserManager.Enabled() {
+		operationCtx = extensions.ContextWithBrowserAcquirer(operationCtx, func(ctx context.Context) (browser.Connection, func(), error) {
+			return s.browserManager.Acquire(ctx, browser.Scope{
+				ConversationID: run.conversationID,
+				CWD:            run.manifest.WorkingDirectory,
+			})
+		})
+	}
 	var updateSink agentenv.ToolUpdateSink
 	if params.WantUpdates {
 		requestID := protocol.RequestIDFromContext(operationCtx)
@@ -1445,6 +1455,7 @@ func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID 
 	ctx = extensions.ContextWithRunnerID(ctx, runnerID)
 	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{
 		BackgroundTasks:       true,
+		Browser:               s.browserManager != nil && s.browserManager.Enabled(),
 		RemoteProfiles:        remoteProfiles,
 		ConversationHierarchy: conversationHierarchy,
 	})

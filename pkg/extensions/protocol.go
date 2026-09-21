@@ -507,6 +507,9 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	if msg.Method == ConversationForkMethod && !parentMatched {
 		handler = invalidConversationForkParentHandler{}
 	}
+	if (msg.Method == BrowserAcquireMethod || msg.Method == BrowserReleaseMethod) && !parentMatched {
+		handler = invalidBrowserParentHandler{}
+	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
 	}

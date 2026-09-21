@@ -24,18 +24,19 @@ import (
 )
 
 const (
-	maxSessions        = 4
-	defaultIdleTimeout = 15 * time.Minute
-	startupTimeout     = 20 * time.Second
-	commandTimeout     = 30 * time.Second
-	connectionTimeout  = 10 * time.Second
-	processGracePeriod = time.Second
-	processKillWait    = 2 * time.Second
-	maxStderrBytes     = 32 * 1024
-	maxCDPMessageBytes = 16 * 1024 * 1024
-	maxTargetListBytes = 1024 * 1024
-	maxAssetChunkBytes = 128 * 1024
-	maxAssetBytes      = 16 * 1024 * 1024
+	maxSessions         = 4
+	maxConnectionLeases = 64
+	defaultIdleTimeout  = 15 * time.Minute
+	startupTimeout      = 20 * time.Second
+	commandTimeout      = 30 * time.Second
+	connectionTimeout   = 10 * time.Second
+	processGracePeriod  = time.Second
+	processKillWait     = 2 * time.Second
+	maxStderrBytes      = 32 * 1024
+	maxCDPMessageBytes  = 16 * 1024 * 1024
+	maxTargetListBytes  = 1024 * 1024
+	maxAssetChunkBytes  = 128 * 1024
+	maxAssetBytes       = 16 * 1024 * 1024
 )
 
 // Config is trusted runner configuration, not workspace- or page-provided input.
@@ -61,6 +62,14 @@ type Info struct {
 	ConversationID string `json:"conversationId"`
 	CWD            string `json:"cwd"`
 	DevTools       bool   `json:"devTools"`
+}
+
+// Connection identifies a runner-local browser CDP endpoint and the shared page.
+// Direct clients have browser-wide access; the target ID is not an access restriction.
+type Connection struct {
+	SessionID    string `json:"sessionId"`
+	CDPURL       string `json:"cdpUrl"`
+	PageTargetID string `json:"pageTargetId"`
 }
 
 // AssetChunk is a bounded portion of one trusted DevTools frontend file.
@@ -92,6 +101,7 @@ type session struct {
 
 	// Startup publishes these fields by closing ready; cleanup publishes closeErr through done.
 	wsURL       string
+	connection  Connection
 	startErr    error
 	closeErr    error
 	profile     string
@@ -102,6 +112,7 @@ type session struct {
 
 	// Protected by Manager.mu, including connections that are still dialing.
 	attachments int
+	leases      int
 	lastUsed    time.Time
 	connections map[*websocket.Conn]struct{}
 }
@@ -292,6 +303,58 @@ func (m *Manager) Connect(ctx context.Context, scope Scope, sessionID string) (*
 		}
 	}()
 	return conn, release, nil
+}
+
+// Acquire opens or reuses the shared browser and leases its runner-local CDP endpoint.
+// Authorization belongs to the caller. Release is idempotent and does not stop Chrome
+// or disconnect direct clients. The lease also ends when ctx or the browser is canceled.
+func (m *Manager) Acquire(ctx context.Context, scope Scope) (Connection, func(), error) {
+	info, err := m.Open(ctx, scope)
+	if err != nil {
+		return Connection{}, nil, err
+	}
+	m.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
+		return Connection{}, nil, errors.Wrap(err, "browser acquisition canceled")
+	}
+	s := m.sessions[Scope{ConversationID: info.ConversationID, CWD: info.CWD}]
+	if m.closed || s == nil || s.info.SessionID != info.SessionID || s.ctx.Err() != nil {
+		m.mu.Unlock()
+		return Connection{}, nil, errors.New("browser session is unavailable or stale")
+	}
+	if s.leases >= maxConnectionLeases {
+		m.mu.Unlock()
+		return Connection{}, nil, errors.New("browser connection lease limit reached")
+	}
+	s.leases++
+	s.attachments++
+	s.lastUsed = time.Now()
+	connection := s.connection
+	m.mu.Unlock()
+
+	released := make(chan struct{})
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			m.mu.Lock()
+			s.leases--
+			s.attachments--
+			s.lastUsed = time.Now()
+			m.mu.Unlock()
+			close(released)
+		})
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			release()
+		case <-s.ctx.Done():
+			release()
+		case <-released:
+		}
+	}()
+	return connection, release, nil
 }
 
 // Stop closes one exact session and all of its attached sockets. Stale IDs cannot stop replacements.
@@ -547,8 +610,9 @@ func (s *session) start(ctx context.Context, executable string) error {
 			return errors.Errorf("Chrome exited before its page target was ready: %v", s.processErr)
 		default:
 		}
-		s.wsURL, lastErr = discoverPage(ctx, client, s.profile)
+		s.wsURL, s.connection, lastErr = discoverPage(ctx, client, s.profile)
 		if lastErr == nil {
+			s.connection.SessionID = s.info.SessionID
 			return nil
 		}
 		select {
@@ -559,50 +623,58 @@ func (s *session) start(ctx context.Context, executable string) error {
 	}
 }
 
-func discoverPage(ctx context.Context, client *http.Client, profile string) (string, error) {
+func discoverPage(ctx context.Context, client *http.Client, profile string) (string, Connection, error) {
 	file, err := os.Open(filepath.Join(profile, "DevToolsActivePort"))
 	if err != nil {
-		return "", errors.Wrap(err, "reading Chrome debugging port")
+		return "", Connection{}, errors.Wrap(err, "reading Chrome debugging port")
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, 4097))
 	if err != nil {
-		return "", errors.Wrap(err, "reading Chrome debugging port")
+		return "", Connection{}, errors.Wrap(err, "reading Chrome debugging port")
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(data) > 4096 || len(lines) != 2 || !strings.HasPrefix(lines[1], "/devtools/browser/") {
-		return "", errors.New("invalid Chrome DevToolsActivePort file")
+		return "", Connection{}, errors.New("invalid Chrome DevToolsActivePort file")
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil || port <= 0 || port > 65535 {
-		return "", errors.New("invalid Chrome debugging port")
+		return "", Connection{}, errors.New("invalid Chrome debugging port")
 	}
 	host := "127.0.0.1:" + strconv.Itoa(port)
+	browserURL, err := url.Parse("ws://" + host + lines[1])
+	if err != nil || browserURL.RawPath != "" || browserURL.RawQuery != "" || browserURL.ForceQuery || browserURL.Fragment != "" {
+		return "", Connection{}, errors.New("invalid Chrome browser WebSocket")
+	}
+	browserID := strings.TrimPrefix(browserURL.Path, "/devtools/browser/")
+	if browserID == "" || strings.Contains(browserID, "/") {
+		return "", Connection{}, errors.New("invalid Chrome browser WebSocket")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/json/list", nil)
 	if err != nil {
-		return "", errors.Wrap(err, "creating Chrome discovery request")
+		return "", Connection{}, errors.Wrap(err, "creating Chrome discovery request")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", errors.Wrap(err, "querying Chrome page targets")
+		return "", Connection{}, errors.Wrap(err, "querying Chrome page targets")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", errors.Errorf("Chrome target discovery returned HTTP %d", resp.StatusCode)
+		return "", Connection{}, errors.Errorf("Chrome target discovery returned HTTP %d", resp.StatusCode)
 	}
 	data, err = io.ReadAll(io.LimitReader(resp.Body, maxTargetListBytes+1))
 	if err != nil {
-		return "", errors.Wrap(err, "reading Chrome page targets")
+		return "", Connection{}, errors.Wrap(err, "reading Chrome page targets")
 	}
 	if len(data) > maxTargetListBytes {
-		return "", errors.New("Chrome target list exceeds the size limit")
+		return "", Connection{}, errors.New("Chrome target list exceeds the size limit")
 	}
 	var targets []struct {
 		Type string `json:"type"`
 		URL  string `json:"webSocketDebuggerUrl"`
 	}
 	if err := json.Unmarshal(data, &targets); err != nil {
-		return "", errors.Wrap(err, "decoding Chrome page targets")
+		return "", Connection{}, errors.Wrap(err, "decoding Chrome page targets")
 	}
 	for _, target := range targets {
 		if target.Type != "page" {
@@ -610,15 +682,15 @@ func discoverPage(ctx context.Context, client *http.Client, profile string) (str
 		}
 		u, err := url.Parse(target.URL)
 		if err != nil || u.Scheme != "ws" || u.Host != host || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
-			return "", errors.New("Chrome page target must use the same loopback debugging endpoint")
+			return "", Connection{}, errors.New("Chrome page target must use the same loopback debugging endpoint")
 		}
 		id, ok := strings.CutPrefix(u.Path, "/devtools/page/")
 		if !ok || id == "" || strings.Contains(id, "/") {
-			return "", errors.New("Chrome target is not a page WebSocket")
+			return "", Connection{}, errors.New("Chrome target is not a page WebSocket")
 		}
-		return u.String(), nil
+		return u.String(), Connection{CDPURL: browserURL.String(), PageTargetID: id}, nil
 	}
-	return "", errors.New("Chrome has no page target")
+	return "", Connection{}, errors.New("Chrome has no page target")
 }
 
 func (s *session) cleanup() error {

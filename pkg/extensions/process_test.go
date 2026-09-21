@@ -40,7 +40,7 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 	}
 	ctx := ContextWithUIInputBroker(t.Context(), staticUIInputBroker{value: "runner-owned"})
 	ctx = ContextWithRunnerID(ctx, "worker-one")
-	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true})
+	ctx = ContextWithRuntimeCapabilities(ctx, RuntimeCapabilities{BackgroundTasks: true, RemoteProfiles: true, Browser: true})
 	initialized := make(chan error, 1)
 	go func() {
 		_, err := process.Initialize(ctx, "/workspace")
@@ -54,6 +54,7 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 	assert.Equal(t, "worker-one", params.Extension.RunnerID)
 	assert.False(t, params.Capabilities["runtime"].(map[string]any)["backgroundTasks"].(bool))
 	assert.True(t, params.Capabilities["profiles"].(map[string]any)["remote"].(bool))
+	assert.NotContains(t, params.Capabilities, "browser", "runner loopback endpoints must not be advertised to remote inline extensions")
 	send(map[string]any{"jsonrpc": "2.0", "id": 100, "parentId": init.ID, "method": "kodelet.ui.input", "params": map[string]any{"title": "initialize"}})
 	assert.Contains(t, string(read().Result), "runner-owned")
 	send(map[string]any{"jsonrpc": "2.0", "id": init.ID, "result": InitializeResult{Name: "inline"}})
@@ -72,7 +73,7 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 	}()
 	tool := read()
 	assert.Equal(t, "extension.tool.execute", tool.Method)
-	for _, method := range []string{"kodelet.tool.update", ConversationForkMethod, BackgroundTaskAcquireMethod} {
+	for _, method := range []string{"kodelet.tool.update", ConversationForkMethod, BackgroundTaskAcquireMethod, BrowserAcquireMethod} {
 		send(map[string]any{"jsonrpc": "2.0", "id": 101, "parentId": tool.ID, "method": method, "params": map[string]any{"content": "working"}})
 		response := read()
 		switch method {
@@ -84,6 +85,9 @@ func TestAttachedProcessInitializeStreamingAndReverseRPC(t *testing.T) {
 		case BackgroundTaskAcquireMethod:
 			require.NotNil(t, response.Error)
 			assert.Contains(t, response.Error.Message, "not available")
+		case BrowserAcquireMethod:
+			require.NotNil(t, response.Error)
+			assert.Contains(t, response.Error.Message, "runner-local")
 		}
 	}
 	send(map[string]any{"jsonrpc": "2.0", "id": 102, "parentId": 999999, "method": "kodelet.tool.update", "params": map[string]any{}})

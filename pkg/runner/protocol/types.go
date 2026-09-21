@@ -385,6 +385,8 @@ type ClientCapabilities struct {
 
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
+	// BrowserEnabled is a server-authorized grant, never a workspace setting.
+	BrowserEnabled     bool                       `json:"browserEnabled,omitempty"`
 	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`
 	RequireCheckpoint  bool                       `json:"requireCheckpoint,omitempty"`
 	RunID              string                     `json:"runId"`

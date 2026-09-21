@@ -315,6 +315,22 @@ export interface BackgroundTaskLease {
   close(): Promise<void>;
 }
 
+/** Raw CDP access for trusted runner-local extensions, scoped to the active tool invocation. */
+export interface BrowserConnection {
+  readonly leaseId: string;
+  readonly sessionId: string;
+  /** Runner-local browser endpoint; not a remotely accessible or page-restricted capability. */
+  readonly cdpUrl: string;
+  /** The exact page target shared with the human. */
+  readonly pageTargetId: string;
+  /**
+   * Release the lifetime lease, not the automation client or Chrome. Concurrent calls share
+   * one request; a failed release can be retried while the tool invocation remains active.
+   * The host also releases leases when that invocation completes or is canceled.
+   */
+  release(): Promise<void>;
+}
+
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
   signal: AbortSignal;
   storage: StorageContext;
@@ -328,6 +344,10 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
 }
 
 export interface ToolContext extends SharedContext {
+  browser: {
+    /** Acquire the shared browser for this tool invocation; remote inline extensions are unsupported. */
+    acquire(): Promise<BrowserConnection>;
+  };
   update(content: string, data?: ExtensionToolData): Promise<void>;
   forkConversation(options?: ConversationForkOptions): Promise<string>;
 }

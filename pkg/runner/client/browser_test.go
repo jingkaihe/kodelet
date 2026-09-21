@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -251,6 +252,70 @@ func TestBrowserRunnerToolAndUIShareOnlyConversationSessionAcrossRuns(t *testing
 		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
 		human := callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: conversationID})
 		assert.Equal(t, info, human, "the human must retain the same session after agent completion")
+	}
+}
+
+type browserAcquisitionEnvironment struct {
+	agentenv.Environment
+	acquire extensions.BrowserAcquirer
+}
+
+func (e *browserAcquisitionEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	e.acquire = extensions.BrowserAcquirerFromContext(ctx)
+	result := tooltypes.BaseToolResult{Result: "observed browser capability"}
+	if e.acquire != nil {
+		connection, release, err := e.acquire(ctx)
+		if err != nil {
+			return agentenv.ToolExecution{}, err
+		}
+		defer release()
+		encoded, err := json.Marshal(connection)
+		if err != nil {
+			return agentenv.ToolExecution{}, err
+		}
+		result.Result = string(encoded)
+	}
+	return agentenv.ToolExecution{Input: request.Input, Result: result, StructuredResult: result.StructuredData()}, nil
+}
+
+func TestBrowserRunnerAcquisitionRequiresServerGrant(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	workspace := t.TempDir()
+	var environment *browserAcquisitionEnvironment
+	service := newRegisteredTestService(t, workspace, ServiceOptions{
+		Browser: browser.Config{Executable: fakeBrowserExecutable(t)},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{}, nil
+		},
+		EnvironmentFactory: func(cwd string, runtime *extensions.Runtime) agentenv.Environment {
+			environment = &browserAcquisitionEnvironment{Environment: agentenv.NewLocalEnvironment(cwd, runtime)}
+			return environment
+		},
+	})
+	for i, grant := range []bool{false, true, false} {
+		runID := fmt.Sprintf("acquire-%d", i)
+		params := protocol.RunOpenParams{
+			RunID: runID, ConversationID: "conversation", BrowserEnabled: grant,
+			Options: &llmtypes.ExecutionOptions{NoExtensions: new(true), NoSkills: new(true)},
+		}
+		callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, params)
+		result, err := service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{
+			RunID: runID, ToolCallID: "acquire", Name: "extension-browser",
+			Input: json.RawMessage(`{"conversationId":"forged","cwd":"/forged"}`),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, grant, environment.acquire != nil, "runner capability alone must not authorize browser acquisition")
+		if grant {
+			var connection browser.Connection
+			require.NoError(t, json.Unmarshal([]byte(result.Result.DisplayOutput), &connection))
+			assert.Contains(t, connection.CDPURL, "/devtools/browser/")
+			assert.Equal(t, "test", connection.PageTargetID)
+			info, err := service.BrowserManager().Open(t.Context(), browser.Scope{ConversationID: "conversation", CWD: workspace})
+			require.NoError(t, err)
+			assert.Equal(t, info.SessionID, connection.SessionID, "extension and Web UI must share the trusted conversation browser")
+		}
+		callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID})
 	}
 }
 

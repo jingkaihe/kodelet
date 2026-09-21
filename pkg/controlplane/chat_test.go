@@ -17,9 +17,11 @@ type browserPolicyTestController struct {
 	agentenv.RemoteController
 	manifest runnerpayload.Manifest
 	executed string
+	opened   protocol.RunOpenParams
 }
 
-func (c *browserPolicyTestController) OpenRun(context.Context, string, protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+func (c *browserPolicyTestController) OpenRun(_ context.Context, _ string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+	c.opened = params
 	return c.manifest, nil
 }
 
@@ -34,8 +36,9 @@ func TestBrowserPolicyControllerFiltersAndEnforces(t *testing.T) {
 			Tools: []runnerpayload.ToolDefinition{{Name: "browser"}, {Name: "file_read"}},
 		}}
 		controller := browserPolicyController{RemoteController: inner, allowed: allowed}
-		manifest, err := controller.OpenRun(t.Context(), "runner", protocol.RunOpenParams{})
+		manifest, err := controller.OpenRun(t.Context(), "runner", protocol.RunOpenParams{BrowserEnabled: !allowed})
 		require.NoError(t, err)
+		assert.Equal(t, allowed, inner.opened.BrowserEnabled, "server policy must overwrite caller-supplied browser grants")
 		require.Len(t, inner.manifest.Tools, 2, "do not mutate the registry's pinned manifest")
 		if allowed {
 			assert.Len(t, manifest.Tools, 2)

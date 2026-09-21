@@ -9,6 +9,7 @@ import { createToolContext, runWithHostRPCClient } from "./context.js";
 
 import {
   type BackgroundTaskLease,
+  type BrowserConnection,
   ConversationForkUnavailableError,
   ExtensionHost,
   type ExtensionProfileRegistration,
@@ -791,6 +792,133 @@ test("tool context translates fork unavailable host errors", async () => {
   harness.initialize({ capabilities: { conversations: { fork: true } } });
 
   assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "unavailable" });
+});
+
+const browserConnectionInfo = {
+  leaseId: "browser-lease-1",
+  sessionId: "browser-session-1",
+  cdpUrl: "ws://127.0.0.1:9222/devtools/browser/test",
+  pageTargetId: "page-1",
+};
+const browserInit: InitializeParams = {
+  protocolVersion: "test",
+  extension: { id: "browser-test" },
+  capabilities: { browser: { version: 1 } },
+};
+
+test("browser acquisition preserves connection details and shares concurrent release requests", async () => {
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const harness = await createTestHarness(defineExtension((ext) => {
+    ext.registerTool({
+      name: "browse",
+      description: "Use the shared browser",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        const connection: BrowserConnection = await ctx.browser.acquire();
+        const { release, ...details } = connection;
+        assert.deepEqual(details, browserConnectionInfo);
+        const releasing = release();
+        assert.equal(release(), releasing, "concurrent releases must share the same promise");
+        await releasing;
+        assert.equal(release(), releasing, "successful release must not send another request");
+        return "detached";
+      },
+    });
+  }), {
+    async request(method, params) {
+      requests.push({ method, params });
+      return method === "kodelet.browser.acquire" ? browserConnectionInfo : { released: true };
+    },
+    async requestPersistent() {
+      assert.fail("browser leases must use the active tool request, not persistent RPC");
+    },
+  });
+  harness.initialize(browserInit);
+  assert.deepEqual(await harness.executeTool({ name: "browse", input: {} }), { content: "detached" });
+  assert.deepEqual(requests, [
+    { method: "kodelet.browser.acquire", params: {} },
+    { method: "kodelet.browser.release", params: { leaseId: browserConnectionInfo.leaseId } },
+  ]);
+});
+
+test("browser acquisition requires capability version 1 and an active host client", async () => {
+  const host = { async request() { assert.fail("unavailable browser must not send an RPC"); } };
+  await runWithHostRPCClient(host, async () => {
+    await assert.rejects(createToolContext(undefined).browser.acquire(), /not supported/);
+    for (const capability of [undefined, null, false, [], {}, { version: 0 }, { version: 2 }, { version: "1" }]) {
+      const ctx = createToolContext({ ...browserInit, capabilities: { browser: capability } });
+      await assert.rejects(ctx.browser.acquire(), /not supported/);
+    }
+  });
+  await runWithHostRPCClient(undefined, async () => {
+    await assert.rejects(createToolContext(browserInit).browser.acquire(), /active tool request/);
+  });
+});
+
+test("browser acquisition rejects malformed connection responses", async () => {
+  const invalidResponses: unknown[] = [undefined, null, true, 1, "connection", [], {}];
+  for (const key of Object.keys(browserConnectionInfo)) {
+    for (const value of [undefined, null, 1, false, {}, "", " \n "]) {
+      invalidResponses.push({ ...browserConnectionInfo, [key]: value });
+    }
+  }
+  for (const response of invalidResponses) {
+    await runWithHostRPCClient({ async request() { return response; } }, async () => {
+      await assert.rejects(createToolContext(browserInit).browser.acquire(), /Invalid browser acquisition response/);
+    });
+  }
+});
+
+test("browser acquisition rejects cancellation before sending or returning a connection", async () => {
+  for (const abortBeforeRequest of [true, false]) {
+    const controller = new AbortController();
+    const reason = new Error("tool request canceled");
+    if (abortBeforeRequest) controller.abort(reason);
+    let requests = 0;
+    await runWithHostRPCClient({
+      async request() {
+        requests++;
+        controller.abort(reason);
+        return browserConnectionInfo;
+      },
+    }, async () => {
+      const ctx = createToolContext(browserInit, {}, controller.signal);
+      await assert.rejects(ctx.browser.acquire(), (error) => error === reason);
+    });
+    assert.equal(requests, abortBeforeRequest ? 0 : 1);
+  }
+});
+
+test("browser acquisition preserves host authorization errors", async () => {
+  const denied = new HostRPCError({ code: -32004, message: "browser access denied" });
+  await runWithHostRPCClient({ async request() { throw denied; } }, async () => {
+    await assert.rejects(createToolContext(browserInit).browser.acquire(), (error) => error === denied);
+  });
+});
+
+test("browser release can retry a failed request without duplicating concurrent attempts", async () => {
+  const failure = new Error("temporary release failure");
+  let releases = 0;
+  await runWithHostRPCClient({
+    async request(method, params) {
+      if (method === "kodelet.browser.acquire") return browserConnectionInfo;
+      assert.equal(method, "kodelet.browser.release");
+      assert.deepEqual(params, { leaseId: browserConnectionInfo.leaseId });
+      if (++releases === 1) throw failure;
+      return { released: true };
+    },
+  }, async () => {
+    const connection = await createToolContext(browserInit).browser.acquire();
+    const first = connection.release();
+    assert.equal(connection.release(), first);
+    await assert.rejects(first, (error) => error === failure);
+    const retry = connection.release();
+    assert.notEqual(retry, first);
+    assert.equal(connection.release(), retry);
+    await retry;
+    await connection.release();
+  });
+  assert.equal(releases, 2);
 });
 
 test("background task leases use persistent host RPC and retry failed release", async () => {
@@ -1668,6 +1796,7 @@ test("runtime runs bounded session cleanup and exits when the host disconnects",
 
 test("runtime supports extension-initiated host RPC", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-host-rpc-")), "extension.ts");
+  t.after(() => rm(path.dirname(extensionFile), { recursive: true, force: true }));
   await writeFile(
     extensionFile,
     `
@@ -1681,6 +1810,8 @@ test("runtime supports extension-initiated host RPC", async (t) => {
           async execute(_, ctx) {
             await ctx.update("Working", { step: 1 });
             const conversationId = await ctx.forkConversation({ name: "Investigate fork naming" });
+            const browser = await ctx.browser.acquire();
+            await browser.release();
             const answer = await ctx.ui.input({ title: "Choose" });
             const confirmed = await ctx.ui.confirm({ title: "Allow?" });
             const selection = await ctx.ui.select({ title: "Food", options: ["Pasta", "Pizza"] });
@@ -1704,7 +1835,7 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "rpc-ui", cwd: process.cwd(), dataDir: "" },
-    capabilities: { conversations: { fork: true }, toolUpdates: true, ui: { input: true } },
+    capabilities: { browser: { version: 1 }, conversations: { fork: true }, toolUpdates: true, ui: { input: true } },
   });
   assert.equal(init.tools[0].name, "ask");
 
@@ -1716,14 +1847,18 @@ test("runtime supports extension-initiated host RPC", async (t) => {
   assert.deepEqual(client.hostRequests.map((request) => request.method), [
     "kodelet.tool.update",
     "kodelet.conversation.fork",
+    "kodelet.browser.acquire",
+    "kodelet.browser.release",
     "kodelet.ui.input",
     "kodelet.ui.confirm",
     "kodelet.ui.select",
     "kodelet.ui.notify",
   ]);
-  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2, 2, 2]);
+  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2, 2, 2, 2, 2]);
   assert.deepEqual(client.hostRequests[0]?.params, { content: "Working", data: { step: 1 } });
   assert.deepEqual(client.hostRequests[1]?.params, { name: "Investigate fork naming" });
+  assert.deepEqual(client.hostRequests[2]?.params, {});
+  assert.deepEqual(client.hostRequests[3]?.params, { leaseId: browserConnectionInfo.leaseId });
   assert.deepEqual(result, { content: "forked-conversation:from-host:true:Pizza" });
 });
 
@@ -2182,6 +2317,12 @@ class RpcTestClient {
         }
         let result: unknown;
         switch (response.method) {
+          case "kodelet.browser.acquire":
+            result = browserConnectionInfo;
+            break;
+          case "kodelet.browser.release":
+            result = { released: true };
+            break;
           case "kodelet.conversation.fork":
             result = { conversationId: "forked-conversation" };
             break;

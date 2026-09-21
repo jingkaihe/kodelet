@@ -206,6 +206,7 @@ type browserPolicyController struct {
 }
 
 func (c browserPolicyController) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+	params.BrowserEnabled = c.allowed
 	manifest, err := c.RemoteController.OpenRun(ctx, runnerID, params)
 	if err != nil || c.allowed {
 		return manifest, err

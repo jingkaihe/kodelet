@@ -579,6 +579,38 @@ Fresh sessions use SDK `parentConversationId` / `parent_conversation_id`, carrie
 
 ACP checks the daemon's `/api/chat/settings` `conversationHierarchyVersion: 1` before accepting a child session. Runner registration returns `conversationHierarchy: true`; only negotiated runners advertise extension hierarchy support and forward fork `asChild`. Unsupported peers fail explicitly rather than silently creating an unlinked conversation.
 
+### Runner-local browser connections
+
+Installed extension tools can acquire the conversation's shared Chrome connection through `ctx.browser.acquire()` in the TypeScript SDK. Initialization advertises `capabilities.browser: { "version": 1 }` when the runner supports the protocol. This advertises support, not permission: the daemon must enable browser access and authorize the caller with terminal/admin access. The daemon supplies a trusted `run.open.browserEnabled` grant; absence means denied. Repository settings and extension tool-list patches cannot grant access. Inline SDK extensions do not advertise or receive this capability because their process may not share the runner's loopback network.
+
+| Method | Parameters | Result |
+|---|---|---|
+| `kodelet.browser.acquire` | `{}` | `{ "leaseId": "...", "sessionId": "...", "cdpUrl": "ws://127.0.0.1:.../devtools/browser/...", "pageTargetId": "..." }` |
+| `kodelet.browser.release` | `{ "leaseId": "..." }` | `{ "released": true }` |
+
+Both requests require the originating active tool `parentId`. The runner derives conversation and canonical workspace from that invocation; acquire accepts no scope overrides. Release accepts only leases owned by that invocation and is idempotent. At most eight acquisitions are allowed per tool invocation, including released leases. The manager also bounds concurrent direct connection leases per browser.
+
+```typescript
+const connection = await ctx.browser.acquire();
+let browser;
+try {
+  browser = await chromium.connectOverCDP(connection.cdpUrl, { noDefaults: true });
+  // Match connection.pageTargetId using Target.getTargetInfo on each page's
+  // CDP session. Do not assume contexts()[0].pages()[0] is the shared page.
+  // The extension owns snapshots, locators, actions, waits, and any AI calls.
+} finally {
+  try {
+    await browser?.close(); // Detach this connected Playwright client.
+  } finally {
+    await connection.release();
+  }
+}
+```
+
+The endpoint is browser-level CDP, not the Web UI's page-level relay. Browser traffic goes directly from the extension to runner-local Chrome; the control plane does not proxy automation commands. The lease prevents idle cleanup while the extension owns the connection. All leases are automatically released on tool completion, failure, cancellation, or extension disconnect. They cannot be retained with a background-task lease. Release does not stop Chrome or forcibly disconnect raw CDP clients; extensions must honor `ctx.signal`, disconnect their clients, and leave the shared page open for the human.
+
+This API grants broad control of the conversation's isolated browser to trusted installed code, not a sandbox or per-action permission boundary. `pageTargetId` identifies the shared page but does not restrict CDP access to it. Extensions must not close the browser, interfere with the human's input, expose connection details in model-facing results, or claim that releasing a lease revokes a copied endpoint. Kodelet owns authorization, session discovery, and lifetime; the extension owns automation semantics, confirmation policy, and outcome reporting.
+
 ### Background extension work
 
 `capabilities.runtime.backgroundTasks` tells an extension whether it may acquire a lifetime handle for work that continues after an individual tool request returns. Extensions must hide tools that require asynchronous continuation when this capability is unavailable.

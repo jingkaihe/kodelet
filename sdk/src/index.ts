@@ -60,6 +60,7 @@ export type {
   Awaitable,
   BaseCallContext,
   BackgroundTaskLease,
+  BrowserConnection,
   CommandFlagValue,
   CommandContext,
   CommandInvocation,

@@ -99,6 +99,12 @@ Core persists `metadata.parent_conversation_id`, which the Web sidebar and TUI c
 
 Fresh children require ACP `_meta.conversationHierarchy.version: 1`; child forks require extension `capabilities.conversations.hierarchy: true`. Explicit hierarchy requests fail with an upgrade message on older hosts rather than silently creating unrelated conversations. Omit the new options to retain existing SDK behavior.
 
+## Runner-local browser connections
+
+Installed extension tools can call `await ctx.browser.acquire()` to obtain `{ leaseId, sessionId, cdpUrl, pageTargetId, release }` for the same Chrome session as the conversation's Web UI. The host must advertise `capabilities.browser.version: 1`, and the daemon must authorize browser access. Inline SDK extensions cannot acquire runner-local endpoints.
+
+Use `chromium.connectOverCDP(connection.cdpUrl, { noDefaults: true })` from Playwright, resolve the exact `pageTargetId`, and keep all automation in the extension. Disconnect the client and call `connection.release()` in `finally`; also honor `ctx.signal`. The lease ends when the tool invocation ends, and release does not close Chrome or revoke raw CDP access. This is broad browser access for trusted installed extensions, not a per-action permission boundary. See the [wire protocol and lifecycle](../docs/extension-design.md#runner-local-browser-connections).
+
 ## Development
 
 From the repository root, run `mise run sdk-test` for TypeScript checking, build, SDK tests, and package dry-run. The real SDK/ACP/daemon/runner acceptance gate is `KODELET_TEST_EXTENSION_SDK=typescript mise exec -- go test ./cmd/kodelet -run '^TestSessionExtensionsAcrossProcessBoundary$' -count=1 -timeout=3m`.

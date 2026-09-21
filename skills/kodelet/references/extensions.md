@@ -102,6 +102,8 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 ### Tools, commands, events, and UI helpers
 
 - Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`.
+- Installed runner-local tool handlers can use `await ctx.browser.acquire()` when the host advertises `capabilities.browser.version: 1`. It returns `leaseId`, `sessionId`, `cdpUrl`, `pageTargetId`, and an idempotent `release()` method. Browser access still requires daemon authorization and runner Chrome configuration; inline SDK callbacks are unsupported.
+- Browser connections use direct browser-level CDP, suitable for Playwright. Match `pageTargetId` to the shared page instead of taking the first tab. Disconnect the automation client and release in `finally`; honor `ctx.signal`. Leases end with the tool invocation, never stop Chrome, and do not restrict raw CDP operations or forcibly revoke direct connections. Keep endpoint details out of tool results.
 - Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
 - Native TUI shortcuts use `ext.registerShortcut(key, { description?, handler })` and may return `{ action: "submit", message }`.
 - `runAgent` results may set `display` when the visible and persisted user message should differ from the model-facing `prompt`.

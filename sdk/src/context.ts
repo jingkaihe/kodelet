@@ -92,6 +92,45 @@ export function createToolContext(
   const client = currentHostRPCClient();
   return {
     ...createSharedContext(init, context, signal, client),
+    browser: {
+      async acquire() {
+        signal.throwIfAborted();
+        const capability = init?.capabilities?.browser;
+        if (!isRecord(capability) || capability.version !== 1) {
+          throw new Error("Browser acquisition is not supported by this Kodelet host");
+        }
+        if (!client) {
+          throw new Error("Browser acquisition requires an active tool request");
+        }
+        const response = await client.request("kodelet.browser.acquire", {});
+        signal.throwIfAborted();
+        if (!isRecord(response)) {
+          throw new Error("Invalid browser acquisition response from Kodelet host");
+        }
+        const { leaseId, sessionId, cdpUrl, pageTargetId } = response;
+        if (
+          typeof leaseId !== "string" || leaseId.trim() === "" ||
+          typeof sessionId !== "string" || sessionId.trim() === "" ||
+          typeof cdpUrl !== "string" || cdpUrl.trim() === "" ||
+          typeof pageTargetId !== "string" || pageTargetId.trim() === ""
+        ) {
+          throw new Error("Invalid browser acquisition response from Kodelet host");
+        }
+        let releasePromise: Promise<void> | undefined;
+        return {
+          leaseId, sessionId, cdpUrl, pageTargetId,
+          release() {
+            releasePromise ??= Promise.resolve().then(async () => {
+              await client.request("kodelet.browser.release", { leaseId });
+            }).catch((error) => {
+              releasePromise = undefined;
+              throw error;
+            });
+            return releasePromise;
+          },
+        };
+      },
+    },
     async update(content: string, data?: ExtensionToolData) {
       if (!toolUpdatesSupported(init)) {
         return;

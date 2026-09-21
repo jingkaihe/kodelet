@@ -80,7 +80,7 @@ func TestBrowserHelperProcess(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]string{{"type": "page", "webSocketDebuggerUrl": "ws://" + r.Host + "/devtools/page/test"}})
 	})
-	mux.HandleFunc("/devtools/page/test", func(w http.ResponseWriter, r *http.Request) {
+	handleCDP := func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat("browser-test-stall-upgrade"); err == nil {
 			require.NoError(t, os.WriteFile(filepath.Join(profile, "upgrade-started"), nil, 0o600))
 			<-r.Context().Done()
@@ -120,7 +120,9 @@ func TestBrowserHelperProcess(t *testing.T) {
 				_ = conn.WriteJSON(map[string]any{"id": request.ID, "result": map[string]any{"method": request.Method, "params": request.Params}})
 			}
 		}
-	})
+	}
+	mux.HandleFunc("/devtools/page/test", handleCDP)
+	mux.HandleFunc("/devtools/browser/test", handleCDP)
 	server := httptest.NewServer(mux)
 	u, err := url.Parse(server.URL)
 	require.NoError(t, err)
@@ -190,6 +192,10 @@ func TestDisabledAndInvalidConfiguration(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, m.config.IdleTimeout)
 	_, err := m.Open(t.Context(), scope)
 	require.ErrorContains(t, err, "disabled")
+	connection, release, err := m.Acquire(t.Context(), scope)
+	require.ErrorContains(t, err, "disabled")
+	assert.Empty(t, connection)
+	assert.Nil(t, release)
 	assert.Empty(t, m.sessions)
 
 	m = testManager(t, Config{Executable: filepath.Join(t.TempDir(), "missing-chrome")})
@@ -220,6 +226,10 @@ func TestMissingScopeCannotLaunchOrAttach(t *testing.T) {
 		conn, release, err := m.Connect(t.Context(), scope, "session")
 		require.Error(t, err)
 		assert.Nil(t, conn)
+		assert.Nil(t, release)
+		connection, release, err := m.Acquire(t.Context(), scope)
+		require.Error(t, err)
+		assert.Empty(t, connection)
 		assert.Nil(t, release)
 		require.Error(t, m.Stop(scope, "session"))
 	}
@@ -384,6 +394,203 @@ func TestAttachmentsReleaseCancellationAndStop(t *testing.T) {
 	_, _, err = m.Connect(t.Context(), scope, info.SessionID)
 	require.ErrorContains(t, err, "stale")
 	assert.Empty(t, m.sessions)
+}
+
+func TestAcquireSharedBrowserConnection(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	connection, release, err := m.Acquire(t.Context(), scope)
+	require.NoError(t, err)
+	defer release()
+	info, err := m.Open(t.Context(), scope)
+	require.NoError(t, err)
+	s := openedSession(t, m, info)
+	pageURL, err := url.Parse(s.wsURL)
+	require.NoError(t, err)
+	assert.Equal(t, Connection{
+		SessionID:    info.SessionID,
+		CDPURL:       "ws://" + pageURL.Host + "/devtools/browser/test",
+		PageTargetID: "test",
+	}, connection)
+	data, err := json.Marshal(connection)
+	require.NoError(t, err)
+	assert.JSONEq(t, fmt.Sprintf(`{"sessionId":%q,"cdpUrl":%q,"pageTargetId":"test"}`, info.SessionID, connection.CDPURL), string(data))
+
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(scope.CWD, alias))
+	second, releaseSecond, err := m.Acquire(t.Context(), Scope{ConversationID: scope.ConversationID, CWD: alias})
+	require.NoError(t, err)
+	defer releaseSecond()
+	assert.Equal(t, connection, second)
+	m.mu.Lock()
+	assert.Equal(t, 2, s.attachments)
+	assert.Equal(t, 2, s.leases)
+	assert.Empty(t, s.connections, "acquisition must not create a managed CDP socket")
+	m.mu.Unlock()
+
+	direct, response, err := websocket.DefaultDialer.DialContext(t.Context(), connection.CDPURL, nil)
+	if response != nil {
+		defer response.Body.Close()
+	}
+	require.NoError(t, err)
+	defer direct.Close()
+	require.NoError(t, direct.SetReadDeadline(time.Now().Add(time.Second)))
+	release()
+	release()
+	m.mu.Lock()
+	assert.Equal(t, 1, s.attachments)
+	assert.Equal(t, 1, s.leases)
+	m.mu.Unlock()
+	assert.NoError(t, s.ctx.Err(), "release must not stop the shared browser")
+	require.NoError(t, direct.WriteJSON(map[string]any{"id": 1, "method": "Browser.getVersion"}))
+	_, _, err = direct.ReadMessage()
+	require.NoError(t, err, "release must not disconnect direct clients")
+	releaseSecond()
+	m.mu.Lock()
+	assert.Zero(t, s.attachments)
+	assert.Zero(t, s.leases)
+	m.mu.Unlock()
+}
+
+func TestAcquireScopeIsolation(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	first, release, err := m.Acquire(t.Context(), scope)
+	require.NoError(t, err)
+	defer release()
+	for _, otherScope := range []Scope{
+		{ConversationID: "other", CWD: scope.CWD},
+		{ConversationID: scope.ConversationID, CWD: t.TempDir()},
+	} {
+		other, releaseOther, err := m.Acquire(t.Context(), otherScope)
+		require.NoError(t, err)
+		defer releaseOther()
+		assert.NotEqual(t, first.SessionID, other.SessionID)
+		assert.NotEqual(t, first.CDPURL, other.CDPURL)
+		require.NoError(t, m.Stop(otherScope, other.SessionID))
+	}
+	got, releaseAgain, err := m.Acquire(t.Context(), scope)
+	require.NoError(t, err)
+	releaseAgain()
+	assert.Equal(t, first, got)
+}
+
+func TestAcquireLeaseCancellationAndCleanup(t *testing.T) {
+	for _, end := range []string{"request", "stop", "manager"} {
+		t.Run(end, func(t *testing.T) {
+			config, _ := fakeBrowserConfig(t)
+			m := testManager(t, config)
+			scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			connection, release, err := m.Acquire(ctx, scope)
+			require.NoError(t, err)
+			defer release()
+			info, err := m.Open(t.Context(), scope)
+			require.NoError(t, err)
+			s := openedSession(t, m, info)
+			switch end {
+			case "request":
+				cancel()
+			case "stop":
+				require.NoError(t, m.Stop(scope, connection.SessionID))
+			case "manager":
+				require.NoError(t, m.Close())
+			}
+			require.Eventually(t, func() bool {
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				return s.attachments == 0 && s.leases == 0
+			}, time.Second, time.Millisecond)
+			if end == "request" {
+				assert.NoError(t, s.ctx.Err(), "request cancellation must only release its lease")
+				got, failedRelease, err := m.Acquire(ctx, scope)
+				require.ErrorIs(t, err, context.Canceled)
+				assert.Empty(t, got)
+				assert.Nil(t, failedRelease)
+				require.NoError(t, m.Stop(scope, connection.SessionID))
+			}
+			waitSessionDone(t, s)
+			if end == "manager" {
+				got, failedRelease, err := m.Acquire(t.Context(), scope)
+				require.ErrorContains(t, err, "closed")
+				assert.Empty(t, got)
+				assert.Nil(t, failedRelease)
+				return
+			}
+			replacement, releaseReplacement, err := m.Acquire(t.Context(), scope)
+			require.NoError(t, err)
+			defer releaseReplacement()
+			assert.NotEqual(t, connection.SessionID, replacement.SessionID)
+			release()
+			info, err = m.Open(t.Context(), scope)
+			require.NoError(t, err)
+			current := openedSession(t, m, info)
+			m.mu.Lock()
+			assert.Equal(t, 1, current.attachments, "old release must not affect the replacement session")
+			assert.Equal(t, 1, current.leases)
+			m.mu.Unlock()
+		})
+	}
+}
+
+func TestAcquireLeasePreventsIdleCleanup(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	config.IdleTimeout = 100 * time.Millisecond
+	m := testManager(t, config)
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	_, release, err := m.Acquire(t.Context(), scope)
+	require.NoError(t, err)
+	defer release()
+	info, err := m.Open(t.Context(), scope)
+	require.NoError(t, err)
+	s := openedSession(t, m, info)
+	time.Sleep(3 * config.IdleTimeout)
+	assert.NoError(t, s.ctx.Err(), "direct clients must retain the session without managed sockets")
+	release()
+	waitSessionDone(t, s)
+}
+
+func TestAcquireLeaseLimitAndConcurrentRelease(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	scope := Scope{ConversationID: "conversation", CWD: t.TempDir()}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var releases []func()
+	for range maxConnectionLeases {
+		_, release, err := m.Acquire(ctx, scope)
+		require.NoError(t, err)
+		defer release()
+		releases = append(releases, release)
+	}
+	got, release, err := m.Acquire(ctx, scope)
+	require.ErrorContains(t, err, "lease limit")
+	assert.Empty(t, got)
+	assert.Nil(t, release)
+	info, err := m.Open(t.Context(), scope)
+	require.NoError(t, err)
+	s := openedSession(t, m, info)
+	m.mu.Lock()
+	assert.Equal(t, maxConnectionLeases, s.attachments)
+	assert.Equal(t, maxConnectionLeases, s.leases)
+	m.mu.Unlock()
+	var wg sync.WaitGroup
+	wg.Go(cancel)
+	for _, release := range releases {
+		wg.Go(release)
+		wg.Go(release)
+	}
+	wg.Wait()
+	m.mu.Lock()
+	assert.Zero(t, s.attachments)
+	assert.Zero(t, s.leases)
+	m.mu.Unlock()
+	_, release, err = m.Acquire(t.Context(), scope)
+	require.NoError(t, err, "released leases must restore acquisition capacity")
+	release()
 }
 
 func TestUnattachedIdleCleanup(t *testing.T) {
@@ -712,9 +919,10 @@ func TestDiscoveryConfinesPageEndpoint(t *testing.T) {
 	validPort := u.Port() + "\n/devtools/browser/test\n"
 	require.NoError(t, os.WriteFile(portFile, []byte(validPort), 0o600))
 	target = "ws://" + u.Host + "/devtools/page/test"
-	got, err := discoverPage(t.Context(), server.Client(), profile)
+	got, connection, err := discoverPage(t.Context(), server.Client(), profile)
 	require.NoError(t, err)
 	assert.Equal(t, target, got)
+	assert.Equal(t, Connection{CDPURL: "ws://" + u.Host + "/devtools/browser/test", PageTargetID: "test"}, connection)
 	for _, invalid := range []string{
 		"ws://example.invalid:" + u.Port() + "/devtools/page/test",
 		"ws://127.0.0.2:" + u.Port() + "/devtools/page/test",
@@ -731,17 +939,26 @@ func TestDiscoveryConfinesPageEndpoint(t *testing.T) {
 		"://invalid",
 	} {
 		target = invalid
-		_, err := discoverPage(t.Context(), server.Client(), profile)
+		_, _, err := discoverPage(t.Context(), server.Client(), profile)
 		require.Error(t, err, invalid)
 	}
+	for _, invalid := range []string{
+		"/devtools/browser/", "/devtools/browser/test/nested", "/devtools/browser/test%2Fnested",
+		"/devtools/browser/test?query=x", "/devtools/browser/test?", "/devtools/browser/test#fragment",
+	} {
+		require.NoError(t, os.WriteFile(portFile, []byte(u.Port()+"\n"+invalid+"\n"), 0o600))
+		_, _, err := discoverPage(t.Context(), server.Client(), profile)
+		require.ErrorContains(t, err, "invalid Chrome browser WebSocket", invalid)
+	}
+	require.NoError(t, os.WriteFile(portFile, []byte(validPort), 0o600))
 	for _, invalid := range []string{"{", "[]", strings.Repeat("x", maxTargetListBytes+1)} {
 		body = invalid
-		_, err := discoverPage(t.Context(), server.Client(), profile)
+		_, _, err := discoverPage(t.Context(), server.Client(), profile)
 		require.Error(t, err)
 	}
 	for _, invalid := range []string{"", "0\n/devtools/browser/test", "65536\n/devtools/browser/test", "abc\n/devtools/browser/test", "1234\nnot-a-browser", strings.Repeat("x", 4097)} {
 		require.NoError(t, os.WriteFile(portFile, []byte(invalid), 0o600))
-		_, err := discoverPage(t.Context(), server.Client(), profile)
+		_, _, err := discoverPage(t.Context(), server.Client(), profile)
 		require.Error(t, err)
 	}
 }
