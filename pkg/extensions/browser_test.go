@@ -130,7 +130,7 @@ func TestProcessBrowserLeasesEndWithInvocation(t *testing.T) {
 			})
 			done := make(chan error, 1)
 			go func() {
-				_, err := process.ExecuteTool(ctx, "browser_use", json.RawMessage(`{}`), ExtensionCallContext{})
+				_, err := process.ExecuteTool(ctx, "browse", json.RawMessage(`{}`), ExtensionCallContext{})
 				done <- err
 			}()
 			reader := bufio.NewReader(extension)
