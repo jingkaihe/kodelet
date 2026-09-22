@@ -25,11 +25,11 @@ type ModelPricing struct {
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[anthropic.Model]ModelPricing{
 	anthropic.ModelClaudeSonnet5: {
-		Input:                0.000003,   // $3.00 per million tokens
-		Output:               0.000015,   // $15.00 per million tokens
-		PromptCachingWrite5m: 0.00000375, // $3.75 per million tokens
-		PromptCachingWrite1h: 0.000006,   // $6.00 per million tokens
-		PromptCachingRead:    0.0000003,  // $0.30 per million tokens
+		Input:                0.000002,  // $2.00 per million tokens
+		Output:               0.000010,  // $10.00 per million tokens
+		PromptCachingWrite5m: 0.0000025, // $2.50 per million tokens
+		PromptCachingWrite1h: 0.000004,  // $4.00 per million tokens
+		PromptCachingRead:    0.0000002, // $0.20 per million tokens
 		ContextWindow:        1_000_000,
 	},
 	anthropic.ModelClaudeFable5_1: {
@@ -46,6 +46,14 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingWrite5m: 0.0000125, // $12.50 per million tokens
 		PromptCachingWrite1h: 0.000020,  // $20.00 per million tokens
 		PromptCachingRead:    0.000001,  // $1.00 per million tokens
+		ContextWindow:        1_000_000,
+	},
+	anthropic.ModelClaudeOpus5_5: {
+		Input:                0.000004,  // $4.00 per million tokens
+		Output:               0.000020,  // $20.00 per million tokens
+		PromptCachingWrite5m: 0.000005,  // $5.00 per million tokens
+		PromptCachingWrite1h: 0.000008,  // $8.00 per million tokens
+		PromptCachingRead:    0.0000002, // $0.20 per million tokens
 		ContextWindow:        1_000_000,
 	},
 	anthropic.ModelClaudeOpus5: {
@@ -168,6 +176,8 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 		return ModelPricingMap[anthropic.ModelClaudeFable5_1]
 	} else if strings.Contains(lowerModel, "claude-fable-5") {
 		return ModelPricingMap[anthropic.ModelClaudeFable5]
+	} else if strings.Contains(lowerModel, "claude-opus-5-5") {
+		return ModelPricingMap[anthropic.ModelClaudeOpus5_5]
 	} else if strings.Contains(lowerModel, "claude-opus-5") {
 		return ModelPricingMap[anthropic.ModelClaudeOpus5]
 	} else if strings.Contains(lowerModel, "claude-opus-4-8") {

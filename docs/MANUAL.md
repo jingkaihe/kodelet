@@ -953,13 +953,14 @@ tracing:
 profiles:
   anthropic:
     provider: "anthropic"
-    model: "opus-5" # alias to "claude-opus-5"
+    model: "opus-55" # alias to "claude-opus-5-5"
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
     reasoning_effort: "max"
     allowed_reasoning_efforts: ["medium", "high", "xhigh", "max"]
     # On adaptive Claude models, reasoning_effort controls adaptive thinking.
+    # Opus 5.5 requires adaptive thinking; reasoning_effort: none is unsupported.
     # thinking_budget_tokens applies only to models using manual thinking.
     # For non-standard model IDs supporting adaptive thinking:
     # anthropic:
@@ -983,6 +984,7 @@ aliases:
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
     opus-5: claude-opus-5
+    opus-55: claude-opus-5-5
     sonnet-46: claude-sonnet-4-6
 ```
 
@@ -1054,7 +1056,7 @@ Existing conversations keep their saved model configuration, even when the confi
 
 “Default” describes which named profile is selected implicitly; it is not a separate model configuration. Pickers display plain profile names and indicate the current selection without a default label. Choosing another profile for one conversation does not change the daemon's default.
 
-`kodelet setup` writes named `openai` and `anthropic` profiles and sets `profile: openai`. The default selector is required even with a single configured profile; Kodelet never chooses a profile based on its name or order.
+`kodelet setup` writes named `openai` and `anthropic` profiles using full model IDs without aliases and sets `profile: openai`. The default selector is required even with a single configured profile; Kodelet never chooses a profile based on its name or order.
 
 ## Observability
 
@@ -1142,7 +1144,8 @@ When output exceeds that budget, Kodelet writes the complete byte stream to a lo
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
-- `claude-opus-5` (latest Opus model, recommended default for coding and agentic work)
+- `claude-opus-5-5` (Opus 5.5, 1M-token context window, recommended default for coding and agentic work)
+- `claude-opus-5` (Opus 5, available through the retained `opus-5` alias)
 - `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)
 - `claude-haiku-4-5-20251001` (recommended for lightweight tasks)

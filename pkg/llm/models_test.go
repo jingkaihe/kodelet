@@ -36,7 +36,7 @@ func TestModelOptionsScopedCatalogs(t *testing.T) {
 					Pricing:  llmtypes.CustomPricing{"priced-openai": {}},
 				},
 			},
-			contains: []string{"claude-sonnet-4-5", "claude-opus-4-6"},
+			contains: []string{"claude-sonnet-4-5", "claude-opus-4-6", "claude-opus-5-5"},
 			excludes: []string{"gpt-5", "unrelated-model", "openai-custom", "priced-openai"},
 		},
 		{

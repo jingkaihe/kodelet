@@ -981,6 +981,7 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
+		anthropic.ModelClaudeOpus5_5,
 		anthropic.ModelClaudeOpus5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
@@ -996,6 +997,7 @@ func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 	alwaysOnAdaptiveThinkingModels := []anthropic.Model{
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
+		anthropic.ModelClaudeOpus5_5,
 		modelClaudeMythosPreview,
 	}
 
@@ -1006,6 +1008,7 @@ func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
+		anthropic.ModelClaudeOpus5_5,
 		anthropic.ModelClaudeOpus5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
@@ -1029,6 +1032,7 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeSonnet4_5_20250929,
 		anthropic.ModelClaudeSonnet4_6,
 		// opus 5 models
+		anthropic.ModelClaudeOpus5_5,
 		anthropic.ModelClaudeOpus5,
 
 		// opus 4 models

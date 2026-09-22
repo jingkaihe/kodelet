@@ -38,6 +38,7 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 	"claude-fable-5-1": {},
 	"claude-fable-5":   {},
 	"claude-mythos-5":  {},
+	"claude-opus-5-5":  {},
 	"claude-opus-5":    {},
 	"claude-opus-4-8":  {},
 	"claude-opus-4-7":  {},

@@ -105,6 +105,7 @@ aliases:
   haiku-45: "claude-haiku-4-5-20251001"
   opus-48: "claude-opus-4-8"
   opus-5: "claude-opus-5"
+  opus-55: "claude-opus-5-5"
 
 # Required default model profile for new conversations on the daemon.
 # --profile selects another named profile for one conversation.
@@ -119,7 +120,7 @@ profile: "anthropic"
 profiles:
   anthropic:
     provider: "anthropic"
-    model: "claude-opus-5"
+    model: "claude-opus-5-5"
     weak_model: "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192

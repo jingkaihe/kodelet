@@ -12,15 +12,7 @@ import (
 )
 
 func recommendedSetupConfigYAML() string {
-	return `aliases:
-    fable-5: claude-fable-5
-    gpt-6: gpt-6-astra
-    gpt-5.6: gpt-5.6-sol
-    haiku-45: claude-haiku-4-5-20251001
-    opus-48: claude-opus-4-8
-    opus-5: claude-opus-5
-    sonnet-46: claude-sonnet-4-6
-enable_fs_search_tools: false
+	return `enable_fs_search_tools: false
 profile: openai
 tool_mode: patch
 profiles:
@@ -41,7 +33,7 @@ profiles:
         weak_model_max_tokens: 8192
     anthropic:
         max_tokens: 64000
-        model: opus-5
+        model: claude-opus-5-5
         provider: anthropic
         reasoning_effort: max
         allowed_reasoning_efforts:
@@ -50,7 +42,7 @@ profiles:
             - high
             - xhigh
             - max
-        weak_model: haiku-45
+        weak_model: claude-haiku-4-5-20251001
         weak_model_max_tokens: 8192
 `
 }

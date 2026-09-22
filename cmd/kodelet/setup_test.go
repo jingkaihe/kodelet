@@ -35,7 +35,12 @@ func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *
 			config, err := llm.GetConfigFromViper()
 			require.NoError(t, err)
 			assert.Equal(t, viper.GetString("profile"), config.Profile)
+			anthropicConfig, err := llm.GetConfigFromViperWithProfile("anthropic")
+			require.NoError(t, err)
+			assert.Equal(t, "claude-opus-5-5", anthropicConfig.Model)
 			if name == "setup" {
+				assert.False(t, viper.IsSet("aliases"))
+				assert.Equal(t, "claude-haiku-4-5-20251001", anthropicConfig.WeakModel)
 				assert.Equal(t, "openai", config.Profile)
 				assert.Equal(t, "patch", viper.GetString("tool_mode"))
 				assert.False(t, viper.GetBool("enable_fs_search_tools"))
@@ -47,6 +52,9 @@ func TestRecommendedSetupConfigYAML_SeparatesModelProfilesFromRunnerDefaults(t *
 					assert.NotContains(t, definition, "enable_fs_search_tools")
 					assert.Equal(t, profile, definition["provider"])
 				}
+			} else {
+				assert.Equal(t, "claude-opus-5", config.Aliases["opus-5"])
+				assert.Equal(t, "claude-opus-5-5", config.Aliases["opus-55"])
 			}
 		})
 	}
