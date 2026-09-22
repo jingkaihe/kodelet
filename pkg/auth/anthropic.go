@@ -63,7 +63,7 @@ const (
 	anthropicAuthEndpoint        = "https://claude.ai/oauth/authorize"
 	anthropicRedirectURI         = "https://console.anthropic.com/oauth/code/callback"
 	anthropicTokenEndpoint       = "https://console.anthropic.com/v1/oauth/token"
-	anthropicClaudeCodeUserAgent = "claude-cli/2.1.251 (external, cli)"
+	anthropicClaudeCodeUserAgent = "claude-cli/2.1.280 (external, cli)"
 
 	// tokenRefreshThreshold is the duration before token expiry when we should refresh
 	tokenRefreshThreshold = 10 * time.Minute
