@@ -136,14 +136,15 @@
 
 .composer-context-cluster {
   display: flex;
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 2;
+  grid-row: 2;
   flex: 0 1 auto;
   width: auto;
   max-width: min(100%, 38vw, 30rem);
   min-width: 0;
   min-height: 2.75rem;
-  align-self: start;
+  align-self: center;
+  justify-self: end;
   align-items: center;
   justify-content: flex-end;
   gap: 0.7rem;
@@ -153,18 +154,9 @@
 
 .composer-control-grid {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  column-gap: 0.25rem;
-  align-items: center;
-}
-
-.composer-footer-divider {
-  display: none;
-  grid-column: 1 / -1;
-  grid-row: 2;
-  height: 1px;
-  margin: 0 0.25rem;
-  background: color-mix(in srgb, var(--kodelet-dark) 8%, transparent);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.25rem;
+  align-items: end;
 }
 
 .composer-inline-context {
@@ -301,11 +293,11 @@
 
 .composer-status-actions {
   display: flex;
-  grid-column: 4;
-  grid-row: 1;
+  grid-column: 3;
+  grid-row: 2;
   z-index: 1;
   flex-shrink: 0;
-  align-self: start;
+  align-self: center;
   align-items: center;
   gap: 0.52rem;
   margin: 0;
@@ -439,27 +431,27 @@
 .composer-leading-actions {
   display: inline-flex;
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 2;
   z-index: 1;
   flex-shrink: 0;
-  align-self: start;
+  align-self: center;
   align-items: center;
   gap: 0.55rem;
   margin: 0;
 }
 
 .composer-editor {
-  grid-column: 2;
+  grid-column: 1 / -1;
   grid-row: 1;
   width: 100%;
-  min-height: 2.75rem;
+  min-height: 4.25rem;
   max-height: 13rem;
-  overflow-y: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
   resize: none;
   border: 0;
   background: transparent;
-  padding: calc((2.75rem - 1lh) / 2) 0.25rem;
+  padding: 0.5rem 0.25rem;
   font-family: var(--font-mono);
   font-size: 0.86rem;
   line-height: 1.65;
@@ -469,45 +461,6 @@
 
 .composer-editor::placeholder {
   color: var(--kodelet-muted);
-}
-
-.composer-control-grid.is-multiline {
-  align-items: end;
-  row-gap: 0.25rem;
-}
-
-.composer-control-grid.is-multiline .composer-editor {
-  grid-column: 1 / -1;
-  grid-row: 1;
-  min-height: 4.25rem;
-  padding: 0.5rem 0.25rem;
-}
-
-.composer-control-grid.is-multiline .composer-leading-actions {
-  grid-column: 1;
-  grid-row: 2;
-  align-self: center;
-}
-
-.composer-control-grid.is-multiline .composer-context-cluster {
-  grid-column: 2 / 4;
-  grid-row: 2;
-  width: auto;
-  align-self: center;
-  justify-self: end;
-  justify-content: flex-end;
-  margin: 0;
-  padding: 0 0.25rem;
-}
-
-.composer-control-grid.is-multiline .composer-status-actions {
-  grid-column: 4;
-  grid-row: 2;
-  align-self: center;
-}
-
-.composer-control-grid.is-multiline .composer-footer-divider {
-  display: none;
 }
 
 .composer-slash-suggestions {
@@ -763,86 +716,26 @@
 }
 
 @media (max-width: 1023px) {
-  .composer-control-grid {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
   .composer-editor {
     max-height: 10rem;
     font-size: 1rem;
   }
 
-  .composer-status-actions {
-    grid-column: 3;
-  }
-
-  .composer-footer-divider {
-    display: block;
-  }
-
   .composer-context-cluster {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    width: 100%;
     max-width: none;
     min-height: 0;
-    align-self: auto;
-    justify-content: flex-start;
-    margin: 0;
-    padding: 0.5rem 0.25rem 0;
-  }
-
-  .composer-control-grid.is-multiline .composer-context-cluster {
-    grid-column: 2;
-    grid-row: 2;
-    width: auto;
-    max-width: none;
-    min-height: 0;
-    align-self: center;
     justify-self: stretch;
-    justify-content: flex-end;
-    margin: 0;
-    padding: 0 0.25rem;
-  }
-
-  .composer-control-grid.is-multiline .composer-status-actions {
-    grid-column: 3;
   }
 }
 
 @media (max-width: 600px) {
-  .composer-control-grid {
-    row-gap: 0.25rem;
-  }
-
-  .composer-control-grid .composer-editor {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    min-height: 2.75rem;
+  .composer-editor {
     max-height: 9rem;
-    padding: calc((2.75rem - 1lh) / 2) 0.25rem;
-    font-size: 1rem;
     line-height: 1.5;
   }
 
-  .composer-control-grid .composer-leading-actions,
-  .composer-control-grid .composer-status-actions {
-    grid-row: 2;
-    align-self: center;
-  }
-
-  .composer-control-grid .composer-context-cluster {
-    grid-column: 2;
-    grid-row: 2;
-    width: auto;
-    align-self: center;
-    justify-self: stretch;
+  .composer-context-cluster {
     justify-content: flex-start;
-    padding: 0 0.25rem;
-  }
-
-  .composer-footer-divider {
-    display: none;
   }
 
   .composer-leading-actions,
@@ -876,7 +769,7 @@
     padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
   }
 
-  .composer-control-grid .composer-editor {
+  .composer-editor {
     max-height: 7rem;
   }
 }
