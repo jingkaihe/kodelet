@@ -4,9 +4,9 @@
 
 <h1 align="center">Kodelet</h1>
 
-[Kodelet](https://kodelet.com/) is an open-source coding agent that isn't tied to your laptop or terminal session. Run everything locally, or use a single control plane to manage multiple agent runs across remote machines. The agentic loop is decoupled from the execution environments, so the server coordinating the work doesn't have to be the machine doing it.
+[Kodelet](https://kodelet.com/) is an open-source coding agent that isn't tied to your laptop or terminal session. You can run Kodelet entirely on your laptop or use a remote server to coordinate multiple agents across remote machines.
 
-The terminal UI, Web UI, and ACP-compatible editors connect to the agent without owning its lifetime. Switch clients or disconnect while the work continues. Shape the agent with custom extension tools, MCP integrations, and agent skills, and access your server through identity-based sign-in.
+The terminal UI, Web UI, and [ACP](https://agentclientprotocol.com/)-compatible editors connect to the same agent, which keeps working even when you switch clients or disconnect. A powerful extension system, MCP integrations, and agent skills let you tailor the agent's behavior, while identity-based sign-in controls access to your server.
 
 ## Why Kodelet?
 
