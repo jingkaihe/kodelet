@@ -117,6 +117,38 @@ func TestNewThreadModelDefault(t *testing.T) {
 	}
 }
 
+func TestNewThreadGPT6SolLunaUsesResponses(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("KODELET_OPENAI_API_MODE", "chat_completions")
+	for _, platform := range []string{"openai", "codex"} {
+		for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+			for _, role := range []string{"main", "weak"} {
+				t.Run(platform+"/"+model+"/"+role, func(t *testing.T) {
+					config := llmtypes.Config{
+						Provider: "openai",
+						Model:    model,
+						OpenAI: &llmtypes.OpenAIConfig{
+							Platform: platform,
+							APIMode:  llmtypes.OpenAIAPIModeChatCompletions,
+						},
+					}
+					if role == "weak" {
+						config.Model = "gpt-4.1"
+						config.WeakModel = model
+					}
+					thread, err := NewThread(config)
+					require.NoError(t, err)
+					require.IsType(t, &responses.Thread{}, thread)
+					t.Cleanup(func() { require.NoError(t, thread.(*responses.Thread).Close()) })
+					assert.Equal(t, config.Model, thread.GetConfig().Model)
+					assert.Equal(t, config.WeakModel, thread.GetConfig().WeakModel)
+				})
+			}
+		}
+	}
+}
+
 func TestNewThreadDispatchesToChatCompletions(t *testing.T) {
 	// Set up test API key
 	os.Setenv("OPENAI_API_KEY", "test-key")

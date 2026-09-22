@@ -46,7 +46,7 @@ func TestModelOptionsScopedCatalogs(t *testing.T) {
 				Aliases:   map[string]string{"claude": "claude-sonnet-4-5"},
 				Anthropic: &llmtypes.AnthropicConfig{Platform: "copilot"},
 			},
-			contains: []string{"gpt-5", "gpt-4.1-mini", "gpt-4o"},
+			contains: []string{"gpt-6-sol", "gpt-6-luna", "gpt-5", "gpt-4.1-mini", "gpt-4o"},
 			excludes: []string{
 				"claude-sonnet-4-5", "gpt-image-1", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
 				"o3-deep-research", "o4-mini-deep-research", "computer-use-preview",
@@ -58,7 +58,7 @@ func TestModelOptionsScopedCatalogs(t *testing.T) {
 				Provider: " OpenAI ", Model: "gpt-5.2-codex",
 				OpenAI: &llmtypes.OpenAIConfig{Platform: " CODEX "},
 			},
-			contains: []string{"gpt-5.3-codex", "gpt-5.4-mini"},
+			contains: []string{"gpt-6-sol", "gpt-6-luna", "gpt-5.3-codex", "gpt-5.4-mini"},
 			excludes: []string{"gpt-4o", "gpt-4.1", "o1", "claude-sonnet-4-5"},
 		},
 		{

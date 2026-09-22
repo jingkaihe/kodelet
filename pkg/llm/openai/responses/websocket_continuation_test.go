@@ -266,7 +266,7 @@ func responseFunctionCallItem(callID, name string) openairesponses.ResponseInput
 func responseFunctionCallOutputItem(callID, output string) openairesponses.ResponseInputItemUnionParam {
 	return openairesponses.ResponseInputItemUnionParam{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: callID,
+			CallID: param.NewOpt(callID),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfString: param.NewOpt(output),
 			},

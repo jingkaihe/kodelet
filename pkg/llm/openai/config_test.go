@@ -15,6 +15,7 @@ import (
 var (
 	expectedOpenAIReasoningModels = []string{
 		"gpt-6-astra",
+		"gpt-6-sol", "gpt-6-luna",
 		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
@@ -157,6 +158,8 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 
 	expectedReasoning := []string{
 		"gpt-6-astra",
+		"gpt-6-sol",
+		"gpt-6-luna",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -655,6 +658,11 @@ func TestValidateModelServiceTier(t *testing.T) {
 	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
 		Model:  "gpt-5.6-sol",
 		OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
+	}))
+	assert.NoError(t, validateModelServiceTier(llmtypes.Config{
+		Model:     "gpt-6-sol",
+		WeakModel: "gpt-6-luna",
+		OpenAI:    &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFlex},
 	}))
 
 	err := validateModelServiceTier(llmtypes.Config{

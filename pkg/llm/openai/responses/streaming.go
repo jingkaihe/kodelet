@@ -176,7 +176,6 @@ streamLoop:
 			if pendingToolCalls[callID] == nil {
 				pendingToolCalls[callID] = &toolCallState{}
 			}
-			pendingToolCalls[callID].name = event.Name
 			pendingToolCalls[callID].callID = callID
 			pendingToolCalls[callID].arguments.Reset()
 			pendingToolCalls[callID].arguments.WriteString(event.Arguments)
@@ -427,7 +426,7 @@ streamLoop:
 			outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(toolResult)
 			inputItem := responses.ResponseInputItemUnionParam{
 				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-					CallID: functionCall.callID,
+					CallID: param.NewOpt(functionCall.callID),
 					Output: outputUnion,
 				},
 			}
@@ -561,7 +560,6 @@ func firstNonEmpty(values ...string) string {
 // toolCallState tracks the state of a pending tool call during streaming.
 type toolCallState struct {
 	callID    string
-	name      string
 	arguments strings.Builder
 }
 

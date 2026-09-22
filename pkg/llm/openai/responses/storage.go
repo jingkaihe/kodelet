@@ -109,7 +109,7 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 				if err := json.Unmarshal(item.RawOutput, &outputItems); err == nil {
 					result = append(result, responses.ResponseInputItemUnionParam{
 						OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-							CallID: item.CallID,
+							CallID: param.NewOpt(item.CallID),
 							Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 								OfResponseFunctionCallOutputItemArray: outputItems,
 							},
@@ -120,7 +120,7 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 			}
 			result = append(result, responses.ResponseInputItemUnionParam{
 				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-					CallID: item.CallID,
+					CallID: param.NewOpt(item.CallID),
 					Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 						OfString: param.NewOpt(item.Output),
 					},

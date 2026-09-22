@@ -80,7 +80,7 @@ func applyPromptCacheOptions(params *responses.ResponseNewParams, config llmtype
 
 func supportsPromptCacheOptions(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "gpt-6-astra" || model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
+	return model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna" || model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
 func openAIReasoningEffortForRequest(model string, effort shared.ReasoningEffort) shared.ReasoningEffort {

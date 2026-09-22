@@ -7,6 +7,8 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 var Models = llm.CustomModels{
 	Reasoning: []string{
 		"gpt-6-astra",
+		"gpt-6-sol",
+		"gpt-6-luna",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -59,6 +61,30 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-6-sol": llm.ModelPricing{
+		Input:                      0.000002,  // $2.00 per million tokens
+		CachedInput:                0.0000002, // $0.20 per million tokens
+		CacheWriteInput:            0.0000025, // $2.50 per million tokens
+		Output:                     0.00001,   // $10.00 per million tokens
+		LongContextInput:           0.000004,  // $4.00 per million tokens
+		LongContextCachedInput:     0.0000004, // $0.40 per million tokens
+		LongContextCacheWriteInput: 0.000005,  // $5.00 per million tokens
+		LongContextOutput:          0.000015,  // $15.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	"gpt-6-luna": llm.ModelPricing{
+		Input:                      0.0000001,   // $0.10 per million tokens
+		CachedInput:                0.00000001,  // $0.01 per million tokens
+		CacheWriteInput:            0.000000125, // $0.125 per million tokens
+		Output:                     0.0000005,   // $0.50 per million tokens
+		LongContextInput:           0.0000002,   // $0.20 per million tokens
+		LongContextCachedInput:     0.00000002,  // $0.02 per million tokens
+		LongContextCacheWriteInput: 0.00000025,  // $0.25 per million tokens
+		LongContextOutput:          0.00000075,  // $0.75 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-6-astra": llm.ModelPricing{
 		Input:                      0.00001,   // $10.00 per million tokens
 		CachedInput:                0.000001,  // $1.00 per million tokens
@@ -367,6 +393,30 @@ var Pricing = llm.CustomPricing{
 // OpenAI's pricing table publishes a separate priority rate. Models absent from
 // this map use their standard pricing.
 var PriorityPricing = llm.CustomPricing{
+	"gpt-6-sol": llm.ModelPricing{
+		Input:                      0.000004,  // $4.00 per million tokens
+		CachedInput:                0.0000004, // $0.40 per million tokens
+		CacheWriteInput:            0.000005,  // $5.00 per million tokens
+		Output:                     0.00002,   // $20.00 per million tokens
+		LongContextInput:           0.000008,  // $8.00 per million tokens
+		LongContextCachedInput:     0.0000008, // $0.80 per million tokens
+		LongContextCacheWriteInput: 0.00001,   // $10.00 per million tokens
+		LongContextOutput:          0.00003,   // $30.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	"gpt-6-luna": llm.ModelPricing{
+		Input:                      0.0000002,  // $0.20 per million tokens
+		CachedInput:                0.00000002, // $0.02 per million tokens
+		CacheWriteInput:            0.00000025, // $0.25 per million tokens
+		Output:                     0.000001,   // $1.00 per million tokens
+		LongContextInput:           0.0000004,  // $0.40 per million tokens
+		LongContextCachedInput:     0.00000004, // $0.04 per million tokens
+		LongContextCacheWriteInput: 0.0000005,  // $0.50 per million tokens
+		LongContextOutput:          0.0000015,  // $1.50 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-6-astra": llm.ModelPricing{
 		Input:                      0.00002,  // $20.00 per million tokens
 		CachedInput:                0.000002, // $2.00 per million tokens
@@ -402,6 +452,35 @@ var PriorityPricing = llm.CustomPricing{
 	},
 }
 
+// FlexPricing defines explicit flex-tier pricing for GPT-6 Sol and Luna.
+// Models absent from this map retain their standard pricing.
+var FlexPricing = llm.CustomPricing{
+	"gpt-6-sol": llm.ModelPricing{
+		Input:                      0.000001,   // $1.00 per million tokens
+		CachedInput:                0.0000001,  // $0.10 per million tokens
+		CacheWriteInput:            0.00000125, // $1.25 per million tokens
+		Output:                     0.000005,   // $5.00 per million tokens
+		LongContextInput:           0.000002,   // $2.00 per million tokens
+		LongContextCachedInput:     0.0000002,  // $0.20 per million tokens
+		LongContextCacheWriteInput: 0.0000025,  // $2.50 per million tokens
+		LongContextOutput:          0.0000075,  // $7.50 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	"gpt-6-luna": llm.ModelPricing{
+		Input:                      0.00000005,   // $0.05 per million tokens
+		CachedInput:                0.000000005,  // $0.005 per million tokens
+		CacheWriteInput:            0.0000000625, // $0.0625 per million tokens
+		Output:                     0.00000025,   // $0.25 per million tokens
+		LongContextInput:           0.0000001,    // $0.10 per million tokens
+		LongContextCachedInput:     0.00000001,   // $0.01 per million tokens
+		LongContextCacheWriteInput: 0.000000125,  // $0.125 per million tokens
+		LongContextOutput:          0.000000375,  // $0.375 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+}
+
 func PricingForServiceTier(serviceTier llm.OpenAIServiceTier) llm.CustomPricing {
 	pricing := make(llm.CustomPricing, len(Pricing))
 	for model, modelPricing := range Pricing {
@@ -416,6 +495,10 @@ func PricingForServiceTier(serviceTier llm.OpenAIServiceTier) llm.CustomPricing 
 	switch tier {
 	case llm.OpenAIServiceTierFast, llm.OpenAIServiceTierPriority:
 		for model, modelPricing := range PriorityPricing {
+			pricing[model] = modelPricing
+		}
+	case llm.OpenAIServiceTierFlex:
+		for model, modelPricing := range FlexPricing {
 			pricing[model] = modelPricing
 		}
 	}

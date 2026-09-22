@@ -751,8 +751,8 @@ func TestProcessStreamExecutesFunctionCallsInParallelAndStreamsUpdates(t *testin
 	require.NotNil(t, thread.inputItems[1].OfFunctionCall)
 	require.NotNil(t, thread.inputItems[2].OfFunctionCallOutput)
 	require.NotNil(t, thread.inputItems[3].OfFunctionCallOutput)
-	assert.Equal(t, "call_1", thread.inputItems[2].OfFunctionCallOutput.CallID)
-	assert.Equal(t, "call_2", thread.inputItems[3].OfFunctionCallOutput.CallID)
+	assert.Equal(t, "call_1", thread.inputItems[2].OfFunctionCallOutput.CallID.Value)
+	assert.Equal(t, "call_2", thread.inputItems[3].OfFunctionCallOutput.CallID.Value)
 
 	structuredResults := thread.GetStructuredToolResults()
 	assert.Contains(t, structuredResults, "call_1")

@@ -848,7 +848,7 @@ func TestApproximateResponseInputItemTokensDiscountsInlineImagePayload(t *testin
 	functionOutputImage := func(payloadLength int) openairesponses.ResponseInputItemUnionParam {
 		return openairesponses.ResponseInputItemUnionParam{
 			OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-				CallID: "call-image",
+				CallID: param.NewOpt("call-image"),
 				Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 					OfResponseFunctionCallOutputItemArray: openairesponses.ResponseFunctionCallOutputItemListParam{{
 						OfInputImage: &openairesponses.ResponseInputImageContentParam{
@@ -876,7 +876,7 @@ func TestApproximateResponseInputItemTokensDiscountsInlineImagePayload(t *testin
 func TestTrimRemoteCompactionV2InputDoesNotRewriteForInlineImageEncodingSize(t *testing.T) {
 	input := []openairesponses.ResponseInputItemUnionParam{{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: "call-image",
+			CallID: param.NewOpt("call-image"),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfResponseFunctionCallOutputItemArray: openairesponses.ResponseFunctionCallOutputItemListParam{{
 					OfInputImage: &openairesponses.ResponseInputImageContentParam{
@@ -900,7 +900,7 @@ func TestTrimRemoteCompactionV2InputAccountsForOriginalImagePatches(t *testing.T
 	imageURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes.Bytes())
 	input := []openairesponses.ResponseInputItemUnionParam{{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: "call-original-image",
+			CallID: param.NewOpt("call-original-image"),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfResponseFunctionCallOutputItemArray: openairesponses.ResponseFunctionCallOutputItemListParam{{
 					OfInputImage: &openairesponses.ResponseInputImageContentParam{
@@ -943,7 +943,7 @@ func TestEstimateRemoteCompactionV2ContextTokensCountsRetainedImages(t *testing.
 func TestTrimRemoteCompactionV2InputRewritesNewestFunctionOutputsFirst(t *testing.T) {
 	oldOutput := openairesponses.ResponseInputItemUnionParam{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: "call-old",
+			CallID: param.NewOpt("call-old"),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfString: param.NewOpt(strings.Repeat("o", 4_000)),
 			},
@@ -951,7 +951,7 @@ func TestTrimRemoteCompactionV2InputRewritesNewestFunctionOutputsFirst(t *testin
 	}
 	newOutput := openairesponses.ResponseInputItemUnionParam{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: "call-new",
+			CallID: param.NewOpt("call-new"),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfString: param.NewOpt(strings.Repeat("n", 4_000)),
 			},
@@ -982,7 +982,7 @@ func TestTrimRemoteCompactionV2InputRewritesMultimodalFunctionOutput(t *testing.
 	}
 	input := []openairesponses.ResponseInputItemUnionParam{{
 		OfFunctionCallOutput: &openairesponses.ResponseInputItemFunctionCallOutputParam{
-			CallID: "call-multimodal",
+			CallID: param.NewOpt("call-multimodal"),
 			Output: openairesponses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 				OfResponseFunctionCallOutputItemArray: outputItems,
 			},

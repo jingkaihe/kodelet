@@ -15,6 +15,8 @@ func TestModels(t *testing.T) {
 
 	// Test reasoning models
 	assert.Contains(t, Models.Reasoning, "gpt-6-astra")
+	assert.Contains(t, Models.Reasoning, "gpt-6-sol")
+	assert.Contains(t, Models.Reasoning, "gpt-6-luna")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-terra")
 	assert.Contains(t, Models.Reasoning, "gpt-5.6-luna")
@@ -248,6 +250,131 @@ func TestPricingForServiceTier(t *testing.T) {
 	assert.Equal(t, 0.000012, priority["gpt-5.6-luna"].Output)
 
 	assert.Equal(t, Pricing["gpt-4.1"], priority["gpt-4.1"])
+	for model, price := range Pricing {
+		if model != "gpt-6-sol" && model != "gpt-6-luna" {
+			assert.Equal(t, price, flex[model], "existing flex pricing for %s must not change", model)
+		}
+	}
+}
+
+func TestGPT6SolLunaPricing(t *testing.T) {
+	tests := []struct {
+		model    string
+		standard llmtypes.ModelPricing
+		priority llmtypes.ModelPricing
+		flex     llmtypes.ModelPricing
+	}{
+		{
+			model: "gpt-6-sol",
+			standard: llmtypes.ModelPricing{
+				Input:                      0.000002,
+				CachedInput:                0.0000002,
+				CacheWriteInput:            0.0000025,
+				Output:                     0.00001,
+				LongContextInput:           0.000004,
+				LongContextCachedInput:     0.0000004,
+				LongContextCacheWriteInput: 0.000005,
+				LongContextOutput:          0.000015,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			priority: llmtypes.ModelPricing{
+				Input:                      0.000004,
+				CachedInput:                0.0000004,
+				CacheWriteInput:            0.000005,
+				Output:                     0.00002,
+				LongContextInput:           0.000008,
+				LongContextCachedInput:     0.0000008,
+				LongContextCacheWriteInput: 0.00001,
+				LongContextOutput:          0.00003,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			flex: llmtypes.ModelPricing{
+				Input:                      0.000001,
+				CachedInput:                0.0000001,
+				CacheWriteInput:            0.00000125,
+				Output:                     0.000005,
+				LongContextInput:           0.000002,
+				LongContextCachedInput:     0.0000002,
+				LongContextCacheWriteInput: 0.0000025,
+				LongContextOutput:          0.0000075,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+		},
+		{
+			model: "gpt-6-luna",
+			standard: llmtypes.ModelPricing{
+				Input:                      0.0000001,
+				CachedInput:                0.00000001,
+				CacheWriteInput:            0.000000125,
+				Output:                     0.0000005,
+				LongContextInput:           0.0000002,
+				LongContextCachedInput:     0.00000002,
+				LongContextCacheWriteInput: 0.00000025,
+				LongContextOutput:          0.00000075,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			priority: llmtypes.ModelPricing{
+				Input:                      0.0000002,
+				CachedInput:                0.00000002,
+				CacheWriteInput:            0.00000025,
+				Output:                     0.000001,
+				LongContextInput:           0.0000004,
+				LongContextCachedInput:     0.00000004,
+				LongContextCacheWriteInput: 0.0000005,
+				LongContextOutput:          0.0000015,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			flex: llmtypes.ModelPricing{
+				Input:                      0.00000005,
+				CachedInput:                0.000000005,
+				CacheWriteInput:            0.0000000625,
+				Output:                     0.00000025,
+				LongContextInput:           0.0000001,
+				LongContextCachedInput:     0.00000001,
+				LongContextCacheWriteInput: 0.000000125,
+				LongContextOutput:          0.000000375,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			for _, tier := range []struct {
+				name llmtypes.OpenAIServiceTier
+				want llmtypes.ModelPricing
+			}{
+				{llmtypes.OpenAIServiceTierDefault, tt.standard},
+				{llmtypes.OpenAIServiceTierAuto, tt.standard},
+				{llmtypes.OpenAIServiceTierScale, tt.standard},
+				{llmtypes.OpenAIServiceTierPriority, tt.priority},
+				{llmtypes.OpenAIServiceTierFast, tt.priority},
+				{llmtypes.OpenAIServiceTierFlex, tt.flex},
+			} {
+				t.Run(string(tier.name), func(t *testing.T) {
+					price, ok := PricingForServiceTier(tier.name)[tt.model]
+					require.True(t, ok)
+					assert.Equal(t, tier.want, price)
+					assert.Equal(t, tier.want, price.ForPromptTokens(271_999))
+					assert.Equal(t, tier.want, price.ForPromptTokens(272_000))
+
+					longContext := tier.want
+					longContext.Input = tier.want.LongContextInput
+					longContext.CachedInput = tier.want.LongContextCachedInput
+					longContext.CacheWriteInput = tier.want.LongContextCacheWriteInput
+					longContext.Output = tier.want.LongContextOutput
+					assert.Equal(t, longContext, price.ForPromptTokens(272_001))
+					assert.Equal(t, longContext, price.ForPromptTokens(1_000_000))
+				})
+			}
+		})
+	}
 }
 
 func TestBaseURL(t *testing.T) {

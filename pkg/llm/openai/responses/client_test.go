@@ -556,6 +556,54 @@ func TestOpenAIReasoningEffortForRequest(t *testing.T) {
 	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest("gpt-6-astra", shared.ReasoningEffortNone))
 	assert.Equal(t, shared.ReasoningEffortLow, openAIReasoningEffortForRequest(" GPT-6-ASTRA ", shared.ReasoningEffortMinimal))
 	assert.Equal(t, shared.ReasoningEffortNone, openAIReasoningEffortForRequest("gpt-5.6-sol", shared.ReasoningEffortNone))
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		assert.Equal(t, shared.ReasoningEffortNone, openAIReasoningEffortForRequest(model, shared.ReasoningEffortNone))
+		assert.Equal(t, shared.ReasoningEffortMax, openAIReasoningEffortForRequest(model, shared.ReasoningEffort(" MAX ")))
+	}
+}
+
+func TestProcessMessageExchangeGPT6SolLuna(t *testing.T) {
+	for _, platform := range []string{"openai", "codex"} {
+		for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+			t.Run(platform+"/"+model, func(t *testing.T) {
+				config := llmtypes.Config{
+					Provider: "openai",
+					Model:    model,
+					OpenAI:   &llmtypes.OpenAIConfig{Platform: platform},
+				}
+				models, pricing := loadCustomConfiguration(config)
+				thread := &Thread{
+					Thread:          base.NewThread(config, "conv-test"),
+					customModels:    models,
+					customPricing:   pricing,
+					reasoningEffort: shared.ReasoningEffortMax,
+					isCodex:         platform == "codex",
+				}
+				var captured openairesponses.ResponseNewParams
+				thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+					captured = params
+					return nil
+				}
+				thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+					return processStreamResult{responseCompleted: true}, nil
+				}
+
+				_, _, _, err := thread.processMessageExchange(context.Background(), &llmtypes.StringCollectorHandler{Silent: true}, model, 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+				require.NoError(t, err)
+				body := responseParamsBody(t, captured)
+				assert.Equal(t, model, body["model"])
+				assert.Equal(t, map[string]any{"effort": "max", "summary": "auto"}, body["reasoning"])
+				assert.Equal(t, false, body["store"])
+				if platform == "openai" {
+					assert.Equal(t, map[string]any{"mode": "implicit", "ttl": "30m"}, body["prompt_cache_options"])
+					assert.Equal(t, float64(256), body["max_output_tokens"])
+				} else {
+					assert.NotContains(t, body, "prompt_cache_options")
+					assert.NotContains(t, body, "max_output_tokens")
+				}
+			})
+		}
+	}
 }
 
 func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
