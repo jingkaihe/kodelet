@@ -171,14 +171,6 @@ run = [
   "cd sdk && npm run typecheck && npm run build && npm test && npm pack --dry-run",
 ]
 
-[tasks.extensions-test]
-description = "Typecheck and smoke-test the repository extensions"
-run = [
-  "echo 'Checking repository extensions...'",
-  "cd .kodelet/extensions/drawing-board && npm run typecheck",
-  ".kodelet/extensions/drawing-board/kodelet-extension-drawing-board.ts </dev/null",
-]
-
 [tasks.frontend-storybook]
 description = "Run the frontend Storybook"
 run = [
@@ -301,8 +293,6 @@ run = [
   "cd pkg/webui/frontend && npm install",
   "echo 'Installing TypeScript SDK npm dependencies and building the SDK...'",
   "cd sdk && npm install && npm run build",
-  "echo 'Installing repository extension npm dependencies...'",
-  "cd .kodelet/extensions/drawing-board && npm install",
   "echo 'Installing extension example npm dependencies...'",
   "cd skills/kodelet/examples/extensions/workspace && npm install",
   "echo 'All dependencies installed successfully!'",
