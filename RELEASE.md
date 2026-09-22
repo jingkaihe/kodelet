@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.6.20-beta
+
+Added Claude Opus 5.5 (`claude-opus-5-5`) with always-on adaptive thinking, `xhigh`/`max` reasoning effort, original-detail image viewing, a 1M-token context window, and pricing. Added the `opus-55` alias and made Opus 5.5 the default model in the sample configuration's `anthropic` profile. Updated Claude Sonnet 5 pricing.
+
+Added GPT-6 Sol (`gpt-6-sol`) and GPT-6 Luna (`gpt-6-luna`) for the OpenAI and Codex presets, with Responses API routing, prompt-cache options, and standard, priority, and long-context pricing.
+
+Changed `kodelet setup` to write full model IDs rather than aliases, and to select Claude Opus 5.5 for the generated `anthropic` profile.
+
+Added runner-local browser leases for installed extensions. Tool handlers can call `ctx.browser.acquire()` in the TypeScript SDK to connect directly over CDP to the conversation's shared Chrome session, for example with Playwright. Access requires daemon browser authorization and is released automatically when the tool invocation ends. Inline SDK extensions cannot acquire browser connections.
+
+Fixed Web UI typing latency in long conversations by excluding unused DaisyUI `:has()` selectors that caused Chromium to rescan the transcript on each composer edit.
+
+Removed the repository's drawing-board extension.
+
+Updated the Anthropic and OpenAI Go SDKs.
+
 ## 0.6.19-beta
 
 **Breaking change:** Removed the built-in `read_conversation` tool. Conversation reading now requires a runner extension that registers the tool and is subject to runner `allowed_tools` policy and extension lifecycle hooks. Install and enable a conversation-reader extension to retain this capability; saved results from the former built-in tool remain readable.
