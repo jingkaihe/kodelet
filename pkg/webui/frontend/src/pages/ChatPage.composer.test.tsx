@@ -254,28 +254,18 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     );
   });
 
-  it('keeps the composer layout stable when editing and clearing multiline drafts', async () => {
+  it('switches the composer layout automatically for multiline drafts', async () => {
     await renderChatWithRunner();
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
     const textarea = screen.getByTestId('composer-textarea');
     expect(screen.queryByTestId('composer-expand-toggle')).not.toBeInTheDocument();
-    const gridClassName = textarea.parentElement?.className;
-    expect(textarea).toHaveAttribute('rows', '3');
+    expect(textarea.parentElement).not.toHaveClass('is-multiline');
 
     fireEvent.change(textarea, { target: { value: 'a\nb\nc' } });
 
-    expect(textarea).toHaveValue('a\nb\nc');
-    expect(textarea.parentElement).toHaveAttribute('class', gridClassName);
-    expect(textarea).not.toHaveAttribute('style');
-
-    fireEvent.change(textarea, { target: { value: '' } });
-
-    expect(textarea).toHaveValue('');
-    expect(textarea.parentElement).toHaveAttribute('class', gridClassName);
-    expect(textarea).toHaveAttribute('rows', '3');
-    expect(textarea).not.toHaveAttribute('style');
+    await waitFor(() => expect(textarea.parentElement).toHaveClass('is-multiline'));
   });
 
   it('includes image attachments when queueing steering', async () => {

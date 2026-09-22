@@ -68,7 +68,7 @@ describe('ChatComposer', () => {
     expect(screen.getByTestId('composer-textarea').parentElement).toHaveClass(
       'composer-control-grid'
     );
-    expect(screen.getByTestId('composer-textarea')).toHaveAttribute('rows', '3');
+    expect(screen.getByTestId('composer-textarea')).toHaveAttribute('rows', '1');
     expect(screen.queryByTestId('composer-expand-toggle')).not.toBeInTheDocument();
     expect(props.onDraftChange).toHaveBeenCalledWith('next draft');
     expect(props.onSubmit).toHaveBeenCalledTimes(1);
@@ -141,6 +141,13 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('option', { name: 'Loading models…' })).toBeDisabled();
   });
 
+  it('uses the automatic multiline layout for drafts with line breaks', () => {
+    renderComposer({ draft: 'a\nb\nc' });
+
+    expect(screen.getByTestId('composer-textarea').parentElement).toHaveClass('is-multiline');
+    expect(screen.queryByTestId('composer-expand-toggle')).not.toBeInTheDocument();
+  });
+
   it('offers an explicit reload action alongside a stream error', () => {
     const onReload = vi.fn();
     const composer = renderComposer({ streamError: 'Failed to fetch', onReload });
@@ -167,41 +174,71 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
   });
 
-  it('keeps editor sizing stable without measuring layout on mount, edits, or resize', () => {
-    const measurements = [
-      vi.spyOn(window, 'getComputedStyle'),
-      vi.spyOn(Element.prototype, 'getBoundingClientRect'),
-      vi.spyOn(Element.prototype, 'clientHeight', 'get'),
-      vi.spyOn(Element.prototype, 'scrollHeight', 'get'),
-    ];
+  it('keeps a fitting single-line editor stable during layout syncs', () => {
+    renderComposer({ draft: 'hello' });
+
+    const textarea = screen.getByTestId('composer-textarea');
+    Object.defineProperties(textarea, {
+      clientHeight: { configurable: true, value: 52 },
+      scrollHeight: { configurable: true, value: 52 },
+    });
+    const styleObserver = new MutationObserver(() => undefined);
+    styleObserver.observe(textarea, {
+      attributes: true,
+      attributeFilter: ['style'],
+    });
+
+    window.dispatchEvent(new Event('resize'));
+
+    expect(styleObserver.takeRecords()).toHaveLength(0);
+    styleObserver.disconnect();
+  });
+
+  it('resets a stale multiline height when the draft is cleared', () => {
+    const composer = renderComposer({ draft: 'a\nb\nc' });
+    const textarea = screen.getByTestId('composer-textarea');
+
+    textarea.style.height = '91px';
+    textarea.style.overflowY = 'auto';
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 91,
+    });
+
+    composer.rerenderComposer({ draft: '' });
+
+    expect(textarea.parentElement).not.toHaveClass('is-multiline');
+    expect(textarea.style.height).toBe('');
+    expect(textarea.style.overflowY).toBe('');
+  });
+
+  it('fits a wrapped empty placeholder and shrinks when it fits on one line again', () => {
+    const composer = renderComposer({ draft: '', placeholder: 'Steer the active conversation…' });
+    const textarea = screen.getByTestId('composer-textarea');
+    let scrollHeight = 68;
+    Object.defineProperties(textarea, {
+      clientHeight: { configurable: true, value: 44 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+    });
+    const computedStyles = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      minHeight: '44px',
+      maxHeight: '144px',
+    } as CSSStyleDeclaration);
+
     try {
-      const composer = renderComposer({ draft: '' });
-      const textarea = screen.getByTestId('composer-textarea');
+      fireEvent(window, new Event('resize'));
 
-      for (const overrides of [
-        { draft: 'hello' },
-        { draft: 'A long wrapped draft. '.repeat(100) },
-        { draft: 'a\nb\nc\nd\ne' },
-        { draft: '' },
-        { contextText: 'claude-sonnet-4-6 · high' },
-        { showStop: true },
-        { placeholder: 'Steer the active conversation…' },
-      ]) {
-        composer.rerenderComposer(overrides);
-        fireEvent(window, new Event('resize'));
+      expect(textarea.parentElement).toHaveClass('is-multiline');
+      expect(textarea.style.height).toBe('68px');
+      expect(textarea.style.overflowY).toBe('hidden');
 
-        expect(textarea).toHaveAttribute('rows', '3');
-        expect(textarea).not.toHaveAttribute('style');
-        expect(textarea.parentElement).toHaveAttribute('class', 'composer-control-grid');
-      }
+      scrollHeight = 44;
+      composer.rerenderComposer({ draft: '', placeholder: 'Ask anything…' });
 
-      for (const measurement of measurements) {
-        expect(measurement).not.toHaveBeenCalled();
-      }
+      expect(textarea.parentElement).not.toHaveClass('is-multiline');
+      expect(textarea.style.height).toBe('44px');
     } finally {
-      for (const measurement of measurements) {
-        measurement.mockRestore();
-      }
+      computedStyles.mockRestore();
     }
   });
 
@@ -214,6 +251,23 @@ describe('ChatComposer', () => {
 
     fireEvent.click(stopButton);
     expect(props.onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { contextText: 'claude-sonnet-4-6 · high' },
+    { showStop: true },
+  ])('remeasures the editor when surrounding controls change: %j', (overrides) => {
+    const composer = renderComposer({ draft: 'same draft' });
+    const textarea = screen.getByTestId('composer-textarea');
+    const measureHeight = vi.fn(() => 52);
+    Object.defineProperties(textarea, {
+      clientHeight: { configurable: true, value: 52 },
+      scrollHeight: { configurable: true, get: measureHeight },
+    });
+
+    composer.rerenderComposer(overrides);
+
+    expect(measureHeight).toHaveBeenCalled();
   });
 
   it('renders attachment previews and slash command suggestions', () => {

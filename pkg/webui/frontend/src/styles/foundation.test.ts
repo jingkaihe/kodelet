@@ -1,5 +1,40 @@
+import path from 'node:path';
+import postcss from 'postcss';
+import tailwindcss from 'tailwindcss';
+import loadConfig from 'tailwindcss/loadConfig';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import foundationStyles from './foundation.css?raw';
+
+describe('Generated component styles', () => {
+  it('excludes unused DaisyUI selectors that scan the transcript on textarea edits', async () => {
+    const config = loadConfig(path.resolve('tailwind.config.js'));
+    const result = await postcss([
+      tailwindcss({
+        ...config,
+        content: [
+          {
+            // Tailwind detects these prose and method names as class candidates.
+            raw: `// A custom modal dialog
+const text = lines.join(' ');
+const classes = 'btn flex';`,
+            extension: 'tsx',
+          },
+        ],
+      }),
+    ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
+    const selectors: string[] = [];
+    result.root.walkRules((rule) => {
+      selectors.push(rule.selector);
+    });
+
+    expect(
+      selectors.filter((selector) => selector.includes(':has(') && /:root|\.join\b/.test(selector))
+    ).toEqual([]);
+    expect(selectors).toContain('.btn');
+    expect(selectors).toContain('.flex');
+    expect(result.css).toContain('[data-theme=gruvbox-dark]');
+  });
+});
 
 describe('Text-entry typography', () => {
   let stylesheet: HTMLStyleElement;

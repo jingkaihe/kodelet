@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  // Prose mentioning modal dialogs and JS .join() calls are not DaisyUI components.
+  // Their unused :has() rules make Chromium rescan long transcripts on textarea edits.
+  blocklist: ['modal', 'join'],
   theme: {
     extend: {
       fontFamily: {

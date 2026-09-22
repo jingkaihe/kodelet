@@ -98,6 +98,96 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   onSubmit,
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const controlGridRef = React.useRef<HTMLDivElement | null>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const [multiline, setMultiline] = React.useState(() => draft.includes('\n'));
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(contextText): Context text changes the available editor width and must trigger layout measurement.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(placeholder): The empty editor must resize when its placeholder changes or wraps.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(showStop): Showing the stop control changes the available editor width and must trigger layout measurement.
+  const syncEditorLayout = React.useCallback(() => {
+    const controlGrid = controlGridRef.current;
+    const editor = textareaRef.current;
+    if (!controlGrid || !editor) {
+      return;
+    }
+
+    const hasExplicitLineBreak = draft.includes('\n');
+    const singleLineDraftStillFits =
+      !hasExplicitLineBreak &&
+      !controlGrid.classList.contains('is-multiline') &&
+      editor.clientHeight > 0 &&
+      editor.scrollHeight <= editor.clientHeight + 1;
+    if (singleLineDraftStillFits) {
+      return;
+    }
+
+    controlGrid.classList.remove('is-multiline');
+
+    editor.style.height = '0px';
+    const singleLineStyles = window.getComputedStyle(editor);
+    const singleLineMinHeight = Number.parseFloat(singleLineStyles.minHeight);
+    const measuredSingleLineHeight = editor.scrollHeight;
+    const hasLayoutMetrics =
+      Number.isFinite(singleLineMinHeight) &&
+      singleLineMinHeight > 0 &&
+      measuredSingleLineHeight > 0;
+    const nextMultiline =
+      hasExplicitLineBreak ||
+      (hasLayoutMetrics && measuredSingleLineHeight > singleLineMinHeight + 1);
+
+    controlGrid.classList.toggle('is-multiline', nextMultiline);
+    editor.style.height = '0px';
+    const finalStyles = window.getComputedStyle(editor);
+    const minHeight = Number.parseFloat(finalStyles.minHeight);
+    const maxHeight = Number.parseFloat(finalStyles.maxHeight);
+    const naturalHeight = editor.scrollHeight;
+
+    if (Number.isFinite(minHeight) && minHeight > 0 && naturalHeight > 0) {
+      const constrainedMaxHeight =
+        Number.isFinite(maxHeight) && maxHeight > 0 ? maxHeight : Number.POSITIVE_INFINITY;
+      const nextHeight = Math.min(Math.max(naturalHeight, minHeight), constrainedMaxHeight);
+      editor.style.height = `${nextHeight}px`;
+      editor.style.overflowY = naturalHeight > constrainedMaxHeight ? 'auto' : 'hidden';
+    } else {
+      editor.style.height = '';
+      editor.style.overflowY = '';
+    }
+
+    setMultiline((currentValue) => (currentValue === nextMultiline ? currentValue : nextMultiline));
+  }, [contextText, draft, placeholder, showStop]);
+
+  React.useLayoutEffect(() => {
+    syncEditorLayout();
+  }, [syncEditorLayout]);
+
+  React.useEffect(() => {
+    const controlGrid = controlGridRef.current;
+    let observedWidth = controlGrid?.getBoundingClientRect().width ?? 0;
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' && controlGrid
+        ? new ResizeObserver(([entry]) => {
+            const nextWidth = entry?.contentRect.width ?? 0;
+            if (Math.abs(nextWidth - observedWidth) < 0.5) {
+              return;
+            }
+            observedWidth = nextWidth;
+            syncEditorLayout();
+          })
+        : null;
+
+    if (controlGrid && resizeObserver) {
+      resizeObserver.observe(controlGrid);
+    }
+    window.addEventListener('resize', syncEditorLayout);
+    window.visualViewport?.addEventListener('resize', syncEditorLayout);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', syncEditorLayout);
+      window.visualViewport?.removeEventListener('resize', syncEditorLayout);
+    };
+  }, [syncEditorLayout]);
 
   const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -201,8 +291,10 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
             </div>
           ) : null}
 
-          <div className="composer-control-grid">
-            {/* A fixed row count avoids forced layout measurements while typing. */}
+          <div
+            className={cn('composer-control-grid', multiline && 'is-multiline')}
+            ref={controlGridRef}
+          >
             <textarea
               className="composer-editor"
               data-testid="composer-textarea"
@@ -211,7 +303,8 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
               onKeyDown={onDraftKeyDown}
               onPaste={onPaste}
               placeholder={placeholder}
-              rows={3}
+              ref={textareaRef}
+              rows={1}
               value={draft}
             />
 
@@ -231,6 +324,8 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                 />
               </button>
             </div>
+
+            <div className="composer-footer-divider" />
 
             <div className="composer-context-cluster">
               {contextIsStatic ? (

@@ -85,13 +85,22 @@ const meta = {
         expect(actions.left - context.right).toBeGreaterThanOrEqual(minimumGap - 1);
       }
 
-      const editorRect = editor.getBoundingClientRect();
-      expect(Math.abs(editorRect.left - leading.left)).toBeLessThan(1);
-      expect(Math.abs(editorRect.right - submit.right)).toBeLessThan(1);
-      expect(editorRect.bottom).toBeLessThanOrEqual(submit.top);
-      expect(leading.height).toBeGreaterThanOrEqual(44);
-      if (!args.draft) {
-        expect(editor.scrollHeight).toBeLessThanOrEqual(editor.clientHeight + 1);
+      if (window.matchMedia('(max-width: 600px)').matches) {
+        const editorRect = editor.getBoundingClientRect();
+        expect(Math.abs(editorRect.left - leading.left)).toBeLessThan(1);
+        expect(Math.abs(editorRect.right - submit.right)).toBeLessThan(1);
+        expect(editorRect.bottom).toBeLessThanOrEqual(submit.top);
+        expect(leading.height).toBeGreaterThanOrEqual(44);
+        if (!args.draft) {
+          expect(editor.scrollHeight).toBeLessThanOrEqual(editor.clientHeight + 1);
+        }
+      } else if (!editor.parentElement?.classList.contains('is-multiline')) {
+        const styles = getComputedStyle(editor);
+        const textCenter =
+          editor.getBoundingClientRect().top +
+          Number.parseFloat(styles.paddingTop) +
+          Number.parseFloat(styles.lineHeight) / 2;
+        expect(Math.abs(textCenter - (submit.y + submit.height / 2))).toBeLessThan(1);
       }
     });
   },
@@ -178,32 +187,6 @@ export const QuickPick: Story = {
 export const Multiline: Story = {
   args: {
     draft: 'Review these points:\n- mobile layout\n- terminal behavior',
-  },
-};
-
-export const ScrollableDraft: Story = {
-  args: { draft: '' },
-  play: async (context) => {
-    await meta.play(context);
-    const editor = within(context.canvasElement).getByTestId('composer-textarea');
-    const grid = editor.parentElement as HTMLDivElement;
-    const editorHeight = editor.getBoundingClientRect().height;
-    const gridHeight = grid.getBoundingClientRect().height;
-
-    await userEvent.type(editor, 'A long wrapped draft. '.repeat(20));
-    expect(editor.getBoundingClientRect().height).toBe(editorHeight);
-    expect(grid.getBoundingClientRect().height).toBe(gridHeight);
-
-    await userEvent.type(editor, '{Enter}Another line.'.repeat(5));
-    expect(editor.getBoundingClientRect().height).toBe(editorHeight);
-    expect(grid.getBoundingClientRect().height).toBe(gridHeight);
-    expect(getComputedStyle(editor).overflowY).toBe('auto');
-    expect(editor.scrollHeight).toBeGreaterThan(editor.clientHeight);
-
-    await userEvent.clear(editor);
-    expect(editor.getBoundingClientRect().height).toBe(editorHeight);
-    expect(grid.getBoundingClientRect().height).toBe(gridHeight);
-    expect(editor.scrollHeight).toBeLessThanOrEqual(editor.clientHeight + 1);
   },
 };
 
