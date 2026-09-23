@@ -283,7 +283,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
 					Role:    string(msg.Role),
-					Content: textBlock.Text,
+					Content: textBlock.Text + webSearchCitationLinks(textBlock.Citations),
 				})
 			}
 
@@ -365,7 +365,7 @@ func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltyp
 			if textBlock := contentBlock.OfText; textBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    string(msg.Role),
-					Content: textBlock.Text,
+					Content: textBlock.Text + webSearchCitationLinks(textBlock.Citations),
 				})
 			}
 			if imageBlock := contentBlock.OfImage; imageBlock != nil {

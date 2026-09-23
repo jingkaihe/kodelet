@@ -626,6 +626,10 @@ func (t *Thread) processMessageExchange(
 	if err := t.validateThinkingConfigForModel(model); err != nil {
 		return "", false, err
 	}
+	requestTools, err := t.requestTools(opt)
+	if err != nil {
+		return "", false, err
+	}
 
 	// Prepare message parameters
 	messageParams := anthropic.MessageNewParams{
@@ -633,7 +637,7 @@ func (t *Thread) processMessageExchange(
 		System:    systemPromptBlocks,
 		Messages:  t.messages,
 		Model:     model,
-		Tools:     toAnthropicTools(t.tools(opt), t.useSubscription),
+		Tools:     requestTools,
 	}
 	if thinkingConfig, ok := t.thinkingConfigForModel(model); ok {
 		messageParams.Thinking = thinkingConfig
@@ -661,7 +665,54 @@ func (t *Thread) processMessageExchange(
 	// Check if handler supports streaming for skipping post-stream calls
 	_, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
 
-	response, err := t.NewMessage(ctx, messageParams, handler, opt)
+	var toolBlocks []struct {
+		block   anthropic.ContentBlockUnion
+		variant anthropic.ToolUseBlock
+	}
+	var response *anthropic.Message
+	for request := 0; ; request++ {
+		response, err = t.NewMessage(ctx, messageParams, handler, opt)
+		if err != nil {
+			break
+		}
+		t.messages = append(t.messages, response.ToParam())
+		t.updateUsage(response, model)
+		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+			usageHandler.HandleUsage(t.GetUsage())
+		}
+		err = webSearchResponseError(response)
+		if err != nil {
+			break
+		}
+		for _, block := range response.Content {
+			switch variant := block.AsAny().(type) {
+			case anthropic.TextBlock:
+				text := variant.Text + webSearchCitationLinks(variant.ToParam().Citations)
+				if !isStreamingHandler {
+					handler.HandleText(text)
+				}
+				finalOutput += text
+			case anthropic.ThinkingBlock:
+				if !isStreamingHandler {
+					handler.HandleThinking(variant.Thinking)
+				}
+			case anthropic.ToolUseBlock:
+				toolBlocks = append(toolBlocks, struct {
+					block   anthropic.ContentBlockUnion
+					variant anthropic.ToolUseBlock
+				}{block, variant})
+			}
+		}
+		if response.StopReason != anthropic.StopReasonPauseTurn {
+			break
+		}
+		if request == 2 {
+			err = errors.New("Anthropic server-tool turn did not finish within 3 requests")
+			break
+		}
+		// Continue the paused turn unchanged, without compaction or a new user message.
+		messageParams.Messages = t.messages
+	}
 	if err != nil {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 			t.SaveConversation(ctx)
@@ -674,39 +725,6 @@ func (t *Thread) processMessageExchange(
 		attribute.Int("input_tokens", int(response.Usage.InputTokens)),
 		attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
 	)
-
-	// Add the assistant response to history
-	t.messages = append(t.messages, response.ToParam())
-
-	t.updateUsage(response, model)
-	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
-		usageHandler.HandleUsage(t.GetUsage())
-	}
-
-	// Process the response content blocks - first pass: handle text/thinking, collect tool blocks
-	var toolBlocks []struct {
-		block   anthropic.ContentBlockUnion
-		variant anthropic.ToolUseBlock
-	}
-
-	for _, block := range response.Content {
-		switch variant := block.AsAny().(type) {
-		case anthropic.TextBlock:
-			if !isStreamingHandler {
-				handler.HandleText(variant.Text)
-			}
-			finalOutput = variant.Text
-		case anthropic.ThinkingBlock:
-			if !isStreamingHandler {
-				handler.HandleThinking(variant.Thinking)
-			}
-		case anthropic.ToolUseBlock:
-			toolBlocks = append(toolBlocks, struct {
-				block   anthropic.ContentBlockUnion
-				variant anthropic.ToolUseBlock
-			}{block, variant})
-		}
-	}
 
 	// Execute tools in parallel - handler calls (HandleToolUse/HandleToolResult) happen inside
 	// as each tool completes for real-time feedback
@@ -1155,6 +1173,11 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			return nil, stream.Err()
 		}
 
+		if event.Type == "content_block_stop" {
+			// Tool input is complete now; report it before waiting for the search result.
+			handleWebSearchProgress(handler, message.Content[event.Index])
+		}
+
 		if streamHandler, ok := handler.(llmtypes.StreamingMessageHandler); ok {
 			switch eventVariant := event.AsAny().(type) {
 			case anthropic.ContentBlockStartEvent:
@@ -1171,6 +1194,11 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 					streamHandler.HandleThinkingDelta(deltaVariant.Thinking)
 				}
 			case anthropic.ContentBlockStopEvent:
+				if block := message.Content[eventVariant.Index]; block.Type == "text" {
+					if links := webSearchCitationLinks(block.AsText().ToParam().Citations); links != "" {
+						streamHandler.HandleTextDelta(links)
+					}
+				}
 				if inThinkingBlock {
 					streamHandler.HandleThinkingBlockEnd()
 					inThinkingBlock = false

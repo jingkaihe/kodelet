@@ -9,6 +9,14 @@ import (
 
 const extensionAllowedToolsMetadataKey = "allowed_tools"
 
+// ToolAllowedForThread checks host/request restrictions and extension tool-list patches.
+// Provider-native tools must use this gate because they bypass the runner tool catalog.
+func ToolAllowedForThread(thread llmtypes.Thread, name string) bool {
+	allowed := currentAllowedTools(thread)
+	return thread.GetConfig().EnvironmentOptions().ToolAllowed(name) &&
+		(allowed == nil || slices.Contains(allowed, name))
+}
+
 // AvailableTools returns tools from state while handling disabled tool use and nil state.
 func AvailableTools(state tooltypes.State, noToolUse bool) []tooltypes.Tool {
 	return availableTools(state, noToolUse, nil)

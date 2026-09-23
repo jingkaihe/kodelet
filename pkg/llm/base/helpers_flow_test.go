@@ -223,7 +223,7 @@ func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
 func TestAgentInitAllowedToolsUsesEffectiveStateToolsByDefault(t *testing.T) {
 	state := &toolState{tools: []tooltypes.Tool{namedTool("file_read"), nil, namedTool("bash")}}
 
-	assert.Equal(t, []string{"file_read", "bash", "openai_web_search"}, agentInitAllowedTools(llmtypes.Config{}, state))
+	assert.Equal(t, []string{"file_read", "bash", "openai_web_search", "anthropic_web_search"}, agentInitAllowedTools(llmtypes.Config{}, state))
 	assert.Equal(t, []string{"file_read"}, agentInitAllowedTools(llmtypes.Config{AllowedTools: []string{"file_read"}}, state))
 	assert.Empty(t, agentInitAllowedTools(llmtypes.Config{}, nil))
 }

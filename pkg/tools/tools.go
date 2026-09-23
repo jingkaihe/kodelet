@@ -45,6 +45,7 @@ var toolRegistry = map[string]tooltypes.Tool{
 
 var virtualToolNames = []string{
 	"openai_web_search",
+	"anthropic_web_search",
 }
 
 // VirtualToolNames returns tool names that are exposed directly by providers
