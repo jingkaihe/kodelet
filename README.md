@@ -4,17 +4,11 @@
 
 <h1 align="center">Kodelet</h1>
 
-[Kodelet](https://kodelet.com/) is an open-source coding agent that isn't tied to your laptop or terminal session. You can run Kodelet entirely on your laptop or use a remote server to coordinate multiple agents across remote machines.
+<p align="center">A minimal, extensible coding agent that outlives your terminal.</p>
 
-The terminal UI, Web UI, and [ACP](https://agentclientprotocol.com/)-compatible editors connect to the same agent, which keeps working even when you switch clients or disconnect. A powerful extension system, MCP integrations, and agent skills let you tailor the agent's behavior, while identity-based sign-in controls access to your server.
+[Kodelet](https://kodelet.com/) runs agentic loops on a server instead of your terminal session. Start a task in the terminal, pick it up in the browser or an editor that supports [ACP](https://agentclientprotocol.com/), and disconnect whenever you like. Keep everything on your laptop, or host the server remotely and send work to [runners](docs/MANUAL.md#workspace-bound-runners) on other machines.
 
-## Why Kodelet?
-
-- **Run locally or across remote machines.** Kodelet separates the backend that runs the agentic loops from the runners that access files and execute tools, allowing one backend to coordinate multiple agent runs across different machines. You can keep everything local or host both the backend and runners remotely so work continues when your laptop is offline.
-- **Move between clients without interrupting the agent.** The TUI, Web UI, and ACP-compatible editors connect to the same backend so you can start a task in the terminal and follow the same conversation in your browser without restarting it. The backend manages the agent's lifetime independently of these clients, which means closing your terminal or browser doesn't stop the work.
-- **Customize how the agent works.** Extensions let you change the agent's behavior by adding custom tools and commands or responding to lifecycle events. The SDK MCP extension brings MCP tools into this system alongside your own extensions, while skills and recipes provide specialist instructions and reusable prompts that you can package with extensions as plugins to install and share.
-- **Sign in through your identity provider.** Kodelet supports OpenID Connect (OIDC) so you can use your existing identity to sign in on the web and approve access for CLI, TUI, and ACP clients through your browser. You can restrict access to specific email addresses or domains and assign roles to control who can use the server's terminal or administer runners.
-- **Choose the model for each task.** Kodelet works with Anthropic Claude, OpenAI, and OpenAI-compatible endpoints using your own credentials. Model profiles let you select a model and its settings for each conversation so you can adjust how the agent reasons to suit the work you're doing.
+Kodelet comes with a minimal core but is highly customizable through its powerful [extension system](docs/extension-design.md). Add custom tools and commands, intercept prompts and tool calls, build interactive terminal widgets, or plug in MCP servers, using TypeScript, Python, or any language that speaks JSON-RPC. Bring your own Claude, OpenAI, or OpenAI-compatible models, add skills for specialist know-how, and control access with sign-in through your identity provider.
 
 ## Get started
 
