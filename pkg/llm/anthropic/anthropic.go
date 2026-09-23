@@ -689,7 +689,7 @@ func (t *Thread) processMessageExchange(
 			case anthropic.TextBlock:
 				text := variant.Text + webSearchCitationLinks(variant.ToParam().Citations)
 				if !isStreamingHandler {
-					handler.HandleText(text)
+					handleWebSearchText(handler, variant.ToParam())
 				}
 				finalOutput += text
 			case anthropic.ThinkingBlock:
@@ -1138,6 +1138,10 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	}
 
 	message := anthropic.Message{}
+	// Native citations arrive after text deltas; deliver complete search text blocks.
+	bufferText := slices.ContainsFunc(params.Tools, func(tool anthropic.ToolUnionParam) bool {
+		return tool.OfWebSearchTool20250305 != nil
+	})
 	inThinkingBlock := false
 	completed := false
 	for stream.Next() {
@@ -1189,13 +1193,17 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			case anthropic.ContentBlockDeltaEvent:
 				switch deltaVariant := eventVariant.Delta.AsAny().(type) {
 				case anthropic.TextDelta:
-					streamHandler.HandleTextDelta(deltaVariant.Text)
+					if !bufferText {
+						streamHandler.HandleTextDelta(deltaVariant.Text)
+					}
 				case anthropic.ThinkingDelta:
 					streamHandler.HandleThinkingDelta(deltaVariant.Thinking)
 				}
 			case anthropic.ContentBlockStopEvent:
 				if block := message.Content[eventVariant.Index]; block.Type == "text" {
-					if links := webSearchCitationLinks(block.AsText().ToParam().Citations); links != "" {
+					if bufferText {
+						handleWebSearchText(handler, block.AsText().ToParam())
+					} else if links := webSearchCitationLinks(block.AsText().ToParam().Citations); links != "" {
 						streamHandler.HandleTextDelta(links)
 					}
 				}

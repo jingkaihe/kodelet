@@ -74,7 +74,7 @@ func TestNativeWebSearchExchange(t *testing.T) {
 	const searchCall = `{"type":"server_tool_use","id":"search-1","name":"web_search","input":{"query":"evidence"}}`
 	const searchResult = `{"type":"web_search_tool_result","tool_use_id":"search-1","content":[{"type":"web_search_result","url":"https://example.com","title":"Source","encrypted_content":"private-results"}]}`
 	const answer = `{"type":"text","text":"Finding.","citations":[{"type":"web_search_result_location","url":"https://example.com/a(b)","title":null,"encrypted_index":"private-index","cited_text":"Evidence"}]}`
-	const pausedAnswer = `{"type":"text","text":"Earlier finding. ","citations":[{"type":"web_search_result_location","url":"https://example.org/earlier","title":null,"encrypted_index":"earlier-index","cited_text":"Earlier evidence"}]}`
+	const pausedAnswer = `{"type":"text","text":"Earlier finding. ","citations":[{"type":"web_search_result_location","url":"https://example.org/earlier","title":"Earlier source","encrypted_index":"earlier-index","cited_text":"Earlier evidence"}]}`
 	const searchError = `{"type":"web_search_tool_result","tool_use_id":"search-1","content":{"type":"web_search_tool_result_error","error_code":"unavailable"}}`
 	for _, tc := range []struct {
 		name      string
@@ -211,6 +211,16 @@ func TestNativeWebSearchExchange(t *testing.T) {
 			}
 			assert.Equal(t, wantOutput, output)
 			assert.Contains(t, handler.CollectedText(), "Finding. [source](<https://example.com/a(b)>)")
+			if !tc.nonstream {
+				wantBlocks := `{"text":"Research: ","citations":[]},{"text":"Finding.","citations":[{"url":"https://example.com/a(b)","cited_text":"Evidence"}]}`
+				if len(tc.blocks) > 1 {
+					wantBlocks = `{"text":"Earlier finding. ","citations":[{"url":"https://example.org/earlier","title":"Earlier source","cited_text":"Earlier evidence"}]},` + wantBlocks
+				}
+				data, err := json.Marshal(handler.textData)
+				require.NoError(t, err)
+				assert.JSONEq(t, "["+wantBlocks+"]", string(data))
+				assert.Equal(t, wantOutput, strings.Join(handler.texts, ""), "emit complete blocks without duplicate text deltas")
+			}
 			require.Len(t, requests, len(tc.blocks))
 			require.Len(t, requests[0].Tools, 1)
 			require.NotNil(t, requests[0].Tools[0].OfWebSearchTool20250305)
@@ -237,6 +247,14 @@ type searchProgressHandler struct {
 	reported chan string
 	progress []string
 	results  []tooltypes.ToolResult
+	texts    []string
+	textData []any
+}
+
+func (h *searchProgressHandler) HandleStructuredText(text string, data any) {
+	h.texts = append(h.texts, text)
+	h.textData = append(h.textData, data)
+	h.HandleText(text)
 }
 
 func (h *searchProgressHandler) HandleToolUse(id, name, input string) {

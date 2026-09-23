@@ -98,6 +98,7 @@ type ChatEvent struct {
 	Role              string                          `json:"role,omitempty"`
 	Delta             string                          `json:"delta,omitempty"`
 	Content           any                             `json:"content,omitempty"`
+	TextData          any                             `json:"text_data,omitempty"`
 	Usage             *llmtypes.Usage                 `json:"usage,omitempty"`
 	Compaction        *llmtypes.CompactionMarker      `json:"compaction,omitempty"`
 	BeforeCurrentUser bool                            `json:"before_current_user,omitempty"`
@@ -1479,6 +1480,10 @@ func (h *chatMessageHandler) sendEvent(event ChatEvent) {
 }
 
 func (h *chatMessageHandler) HandleText(text string) {
+	h.HandleStructuredText(text, nil)
+}
+
+func (h *chatMessageHandler) HandleStructuredText(text string, data any) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -1486,6 +1491,7 @@ func (h *chatMessageHandler) HandleText(text string) {
 	event := ChatEvent{
 		Kind:           "text",
 		Content:        text,
+		TextData:       data,
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}

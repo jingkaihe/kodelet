@@ -15,6 +15,35 @@ import (
 
 const anthropicSearchToolName = "anthropic_web_search"
 
+type webSearchCitation struct {
+	URL       string `json:"url"`
+	Title     string `json:"title,omitempty"`
+	CitedText string `json:"cited_text"`
+}
+
+type webSearchTextBlock struct {
+	Text      string              `json:"text"`
+	Citations []webSearchCitation `json:"citations"`
+}
+
+func handleWebSearchText(handler llmtypes.MessageHandler, text anthropic.TextBlockParam) {
+	rendered := text.Text + webSearchCitationLinks(text.Citations)
+	structured, ok := handler.(llmtypes.StructuredTextMessageHandler)
+	if !ok {
+		handler.HandleText(rendered)
+		return
+	}
+	block := webSearchTextBlock{Text: text.Text, Citations: []webSearchCitation{}}
+	for _, citation := range text.Citations {
+		if source := citation.OfWebSearchResultLocation; source != nil {
+			block.Citations = append(block.Citations, webSearchCitation{
+				URL: source.URL, Title: source.Title.Value, CitedText: source.CitedText,
+			})
+		}
+	}
+	structured.HandleStructuredText(rendered, block)
+}
+
 func (t *Thread) requestTools(opt llmtypes.MessageOpt) ([]anthropic.ToolUnionParam, error) {
 	tools := toAnthropicTools(t.tools(opt), t.useSubscription)
 	// Explicit opt-in lets an extension profile search without enabling it for the parent.

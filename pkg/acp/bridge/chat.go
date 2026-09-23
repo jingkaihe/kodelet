@@ -68,7 +68,7 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		}
 	case "text":
 		if text := chatEventText(event); text != "" {
-			s.handler.HandleText(text)
+			s.handler.HandleStructuredText(text, event.TextData)
 		}
 	case "text-delta":
 		s.handler.HandleTextDelta(event.Delta)

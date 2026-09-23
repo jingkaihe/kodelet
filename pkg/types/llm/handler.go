@@ -44,6 +44,11 @@ type MessageHandler interface {
 	HandleDone()
 }
 
+// StructuredTextMessageHandler receives machine-readable data alongside display text.
+type StructuredTextMessageHandler interface {
+	HandleStructuredText(text string, data any)
+}
+
 // ToolUpdateMessageHandler can be implemented by message handlers that want
 // transient, accumulated tool result snapshots while a tool is still running.
 // Providers may execute multiple tool calls concurrently, so implementations

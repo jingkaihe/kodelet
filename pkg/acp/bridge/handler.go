@@ -90,13 +90,22 @@ func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID, opt
 
 // HandleText sends complete text as agent_message_chunk
 func (h *ACPMessageHandler) HandleText(text string) {
-	h.sendUpdate(map[string]any{
+	h.HandleStructuredText(text, nil)
+}
+
+// HandleStructuredText keeps display text separate from native result data.
+func (h *ACPMessageHandler) HandleStructuredText(text string, data any) {
+	update := map[string]any{
 		"sessionUpdate": acptypes.UpdateAgentMessageChunk,
 		"content": map[string]any{
 			"type": acptypes.ContentTypeText,
 			"text": text,
 		},
-	})
+	}
+	if data != nil {
+		update["_meta"] = map[string]any{"kodelet/textData": data}
+	}
+	h.sendUpdate(update)
 }
 
 // HandleTextDelta sends streaming text deltas

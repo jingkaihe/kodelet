@@ -72,6 +72,25 @@ func TestACPChatEventSinkTranslatesStreamingEvents(t *testing.T) {
 	assert.Equal(t, acptypes.ToolStatusInProgress, sender.transientUpdates[0].(map[string]any)["status"])
 }
 
+func TestACPChatEventSinkPreservesStructuredText(t *testing.T) {
+	data := json.RawMessage(`{"text":"Finding.","citations":[{"url":"https://example.com","cited_text":"Evidence"}]}`)
+	raw, err := json.Marshal(chat.ChatEvent{
+		Kind: "text", Content: "Finding. [source](<https://example.com>)", TextData: data,
+	})
+	require.NoError(t, err)
+	var event chat.ChatEvent
+	require.NoError(t, json.Unmarshal(raw, &event))
+	sender := &mockSender{}
+	require.NoError(t, NewACPChatEventSink(sender, "session-1").Send(event))
+	require.Len(t, sender.updates, 1)
+	update := sender.updates[0].(map[string]any)
+	assert.Equal(t, acptypes.UpdateAgentMessageChunk, update["sessionUpdate"])
+	assert.Equal(t, event.Content, update["content"].(map[string]any)["text"])
+	payload, err := json.Marshal(update["_meta"].(map[string]any)["kodelet/textData"])
+	require.NoError(t, err)
+	assert.JSONEq(t, string(data), string(payload))
+}
+
 func TestReplayConversationHistory(t *testing.T) {
 	sender := &mockSender{}
 	structured := tooltypes.StructuredToolResult{ToolName: "file_write", Success: true, Timestamp: time.Now()}
