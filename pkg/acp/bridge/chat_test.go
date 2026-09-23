@@ -73,9 +73,17 @@ func TestACPChatEventSinkTranslatesStreamingEvents(t *testing.T) {
 }
 
 func TestACPChatEventSinkPreservesStructuredText(t *testing.T) {
-	data := json.RawMessage(`{"text":"Finding.","citations":[{"url":"https://example.com","cited_text":"Evidence"}]}`)
+	data := json.RawMessage(`{
+		"text": "Finding.",
+		"citations": [{
+			"url": "https://example.com",
+			"cited_text": "Evidence"
+		}]
+	}`)
 	raw, err := json.Marshal(chat.ChatEvent{
-		Kind: "text", Content: "Finding. [source](<https://example.com>)", TextData: data,
+		Kind:     "text",
+		Content:  "Finding. [source](<https://example.com>)",
+		TextData: data,
 	})
 	require.NoError(t, err)
 	var event chat.ChatEvent

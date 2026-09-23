@@ -33,11 +33,16 @@ func handleWebSearchText(handler llmtypes.MessageHandler, text anthropic.TextBlo
 		handler.HandleText(rendered)
 		return
 	}
-	block := webSearchTextBlock{Text: text.Text, Citations: []webSearchCitation{}}
+	block := webSearchTextBlock{
+		Text:      text.Text,
+		Citations: []webSearchCitation{},
+	}
 	for _, citation := range text.Citations {
 		if source := citation.OfWebSearchResultLocation; source != nil {
 			block.Citations = append(block.Citations, webSearchCitation{
-				URL: source.URL, Title: source.Title.Value, CitedText: source.CitedText,
+				URL:       source.URL,
+				Title:     source.Title.Value,
+				CitedText: source.CitedText,
 			})
 		}
 	}
@@ -55,13 +60,16 @@ func (t *Thread) requestTools(opt llmtypes.MessageOpt) ([]anthropic.ToolUnionPar
 		return nil, errors.New("anthropic_web_search is not supported by GitHub Copilot")
 	}
 	return append(tools, anthropic.ToolUnionParam{
-		OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{MaxUses: anthropic.Int(5)},
+		OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{
+			MaxUses: anthropic.Int(5),
+		},
 	}), nil
 }
 
 func webSearchResponseError(response *anthropic.Message) error {
 	for _, block := range response.Content {
-		if result, ok := block.AsAny().(anthropic.WebSearchToolResultBlock); ok && result.Content.ErrorCode != "" {
+		result, ok := block.AsAny().(anthropic.WebSearchToolResultBlock)
+		if ok && result.Content.ErrorCode != "" {
 			return errors.Errorf("Anthropic web search failed: %s", result.Content.ErrorCode)
 		}
 	}
@@ -80,7 +88,10 @@ func handleWebSearchProgress(handler llmtypes.MessageHandler, block anthropic.Co
 		if variant.Content.ErrorCode != "" {
 			result.Error = "Anthropic web search failed: " + string(variant.Content.ErrorCode)
 		} else {
-			result.Result = fmt.Sprintf("Found %d search results", len(variant.Content.OfWebSearchResultBlockArray))
+			result.Result = fmt.Sprintf(
+				"Found %d search results",
+				len(variant.Content.OfWebSearchResultBlockArray),
+			)
 		}
 		handler.HandleToolResult(variant.ToolUseID, "web_search", result)
 	}
@@ -100,7 +111,12 @@ func webSearchCitationLinks(citations []anthropic.TextCitationParamUnion) string
 			continue
 		}
 		seen[*raw] = true
-		safeURL := strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20", "\\", "%5C").Replace(u.String())
+		safeURL := strings.NewReplacer(
+			"<", "%3C",
+			">", "%3E",
+			" ", "%20",
+			"\\", "%5C",
+		).Replace(u.String())
 		links.WriteString(" [source](<" + safeURL + ">)")
 	}
 	return links.String()

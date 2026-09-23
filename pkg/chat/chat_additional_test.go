@@ -1231,6 +1231,8 @@ func TestChatMessageHandlerEmitsStreamingEventsAndBroadcasts(t *testing.T) {
 	handler.HandleThinkingDelta("")
 	handler.HandleThinkingBlockEnd()
 	handler.HandleContentBlockEnd()
+	data := map[string]any{"text": "Finding", "citations": []any{}}
+	handler.HandleStructuredText("Finding", data)
 	handler.HandleDone()
 
 	wantKinds := []string{
@@ -1242,6 +1244,7 @@ func TestChatMessageHandlerEmitsStreamingEventsAndBroadcasts(t *testing.T) {
 		"thinking-delta",
 		"thinking-end",
 		"content-end",
+		"text",
 	}
 	require.Len(t, sink.events, len(wantKinds))
 	require.Len(t, broadcasted, len(wantKinds))
@@ -1256,6 +1259,8 @@ func TestChatMessageHandlerEmitsStreamingEventsAndBroadcasts(t *testing.T) {
 	assert.Equal(t, "bash", sink.events[1].ToolName)
 	assert.Equal(t, "delta", sink.events[3].Delta)
 	assert.Equal(t, "think", sink.events[5].Delta)
+	assert.Equal(t, "Finding", sink.events[8].Content)
+	assert.Equal(t, data, sink.events[8].TextData)
 }
 
 func TestChatContentBlocksForUserInputHandlesURLsAndLocalFiles(t *testing.T) {

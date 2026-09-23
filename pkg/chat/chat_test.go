@@ -328,18 +328,6 @@ func TestChatMessageHandler_HandleUsageDeduplicatesSnapshots(t *testing.T) {
 	assert.Equal(t, "text", sink.events[1].Kind)
 }
 
-func TestChatMessageHandler_HandleStructuredText(t *testing.T) {
-	sink := &recordingChatSink{}
-	handler := &chatMessageHandler{conversationID: "conv-123", sink: sink}
-	data := map[string]any{"text": "Finding", "citations": []any{}}
-	handler.HandleStructuredText("Finding", data)
-	require.Len(t, sink.events, 1)
-	assert.Equal(t, ChatEvent{
-		Kind: "text", Content: "Finding", TextData: data,
-		ConversationID: "conv-123", Role: "assistant",
-	}, sink.events[0])
-}
-
 func TestChatMessageHandler_HandleToolResultBackfillsToolName(t *testing.T) {
 	sink := &recordingChatSink{}
 	handler := &chatMessageHandler{
