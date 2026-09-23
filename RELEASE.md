@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.6.21-beta
+
+Added opt-in Anthropic native web search. Add `anthropic_web_search` to `allowed_tools` to enable up to five server-side searches per request. Searches appear as `web_search` tool calls, and cited sources are shown as links in live output, saved transcripts, and exports. ACP clients also receive the citation URLs, titles, and cited text under `_meta["kodelet/textData"]`. The tool follows runner and extension tool restrictions and is not supported with GitHub Copilot.
+
 ## 0.6.20-beta
 
 Added Claude Opus 5.5 (`claude-opus-5-5`) with always-on adaptive thinking, `xhigh`/`max` reasoning effort, original-detail image viewing, a 1M-token context window, and pricing. Added the `opus-55` alias and made Opus 5.5 the default model in the sample configuration's `anthropic` profile. Updated Claude Sonnet 5 pricing.
