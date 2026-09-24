@@ -494,10 +494,11 @@ func TestOIDCConfigPrincipalRoleAssignment(t *testing.T) {
 
 func TestOIDCConfigNormalizeSets(t *testing.T) {
 	config := OIDCConfig{
-		Scopes:          []string{"openid", " openid ", "email"},
-		AllowedEmails:   []string{"USER@example.com", " user@EXAMPLE.com ", ""},
-		AllowedDomains:  []string{"@Example.com", " example.COM ", ""},
-		SessionDuration: -time.Minute,
+		Scopes:             []string{"openid", " openid ", "email"},
+		AllowedEmails:      []string{"USER@example.com", " user@EXAMPLE.com ", ""},
+		AllowedDomains:     []string{"@Example.com", " example.COM ", ""},
+		SessionDuration:    -time.Minute,
+		CLISessionDuration: -time.Minute,
 	}
 
 	config.normalize()
@@ -506,6 +507,7 @@ func TestOIDCConfigNormalizeSets(t *testing.T) {
 	assert.Equal(t, []string{"user@example.com"}, config.AllowedEmails)
 	assert.Equal(t, []string{"example.com"}, config.AllowedDomains)
 	assert.Equal(t, defaultWebSessionDuration, config.SessionDuration)
+	assert.Equal(t, 14*24*time.Hour, config.CLISessionDuration)
 }
 
 func TestOIDCConfigNormalizeAddsOpenIDToCustomScopes(t *testing.T) {

@@ -141,6 +141,7 @@ const (
 	maxEnrollmentPollsPerWindow         = 8192
 	maxUserLoginStartsPerWindow         = 30
 	maxUserLoginPollsPerWindow          = 8192
+	maxUserRefreshesPerWindow           = 120
 	defaultHTTPShutdownTimeout          = 30 * time.Second
 )
 
@@ -389,6 +390,7 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc(userauth.DeviceVerificationPath, s.handleUserLoginVerificationPage).Methods("GET", "HEAD")
 	s.router.HandleFunc(userauth.DeviceStartPath, s.handleStartUserLogin).Methods("POST")
 	s.router.HandleFunc(userauth.DevicePollPath, s.handlePollUserLogin).Methods("POST")
+	s.router.HandleFunc(userauth.RefreshPath, s.handleRefreshUserCredential).Methods("POST")
 	s.router.HandleFunc(userauth.CurrentCredentialPath, s.handleRevokeCurrentUserCredential).Methods("DELETE")
 	s.router.HandleFunc("/runner/enroll", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentPage)).Methods("GET", "HEAD")
 	s.router.HandleFunc(protocol.EnrollmentStartPath, s.handleStartRunnerEnrollment).Methods("POST")

@@ -15,6 +15,7 @@ import (
 
 	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane"
+	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -336,6 +337,129 @@ func TestPrepareDaemonChatUsesConnectedServerURL(t *testing.T) {
 				assert.Zero(t, statusCalls.Load(), "explicit servers must not use local daemon discovery")
 			}
 		})
+	}
+}
+
+func TestCLIClientsRefreshSavedCredentialsAcrossRequests(t *testing.T) {
+	for _, command := range []string{"chat", "run", "acp", "runner"} {
+		sources := []string{"saved"}
+		if command == "chat" {
+			// Precedence is shared by all entry points; exercise overrides once.
+			sources = append(sources, "flag", "environment")
+		}
+		for _, source := range sources {
+			t.Run(command+"/"+source, func(t *testing.T) {
+				localServerTestState(t)
+				forbidLocalServerSpawn(t)
+				store, err := userauth.NewStore()
+				require.NoError(t, err)
+				hardExpiry := time.Now().UTC().Add(time.Hour)
+				var refreshes atomic.Int32
+				token := func(generation int32) string { return controlPlaneAuthTestBearer(byte(0xa0 + generation)) }
+				refreshToken := func(generation int32) string {
+					return userauth.RefreshTokenPrefix + strings.TrimPrefix(token(generation), userauth.BearerTokenPrefix)
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == userauth.RefreshPath {
+						assert.Equal(t, "saved", source, "explicit tokens must never refresh a stored login")
+						var request userauth.RefreshRequest
+						require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+						assert.Equal(t, refreshToken(refreshes.Load()), request.RefreshToken)
+						generation := refreshes.Add(1)
+						require.NoError(t, json.NewEncoder(w).Encode(userauth.RefreshResponse{
+							CredentialID: "saved-login", BearerToken: token(generation), RefreshToken: refreshToken(generation),
+							AccessExpiresAt: time.Now().UTC().Add(10 * time.Minute), ExpiresAt: hardExpiry,
+						}))
+						return
+					}
+					wantToken := "static-token"
+					if source == "saved" {
+						wantToken = token(refreshes.Load())
+					}
+					assert.Equal(t, "Bearer "+wantToken, r.Header.Get("Authorization"))
+					switch r.URL.Path {
+					case "/api/runners":
+						require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+							ID: "runner", Connected: true, Status: runnerregistry.RunnerStatusIdle,
+							Workspace: protocol.Workspace{Path: "/workspace"},
+						}}}))
+					case "/api/chat/settings":
+						require.NoError(t, json.NewEncoder(w).Encode(chatpkg.ControlPlaneChatSettings{
+							CurrentProfile: "default", DefaultRunnerID: "runner", DefaultRunnerReady: true,
+						}))
+					case "/api/chat/cwd-suggestions":
+						require.NoError(t, json.NewEncoder(w).Encode(protocol.WorkspaceCWDHintsResult{BaseDir: "/workspace"}))
+					default:
+						t.Errorf("unexpected endpoint: %s", r.URL.Path)
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+				credential := controlPlaneAuthTestCredential(server.URL, "saved-login", token(0), controlPlaneAuthTestPrincipal("user", "user@example.com"), hardExpiry)
+				credential.RefreshToken = refreshToken(0)
+				credential.AccessExpiresAt = time.Now().UTC().Add(time.Second)
+				require.NoError(t, store.SaveCredential(credential))
+				cmd := remoteRunCommandForTest()
+				cmd.Use = command
+				require.NoError(t, cmd.Flags().Set("server", server.URL))
+				require.NoError(t, cmd.Flags().Set("runner", "runner"))
+				switch source {
+				case "flag":
+					require.NoError(t, cmd.Flags().Set("auth-token", "static-token"))
+				case "environment":
+					t.Setenv(controlPlaneAuthTokenEnv, "static-token")
+				}
+				var client *chatpkg.Client
+				var query func() error
+				switch command {
+				case "chat":
+					cmd.Flags().String("theme", tui.AutoThemeName, "")
+					config, err := prepareDaemonChat(t.Context(), cmd)
+					require.NoError(t, err)
+					client = config.Runner.(*configuredChatRunner).Client
+				case "run":
+					serverURL, bearer, err := prepareClientServer(t.Context(), cmd)
+					require.NoError(t, err)
+					client, err = prepareOneShotRunner(t.Context(), cmd, serverURL, bearer, &chatpkg.ChatRequest{})
+					require.NoError(t, err)
+				case "acp":
+					cmd.Flags().String("runner-auth-token", "", "")
+					config, err := remoteACPSessionConfig(t.Context(), cmd, server.URL)
+					require.NoError(t, err)
+					remote, _, err := config.Provider.WaitForRemoteChat(t.Context())
+					require.NoError(t, err)
+					client = remote.(*chatpkg.Client)
+				case "runner":
+					cmd.Flags().Bool("json", true, "")
+					config := runnerQueryConfigFromFlags(cmd)
+					require.NoError(t, config.ConfigError)
+					query = func() error { return runRunnerList(t.Context(), config, io.Discard) }
+					require.NoError(t, query())
+				}
+				if client != nil {
+					query = func() error {
+						_, err := client.ChatSettings(t.Context(), "")
+						return err
+					}
+				}
+				if source == "saved" {
+					assert.EqualValues(t, 1, refreshes.Load(), "setup should proactively refresh")
+				}
+				// Simulate time passing without sleeping or replacing the live CLI client.
+				credential, found, err := store.LoadCredential(server.URL)
+				require.NoError(t, err)
+				require.True(t, found)
+				credential.AccessExpiresAt = time.Now().UTC().Add(-time.Second)
+				require.NoError(t, store.SaveCredential(credential))
+				require.NoError(t, query())
+				require.NoError(t, query())
+				if source == "saved" {
+					assert.EqualValues(t, 2, refreshes.Load(), "reuse the refreshed token until it approaches expiry")
+				} else {
+					assert.Zero(t, refreshes.Load(), "static credentials must not read or refresh the saved login")
+				}
+			})
+		}
 	}
 }
 

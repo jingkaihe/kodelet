@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -18,12 +17,7 @@ var conversationTurnCmd = &cobra.Command{
 }
 
 func runConversationTurnCommand(cmd *cobra.Command, args []string) error {
-	server, _ := serverFlagOrConfig(cmd)
-	token, _, err := resolveControlPlaneAuthToken(cmd, server)
-	if err != nil {
-		return err
-	}
-	client, err := chat.NewClient(server, token, "")
+	client, err := remoteAdministrationClient(cmd)
 	if err != nil {
 		return err
 	}

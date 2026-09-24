@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 17)
+	require.Len(t, migrations, 18)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -43,6 +43,7 @@ func TestAll(t *testing.T) {
 		20260906160000,
 		20260910120000,
 		20260920120000,
+		20260924120000,
 	}, versions)
 }
 
@@ -75,6 +76,9 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableMissing(t, database.DB, "runner_auth_challenges")
 	assertTableExists(t, database.DB, "user_api_credentials")
 	assertTableExists(t, database.DB, "user_login_authorizations")
+	assertTableExists(t, database.DB, "user_access_tokens")
+	assertTableExists(t, database.DB, "user_refresh_tokens")
+	assertColumnExists(t, database.DB, "user_login_authorizations", "refresh_token_sha256")
 	assertColumnExists(t, database.DB, "conversations", "background_processes")
 	assertColumnExists(t, database.DB, "conversations", "cwd")
 	assertColumnExists(t, database.DB, "conversations", "compaction_history")
@@ -135,6 +139,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260906160000,
 		20260910120000,
 		20260920120000,
+		20260924120000,
 	}, versions)
 }
 
@@ -423,6 +428,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"image artifacts down", Migration20260910120000CreateImageArtifacts().Down},
 		{"compaction history up", Migration20260920120000AddCompactionHistory().Up},
 		{"compaction history down", Migration20260920120000AddCompactionHistory().Down},
+		{"user refresh tokens up", Migration20260924120000CreateUserRefreshTokens().Up},
+		{"user refresh tokens down", Migration20260924120000CreateUserRefreshTokens().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -437,6 +444,13 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Refresh rollback leaves legacy families intact but removes the token tables.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "user_access_tokens")
+	assertTableMissing(t, database.DB, "user_refresh_tokens")
+	assertTableExists(t, database.DB, "user_api_credentials")
+	assertColumnMissing(t, database.DB, "user_login_authorizations", "refresh_token_sha256")
 
 	// Removing the display archive leaves active model context and artifacts intact.
 	require.NoError(t, runner.Rollback(ctx, All()))
@@ -516,6 +530,74 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	require.NoError(t, runner.Rollback(ctx, All()))
 	assertTableMissing(t, database.DB, "conversations")
 	assertTableMissing(t, database.DB, "conversation_summaries")
+}
+
+func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
+	database := openMigrationsTestDB(t)
+	runner := db.NewMigrationRunner(database)
+	migrations := All()
+	require.NoError(t, runner.Run(t.Context(), migrations[:len(migrations)-1]))
+	now := time.Now().UTC().Truncate(time.Second)
+	for index, state := range []string{"active", "expired", "revoked"} {
+		hash := make([]byte, 32)
+		hash[0] = byte(index)
+		expiry := now.Add(time.Hour)
+		if state == "expired" {
+			expiry = now.Add(-time.Minute)
+		}
+		var revokedAt any
+		if state == "revoked" {
+			revokedAt = now
+		}
+		_, err := database.ExecContext(t.Context(), `
+			INSERT INTO user_api_credentials (id, token_sha256, issuer, subject, created_at, expires_at, revoked_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, state, hash, "issuer", "subject", now.Add(-time.Hour), expiry, revokedAt)
+		require.NoError(t, err)
+	}
+	require.NoError(t, runner.Run(t.Context(), migrations))
+	var copied, unchangedRevocations, refreshTokens int
+	require.NoError(t, database.GetContext(t.Context(), &copied, `
+		SELECT COUNT(*) FROM user_access_tokens a JOIN user_api_credentials c ON c.id = a.credential_id
+		WHERE a.token_sha256 = c.token_sha256 AND a.created_at = c.created_at AND a.expires_at = c.expires_at
+	`))
+	assert.Equal(t, 3, copied)
+	require.NoError(t, database.GetContext(t.Context(), &unchangedRevocations, `SELECT COUNT(*) FROM user_api_credentials WHERE revoked_at IS NOT NULL`))
+	assert.Equal(t, 1, unchangedRevocations)
+	require.NoError(t, database.GetContext(t.Context(), &refreshTokens, `SELECT COUNT(*) FROM user_refresh_tokens`))
+	assert.Zero(t, refreshTokens)
+
+	for index, name := range []string{"legacy-pending", "refresh-pending"} {
+		hash := make([]byte, 32)
+		hash[0] = byte(index)
+		var refreshHash any
+		if name == "refresh-pending" {
+			refreshHash = hash
+		}
+		_, err := database.ExecContext(t.Context(), `
+			INSERT INTO user_login_authorizations (
+				id, device_code_sha256, user_code, token_sha256, refresh_token_sha256, status,
+				client_name, client_os, client_arch, kodelet_version, poll_interval_seconds, created_at, expires_at
+			) VALUES (?, ?, ?, ?, ?, 'pending', 'kodelet', 'linux', 'amd64', 'test', 5, ?, ?)
+		`, name, hash, name, hash, refreshHash, now, now.Add(time.Minute))
+		require.NoError(t, err)
+	}
+
+	// Rollback must not turn an initial short access token back into a long-lived bearer.
+	_, err := database.ExecContext(t.Context(), `
+		INSERT INTO user_refresh_tokens (token_sha256, credential_id, created_at)
+		VALUES (?, 'active', ?)
+	`, make([]byte, 32), now)
+	require.NoError(t, err)
+	require.NoError(t, runner.Rollback(t.Context(), migrations))
+	var reason string
+	require.NoError(t, database.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = 'active' AND revoked_at IS NOT NULL`))
+	assert.Equal(t, "token schema rollback", reason)
+	var pending, expired int
+	require.NoError(t, database.GetContext(t.Context(), &pending, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'legacy-pending' AND status = 'pending'`))
+	assert.Equal(t, 1, pending)
+	require.NoError(t, database.GetContext(t.Context(), &expired, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'refresh-pending' AND status = 'expired'`))
+	assert.Equal(t, 1, expired)
 }
 
 func openMigrationsTestDB(t *testing.T) *sqlx.DB {

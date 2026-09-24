@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"slices"
@@ -186,14 +187,17 @@ func remoteRunExecutionOptions(cmd *cobra.Command, ignoredFlags ...string) (*llm
 }
 
 func prepareOneShotRunner(ctx context.Context, cmd *cobra.Command, server, token string, request *chat.ChatRequest) (*chat.Client, error) {
+	httpClient, err := controlPlaneHTTPClient(cmd, server, &http.Client{})
+	if err != nil {
+		return nil, err
+	}
 	selector, _ := cmd.Flags().GetString("runner")
 	var runner *chat.Client
 	var defaultCWD string
-	var err error
 	if strings.TrimSpace(selector) != "" {
-		runner, defaultCWD, err = prepareRemoteChatRunner(ctx, &ChatConfig{Server: server, AuthToken: token, Runner: selector})
+		runner, defaultCWD, err = prepareRemoteChatRunner(ctx, &ChatConfig{Server: server, AuthToken: token, Runner: selector, HTTPClient: httpClient})
 	} else {
-		runner, err = chat.NewClient(server, token, "")
+		runner, err = chat.NewClient(server, token, "", chat.WithHTTPClient(httpClient))
 	}
 	if err != nil {
 		return nil, err

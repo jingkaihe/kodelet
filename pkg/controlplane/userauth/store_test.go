@@ -171,6 +171,12 @@ func TestStoreLoadsExpiredStateButRejectsTampering(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, payload, 0o600))
 	_, _, err = store.LoadCredential(server)
 	require.ErrorContains(t, err, "unknown field")
+
+	expiredCredential.RefreshToken, err = GenerateRefreshToken()
+	require.NoError(t, err)
+	require.ErrorContains(t, store.SaveCredential(expiredCredential), "access token expiry")
+	expiredCredential.AccessExpiresAt = expiredCredential.ExpiresAt.Add(time.Second)
+	require.ErrorContains(t, store.SaveCredential(expiredCredential), "access token expiry")
 }
 
 func TestStoreConcurrentWritesRemainValid(t *testing.T) {

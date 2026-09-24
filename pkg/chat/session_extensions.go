@@ -48,19 +48,42 @@ func (r *Client) AttachSessionExtensions(ctx context.Context, conversationID, ru
 	if err != nil {
 		return nil, err
 	}
-	request := &http.Request{Header: make(http.Header)}
+	connectCtx, cancelConnect := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelConnect()
+	httpEndpoint, err := controlplaneurl.Endpoint(r.baseURL, strings.Split(strings.Trim(protocol.SessionExtensionsEndpoint, "/"), "/")...)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(connectCtx, http.MethodGet, httpEndpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create session-extension handshake")
+	}
 	r.authorize(request)
+	// Gorilla does not use an http.Client. Refresh-capable transports expose
+	// the same pre-request credential check for this upgrade handshake.
+	if authorizer, ok := r.client.Transport.(interface{ AuthorizeRequest(*http.Request) error }); ok {
+		if err := authorizer.AuthorizeRequest(request); err != nil {
+			return nil, errors.Wrap(err, "failed to authenticate session-extension handshake")
+		}
+	}
 	request.Header.Set(ClientIDHeader, r.clientID)
 	dialer := *websocket.DefaultDialer
 	dialer.Subprotocols = []string{protocol.SessionExtensionsSubprotocol}
-	connectCtx, cancelConnect := context.WithTimeout(ctx, 15*time.Second)
-	defer cancelConnect()
 	conn, response, err := dialer.DialContext(connectCtx, endpoint, request.Header)
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to attach session extensions; check the server connection and session-extension support")
+		if ctxErr := connectCtx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(ctxErr, "failed to attach session extensions")
+		}
+		message := err.Error()
+		for _, token := range []string{r.authToken, strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")} {
+			if token != "" {
+				message = strings.ReplaceAll(message, token, "[REDACTED]")
+			}
+		}
+		return nil, errors.Errorf("failed to attach session extensions; check the server connection and session-extension support: %s", message)
 	}
 	if conn.Subprotocol() != protocol.SessionExtensionsSubprotocol {
 		_ = conn.Close()

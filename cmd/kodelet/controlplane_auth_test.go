@@ -436,6 +436,7 @@ func TestRunControlPlaneAuthLogoutCredentialLifecycle(t *testing.T) {
 		bearer := controlPlaneAuthTestBearer(0x62)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			assert.Equal(t, "Bearer "+bearer, request.Header.Get("Authorization"))
+			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 			writeControlPlaneAuthJSON(t, w, http.StatusUnauthorized, map[string]string{"error": "revoked " + bearer})
 		}))
 		t.Cleanup(server.Close)
@@ -798,6 +799,128 @@ func setControlPlaneAuthServerConfigForTest(t *testing.T, value string) {
 		}
 		viper.Set("server", nil)
 	})
+}
+
+func TestControlPlaneAuthCommandsRefreshExpiredAccess(t *testing.T) {
+	for _, command := range []string{"login", "status", "logout", "logout revoked"} {
+		t.Run(command, func(t *testing.T) {
+			store, err := userauth.NewStoreAt(t.TempDir())
+			require.NoError(t, err)
+			refresh, err := userauth.GenerateRefreshToken()
+			require.NoError(t, err)
+			nextRefresh, err := userauth.GenerateRefreshToken()
+			require.NoError(t, err)
+			oldBearer := controlPlaneAuthTestBearer(0xa1)
+			newBearer := controlPlaneAuthTestBearer(0xa2)
+			principal := controlPlaneAuthTestPrincipal("refresh-user", "refresh@example.com")
+			hardExpiry := time.Now().UTC().Add(time.Hour)
+			accessExpiry := time.Now().UTC().Add(10 * time.Minute)
+			var refreshCalls, apiCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case userauth.RefreshPath:
+					refreshCalls.Add(1)
+					assert.Equal(t, http.MethodPost, r.Method)
+					assert.Empty(t, r.Header.Get("Authorization"))
+					var request userauth.RefreshRequest
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+					assert.Equal(t, refresh, request.RefreshToken)
+					if command == "logout revoked" {
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					writeControlPlaneAuthJSON(t, w, http.StatusOK, userauth.RefreshResponse{
+						CredentialID: "refresh-session", BearerToken: newBearer,
+						RefreshToken: nextRefresh, AccessExpiresAt: accessExpiry, ExpiresAt: hardExpiry,
+					})
+				case userauth.MePath, userauth.CurrentCredentialPath:
+					apiCalls.Add(1)
+					assert.Equal(t, "Bearer "+newBearer, r.Header.Get("Authorization"))
+					if command == "logout" {
+						assert.Equal(t, userauth.CurrentCredentialPath, r.URL.Path)
+						assert.Equal(t, http.MethodDelete, r.Method)
+						w.WriteHeader(http.StatusNoContent)
+					} else {
+						assert.Equal(t, userauth.MePath, r.URL.Path)
+						writeControlPlaneAuthJSON(t, w, http.StatusOK, principal)
+					}
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			t.Cleanup(server.Close)
+			credential := controlPlaneAuthTestCredential(server.URL, "refresh-session", oldBearer, principal, hardExpiry)
+			credential.RefreshToken = refresh
+			credential.AccessExpiresAt = time.Now().UTC().Add(-time.Minute)
+			require.NoError(t, store.SaveCredential(credential))
+			var output bytes.Buffer
+			switch command {
+			case "login":
+				err = runControlPlaneAuthLogin(t.Context(), controlPlaneAuthLoginConfig{
+					Server: server.URL, Store: store, HTTPClient: server.Client(),
+					OpenBrowser: func(string) error { t.Error("refresh should not open a browser"); return nil },
+				}, &output)
+				assert.Contains(t, output.String(), "Already logged in")
+			case "status":
+				err = runControlPlaneAuthStatus(t.Context(), controlPlaneAuthStatusConfig{
+					Server: server.URL, Store: store, HTTPClient: server.Client(),
+				}, &output)
+				assert.Contains(t, output.String(), "Credential status: valid")
+				assert.Contains(t, output.String(), "Access token expires: "+formatControlPlaneAuthTime(accessExpiry))
+				assert.Contains(t, output.String(), "Expires: "+formatControlPlaneAuthTime(hardExpiry))
+			case "logout", "logout revoked":
+				err = runControlPlaneAuthLogout(t.Context(), controlPlaneAuthLogoutConfig{
+					Server: server.URL, Store: store, HTTPClient: server.Client(),
+				}, &output)
+				assert.Contains(t, output.String(), "Logged out")
+			}
+			require.NoError(t, err)
+			assert.Equal(t, int32(1), refreshCalls.Load())
+			if command == "logout revoked" {
+				assert.Zero(t, apiCalls.Load())
+				assert.Contains(t, output.String(), "revocation could not be confirmed")
+			} else {
+				assert.Equal(t, int32(1), apiCalls.Load())
+			}
+			assertControlPlaneAuthSecretsHidden(t, output.String(), oldBearer, newBearer, refresh, nextRefresh)
+			saved, found, err := store.LoadCredential(server.URL)
+			require.NoError(t, err)
+			if command == "logout" || command == "logout revoked" {
+				assert.False(t, found)
+			} else {
+				require.True(t, found)
+				assert.Equal(t, newBearer, saved.BearerToken)
+				assert.Equal(t, nextRefresh, saved.RefreshToken)
+				assert.True(t, hardExpiry.Equal(saved.ExpiresAt))
+			}
+		})
+	}
+}
+
+func TestControlPlaneAuthStatusInterruptedRefreshRequiresLogin(t *testing.T) {
+	store, err := userauth.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	refresh, err := userauth.GenerateRefreshToken()
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("an interrupted refresh must not be retried")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	credential := controlPlaneAuthTestCredential(server.URL, "interrupted", controlPlaneAuthTestBearer(0xa3),
+		controlPlaneAuthTestPrincipal("user", "user@example.com"), time.Now().UTC().Add(time.Hour))
+	credential.RefreshToken = refresh
+	credential.AccessExpiresAt = time.Now().UTC().Add(time.Minute)
+	credential.RefreshPending = true
+	require.NoError(t, store.SaveCredential(credential))
+	var output bytes.Buffer
+	require.NoError(t, runControlPlaneAuthStatus(t.Context(), controlPlaneAuthStatusConfig{
+		Server: server.URL, Store: store, HTTPClient: server.Client(),
+	}, &output))
+	assert.Contains(t, output.String(), "Credential status: sign-in required")
+	assert.Contains(t, output.String(), "kodelet auth login --server "+server.URL)
+	assertControlPlaneAuthSecretsHidden(t, output.String(), credential.BearerToken, refresh)
 }
 
 func controlPlaneAuthTestBearer(discriminator byte) string {

@@ -57,6 +57,9 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 	rawServer := "http://LOCALHOST:80/base/./"
 	canonicalServer := "http://localhost/base"
 	bearer := testBearerToken(0x91)
+	refresh, err := GenerateRefreshToken()
+	require.NoError(t, err)
+	accessExpiry := clock.now().Add(10 * time.Minute)
 	principal := testPrincipalSnapshot()
 	var startRequest DeviceStartRequest
 	var callbackCalled bool
@@ -83,6 +86,7 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 				VerificationURL:         "https://kodelet.example/auth/device",
 				VerificationURLComplete: "https://kodelet.example/auth/device?user_code=ABCD-EFGH",
 				BearerToken:             bearer,
+				RefreshToken:            refresh,
 				ExpiresAt:               clock.now().Add(10 * time.Minute),
 				PollIntervalMS:          2000,
 			}, nil), nil
@@ -92,10 +96,11 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 			assert.Equal(t, "authorization-new", poll.AuthorizationID)
 			assert.Equal(t, "device-secret-new", poll.DeviceCode)
 			return userAuthJSONResponse(t, http.StatusOK, DevicePollResponse{
-				Status:       DeviceStatusApproved,
-				CredentialID: "credential-new",
-				Principal:    principal,
-				ExpiresAt:    clock.now().Add(24 * time.Hour),
+				Status:          DeviceStatusApproved,
+				CredentialID:    "credential-new",
+				Principal:       principal,
+				ExpiresAt:       clock.now().Add(24 * time.Hour),
+				AccessExpiresAt: accessExpiry,
 			}, nil), nil
 		default:
 			t.Fatalf("unexpected user-auth request path %q", request.URL.Path)
@@ -112,6 +117,7 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 			require.NoError(t, loadErr)
 			require.True(t, found)
 			assert.Equal(t, bearer, pending.BearerToken)
+			assert.Equal(t, refresh, pending.RefreshToken)
 			assert.Equal(t, "device-secret-new", pending.DeviceCode)
 			assert.Equal(t, canonicalServer, info.Server)
 			assert.Equal(t, "ABCD-EFGH", info.UserCode)
@@ -120,6 +126,7 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 			encoded, marshalErr := json.Marshal(info)
 			require.NoError(t, marshalErr)
 			assert.NotContains(t, string(encoded), bearer)
+			assert.NotContains(t, string(encoded), refresh)
 			assert.NotContains(t, string(encoded), pending.DeviceCode)
 			callbackCalled = true
 		},
@@ -133,6 +140,8 @@ func TestLoginStartsPersistsNotifiesAndApproves(t *testing.T) {
 	assert.Equal(t, version.Get().Version, startRequest.KodeletVersion)
 	assert.Equal(t, "credential-new", credential.CredentialID)
 	assert.Equal(t, bearer, credential.BearerToken)
+	assert.Equal(t, refresh, credential.RefreshToken)
+	assert.Equal(t, accessExpiry, credential.AccessExpiresAt)
 	assert.Equal(t, principal, credential.Principal)
 
 	storedCredential, found, err := store.LoadCredential(canonicalServer)

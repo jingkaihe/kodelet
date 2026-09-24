@@ -431,6 +431,22 @@ func TestValidateServeAuthConfig(t *testing.T) {
 			expectedError: "OIDC session duration must be greater than zero",
 		},
 		{
+			name: "OIDC CLI session duration cannot be zero",
+			configure: func(config *ServeConfig) {
+				configureValidOIDC(config, writeOIDCSecretFile(t, "secret"))
+				config.OIDC.CLISessionDuration = 0
+			},
+			expectedError: "OIDC CLI session duration must be greater than zero",
+		},
+		{
+			name: "OIDC CLI session duration cannot be negative",
+			configure: func(config *ServeConfig) {
+				configureValidOIDC(config, writeOIDCSecretFile(t, "secret"))
+				config.OIDC.CLISessionDuration = -time.Hour
+			},
+			expectedError: "OIDC CLI session duration must be greater than zero",
+		},
+		{
 			name: "OIDC enrollment requires an approver",
 			configure: func(config *ServeConfig) {
 				configureValidOIDC(config, writeOIDCSecretFile(t, "secret"))
@@ -608,6 +624,7 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	assert.Equal(t, 0.65, config.CompactRatio)
 	assert.Equal(t, defaultOIDCScopes, config.OIDC.Scopes)
 	assert.Equal(t, defaultOIDCSessionDuration, config.OIDC.SessionDuration)
+	assert.Equal(t, 14*24*time.Hour, config.OIDC.CLISessionDuration)
 }
 
 func TestGetServeConfigFromFlagsRequiresNamedModelProfiles(t *testing.T) {
@@ -762,18 +779,19 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 		"disable_control_plane_workspace": false,
 		"cors_origins":                    []string{"https://app.example.com"},
 		"oidc": map[string]any{
-			"issuer":              "https://issuer.example.com",
-			"client_id":           "kodelet",
-			"client_secret_file":  " /run/secrets/kodelet-oidc ",
-			"redirect_url":        "https://kodelet.example.com/auth/oidc/callback",
-			"scopes":              []string{"openid", "profile", "email", "groups"},
-			"allowed_emails":      []string{"user@example.com"},
-			"allowed_domains":     []string{"example.com"},
-			"admin_emails":        []string{"admin@example.com"},
-			"terminal_emails":     []string{"terminal@example.com"},
-			"runner_admin_emails": []string{"runners@example.com"},
-			"allow_any_user":      true,
-			"session_duration":    "24h",
+			"issuer":               "https://issuer.example.com",
+			"client_id":            "kodelet",
+			"client_secret_file":   " /run/secrets/kodelet-oidc ",
+			"redirect_url":         "https://kodelet.example.com/auth/oidc/callback",
+			"scopes":               []string{"openid", "profile", "email", "groups"},
+			"allowed_emails":       []string{"user@example.com"},
+			"allowed_domains":      []string{"example.com"},
+			"admin_emails":         []string{"admin@example.com"},
+			"terminal_emails":      []string{"terminal@example.com"},
+			"runner_admin_emails":  []string{"runners@example.com"},
+			"allow_any_user":       true,
+			"session_duration":     "24h",
+			"cli_session_duration": "168h",
 		},
 	})
 
@@ -800,6 +818,7 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, []string{"runners@example.com"}, config.OIDC.RunnerAdminEmails)
 	assert.True(t, config.OIDC.AllowAnyUser)
 	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
+	assert.Equal(t, 168*time.Hour, config.OIDC.CLISessionDuration)
 }
 
 func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.T) {
@@ -840,8 +859,10 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 		"auth_token":                      "yaml-token",
 		"disable_control_plane_workspace": true,
 		"oidc": map[string]any{
-			"issuer":         "https://yaml-issuer.example.com",
-			"allow_any_user": true,
+			"issuer":               "https://yaml-issuer.example.com",
+			"allow_any_user":       true,
+			"session_duration":     "24h",
+			"cli_session_duration": "168h",
 		},
 	})
 	cmd := newServeCommandForTest()
@@ -854,6 +875,7 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 		"--disable-control-plane-workspace=false",
 		"--oidc-issuer=https://flag-issuer.example.com",
 		"--oidc-allow-any-user=false",
+		"--oidc-cli-session-duration=72h",
 	}))
 
 	config := getServeConfigFromFlags(cmd)
@@ -865,6 +887,8 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	assert.Equal(t, "flag-token", config.AuthToken)
 	assert.Equal(t, "https://flag-issuer.example.com", config.OIDC.IssuerURL)
 	assert.False(t, config.OIDC.AllowAnyUser)
+	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
+	assert.Equal(t, 72*time.Hour, config.OIDC.CLISessionDuration)
 }
 
 func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testing.T) {

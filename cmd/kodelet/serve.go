@@ -33,7 +33,8 @@ import (
 )
 
 const (
-	defaultOIDCSessionDuration = 12 * time.Hour
+	defaultOIDCSessionDuration    = 12 * time.Hour
+	defaultOIDCCLISessionDuration = 14 * 24 * time.Hour
 )
 
 var defaultOIDCScopes = []string{"openid", "profile", "email"}
@@ -80,18 +81,19 @@ type trustedServeConfig struct {
 }
 
 type trustedServeOIDCConfig struct {
-	IssuerURL         *string        `mapstructure:"issuer"`
-	ClientID          *string        `mapstructure:"client_id"`
-	ClientSecretFile  *string        `mapstructure:"client_secret_file"`
-	RedirectURL       *string        `mapstructure:"redirect_url"`
-	Scopes            []string       `mapstructure:"scopes"`
-	AllowedEmails     []string       `mapstructure:"allowed_emails"`
-	AllowedDomains    []string       `mapstructure:"allowed_domains"`
-	AdminEmails       []string       `mapstructure:"admin_emails"`
-	TerminalEmails    []string       `mapstructure:"terminal_emails"`
-	RunnerAdminEmails []string       `mapstructure:"runner_admin_emails"`
-	AllowAnyUser      *bool          `mapstructure:"allow_any_user"`
-	SessionDuration   *time.Duration `mapstructure:"session_duration"`
+	IssuerURL          *string        `mapstructure:"issuer"`
+	ClientID           *string        `mapstructure:"client_id"`
+	ClientSecretFile   *string        `mapstructure:"client_secret_file"`
+	RedirectURL        *string        `mapstructure:"redirect_url"`
+	Scopes             []string       `mapstructure:"scopes"`
+	AllowedEmails      []string       `mapstructure:"allowed_emails"`
+	AllowedDomains     []string       `mapstructure:"allowed_domains"`
+	AdminEmails        []string       `mapstructure:"admin_emails"`
+	TerminalEmails     []string       `mapstructure:"terminal_emails"`
+	RunnerAdminEmails  []string       `mapstructure:"runner_admin_emails"`
+	AllowAnyUser       *bool          `mapstructure:"allow_any_user"`
+	SessionDuration    *time.Duration `mapstructure:"session_duration"`
+	CLISessionDuration *time.Duration `mapstructure:"cli_session_duration"`
 }
 
 func NewServeConfig() *ServeConfig {
@@ -102,8 +104,9 @@ func NewServeConfig() *ServeConfig {
 		CompactRatio:   llmtypes.DefaultCompactRatio,
 		EmbeddedRunner: true,
 		OIDC: controlplane.OIDCConfig{
-			Scopes:          append([]string(nil), defaultOIDCScopes...),
-			SessionDuration: defaultOIDCSessionDuration,
+			Scopes:             append([]string(nil), defaultOIDCScopes...),
+			SessionDuration:    defaultOIDCSessionDuration,
+			CLISessionDuration: defaultOIDCCLISessionDuration,
 		},
 	}
 }
@@ -160,6 +163,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().StringSlice("oidc-runner-admin-emails", defaults.OIDC.RunnerAdminEmails, "OIDC email addresses allowed to administer runners (comma-separated or repeated)")
 	cmd.Flags().Bool("oidc-allow-any-user", defaults.OIDC.AllowAnyUser, "Allow any verified OIDC user to sign in")
 	cmd.Flags().Duration("oidc-session-duration", defaults.OIDC.SessionDuration, "OIDC web session duration")
+	cmd.Flags().Duration("oidc-cli-session-duration", defaults.OIDC.CLISessionDuration, "OIDC CLI sign-in hard lifetime; token refresh never extends it")
 	cmd.Flags().StringSlice("cors-origins", defaults.CORSOrigins, "Additional allowed CORS origins for browser clients (comma-separated or repeated); loopback origins are always allowed")
 }
 
@@ -249,6 +253,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if oidcSessionDuration, err := cmd.Flags().GetDuration("oidc-session-duration"); err == nil && cmd.Flags().Changed("oidc-session-duration") {
 		config.OIDC.SessionDuration = oidcSessionDuration
+	}
+	if oidcCLISessionDuration, err := cmd.Flags().GetDuration("oidc-cli-session-duration"); err == nil && cmd.Flags().Changed("oidc-cli-session-duration") {
+		config.OIDC.CLISessionDuration = oidcCLISessionDuration
 	}
 	if corsOrigins, err := cmd.Flags().GetStringSlice("cors-origins"); err == nil && cmd.Flags().Changed("cors-origins") {
 		config.CORSOrigins = corsOrigins
@@ -376,6 +383,9 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	if trusted.OIDC.SessionDuration != nil {
 		config.OIDC.SessionDuration = *trusted.OIDC.SessionDuration
 	}
+	if trusted.OIDC.CLISessionDuration != nil {
+		config.OIDC.CLISessionDuration = *trusted.OIDC.CLISessionDuration
+	}
 	return nil
 }
 
@@ -449,6 +459,9 @@ func validateServeConfig(config *ServeConfig) error {
 		}
 		if config.OIDC.SessionDuration <= 0 {
 			return errors.New("OIDC session duration must be greater than zero")
+		}
+		if config.OIDC.CLISessionDuration <= 0 {
+			return errors.New("OIDC CLI session duration must be greater than zero")
 		}
 
 		oidcConfig := config.OIDC

@@ -166,6 +166,7 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 	assert.Equal(t, runnerQueryConfig{
 		Server:     defaultRunnerServer,
 		AuthToken:  "control-plane-secret",
+		HTTPClient: &http.Client{},
 		JSONOutput: true,
 	}, runnerQueryConfigFromFlags(queryCmd))
 }

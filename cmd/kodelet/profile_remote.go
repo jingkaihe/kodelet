@@ -68,7 +68,11 @@ func remoteAdministrationClient(cmd *cobra.Command) (*chat.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return chat.NewClient(server, token, "")
+	client, err := controlPlaneHTTPClient(cmd, server, nil)
+	if err != nil {
+		return nil, err
+	}
+	return chat.NewClient(server, token, "", chat.WithHTTPClient(client))
 }
 
 func runRemoteProfileCommand(cmd *cobra.Command, args []string) error {

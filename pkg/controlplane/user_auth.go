@@ -100,6 +100,40 @@ func (s *Server) handlePollUserLogin(w http.ResponseWriter, r *http.Request) {
 	encodeAuthJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handleRefreshUserCredential(w http.ResponseWriter, r *http.Request) {
+	if !s.userLoginEnabled() {
+		s.writeUserAuthAPIError(w, r, http.StatusNotFound, "user login is not enabled", nil)
+		return
+	}
+	if !s.allowPublicAuthRequest(r, maxUserRefreshesPerWindow) {
+		w.Header().Set("Retry-After", strconv.Itoa(int(publicAuthRateWindow/time.Second)))
+		encodeAuthJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":        "slow_down",
+			"retryAfterMs": publicAuthRateWindow.Milliseconds(),
+		})
+		return
+	}
+	var request userauth.RefreshRequest
+	if err := decodeUserAuthJSON(w, r, maxUserLoginPollRequestBytes, &request); err != nil {
+		s.writeUserAuthAPIError(w, r, http.StatusBadRequest, "invalid user token refresh request", nil)
+		return
+	}
+	if err := request.Validate(); err != nil {
+		s.writeUserAuthAPIError(w, r, http.StatusBadRequest, "invalid user token refresh request", nil)
+		return
+	}
+	response, err := s.authStore.RefreshUserCredential(r.Context(), request)
+	if err != nil {
+		if errors.Is(err, errUserCredentialInvalid) {
+			s.writeUserAuthAPIError(w, r, http.StatusUnauthorized, "user refresh token is invalid, expired, or revoked; sign in again", nil)
+			return
+		}
+		s.writeUserAuthAPIError(w, r, http.StatusInternalServerError, "failed to refresh user credential", err)
+		return
+	}
+	encodeAuthJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleUserLoginVerificationPage(w http.ResponseWriter, r *http.Request) {
 	setAuthApprovalPageHeaders(w)
 	if !s.userLoginEnabled() {
@@ -221,7 +255,7 @@ func (s *Server) handleUserLoginDecision(w http.ResponseWriter, r *http.Request)
 			},
 		})
 	case "approve":
-		if _, err := s.authStore.ApproveUserLogin(r.Context(), userCode, principal, s.config.OIDC.SessionDuration); err != nil {
+		if _, err := s.authStore.ApproveUserLogin(r.Context(), userCode, principal, s.config.OIDC.CLISessionDuration); err != nil {
 			s.writeUserLoginDecisionError(w, r, err)
 			return
 		}

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func extensionRelayServer(t *testing.T, handler protocol.RequestHandler) (*Client, <-chan *protocol.Peer) {
+func extensionRelayServer(t *testing.T, handler protocol.RequestHandler, options ...ClientOption) (*Client, <-chan *protocol.Peer) {
 	t.Helper()
 	peers := make(chan *protocol.Peer, 1)
 	headers := make(chan http.Header, 1)
@@ -38,7 +39,7 @@ func extensionRelayServer(t *testing.T, handler protocol.RequestHandler) (*Clien
 		<-peer.TransportDone()
 	}))
 	t.Cleanup(server.Close)
-	client, err := NewClient(server.URL+"/prefix", "client-secret", "runner-1")
+	client, err := NewClient(server.URL+"/prefix", "client-secret", "runner-1", options...)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		select {
@@ -52,9 +53,64 @@ func extensionRelayServer(t *testing.T, handler protocol.RequestHandler) (*Clien
 	return client, peers
 }
 
+type extensionAuthorizationTransport struct {
+	authorize func(*http.Request) error
+}
+
+func (transport extensionAuthorizationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return http.DefaultTransport.RoundTrip(request)
+}
+
+func (transport extensionAuthorizationTransport) AuthorizeRequest(request *http.Request) error {
+	return transport.authorize(request)
+}
+
+func TestSessionExtensionRelayDoesNotConnectWhenAuthenticationFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("authentication failure must stop the handshake before dialing")
+	}))
+	defer server.Close()
+	authErr := errors.New("session expired; login required")
+	client, err := NewClient(server.URL, "stale", "", WithHTTPClient(&http.Client{
+		Transport: extensionAuthorizationTransport{authorize: func(*http.Request) error { return authErr }},
+	}))
+	require.NoError(t, err)
+	_, err = client.AttachSessionExtensions(t.Context(), "conversation", "runner", []string{"extension"}, func(context.Context, protocol.ExtensionFrame) error { return nil })
+	require.ErrorIs(t, err, authErr)
+}
+
+func TestSessionExtensionRelayRedactsRotatedTokenOnDialFailure(t *testing.T) {
+	previous := websocket.DefaultDialer
+	dialer := *previous
+	dialer.NetDialContext = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection failed with original-secret and rotated-secret")
+	}
+	websocket.DefaultDialer = &dialer
+	t.Cleanup(func() { websocket.DefaultDialer = previous })
+	client, err := NewClient("http://localhost:1", "original-secret", "", WithHTTPClient(&http.Client{
+		Transport: extensionAuthorizationTransport{authorize: func(request *http.Request) error {
+			request.Header.Set("Authorization", "Bearer rotated-secret")
+			return nil
+		}},
+	}))
+	require.NoError(t, err)
+	_, err = client.AttachSessionExtensions(t.Context(), "conversation", "runner", []string{"extension"}, func(context.Context, protocol.ExtensionFrame) error { return nil })
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "original-secret")
+	assert.NotContains(t, err.Error(), "rotated-secret")
+	assert.Contains(t, err.Error(), "[REDACTED]")
+}
+
 func TestSessionExtensionRelayDuplex(t *testing.T) {
 	attachment := protocol.SessionExtensions{ID: "attachment-1", ExtensionIDs: []string{"inline-1"}}
 	frames := make(chan protocol.ExtensionFrame, 4)
+	authorizations := 0
+	transport := extensionAuthorizationTransport{authorize: func(request *http.Request) error {
+		authorizations++
+		assert.Equal(t, "Bearer stale-token", request.Header.Get("Authorization"))
+		request.Header.Set("Authorization", "Bearer client-secret")
+		return nil
+	}}
 	client, peers := extensionRelayServer(t, protocol.RequestHandlerFunc(func(_ context.Context, method string, params json.RawMessage) (any, *protocol.RPCError) {
 		if method == protocol.MethodSessionExtensionsAttach {
 			assert.JSONEq(t, `{"conversationId":"conversation-1","runnerId":"runner-1","extensionIds":["inline-1"]}`, string(params))
@@ -65,7 +121,8 @@ func TestSessionExtensionRelayDuplex(t *testing.T) {
 		assert.NoError(t, json.Unmarshal(params, &frame))
 		frames <- frame
 		return struct{}{}, nil
-	}))
+	}), WithHTTPClient(&http.Client{Transport: transport}))
+	client.authToken = "stale-token"
 	started := make(chan protocol.ExtensionFrame, 1)
 	release := make(chan struct{})
 	relay, err := client.AttachSessionExtensions(t.Context(), "conversation-1", "runner-1", attachment.ExtensionIDs, func(ctx context.Context, frame protocol.ExtensionFrame) error {
@@ -78,6 +135,7 @@ func TestSessionExtensionRelayDuplex(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relay.Close() })
+	assert.Equal(t, 1, authorizations)
 	assert.Equal(t, attachment, relay.Attachment())
 	copy := relay.Attachment()
 	copy.ExtensionIDs[0] = "changed"

@@ -33,6 +33,7 @@ type ChatConfig struct {
 	Server           string
 	ServerConfigured bool
 	AuthToken        string
+	HTTPClient       *http.Client
 	ConfigError      error
 	Options          *llmtypes.ExecutionOptions
 }
@@ -246,13 +247,17 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		return result, err
 	}
 	config.Server, config.AuthToken = server, token
+	config.HTTPClient, err = controlPlaneHTTPClient(cmd, server, &http.Client{})
+	if err != nil {
+		return result, err
+	}
 	client, err := prepareServerChatRunner(config)
 	if err != nil {
 		return result, err
 	}
 	runner := &configuredChatRunner{Client: client, options: config.Options.Clone(), environmentProfile: config.RunnerProfile}
 	if config.Runner != "" {
-		runners, _, err := fetchRunners(ctx, config.Server, config.AuthToken)
+		runners, _, err := fetchRunners(ctx, config.Server, config.AuthToken, config.HTTPClient)
 		if err != nil {
 			return result, err
 		}
@@ -271,7 +276,7 @@ func prepareDaemonChat(ctx context.Context, cmd *cobra.Command) (tui.Config, err
 		if err != nil {
 			return result, err
 		}
-		source, err := chatpkg.NewClient(config.Server, config.AuthToken, runner.explicitRunnerID)
+		source, err := chatpkg.NewClient(config.Server, config.AuthToken, runner.explicitRunnerID, chatpkg.WithHTTPClient(config.HTTPClient))
 		if err != nil {
 			return result, err
 		}
@@ -435,7 +440,7 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if config == nil || strings.TrimSpace(config.Runner) == "" {
 		return nil, "", errors.New("runner selector is required")
 	}
-	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
+	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken, config.HTTPClient)
 	if err != nil {
 		return nil, "", err
 	}
@@ -458,7 +463,7 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if selected.Status == runnerregistry.RunnerStatusBusy && !selected.ConcurrentRuns {
 		return nil, "", errors.New("runner does not support concurrent runs")
 	}
-	runner, err := chatpkg.NewClient(server, config.AuthToken, selected.ID)
+	runner, err := chatpkg.NewClient(server, config.AuthToken, selected.ID, chatpkg.WithHTTPClient(config.HTTPClient))
 	if err != nil {
 		return nil, "", err
 	}
@@ -469,7 +474,7 @@ func prepareServerChatRunner(config *ChatConfig) (*chatpkg.Client, error) {
 	if config == nil {
 		return nil, errors.New("chat configuration is required")
 	}
-	return chatpkg.NewClient(config.Server, config.AuthToken, "")
+	return chatpkg.NewClient(config.Server, config.AuthToken, "", chatpkg.WithHTTPClient(config.HTTPClient))
 }
 
 func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.Client, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {

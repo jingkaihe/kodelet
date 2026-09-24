@@ -306,6 +306,7 @@ serve:
     terminal_emails: ["operator@example.com"]
     runner_admin_emails: ["runners@example.com"]
     session_duration: "12h"
+    cli_session_duration: "336h" # 14 days
 ```
 
 Store `serve` settings in `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`. Command-line flags take precedence, and repository-level `kodelet-config.yaml` cannot set this security-sensitive namespace. Files containing static tokens and the file referenced by `client_secret_file` must be owner-only. See [`config.sample.yaml`](../config.sample.yaml) for all settings.
@@ -320,7 +321,9 @@ kodelet auth status --server https://kodelet.example
 kodelet auth logout --server https://kodelet.example
 ```
 
-`login` prints a short code, opens the verification page when possible, and waits for approval. Enter the code, sign in, review the client details, and approve the request. Use `--no-browser` to suppress browser launch. `status` shows the stored identity, roles, and expiry, while `logout` revokes the credential. Remote commands use the per-server credential automatically; an explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored login.
+`login` prints a short code, opens the verification page when possible, and waits for approval. Enter the code, sign in, review the client details, and approve the request. Use `--no-browser` to suppress browser launch. `status` shows the stored identity, roles, and expiry, while `logout` revokes the sign-in and all its tokens. Remote commands use the per-server credential automatically; an explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored login.
+
+New CLI sign-ins use one-hour access tokens refreshed automatically before requests and a 14-day hard lifetime (`serve.oidc.cli_session_duration` or `--oidc-cli-session-duration`); rotation never extends the original deadline. Browser sessions remain 12 hours by default (`serve.oidc.session_duration`). Run `kodelet auth login` again after the CLI deadline or an interrupted refresh. Local-daemon and explicitly supplied tokens are unchanged.
 
 OIDC authentication does not make the current server multi-tenant. Conversations, active chats, terminal sessions, and runner execution remain shared among authenticated users; roles protect sensitive capabilities but do not add per-user conversation ownership or isolation.
 

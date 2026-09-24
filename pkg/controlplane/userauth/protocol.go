@@ -15,10 +15,12 @@ import (
 const (
 	DeviceStartPath         = "/api/auth/v1/device/start"
 	DevicePollPath          = "/api/auth/v1/device/poll"
+	RefreshPath             = "/api/auth/v1/token/refresh"
 	DeviceVerificationPath  = "/auth/device"
 	CurrentCredentialPath   = "/api/auth/v1/credentials/current"
 	MePath                  = "/api/auth/me"
 	BearerTokenPrefix       = "kltu_"
+	RefreshTokenPrefix      = "kltr_"
 	bearerTokenPayloadBytes = 32
 )
 
@@ -29,6 +31,8 @@ var (
 	ErrLoginExpired = errors.New("user login expired")
 	// ErrLoginSuperseded indicates that a newer pending login replaced this flow locally.
 	ErrLoginSuperseded = errors.New("user login was superseded by a newer local login")
+	// ErrLoginRequired indicates that saved credentials cannot safely authenticate a request.
+	ErrLoginRequired = errors.New("a new server login is required")
 )
 
 // DeviceStatus is the current state of a device authorization.
@@ -85,6 +89,7 @@ type DeviceStartResponse struct {
 	VerificationURL         string    `json:"verificationUrl"`
 	VerificationURLComplete string    `json:"verificationUrlComplete,omitempty"`
 	BearerToken             string    `json:"bearerToken"`
+	RefreshToken            string    `json:"refreshToken,omitempty"`
 	ExpiresAt               time.Time `json:"expiresAt"`
 	PollIntervalMS          int64     `json:"pollIntervalMs"`
 }
@@ -117,6 +122,11 @@ func (r DeviceStartResponse) ValidateAt(now time.Time) error {
 	if err := ValidateBearerToken(r.BearerToken); err != nil {
 		return err
 	}
+	if r.RefreshToken != "" {
+		if err := ValidateRefreshToken(r.RefreshToken); err != nil {
+			return err
+		}
+	}
 	if r.ExpiresAt.IsZero() {
 		return errors.New("expiresAt is required")
 	}
@@ -143,11 +153,12 @@ func (r DevicePollRequest) Validate() error {
 
 // DevicePollResponse reports the authorization state and approved credential metadata.
 type DevicePollResponse struct {
-	Status       DeviceStatus      `json:"status"`
-	CredentialID string            `json:"credentialId,omitempty"`
-	Principal    PrincipalSnapshot `json:"principal,omitempty"`
-	ExpiresAt    time.Time         `json:"expiresAt,omitempty"`
-	RetryAfterMS int64             `json:"retryAfterMs,omitempty"`
+	Status          DeviceStatus      `json:"status"`
+	CredentialID    string            `json:"credentialId,omitempty"`
+	Principal       PrincipalSnapshot `json:"principal,omitempty"`
+	ExpiresAt       time.Time         `json:"expiresAt,omitempty"`
+	AccessExpiresAt time.Time         `json:"accessExpiresAt,omitzero"`
+	RetryAfterMS    int64             `json:"retryAfterMs,omitempty"`
 }
 
 // Validate checks a device-poll response against the current time.
@@ -180,6 +191,9 @@ func (r DevicePollResponse) ValidateAt(now time.Time) error {
 		}
 		if !r.ExpiresAt.After(now) {
 			return errors.New("approved credential is expired")
+		}
+		if !r.AccessExpiresAt.IsZero() && r.AccessExpiresAt.After(r.ExpiresAt) {
+			return errors.New("access token expiry exceeds the session deadline")
 		}
 	case DeviceStatusDenied, DeviceStatusExpired:
 		if err := validateAbsentApproval(r); err != nil {
@@ -242,11 +256,20 @@ func (p PrincipalSnapshot) Validate() error {
 
 // GenerateBearerToken creates a Kodelet user bearer from 32 cryptographically random bytes.
 func GenerateBearerToken() (string, error) {
+	return generateToken(BearerTokenPrefix)
+}
+
+// GenerateRefreshToken creates a refresh-only secret from 32 random bytes.
+func GenerateRefreshToken() (string, error) {
+	return generateToken(RefreshTokenPrefix)
+}
+
+func generateToken(prefix string) (string, error) {
 	payload := make([]byte, bearerTokenPayloadBytes)
 	if _, err := rand.Read(payload); err != nil {
 		return "", errors.Wrap(err, "failed to generate user bearer token")
 	}
-	return BearerTokenPrefix + base64.RawURLEncoding.EncodeToString(payload), nil
+	return prefix + base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
 // NewBearerToken creates a Kodelet user bearer token.
@@ -256,16 +279,25 @@ func NewBearerToken() (string, error) {
 
 // ValidateBearerToken checks the exact kltu_ plus canonical 32-byte base64url format.
 func ValidateBearerToken(token string) error {
+	return validateToken(token, BearerTokenPrefix)
+}
+
+// ValidateRefreshToken checks the distinct refresh-only token format.
+func ValidateRefreshToken(token string) error {
+	return validateToken(token, RefreshTokenPrefix)
+}
+
+func validateToken(token, prefix string) error {
 	if token == "" {
 		return errors.New("bearer token is required")
 	}
 	if strings.TrimSpace(token) != token {
 		return errors.New("bearer token must not contain leading or trailing whitespace")
 	}
-	if !strings.HasPrefix(token, BearerTokenPrefix) {
-		return errors.Errorf("bearer token must use the %s prefix", BearerTokenPrefix)
+	if !strings.HasPrefix(token, prefix) {
+		return errors.Errorf("token must use the %s prefix", prefix)
 	}
-	encoded := strings.TrimPrefix(token, BearerTokenPrefix)
+	encoded := strings.TrimPrefix(token, prefix)
 	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
 		return errors.New("bearer token must use canonical unpadded base64url")
@@ -280,8 +312,44 @@ func ValidateBearerToken(token string) error {
 }
 
 func validateAbsentApproval(response DevicePollResponse) error {
-	if response.CredentialID != "" || !response.Principal.isZero() {
+	if response.CredentialID != "" || !response.Principal.isZero() || !response.AccessExpiresAt.IsZero() {
 		return errors.New("credential approval fields are only valid for approved authorization")
+	}
+	return nil
+}
+
+// RefreshRequest exchanges a refresh-only credential for a rotated token pair.
+type RefreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+// Validate checks a refresh request without accepting access tokens.
+func (r RefreshRequest) Validate() error {
+	return ValidateRefreshToken(r.RefreshToken)
+}
+
+// RefreshResponse preserves the absolute session deadline while rotating secrets.
+type RefreshResponse struct {
+	BearerToken     string    `json:"bearerToken"`
+	RefreshToken    string    `json:"refreshToken"`
+	AccessExpiresAt time.Time `json:"accessExpiresAt"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	CredentialID    string    `json:"credentialId"`
+}
+
+// ValidateAt checks the token pair and its expiry bounds.
+func (r RefreshResponse) ValidateAt(now time.Time) error {
+	if err := ValidateBearerToken(r.BearerToken); err != nil {
+		return err
+	}
+	if err := ValidateRefreshToken(r.RefreshToken); err != nil {
+		return err
+	}
+	if err := validateText("credential id", r.CredentialID, true); err != nil {
+		return err
+	}
+	if !r.AccessExpiresAt.After(now) || r.AccessExpiresAt.After(r.ExpiresAt) {
+		return errors.New("invalid access token expiry")
 	}
 	return nil
 }

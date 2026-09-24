@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	defaultUserLoginTTL     = 10 * time.Minute
-	defaultUserPollInterval = 5 * time.Second
-	maxPendingUserLogins    = 1024
+	defaultUserLoginTTL        = 10 * time.Minute
+	defaultUserAccessTTL       = time.Hour
+	defaultUserSessionDuration = 14 * 24 * time.Hour
+	defaultUserPollInterval    = 5 * time.Second
+	maxPendingUserLogins       = 1024
 )
 
 var (
@@ -60,6 +62,7 @@ type userLoginAuthorizationRow struct {
 	Status              string       `db:"status"`
 	UserCode            string       `db:"user_code"`
 	TokenSHA256         []byte       `db:"token_sha256"`
+	RefreshTokenSHA256  []byte       `db:"refresh_token_sha256"`
 	ClientName          string       `db:"client_name"`
 	ClientOS            string       `db:"client_os"`
 	ClientArch          string       `db:"client_arch"`
@@ -74,6 +77,7 @@ type userLoginAuthorizationRow struct {
 	CredentialEmail     string       `db:"credential_email"`
 	CredentialRolesJSON string       `db:"credential_roles_json"`
 	CredentialExpiresAt sql.NullTime `db:"credential_expires_at"`
+	AccessExpiresAt     sql.NullTime `db:"access_expires_at"`
 }
 
 type userCredentialRow struct {
@@ -133,6 +137,10 @@ func (s *authStore) StartUserLogin(ctx context.Context, request userauth.DeviceS
 	if err != nil {
 		return userauth.DeviceStartResponse{}, err
 	}
+	refreshToken, err := userauth.GenerateRefreshToken()
+	if err != nil {
+		return userauth.DeviceStartResponse{}, err
+	}
 	tokenHash := authHash(bearerToken)
 	expiresAt := now.Add(defaultUserLoginTTL)
 
@@ -144,11 +152,11 @@ func (s *authStore) StartUserLogin(ctx context.Context, request userauth.DeviceS
 		}
 		_, insertErr = tx.ExecContext(ctx, `
 			INSERT INTO user_login_authorizations (
-				id, device_code_sha256, user_code, token_sha256, status,
+				id, device_code_sha256, user_code, token_sha256, refresh_token_sha256, status,
 				client_name, client_os, client_arch, kodelet_version,
 				poll_interval_seconds, created_at, expires_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, authorizationID, deviceCodeHash, userCode, tokenHash, userauth.DeviceStatusPending,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, authorizationID, deviceCodeHash, userCode, tokenHash, authHash(refreshToken), userauth.DeviceStatusPending,
 			request.ClientName, request.ClientOS, request.ClientArch, request.KodeletVersion,
 			int64(defaultUserPollInterval/time.Second), now, expiresAt)
 		if insertErr != nil {
@@ -163,6 +171,7 @@ func (s *authStore) StartUserLogin(ctx context.Context, request userauth.DeviceS
 			UserCode:        userCode,
 			VerificationURL: verification.String(),
 			BearerToken:     bearerToken,
+			RefreshToken:    refreshToken,
 			ExpiresAt:       expiresAt,
 			PollIntervalMS:  defaultUserPollInterval.Milliseconds(),
 		}, nil
@@ -207,7 +216,7 @@ func (s *authStore) ApproveUserLogin(ctx context.Context, userCode string, princ
 		return userLoginAuthorization{}, err
 	}
 	if duration <= 0 {
-		duration = defaultWebSessionDuration
+		duration = defaultUserSessionDuration
 	}
 
 	tx, err := s.db.BeginTxx(ctx, nil)
@@ -253,6 +262,23 @@ func (s *authStore) ApproveUserLogin(ctx context.Context, userCode string, princ
 		nullAuthString(principalSnapshot.Name), nullAuthString(principalSnapshot.Email), string(rolesJSON),
 		now, credentialExpiresAt); err != nil {
 		return userLoginAuthorization{}, errors.Wrap(err, "failed to issue user API credential")
+	}
+	accessExpiresAt := credentialExpiresAt
+	if len(row.RefreshTokenSHA256) != 0 {
+		accessExpiresAt = userAccessExpiresAt(now, credentialExpiresAt)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO user_refresh_tokens (token_sha256, credential_id, created_at)
+			VALUES (?, ?, ?)
+		`, row.RefreshTokenSHA256, credentialID, now); err != nil {
+			return userLoginAuthorization{}, errors.Wrap(err, "failed to issue initial user refresh token")
+		}
+	}
+	// A pending login created before the migration has no refresh token and keeps its old lifetime.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_access_tokens (token_sha256, credential_id, created_at, expires_at)
+		VALUES (?, ?, ?, ?)
+	`, row.TokenSHA256, credentialID, now, accessExpiresAt); err != nil {
+		return userLoginAuthorization{}, errors.Wrap(err, "failed to issue initial user access token")
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE user_login_authorizations
@@ -412,6 +438,9 @@ func (s *authStore) PollUserLogin(ctx context.Context, request userauth.DevicePo
 		response.CredentialID = view.CredentialID
 		response.Principal = view.Principal
 		response.ExpiresAt = view.CredentialExpiresAt
+		if len(row.RefreshTokenSHA256) != 0 {
+			response.AccessExpiresAt = row.AccessExpiresAt.Time.UTC()
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE user_login_authorizations
 			SET delivered_at = COALESCE(delivered_at, ?)
@@ -436,6 +465,92 @@ func (s *authStore) PollUserLogin(ctx context.Context, request userauth.DevicePo
 	return response, nil
 }
 
+// RefreshUserCredential rotates a single-use refresh token without moving the session deadline.
+func (s *authStore) RefreshUserCredential(ctx context.Context, request userauth.RefreshRequest) (userauth.RefreshResponse, error) {
+	if s == nil || s.db == nil {
+		return userauth.RefreshResponse{}, errors.New("authentication store is closed")
+	}
+	if err := request.Validate(); err != nil {
+		return userauth.RefreshResponse{}, errUserCredentialInvalid
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to begin user token refresh")
+	}
+	defer tx.Rollback()
+	now := s.now().UTC()
+	tokenHash := authHash(request.RefreshToken)
+	var credentialID string
+	// The first statement acquires the SQLite write lock, so concurrent reuse cannot issue two pairs.
+	err = tx.GetContext(ctx, &credentialID, `
+		UPDATE user_refresh_tokens SET consumed_at = ?
+		WHERE token_sha256 = ? AND consumed_at IS NULL
+			AND credential_id IN (SELECT id FROM user_api_credentials WHERE revoked_at IS NULL AND expires_at > ?)
+		RETURNING credential_id
+	`, now, tokenHash, now)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Retain consumed hashes until the session is removed: even an older generation detects theft.
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE user_api_credentials SET revoked_at = ?, revoke_reason = 'refresh token reuse'
+			WHERE revoked_at IS NULL AND id IN (
+				SELECT credential_id FROM user_refresh_tokens WHERE token_sha256 = ? AND consumed_at IS NOT NULL
+			)
+		`, now, tokenHash); err != nil {
+			return userauth.RefreshResponse{}, errors.Wrap(err, "failed to revoke reused user credential")
+		}
+		if err := tx.Commit(); err != nil {
+			return userauth.RefreshResponse{}, errors.Wrap(err, "failed to commit rejected user token refresh")
+		}
+		return userauth.RefreshResponse{}, errUserCredentialInvalid
+	}
+	if err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to consume user refresh token")
+	}
+	var expiresAt time.Time
+	if err := tx.GetContext(ctx, &expiresAt, `SELECT expires_at FROM user_api_credentials WHERE id = ?`, credentialID); err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to load user session deadline")
+	}
+	bearerToken, err := userauth.GenerateBearerToken()
+	if err != nil {
+		return userauth.RefreshResponse{}, err
+	}
+	refreshToken, err := userauth.GenerateRefreshToken()
+	if err != nil {
+		return userauth.RefreshResponse{}, err
+	}
+	accessExpiresAt := userAccessExpiresAt(now, expiresAt)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_access_tokens (token_sha256, credential_id, created_at, expires_at)
+		VALUES (?, ?, ?, ?)
+	`, authHash(bearerToken), credentialID, now, accessExpiresAt); err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to issue user access token")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_refresh_tokens (token_sha256, credential_id, created_at)
+		VALUES (?, ?, ?)
+	`, authHash(refreshToken), credentialID, now); err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to issue user refresh token")
+	}
+	if err := tx.Commit(); err != nil {
+		return userauth.RefreshResponse{}, errors.Wrap(err, "failed to commit user token refresh")
+	}
+	return userauth.RefreshResponse{
+		BearerToken:     bearerToken,
+		RefreshToken:    refreshToken,
+		CredentialID:    credentialID,
+		AccessExpiresAt: accessExpiresAt.UTC(),
+		ExpiresAt:       expiresAt.UTC(),
+	}, nil
+}
+
+func userAccessExpiresAt(now, hardExpiry time.Time) time.Time {
+	expiresAt := now.Add(defaultUserAccessTTL)
+	if hardExpiry.Before(expiresAt) {
+		return hardExpiry
+	}
+	return expiresAt
+}
+
 func (s *authStore) LoadUserCredential(ctx context.Context, bearerToken string) (userCredentialIdentity, error) {
 	if s == nil || s.db == nil {
 		return userCredentialIdentity{}, errors.New("authentication store is closed")
@@ -453,10 +568,11 @@ func (s *authStore) LoadUserCredential(ctx context.Context, bearerToken string) 
 	if err := tx.GetContext(ctx, &row, `
 		UPDATE user_api_credentials
 		SET last_used_at = ?
-		WHERE token_sha256 = ? AND revoked_at IS NULL AND expires_at > ?
+		WHERE revoked_at IS NULL AND expires_at > ?
+			AND id IN (SELECT credential_id FROM user_access_tokens WHERE token_sha256 = ? AND expires_at > ?)
 		RETURNING id AS credential_id, issuer, subject,
 			COALESCE(name, '') AS name, COALESCE(email, '') AS email, roles_json
-	`, now, authHash(bearerToken), now); errors.Is(err, sql.ErrNoRows) {
+	`, now, now, authHash(bearerToken), now); errors.Is(err, sql.ErrNoRows) {
 		return userCredentialIdentity{}, errUserCredentialInvalid
 	} else if err != nil {
 		return userCredentialIdentity{}, errors.Wrap(err, "failed to load user credential")
@@ -630,7 +746,7 @@ func newUserCode() (string, error) {
 const userCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 const userLoginAuthorizationSelect = `
-	SELECT a.id, a.status, a.user_code, a.token_sha256,
+	SELECT a.id, a.status, a.user_code, a.token_sha256, a.refresh_token_sha256,
 		a.client_name, a.client_os, a.client_arch, a.kodelet_version,
 		a.poll_interval_seconds, a.last_polled_at,
 		a.expires_at AS authorization_expires_at,
@@ -640,6 +756,8 @@ const userLoginAuthorizationSelect = `
 		COALESCE(c.name, '') AS credential_name,
 		COALESCE(c.email, '') AS credential_email,
 		COALESCE(c.roles_json, '[]') AS credential_roles_json,
-		c.expires_at AS credential_expires_at
+		c.expires_at AS credential_expires_at,
+		t.expires_at AS access_expires_at
 	FROM user_login_authorizations a
-	LEFT JOIN user_api_credentials c ON c.id = a.credential_id`
+	LEFT JOIN user_api_credentials c ON c.id = a.credential_id
+	LEFT JOIN user_access_tokens t ON t.token_sha256 = a.token_sha256 AND t.credential_id = c.id`

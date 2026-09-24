@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/acp"
@@ -51,10 +52,14 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 	if err != nil {
 		return config, err
 	}
+	httpClient, err := controlPlaneHTTPClient(cmd, serverURL, &http.Client{})
+	if err != nil {
+		return config, err
+	}
 	var runnerID string
 	selector, _ := cmd.Flags().GetString("runner")
 	if strings.TrimSpace(selector) != "" {
-		runners, _, err := fetchRunners(ctx, serverURL, token)
+		runners, _, err := fetchRunners(ctx, serverURL, token, httpClient)
 		if err != nil {
 			return config, err
 		}
@@ -66,7 +71,7 @@ func remoteACPSessionConfig(ctx context.Context, cmd *cobra.Command, serverURL s
 		// discovery, not by starting or acquiring a client-owned workspace.
 		runnerID = runner.ID
 	}
-	client, err := chat.NewClient(serverURL, token, runnerID)
+	client, err := chat.NewClient(serverURL, token, runnerID, chat.WithHTTPClient(httpClient))
 	if err != nil {
 		return config, err
 	}

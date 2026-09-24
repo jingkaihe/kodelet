@@ -33,14 +33,17 @@ type Store struct {
 
 // Credential is one active Kodelet-issued bearer credential for a control plane.
 type Credential struct {
-	Version      int               `json:"version"`
-	Server       string            `json:"server"`
-	CredentialID string            `json:"credentialId"`
-	BearerToken  string            `json:"bearerToken"`
-	Principal    PrincipalSnapshot `json:"principal"`
-	CreatedAt    time.Time         `json:"createdAt"`
-	ExpiresAt    time.Time         `json:"expiresAt"`
-	UpdatedAt    time.Time         `json:"updatedAt"`
+	Version         int               `json:"version"`
+	Server          string            `json:"server"`
+	CredentialID    string            `json:"credentialId"`
+	BearerToken     string            `json:"bearerToken"`
+	RefreshToken    string            `json:"refreshToken,omitempty"`
+	AccessExpiresAt time.Time         `json:"accessExpiresAt,omitzero"`
+	RefreshPending  bool              `json:"refreshPending,omitempty"`
+	Principal       PrincipalSnapshot `json:"principal"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	ExpiresAt       time.Time         `json:"expiresAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
 }
 
 // PendingLogin is one uncompleted device login and its start-only secrets.
@@ -53,6 +56,7 @@ type PendingLogin struct {
 	VerificationURL         string    `json:"verificationUrl"`
 	VerificationURLComplete string    `json:"verificationUrlComplete,omitempty"`
 	BearerToken             string    `json:"bearerToken"`
+	RefreshToken            string    `json:"refreshToken,omitempty"`
 	ExpiresAt               time.Time `json:"expiresAt"`
 	PollIntervalMS          int64     `json:"pollIntervalMs"`
 	CreatedAt               time.Time `json:"createdAt"`
@@ -269,6 +273,7 @@ func (s *Store) loadCredentialUnlocked(server string) (Credential, bool, error) 
 	}
 	credential.CreatedAt = credential.CreatedAt.UTC()
 	credential.ExpiresAt = credential.ExpiresAt.UTC()
+	credential.AccessExpiresAt = credential.AccessExpiresAt.UTC()
 	credential.UpdatedAt = credential.UpdatedAt.UTC()
 	return credential, true, nil
 }
@@ -313,6 +318,7 @@ func prepareCredential(credential Credential, now time.Time) (Credential, error)
 	credential.Version = stateVersion
 	credential.CreatedAt = credential.CreatedAt.UTC()
 	credential.ExpiresAt = credential.ExpiresAt.UTC()
+	credential.AccessExpiresAt = credential.AccessExpiresAt.UTC()
 	if credential.CreatedAt.IsZero() {
 		credential.CreatedAt = now.UTC()
 	}
@@ -365,6 +371,18 @@ func validateCredentialFields(credential Credential) error {
 	if err := ValidateBearerToken(credential.BearerToken); err != nil {
 		return err
 	}
+	if credential.RefreshToken == "" {
+		if !credential.AccessExpiresAt.IsZero() || credential.RefreshPending {
+			return errors.New("refresh state requires a refresh token")
+		}
+	} else {
+		if err := ValidateRefreshToken(credential.RefreshToken); err != nil {
+			return err
+		}
+		if credential.AccessExpiresAt.IsZero() || credential.AccessExpiresAt.After(credential.ExpiresAt) {
+			return errors.New("invalid access token expiry")
+		}
+	}
 	if err := credential.Principal.Validate(); err != nil {
 		return errors.Wrap(err, "credential principal is invalid")
 	}
@@ -405,6 +423,11 @@ func validatePendingLoginFields(login PendingLogin) error {
 	}
 	if err := ValidateBearerToken(login.BearerToken); err != nil {
 		return err
+	}
+	if login.RefreshToken != "" {
+		if err := ValidateRefreshToken(login.RefreshToken); err != nil {
+			return err
+		}
 	}
 	if _, err := durationFromMilliseconds(login.PollIntervalMS); err != nil {
 		return errors.Wrap(err, "pending login poll interval is invalid")

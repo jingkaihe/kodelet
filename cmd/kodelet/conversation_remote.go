@@ -68,12 +68,7 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 			return errors.New("cannot use both --gist and --public-gist")
 		}
 	}
-	server, _ := serverFlagOrConfig(cmd)
-	token, _, err := resolveControlPlaneAuthToken(cmd, server)
-	if err != nil {
-		return err
-	}
-	client, err := chat.NewClient(server, token, "")
+	client, err := remoteAdministrationClient(cmd)
 	if err != nil {
 		return err
 	}
@@ -187,12 +182,7 @@ func newConversationMoveCommand() *cobra.Command {
 				return err
 			}
 			noConfirm, _ := cmd.Flags().GetBool("no-confirm")
-			server, _ := serverFlagOrConfig(cmd)
-			token, _, err := resolveControlPlaneAuthToken(cmd, server)
-			if err != nil {
-				return err
-			}
-			client, err := chat.NewClient(server, token, "")
+			client, err := remoteAdministrationClient(cmd)
 			if err != nil {
 				return err
 			}

@@ -107,21 +107,22 @@ type OIDCFlow interface {
 	Exchange(ctx context.Context, code, verifier, expectedNonce string) (OIDCIdentity, error)
 }
 
-// OIDCConfig configures generic OpenID Connect authentication for browser users.
+// OIDCConfig configures generic OpenID Connect authentication for browser and CLI users.
 type OIDCConfig struct {
-	IssuerURL         string
-	ClientID          string
-	ClientSecret      string
-	RedirectURL       string
-	Scopes            []string
-	AllowedEmails     []string
-	AllowedDomains    []string
-	AdminEmails       []string
-	TerminalEmails    []string
-	RunnerAdminEmails []string
-	AllowAnyUser      bool
-	SessionDuration   time.Duration
-	Flow              OIDCFlow
+	IssuerURL          string
+	ClientID           string
+	ClientSecret       string
+	RedirectURL        string
+	Scopes             []string
+	AllowedEmails      []string
+	AllowedDomains     []string
+	AdminEmails        []string
+	TerminalEmails     []string
+	RunnerAdminEmails  []string
+	AllowAnyUser       bool
+	SessionDuration    time.Duration
+	CLISessionDuration time.Duration
+	Flow               OIDCFlow
 }
 
 func (c *ServerConfig) normalizeAuth() {
@@ -236,6 +237,9 @@ func (c *OIDCConfig) normalize() {
 	c.RunnerAdminEmails = normalizeEmailSet(c.RunnerAdminEmails)
 	if c.SessionDuration <= 0 {
 		c.SessionDuration = defaultWebSessionDuration
+	}
+	if c.CLISessionDuration <= 0 {
+		c.CLISessionDuration = defaultUserSessionDuration
 	}
 }
 
@@ -620,6 +624,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if mode == WebAuthModeOIDC {
 				bearerToken, valid := strictKodeletBearerToken(authorization)
 				if !valid {
+					w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 					s.writeAuthError(w, r, http.StatusUnauthorized, "invalid authentication credentials")
 					return
 				}
@@ -630,6 +635,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				identity, err := s.authStore.LoadUserCredential(r.Context(), bearerToken)
 				if err != nil {
 					if errors.Is(err, errUserCredentialInvalid) {
+						w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 						s.writeAuthError(w, r, http.StatusUnauthorized, "invalid authentication credentials")
 						return
 					}
@@ -753,7 +759,7 @@ func (s *Server) isPublicRequestPath(path string) bool {
 
 func isPublicControlPlanePath(path string) bool {
 	switch path {
-	case "/auth/login", OIDCCallbackPath, "/auth/logout", signedOutPath, protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath:
+	case "/auth/login", OIDCCallbackPath, "/auth/logout", signedOutPath, protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath, userauth.RefreshPath:
 		return true
 	default:
 		return false

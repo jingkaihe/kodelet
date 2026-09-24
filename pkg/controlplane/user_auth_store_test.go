@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdErrors "errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
+	dbmigrations "github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,23 +26,25 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	assert.NotEmpty(t, started.AuthorizationID)
 	assert.NotEmpty(t, started.DeviceCode)
 	assert.NotEmpty(t, started.BearerToken)
+	assert.True(t, strings.HasPrefix(started.RefreshToken, "kltr_"))
 	assert.Equal(t, clock.current.Add(defaultUserLoginTTL), started.ExpiresAt)
 	assert.Equal(t, defaultUserPollInterval.Milliseconds(), started.PollIntervalMS)
 	assert.Equal(t, "https://kodelet.example/auth/device?source=test", started.VerificationURL)
 	assert.Empty(t, started.VerificationURLComplete)
 
-	var storedDeviceHash, storedTokenHash []byte
+	var storedDeviceHash, storedTokenHash, storedRefreshHash []byte
 	require.NoError(t, store.db.QueryRowxContext(t.Context(), `
-		SELECT device_code_sha256, token_sha256
+		SELECT device_code_sha256, token_sha256, refresh_token_sha256
 		FROM user_login_authorizations WHERE id = ?
-	`, started.AuthorizationID).Scan(&storedDeviceHash, &storedTokenHash))
+	`, started.AuthorizationID).Scan(&storedDeviceHash, &storedTokenHash, &storedRefreshHash))
+	assert.Equal(t, authHash(started.RefreshToken), storedRefreshHash)
 	assert.Equal(t, authHash(started.DeviceCode), storedDeviceHash)
 	assert.Equal(t, authHash(started.BearerToken), storedTokenHash)
 	assert.Len(t, storedDeviceHash, 32)
 	assert.Len(t, storedTokenHash, 32)
 	assert.NotEqual(t, []byte(started.DeviceCode), storedDeviceHash)
 	assert.NotEqual(t, []byte(started.BearerToken), storedTokenHash)
-	assertUserAuthSecretsAbsentFromDatabaseFiles(t, store, started.DeviceCode, started.BearerToken)
+	assertUserAuthSecretsAbsentFromDatabaseFiles(t, store, started.DeviceCode, started.BearerToken, started.RefreshToken)
 
 	enteredCode := strings.ToLower(strings.ReplaceAll(started.UserCode, "-", " "))
 	pendingView, err := store.UserLoginByUserCode(t.Context(), enteredCode)
@@ -93,6 +97,12 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	assert.Equal(t, approved.CredentialID, approvedPoll.CredentialID)
 	assert.Equal(t, expectedPrincipal, approvedPoll.Principal)
 	assert.Equal(t, approved.CredentialExpiresAt, approvedPoll.ExpiresAt)
+	assert.Equal(t, clock.current.Add(defaultUserAccessTTL), approvedPoll.AccessExpiresAt)
+	clock.current = clock.current.Add(time.Second)
+	repeatedPoll, err := store.PollUserLogin(t.Context(), pollRequest)
+	require.NoError(t, err)
+	assert.Equal(t, approvedPoll, repeatedPoll, "repeated polls must not extend either deadline")
+	clock.current = clock.current.Add(-time.Second)
 
 	var credentialTokenHash []byte
 	var issuer, subject, name, email, rolesJSON, approvedBy string
@@ -342,7 +352,7 @@ func TestAuthStoreUserLoginValidationAndCredentialDefaults(t *testing.T) {
 
 	approved, err := store.ApproveUserLogin(t.Context(), started.UserCode, testUserLoginPrincipal(), 0)
 	require.NoError(t, err)
-	assert.Equal(t, clock.current.Add(defaultWebSessionDuration), approved.CredentialExpiresAt)
+	assert.Equal(t, clock.current.Add(14*24*time.Hour), approved.CredentialExpiresAt)
 	for _, invalidBearer := range []string{"", " " + started.BearerToken, "Bearer " + started.BearerToken, "kltu_bad"} {
 		_, err := store.LoadUserCredential(t.Context(), invalidBearer)
 		require.ErrorIs(t, err, errUserCredentialInvalid, invalidBearer)
@@ -398,6 +408,176 @@ func TestAuthStoreApproveUserLoginReturnsCommittedResultWithoutReread(t *testing
 	assert.Equal(t, "mutated client", storedClientName)
 	assert.Equal(t, "Mutated User", storedName)
 	assert.JSONEq(t, `["mutated"]`, storedRoles)
+}
+
+func TestAuthStoreUserRefreshRotationAndReuse(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	started, approved := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), 2*time.Hour)
+	unrelated, _ := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), 2*time.Hour)
+	_, err := store.LoadUserCredential(t.Context(), started.RefreshToken)
+	require.ErrorIs(t, err, errUserCredentialInvalid, "refresh tokens cannot authorize API requests")
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.BearerToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid, "access tokens cannot mint new tokens")
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{
+		RefreshToken: strings.Replace(started.BearerToken, "kltu_", "kltr_", 1),
+	})
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+
+	clock.current = clock.current.Add(time.Minute)
+	first, err := store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+	require.NoError(t, err)
+	assert.Equal(t, approved.CredentialID, first.CredentialID)
+	assert.Equal(t, approved.CredentialExpiresAt, first.ExpiresAt)
+	assert.Equal(t, clock.current.Add(defaultUserAccessTTL), first.AccessExpiresAt)
+	assert.NotEqual(t, started.BearerToken, first.BearerToken)
+	assert.NotEqual(t, started.RefreshToken, first.RefreshToken)
+	_, err = store.LoadUserCredential(t.Context(), started.BearerToken)
+	require.NoError(t, err, "rotation does not invalidate unexpired access tokens")
+	second, err := store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: first.RefreshToken})
+	require.NoError(t, err)
+	assert.Equal(t, approved.CredentialExpiresAt, second.ExpiresAt)
+	for _, token := range []string{started.BearerToken, first.BearerToken, second.BearerToken} {
+		identity, err := store.LoadUserCredential(t.Context(), token)
+		require.NoError(t, err)
+		assert.Equal(t, approved.CredentialID, identity.CredentialID)
+	}
+	assertUserAuthSecretsAbsentFromDatabaseFiles(t, store,
+		started.RefreshToken, first.RefreshToken, first.BearerToken, second.RefreshToken, second.BearerToken)
+
+	// Reuse of an older generation, not just the immediately previous token, revokes everything.
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+	for _, token := range []string{started.BearerToken, first.BearerToken, second.BearerToken} {
+		_, err := store.LoadUserCredential(t.Context(), token)
+		require.ErrorIs(t, err, errUserCredentialInvalid)
+	}
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: second.RefreshToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+	_, err = store.LoadUserCredential(t.Context(), unrelated.BearerToken)
+	require.NoError(t, err, "other credential families must remain valid")
+	var reason string
+	require.NoError(t, store.db.GetContext(t.Context(), &reason, `SELECT revoke_reason FROM user_api_credentials WHERE id = ?`, approved.CredentialID))
+	assert.Equal(t, "refresh token reuse", reason)
+}
+
+func TestAuthStoreUserRefreshExpiry(t *testing.T) {
+	for _, duration := range []time.Duration{5 * time.Minute, 14 * 24 * time.Hour} {
+		t.Run(duration.String(), func(t *testing.T) {
+			store, clock := newAuthStoreTest(t)
+			started, approved := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), duration)
+			polled, err := store.PollUserLogin(t.Context(), userauth.DevicePollRequest{
+				AuthorizationID: started.AuthorizationID, DeviceCode: started.DeviceCode,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, clock.current.Add(min(duration, time.Hour)), polled.AccessExpiresAt)
+			if duration > defaultUserAccessTTL {
+				clock.current = polled.AccessExpiresAt
+				_, err := store.LoadUserCredential(t.Context(), started.BearerToken)
+				require.ErrorIs(t, err, errUserCredentialInvalid)
+			}
+			clock.current = approved.CredentialExpiresAt.Add(-time.Minute)
+			refreshed, err := store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+			require.NoError(t, err, "refresh remains valid after access token expiry")
+			assert.Equal(t, approved.CredentialExpiresAt, refreshed.ExpiresAt)
+			assert.Equal(t, approved.CredentialExpiresAt, refreshed.AccessExpiresAt, "access expiry is capped at the original deadline")
+			clock.current = approved.CredentialExpiresAt
+			_, err = store.LoadUserCredential(t.Context(), refreshed.BearerToken)
+			require.ErrorIs(t, err, errUserCredentialInvalid)
+			_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: refreshed.RefreshToken})
+			require.ErrorIs(t, err, errUserCredentialInvalid)
+		})
+	}
+}
+
+func TestAuthStoreConcurrentUserRefreshRevokesFamily(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	started, _ := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), time.Hour)
+	type refreshResult struct {
+		response userauth.RefreshResponse
+		err      error
+	}
+	results := make(chan refreshResult, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			response, err := store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+			results <- refreshResult{response: response, err: err}
+		}()
+	}
+	close(start)
+	var succeeded, rejected int
+	var winner userauth.RefreshResponse
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			succeeded++
+			winner = result.response
+		} else {
+			require.ErrorIs(t, result.err, errUserCredentialInvalid)
+			rejected++
+		}
+	}
+	assert.Equal(t, 1, succeeded)
+	assert.Equal(t, 1, rejected)
+	_, err := store.LoadUserCredential(t.Context(), winner.BearerToken)
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: winner.RefreshToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+}
+
+func TestAuthStoreUserLegacyTokenMigration(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	migration := dbmigrations.Migration20260924120000CreateUserRefreshTokens()
+	tx, err := store.db.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	require.NoError(t, migration.Down(tx))
+	require.NoError(t, tx.Commit())
+	bearer, err := userauth.GenerateBearerToken()
+	require.NoError(t, err)
+	expiresAt := clock.current.Add(time.Hour)
+	_, err = store.db.ExecContext(t.Context(), `
+		INSERT INTO user_api_credentials (id, token_sha256, issuer, subject, roles_json, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "legacy", authHash(bearer), "issuer", "subject", `["user"]`, clock.current, expiresAt)
+	require.NoError(t, err)
+	tx, err = store.db.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	require.NoError(t, migration.Up(tx))
+	require.NoError(t, tx.Commit())
+	clock.current = clock.current.Add(30 * time.Minute)
+	identity, err := store.LoadUserCredential(t.Context(), bearer)
+	require.NoError(t, err, "legacy credentials keep their original expiry, not the new ten-minute TTL")
+	assert.Equal(t, "legacy", identity.CredentialID)
+	clock.current = expiresAt
+	_, err = store.LoadUserCredential(t.Context(), bearer)
+	require.ErrorIs(t, err, errUserCredentialInvalid)
+}
+
+func TestAuthStoreLegacyPendingLoginKeepsOriginalLifetime(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	started, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), "https://kodelet.example/auth/device")
+	require.NoError(t, err)
+	// This is the state of a device flow started before the refresh-token migration.
+	_, err = store.db.ExecContext(t.Context(), `UPDATE user_login_authorizations SET refresh_token_sha256 = NULL WHERE id = ?`, started.AuthorizationID)
+	require.NoError(t, err)
+	approved, err := store.ApproveUserLogin(t.Context(), started.UserCode, testUserLoginPrincipal(), time.Hour)
+	require.NoError(t, err)
+	polled, err := store.PollUserLogin(t.Context(), userauth.DevicePollRequest{
+		AuthorizationID: started.AuthorizationID, DeviceCode: started.DeviceCode,
+	})
+	require.NoError(t, err)
+	assert.True(t, polled.AccessExpiresAt.IsZero(), "legacy clients have no refresh token")
+	assert.Equal(t, approved.CredentialExpiresAt, polled.ExpiresAt)
+	server := newUserAuthRouteServer(testUserAuthServerConfig(), store)
+	response := pollUserLoginHTTPResponse(t, server, started)
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.NotContains(t, response.Body.String(), "accessExpiresAt", "legacy wire responses must omit the new expiry")
+	clock.current = clock.current.Add(30 * time.Minute)
+	_, err = store.LoadUserCredential(t.Context(), started.BearerToken)
+	require.NoError(t, err)
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid)
 }
 
 func testUserLoginStartRequest() userauth.DeviceStartRequest {

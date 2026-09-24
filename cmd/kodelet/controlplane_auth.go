@@ -75,6 +75,7 @@ var authLogoutCmd = &cobra.Command{
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sign-in status",
+	Long:  "Show the saved server sign-in and its hard expiry, refreshing its access token when needed. This does not inspect local-server or explicitly supplied tokens.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runControlPlaneAuthStatus(cmd.Context(), controlPlaneAuthStatusConfigFromFlags(cmd), cmd.OutOrStdout())
@@ -124,14 +125,18 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 			}
 			fmt.Fprintln(output, "Your saved sign-in has expired; signing in again")
 		} else {
-			principal, validateErr := userauth.ValidateCredential(ctx, server, credential.BearerToken, config.HTTPClient)
+			client, err := userauth.NewAuthenticatedClient(server, store, config.HTTPClient, credential.CredentialID)
+			if err != nil {
+				return err
+			}
+			principal, validateErr := userauth.ValidateCredential(ctx, server, credential.BearerToken, client)
 			switch {
 			case validateErr == nil:
 				fmt.Fprintf(output, "Already logged in to %s\n", server)
 				writeControlPlaneCredential(output, credential.CredentialID, principal, credential.ExpiresAt)
 				fmt.Fprintf(output, "Credentials directory: %s\n", store.Root())
 				return nil
-			case isControlPlaneAuthUnauthorized(validateErr):
+			case isControlPlaneAuthUnauthorized(validateErr), errors.Is(validateErr, userauth.ErrLoginRequired):
 				if _, err := store.DeleteCredential(server, credential.CredentialID); err != nil {
 					return errors.Wrap(err, "failed to delete invalid sign-in credentials")
 				}
@@ -194,9 +199,25 @@ func runControlPlaneAuthLogout(ctx context.Context, config controlPlaneAuthLogou
 		return nil
 	}
 
-	revokeErr := userauth.RevokeCredential(ctx, server, credential.BearerToken, config.HTTPClient)
-	if revokeErr != nil && !isControlPlaneAuthUnauthorized(revokeErr) {
+	client := config.HTTPClient
+	// After the hard deadline there is nothing left to revoke. If a refresh
+	// response was lost, the old access token can still revoke the whole session;
+	// do not attempt to rotate the possibly consumed refresh token again.
+	if credential.ExpiresAt.After(time.Now().UTC()) && !credential.RefreshPending {
+		client, err = userauth.NewAuthenticatedClient(server, store, client, credential.CredentialID)
+		if err != nil {
+			return err
+		}
+	}
+	var revokeErr error
+	if credential.ExpiresAt.After(time.Now().UTC()) {
+		revokeErr = userauth.RevokeCredential(ctx, server, credential.BearerToken, client)
+	}
+	if revokeErr != nil && !isControlPlaneAuthUnauthorized(revokeErr) && !errors.Is(revokeErr, userauth.ErrLoginRequired) {
 		return errors.Wrap(revokeErr, "failed to revoke your sign-in credentials")
+	}
+	if errors.Is(revokeErr, userauth.ErrLoginRequired) || credential.RefreshPending && isControlPlaneAuthUnauthorized(revokeErr) {
+		fmt.Fprintln(output, "Server-side revocation could not be confirmed; any remaining session expires at its original hard deadline.")
 	}
 	if _, err := store.DeleteCredential(server, credential.CredentialID); err != nil {
 		return errors.Wrap(err, "failed to delete saved sign-in credentials")
@@ -231,13 +252,28 @@ func runControlPlaneAuthStatus(ctx context.Context, config controlPlaneAuthStatu
 			fmt.Fprintln(output, "Credential status: expired")
 			writeControlPlanePrincipal(output, credential.Principal)
 		} else {
-			principal, validateErr := userauth.ValidateCredential(ctx, server, credential.BearerToken, config.HTTPClient)
+			client, err := userauth.NewAuthenticatedClient(server, store, config.HTTPClient, credential.CredentialID)
+			if err != nil {
+				return err
+			}
+			principal, validateErr := userauth.ValidateCredential(ctx, server, credential.BearerToken, client)
 			switch {
 			case validateErr == nil:
 				fmt.Fprintln(output, "Credential status: valid")
 				writeControlPlanePrincipal(output, principal)
+				current, found, err := store.LoadCredential(server)
+				if err != nil {
+					return err
+				}
+				if found && !current.AccessExpiresAt.IsZero() {
+					fmt.Fprintf(output, "Access token expires: %s\n", formatControlPlaneAuthTime(current.AccessExpiresAt))
+				}
 			case isControlPlaneAuthUnauthorized(validateErr):
 				fmt.Fprintln(output, "Credential status: invalid or revoked")
+				writeControlPlanePrincipal(output, credential.Principal)
+			case errors.Is(validateErr, userauth.ErrLoginRequired):
+				fmt.Fprintln(output, "Credential status: sign-in required")
+				fmt.Fprintf(output, "Run `kodelet auth login --server %s`\n", server)
 				writeControlPlanePrincipal(output, credential.Principal)
 			default:
 				return errors.Wrap(validateErr, "failed to check your sign-in")
@@ -299,6 +335,22 @@ func resolveControlPlaneAuthToken(cmd *cobra.Command, server string) (token stri
 		return "", controlPlaneAuthTokenSourceStored, errors.Errorf("your sign-in for %s expired at %s; run `kodelet auth login --server %s`", canonicalServer, formatControlPlaneAuthTime(credential.ExpiresAt), canonicalServer)
 	}
 	return credential.BearerToken, controlPlaneAuthTokenSourceStored, nil
+}
+
+// controlPlaneHTTPClient opts saved sign-ins into per-request refresh without
+// changing authentication precedence for explicit tokens or the local daemon.
+func controlPlaneHTTPClient(cmd *cobra.Command, server string, client *http.Client) (*http.Client, error) {
+	if client == nil {
+		client = &http.Client{}
+	}
+	_, source, err := resolveControlPlaneAuthToken(cmd, server)
+	if err != nil {
+		return nil, err
+	}
+	if source != controlPlaneAuthTokenSourceStored {
+		return client, nil
+	}
+	return userauth.NewAuthenticatedClient(server, nil, client)
 }
 
 func prepareControlPlaneAuthState(server string, store *userauth.Store) (string, *userauth.Store, error) {

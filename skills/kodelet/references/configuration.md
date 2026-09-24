@@ -37,6 +37,8 @@ The OIDC client secret is read from a regular, non-empty, user-only referenced f
 
 In OIDC mode, browser users authenticate through server-side sessions. Non-browser clients run `kodelet auth login --server https://kodelet.example`, approve the request in an OIDC-authenticated browser, and store the resulting Kodelet-issued credential in user-only state keyed by canonical server URL. `kodelet chat --server`, `kodelet acp --server`, and runner-administration commands discover it automatically. Explicit `--auth-token` values override `KODELET_AUTH_TOKEN`, which overrides stored login state; static tokens remain administrative migration or automation credentials, and pure OIDC mode does not generate one automatically.
 
+Saved CLI sign-ins automatically refresh one-hour access tokens without extending the original 14-day hard deadline (`serve.oidc.cli_session_duration`, default `336h`, or `--oidc-cli-session-duration`). Browser sessions use `serve.oidc.session_duration` (default `12h`); local-daemon and explicit tokens do not use refresh.
+
 Runner enrollment state is also outside project configuration. Run `kodelet runner enroll --server https://kodelet.example` from the workspace; Kodelet stores the pending enrollment, opaque access token, private key, credential identifier, and stable registration in user-only runner state. `kodelet runner start` loads that DPoP credential automatically when no explicit runner token is supplied. ACP uses client authentication, never runner credentials. Runner tokens apply only in token mode; remove token overrides when using enrollment mode.
 
 ## Provider setup

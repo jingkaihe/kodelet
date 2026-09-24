@@ -77,9 +77,13 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 	if err != nil {
 		return err
 	}
+	httpClient, err := controlPlaneHTTPClient(cmd, server, nil)
+	if err != nil {
+		return err
+	}
 	var runnerID string
 	if selector != "" {
-		runners, _, err := fetchRunners(ctx, server, token)
+		runners, _, err := fetchRunners(ctx, server, token, httpClient)
 		if err != nil {
 			return err
 		}
@@ -92,7 +96,7 @@ func sendRemoteSteer(cmd *cobra.Command, message string) error {
 			cwd = runner.Workspace.Path
 		}
 	}
-	client, err := chat.NewClient(server, token, runnerID)
+	client, err := chat.NewClient(server, token, runnerID, chat.WithHTTPClient(httpClient))
 	if err != nil {
 		return err
 	}

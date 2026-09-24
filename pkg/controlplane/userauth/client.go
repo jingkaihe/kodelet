@@ -30,7 +30,7 @@ const (
 	maxAPIErrorMessageRunes = 512
 )
 
-var bearerTokenPattern = regexp.MustCompile(`kltu_[A-Za-z0-9_-]+`)
+var bearerTokenPattern = regexp.MustCompile(`klt[ur]_[A-Za-z0-9_-]+`)
 
 // LoginConfig configures one user device-login operation.
 type LoginConfig struct {
@@ -57,6 +57,7 @@ type APIError struct {
 	Operation  string
 	StatusCode int
 	Message    string
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -67,10 +68,14 @@ func (e *APIError) Error() string {
 	if operation == "" {
 		operation = "request"
 	}
-	if strings.TrimSpace(e.Message) == "" {
-		return fmt.Sprintf("user authentication %s failed with HTTP %d", operation, e.StatusCode)
+	retry := ""
+	if e.RetryAfter > 0 {
+		retry = fmt.Sprintf("; retry after %s", e.RetryAfter)
 	}
-	return fmt.Sprintf("user authentication %s failed with HTTP %d: %s", operation, e.StatusCode, e.Message)
+	if strings.TrimSpace(e.Message) == "" {
+		return fmt.Sprintf("user authentication %s failed with HTTP %d%s", operation, e.StatusCode, retry)
+	}
+	return fmt.Sprintf("user authentication %s failed with HTTP %d: %s%s", operation, e.StatusCode, e.Message, retry)
 }
 
 type loginDependencies struct {
@@ -225,6 +230,7 @@ func (c *loginClient) start(ctx context.Context) (PendingLogin, error) {
 		VerificationURL:         started.VerificationURL,
 		VerificationURLComplete: started.VerificationURLComplete,
 		BearerToken:             started.BearerToken,
+		RefreshToken:            started.RefreshToken,
 		ExpiresAt:               started.ExpiresAt,
 		PollIntervalMS:          started.PollIntervalMS,
 		CreatedAt:               c.now(),
@@ -252,7 +258,7 @@ func (c *loginClient) poll(ctx context.Context, pending PendingLogin) (Credentia
 		response, err := postJSON(ctx, c.httpClient, c.pollURL, DevicePollRequest{
 			AuthorizationID: pending.AuthorizationID,
 			DeviceCode:      pending.DeviceCode,
-		}, "poll", pending.DeviceCode, pending.BearerToken)
+		}, "poll", pending.DeviceCode, pending.BearerToken, pending.RefreshToken)
 		if err != nil {
 			return Credential{}, err
 		}
@@ -270,7 +276,7 @@ func (c *loginClient) poll(ctx context.Context, pending PendingLogin) (Credentia
 			if response.statusCode == http.StatusNotFound {
 				return Credential{}, c.finishTerminal(pending.AuthorizationID, ErrLoginExpired)
 			}
-			return Credential{}, newAPIError("poll", response, pending.DeviceCode, pending.BearerToken)
+			return Credential{}, newAPIError("poll", response, pending.DeviceCode, pending.BearerToken, pending.RefreshToken)
 		}
 		var polled DevicePollResponse
 		if err := decodeStrictJSON(response.body, &polled); err != nil {
@@ -291,12 +297,14 @@ func (c *loginClient) poll(ctx context.Context, pending PendingLogin) (Credentia
 			}
 		case DeviceStatusApproved:
 			credential, saved, err := c.store.saveCredentialForPendingLogin(Credential{
-				Server:       c.server,
-				CredentialID: polled.CredentialID,
-				BearerToken:  pending.BearerToken,
-				Principal:    polled.Principal,
-				CreatedAt:    c.now(),
-				ExpiresAt:    polled.ExpiresAt,
+				Server:          c.server,
+				CredentialID:    polled.CredentialID,
+				BearerToken:     pending.BearerToken,
+				RefreshToken:    pending.RefreshToken,
+				AccessExpiresAt: polled.AccessExpiresAt,
+				Principal:       polled.Principal,
+				CreatedAt:       c.now(),
+				ExpiresAt:       polled.ExpiresAt,
 			}, pending.AuthorizationID, c.now())
 			if err != nil {
 				return Credential{}, errors.Wrap(err, "failed to save approved user credential")
@@ -470,6 +478,16 @@ func postJSON(ctx context.Context, client *http.Client, endpoint string, value a
 func doRequest(client *http.Client, request *http.Request, operation string, secrets ...string) (authHTTPResponse, error) {
 	response, err := client.Do(request)
 	if err != nil {
+		if errors.Is(err, ErrLoginRequired) {
+			return authHTTPResponse{}, errors.Wrap(ErrLoginRequired, redactSecrets(err.Error(), secrets...))
+		}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			sanitized := *apiErr
+			sanitized.Operation = compactErrorMessage(redactSecrets(sanitized.Operation, secrets...))
+			sanitized.Message = compactErrorMessage(redactSecrets(sanitized.Message, secrets...))
+			return authHTTPResponse{}, &sanitized
+		}
 		if ctxErr := request.Context().Err(); ctxErr != nil {
 			return authHTTPResponse{}, ctxErr
 		}

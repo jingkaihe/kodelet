@@ -24,6 +24,11 @@ func TestProtocolConstantsAndBearerFormat(t *testing.T) {
 	decoded, err := base64.RawURLEncoding.DecodeString(generated[len(BearerTokenPrefix):])
 	require.NoError(t, err)
 	assert.Len(t, decoded, bearerTokenPayloadBytes)
+	refresh, err := GenerateRefreshToken()
+	require.NoError(t, err)
+	require.NoError(t, ValidateRefreshToken(refresh))
+	assert.Error(t, ValidateBearerToken(refresh))
+	assert.Error(t, ValidateRefreshToken(generated))
 
 	valid := testBearerToken(0x31)
 	require.NoError(t, ValidateBearerToken(valid))

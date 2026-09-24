@@ -124,8 +124,21 @@ type ControlPlaneChatSettings struct {
 	DefaultRunnerReady           bool                        `json:"defaultRunnerReady"`
 }
 
+// ClientOption configures the daemon HTTP client without discovering local state.
+type ClientOption func(*Client)
+
+// WithHTTPClient supplies the transport used for daemon requests. A nil client
+// leaves the default streaming client in place.
+func WithHTTPClient(client *http.Client) ClientOption {
+	return func(r *Client) {
+		if client != nil {
+			r.client = client
+		}
+	}
+}
+
 // NewClient creates a daemon HTTP client with an optional runner selection.
-func NewClient(server, authToken, runnerID string) (*Client, error) {
+func NewClient(server, authToken, runnerID string, options ...ClientOption) (*Client, error) {
 	baseURL, err := controlPlaneBaseURL(server)
 	if err != nil {
 		return nil, err
@@ -135,14 +148,18 @@ func NewClient(server, authToken, runnerID string) (*Client, error) {
 		return nil, err
 	}
 	runnerID = strings.TrimSpace(runnerID)
-	return &Client{
+	client := &Client{
 		baseURL:   baseURL,
 		chatURL:   chatURL,
 		authToken: strings.TrimSpace(authToken),
 		runnerID:  runnerID,
 		clientID:  convtypes.GenerateID(),
 		client:    &http.Client{Timeout: 0},
-	}, nil
+	}
+	for _, option := range options {
+		option(client)
+	}
+	return client, nil
 }
 
 // Run posts one chat request and forwards NDJSON events to the event sink.

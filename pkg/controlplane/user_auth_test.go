@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func TestUserLoginHTTPApprovalLifecycleAndTrustedVerificationURL(t *testing.T) {
 	store, clock := newAuthStoreTest(t)
 	config := testUserAuthServerConfig()
 	config.OIDC.SessionDuration = 90 * time.Minute
+	config.OIDC.CLISessionDuration = 7 * 24 * time.Hour
 	config.OIDC.RedirectURL = "https://trusted.example:8443/base/oidc/callback?tenant=one"
 	server := newUserAuthRouteServer(config, store)
 
@@ -123,7 +125,8 @@ func TestUserLoginHTTPApprovalLifecycleAndTrustedVerificationURL(t *testing.T) {
 		Email:   "user@example.com",
 		Roles:   []string{string(RoleUser), string(RoleTerminal)},
 	}, polled.Principal)
-	assert.Equal(t, clock.current.Add(config.OIDC.SessionDuration), polled.ExpiresAt)
+	assert.Equal(t, clock.current.Add(config.OIDC.CLISessionDuration), polled.ExpiresAt)
+	assert.Equal(t, clock.current.Add(time.Hour), polled.AccessExpiresAt)
 
 	conflictResponse := performUserLoginDecision(t, server, started.UserCode, "approve", sessionToken, csrfToken, csrfToken, "https://trusted.example:8443", "")
 	assert.Equal(t, http.StatusConflict, conflictResponse.Code)
@@ -277,6 +280,12 @@ func TestUserLoginHTTPDisabledModesReturnNotFound(t *testing.T) {
 			pollResponse := serveUserAuthRequest(server, pollRequest)
 			assert.Equal(t, http.StatusNotFound, pollResponse.Code)
 			assert.Equal(t, "no-store", pollResponse.Header().Get("Cache-Control"))
+
+			refreshRequest := httptest.NewRequest(http.MethodPost, "https://kodelet.example"+userauth.RefreshPath, strings.NewReader(`{}`))
+			refreshResponse := serveUserAuthRequest(server, refreshRequest)
+			assert.Equal(t, http.StatusNotFound, refreshResponse.Code)
+			assert.Equal(t, "no-store", refreshResponse.Header().Get("Cache-Control"))
+			assert.Empty(t, refreshResponse.Header().Get("WWW-Authenticate"))
 		})
 	}
 }
@@ -394,6 +403,186 @@ func TestUserCredentialMiddlewareVerificationAndSelfRevocation(t *testing.T) {
 	meAfterRevoke.Header.Set("Authorization", "Bearer "+started.BearerToken)
 	meAfterRevokeResponse := serveUserAuthRequest(server, meAfterRevoke)
 	assert.Equal(t, http.StatusUnauthorized, meAfterRevokeResponse.Code)
+}
+
+func TestUserRefreshAuthenticatedClientRecoversOnceAndLogsOut(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	clock.current = time.Now().UTC()
+	server := newUserAuthRouteServer(testUserAuthServerConfig(), store)
+	var refreshRequests, protectedRequests, logoutRequests atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case userauth.RefreshPath:
+			refreshRequests.Add(1)
+		case userauth.MePath:
+			protectedRequests.Add(1)
+		case userauth.CurrentCredentialPath:
+			logoutRequests.Add(1)
+		}
+		server.router.ServeHTTP(w, r)
+		if r.URL.Path == userauth.RefreshPath {
+			assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+			assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+		}
+	}))
+	defer endpoint.Close()
+	started, err := store.StartUserLogin(t.Context(), testUserLoginStartRequest(), endpoint.URL+userauth.DeviceVerificationPath)
+	require.NoError(t, err)
+	_, err = store.ApproveUserLogin(t.Context(), started.UserCode, testUserLoginPrincipal(), 3*time.Hour)
+	require.NoError(t, err)
+	polled, err := store.PollUserLogin(t.Context(), userauth.DevicePollRequest{
+		AuthorizationID: started.AuthorizationID, DeviceCode: started.DeviceCode,
+	})
+	require.NoError(t, err)
+	clientStore, err := userauth.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, clientStore.SaveCredential(userauth.Credential{
+		Server:          endpoint.URL,
+		CredentialID:    polled.CredentialID,
+		BearerToken:     started.BearerToken,
+		RefreshToken:    started.RefreshToken,
+		AccessExpiresAt: polled.AccessExpiresAt,
+		ExpiresAt:       polled.ExpiresAt,
+		Principal:       polled.Principal,
+		CreatedAt:       clock.current,
+	}))
+	client, err := userauth.NewAuthenticatedClient(endpoint.URL, clientStore, endpoint.Client())
+	require.NoError(t, err)
+	principal, err := userauth.ValidateCredential(t.Context(), endpoint.URL, started.BearerToken, client)
+	require.NoError(t, err)
+	assert.Equal(t, polled.Principal, principal)
+	assert.EqualValues(t, 1, protectedRequests.Load())
+	assert.Zero(t, refreshRequests.Load(), "a valid access token needs no refresh preflight")
+
+	// The preceding response is fully read and closed. Only the backend clock advances;
+	// the real client still considers its access token valid.
+	clock.current = polled.AccessExpiresAt.Add(time.Second)
+	principal, err = userauth.ValidateCredential(t.Context(), endpoint.URL, started.BearerToken, client)
+	require.NoError(t, err)
+	assert.Equal(t, polled.Principal, principal)
+	assert.EqualValues(t, 3, protectedRequests.Load(), "one rejected request and one successful retry")
+	assert.EqualValues(t, 1, refreshRequests.Load(), "recovery must perform exactly one token exchange")
+	rotated, found, err := clientStore.LoadCredential(endpoint.URL)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.NotEqual(t, started.BearerToken, rotated.BearerToken)
+	assert.NotEqual(t, started.RefreshToken, rotated.RefreshToken)
+	assert.Equal(t, polled.ExpiresAt, rotated.ExpiresAt)
+	assert.Equal(t, clock.current.Add(defaultUserAccessTTL), rotated.AccessExpiresAt)
+	assert.False(t, rotated.RefreshPending)
+
+	// The transport replaces a caller's stale header with the saved rotated token.
+	require.NoError(t, userauth.RevokeCredential(t.Context(), endpoint.URL, started.BearerToken, client))
+	assert.EqualValues(t, 1, logoutRequests.Load())
+	assert.EqualValues(t, 1, refreshRequests.Load(), "logout must reuse the valid rotated token")
+	for _, bearer := range []string{started.BearerToken, rotated.BearerToken} {
+		_, err := userauth.ValidateCredential(t.Context(), endpoint.URL, bearer, endpoint.Client())
+		var apiErr *userauth.APIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
+	}
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: rotated.RefreshToken})
+	require.ErrorIs(t, err, errUserCredentialInvalid, "logout also revokes the current refresh token")
+}
+
+func TestUserRefreshHTTPValidationAndRateLimit(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	server := newUserAuthRouteServer(testUserAuthServerConfig(), store)
+	started, _ := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), time.Hour)
+	unknown, err := userauth.GenerateRefreshToken()
+	require.NoError(t, err)
+	validBody, err := json.Marshal(userauth.RefreshRequest{RefreshToken: unknown})
+	require.NoError(t, err)
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{name: "missing token", body: `{}`, status: http.StatusBadRequest},
+		{name: "malformed token", body: `{"refreshToken":"kltr_invalid"}`, status: http.StatusBadRequest},
+		{name: "access token", body: `{"refreshToken":"` + started.BearerToken + `"}`, status: http.StatusBadRequest},
+		{name: "unknown field", body: `{"refreshToken":"` + unknown + `","extra":true}`, status: http.StatusBadRequest},
+		{name: "trailing JSON", body: string(validBody) + `{}`, status: http.StatusBadRequest},
+		{name: "oversized", body: `{"refreshToken":"` + strings.Repeat("x", maxUserLoginPollRequestBytes) + `"}`, status: http.StatusBadRequest},
+		{name: "unknown valid token", body: string(validBody), status: http.StatusUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "https://kodelet.example"+userauth.RefreshPath, strings.NewReader(test.body))
+			response := serveUserAuthRequest(server, request)
+			assert.Equal(t, test.status, response.Code)
+			assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+			assert.Empty(t, response.Header().Get("WWW-Authenticate"))
+			assert.NotContains(t, response.Body.String(), unknown)
+		})
+	}
+	limited := newUserAuthRouteServer(testUserAuthServerConfig(), store)
+	for range maxUserRefreshesPerWindow {
+		request := httptest.NewRequest(http.MethodPost, "https://kodelet.example"+userauth.RefreshPath, strings.NewReader(`{}`))
+		require.Equal(t, http.StatusBadRequest, serveUserAuthRequest(limited, request).Code)
+	}
+	refreshBody, err := json.Marshal(userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "https://kodelet.example"+userauth.RefreshPath, bytes.NewReader(refreshBody))
+	response := serveUserAuthRequest(limited, request)
+	assert.Equal(t, http.StatusTooManyRequests, response.Code)
+	assert.Equal(t, strconvForDuration(publicAuthRateWindow), response.Header().Get("Retry-After"))
+	assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	assert.Empty(t, response.Header().Get("WWW-Authenticate"))
+	var slowDown struct {
+		Error        string `json:"error"`
+		RetryAfterMS int64  `json:"retryAfterMs"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &slowDown))
+	assert.Equal(t, "slow_down", slowDown.Error)
+	assert.Equal(t, publicAuthRateWindow.Milliseconds(), slowDown.RetryAfterMS)
+	_, err = store.RefreshUserCredential(t.Context(), userauth.RefreshRequest{RefreshToken: started.RefreshToken})
+	require.NoError(t, err, "rate limiting must reject before consuming the refresh token")
+}
+
+func TestUserAccessInvalidTokenChallengeOnlyBeforeHandler(t *testing.T) {
+	// Expiry/revocation are covered by the real-client test; these cases protect the retry boundary.
+	store, _ := newAuthStoreTest(t)
+	started, _ := issueUserCredentialForHTTPTest(t, store, testUserLoginPrincipal(), time.Hour)
+	for _, state := range []string{"refresh token", "handler rejection", "token mode", "local proxy"} {
+		t.Run(state, func(t *testing.T) {
+			config := testUserAuthServerConfig()
+			token := started.BearerToken
+			expectChallenge := true
+			switch state {
+			case "refresh token":
+				token = started.RefreshToken
+			case "handler rejection":
+				expectChallenge = false
+			case "token mode":
+				config.WebAuthMode, config.AuthToken = WebAuthModeToken, "other-token"
+				expectChallenge = false
+			case "local proxy":
+				config.LocalAuthToken, token = "local-token", "local-token"
+				expectChallenge = false
+			}
+			server := newUserAuthRouteServer(config, store)
+			called := false
+			handler := server.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				server.writeAuthError(w, r, http.StatusUnauthorized, "handler rejected request")
+			}))
+			request := httptest.NewRequest(http.MethodPost, "http://localhost/api/test", strings.NewReader(`{}`))
+			request.Header.Set("Authorization", "Bearer "+token)
+			if state == "local proxy" {
+				request.RemoteAddr = "127.0.0.1:1234"
+				request.Header.Set("X-Forwarded-For", "127.0.0.1")
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusUnauthorized, response.Code)
+			assert.Equal(t, state == "handler rejection", called)
+			if expectChallenge {
+				assert.Equal(t, `Bearer error="invalid_token"`, response.Header().Get("WWW-Authenticate"))
+			} else {
+				assert.Empty(t, response.Header().Get("WWW-Authenticate"))
+			}
+		})
+	}
 }
 
 func newUserAuthRouteServer(config *ServerConfig, store *authStore) *Server {

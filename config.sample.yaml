@@ -72,7 +72,10 @@ log_format: "json"
 #     terminal_emails: ["terminal@example.com"]
 #     runner_admin_emails: ["runners@example.com"]
 #     allow_any_user: false
+#     # Browser session lifetime.
 #     session_duration: "12h"
+#     # Absolute CLI sign-in lifetime (14 days); token refresh never extends it.
+#     cli_session_duration: "336h"
 # Pure OIDC does not generate an administrative compatibility token. Use
 # `kodelet auth login --server https://kodelet.example` for interactive CLI,
 # TUI, and ACP access; explicit tokens remain migration or automation overrides.

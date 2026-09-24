@@ -55,6 +55,7 @@ type runnerEnrollConfig struct {
 type runnerQueryConfig struct {
 	Server      string
 	AuthToken   string
+	HTTPClient  *http.Client
 	JSONOutput  bool
 	ConfigError error
 }
@@ -181,9 +182,14 @@ func runnerQueryConfigFromFlags(cmd *cobra.Command) runnerQueryConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	authToken, _, authErr := resolveControlPlaneAuthToken(cmd, server)
+	var httpClient *http.Client
+	if authErr == nil {
+		httpClient, authErr = controlPlaneHTTPClient(cmd, server, &http.Client{})
+	}
 	return runnerQueryConfig{
 		Server:      server,
 		AuthToken:   authToken,
+		HTTPClient:  httpClient,
 		JSONOutput:  jsonOutput,
 		ConfigError: authErr,
 	}
@@ -351,7 +357,7 @@ func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writ
 	if config.ConfigError != nil {
 		return config.ConfigError
 	}
-	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
+	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken, config.HTTPClient)
 	if err != nil {
 		return err
 	}
@@ -384,7 +390,7 @@ func runRunnerInspect(ctx context.Context, query string, config runnerQueryConfi
 	if config.ConfigError != nil {
 		return config.ConfigError
 	}
-	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
+	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken, config.HTTPClient)
 	if err != nil {
 		return err
 	}
@@ -422,7 +428,7 @@ func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfi
 	if config.JSONOutput && !config.NoConfirm {
 		return errors.New("--json requires --no-confirm for runner removal")
 	}
-	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
+	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken, config.HTTPClient)
 	if err != nil {
 		return err
 	}
@@ -438,7 +444,7 @@ func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfi
 		return nil
 	}
 
-	result, err := deleteRunner(ctx, server, config.AuthToken, runner.ID, config.Force)
+	result, err := deleteRunner(ctx, server, config.AuthToken, runner.ID, config.Force, config.HTTPClient)
 	if err != nil {
 		return err
 	}
@@ -462,7 +468,9 @@ func confirmRunnerRemoval(input io.Reader, output io.Writer, runner runnerregist
 	return response == "y" || response == "yes"
 }
 
-func deleteRunner(ctx context.Context, server, authToken, runnerID string, force bool) (runnerregistry.RemovalResult, error) {
+func deleteRunner(ctx context.Context, server, authToken, runnerID string, force bool, clients ...*http.Client) (runnerregistry.RemovalResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	endpoint, err := controlplaneurl.Endpoint(server, "api", "runners", runnerID)
 	if err != nil {
 		return runnerregistry.RemovalResult{}, err
@@ -483,7 +491,11 @@ func deleteRunner(ctx context.Context, server, authToken, runnerID string, force
 	if token := strings.TrimSpace(authToken); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	client := http.DefaultClient
+	if len(clients) > 0 && clients[0] != nil {
+		client = clients[0]
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to remove the runner")
 	}
@@ -525,7 +537,9 @@ func deleteLocalRunnerRegistration(server string, runner runnerregistry.Runner) 
 	return nil
 }
 
-func fetchRunners(ctx context.Context, rawServer, authToken string) ([]runnerregistry.Runner, string, error) {
+func fetchRunners(ctx context.Context, rawServer, authToken string, clients ...*http.Client) ([]runnerregistry.Runner, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	server, err := normalizeRunnerAPIBaseURL(rawServer)
 	if err != nil {
 		return nil, "", err
@@ -541,7 +555,10 @@ func fetchRunners(ctx context.Context, rawServer, authToken string) ([]runnerreg
 	if token := strings.TrimSpace(authToken); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := http.DefaultClient
+	if len(clients) > 0 && clients[0] != nil {
+		client = clients[0]
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "could not list runners; check that 'kodelet serve' is running and --server points to it")
