@@ -117,6 +117,13 @@ func (r *configuredChatRunner) discoveryTarget(ctx context.Context, target chatp
 	return target, nil
 }
 
+func (r *configuredChatRunner) RunnerStatus(ctx context.Context, target chatpkg.WorkspaceTarget) (chatpkg.RunnerStatus, error) {
+	if strings.TrimSpace(target.RunnerID) == "" {
+		target.RunnerID = r.runnerID
+	}
+	return r.Client.RunnerStatus(ctx, target)
+}
+
 func (r *configuredChatRunner) DiscoverWorkspace(ctx context.Context, target chatpkg.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
 	target, err := r.discoveryTarget(ctx, target)
 	if err != nil {

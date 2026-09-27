@@ -691,6 +691,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyServerStatus(msg)
 		return m, nil
 
+	case runnerStatusMsg:
+		m.applyRunnerStatus(msg)
+		return m, nil
+
 	case tea.PasteMsg:
 		if m.infoDialogOpen() {
 			return m, nil
@@ -911,6 +915,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mouse := msg.Mouse()
 		action := mouseActionFor(msg)
 		if m.infoDialogOpen() {
+			if m.aboutDialog != nil && isVerticalViewportNavigation(msg) {
+				if mouse.Button == tea.MouseWheelUp {
+					return m, m.updateAboutDialogKey("up")
+				}
+				return m, m.updateAboutDialogKey("down")
+			}
 			if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
 				return m, m.dismissInfoDialogs()
 			}

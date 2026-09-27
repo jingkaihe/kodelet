@@ -668,10 +668,97 @@ func TestPrepareDaemonChatResumePreloadsModelChoicesWithoutChangingSavedSettings
 	}
 }
 
-// The TUI /about dialog discovers server build metadata through this method.
+// The TUI /about dialog discovers server and runner details through these methods.
 var _ interface {
 	ServerStatus(context.Context) (chatpkg.ServerStatus, error)
+	RunnerStatus(context.Context, chatpkg.WorkspaceTarget) (chatpkg.RunnerStatus, error)
 } = (*configuredChatRunner)(nil)
+
+func TestConfiguredChatRunnerStatusSelectionWithoutDiscovery(t *testing.T) {
+	var paths []string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Empty(t, r.URL.Query().Get("options"))
+		switch {
+		case r.URL.Path == "/api/conversations/missing":
+			http.NotFound(w, r)
+		case strings.HasPrefix(r.URL.Path, "/api/conversations/"):
+			assert.Equal(t, "stream", r.URL.Query().Get("format"))
+			id := strings.TrimPrefix(r.URL.Path, "/api/conversations/")
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"runnerId": id + "-runner"}))
+		case strings.HasPrefix(r.URL.Path, "/api/runners/"):
+			require.NoError(t, json.NewEncoder(w).Encode(runnerregistry.Runner{
+				ID:     strings.TrimPrefix(r.URL.Path, "/api/runners/"),
+				Status: runnerregistry.RunnerStatusOffline,
+			}))
+		case r.URL.Path == "/api/auth/me":
+			_, _ = w.Write([]byte(`{"roles":["admin"]}`))
+		default:
+			t.Errorf("status must not execute workspace discovery: %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer daemon.Close()
+	client, err := chatpkg.NewClient(daemon.URL, "", "")
+	require.NoError(t, err)
+	runner := &configuredChatRunner{Client: client, runnerID: "configured"}
+
+	for _, test := range []struct {
+		name       string
+		target     chatpkg.WorkspaceTarget
+		wantRunner string
+		wantPaths  []string
+		wantError  bool
+	}{
+		{
+			name:       "new conversation uses configured runner",
+			wantRunner: "configured",
+			wantPaths:  []string{"/api/runners/configured", "/api/auth/me"},
+		},
+		{
+			name:       "explicit target overrides configured runner",
+			target:     chatpkg.WorkspaceTarget{RunnerID: "explicit"},
+			wantRunner: "explicit",
+			wantPaths:  []string{"/api/runners/explicit", "/api/auth/me"},
+		},
+		{
+			name:       "saved conversation overrides configured runner",
+			target:     chatpkg.WorkspaceTarget{ConversationID: "first"},
+			wantRunner: "first-runner",
+			wantPaths:  []string{"/api/conversations/first", "/api/runners/first-runner", "/api/auth/me"},
+		},
+		{
+			name:       "switched conversation overrides explicit and configured runners",
+			target:     chatpkg.WorkspaceTarget{ConversationID: "second", RunnerID: "explicit"},
+			wantRunner: "second-runner",
+			wantPaths:  []string{"/api/conversations/second", "/api/runners/second-runner", "/api/auth/me"},
+		},
+		{
+			name:      "missing saved conversation must not fall back",
+			target:    chatpkg.WorkspaceTarget{ConversationID: "missing", RunnerID: "explicit"},
+			wantPaths: []string{"/api/conversations/missing"},
+			wantError: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			paths = nil
+
+			status, err := runner.RunnerStatus(t.Context(), test.target)
+
+			assert.Equal(t, test.wantPaths, paths)
+			assert.Equal(t, "configured", runner.runnerID)
+			if test.wantError {
+				require.ErrorContains(t, err, "could not load the conversation's runner")
+				assert.Nil(t, status.Runner)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, status.Runner)
+			assert.Equal(t, test.wantRunner, status.Runner.ID)
+		})
+	}
+}
 
 func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 	for _, test := range []struct {
