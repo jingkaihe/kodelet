@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.6.24-beta
+
+Added an About Kodelet dialog to the Web UI, available from the sidebar account menu or directly from the sidebar when no account is shown. It shows the server version, build commit and date, runner details, and available workspace capabilities. `/api/status` now also reports `gitCommit` and `buildTime`.
+
+Fixed blurry Web UI browser previews by rendering the shared headless Chrome session at 2x device scale and streaming full-resolution screencast frames, while keeping page layout and pointer input mapped to CSS pixels.
+
 ## 0.6.22-beta
 
 Added automatic token refresh for `kodelet auth login` sign-ins, using one-hour rotating access tokens within a fixed 14-day session. Configure the lifetime with `serve.oidc.cli_session_duration` or `--oidc-cli-session-duration`; `serve.oidc.session_duration` now applies only to browser sessions. Existing saved sign-ins work until they expire but do not refresh.
