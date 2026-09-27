@@ -576,8 +576,11 @@ func (s *session) start(ctx context.Context, executable string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create isolated browser profile")
 	}
+	// Screencast resolution follows Chrome's native scale, not emulated DPR alone.
+	// Render at 2x while retaining CSS-sized frame metadata for input mapping.
 	s.cmd = exec.Command(executable,
-		"--headless", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
+		"--headless", "--force-device-scale-factor=2",
+		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
 		"--user-data-dir="+s.profile, "--no-first-run", "--no-default-browser-check", "about:blank")
 	s.cmd.Dir = s.info.CWD
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

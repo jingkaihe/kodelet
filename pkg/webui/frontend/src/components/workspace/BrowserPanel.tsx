@@ -257,9 +257,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
               }
               await client.request('Page.startScreencast', {
                 format: 'jpeg',
-                quality: 80,
-                maxWidth: 1920,
-                maxHeight: 1440,
+                quality: 95,
               });
               if (!disposed && !stopped.current) setStatus('live');
             })().catch((reason) => {
@@ -317,10 +315,11 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
         const { clientWidth: width, clientHeight: height } = viewport;
         if (width < 1 || height < 1) return;
         void command('Emulation.setDeviceMetricsOverride', {
-          // Match the panel's content box; only the encoded screencast is size-limited.
+          // Keep CSS layout and input coordinates independent of capture density.
           width,
           height,
-          deviceScaleFactor: 1,
+          // Match the runner's native scale; emulated DPR alone cannot sharpen screencasts.
+          deviceScaleFactor: 2,
           mobile: false,
         });
       }, 80);

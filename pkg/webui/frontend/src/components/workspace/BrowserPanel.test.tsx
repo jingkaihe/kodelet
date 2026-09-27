@@ -169,7 +169,7 @@ describe('BrowserPanel', () => {
     expect(stopButton.querySelector('.spinner-glyph')).not.toBeInTheDocument();
   });
 
-  it('opens the target with debugging and an uncapped CSS-pixel viewport', async () => {
+  it('opens the target with debugging and an uncapped 2x CSS-pixel viewport', async () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(2300);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1800);
     const { socket } = await open();
@@ -187,13 +187,13 @@ describe('BrowserPanel', () => {
     await waitFor(() =>
       expect(socket.matching('Emulation.setDeviceMetricsOverride')).toEqual([
         expect.objectContaining({
-          params: { width: 2300, height: 1800, deviceScaleFactor: 1, mobile: false },
+          params: { width: 2300, height: 1800, deviceScaleFactor: 2, mobile: false },
         }),
       ])
     );
-    expect(socket.matching('Page.startScreencast')[0].params).toMatchObject({
-      maxWidth: 1920,
-      maxHeight: 1440,
+    expect(socket.matching('Page.startScreencast')[0].params).toEqual({
+      format: 'jpeg',
+      quality: 95,
     });
   });
 
@@ -280,10 +280,44 @@ describe('BrowserPanel', () => {
       });
       expect(
         socket.matching('Emulation.setDeviceMetricsOverride').map(({ params }) => params)
-      ).toEqual(Array(3).fill({ width: 400, height: 300, deviceScaleFactor: 1, mobile: false }));
+      ).toEqual(Array(3).fill({ width: 400, height: 300, deviceScaleFactor: 2, mobile: false }));
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    1, 1.5, 2, 3,
+  ])('maps a 2x capture to CSS coordinates on a %sx display', async (devicePixelRatio) => {
+    vi.stubGlobal('devicePixelRatio', devicePixelRatio);
+    const { socket } = await open();
+    // The encoded image is 800x600, but metadata and input stay at 400x300.
+    fireEvent.load(await showFrame(socket, 1, 'YQ==', { deviceWidth: 400, deviceHeight: 300 }));
+    const input = screen.getByLabelText('Remote browser input');
+    const pointer = { clientX: 110, clientY: 95, button: 0 };
+    fireEvent.pointerDown(input, pointer);
+    fireEvent.pointerUp(input, pointer);
+    fireEvent.wheel(input, { ...pointer, deltaY: 10 });
+    expect(socket.matching('Input.dispatchMouseEvent').map(({ params }) => params)).toEqual([
+      expect.objectContaining({ type: 'mousePressed', x: 100, y: 75 }),
+      expect.objectContaining({ type: 'mouseReleased', x: 100, y: 75 }),
+      expect.objectContaining({ type: 'mouseWheel', x: 100, y: 75, deltaY: 10 }),
+    ]);
+    fireEvent.pointerDown(input, { ...pointer, pointerType: 'touch' });
+    fireEvent.pointerUp(input, { ...pointer, pointerType: 'touch' });
+    expect(socket.matching('Input.dispatchTouchEvent')[0].params).toMatchObject({
+      type: 'touchStart',
+      touchPoints: [{ x: 100, y: 75, id: 1 }],
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Inspect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick element' }));
+    await act(async () => {
+      fireEvent.pointerDown(input, pointer);
+      fireEvent.pointerUp(input, pointer);
+    });
+    expect(socket.matching('Runtime.evaluate')[0].params.expression).toContain(
+      'document.elementFromPoint(100, 75)'
+    );
   });
 
   it.each([

@@ -2,8 +2,10 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"net"
 	"net/http"
@@ -262,6 +264,7 @@ func TestOpenReusesCanonicalConversationAndRequestLifetime(t *testing.T) {
 	assert.Equal(t, info.CWD, s.cmd.Dir)
 	assert.Contains(t, s.cmd.Args, "--remote-debugging-port=0")
 	assert.Contains(t, s.cmd.Args, "--remote-debugging-address=127.0.0.1")
+	assert.Contains(t, s.cmd.Args, "--force-device-scale-factor=2")
 	assert.Contains(t, s.cmd.Args, "--user-data-dir="+s.profile)
 	assert.Contains(t, s.cmd.Args, "about:blank")
 	assert.NotContains(t, s.cmd.Args, "--no-sandbox")
@@ -1071,4 +1074,53 @@ func TestRealBrowserSmoke(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(result, &screenshot))
 	assert.NotEmpty(t, screenshot.Data)
+
+	t.Run("native resolution screencast", func(t *testing.T) {
+		info, err := m.Open(t.Context(), scope)
+		require.NoError(t, err)
+		conn, release, err := m.Connect(t.Context(), scope, info.SessionID)
+		require.NoError(t, err)
+		defer release()
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`
+{"id":1,"method":"Emulation.setDeviceMetricsOverride","params":{"width":800,"height":600,"deviceScaleFactor":2,"mobile":false}}
+`)))
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`
+{"id":2,"method":"Page.startScreencast","params":{"format":"jpeg","quality":95}}
+`)))
+		for {
+			var event struct {
+				Method string          `json:"method"`
+				Error  json.RawMessage `json:"error"`
+				Params struct {
+					Data      string `json:"data"`
+					SessionID int    `json:"sessionId"`
+					Metadata  struct {
+						Width  float64 `json:"deviceWidth"`
+						Height float64 `json:"deviceHeight"`
+					} `json:"metadata"`
+				} `json:"params"`
+			}
+			require.NoError(t, conn.ReadJSON(&event))
+			require.Empty(t, event.Error)
+			if event.Method != "Page.screencastFrame" {
+				continue
+			}
+			require.NoError(t, conn.WriteJSON(map[string]any{
+				"id": 3, "method": "Page.screencastFrameAck",
+				"params": map[string]int{"sessionId": event.Params.SessionID},
+			}))
+			if event.Params.Metadata.Width != 800 || event.Params.Metadata.Height != 600 {
+				continue // The first frame can still use Chrome's initial window size.
+			}
+			image, err := jpeg.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(event.Params.Data)))
+			require.NoError(t, err)
+			t.Logf("CSS viewport 800x600, encoded frame %dx%d", image.Width, image.Height)
+			if image.Width == 1600 && image.Height == 1200 {
+				break
+			}
+			// Chrome can update metadata before its resized capture surface is ready.
+			// Keep waiting within the read deadline for a full native-resolution frame.
+		}
+	})
 }
