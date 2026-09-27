@@ -4,6 +4,8 @@
 
 Added an About Kodelet dialog to the Web UI, available from the sidebar account menu or directly from the sidebar when no account is shown. It shows the server version, build commit and date, runner details, and available workspace capabilities. `/api/status` now also reports `gitCommit` and `buildTime`.
 
+Added an `/about` slash command to the TUI that shows the client's version, build commit, and build date alongside the connected server's address and build details.
+
 Fixed blurry Web UI browser previews by rendering the shared headless Chrome session at 2x device scale and streaming full-resolution screencast frames, while keeping page layout and pointer input mapped to CSS pixels.
 
 ## 0.6.22-beta

@@ -204,7 +204,7 @@ func (m *model) openHistorySearch() {
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
-	m.shortcutsOpen = false
+	m.closeInfoDialogs()
 	m.historySearch = &historySearchState{originalDraft: m.textarea.Value()}
 	m.applyHistorySearchQuery()
 }

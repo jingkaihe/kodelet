@@ -202,11 +202,13 @@ The default `auto` theme follows the terminal's light or dark appearance. Use `-
 
 Before the first message, use `Ctrl+T`, `/model`, or click the model name to choose a `profile/model`; use `Ctrl+Y` for reasoning effort. Type to filter, use arrow keys to navigate, and press `Enter` to select or `Esc` to cancel. `/model <profile/model>` selects directly; `/model <id>` uses the current profile. Selection applies the profile and model only to this conversation, without editing configuration. Settings lock after the first message.
 
-While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, and `/theme` run immediately; `/model` reports that the model is locked. Other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Extension prompts appear only in the submitting client and are dismissed on disconnect, not restored on reconnect. Other clients can watch, steer, and stop.
+While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, `/theme`, and `/about` run immediately; `/model` reports that the model is locked. Other slash commands are queued for the next turn. `Ctrl+C` exits without stopping the turn. Extension prompts appear only in the submitting client and are dismissed on disconnect, not restored on reconnect. Other clients can watch, steer, and stop.
 
 Extension shortcuts use the selected runner. During a turn, only the client handling its extension prompts can invoke them; submitted messages queue like typed input.
 
 Use `/sessions` or `Ctrl+L` to switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
+
+Use `/about` to show the TUI's version, build commit, and build date alongside the connected server's address, version, and build details.
 
 #### Custom TUI themes
 

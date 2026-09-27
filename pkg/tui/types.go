@@ -315,8 +315,10 @@ type model struct {
 
 	terminalTitleEpoch time.Time
 
-	detailRegions []detailRegion
-	shortcutsOpen bool
+	detailRegions      []detailRegion
+	shortcutsOpen      bool
+	aboutDialog        *aboutDialogState
+	nextAboutRequestID int
 
 	uiNotifications      []uiNotification
 	nextUINotificationID int

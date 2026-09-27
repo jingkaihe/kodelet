@@ -668,6 +668,11 @@ func TestPrepareDaemonChatResumePreloadsModelChoicesWithoutChangingSavedSettings
 	}
 }
 
+// The TUI /about dialog discovers server build metadata through this method.
+var _ interface {
+	ServerStatus(context.Context) (chatpkg.ServerStatus, error)
+} = (*configuredChatRunner)(nil)
+
 func TestConfiguredChatRunnerAppliesPickedModelOverCLIOptions(t *testing.T) {
 	for _, test := range []struct {
 		name       string

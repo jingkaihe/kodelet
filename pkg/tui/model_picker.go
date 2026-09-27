@@ -147,7 +147,7 @@ func (m *model) handleModelCommand(args string) tea.Cmd {
 	}
 	m.cancelHistorySearch()
 	m.dismissSlashCommandSuggestions()
-	m.shortcutsOpen = false
+	m.closeInfoDialogs()
 	m.modelPickerOpen = true
 	m.modelPickerQuery = ""
 	m.modelPickerIndex = 0

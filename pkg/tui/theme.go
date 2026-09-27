@@ -133,6 +133,11 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 			Hint:        "cwd (optional)",
 			Placeholder: "/new [cwd]",
 		},
+		{
+			Name:        "about",
+			Description: "Show Kodelet client and server version details",
+			Placeholder: "/about",
+		},
 	}
 }
 
@@ -193,6 +198,17 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()
 		return m.openNewConversationPrompt(args), true
+	case "about":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		if strings.TrimSpace(args) != "" {
+			return m.addUINotification(uiNotification{
+				level:   uiNotificationError,
+				title:   "Invalid command",
+				message: "usage: /about",
+			}), true
+		}
+		return m.openAboutDialog(), true
 	default:
 		return nil, false
 	}

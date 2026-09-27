@@ -701,7 +701,7 @@ func (m *model) removeExtensionSurfaceOrder(key extensionUIKey) {
 }
 
 func (m model) focusedExtensionSurfaceKey() (extensionUIKey, bool) {
-	if (m.conversationState != nil && m.activeUIPrompt != nil) || m.conversationPicker != nil || m.shortcutsOpen {
+	if (m.conversationState != nil && m.activeUIPrompt != nil) || m.conversationPicker != nil || m.infoDialogOpen() {
 		return extensionUIKey{}, false
 	}
 	for index := len(m.extensionSurfaceOrder) - 1; index >= 0; index-- {

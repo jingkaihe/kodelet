@@ -220,6 +220,9 @@ func (m model) renderUIOverlays(content string) string {
 	if m.shortcutsOpen {
 		lines = m.overlayShortcutsDialog(lines)
 	}
+	if m.aboutDialog != nil {
+		lines = m.overlayAboutDialog(lines)
+	}
 	// Notifications stay topmost so modal overlays cannot obscure transient feedback.
 	if len(m.uiNotifications) > 0 {
 		lines = m.overlayUINotifications(lines)
@@ -228,27 +231,14 @@ func (m model) renderUIOverlays(content string) string {
 }
 
 func (m model) overlayUIDialog(lines []string) []string {
-	dialog := m.renderUIDialog()
-	if strings.TrimSpace(dialog) == "" {
-		return lines
-	}
-	dialogLines := strings.Split(dialog, "\n")
-	width := m.contentWidth()
-	dialogHeight := len(dialogLines)
-	startY := max(0, (m.height-dialogHeight)/2)
-	for i, line := range dialogLines {
-		row := startY + i
-		if row < 0 || row >= len(lines) {
-			continue
-		}
-		startX := max(0, (width-lipgloss.Width(line))/2)
-		lines[row] = padVisible(strings.Repeat(" ", startX)+line, width)
-	}
-	return lines
+	return m.overlayCenteredDialog(lines, m.renderUIDialog())
 }
 
 func (m model) overlayShortcutsDialog(lines []string) []string {
-	dialog := m.renderShortcutsDialog()
+	return m.overlayCenteredDialog(lines, m.renderShortcutsDialog())
+}
+
+func (m model) overlayCenteredDialog(lines []string, dialog string) []string {
 	if strings.TrimSpace(dialog) == "" {
 		return lines
 	}
@@ -331,7 +321,12 @@ func (m model) renderShortcutsDialog() string {
 		lines = append(lines, shortcut+"  "+description)
 	}
 	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Press Esc, Enter, ?, or q to close.", contentWidth)))
+	return renderDialogBox(width, lines)
+}
 
+// renderDialogBox frames pre-fitted content lines in a rounded dialog border.
+func renderDialogBox(width int, lines []string) string {
+	contentWidth := max(1, width-4)
 	top := uiDialogBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
 	bottom := uiDialogBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
 	boxLines := []string{top}

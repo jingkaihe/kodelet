@@ -82,7 +82,7 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.cancelHistorySearch()
-	m.shortcutsOpen = false
+	m.closeInfoDialogs()
 	m.nextConversationListRequestID++
 	requestID := m.nextConversationListRequestID
 	m.conversationPicker = &conversationPickerState{

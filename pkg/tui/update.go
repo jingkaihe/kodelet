@@ -62,7 +62,7 @@ func normalizeSingleLinePaste(text string) string {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
-	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
+	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.infoDialogOpen() && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
 		return m, m.insertTextareaNewline()
 	}
 
@@ -687,8 +687,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyConversationList(msg)
 		return m, nil
 
+	case serverStatusMsg:
+		m.applyServerStatus(msg)
+		return m, nil
+
 	case tea.PasteMsg:
-		if m.shortcutsOpen {
+		if m.infoDialogOpen() {
 			return m, nil
 		}
 		if m.activeUIPrompt != nil {
@@ -732,19 +736,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.aboutDialog != nil {
+			return m, m.updateAboutDialogKey(key)
+		}
 		if m.shortcutsOpen {
 			switch key {
 			case "ctrl+l":
 				return m, m.openConversationPicker("")
 			case "esc", "enter", "?", "q", "Q", "ctrl+c", "ctrl+d":
-				oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
-				var oldFocus tuiExtensionSurface
-				if oldFocused {
-					oldFocus = m.extensionSurfaces[oldFocusKey]
-				}
-				m.shortcutsOpen = false
-				m.refreshViewport(false)
-				return m, tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+				return m, m.dismissInfoDialogs()
 			default:
 				return m, nil
 			}
@@ -910,16 +910,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		mouse := msg.Mouse()
 		action := mouseActionFor(msg)
-		if m.shortcutsOpen {
+		if m.infoDialogOpen() {
 			if action == tuiMouseActionPress && mouse.Button == tea.MouseLeft {
-				oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
-				var oldFocus tuiExtensionSurface
-				if oldFocused {
-					oldFocus = m.extensionSurfaces[oldFocusKey]
-				}
-				m.shortcutsOpen = false
-				m.refreshViewport(false)
-				return m, tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+				return m, m.dismissInfoDialogs()
 			}
 			return m, nil
 		}
@@ -1377,6 +1370,7 @@ func (m *model) openShortcutsDialog() tea.Cmd {
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
+	m.aboutDialog = nil
 	m.shortcutsOpen = true
 	m.resize()
 	m.refreshViewport(false)
@@ -1409,7 +1403,7 @@ func (m *model) openComposerInEditor() tea.Cmd {
 	m.reasoningPickerOpen = false
 	m.modelPickerOpen = false
 	m.dismissSlashCommandSuggestions()
-	m.shortcutsOpen = false
+	m.closeInfoDialogs()
 	m.steerError = ""
 	m.status = "editing"
 	m.refreshViewport(false)
