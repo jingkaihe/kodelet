@@ -467,9 +467,6 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if selected.Status != runnerregistry.RunnerStatusIdle && selected.Status != runnerregistry.RunnerStatusBusy {
 		return nil, "", errors.Errorf("runner is not available: %s", selected.Status)
 	}
-	if selected.Status == runnerregistry.RunnerStatusBusy && !selected.ConcurrentRuns {
-		return nil, "", errors.New("runner does not support concurrent runs")
-	}
 	runner, err := chatpkg.NewClient(server, config.AuthToken, selected.ID, chatpkg.WithHTTPClient(config.HTTPClient))
 	if err != nil {
 		return nil, "", err

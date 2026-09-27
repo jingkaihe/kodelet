@@ -79,7 +79,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
     const busyRunner = makeRunner({
       displayName: 'kodelet',
       status: 'busy',
-      concurrentRuns: true,
       activeRunId: 'run-1',
       activeRunIds: ['run-1'],
     });

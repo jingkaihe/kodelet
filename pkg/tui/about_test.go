@@ -365,9 +365,6 @@ func TestAboutDialogShowsRunnerCapabilities(t *testing.T) {
 			for _, label := range []string{"Terminal", "Browser"} {
 				assert.Contains(t, view, padVisible(label, aboutLabelWidth)+"  "+test.wantTerminal)
 			}
-			if test.wantGit == "Enabled" {
-				assert.Contains(t, view, padVisible("Parallel runs", aboutLabelWidth)+"  Not enabled")
-			}
 			assert.Contains(t, view, "Esc close")
 			assert.LessOrEqual(t, len(strings.Split(m.renderAboutDialog(), "\n")), m.height)
 		})

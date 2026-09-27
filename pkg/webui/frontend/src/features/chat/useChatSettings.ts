@@ -172,8 +172,7 @@ export const useChatSettings = ({
   const defaultRunnerId =
     settings.defaultRunnerReady &&
     defaultRunner?.connected &&
-    (defaultRunner.status === 'idle' ||
-      (defaultRunner.status === 'busy' && defaultRunner.concurrentRuns))
+    (defaultRunner.status === 'idle' || defaultRunner.status === 'busy')
       ? defaultRunner.id
       : '';
 

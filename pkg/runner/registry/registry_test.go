@@ -966,23 +966,6 @@ func TestOpenRunOutsideStartupWorkspacePreservesRunnerManifestDigest(t *testing.
 	require.NoError(t, registry.CloseRun(t.Context(), params.RunID, RunStatusSucceeded, nil))
 }
 
-func TestOpenRunKeepsLegacyRunnerCapacityOne(t *testing.T) {
-	registry := newTestRegistry(t)
-	link := newFakeLink()
-	params := testRegisterParams("host-one", "/work/project")
-	params.Capabilities.ConcurrentRuns = false
-	registration, err := registry.Register(params, link)
-	require.NoError(t, err)
-	configureManifestLink(t, link, registration)
-	markRunnerReady(t, registry, registration)
-	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
-	require.NoError(t, err)
-
-	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-two", "conversation-two"))
-	require.ErrorContains(t, err, "does not support concurrent runs")
-	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
-}
-
 func TestClosingConcurrentRunPreservesRunnerErrorState(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
@@ -2565,7 +2548,7 @@ func sequentialIDs() func(string) (string, error) {
 func testRegisterParams(hostInstanceID, workspace string) protocol.RegisterParams {
 	return protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{ConcurrentRuns: true},
+		Capabilities:     protocol.RunnerCapabilities{},
 		Host: protocol.Host{
 			InstanceID: hostInstanceID,
 			Hostname:   "host",

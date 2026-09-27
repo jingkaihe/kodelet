@@ -110,7 +110,7 @@ func TestSessionExtensionRelayRoundTripOwnershipAndDisconnect(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	link := newRunnerAPITestLink()
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
-		ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{SessionExtensions: true, ConcurrentRuns: true},
+		ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{SessionExtensions: true},
 		Host: protocol.Host{InstanceID: "host"}, Workspace: protocol.Workspace{Path: "/workspace", Name: "workspace"},
 	}, link)
 	require.NoError(t, err)

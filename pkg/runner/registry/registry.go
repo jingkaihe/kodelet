@@ -113,7 +113,6 @@ type Runner struct {
 	CompatibilityError      string             `json:"compatibilityError,omitempty"`
 	Status                  RunnerStatus       `json:"status"`
 	Connected               bool               `json:"connected"`
-	ConcurrentRuns          bool               `json:"concurrentRuns"`
 	WorkspaceGitDiff        bool               `json:"workspaceGitDiff"`
 	WorkspaceGitCommit      bool               `json:"workspaceGitCommit"`
 	WorkspaceTerminal       bool               `json:"workspaceTerminal"`
@@ -622,7 +621,6 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.Workspace = params.Workspace
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
-	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
@@ -758,7 +756,6 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.Workspace = params.Workspace
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
-	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
@@ -1074,10 +1071,6 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	if entry.Status != RunnerStatusIdle && entry.Status != RunnerStatusBusy {
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.Errorf("runner is not available: %s", entry.Status)
-	}
-	if len(runnerActiveRunIDs(entry)) > 0 && !entry.ConcurrentRuns {
-		r.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.New("runner does not support concurrent runs")
 	}
 	if activeRunID := r.affinities.activeRun(params.ConversationID); activeRunID != "" {
 		r.mu.Unlock()

@@ -50,7 +50,7 @@ func (s *Server) EmbeddedRunnerStatus() EmbeddedRunnerStatus {
 	s.activeChatsMu.Unlock()
 	if !stopping && status.RunnerID != "" && s.runnerRegistry != nil && status.Error == "" {
 		runner, ok := s.runnerRegistry.Runner(status.RunnerID)
-		status.Ready = ok && runner.Connected && (runner.Status == runnerregistry.RunnerStatusIdle || runner.Status == runnerregistry.RunnerStatusBusy && runner.ConcurrentRuns)
+		status.Ready = ok && runner.Connected && (runner.Status == runnerregistry.RunnerStatusIdle || runner.Status == runnerregistry.RunnerStatusBusy)
 	}
 	return status
 }

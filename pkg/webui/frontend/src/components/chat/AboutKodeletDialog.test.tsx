@@ -34,7 +34,6 @@ const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
   manifestChanged: false,
   status: 'idle',
   connected: true,
-  concurrentRuns: true,
   workspaceGitDiff: true,
   workspaceTerminal: true,
   workspaceBrowser: true,
@@ -50,7 +49,6 @@ const capabilities = [
   'Browser',
   'Slash commands',
   'Working directory',
-  'Parallel runs',
 ] as const;
 
 const expectCapability = (label: string, state: string) => {
@@ -164,7 +162,6 @@ describe('AboutKodeletDialog', () => {
           workspaceBrowser: false,
           workspaceDiscovery: undefined,
           workspaceCwd: false,
-          concurrentRuns: undefined,
         })}
         terminalAuthorized
       />

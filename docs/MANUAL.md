@@ -466,7 +466,7 @@ kodelet runner remove kodelet-gpu --server https://kodelet.example
 
 Removing a stopped runner deletes its registration, credentials, and run history, and clears its conversation affinities. Conversations and transcripts are preserved; use `conversation move` to assign another runner before resuming. `--no-confirm` skips the removal prompt and is required with `--json`.
 
-Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. An idle compatible runner accepts a new run, and a busy runner also accepts one when it advertised concurrent-run support; legacy protocol-v1 runners that omit that capability remain capacity-one. A manifest-change flag means the connected runner detected changed context, skills, tools, commands, extensions, or relevant configuration; the changed manifest is pinned independently by the next run and never mutates an already active run.
+Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. Idle and busy compatible runners both accept new runs, because every runner supports concurrent runs across different conversations. A manifest-change flag means the connected runner detected changed context, skills, tools, commands, extensions, or relevant configuration; the changed manifest is pinned independently by the next run and never mutates an already active run.
 
 In the Web UI, choose a runner from **Environment**. **Runner profile** and **Working directory** are optional. Relative paths and `~` resolve on the runner host; a blank directory uses its startup workspace. Suggestions and slash commands follow the selected runner, profile, and directory.
 

@@ -36,7 +36,7 @@ func newShortcutFixture(t *testing.T) *shortcutFixture {
 	f := &shortcutFixture{server: newRunnerTestServer(t, "")}
 	link := newRunnerAPITestLink()
 	registration, err := f.server.runnerRegistry.Register(protocol.RegisterParams{
-		ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{WorkspaceDiscovery: true, WorkspaceCWD: true, ConcurrentRuns: true},
+		ProtocolVersions: []int{protocol.Version}, Capabilities: protocol.RunnerCapabilities{WorkspaceDiscovery: true, WorkspaceCWD: true},
 		Host: protocol.Host{InstanceID: "shortcut-host", Hostname: "worker", OS: "linux", Arch: "amd64"}, Workspace: protocol.Workspace{Path: "/runner/startup", Name: "startup"},
 	}, link)
 	require.NoError(t, err)

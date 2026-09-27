@@ -191,7 +191,7 @@ If the workspace, skills, extension registrations, or configuration change, the 
 
 ### Concurrent top-level runs per runner
 
-Current runners advertise concurrent-run support, so the control plane may assign multiple top-level runs for different conversations to one registered workspace. Protocol-v1 runners that omit the additive capability remain capacity-one. Concurrent runs have independently fenced state, manifests, extension processes, cancellation, and cleanup, but the built-in execution provider exposes the same filesystem and host resources to all of them.
+Every runner accepts concurrent runs, so the control plane may assign multiple top-level runs for different conversations to one registered workspace. Concurrent runs have independently fenced state, manifests, extension processes, cancellation, and cleanup, but the built-in execution provider exposes the same filesystem and host resources to all of them.
 
 ### One active run per conversation
 
@@ -547,7 +547,7 @@ environment_profiles:
 
 The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Active runs receive isolated extension runtime processes so concurrent parentless extension UI or lifecycle requests cannot inherit another run's context. Command discovery may use a cached non-run runtime; fingerprint changes replace that discovery generation without closing a generation still leased by a caller.
 
-Concurrent runs are negotiated as an additive runner registration capability within protocol v1. Current runners advertise unbounded concurrent-run support; a protocol-v1 runner that omits the capability remains usable but is scheduled for a new run only while idle.
+Concurrent runs are always supported and are not negotiated as a registration capability; the control plane schedules new runs on both idle and busy runners.
 
 At `run.open`, the runner materializes a sanitized environment configuration projection into the manifest. It never sends secrets, environment variables, runner authentication credentials, or arbitrary runner-global provider credentials.
 
@@ -608,7 +608,6 @@ The runner's first request registers the stable runner and negotiates the applic
       "name": "kodelet"
     },
     "capabilities": {
-      "concurrentRuns": true,
       "workspaceGitDiff": true,
       "workspaceTerminal": true
     },

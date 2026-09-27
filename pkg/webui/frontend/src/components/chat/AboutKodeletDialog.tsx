@@ -96,7 +96,6 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
     { label: 'Browser', enabled: runner?.workspaceBrowser && terminalAuthorized },
     { label: 'Slash commands', enabled: runner?.workspaceDiscovery },
     { label: 'Working directory', enabled: runner?.workspaceCwd },
-    { label: 'Parallel runs', enabled: runner?.concurrentRuns },
   ];
   const gitCommit = status?.gitCommit === 'unknown' ? undefined : status?.gitCommit;
   const buildDate = status?.buildTime ? new Date(status.buildTime) : null;

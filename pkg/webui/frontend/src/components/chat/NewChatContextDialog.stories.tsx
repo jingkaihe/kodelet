@@ -137,7 +137,6 @@ export const RunnerAvailability: Story = {
         id: 'runner-gpu',
         displayName: 'GPU workspace for model experiments',
         status: 'busy',
-        concurrentRuns: true,
         activeRunIds: ['run-1', 'run-2'],
       },
       {

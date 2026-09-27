@@ -460,7 +460,7 @@ func testRunnerAuthRegisterParams(runnerID, hostInstanceID, workspacePath string
 	return protocol.RegisterParams{
 		RunnerID:         runnerID,
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{ConcurrentRuns: true},
+		Capabilities:     protocol.RunnerCapabilities{},
 		Host: protocol.Host{
 			InstanceID: hostInstanceID,
 			Hostname:   "host",

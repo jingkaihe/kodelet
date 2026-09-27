@@ -208,8 +208,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     const selectedRunnerAvailable = Boolean(
       runnerIdDraft &&
         selectedRunner?.connected &&
-        (selectedRunner.status === 'idle' ||
-          (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
+        (selectedRunner.status === 'idle' || selectedRunner.status === 'busy')
     );
     const directorySuggestions =
       cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
@@ -315,8 +314,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     label: `${runner.displayName || runner.workspace.name || runner.id} — ${runner.host.hostname} — ${formatRunnerStatus(runner)}`,
                     disabled: !(
                       runner.connected &&
-                      (runner.status === 'idle' ||
-                        (runner.status === 'busy' && runner.concurrentRuns))
+                      (runner.status === 'idle' || runner.status === 'busy')
                     ),
                   })),
                 ]}

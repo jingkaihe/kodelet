@@ -214,7 +214,6 @@ type Workspace struct {
 type RunnerCapabilities struct {
 	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
 	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
-	ConcurrentRuns          bool `json:"concurrentRuns,omitempty"`
 	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
 	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
 	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`

@@ -233,7 +233,6 @@ describe('NewChatContextDialog', () => {
           manifestChanged: true,
           status: 'idle',
           connected: true,
-          concurrentRuns: true,
           generation: 2,
         },
       ],
@@ -253,7 +252,7 @@ describe('NewChatContextDialog', () => {
     expect(props.onEnvironmentProfileDraftChange).toHaveBeenCalledWith('gpu');
   });
 
-  it('allows concurrent busy runners but disables legacy busy and offline runners', () => {
+  it('allows busy runners but disables offline runners', () => {
     const props = renderDialog({
       runners: [
         {
@@ -268,24 +267,8 @@ describe('NewChatContextDialog', () => {
           manifestChanged: false,
           status: 'busy',
           connected: true,
-          concurrentRuns: true,
           activeRunId: 'run-1',
           activeRunIds: ['run-1', 'run-2'],
-          generation: 1,
-        },
-        {
-          id: 'runner-legacy-busy',
-          host: {
-            instanceId: 'host-legacy',
-            hostname: 'worker',
-            os: 'linux',
-            arch: 'amd64',
-          },
-          workspace: { path: '/workspace/legacy', name: 'legacy' },
-          manifestChanged: false,
-          status: 'busy',
-          connected: true,
-          concurrentRuns: false,
           generation: 1,
         },
         {
@@ -300,7 +283,6 @@ describe('NewChatContextDialog', () => {
           manifestChanged: false,
           status: 'offline',
           connected: false,
-          concurrentRuns: false,
           generation: 1,
         },
       ],
@@ -310,7 +292,6 @@ describe('NewChatContextDialog', () => {
     const environment = screen.getByRole('combobox', { name: 'Environment' });
     fireEvent.click(environment);
     expect(screen.getByRole('option', { name: /busy — worker — 2 active/ })).toBeEnabled();
-    expect(screen.getByRole('option', { name: /legacy — worker — 1 active/ })).toBeDisabled();
     expect(screen.getByRole('option', { name: /offline — worker — offline/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
     fireEvent.click(screen.getByRole('option', { name: /offline — worker — offline/ }));

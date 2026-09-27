@@ -315,7 +315,6 @@ func (m model) aboutDialogContent() ([]string, string) {
 			{label: "Browser", enabled: runner.WorkspaceBrowser && about.runnerStatus.TerminalAuthorized},
 			{label: "Slash commands", enabled: runner.WorkspaceDiscovery},
 			{label: "Working directory", enabled: runner.WorkspaceCWD},
-			{label: "Parallel runs", enabled: runner.ConcurrentRuns},
 		} {
 			value := "Not enabled"
 			switch {
