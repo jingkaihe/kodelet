@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ChatPage,
@@ -11,6 +12,7 @@ import {
   mockGetConversations,
   mockGetCopilotProviderStatus,
   mockGetRunners,
+  mockGetServerStatus,
   renderChatWithRunner,
   setRouteParams,
   setupChatPageTests,
@@ -147,6 +149,52 @@ describe('ChatPage layout and accessibility', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
     expect(screen.queryByRole('dialog', { name: 'Provider settings' })).not.toBeInTheDocument();
+  });
+
+  it.each(['user', 'admin'])('opens About Kodelet from the %s account menu', async (role) => {
+    const user = userEvent.setup();
+    mockGetAuthPrincipal.mockResolvedValue({
+      id: 'https://issuer.example.com|user',
+      issuer: 'https://issuer.example.com',
+      subject: 'user',
+      name: 'Jingkai He',
+      roles: [role],
+    });
+    render(<ChatPage />);
+
+    const account = await screen.findByRole('button', { name: 'Jingkai He account menu' });
+    expect(mockGetServerStatus).not.toHaveBeenCalled();
+    await user.click(account);
+    const items = screen.getAllByRole('menuitem');
+    expect(items.slice(-2).map((item) => item.textContent)).toEqual(['About Kodelet', 'Sign out']);
+    await user.click(screen.getByRole('menuitem', { name: 'About Kodelet' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'About Kodelet' });
+    expect(await within(dialog).findByText('1.2.3')).toBeInTheDocument();
+    expect(mockGetServerStatus).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('chat-layout')).toHaveAttribute('inert');
+    expect(screen.queryByRole('menuitem', { name: 'About Kodelet' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Close about Kodelet' })).toHaveFocus()
+    );
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'About Kodelet' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-layout')).not.toHaveAttribute('inert');
+    await waitFor(() => expect(account).toHaveFocus());
+  });
+
+  it('offers About Kodelet without an OIDC account menu', async () => {
+    const user = userEvent.setup();
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetAuthPrincipal).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /account menu/i })).not.toBeInTheDocument();
+    const about = screen.getByRole('button', { name: 'About Kodelet' });
+    await user.click(about);
+    expect(await screen.findByText('1.2.3')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close about Kodelet' }));
+    await waitFor(() => expect(about).toHaveFocus());
   });
 
   it('starts with the sidebar closed on mobile and closes it before opening a new chat', async () => {

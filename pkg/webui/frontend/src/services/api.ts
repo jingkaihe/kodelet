@@ -24,6 +24,7 @@ import type {
   RunnerEnrollmentDecisionResponse,
   RunnerListResponse,
   SearchFilters,
+  ServerStatus,
   SlashCommandsResponse,
   SteerConversationResponse,
   StopConversationResponse,
@@ -119,6 +120,10 @@ class ApiService {
 
   async getAuthPrincipal(): Promise<AuthPrincipal> {
     return this.request<AuthPrincipal>('/api/auth/me');
+  }
+
+  async getServerStatus(): Promise<ServerStatus> {
+    return this.request<ServerStatus>('/api/status');
   }
 
   async getCodexProviderStatus(): Promise<CodexProviderStatus> {

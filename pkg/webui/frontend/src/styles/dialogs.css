@@ -1000,14 +1000,16 @@
   }
 }
 
-.provider-settings-backdrop {
+.provider-settings-backdrop,
+.about-kodelet-backdrop {
   z-index: 75;
   padding: 1rem;
   background: rgba(20, 20, 19, 0.16);
   backdrop-filter: none;
 }
 
-.provider-settings-dialog {
+.provider-settings-dialog,
+.about-kodelet-dialog {
   display: flex;
   width: min(40rem, 100%);
   max-height: calc(100% - 2rem);
@@ -1032,17 +1034,20 @@
   letter-spacing: normal;
 }
 
-.provider-settings-header .new-chat-context-close {
+.provider-settings-header .new-chat-context-close,
+.about-kodelet-header .new-chat-context-close {
   width: 2.75rem;
   height: 2.75rem;
   border-radius: 2px;
 }
 
-.provider-settings-header .new-chat-context-close:hover {
+.provider-settings-header .new-chat-context-close:hover,
+.about-kodelet-header .new-chat-context-close:hover {
   background: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
 }
 
-.provider-settings-dialog :is(button, a, input):focus-visible {
+.provider-settings-dialog :is(button, a, input):focus-visible,
+.about-kodelet-dialog button:focus-visible {
   outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
   box-shadow: none;
@@ -1058,6 +1063,101 @@
   padding: 0.5rem 1rem;
   scrollbar-color: color-mix(in srgb, var(--kodelet-muted) 24%, transparent) transparent;
   scrollbar-width: thin;
+}
+
+.about-kodelet-dialog {
+  width: min(32rem, 100%);
+}
+
+.about-kodelet-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.25rem;
+  color: var(--sidebar-surface-ink);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  scrollbar-width: thin;
+}
+
+.about-kodelet-header {
+  border-bottom: 0;
+  padding: 1.25rem 1.25rem 0;
+}
+
+.about-kodelet-header .kodelet-brand {
+  font-size: 2rem;
+}
+
+.about-kodelet-description {
+  margin: 0.35rem 0 0;
+  color: var(--kodelet-muted);
+  font-size: 0.72rem;
+}
+
+.about-kodelet-content section + section {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--sidebar-stroke-strong);
+  padding-top: 1rem;
+}
+
+.about-kodelet-content h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.about-kodelet-details,
+.about-kodelet-capabilities {
+  margin: 0;
+}
+
+.about-kodelet-capabilities {
+  margin-top: 0.65rem;
+}
+
+.about-kodelet-details > div,
+.about-kodelet-capabilities > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+
+.about-kodelet-details dt {
+  color: var(--kodelet-muted);
+}
+
+.about-kodelet-details dd,
+.about-kodelet-capabilities dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.about-kodelet-capabilities dd,
+.about-kodelet-loading {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  color: var(--kodelet-muted);
+  font-size: 0.72rem;
+}
+
+.about-kodelet-capabilities dd.is-enabled {
+  color: var(--kodelet-success);
+}
+
+.about-kodelet-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--kodelet-muted);
+  font-size: 0.72rem;
 }
 
 .provider-settings-list {
@@ -1147,7 +1247,8 @@
   font-size: 0.7rem;
 }
 
-.provider-settings-dialog .panel-action-button {
+.provider-settings-dialog .panel-action-button,
+.about-kodelet-dialog .panel-action-button {
   min-height: 2.75rem;
   border: 1px solid color-mix(in srgb, var(--kodelet-link) 25%, transparent);
   border-radius: 2px;
@@ -1163,7 +1264,8 @@
     border-color 140ms ease;
 }
 
-.provider-settings-dialog .panel-action-button:hover:not(:disabled) {
+.provider-settings-dialog .panel-action-button:hover:not(:disabled),
+.about-kodelet-dialog .panel-action-button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
   border-color: var(--kodelet-link);
 }

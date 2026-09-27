@@ -49,6 +49,7 @@ vi.mock('../components/workspace/BrowserPanel', () => ({
 
 const apiMocks = vi.hoisted(() => ({
   getAuthPrincipal: vi.fn(),
+  getServerStatus: vi.fn(),
   getConversations: vi.fn(),
   getConversation: vi.fn(),
   getChatSettings: vi.fn(),
@@ -79,6 +80,7 @@ const apiMocks = vi.hoisted(() => ({
 
 export const {
   getAuthPrincipal: mockGetAuthPrincipal,
+  getServerStatus: mockGetServerStatus,
   getConversations: mockGetConversations,
   getConversation: mockGetConversation,
   getChatSettings: mockGetChatSettings,
@@ -273,6 +275,11 @@ export const setupChatPageTests = () => {
       }
     );
     mockGetAuthPrincipal.mockResolvedValue({ id: 'anonymous', roles: ['admin'] });
+    mockGetServerStatus.mockResolvedValue({
+      version: '1.2.3',
+      apiReady: true,
+      embeddedRunner: { enabled: false, ready: false },
+    });
     mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
     mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
     mockGetCopilotProviderStatus.mockResolvedValue({ provider: 'copilot', connected: false });

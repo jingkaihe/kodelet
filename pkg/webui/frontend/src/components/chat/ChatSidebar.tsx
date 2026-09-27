@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  Info,
   LogOut,
   PanelLeft,
   Search,
@@ -33,6 +34,7 @@ interface ChatSidebarProps {
   disabled?: boolean;
   onHide?: () => void;
   onNewChat: () => void;
+  onOpenAbout?: () => void;
   onOpenProviderSettings?: () => void;
   onSearch: () => void;
   onSelectConversation: (conversationId: string) => void;
@@ -628,6 +630,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   disabled = false,
   onHide,
   onNewChat,
+  onOpenAbout,
   onOpenProviderSettings,
   onSearch,
   onSelectConversation,
@@ -1047,6 +1050,21 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   <span>Provider settings</span>
                 </button>
               ) : null}
+              {onOpenAbout ? (
+                <button
+                  aria-haspopup="dialog"
+                  className="sidebar-account-menu-item"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onOpenAbout();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Info aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+                  <span>About Kodelet</span>
+                </button>
+              ) : null}
               <a
                 className="sidebar-account-menu-item"
                 href="/auth/logout"
@@ -1075,6 +1093,19 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               {account.initials}
             </span>
             <span className="sidebar-account-name">{account.shortName}</span>
+          </button>
+        </div>
+      ) : onOpenAbout ? (
+        <div className="sidebar-account">
+          <button
+            aria-haspopup="dialog"
+            className="sidebar-account-menu-item"
+            data-testid="sidebar-about-kodelet"
+            onClick={onOpenAbout}
+            type="button"
+          >
+            <Info aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+            <span>About Kodelet</span>
           </button>
         </div>
       ) : null}

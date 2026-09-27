@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import AboutKodeletDialog from '../components/chat/AboutKodeletDialog';
 import ChatComposer from '../components/chat/ChatComposer';
 import ChatSidebar, {
   ChatSidebarCollapsedRail,
@@ -211,6 +212,7 @@ const ChatPage: React.FC = () => {
   const [gitDiffError, setGitDiffError] = useState<string | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const loadedConversationId = conversation?.id ?? null;
@@ -266,7 +268,11 @@ const ChatPage: React.FC = () => {
   });
   const { isOpen: sidebarSearchOpen, close: handleCloseConversationSearch } = conversationSearch;
   const higherPriorityDialogOpen =
-    uiRequestDialog !== null || newChatDialogOpen || providerSettingsOpen || sidebarSearchOpen;
+    uiRequestDialog !== null ||
+    newChatDialogOpen ||
+    providerSettingsOpen ||
+    aboutOpen ||
+    sidebarSearchOpen;
   const layout = useChatLayout(higherPriorityDialogOpen);
   const {
     mobileLayout,
@@ -1719,18 +1725,34 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      {providerSettingsOpen && !uiRequestDialog && !newChatDialogOpen && !sidebarSearchOpen ? (
+      {aboutOpen && !uiRequestDialog ? (
+        <AboutKodeletDialog
+          onClose={() => setAboutOpen(false)}
+          runner={runners.find((runner) => runner.id === currentRunnerID)}
+          terminalAuthorized={terminalAuthorized}
+        />
+      ) : null}
+
+      {providerSettingsOpen &&
+      !uiRequestDialog &&
+      !newChatDialogOpen &&
+      !sidebarSearchOpen &&
+      !aboutOpen ? (
         <ProviderSettingsDialog onClose={() => setProviderSettingsOpen(false)} />
       ) : null}
 
-      {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen ? (
+      {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen && !aboutOpen ? (
         <NewChatContextDialog
           {...contextSettings.dialogProps}
           onCommit={handleCommitNewChatContext}
         />
       ) : null}
 
-      {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen && !providerSettingsOpen ? (
+      {sidebarSearchOpen &&
+      !uiRequestDialog &&
+      !newChatDialogOpen &&
+      !providerSettingsOpen &&
+      !aboutOpen ? (
         <ConversationSearchDialog
           {...conversationSearch.dialogProps}
           cwdOptions={conversationCWDOptions}
@@ -1776,6 +1798,7 @@ const ChatPage: React.FC = () => {
               onForkConversation={handleForkConversation}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
+              onOpenAbout={() => setAboutOpen(true)}
               onOpenProviderSettings={() => setProviderSettingsOpen(true)}
               onSearch={handleOpenSidebarSearch}
               onSelectConversation={handleSelectConversation}

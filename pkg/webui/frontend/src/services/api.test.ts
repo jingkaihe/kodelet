@@ -172,6 +172,38 @@ describe('ApiService', () => {
     });
   });
 
+  describe('getServerStatus', () => {
+    it('loads the running server version, build metadata and readiness from the status endpoint', async () => {
+      const status = {
+        version: '1.2.3',
+        gitCommit: 'abcdef1234567890abcdef1234567890abcdef1234',
+        buildTime: '2026-09-27T23:45:00Z',
+        apiReady: true,
+        embeddedRunner: {
+          enabled: true,
+          ready: false,
+          runnerId: 'runner-1',
+          error: 'Waiting for runner connection',
+        },
+      };
+      setTestCookie('kodelet_csrf=csrf-status; Path=/');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => status,
+      });
+
+      await expect(apiService.getServerStatus()).resolves.toEqual(status);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/status',
+        expect.objectContaining({
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    });
+  });
+
   describe('authentication approvals', () => {
     it('loads the authenticated principal', async () => {
       const principal = {

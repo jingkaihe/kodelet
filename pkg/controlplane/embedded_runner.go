@@ -69,6 +69,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"embeddedRunner": s.EmbeddedRunnerStatus(),
 		"instanceId":     instanceID,
 		"version":        version.Version,
+		"gitCommit":      version.GitCommit,
+		"buildTime":      version.BuildTime,
 		"activeRuns":     activeRuns,
 	})
 }

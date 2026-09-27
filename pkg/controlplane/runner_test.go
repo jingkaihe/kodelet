@@ -44,6 +44,21 @@ type runnerAPITestLink struct {
 	call func(context.Context, string, any, any) error
 }
 
+func TestServerStatusIncludesBuildMetadata(t *testing.T) {
+	server := &Server{router: mux.NewRouter()}
+	server.setupRoutes()
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+
+	var status map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
+	assert.Equal(t, version.Version, status["version"])
+	assert.Equal(t, version.GitCommit, status["gitCommit"])
+	assert.Equal(t, version.BuildTime, status["buildTime"])
+	assert.Equal(t, true, status["apiReady"])
+}
+
 func TestLocalServerStopRequiresIdentityAndIdleServer(t *testing.T) {
 	for _, test := range []struct {
 		name   string

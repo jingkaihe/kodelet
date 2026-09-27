@@ -39,6 +39,7 @@ const meta = {
     onForkConversation: fn(),
     onHide: fn(),
     onNewChat: fn(),
+    onOpenAbout: fn(),
     onSearch: fn(),
     onSelectConversation: fn(),
     searchActive: false,

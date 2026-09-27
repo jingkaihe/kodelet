@@ -172,6 +172,19 @@ export interface AuthPrincipal {
   roles: string[];
 }
 
+export interface ServerStatus {
+  version: string;
+  gitCommit?: string;
+  buildTime?: string;
+  apiReady: boolean;
+  embeddedRunner: {
+    enabled: boolean;
+    ready: boolean;
+    runnerId?: string;
+    error?: string;
+  };
+}
+
 export interface CodexProviderStatus {
   provider: 'codex';
   connected: boolean;
