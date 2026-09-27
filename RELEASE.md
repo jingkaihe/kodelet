@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.7.0-beta
+
+Made concurrent runs across conversations standard for all runners, retaining one active run per conversation. Removed the `concurrentRuns` capability flag and "Parallel runs" About-dialog entry.
+
 ## 0.6.24-beta
 
 Added an About Kodelet dialog to the Web UI, available from the sidebar account menu or directly from the sidebar when no account is shown. It shows the server version, build commit and date, runner details, and available workspace capabilities. `/api/status` now also reports `gitCommit` and `buildTime`.
