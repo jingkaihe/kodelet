@@ -27,15 +27,13 @@ type mockStore struct {
 	conversations map[string]convtypes.ConversationRecord
 }
 
-func newMockStore() *mockStore {
+func newMockStore() conversations.ConversationStore {
 	return &mockStore{
 		conversations: make(map[string]convtypes.ConversationRecord),
 	}
 }
 
 // Save saves a conversation record to the mock store
-//
-//nolint:unparam // error is always nil in mock implementation
 func (m *mockStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
 	m.conversations[record.ID] = record
 	return nil

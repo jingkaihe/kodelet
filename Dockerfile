@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_IMAGE=node:24.16.0-bookworm-slim
-ARG GO_IMAGE=golang:1.26.5-bookworm
+ARG GO_IMAGE=golang:1.27.1-bookworm
 ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot
 
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend

@@ -368,7 +368,7 @@ func ExtractMetadata(metadata ToolMetadata, target any) bool {
 	}
 
 	targetValue := reflect.ValueOf(target)
-	if targetValue.Kind() != reflect.Ptr || targetValue.IsNil() {
+	if targetValue.Kind() != reflect.Pointer || targetValue.IsNil() {
 		return false
 	}
 
@@ -376,7 +376,7 @@ func ExtractMetadata(metadata ToolMetadata, target any) bool {
 	metadataValue := reflect.ValueOf(metadata)
 
 	// If metadata is a pointer, dereference it
-	if metadataValue.Kind() == reflect.Ptr && !metadataValue.IsNil() {
+	if metadataValue.Kind() == reflect.Pointer && !metadataValue.IsNil() {
 		metadataValue = metadataValue.Elem()
 	}
 

@@ -190,7 +190,7 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 
 				// IMPORTANT: After unmarshaling, metadata is always a value type, not a pointer
 				metaType := reflect.TypeOf(unmarshaled.Metadata)
-				assert.NotEqual(t, reflect.Ptr, metaType.Kind(), "Expected value type after unmarshal, got pointer type: %T", unmarshaled.Metadata)
+				assert.NotEqual(t, reflect.Pointer, metaType.Kind(), "Expected value type after unmarshal, got pointer type: %T", unmarshaled.Metadata)
 
 				// Log the actual type for debugging
 				t.Logf("Unmarshaled metadata type: %T", unmarshaled.Metadata)
@@ -469,7 +469,7 @@ func TestStructuredToolResult_RawJSONStrings(t *testing.T) {
 				assert.Equal(t, tt.expected.ToolType(), result.Metadata.ToolType(), "ToolType mismatch")
 
 				// Check it's a value type (not pointer) after unmarshal
-				assert.NotEqual(t, reflect.Ptr, reflect.TypeOf(result.Metadata).Kind(), "Expected value type after unmarshal, got pointer")
+				assert.NotEqual(t, reflect.Pointer, reflect.TypeOf(result.Metadata).Kind(), "Expected value type after unmarshal, got pointer")
 			}
 		})
 	}
