@@ -6,6 +6,8 @@ Added Claude Sonnet 5.5 (`claude-sonnet-5-5`) with always-on adaptive thinking, 
 
 Updated the Go toolchain to 1.27.1, golangci-lint to 2.13.2, and the Anthropic Go SDK to v1.76.0.
 
+Fixed Dependabot security alerts by updating the SDK's transitive `ip-address` dependency to 10.7.2.
+
 ## 0.7.0-beta
 
 Made concurrent runs across conversations standard for all runners, retaining one active run per conversation. Removed the `concurrentRuns` capability flag and "Parallel runs" About-dialog entry.
