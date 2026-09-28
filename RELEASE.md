@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.7.1-beta
+
+Added Claude Sonnet 5.5 (`claude-sonnet-5-5`) with always-on adaptive thinking, `xhigh`/`max` reasoning effort, original-detail image viewing, a 1M-token context window, and pricing. Added the `sonnet-55` alias to the sample configuration and setup-generated Anthropic aliases.
+
+Updated the Go toolchain to 1.27.1, golangci-lint to 2.13.2, and the Anthropic Go SDK to v1.76.0.
+
 ## 0.7.0-beta
 
 Made concurrent runs across conversations standard for all runners, retaining one active run per conversation. Removed the `concurrentRuns` capability flag and "Parallel runs" About-dialog entry.
