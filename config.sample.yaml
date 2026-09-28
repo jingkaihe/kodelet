@@ -105,6 +105,7 @@ aliases:
   gpt-6: "gpt-6-astra"
   gpt-5.6: "gpt-5.6-sol"
   sonnet-46: "claude-sonnet-4-6"
+  sonnet-55: "claude-sonnet-5-5"
   haiku-45: "claude-haiku-4-5-20251001"
   opus-48: "claude-opus-4-8"
   opus-5: "claude-opus-5"

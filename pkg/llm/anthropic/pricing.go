@@ -24,6 +24,14 @@ type ModelPricing struct {
 
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[anthropic.Model]ModelPricing{
+	anthropic.ModelClaudeSonnet5_5: {
+		Input:                0.000002,  // $2.00 per million tokens
+		Output:               0.000010,  // $10.00 per million tokens
+		PromptCachingWrite5m: 0.0000025, // $2.50 per million tokens
+		PromptCachingWrite1h: 0.000004,  // $4.00 per million tokens
+		PromptCachingRead:    0.0000002, // $0.20 per million tokens
+		ContextWindow:        1_000_000,
+	},
 	anthropic.ModelClaudeSonnet5: {
 		Input:                0.000002,  // $2.00 per million tokens
 		Output:               0.000010,  // $10.00 per million tokens
@@ -170,7 +178,9 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	}
 	// Try to find a match based on model family
 	lowerModel := strings.ToLower(model)
-	if strings.Contains(lowerModel, "claude-sonnet-5") {
+	if strings.Contains(lowerModel, "claude-sonnet-5-5") {
+		return ModelPricingMap[anthropic.ModelClaudeSonnet5_5]
+	} else if strings.Contains(lowerModel, "claude-sonnet-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5]
 	} else if strings.Contains(lowerModel, "claude-fable-5-1") {
 		return ModelPricingMap[anthropic.ModelClaudeFable5_1]

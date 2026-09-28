@@ -991,6 +991,7 @@ aliases:
     opus-5: claude-opus-5
     opus-55: claude-opus-5-5
     sonnet-46: claude-sonnet-4-6
+    sonnet-55: claude-sonnet-5-5
 ```
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
@@ -1150,6 +1151,7 @@ When output exceeds that budget, Kodelet writes the complete byte stream to a lo
 
 Kodelet supports various Anthropic Claude models:
 - `claude-opus-5-5` (Opus 5.5, 1M-token context window, recommended default for coding and agentic work)
+- `claude-sonnet-5-5` (Sonnet 5.5, 1M-token context window, available through the sample configuration's `sonnet-55` alias)
 - `claude-opus-5` (Opus 5, available through the retained `opus-5` alias)
 - `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)

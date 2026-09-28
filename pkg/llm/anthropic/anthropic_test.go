@@ -415,6 +415,8 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 }
 
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5_5], getModelPricing(anthropic.ModelClaudeSonnet5_5))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5_5], getModelPricing("claude-sonnet-5-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing(anthropic.ModelClaudeSonnet5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing("claude-sonnet-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5_1], getModelPricing(anthropic.ModelClaudeFable5_1))
@@ -477,6 +479,17 @@ func TestFable51Pricing(t *testing.T) {
 	assert.Equal(t, 0.000020, pricing.PromptCachingWrite1h)
 	assert.Equal(t, 0.00000025, pricing.PromptCachingRead)
 	assert.Equal(t, 0.000050, pricing.Output)
+	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestSonnet55Pricing(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeSonnet5_5]
+
+	assert.Equal(t, 0.000002, pricing.Input)
+	assert.Equal(t, 0.0000025, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.000004, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.0000002, pricing.PromptCachingRead)
+	assert.Equal(t, 0.000010, pricing.Output)
 	assert.Equal(t, 1_000_000, pricing.ContextWindow)
 }
 
@@ -1170,6 +1183,11 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "sonnet 5.5 supports thinking",
+			model:    anthropic.ModelClaudeSonnet5_5,
+			expected: true,
+		},
+		{
 			name:     "fable 5.1 supports thinking",
 			model:    anthropic.ModelClaudeFable5_1,
 			expected: true,
@@ -1260,22 +1278,24 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Equal(t, "adaptive", *config.GetType())
 	})
 
-	t.Run("opus 5.5 uses adaptive thinking regardless of budget", func(t *testing.T) {
-		for _, budget := range []int{0, 4096} {
-			opusThread, err := NewAnthropicThread(llmtypes.Config{
-				Model:                anthropic.ModelClaudeOpus5_5,
-				ThinkingBudgetTokens: budget,
-			})
-			require.NoError(t, err)
+	for _, model := range []anthropic.Model{anthropic.ModelClaudeOpus5_5, anthropic.ModelClaudeSonnet5_5} {
+		t.Run(model+" uses adaptive thinking regardless of budget", func(t *testing.T) {
+			for _, budget := range []int{0, 4096} {
+				modelThread, err := NewAnthropicThread(llmtypes.Config{
+					Model:                model,
+					ThinkingBudgetTokens: budget,
+				})
+				require.NoError(t, err)
 
-			config, ok := opusThread.thinkingConfigForModel(anthropic.ModelClaudeOpus5_5)
-			require.True(t, ok)
-			require.NotNil(t, config.OfAdaptive)
-			assert.Nil(t, config.GetBudgetTokens())
-			assert.Equal(t, anthropic.ThinkingConfigAdaptiveDisplaySummarized, config.OfAdaptive.Display)
-			require.NoError(t, opusThread.validateThinkingConfigForModel(anthropic.ModelClaudeOpus5_5))
-		}
-	})
+				config, ok := modelThread.thinkingConfigForModel(model)
+				require.True(t, ok)
+				require.NotNil(t, config.OfAdaptive)
+				assert.Nil(t, config.GetBudgetTokens())
+				assert.Equal(t, anthropic.ThinkingConfigAdaptiveDisplaySummarized, config.OfAdaptive.Display)
+				require.NoError(t, modelThread.validateThinkingConfigForModel(model))
+			}
+		})
+	}
 
 	t.Run("legacy models keep budgeted thinking", func(t *testing.T) {
 		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
@@ -1359,6 +1379,12 @@ func TestValidateThinkingConfigForModel(t *testing.T) {
 		assert.ErrorContains(t, err, "claude-opus-5-5 does not support disabling adaptive thinking")
 	})
 
+	t.Run("sonnet 5.5 rejects disabled adaptive thinking", func(t *testing.T) {
+		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeSonnet5_5)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "claude-sonnet-5-5 does not support disabling adaptive thinking")
+	})
+
 	t.Run("opus 4.7 allows disabled adaptive thinking", func(t *testing.T) {
 		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
 		assert.NoError(t, err)
@@ -1383,6 +1409,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 		{
 			name:       "opus 5.5 defaults to medium",
 			model:      anthropic.ModelClaudeOpus5_5,
+			configured: "",
+			expected:   anthropic.OutputConfigEffortMedium,
+			ok:         true,
+		},
+		{
+			name:       "sonnet 5.5 defaults to medium",
+			model:      anthropic.ModelClaudeSonnet5_5,
 			configured: "",
 			expected:   anthropic.OutputConfigEffortMedium,
 			ok:         true,
@@ -1444,6 +1477,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			ok:         true,
 		},
 		{
+			name:       "xhigh is preserved on sonnet 5.5",
+			model:      anthropic.ModelClaudeSonnet5_5,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
 			name:       "xhigh falls back to high on opus 4.6",
 			model:      anthropic.ModelClaudeOpus4_6,
 			configured: "xhigh",
@@ -1467,6 +1507,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 		{
 			name:       "opus 5.5 supports max effort",
 			model:      anthropic.ModelClaudeOpus5_5,
+			configured: "max",
+			expected:   anthropic.OutputConfigEffortMax,
+			ok:         true,
+		},
+		{
+			name:       "sonnet 5.5 supports max effort",
+			model:      anthropic.ModelClaudeSonnet5_5,
 			configured: "max",
 			expected:   anthropic.OutputConfigEffortMax,
 			ok:         true,
