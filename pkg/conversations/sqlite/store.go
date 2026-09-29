@@ -328,7 +328,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		return conversations.QueryResult{}, errors.New("relevance sorting requires a search term")
 	}
 	if !searching && strings.TrimSpace(options.SearchTerm) != "" {
-		cwds, err := s.listCWDs(ctx)
+		cwds, err := listCWDs(ctx, s.db)
 		if err != nil {
 			return conversations.QueryResult{}, err
 		}
@@ -432,6 +432,14 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		}
 	}
 
+	// Every read shares one snapshot, so match counts, totals, and snippets
+	// agree even while the indexer replaces a conversation's entries.
+	tx, err := s.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to begin conversation query")
+	}
+	defer tx.Rollback()
+
 	// Execute main query
 	var dbSummaries []dbSearchConversationSummary
 	finalQuery, argsSlice, err := sqlx.Named(baseQuery, args)
@@ -439,8 +447,8 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to build named query")
 	}
 
-	finalQuery = s.db.Rebind(finalQuery)
-	err = s.db.SelectContext(ctx, &dbSummaries, finalQuery, argsSlice...)
+	finalQuery = tx.Rebind(finalQuery)
+	err = tx.SelectContext(ctx, &dbSummaries, finalQuery, argsSlice...)
 	if err != nil {
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to execute query")
 	}
@@ -453,7 +461,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		ids[i] = dbSummary.ID
 	}
 	if searching {
-		matches, err := s.loadSearchMatches(ctx, searchMatch, ids, min(options.SearchMatches, conversations.MaxSearchMatches))
+		matches, err := loadSearchMatches(ctx, tx, searchMatch, ids, min(options.SearchMatches, conversations.MaxSearchMatches))
 		if err != nil {
 			return conversations.QueryResult{}, err
 		}
@@ -481,13 +489,13 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		if err != nil {
 			return conversations.QueryResult{}, errors.Wrap(err, "failed to build named count query")
 		}
-		err = s.db.GetContext(ctx, &total, s.db.Rebind(finalCountQuery), countArgsSlice...)
+		err = tx.GetContext(ctx, &total, tx.Rebind(finalCountQuery), countArgsSlice...)
 		if err != nil {
 			return conversations.QueryResult{}, errors.Wrap(err, "failed to get total count")
 		}
 	}
 
-	cwds, err := s.listCWDs(ctx)
+	cwds, err := listCWDs(ctx, tx)
 	if err != nil {
 		return conversations.QueryResult{}, err
 	}
@@ -501,9 +509,9 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 }
 
 // listCWDs returns all distinct persisted working directories.
-func (s *Store) listCWDs(ctx context.Context) ([]string, error) {
+func listCWDs(ctx context.Context, queryer sqlx.QueryerContext) ([]string, error) {
 	var cwds []string
-	err := s.db.SelectContext(ctx, &cwds, `
+	err := sqlx.SelectContext(ctx, queryer, &cwds, `
 		SELECT DISTINCT cwd
 		FROM conversation_summaries
 		WHERE TRIM(cwd) <> ''

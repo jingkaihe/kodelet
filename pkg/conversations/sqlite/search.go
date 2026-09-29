@@ -17,6 +17,10 @@ const (
 	searchHighlight       = "**"
 )
 
+// searchMatchesRankedHook runs between ranking matches and loading their
+// snippets. Tests use it to write concurrently; it is always nil otherwise.
+var searchMatchesRankedHook func()
+
 // searchScoreSQL weights FTS5 bm25 ranks by entry kind. Ranks are negative and
 // lower is better, so a factor below one demotes tool inputs relative to prose.
 const searchScoreSQL = `m.rank * CASE e.kind WHEN 'tool-use' THEN 0.5 ELSE 1.0 END`
@@ -219,7 +223,10 @@ func insertSearchEntries(ctx context.Context, connection *sqlx.Conn, document co
 // selected rows. The unary + keeps rowid filters out of the FTS5 query plan:
 // as a constraint, FTS5 would re-evaluate the whole MATCH for every rowid,
 // which takes seconds for broad prefixes.
-func (s *Store) loadSearchMatches(ctx context.Context, match string, conversationIDs []string, perConversation int) (map[string][]conversations.SearchMatch, error) {
+// Call it inside the caller's read transaction: ranking and snippets are two
+// statements, and a concurrent re-index between them could otherwise delete
+// the ranked rows or reuse their IDs for different text.
+func loadSearchMatches(ctx context.Context, queryer sqlx.QueryerContext, match string, conversationIDs []string, perConversation int) (map[string][]conversations.SearchMatch, error) {
 	matches := make(map[string][]conversations.SearchMatch, len(conversationIDs))
 	if len(conversationIDs) == 0 || perConversation <= 0 {
 		return matches, nil
@@ -253,11 +260,14 @@ func (s *Store) loadSearchMatches(ctx context.Context, match string, conversatio
 		Role           string `db:"role"`
 		Kind           string `db:"kind"`
 	}
-	if err := s.db.SelectContext(ctx, &rows, s.db.Rebind(query), args...); err != nil {
+	if err := sqlx.SelectContext(ctx, queryer, &rows, query, args...); err != nil {
 		return nil, errors.Wrap(err, "failed to rank search matches")
 	}
 	if len(rows) == 0 {
 		return matches, nil
+	}
+	if searchMatchesRankedHook != nil {
+		searchMatchesRankedHook()
 	}
 
 	entryIDs := make([]int64, len(rows))
@@ -276,7 +286,7 @@ func (s *Store) loadSearchMatches(ctx context.Context, match string, conversatio
 		ID      int64  `db:"id"`
 		Snippet string `db:"snippet"`
 	}
-	if err := s.db.SelectContext(ctx, &snippets, s.db.Rebind(query), args...); err != nil {
+	if err := sqlx.SelectContext(ctx, queryer, &snippets, query, args...); err != nil {
 		return nil, errors.Wrap(err, "failed to load search snippets")
 	}
 	snippetByID := make(map[int64]string, len(snippets))

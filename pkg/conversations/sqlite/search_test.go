@@ -262,6 +262,54 @@ func repeatWords(word string, count int) string {
 	return string(words)
 }
 
+func TestQuerySearchReadsOneSnapshot(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "search.db")
+	setupTestDB(t, dbPath)
+	store, err := NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	// A second store has its own connection, like another daemon or process.
+	writer, err := NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+
+	saveSearchConversation(t, store, "conv", "/workspace")
+	indexSearchConversation(t, store, "conv",
+		textEntry(0, "user", "original needle question"),
+		toolEntry(1, "bash\ncommand: echo needle"),
+	)
+
+	// Re-index between ranking and snippets. The replacement reuses the freed
+	// row IDs for different text, roles, and kinds.
+	replaced := false
+	searchMatchesRankedHook = func() {
+		replaced = true
+		indexSearchConversation(t, writer, "conv",
+			toolEntry(5, "bash\ncommand: replacement needle"),
+			textEntry(6, "assistant", "replacement needle answer"),
+		)
+	}
+	t.Cleanup(func() { searchMatchesRankedHook = nil })
+
+	result, err := store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "needle", SearchMatches: 2, SortBy: "relevance"})
+	require.NoError(t, err)
+	require.True(t, replaced)
+	require.Len(t, result.ConversationSummaries, 1)
+	search := result.ConversationSummaries[0].Search
+	require.NotNil(t, search)
+	assert.Equal(t, 2, search.MatchCount)
+	assert.ElementsMatch(t, []conversations.SearchMatch{
+		{EntryIndex: 0, Role: "user", Kind: conversations.SearchEntryKindText, Snippet: "original **needle** question"},
+		{EntryIndex: 1, Role: "assistant", Kind: conversations.SearchEntryKindToolUse, Snippet: "bash command: echo **needle**"},
+	}, search.Matches, "snippets and labels come from the same snapshot")
+
+	// The next query sees the replacement.
+	searchMatchesRankedHook = nil
+	result, err = store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "replacement", SearchMatches: 1})
+	require.NoError(t, err)
+	require.Len(t, result.ConversationSummaries, 1)
+}
+
 func TestPendingSearchIndexTracksSavesAndVersions(t *testing.T) {
 	store := newSearchTestStore(t)
 	saveSearchConversation(t, store, "older", "/workspace")
