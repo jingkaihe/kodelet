@@ -5,7 +5,6 @@ package extensions
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +99,8 @@ func (b *lockedBuffer) String() string {
 func TestProcessCloseKillsProcessGroup(t *testing.T) {
 	tempDir := t.TempDir()
 	childPIDPath := filepath.Join(tempDir, "child.pid")
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("sleep 60 & echo $! > %q; wait", childPIDPath))
+	// Publish the PID with an atomic rename so the file never appears empty.
+	cmd := exec.Command("bash", "-c", `sleep 60 & echo $! > "$1.tmp" && mv "$1.tmp" "$1"; wait`, "bash", childPIDPath)
 	osutil.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
