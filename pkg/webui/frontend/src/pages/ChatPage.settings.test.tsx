@@ -762,7 +762,9 @@ describe('ChatPage model and reasoning settings', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    expect(screen.getByTestId('composer-inline-context').textContent).toBe(label);
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-inline-context').textContent).toBe(label)
+    );
     expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Change workspace:/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
