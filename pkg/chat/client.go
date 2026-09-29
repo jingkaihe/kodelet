@@ -452,17 +452,38 @@ func (r *Client) ListConversationsInCWD(ctx context.Context, limit int, cwd stri
 	if err != nil {
 		return nil, err
 	}
-	if r.runnerID == "" {
-		return result.Conversations, nil
+	return r.runnerConversations(result.Conversations), nil
+}
+
+// SearchConversations returns the most recently updated conversations that
+// match a full-text query, each with its best highlighted match.
+func (r *Client) SearchConversations(ctx context.Context, query string, limit int) ([]convtypes.ConversationSummary, error) {
+	result, err := r.QueryConversations(ctx, conversations.ListConversationsRequest{
+		SearchTerm:    query,
+		SearchMatches: 1,
+		Limit:         limit,
+		SortBy:        "updated",
+		SortOrder:     "desc",
+	})
+	if err != nil {
+		return nil, err
 	}
-	filtered := make([]convtypes.ConversationSummary, 0, len(result.Conversations))
-	for _, summary := range result.Conversations {
+	return r.runnerConversations(result.Conversations), nil
+}
+
+// runnerConversations keeps only a runner-scoped client's own conversations.
+func (r *Client) runnerConversations(summaries []convtypes.ConversationSummary) []convtypes.ConversationSummary {
+	if r.runnerID == "" {
+		return summaries
+	}
+	filtered := make([]convtypes.ConversationSummary, 0, len(summaries))
+	for _, summary := range summaries {
 		runnerID, _ := summary.Metadata[RunnerIDMetadataKey].(string)
 		if strings.TrimSpace(runnerID) == r.runnerID {
 			filtered = append(filtered, summary)
 		}
 	}
-	return filtered, nil
+	return filtered
 }
 
 // QueryConversations applies history filters centrally, without requiring an

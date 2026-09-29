@@ -206,7 +206,7 @@ While a turn is running, `Enter` queues steering. `/sessions`, `/new`, `/stop`, 
 
 Extension shortcuts use the selected runner. During a turn, only the client handling its extension prompts can invoke them; submitted messages queue like typed input.
 
-Use `/sessions` or `Ctrl+L` to switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
+Use `/sessions` or `Ctrl+L` to search and switch conversations, or `/new [PATH]` to start one. Drafts and scroll positions are preserved. Different conversations can run in parallel, and the picker highlights those waiting for extension input.
 
 Use `/about` to show the TUI's version, build commit, and build date alongside the connected server's address, version, and build details.
 
@@ -633,7 +633,7 @@ kodelet conversation fork [conversation-id]
 kodelet run --resume <conversation-id> "/rename New conversation name"
 ```
 
-`conversation search` finds past conversations by title, conversation ID, or workspace, and by what happened in them: your messages, the agent's replies, and the commands and files it worked with. The best matches are listed first with the matching words highlighted; tool output isn't searched. Words also match longer words that start with them, so `deploy` finds "deployment", and `"quoted text"` matches an exact phrase; all words must appear in the same message. Use `--cwd` to search one workspace, `--sort-by updated_at` to show the newest first, and `--json` for scripts. `conversation list --search` and the Web UI search use the same matching. After upgrading, older conversations can take a short while to appear in results.
+`conversation search` finds past conversations by title, conversation ID, or workspace, and by what happened in them: your messages, the agent's replies, and the commands and files it worked with. The best matches are listed first with the matching words highlighted; tool output isn't searched. Words also match longer words that start with them, so `deploy` finds "deployment", and `"quoted text"` matches an exact phrase; all words must appear in the same message. Use `--cwd` to search one workspace, `--sort-by updated_at` to show the newest first, and `--json` for scripts. `conversation list --search`, the Web UI search, and `/sessions` use the same matching. After upgrading, older conversations can take a short while to appear in results.
 
 `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage. Extension state keyed by conversation ID is not copied.
 

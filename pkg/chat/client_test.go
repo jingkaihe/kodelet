@@ -607,6 +607,37 @@ func TestClientClassifiesOversizedStreamEvents(t *testing.T) {
 	assert.False(t, protocolErr.Retryable())
 }
 
+func TestClientSearchesRunnerConversations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "/api/conversations", request.URL.Path)
+		query := request.URL.Query()
+		assert.Equal(t, `"release notes" deploy`, query.Get("search"))
+		assert.Equal(t, "1", query.Get("matches"))
+		assert.Equal(t, "50", query.Get("limit"))
+		assert.Equal(t, "updated", query.Get("sortBy"))
+		assert.Equal(t, "desc", query.Get("sortOrder"))
+		assert.Equal(t, "runner-1", query.Get("runnerId"))
+		match := &convtypes.ConversationSearchResult{MatchCount: 1, Matches: []convtypes.SearchMatch{{Kind: "text", Role: "user", Snippet: "**deploy** the **release notes**"}}}
+		require.NoError(t, json.NewEncoder(w).Encode(conversations.ListConversationsResponse{
+			Conversations: []convtypes.ConversationSummary{
+				{ID: "bound", Metadata: map[string]any{RunnerIDMetadataKey: "runner-1"}, Search: match},
+				{ID: "other", Metadata: map[string]any{RunnerIDMetadataKey: "runner-2"}, Search: match},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "secret", "runner-1")
+	require.NoError(t, err)
+	var searcher ConversationSearcher = client
+	summaries, err := searcher.SearchConversations(t.Context(), `"release notes" deploy`, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "bound", summaries[0].ID)
+	require.NotNil(t, summaries[0].Search)
+	assert.Equal(t, "**deploy** the **release notes**", summaries[0].Search.Matches[0].Snippet)
+}
+
 func TestClientListsAndLoadsRunnerConversations(t *testing.T) {
 	updatedAt := time.Date(2026, time.August, 9, 12, 35, 0, 0, time.UTC)
 	structuredResult := tooltypes.StructuredToolResult{ToolName: "bash", Success: true, Timestamp: updatedAt}

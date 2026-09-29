@@ -277,12 +277,13 @@ type model struct {
 	// extensionSurfaceOrder is both the overlay z-order and the focus stack.
 	extensionSurfaceOrder []extensionUIKey
 
-	conversations                 map[string]*conversationState
-	activeConversationKey         string
-	nextConversationKey           int
-	nextConversationListRequestID int
-	conversationDefaults          conversationDefaults
-	conversationPicker            *conversationPickerState
+	conversations                   map[string]*conversationState
+	activeConversationKey           string
+	nextConversationKey             int
+	nextConversationListRequestID   int
+	nextConversationSearchRequestID int
+	conversationDefaults            conversationDefaults
+	conversationPicker              *conversationPickerState
 
 	theme          tuiTheme
 	themeSelection string

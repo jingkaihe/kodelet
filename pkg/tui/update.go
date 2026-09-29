@@ -687,6 +687,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyConversationList(msg)
 		return m, nil
 
+	case conversationSearchDueMsg:
+		return m, m.startConversationSearch(msg)
+
+	case conversationSearchMsg:
+		m.applyConversationSearch(msg)
+		return m, nil
+
 	case serverStatusMsg:
 		m.applyServerStatus(msg)
 		return m, nil
@@ -703,8 +710,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.conversationPicker != nil {
-			m.appendConversationPickerQuery(normalizeSingleLinePaste(msg.Content))
-			return m, nil
+			return m, m.appendConversationPickerQuery(normalizeSingleLinePaste(msg.Content))
 		}
 		if m.modelPickerOpen {
 			m.modelPickerQuery += normalizeSingleLinePaste(msg.Content)

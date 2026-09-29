@@ -197,6 +197,11 @@ type ConversationSource interface {
 	LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error)
 }
 
+// ConversationSearcher optionally searches persisted conversations by full text.
+type ConversationSearcher interface {
+	SearchConversations(ctx context.Context, query string, limit int) ([]convtypes.ConversationSummary, error)
+}
+
 // ConversationHistory is the client-facing persisted state needed to resume a conversation.
 type ConversationHistory struct {
 	ID                   string

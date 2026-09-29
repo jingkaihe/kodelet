@@ -18,6 +18,7 @@ import (
 
 const (
 	conversationPickerLimit             = 200
+	conversationPickerSearchDelay       = 200 * time.Millisecond
 	conversationPickerPreferredMinWidth = 112
 	conversationPickerWidthPercent      = 80
 	conversationPickerStatusWidth       = 4
@@ -36,6 +37,18 @@ type conversationPickerState struct {
 	loading     bool
 	err         error
 	requestID   int
+
+	// search holds daemon full-text results. They replace the local filter
+	// over loaded conversations once they arrive for the current query.
+	search          *conversationPickerSearch
+	searchRequestID int
+	searching       bool
+	searchErr       error
+}
+
+type conversationPickerSearch struct {
+	query     string
+	summaries []convtypes.ConversationSummary
 }
 
 type conversationPickerItem struct {
@@ -49,6 +62,7 @@ type conversationPickerItem struct {
 	running      bool
 	unread       bool
 	needsInput   bool
+	match        string
 	isNew        bool
 	matchesQuery bool
 }
@@ -70,6 +84,88 @@ func loadConversationListFromSource(ctx context.Context, requestID int, source c
 		}
 		return conversationListMsg{requestID: requestID, summaries: summaries}
 	}
+}
+
+// conversationSearchDueMsg fires once typing pauses for the search delay.
+type conversationSearchDueMsg struct {
+	requestID int
+}
+
+type conversationSearchMsg struct {
+	requestID int
+	query     string
+	summaries []convtypes.ConversationSummary
+	err       error
+}
+
+func (m model) conversationSearcher() chat.ConversationSearcher {
+	searcher, _ := m.conversationSource.(chat.ConversationSearcher)
+	return searcher
+}
+
+// scheduleConversationSearch debounces a daemon search for the current query.
+// Until results arrive, the picker filters the loaded conversations locally.
+func (m *model) scheduleConversationSearch() tea.Cmd {
+	picker := m.conversationPicker
+	if picker == nil {
+		return nil
+	}
+	// Request IDs stay unique across picker openings, so late results from an
+	// earlier picker are never applied to a new one.
+	m.nextConversationSearchRequestID++
+	picker.searchRequestID = m.nextConversationSearchRequestID
+	picker.searchErr = nil
+	picker.searching = strings.TrimSpace(picker.query) != "" && m.conversationSearcher() != nil
+	if !picker.searching {
+		return nil
+	}
+	requestID := picker.searchRequestID
+	return tea.Tick(conversationPickerSearchDelay, func(time.Time) tea.Msg {
+		return conversationSearchDueMsg{requestID: requestID}
+	})
+}
+
+func (m *model) startConversationSearch(msg conversationSearchDueMsg) tea.Cmd {
+	picker := m.conversationPicker
+	searcher := m.conversationSearcher()
+	if picker == nil || searcher == nil || msg.requestID != picker.searchRequestID {
+		return nil
+	}
+	ctx, query := m.ctx, strings.TrimSpace(picker.query)
+	return func() tea.Msg {
+		summaries, err := searcher.SearchConversations(ctx, query, conversationPickerLimit)
+		if err != nil {
+			err = errors.Wrap(err, "failed to search conversations")
+		}
+		return conversationSearchMsg{requestID: msg.requestID, query: query, summaries: summaries, err: err}
+	}
+}
+
+// applyConversationSearch shows results for the latest query only. The current
+// selection is kept when it still matches; otherwise the first match is selected.
+func (m *model) applyConversationSearch(msg conversationSearchMsg) {
+	picker := m.conversationPicker
+	if picker == nil || msg.requestID != picker.searchRequestID {
+		return
+	}
+	m.rememberConversationPickerSelection()
+	selectedKey := picker.selectedKey
+	picker.searching = false
+	picker.searchErr = msg.err
+	if msg.err == nil {
+		picker.search = &conversationPickerSearch{
+			query:     msg.query,
+			summaries: append([]convtypes.ConversationSummary(nil), msg.summaries...),
+		}
+	}
+	for index, item := range m.filteredConversationPickerItems() {
+		if item.matchesQuery && conversationPickerMatchesSelection(item, selectedKey) {
+			picker.selected = index
+			picker.selectedKey = conversationPickerSelectionKey(item)
+			return
+		}
+	}
+	m.resetConversationPickerSelection()
 }
 
 func (m *model) openConversationPicker(query string) tea.Cmd {
@@ -95,7 +191,7 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	if m.remote && m.conversationSource == nil {
 		return focusTransition
 	}
-	return tea.Batch(loadConversationListFromSource(m.ctx, requestID, m.conversationSource), focusTransition)
+	return tea.Batch(loadConversationListFromSource(m.ctx, requestID, m.conversationSource), focusTransition, m.scheduleConversationSearch())
 }
 
 func (m *model) applyConversationList(msg conversationListMsg) {
@@ -140,7 +236,7 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 		if fallback == "" {
 			fallback = "Untitled conversation"
 		}
-		itemsByID[id] = conversationPickerItem{
+		item := conversationPickerItem{
 			key:       id,
 			id:        id,
 			parentID:  conversationPickerParentID(summary),
@@ -149,6 +245,10 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 			updatedAt: summary.UpdatedAt,
 			running:   summary.IsRunning,
 		}
+		if summary.Search != nil && len(summary.Search.Matches) > 0 {
+			item.match = strings.ReplaceAll(summary.Search.Matches[0].Snippet, "**", "")
+		}
+		itemsByID[id] = item
 	}
 
 	// Durable IDs identify rows even when an ongoing conversation still uses a
@@ -251,17 +351,43 @@ func conversationStateFallbackTitle(state *conversationState) string {
 }
 
 func (m model) filteredConversationPickerItems() []conversationPickerItem {
-	if m.conversationPicker == nil {
+	picker := m.conversationPicker
+	if picker == nil {
 		return nil
 	}
-	items := m.mergeConversationPickerItems(m.conversationPicker.summaries)
-	query := strings.ToLower(strings.TrimSpace(m.conversationPicker.query))
-	return conversationPickerTree(items, query)
+	query := strings.TrimSpace(picker.query)
+	lowered := strings.ToLower(query)
+	titleMatches := func(item conversationPickerItem) bool {
+		return strings.Contains(strings.ToLower(strings.Join([]string{item.title, item.id, item.cwd}, " ")), lowered)
+	}
+	search := picker.search
+	if query == "" || search == nil || search.query != query {
+		return conversationPickerTree(m.mergeConversationPickerItems(picker.summaries), titleMatches)
+	}
+
+	// Daemon results decide the matches; loaded rows only add parent context.
+	matched := make(map[string]bool, len(search.summaries))
+	summaries := make([]convtypes.ConversationSummary, 0, len(picker.summaries)+len(search.summaries))
+	for _, summary := range search.summaries {
+		matched[strings.TrimSpace(summary.ID)] = true
+		summaries = append(summaries, summary)
+	}
+	for _, summary := range picker.summaries {
+		if !matched[strings.TrimSpace(summary.ID)] {
+			summaries = append(summaries, summary)
+		}
+	}
+	return conversationPickerTree(m.mergeConversationPickerItems(summaries), func(item conversationPickerItem) bool {
+		if item.isNew {
+			return titleMatches(item)
+		}
+		return item.id != "" && matched[item.id]
+	})
 }
 
 // conversationPickerTree builds a forest from the loaded rows only. Children
 // retain the merge's ordering; roots inherit activity from their entire tree.
-func conversationPickerTree(items []conversationPickerItem, query string) []conversationPickerItem {
+func conversationPickerTree(items []conversationPickerItem, matches func(conversationPickerItem) bool) []conversationPickerItem {
 	byID := make(map[string]int, len(items))
 	for i, item := range items {
 		if item.id != "" {
@@ -336,8 +462,7 @@ func conversationPickerTree(items []conversationPickerItem, query string) []conv
 
 	keep := make([]bool, len(items))
 	for i, item := range items {
-		haystack := strings.ToLower(strings.Join([]string{item.title, item.id, item.cwd}, " "))
-		items[i].matchesQuery = strings.Contains(haystack, query)
+		items[i].matchesQuery = matches(item)
 		if items[i].matchesQuery {
 			for node := i; node >= 0 && !keep[node]; node = parents[node] {
 				keep[node] = true
@@ -501,26 +626,30 @@ func (m *model) updateConversationPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.selectConversationPickerItem()
 	case "backspace":
-		m.conversationPicker.query = trimLastRune(m.conversationPicker.query)
-		m.resetConversationPickerSelection()
-		return nil
+		return m.setConversationPickerQuery(trimLastRune(m.conversationPicker.query))
 	case "ctrl+u":
-		m.conversationPicker.query = ""
-		m.resetConversationPickerSelection()
-		return nil
+		return m.setConversationPickerQuery("")
 	}
 	if msg.Text != "" {
-		m.appendConversationPickerQuery(msg.Text)
+		return m.appendConversationPickerQuery(msg.Text)
 	}
 	return nil
 }
 
-func (m *model) appendConversationPickerQuery(text string) {
+func (m *model) appendConversationPickerQuery(text string) tea.Cmd {
 	if m.conversationPicker == nil || text == "" {
-		return
+		return nil
 	}
-	m.conversationPicker.query += text
+	return m.setConversationPickerQuery(m.conversationPicker.query + text)
+}
+
+func (m *model) setConversationPickerQuery(query string) tea.Cmd {
+	if m.conversationPicker == nil || query == m.conversationPicker.query {
+		return nil
+	}
+	m.conversationPicker.query = query
 	m.resetConversationPickerSelection()
+	return m.scheduleConversationSearch()
 }
 
 func trimLastRune(value string) string {
@@ -574,7 +703,7 @@ func (m model) renderConversationPicker() string {
 	contentWidth := max(1, width-4)
 	query := m.conversationPicker.query
 	if query == "" {
-		query = "Type to filter conversations"
+		query = "Type to search conversations"
 	}
 	lines := []string{
 		renderPersistentStyle(uiDialogTitleStyle, fitVisible("Conversations", contentWidth)),
@@ -586,13 +715,30 @@ func (m model) renderConversationPicker() string {
 	if m.conversationPicker.loading {
 		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("Loading saved conversations…", contentWidth)))
 	}
-	if m.conversationPicker.err != nil {
-		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible(m.conversationPicker.err.Error(), contentWidth)))
+	if m.conversationPicker.searching {
+		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("Searching saved conversations…", contentWidth)))
+	}
+	for _, err := range []error{m.conversationPicker.err, m.conversationPicker.searchErr} {
+		if err != nil {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible(err.Error(), contentWidth)))
+		}
+	}
+	// The selected search result's best match explains why it was found.
+	match := ""
+	if len(items) > 0 {
+		if snippet := strings.Join(strings.Fields(items[selected].match), " "); snippet != "" {
+			match = renderPersistentStyle(uiDialogMutedStyle, fitVisiblePrefix("Match: "+snippet, contentWidth))
+		}
 	}
 	if len(items) == 0 {
-		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("No matching conversations.", contentWidth)))
+		if !m.conversationPicker.searching {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("No matching conversations.", contentWidth)))
+		}
 	} else {
 		fixedRows := len(lines) + 2
+		if match != "" {
+			fixedRows++
+		}
 		rowBudget := max(0, m.height-2-fixedRows)
 		start, end, showMoreAbove, showMoreBelow := conversationPickerVisibleWindow(len(items), selected, rowBudget)
 		now := time.Now()
@@ -612,7 +758,11 @@ func (m model) renderConversationPicker() string {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("↓ more", contentWidth)))
 		}
 	}
-	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Enter open · Esc close · /new opens setup", contentWidth)))
+	lines = append(lines, "")
+	if match != "" {
+		lines = append(lines, match)
+	}
+	lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("Enter open · Esc close · /new opens setup", contentWidth)))
 	if maxContentRows := max(0, m.height-2); len(lines) > maxContentRows {
 		lines = lines[:maxContentRows]
 	}

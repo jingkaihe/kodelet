@@ -29,7 +29,7 @@ kodelet run --resume <id> "/rename New conversation name"
 kodelet run --follow "/rename New name for the latest conversation"
 ```
 
-`conversation search` finds past conversations by title, ID, or workspace, and by your messages, the agent's replies, and the commands and files it worked with, listing the best matches first with highlighted excerpts. Tool output isn't searched. Words also match longer words that start with them, `"quoted text"` matches an exact phrase, and all words must appear in the same message. `conversation list --search` and the Web UI search use the same matching.
+`conversation search` finds past conversations by title, ID, or workspace, and by your messages, the agent's replies, and the commands and files it worked with, listing the best matches first with highlighted excerpts. Tool output isn't searched. Words also match longer words that start with them, `"quoted text"` matches an exact phrase, and all words must appear in the same message. `conversation list --search`, the Web UI search, and the TUI conversation picker (`Ctrl+L` or `/sessions`) use the same matching.
 
 `conversation move` supports legacy history and registered offline runners. It preserves history and settings, copies no files, and does not check destination readiness. Finish or stop active work first. The command displays the move before confirmation; `--no-confirm` skips the prompt.
 
