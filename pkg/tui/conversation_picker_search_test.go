@@ -131,6 +131,38 @@ func TestConversationPickerSearchesDaemonHistory(t *testing.T) {
 	assert.Len(t, source.queries, 1)
 }
 
+func matchingConversationPickerKeys(items []conversationPickerItem) []string {
+	keys := []string{}
+	for _, item := range items {
+		if item.matchesQuery && !item.isNew {
+			keys = append(keys, item.key)
+		}
+	}
+	return keys
+}
+
+func TestConversationPickerSearchKeepsUnsavedConversations(t *testing.T) {
+	now := time.Now()
+	source := &searchingConversationSource{
+		conversationSourceRunner: conversationSourceRunner{summaries: []convtypes.ConversationSummary{
+			{ID: "saved", FirstMessage: "Unrelated work", UpdatedAt: now},
+		}},
+		results: map[string][]convtypes.ConversationSummary{"release": {
+			searchResult("archived", "Old notes", now.Add(-time.Hour), "**release** notes"),
+		}},
+	}
+	m := newSearchPickerModel(t, source)
+	// A parked, never-submitted conversation exists only in the TUI.
+	m.conversations["new:9"] = &conversationState{key: "new:9", draft: "release notes draft", updatedAt: now}
+
+	m, _ = typeConversationPickerQuery(t, m, "release")
+	assert.Equal(t, []string{"new:9"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()))
+
+	m = runConversationSearch(t, m)
+	assert.ElementsMatch(t, []string{"new:9", "archived"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()),
+		"daemon results do not hide unsaved local matches")
+}
+
 func TestConversationPickerSearchIgnoresStaleResults(t *testing.T) {
 	now := time.Now()
 	source := &searchingConversationSource{

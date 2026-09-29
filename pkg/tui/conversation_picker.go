@@ -378,10 +378,12 @@ func (m model) filteredConversationPickerItems() []conversationPickerItem {
 		}
 	}
 	return conversationPickerTree(m.mergeConversationPickerItems(summaries), func(item conversationPickerItem) bool {
-		if item.isNew {
-			return titleMatches(item)
+		if item.id != "" && matched[item.id] {
+			return true
 		}
-		return item.id != "" && matched[item.id]
+		// The daemon only finds saved conversations, so unsaved ones (and the
+		// new-conversation row) keep matching locally.
+		return item.id == "" && titleMatches(item)
 	})
 }
 
