@@ -61,6 +61,7 @@ interface ConversationSearchDialogProps {
   loading: boolean;
   loadingMore?: boolean;
   returnFocusSelector?: string;
+  searchPending?: number;
   searchTerm: string;
   total?: number;
   onClose: () => void;
@@ -189,6 +190,7 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
   loading,
   loadingMore = false,
   returnFocusSelector,
+  searchPending = 0,
   searchTerm,
   total,
   onClose,
@@ -297,6 +299,10 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
       : resultTotal > conversations.length
         ? `${conversations.length} of ${resultTotal}`
         : String(resultTotal);
+  const searchPendingText =
+    trimmedSearchTerm && searchPending > 0 && !loading && !error
+      ? `Still indexing ${searchPending} saved ${searchPending === 1 ? 'conversation' : 'conversations'}, so some matches may be missing.`
+      : '';
   const emptyStateText = trimmedSearchTerm
     ? 'No conversations match your search.'
     : trimmedCwdFilter
@@ -405,6 +411,10 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
               <span>{resultsLabel}</span>
               <span>{resultCountLabel}</span>
             </div>
+
+            {searchPendingText ? (
+              <output className="conversation-search-note">{searchPendingText}</output>
+            ) : null}
 
             {initialLoading ? <div className="conversation-search-empty">Searching…</div> : null}
 

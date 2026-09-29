@@ -461,6 +461,35 @@ describe('ConversationSearchDialog', () => {
     expect(screen.queryByText('No saved conversations yet.')).not.toBeInTheDocument();
   });
 
+  it('notes when search results may be incomplete while indexing catches up', () => {
+    const props = {
+      conversations: [],
+      cwdFilter: '',
+      cwdOptions: [],
+      loading: false,
+      onClose: vi.fn(),
+      onCwdFilterChange: vi.fn(),
+      onSearchTermChange: vi.fn(),
+      onSelectConversation: vi.fn(),
+    };
+    const { rerender } = render(
+      <ConversationSearchDialog {...props} searchPending={3} searchTerm="needle" />
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Still indexing 3 saved conversations, so some matches may be missing.'
+    );
+
+    rerender(<ConversationSearchDialog {...props} searchPending={1} searchTerm="needle" />);
+    expect(screen.getByRole('status')).toHaveTextContent('Still indexing 1 saved conversation,');
+
+    rerender(<ConversationSearchDialog {...props} searchPending={0} searchTerm="needle" />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    rerender(<ConversationSearchDialog {...props} searchPending={2} searchTerm="" />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('reports search failures instead of leaving stale results visible', () => {
     render(
       <ConversationSearchDialog

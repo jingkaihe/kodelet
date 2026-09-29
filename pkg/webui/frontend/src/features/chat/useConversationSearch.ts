@@ -29,6 +29,7 @@ const emptySearch = {
   loadingMore: false,
   offset: 0,
   total: 0,
+  pending: 0,
 };
 
 export const useConversationSearch = ({
@@ -86,6 +87,7 @@ export const useConversationSearch = ({
             offset: nextOffset,
             total: nextTotal,
             hasMore: response.hasMore ?? nextOffset < nextTotal,
+            pending: response.searchPending ?? 0,
           };
         });
         const responseCWDs = (
@@ -139,6 +141,7 @@ export const useConversationSearch = ({
       hasMore: false,
       loadingMore: false,
       offset: 0,
+      pending: 0,
       results: filtered ? [] : conversations,
       loading: filtered || loading,
       total: filtered ? 0 : total,
@@ -208,6 +211,7 @@ export const useConversationSearch = ({
       hasMore: search.hasMore,
       loading: search.loading,
       loadingMore: search.loadingMore,
+      searchPending: search.pending,
       searchTerm: search.term,
       total: search.total,
       onClose: close,

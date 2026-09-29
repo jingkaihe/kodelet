@@ -132,6 +132,8 @@ export interface ConversationListResponse {
   limit: number;
   offset: number;
   stats?: ConversationStats;
+  /** Conversations not yet indexed for search; results may be incomplete while nonzero. */
+  searchPending?: number;
 }
 
 export interface ConversationStats {

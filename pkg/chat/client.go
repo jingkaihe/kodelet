@@ -456,8 +456,9 @@ func (r *Client) ListConversationsInCWD(ctx context.Context, limit int, cwd stri
 }
 
 // SearchConversations returns the most recently updated conversations that
-// match a full-text query, each with its best highlighted match.
-func (r *Client) SearchConversations(ctx context.Context, query string, limit int) ([]convtypes.ConversationSummary, error) {
+// match a full-text query, each with its best highlighted match, and how many
+// conversations are still waiting to be indexed.
+func (r *Client) SearchConversations(ctx context.Context, query string, limit int) (ConversationSearchResults, error) {
 	result, err := r.QueryConversations(ctx, conversations.ListConversationsRequest{
 		SearchTerm:    query,
 		SearchMatches: 1,
@@ -466,9 +467,12 @@ func (r *Client) SearchConversations(ctx context.Context, query string, limit in
 		SortOrder:     "desc",
 	})
 	if err != nil {
-		return nil, err
+		return ConversationSearchResults{}, err
 	}
-	return r.runnerConversations(result.Conversations), nil
+	return ConversationSearchResults{
+		Conversations: r.runnerConversations(result.Conversations),
+		Pending:       result.SearchPending,
+	}, nil
 }
 
 // runnerConversations keeps only a runner-scoped client's own conversations.

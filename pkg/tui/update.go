@@ -691,8 +691,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startConversationSearch(msg)
 
 	case conversationSearchMsg:
-		m.applyConversationSearch(msg)
-		return m, nil
+		return m, m.applyConversationSearch(msg)
 
 	case serverStatusMsg:
 		m.applyServerStatus(msg)

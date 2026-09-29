@@ -12,21 +12,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 type searchingConversationSource struct {
 	conversationSourceRunner
 	results map[string][]convtypes.ConversationSummary
+	// pending is returned for successive searches; the last value repeats.
+	pending []int
 	err     error
 	queries []string
 	limits  []int
 }
 
-func (s *searchingConversationSource) SearchConversations(_ context.Context, query string, limit int) ([]convtypes.ConversationSummary, error) {
+var _ chat.ConversationSearcher = (*searchingConversationSource)(nil)
+
+func (s *searchingConversationSource) SearchConversations(_ context.Context, query string, limit int) (chat.ConversationSearchResults, error) {
 	s.queries = append(s.queries, query)
 	s.limits = append(s.limits, limit)
-	return s.results[query], s.err
+	pending := 0
+	if len(s.pending) > 0 {
+		pending = s.pending[min(len(s.queries), len(s.pending))-1]
+	}
+	return chat.ConversationSearchResults{Conversations: s.results[query], Pending: pending}, s.err
 }
 
 func searchResult(id, title string, updatedAt time.Time, snippet string) convtypes.ConversationSummary {
@@ -62,13 +71,20 @@ func typeConversationPickerQuery(t *testing.T, m model, text string) (model, tea
 // runConversationSearch delivers the debounce tick without waiting for it.
 func runConversationSearch(t *testing.T, m model) model {
 	t.Helper()
+	m, _ = runConversationSearchWithRetry(t, m)
+	return m
+}
+
+// runConversationSearchWithRetry also returns any scheduled retry tick.
+func runConversationSearchWithRetry(t *testing.T, m model) (model, tea.Cmd) {
+	t.Helper()
 	updated, cmd := m.Update(conversationSearchDueMsg{requestID: m.conversationPicker.searchRequestID})
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	msg, ok := cmd().(conversationSearchMsg)
 	require.True(t, ok)
-	updated, _ = m.Update(msg)
-	return updated.(model)
+	updated, retry := m.Update(msg)
+	return updated.(model), retry
 }
 
 func TestConversationPickerSearchesDaemonHistory(t *testing.T) {
@@ -161,6 +177,52 @@ func TestConversationPickerSearchKeepsUnsavedConversations(t *testing.T) {
 	m = runConversationSearch(t, m)
 	assert.ElementsMatch(t, []string{"new:9", "archived"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()),
 		"daemon results do not hide unsaved local matches")
+}
+
+func TestConversationPickerSearchQualifiesAndRetriesIncompleteResults(t *testing.T) {
+	now := time.Now()
+	source := &searchingConversationSource{
+		conversationSourceRunner: conversationSourceRunner{summaries: []convtypes.ConversationSummary{
+			{ID: "recent", FirstMessage: "Release checklist", UpdatedAt: now},
+			{ID: "other", FirstMessage: "Unrelated work", UpdatedAt: now},
+		}},
+		pending: []int{5, 1, 0},
+	}
+	m := newSearchPickerModel(t, source)
+	m, _ = typeConversationPickerQuery(t, m, "release")
+
+	// Nothing is indexed yet, so loaded title matches stay listed.
+	m, retry := runConversationSearchWithRetry(t, m)
+	require.NotNil(t, retry, "an incomplete result schedules another search")
+	assert.Equal(t, []string{"recent"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()))
+	rendered := xansi.Strip(m.renderConversationPicker())
+	assert.Contains(t, rendered, "Still indexing 5 saved conversations, so some matches may be missing.")
+	assert.NotContains(t, rendered, "No matching conversations")
+	assert.NotContains(t, rendered, "Searching saved conversations", "retries do not flash the searching state")
+
+	m, retry = runConversationSearchWithRetry(t, m)
+	require.NotNil(t, retry)
+	assert.Contains(t, xansi.Strip(m.renderConversationPicker()), "Still indexing 1 saved conversation, so")
+
+	// Once indexing completes, daemon results are final and retries stop.
+	source.results = map[string][]convtypes.ConversationSummary{"release": {
+		searchResult("archived", "Old notes", now.Add(-time.Hour), "**release** notes"),
+	}}
+	m, retry = runConversationSearchWithRetry(t, m)
+	assert.Nil(t, retry)
+	assert.Equal(t, []string{"archived"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()))
+	assert.NotContains(t, xansi.Strip(m.renderConversationPicker()), "Still indexing")
+	assert.Len(t, source.queries, 3)
+
+	// Retries are bounded, and a new query starts a fresh budget.
+	source.pending = []int{2}
+	m.conversationPicker.searchRetries = conversationPickerSearchRetries
+	_, retry = runConversationSearchWithRetry(t, m)
+	assert.Nil(t, retry, "retries stop after the limit")
+	m, _ = typeConversationPickerQuery(t, m, "s")
+	assert.Zero(t, m.conversationPicker.searchRetries)
+	_, retry = runConversationSearchWithRetry(t, m)
+	assert.NotNil(t, retry)
 }
 
 func TestConversationPickerSearchIgnoresStaleResults(t *testing.T) {

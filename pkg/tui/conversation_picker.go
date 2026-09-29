@@ -19,6 +19,8 @@ import (
 const (
 	conversationPickerLimit             = 200
 	conversationPickerSearchDelay       = 200 * time.Millisecond
+	conversationPickerSearchRetryDelay  = 2 * time.Second
+	conversationPickerSearchRetries     = 30
 	conversationPickerPreferredMinWidth = 112
 	conversationPickerWidthPercent      = 80
 	conversationPickerStatusWidth       = 4
@@ -44,11 +46,16 @@ type conversationPickerState struct {
 	searchRequestID int
 	searching       bool
 	searchErr       error
+	// searchRetries counts repeat searches while conversations are still
+	// being indexed, so an unchanged query eventually sees complete results.
+	searchRetries int
 }
 
 type conversationPickerSearch struct {
 	query     string
 	summaries []convtypes.ConversationSummary
+	// pending counts conversations the daemon had not indexed yet.
+	pending int
 }
 
 type conversationPickerItem struct {
@@ -95,6 +102,7 @@ type conversationSearchMsg struct {
 	requestID int
 	query     string
 	summaries []convtypes.ConversationSummary
+	pending   int
 	err       error
 }
 
@@ -115,6 +123,7 @@ func (m *model) scheduleConversationSearch() tea.Cmd {
 	m.nextConversationSearchRequestID++
 	picker.searchRequestID = m.nextConversationSearchRequestID
 	picker.searchErr = nil
+	picker.searchRetries = 0
 	picker.searching = strings.TrimSpace(picker.query) != "" && m.conversationSearcher() != nil
 	if !picker.searching {
 		return nil
@@ -133,20 +142,28 @@ func (m *model) startConversationSearch(msg conversationSearchDueMsg) tea.Cmd {
 	}
 	ctx, query := m.ctx, strings.TrimSpace(picker.query)
 	return func() tea.Msg {
-		summaries, err := searcher.SearchConversations(ctx, query, conversationPickerLimit)
+		results, err := searcher.SearchConversations(ctx, query, conversationPickerLimit)
 		if err != nil {
 			err = errors.Wrap(err, "failed to search conversations")
 		}
-		return conversationSearchMsg{requestID: msg.requestID, query: query, summaries: summaries, err: err}
+		return conversationSearchMsg{
+			requestID: msg.requestID,
+			query:     query,
+			summaries: results.Conversations,
+			pending:   results.Pending,
+			err:       err,
+		}
 	}
 }
 
 // applyConversationSearch shows results for the latest query only. The current
 // selection is kept when it still matches; otherwise the first match is selected.
-func (m *model) applyConversationSearch(msg conversationSearchMsg) {
+// While conversations are still being indexed, it searches the same query again
+// shortly, a bounded number of times.
+func (m *model) applyConversationSearch(msg conversationSearchMsg) tea.Cmd {
 	picker := m.conversationPicker
 	if picker == nil || msg.requestID != picker.searchRequestID {
-		return
+		return nil
 	}
 	m.rememberConversationPickerSelection()
 	selectedKey := picker.selectedKey
@@ -156,12 +173,26 @@ func (m *model) applyConversationSearch(msg conversationSearchMsg) {
 		picker.search = &conversationPickerSearch{
 			query:     msg.query,
 			summaries: append([]convtypes.ConversationSummary(nil), msg.summaries...),
+			pending:   msg.pending,
 		}
 	}
+	m.selectConversationSearchMatch(selectedKey)
+
+	if msg.err != nil || msg.pending == 0 || picker.searchRetries >= conversationPickerSearchRetries {
+		return nil
+	}
+	picker.searchRetries++
+	requestID := picker.searchRequestID
+	return tea.Tick(conversationPickerSearchRetryDelay, func(time.Time) tea.Msg {
+		return conversationSearchDueMsg{requestID: requestID}
+	})
+}
+
+func (m *model) selectConversationSearchMatch(selectedKey string) {
 	for index, item := range m.filteredConversationPickerItems() {
 		if item.matchesQuery && conversationPickerMatchesSelection(item, selectedKey) {
-			picker.selected = index
-			picker.selectedKey = conversationPickerSelectionKey(item)
+			m.conversationPicker.selected = index
+			m.conversationPicker.selectedKey = conversationPickerSelectionKey(item)
 			return
 		}
 	}
@@ -381,9 +412,10 @@ func (m model) filteredConversationPickerItems() []conversationPickerItem {
 		if item.id != "" && matched[item.id] {
 			return true
 		}
-		// The daemon only finds saved conversations, so unsaved ones (and the
-		// new-conversation row) keep matching locally.
-		return item.id == "" && titleMatches(item)
+		// The daemon only finds indexed conversations. Unsaved conversations
+		// (and the new-conversation row) always match locally, as do loaded
+		// conversations while indexing catches up.
+		return (item.id == "" || search.pending > 0) && titleMatches(item)
 	})
 }
 
@@ -719,6 +751,13 @@ func (m model) renderConversationPicker() string {
 	}
 	if m.conversationPicker.searching {
 		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("Searching saved conversations…", contentWidth)))
+	} else if search := m.conversationPicker.search; search != nil && search.pending > 0 &&
+		search.query == strings.TrimSpace(m.conversationPicker.query) {
+		note := fmt.Sprintf("Still indexing %d saved conversations, so some matches may be missing.", search.pending)
+		if search.pending == 1 {
+			note = "Still indexing 1 saved conversation, so some matches may be missing."
+		}
+		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible(note, contentWidth)))
 	}
 	for _, err := range []error{m.conversationPicker.err, m.conversationPicker.searchErr} {
 		if err != nil {

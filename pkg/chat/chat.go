@@ -199,7 +199,15 @@ type ConversationSource interface {
 
 // ConversationSearcher optionally searches persisted conversations by full text.
 type ConversationSearcher interface {
-	SearchConversations(ctx context.Context, query string, limit int) ([]convtypes.ConversationSummary, error)
+	SearchConversations(ctx context.Context, query string, limit int) (ConversationSearchResults, error)
+}
+
+// ConversationSearchResults are the conversations matching a full-text search.
+type ConversationSearchResults struct {
+	Conversations []convtypes.ConversationSummary
+	// Pending counts conversations not yet indexed for search; results may
+	// be incomplete while it is nonzero.
+	Pending int
 }
 
 // ConversationHistory is the client-facing persisted state needed to resume a conversation.

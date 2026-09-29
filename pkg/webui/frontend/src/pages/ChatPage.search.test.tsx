@@ -118,6 +118,46 @@ describe('ChatPage conversation search', () => {
     }
   });
 
+  it('notes incomplete results while conversations are still being indexed', async () => {
+    vi.useFakeTimers();
+    mockGetConversations
+      .mockResolvedValueOnce({ conversations: [], hasMore: false, total: 0, limit: 100, offset: 0 })
+      .mockResolvedValue({
+        conversations: [],
+        hasMore: false,
+        total: 0,
+        limit: 100,
+        offset: 0,
+        searchPending: 42,
+      });
+
+    try {
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+
+      fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), {
+        target: { value: 'release' },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Still indexing 42 saved conversations, so some matches may be missing.'
+      );
+
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), {
+        target: { value: '' },
+      });
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores an in-flight search after the search term changes', async () => {
     vi.useFakeTimers();
     const pendingAlphaSearch = {

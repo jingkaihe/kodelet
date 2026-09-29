@@ -623,6 +623,7 @@ func TestClientSearchesRunnerConversations(t *testing.T) {
 				{ID: "bound", Metadata: map[string]any{RunnerIDMetadataKey: "runner-1"}, Search: match},
 				{ID: "other", Metadata: map[string]any{RunnerIDMetadataKey: "runner-2"}, Search: match},
 			},
+			SearchPending: 4,
 		}))
 	}))
 	defer server.Close()
@@ -630,8 +631,10 @@ func TestClientSearchesRunnerConversations(t *testing.T) {
 	client, err := NewClient(server.URL, "secret", "runner-1")
 	require.NoError(t, err)
 	var searcher ConversationSearcher = client
-	summaries, err := searcher.SearchConversations(t.Context(), `"release notes" deploy`, 50)
+	results, err := searcher.SearchConversations(t.Context(), `"release notes" deploy`, 50)
 	require.NoError(t, err)
+	assert.Equal(t, 4, results.Pending)
+	summaries := results.Conversations
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "bound", summaries[0].ID)
 	require.NotNil(t, summaries[0].Search)

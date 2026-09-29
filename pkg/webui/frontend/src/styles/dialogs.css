@@ -828,6 +828,15 @@
   opacity: 0.62;
 }
 
+.conversation-search-note {
+  display: block;
+  padding: 0 0.55rem 0.55rem;
+  color: var(--kodelet-muted);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
 .conversation-search-empty {
   display: flex;
   min-height: 7rem;
