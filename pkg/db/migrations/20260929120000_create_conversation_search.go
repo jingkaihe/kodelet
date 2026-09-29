@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// The daemon backfills this schema because entry extraction needs Go parsers.
+// Migration20260929120000CreateConversationSearch creates the search schema; the daemon backfills it because entry extraction needs Go parsers.
 func Migration20260929120000CreateConversationSearch() db.Migration {
 	return db.Migration{
 		Version:     20260929120000,

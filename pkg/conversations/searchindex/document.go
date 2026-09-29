@@ -20,7 +20,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
-// Increment Version when extraction rules change to rebuild the index.
+// Version is the index schema version; increment it when extraction rules change to rebuild the index.
 const Version = 1
 
 const (
