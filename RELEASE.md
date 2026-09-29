@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.7.2-beta
+
+Added full-text search for saved conversations. The new `kodelet conversation search` command finds conversations by title, ID, workspace, and by what was said in them: user messages, agent replies, and the commands and files the agent worked with. Results are ranked with matching words highlighted, and support prefix matching, `"quoted phrases"`, `--cwd`, `--sort-by updated_at`, and `--json`. `conversation list --search`, the Web UI search, and the TUI picker use the same matching. Tool output is not searched. After upgrading, older conversations may take a short while to be indexed; results are flagged as incomplete until indexing finishes.
+
+Added search to the TUI conversation picker (`/sessions` or `Ctrl+L`), including unsaved conversations in results.
+
+Added GPT-6.1 Sol (`gpt-6.1-sol`) for the OpenAI and Codex presets, with Responses API routing, prompt-cache options, and standard, priority, and long-context pricing.
+
 ## 0.7.1-beta
 
 Added Claude Sonnet 5.5 (`claude-sonnet-5-5`) with always-on adaptive thinking, `xhigh`/`max` reasoning effort, original-detail image viewing, a 1M-token context window, and pricing. Added the `sonnet-55` alias to the sample configuration and setup-generated Anthropic aliases.
