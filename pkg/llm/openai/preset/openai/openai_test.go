@@ -14,6 +14,7 @@ func TestModels(t *testing.T) {
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-6.1-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-6-astra")
 	assert.Contains(t, Models.Reasoning, "gpt-6-sol")
 	assert.Contains(t, Models.Reasoning, "gpt-6-luna")
@@ -257,13 +258,40 @@ func TestPricingForServiceTier(t *testing.T) {
 	}
 }
 
-func TestGPT6SolLunaPricing(t *testing.T) {
+func TestGPT6Pricing(t *testing.T) {
 	tests := []struct {
 		model    string
 		standard llmtypes.ModelPricing
 		priority llmtypes.ModelPricing
 		flex     llmtypes.ModelPricing
 	}{
+		{
+			model: "gpt-6.1-sol",
+			standard: llmtypes.ModelPricing{
+				Input:                      0.000002,
+				CachedInput:                0.0000001,
+				CacheWriteInput:            0.0000025,
+				Output:                     0.00001,
+				LongContextInput:           0.000004,
+				LongContextCachedInput:     0.0000002,
+				LongContextCacheWriteInput: 0.000005,
+				LongContextOutput:          0.000015,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+			priority: llmtypes.ModelPricing{
+				Input:                      0.000004,
+				CachedInput:                0.0000002,
+				CacheWriteInput:            0.000005,
+				Output:                     0.00002,
+				LongContextInput:           0.000008,
+				LongContextCachedInput:     0.0000004,
+				LongContextCacheWriteInput: 0.00001,
+				LongContextOutput:          0.00003,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
+			},
+		},
 		{
 			model: "gpt-6-sol",
 			standard: llmtypes.ModelPricing{
@@ -346,6 +374,9 @@ func TestGPT6SolLunaPricing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
+			if tt.flex.ContextWindow == 0 {
+				tt.flex = tt.standard
+			}
 			for _, tier := range []struct {
 				name llmtypes.OpenAIServiceTier
 				want llmtypes.ModelPricing

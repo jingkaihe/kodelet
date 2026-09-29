@@ -117,12 +117,12 @@ func TestNewThreadModelDefault(t *testing.T) {
 	}
 }
 
-func TestNewThreadGPT6SolLunaUsesResponses(t *testing.T) {
+func TestNewThreadGPT6UsesResponses(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("KODELET_OPENAI_API_MODE", "chat_completions")
 	for _, platform := range []string{"openai", "codex"} {
-		for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 			for _, role := range []string{"main", "weak"} {
 				t.Run(platform+"/"+model+"/"+role, func(t *testing.T) {
 					config := llmtypes.Config{

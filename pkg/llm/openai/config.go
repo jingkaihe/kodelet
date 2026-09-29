@@ -100,7 +100,9 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 
 func requiresResponsesAPI(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return isGPT6AstraModel(model) || model == "gpt-6-sol" || model == "gpt-6-luna" || model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
+	return model == "gpt-6.1-sol" || isGPT6AstraModel(model) ||
+		model == "gpt-6-sol" || model == "gpt-6-luna" ||
+		model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
 func isGPT6AstraModel(model string) bool {

@@ -1167,6 +1167,7 @@ Features:
 ### OpenAI
 
 Kodelet supports OpenAI models including:
+- `gpt-6.1-sol` (GPT-6.1 Sol, coding and agentic workflows)
 - `gpt-6-astra` (GPT-6 Astra, most capable model for complex agentic work)
 - `gpt-6-sol` (GPT-6 Sol, coding and agentic workflows)
 - `gpt-6-luna` (GPT-6 Luna, efficient high-volume tasks)
