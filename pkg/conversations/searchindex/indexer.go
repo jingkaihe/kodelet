@@ -2,7 +2,6 @@ package searchindex
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -37,9 +36,10 @@ type Indexer struct {
 	refreshBudget time.Duration
 	sweepInterval time.Duration
 
-	// mu serializes indexing, so a search refresh and the background loop
-	// never extract or write the same conversation concurrently.
-	mu sync.Mutex
+	// lock serializes indexing, so a search refresh and the background loop
+	// never extract or write the same conversation concurrently. It is a
+	// channel so waits can give up at a deadline or on cancellation.
+	lock chan struct{}
 	// indexed records the source update time this process last indexed per
 	// conversation, letting overlapping passes skip work already done.
 	indexed map[string]time.Time
@@ -64,6 +64,7 @@ func New(store Store, options ...Option) *Indexer {
 		store:         store,
 		refreshBudget: DefaultRefreshBudget,
 		sweepInterval: DefaultSweepInterval,
+		lock:          make(chan struct{}, 1),
 		indexed:       make(map[string]time.Time),
 	}
 	for _, option := range options {
@@ -73,8 +74,10 @@ func New(store Store, options ...Option) *Indexer {
 }
 
 // Refresh indexes changed conversations, most recently updated first, until
-// they are all indexed or the refresh budget is spent. It returns how many
-// conversations still await indexing.
+// they are all indexed or the refresh budget is spent. Waiting for the
+// background loop counts against the budget, but a conversation that has
+// started indexing is finished. It returns how many conversations still
+// await indexing.
 func (i *Indexer) Refresh(ctx context.Context) (int, error) {
 	result, err := i.sync(ctx, time.Now().Add(i.refreshBudget))
 	return result.pending, err
@@ -136,13 +139,14 @@ func (i *Indexer) sync(ctx context.Context, deadline time.Time) (syncResult, err
 	}
 	result := syncResult{pending: len(candidates)}
 	for _, candidate := range candidates {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
+		if !i.acquire(ctx, deadline) {
+			if err := ctx.Err(); err != nil {
+				return result, err
+			}
 			break
 		}
 		done, wrote, err := i.index(ctx, candidate)
+		<-i.lock
 		if err != nil {
 			return result, err
 		}
@@ -156,12 +160,38 @@ func (i *Indexer) sync(ctx context.Context, deadline time.Time) (syncResult, err
 	return result, nil
 }
 
-// index reports whether the candidate no longer needs indexing and whether
-// this call wrote it.
-func (i *Indexer) index(ctx context.Context, candidate convtypes.SearchIndexCandidate) (bool, bool, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+// acquire takes the indexing lock, giving up when ctx is cancelled or the
+// deadline passes. A zero deadline waits for the lock without a time limit.
+func (i *Indexer) acquire(ctx context.Context, deadline time.Time) bool {
+	var expired <-chan time.Time
+	if !deadline.IsZero() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		timer := time.NewTimer(remaining)
+		defer timer.Stop()
+		expired = timer.C
+	}
+	select {
+	case i.lock <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	case <-expired:
+		return false
+	}
+	// The lock can be won as the deadline passes or ctx ends; do not start
+	// work that the caller has no time left for.
+	if ctx.Err() != nil || (!deadline.IsZero() && !time.Now().Before(deadline)) {
+		<-i.lock
+		return false
+	}
+	return true
+}
 
+// index reports whether the candidate no longer needs indexing and whether
+// this call wrote it. The caller must hold the indexing lock.
+func (i *Indexer) index(ctx context.Context, candidate convtypes.SearchIndexCandidate) (bool, bool, error) {
 	if indexedAt, ok := i.indexed[candidate.ID]; ok && indexedAt.Equal(candidate.UpdatedAt) {
 		return true, false, nil
 	}

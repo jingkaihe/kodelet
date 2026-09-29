@@ -176,6 +176,57 @@ func TestIndexerRefreshHonoursBudget(t *testing.T) {
 	assert.Len(t, searchIDs(t, store, "listing"), 2)
 }
 
+func TestIndexerRefreshStopsWaitingForBackgroundIndexing(t *testing.T) {
+	store := newTestStore(t)
+	saveTranscript(t, store, "one", anthropicTranscript)
+	saveTranscript(t, store, "two", anthropicTranscript)
+	indexer := New(store, WithRefreshBudget(50*time.Millisecond))
+
+	// Simulate the background loop indexing a slow conversation.
+	indexer.lock <- struct{}{}
+	start := time.Now()
+	pending, err := indexer.Refresh(t.Context())
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+	assert.Equal(t, 2, pending, "nothing is indexed while the lock is busy")
+	assert.GreaterOrEqual(t, elapsed, 50*time.Millisecond)
+	assert.Less(t, elapsed, time.Second, "the refresh budget bounds the wait")
+
+	// Cancellation also ends an unbounded wait, as used by the background loop.
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := indexer.sync(ctx, time.Time{})
+		done <- err
+	}()
+	cancel()
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled sync kept waiting for the lock")
+	}
+
+	// Once released, the lock works normally and nothing still holds it.
+	<-indexer.lock
+	pending, err = indexer.Refresh(t.Context())
+	require.NoError(t, err)
+	assert.Zero(t, pending)
+	assert.Empty(t, indexer.lock)
+}
+
+func TestIndexerAcquireRejectsExpiredDeadline(t *testing.T) {
+	indexer := New(newTestStore(t))
+	assert.False(t, indexer.acquire(t.Context(), time.Now().Add(-time.Millisecond)))
+	assert.Empty(t, indexer.lock)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.False(t, indexer.acquire(ctx, time.Time{}))
+	assert.Empty(t, indexer.lock, "a lock won after cancellation is released")
+	assert.True(t, indexer.acquire(t.Context(), time.Time{}))
+	assert.Len(t, indexer.lock, 1)
+}
+
 // changingStore saves the conversation again after it is loaded, as a
 // concurrent turn would, so the extracted document is already stale.
 type changingStore struct {
