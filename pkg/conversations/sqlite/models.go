@@ -71,7 +71,6 @@ type dbConversationSummary struct {
 	UpdatedAt    time.Time                 `db:"updated_at"`
 }
 
-// dbSearchConversationSummary adds search match counts to a summary row.
 type dbSearchConversationSummary struct {
 	dbConversationSummary
 	SearchMatchCount int `db:"search_match_count"`

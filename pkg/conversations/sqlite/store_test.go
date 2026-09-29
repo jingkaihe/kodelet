@@ -360,7 +360,6 @@ func TestStore_Query(t *testing.T) {
 		},
 	}
 
-	// Save all records
 	for _, record := range records {
 		err = store.Save(ctx, record)
 		require.NoError(t, err)
@@ -371,7 +370,6 @@ func TestStore_Query(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/workspace/alpha", "/workspace/beta"}, result.CWDs)
 
-	// Test exact working directory filter
 	result, err = store.Query(ctx, conversations.QueryOptions{CWD: "/workspace/alpha"})
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 2)

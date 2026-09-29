@@ -15,14 +15,12 @@ import (
 
 const conversationSearchTitleLimit = 100
 
-// ConversationSearchOutput is the result of `kodelet conversation search`.
 type ConversationSearchOutput struct {
 	Conversations []ConversationSearchResultOutput `json:"conversations"`
 	Total         int                              `json:"total"`
 	SearchPending int                              `json:"search_pending,omitempty"`
 }
 
-// ConversationSearchResultOutput describes one matching conversation.
 type ConversationSearchResultOutput struct {
 	ID           string                          `json:"id"`
 	Title        string                          `json:"title"`
@@ -42,7 +40,6 @@ type ConversationSearchMatchOutput struct {
 	Snippet    string `json:"snippet"`
 }
 
-// NewConversationSearchOutput converts a daemon search response for display.
 func NewConversationSearchOutput(response conversations.ListConversationsResponse) ConversationSearchOutput {
 	output := ConversationSearchOutput{
 		Conversations: make([]ConversationSearchResultOutput, 0, len(response.Conversations)),
@@ -82,7 +79,6 @@ func conversationSearchTitle(summary convtypes.ConversationSummary) string {
 	return string(title)
 }
 
-// Render writes the results as JSON or readable text.
 func (o ConversationSearchOutput) Render(w io.Writer, format OutputFormat) error {
 	if format == JSONFormat {
 		data, err := json.MarshalIndent(o, "", "  ")

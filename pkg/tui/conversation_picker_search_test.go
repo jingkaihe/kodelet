@@ -75,7 +75,6 @@ func runConversationSearch(t *testing.T, m model) model {
 	return m
 }
 
-// runConversationSearchWithRetry also returns any scheduled retry tick.
 func runConversationSearchWithRetry(t *testing.T, m model) (model, tea.Cmd) {
 	t.Helper()
 	updated, cmd := m.Update(conversationSearchDueMsg{requestID: m.conversationPicker.searchRequestID})
@@ -132,13 +131,11 @@ func TestConversationPickerSearchesDaemonHistory(t *testing.T) {
 	m = updated.(model)
 	assert.Contains(t, xansi.Strip(m.renderConversationPicker()), "Match: draft the release notes")
 
-	// Long matches keep their label and are clipped at the end.
 	m.conversationPicker.search.summaries[1].Search.Matches[0].Snippet = "draft the **release** notes " + strings.Repeat("tail ", 60)
 	rendered = xansi.Strip(m.renderConversationPicker())
 	assert.Contains(t, rendered, "│ Match: draft the release notes tail")
 	assert.Contains(t, rendered, "… │\n│ Enter open")
 
-	// Clearing the query returns to recent conversations without searching.
 	updated, cmd = m.Update(keyPressWithMod('u', tea.ModCtrl))
 	m = updated.(model)
 	assert.Nil(t, cmd)
@@ -191,7 +188,6 @@ func TestConversationPickerSearchQualifiesAndRetriesIncompleteResults(t *testing
 	m := newSearchPickerModel(t, source)
 	m, _ = typeConversationPickerQuery(t, m, "release")
 
-	// Nothing is indexed yet, so loaded title matches stay listed.
 	m, retry := runConversationSearchWithRetry(t, m)
 	require.NotNil(t, retry, "an incomplete result schedules another search")
 	assert.Equal(t, []string{"recent"}, matchingConversationPickerKeys(m.filteredConversationPickerItems()))
@@ -204,7 +200,6 @@ func TestConversationPickerSearchQualifiesAndRetriesIncompleteResults(t *testing
 	require.NotNil(t, retry)
 	assert.Contains(t, xansi.Strip(m.renderConversationPicker()), "Still indexing 1 saved conversation, so")
 
-	// Once indexing completes, daemon results are final and retries stop.
 	source.results = map[string][]convtypes.ConversationSummary{"release": {
 		searchResult("archived", "Old notes", now.Add(-time.Hour), "**release** notes"),
 	}}
@@ -214,7 +209,6 @@ func TestConversationPickerSearchQualifiesAndRetriesIncompleteResults(t *testing
 	assert.NotContains(t, xansi.Strip(m.renderConversationPicker()), "Still indexing")
 	assert.Len(t, source.queries, 3)
 
-	// Retries are bounded, and a new query starts a fresh budget.
 	source.pending = []int{2}
 	m.conversationPicker.searchRetries = conversationPickerSearchRetries
 	_, retry = runConversationSearchWithRetry(t, m)

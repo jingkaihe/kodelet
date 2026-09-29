@@ -25,10 +25,8 @@ var searchMatchesRankedHook func()
 // lower is better, so a factor below one demotes tool inputs relative to prose.
 const searchScoreSQL = `m.rank * CASE e.kind WHEN 'tool-use' THEN 0.5 ELSE 1.0 END`
 
-// searchHitsCTE groups matching entries by conversation. The FTS5 match is
-// materialized first because SQLite rejects rank and auxiliary functions once
-// a MATCH query is flattened into joins or aggregates. bm25 ranks are only
-// computed when ranking by relevance, roughly halving broad filter queries.
+// Materialize MATCH before joins/aggregates so FTS5 rank functions remain valid.
+// Compute bm25 only for relevance sorting to avoid slowing filter queries.
 func searchHitsCTE(ranked bool) string {
 	rank, score := "", ""
 	if ranked {
@@ -218,14 +216,10 @@ func insertSearchEntries(ctx context.Context, connection *sqlx.Conn, document co
 	return nil
 }
 
-// loadSearchMatches returns the best highlighted matches for each conversation.
-// Ranks are computed only for the page's entries and snippets only for the
-// selected rows. The unary + keeps rowid filters out of the FTS5 query plan:
-// as a constraint, FTS5 would re-evaluate the whole MATCH for every rowid,
-// which takes seconds for broad prefixes.
-// Call it inside the caller's read transaction: ranking and snippets are two
-// statements, and a concurrent re-index between them could otherwise delete
-// the ranked rows or reuse their IDs for different text.
+// The unary + keeps rowid filters out of the FTS5 plan, avoiding a full MATCH
+// re-evaluation per row. Compute ranks for page entries and snippets only for
+// selected rows. The caller must use one read transaction: a concurrent re-index
+// between ranking and snippet queries can delete/reuse the ranked row IDs.
 func loadSearchMatches(ctx context.Context, queryer sqlx.QueryerContext, match string, conversationIDs []string, perConversation int) (map[string][]conversations.SearchMatch, error) {
 	matches := make(map[string][]conversations.SearchMatch, len(conversationIDs))
 	if len(conversationIDs) == 0 || perConversation <= 0 {

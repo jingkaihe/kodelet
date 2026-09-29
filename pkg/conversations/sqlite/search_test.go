@@ -135,12 +135,10 @@ func TestQuerySearchesIndexedEntries(t *testing.T) {
 	assert.Empty(t, searchIDs(t, store, conversations.QueryOptions{SearchTerm: `"index search"`}))
 	assert.Equal(t, []string{"conv-c"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "waitrose"}))
 
-	// Titles cover names, working directories, and IDs.
 	assert.Equal(t, []string{"conv-b"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "~/workspace/beta"}))
 	assert.Equal(t, []string{"conv-a"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "conv-a"}))
 	assert.Equal(t, []string{"conv-c"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "groceries"}))
 
-	// Filters apply before pagination, and totals count all matches.
 	result, err := store.Query(t.Context(), conversations.QueryOptions{
 		SearchTerm: "search",
 		CWD:        "/workspace/beta",
@@ -156,13 +154,11 @@ func TestQuerySearchesIndexedEntries(t *testing.T) {
 	assert.Len(t, result.ConversationSummaries, 1)
 	assert.Equal(t, 2, result.Total)
 
-	// A page past the last match still reports the total.
 	result, err = store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "search", Limit: 1, Offset: 5})
 	require.NoError(t, err)
 	assert.Empty(t, result.ConversationSummaries)
 	assert.Equal(t, 2, result.Total)
 
-	// Text without searchable characters matches nothing, even by relevance.
 	result, err = store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "~ --", SortBy: "relevance"})
 	require.NoError(t, err)
 	assert.Empty(t, result.ConversationSummaries)
@@ -217,7 +213,6 @@ func TestQuerySearchReturnsRankedHighlightedMatches(t *testing.T) {
 		Snippet:    "**fts5** **ranking** notes",
 	}}, tool.Search.Matches)
 
-	// Ascending relevance reverses the order; snippets stay opt-in.
 	result, err = store.Query(t.Context(), conversations.QueryOptions{
 		SearchTerm: "fts5 ranking",
 		SortBy:     "relevance",
@@ -229,7 +224,6 @@ func TestQuerySearchReturnsRankedHighlightedMatches(t *testing.T) {
 	assert.Empty(t, result.ConversationSummaries[0].Search.Matches)
 	assert.Equal(t, 1, result.ConversationSummaries[0].Search.MatchCount)
 
-	// Long entries are clipped to a snippet around the match.
 	saveSearchConversation(t, store, "long", "/workspace")
 	long := "prefix " + repeatWords("filler", 100) + " needle " + repeatWords("tail", 100)
 	indexSearchConversation(t, store, "long", textEntry(0, "user", long))
@@ -241,7 +235,6 @@ func TestQuerySearchReturnsRankedHighlightedMatches(t *testing.T) {
 	assert.Contains(t, snippet, "…")
 	assert.Less(t, len(snippet), 400)
 
-	// Plain listings carry no search details, and relevance requires a search.
 	result, err = store.Query(t.Context(), conversations.QueryOptions{})
 	require.NoError(t, err)
 	for _, summary := range result.ConversationSummaries {
@@ -303,7 +296,6 @@ func TestQuerySearchReadsOneSnapshot(t *testing.T) {
 		{EntryIndex: 1, Role: "assistant", Kind: conversations.SearchEntryKindToolUse, Snippet: "bash command: echo **needle**"},
 	}, search.Matches, "snippets and labels come from the same snapshot")
 
-	// The next query sees the replacement.
 	searchMatchesRankedHook = nil
 	result, err = store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "replacement", SearchMatches: 1})
 	require.NoError(t, err)
@@ -327,7 +319,6 @@ func TestPendingSearchIndexTracksSavesAndVersions(t *testing.T) {
 	require.Len(t, pending, 1)
 	assert.Equal(t, "newer", pending[0].ID)
 
-	// Any later save marks the conversation stale again.
 	record, err := store.Load(t.Context(), "older")
 	require.NoError(t, err)
 	require.NoError(t, store.Save(t.Context(), record))
@@ -335,7 +326,6 @@ func TestPendingSearchIndexTracksSavesAndVersions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, pending, 2)
 
-	// A new extraction version rebuilds everything.
 	indexSearchConversation(t, store, "older", textEntry(0, "user", "hello"))
 	indexSearchConversation(t, store, "newer", textEntry(0, "user", "hello"))
 	pending, err = store.PendingSearchIndex(t.Context(), 1)
@@ -373,14 +363,12 @@ func TestReplaceSearchIndexGuardsAgainstStaleDocuments(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, pending)
 
-	// Changed content replaces the entries.
 	require.NoError(t, store.Save(t.Context(), record))
 	indexSearchConversation(t, store, "conv", textEntry(0, "user", "replacement words"))
 	require.Len(t, searchEntryIDs(t, store, "conv"), 1)
 	assert.Empty(t, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "marker"}))
 	assert.Equal(t, []string{"conv"}, searchIDs(t, store, conversations.QueryOptions{SearchTerm: "replacement"}))
 
-	// Documents for deleted conversations are not written.
 	document := searchDocument(t, store, "conv", textEntry(0, "user", "after delete"))
 	require.NoError(t, store.Delete(t.Context(), "conv"))
 	stored, err = store.ReplaceSearchIndex(t.Context(), document)

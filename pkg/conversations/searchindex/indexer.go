@@ -11,15 +11,10 @@ import (
 )
 
 const (
-	// DefaultRefreshBudget bounds how long a search waits for recently changed
-	// conversations to be indexed before querying.
 	DefaultRefreshBudget = 250 * time.Millisecond
-	// DefaultSweepInterval is how often the background loop indexes changes,
-	// including those saved by other processes.
 	DefaultSweepInterval = 30 * time.Second
 )
 
-// Store is the persistence maintained by the indexer.
 type Store interface {
 	PendingSearchIndex(ctx context.Context, version int) ([]convtypes.SearchIndexCandidate, error)
 	LoadSearchSource(ctx context.Context, id string) (convtypes.ConversationRecord, error)
@@ -27,10 +22,8 @@ type Store interface {
 	PruneSearchIndex(ctx context.Context) (int, error)
 }
 
-// Indexer keeps the conversation search index current. Changed conversations
-// are found by comparing saved and indexed update times, so the save path
-// needs no hooks: searches catch up on recent changes within a short budget,
-// and a background loop handles the initial backfill and periodic sweeps.
+// Indexer detects changes by comparing saved and indexed update times,
+// without save-path hooks.
 type Indexer struct {
 	store         Store
 	refreshBudget time.Duration
@@ -40,25 +33,20 @@ type Indexer struct {
 	// never extract or write the same conversation concurrently. It is a
 	// channel so waits can give up at a deadline or on cancellation.
 	lock chan struct{}
-	// indexed records the source update time this process last indexed per
-	// conversation, letting overlapping passes skip work already done.
+	// Source update times let overlapping passes skip work already done.
 	indexed map[string]time.Time
 }
 
-// Option configures an Indexer.
 type Option func(*Indexer)
 
-// WithRefreshBudget overrides DefaultRefreshBudget.
 func WithRefreshBudget(budget time.Duration) Option {
 	return func(indexer *Indexer) { indexer.refreshBudget = budget }
 }
 
-// WithSweepInterval overrides DefaultSweepInterval.
 func WithSweepInterval(interval time.Duration) Option {
 	return func(indexer *Indexer) { indexer.sweepInterval = interval }
 }
 
-// New creates an indexer for store.
 func New(store Store, options ...Option) *Indexer {
 	indexer := &Indexer{
 		store:         store,
@@ -73,18 +61,14 @@ func New(store Store, options ...Option) *Indexer {
 	return indexer
 }
 
-// Refresh indexes changed conversations, most recently updated first, until
-// they are all indexed or the refresh budget is spent. Waiting for the
-// background loop counts against the budget, but a conversation that has
-// started indexing is finished. It returns how many conversations still
-// await indexing.
+// Refresh returns the pending count after a budgeted pass, newest first.
+// Waiting for background indexing consumes the budget; once started, a
+// conversation finishes even if the budget expires.
 func (i *Indexer) Refresh(ctx context.Context) (int, error) {
 	result, err := i.sync(ctx, time.Now().Add(i.refreshBudget))
 	return result.pending, err
 }
 
-// Run backfills the index, then sweeps for changes every sweep interval until
-// ctx is cancelled.
 func (i *Indexer) Run(ctx context.Context) {
 	ticker := time.NewTicker(i.sweepInterval)
 	defer ticker.Stop()
@@ -160,8 +144,6 @@ func (i *Indexer) sync(ctx context.Context, deadline time.Time) (syncResult, err
 	return result, nil
 }
 
-// acquire takes the indexing lock, giving up when ctx is cancelled or the
-// deadline passes. A zero deadline waits for the lock without a time limit.
 func (i *Indexer) acquire(ctx context.Context, deadline time.Time) bool {
 	var expired <-chan time.Time
 	if !deadline.IsZero() {
@@ -197,7 +179,6 @@ func (i *Indexer) index(ctx context.Context, candidate convtypes.SearchIndexCand
 	}
 	record, err := i.store.LoadSearchSource(ctx, candidate.ID)
 	if errors.Is(err, convtypes.ErrConversationNotFound) {
-		// Deleted since listing; Store.Delete already removed its entries.
 		delete(i.indexed, candidate.ID)
 		return true, false, nil
 	}

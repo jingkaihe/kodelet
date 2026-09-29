@@ -2483,8 +2483,6 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Serve accepts an already-bound listener so service hosts can report its actual
 // address (including port zero) before starting optional embedded execution.
-// It is the only serving entry point, so it also starts the background search
-// indexer, whether or not the embedded runner is enabled.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	s.server = &http.Server{Addr: listener.Addr().String(), Handler: s.router}
 	s.startSearchIndexer()

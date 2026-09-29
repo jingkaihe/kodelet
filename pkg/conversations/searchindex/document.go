@@ -20,9 +20,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
-// Version identifies the rules that turn transcripts into search entries.
-// Increment it whenever those rules change; the indexer then rebuilds every
-// conversation in the background.
+// Increment Version when extraction rules change to rebuild the index.
 const Version = 1
 
 const (
@@ -30,11 +28,8 @@ const (
 	maxToolInputPayloadBytes = 4 * 1024
 )
 
-// BuildDocument projects a conversation into search entries: a title entry
-// with the name, summary, working directory, and ID; user and assistant text;
-// tool call inputs; and compaction summaries. Thinking and tool results are
-// left out as noise. When the transcript cannot be parsed, the document still
-// holds the title entry and the parse error is returned alongside it.
+// BuildDocument excludes thinking and tool results. If transcript parsing fails,
+// it returns a title-only document alongside the error.
 func BuildDocument(record convtypes.ConversationRecord) (convtypes.SearchDocument, error) {
 	document := convtypes.SearchDocument{
 		ConversationID:  record.ID,
@@ -98,8 +93,6 @@ func searchEntry(index int, message conversations.StreamableMessage) (convtypes.
 	return entry, entry.Payload != ""
 }
 
-// flattenToolInput turns JSON tool arguments into "key: value" lines, so the
-// indexed text and snippets are free of JSON quoting and escapes.
 func flattenToolInput(input string) string {
 	input = strings.TrimSpace(input)
 	decoder := json.NewDecoder(strings.NewReader(input))

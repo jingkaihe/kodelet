@@ -2,7 +2,6 @@ package conversations
 
 import "time"
 
-// Search entry kinds identify which part of a conversation a search entry projects.
 const (
 	SearchEntryKindTitle      = "title"
 	SearchEntryKindText       = "text"
@@ -10,10 +9,8 @@ const (
 	SearchEntryKindCompaction = "compaction"
 )
 
-// MaxSearchMatches caps the highlighted matches returned per conversation.
 const MaxSearchMatches = 10
 
-// SearchEntry is the searchable projection of one transcript entry.
 type SearchEntry struct {
 	// EntryIndex is the entry's position in the full display transcript; the title uses -1.
 	EntryIndex int
@@ -39,8 +36,7 @@ type SearchIndexCandidate struct {
 	UpdatedAt time.Time `db:"updated_at"`
 }
 
-// SearchMatch is a highlighted transcript excerpt that matched a search.
-// Matched terms in Snippet are wrapped in "**".
+// SearchMatch snippets wrap matched terms in "**".
 type SearchMatch struct {
 	EntryIndex int    `json:"entryIndex"`
 	Role       string `json:"role,omitempty"`
@@ -48,7 +44,6 @@ type SearchMatch struct {
 	Snippet    string `json:"snippet"`
 }
 
-// ConversationSearchResult summarizes how a conversation matched a search.
 type ConversationSearchResult struct {
 	MatchCount int           `json:"matchCount"`
 	Matches    []SearchMatch `json:"matches,omitempty"`

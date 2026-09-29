@@ -137,19 +137,18 @@ func ConversationForkInitiatorFromMetadata(metadata map[string]any) (Conversatio
 
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
-	StartDate *time.Time // Filter by start date
-	EndDate   *time.Time // Filter by end date
-	// SearchTerm is a full-text query over conversation titles, IDs, working
-	// directories, user and assistant messages, tool inputs, and compaction
-	// summaries. Bare words match as prefixes, double-quoted text as an exact
-	// phrase, and every term must appear in the same entry.
+	StartDate *time.Time
+	EndDate   *time.Time
+	// SearchTerm covers titles, IDs, CWDs, messages, tool inputs, and compaction
+	// summaries. Bare words match prefixes; quoted text is exact. All terms
+	// must match one entry.
 	SearchTerm    string
-	SearchMatches int    // Highlighted matches to return per conversation when searching
-	Provider      string // Filter by LLM provider (e.g., "anthropic", "openai")
+	SearchMatches int // Highlighted matches to return per conversation when searching
+	Provider      string
 	CWD           string // Filter by canonical working directory
 	RunnerID      string // Filter by durable runner affinity
-	Limit         int    // Maximum number of results
-	Offset        int    // Offset for pagination
+	Limit         int
+	Offset        int
 	SortBy        string // Field to sort by; "relevance" requires a search term
 	SortOrder     string // "asc" or "desc"
 }
@@ -171,20 +170,19 @@ type ConversationRecord struct {
 
 // ConversationSummary provides a brief overview of a conversation
 type ConversationSummary struct {
-	ID                   string         `json:"id"`
-	ParentConversationID string         `json:"parentConversationId,omitempty"`
-	CWD                  string         `json:"cwd,omitempty"`
-	MessageCount         int            `json:"messageCount"`
-	FirstMessage         string         `json:"firstMessage"`
-	Summary              string         `json:"summary,omitempty"`
-	Provider             string         `json:"provider"`
-	Metadata             map[string]any `json:"metadata,omitempty"`
-	Usage                llmtypes.Usage `json:"usage"`
-	CreatedAt            time.Time      `json:"createdAt"`
-	UpdatedAt            time.Time      `json:"updatedAt"`
-	IsRunning            bool           `json:"isRunning,omitempty"`
-	// Search describes how the conversation matched a full-text search.
-	Search *ConversationSearchResult `json:"search,omitempty"`
+	ID                   string                    `json:"id"`
+	ParentConversationID string                    `json:"parentConversationId,omitempty"`
+	CWD                  string                    `json:"cwd,omitempty"`
+	MessageCount         int                       `json:"messageCount"`
+	FirstMessage         string                    `json:"firstMessage"`
+	Summary              string                    `json:"summary,omitempty"`
+	Provider             string                    `json:"provider"`
+	Metadata             map[string]any            `json:"metadata,omitempty"`
+	Usage                llmtypes.Usage            `json:"usage"`
+	CreatedAt            time.Time                 `json:"createdAt"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+	IsRunning            bool                      `json:"isRunning,omitempty"`
+	Search               *ConversationSearchResult `json:"search,omitempty"`
 }
 
 // QueryResult represents the result of a query operation

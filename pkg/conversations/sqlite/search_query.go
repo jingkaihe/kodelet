@@ -10,11 +10,8 @@ type searchTerm struct {
 	phrase bool
 }
 
-// searchMatchExpression converts user search text into a safe FTS5 MATCH
-// expression. Bare words become prefix terms, double-quoted text becomes an
-// exact phrase, and all terms are combined with AND, so they must appear in
-// the same entry. Every term is quoted, so user input never reaches FTS5 as
-// query syntax. It returns "" when the text has no searchable characters.
+// Quote every term to prevent user input from becoming FTS5 query syntax.
+// Bare words use prefixes; quoted phrases are exact; AND keeps terms in one entry.
 func searchMatchExpression(input string) string {
 	var parts []string
 	for _, term := range parseSearchTerms(input) {
@@ -30,7 +27,6 @@ func searchMatchExpression(input string) string {
 	return strings.Join(parts, " AND ")
 }
 
-// parseSearchTerms splits text into bare words and double-quoted phrases.
 // Unbalanced quotes fall back to whitespace-separated bare words.
 func parseSearchTerms(input string) []searchTerm {
 	var terms []searchTerm

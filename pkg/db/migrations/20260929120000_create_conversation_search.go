@@ -7,9 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Migration20260929120000CreateConversationSearch creates the rebuildable
-// full-text projection of saved conversations. The migration only creates the
-// schema; the daemon fills the index because entry extraction needs Go parsers.
+// The daemon backfills this schema because entry extraction needs Go parsers.
 func Migration20260929120000CreateConversationSearch() db.Migration {
 	return db.Migration{
 		Version:     20260929120000,

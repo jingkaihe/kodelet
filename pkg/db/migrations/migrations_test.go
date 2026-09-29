@@ -453,7 +453,6 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
 
-	// Search rollback drops only the rebuildable projection.
 	require.NoError(t, runner.Rollback(ctx, All()))
 	assertTableMissing(t, database.DB, "conversation_search")
 	assertTableMissing(t, database.DB, "conversation_search_entries")
@@ -629,7 +628,6 @@ func migrationsBefore(t *testing.T, migrations []db.Migration, version int64) []
 	return nil
 }
 
-// migrationsThrough returns the prefix ending with version.
 func migrationsThrough(t *testing.T, migrations []db.Migration, version int64) []db.Migration {
 	t.Helper()
 

@@ -148,7 +148,6 @@ func TestIndexerRefreshIndexesChangedConversations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, candidates, "unreadable transcripts are not retried until they change")
 
-	// Later saves are picked up by the next refresh.
 	record, err := store.Load(t.Context(), "first")
 	require.NoError(t, err)
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Replace with a haiku"}]}]`)
@@ -207,7 +206,6 @@ func TestIndexerRefreshStopsWaitingForBackgroundIndexing(t *testing.T) {
 		t.Fatal("cancelled sync kept waiting for the lock")
 	}
 
-	// Once released, the lock works normally and nothing still holds it.
 	<-indexer.lock
 	pending, err = indexer.Refresh(t.Context())
 	require.NoError(t, err)
@@ -282,7 +280,6 @@ func TestIndexerRunBackfillsAndSweeps(t *testing.T) {
 	saveTranscript(t, store, "later", `[{"role": "user", "content": [{"type": "text", "text": "Sweep me"}]}]`)
 	require.Eventually(t, func() bool { return len(searchIDs(t, store, "sweep")) == 1 }, 5*time.Second, 10*time.Millisecond)
 
-	// Deleted conversations leave search immediately.
 	require.NoError(t, store.Delete(t.Context(), "later"))
 	assert.Empty(t, searchIDs(t, store, "sweep"))
 

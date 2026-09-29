@@ -96,7 +96,6 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	assert.Equal(t, record.ID, list.Conversations[0].ID)
 	assert.Equal(t, record.Usage.TotalCost(), list.Conversations[0].TotalCost)
 
-	// Search indexes saved history on demand and shows highlighted matches.
 	output, stderr, err = run("search", "--json", "--cwd="+record.CWD, "history-only")
 	require.NoError(t, err, "%s", stderr)
 	var search ConversationSearchOutput

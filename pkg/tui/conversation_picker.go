@@ -40,15 +40,11 @@ type conversationPickerState struct {
 	err         error
 	requestID   int
 
-	// search holds daemon full-text results. They replace the local filter
-	// over loaded conversations once they arrive for the current query.
 	search          *conversationPickerSearch
 	searchRequestID int
 	searching       bool
 	searchErr       error
-	// searchRetries counts repeat searches while conversations are still
-	// being indexed, so an unchanged query eventually sees complete results.
-	searchRetries int
+	searchRetries   int
 }
 
 type conversationPickerSearch struct {
@@ -93,7 +89,6 @@ func loadConversationListFromSource(ctx context.Context, requestID int, source c
 	}
 }
 
-// conversationSearchDueMsg fires once typing pauses for the search delay.
 type conversationSearchDueMsg struct {
 	requestID int
 }
@@ -111,8 +106,6 @@ func (m model) conversationSearcher() chat.ConversationSearcher {
 	return searcher
 }
 
-// scheduleConversationSearch debounces a daemon search for the current query.
-// Until results arrive, the picker filters the loaded conversations locally.
 func (m *model) scheduleConversationSearch() tea.Cmd {
 	picker := m.conversationPicker
 	if picker == nil {
@@ -156,10 +149,6 @@ func (m *model) startConversationSearch(msg conversationSearchDueMsg) tea.Cmd {
 	}
 }
 
-// applyConversationSearch shows results for the latest query only. The current
-// selection is kept when it still matches; otherwise the first match is selected.
-// While conversations are still being indexed, it searches the same query again
-// shortly, a bounded number of times.
 func (m *model) applyConversationSearch(msg conversationSearchMsg) tea.Cmd {
 	picker := m.conversationPicker
 	if picker == nil || msg.requestID != picker.searchRequestID {
@@ -764,7 +753,6 @@ func (m model) renderConversationPicker() string {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible(err.Error(), contentWidth)))
 		}
 	}
-	// The selected search result's best match explains why it was found.
 	match := ""
 	if len(items) > 0 {
 		if snippet := strings.Join(strings.Fields(items[selected].match), " "); snippet != "" {

@@ -318,9 +318,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination.
-// A search term filters through the full-text index; conversations the
-// indexer has not reached yet are not matched, and a term without searchable
-// characters matches nothing.
+// Search sees only indexed conversations; non-searchable terms match nothing.
 func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	searchMatch := searchMatchExpression(options.SearchTerm)
 	searching := searchMatch != ""
@@ -339,7 +337,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		}, nil
 	}
 
-	// Build WHERE conditions
 	conditions := []string{}
 	args := map[string]any{}
 
@@ -381,7 +378,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		sortOrder = "ASC"
 	}
 
-	// Build ORDER BY clause
 	orderBy := "updated_at " + sortOrder
 	ranked := false
 	switch options.SortBy {
@@ -401,8 +397,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		ranked = true
 	}
 
-	// Searches join the matching conversations and their match counts, and
-	// count all matches with a window function so the full-text match runs once.
 	with := ""
 	from := "conversation_summaries"
 	searchColumns := "0 AS search_match_count, 0 AS search_total"
@@ -416,12 +410,10 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Build main query
 	baseQuery := with + `SELECT id, cwd, message_count, first_message, summary, provider,
 		metadata, usage, created_at, updated_at, ` + searchColumns + `
 		FROM ` + from + where + " ORDER BY " + orderBy
 
-	// Add pagination
 	if options.Limit > 0 {
 		baseQuery += " LIMIT :limit"
 		args["limit"] = options.Limit
@@ -440,7 +432,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 	defer tx.Rollback()
 
-	// Execute main query
 	var dbSummaries []dbSearchConversationSummary
 	finalQuery, argsSlice, err := sqlx.Named(baseQuery, args)
 	if err != nil {
@@ -453,7 +444,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to execute query")
 	}
 
-	// Convert to domain models
 	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
 	ids := make([]string, len(dbSummaries))
 	for i, dbSummary := range dbSummaries {
@@ -473,8 +463,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		}
 	}
 
-	// Get total count (without pagination). Search pages carry the total from
-	// their window count; only a search page past the last match needs a query.
+	// Search pages carry their total; only a page past the last match needs a count query.
 	total := 0
 	if searching && len(dbSummaries) > 0 {
 		total = dbSummaries[0].SearchTotal
@@ -508,7 +497,6 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}, nil
 }
 
-// listCWDs returns all distinct persisted working directories.
 func listCWDs(ctx context.Context, queryer sqlx.QueryerContext) ([]string, error) {
 	var cwds []string
 	err := sqlx.SelectContext(ctx, queryer, &cwds, `

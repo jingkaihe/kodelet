@@ -37,7 +37,6 @@ type ConversationServiceInterface interface {
 	Close() error
 }
 
-// SearchIndex keeps the full-text search index current before searches run.
 type SearchIndex interface {
 	// Refresh indexes recently changed conversations within a short budget and
 	// returns how many conversations still await indexing.

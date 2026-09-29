@@ -318,7 +318,6 @@ func TestConversationService_ListConversationsRefreshesSearchIndex(t *testing.T)
 	assert.True(t, refreshedBeforeQuery)
 	assert.Equal(t, 7, response.SearchPending)
 
-	// A failed refresh still searches the existing index.
 	index.err = assert.AnError
 	index.pending = 2
 	response, err = service.ListConversations(t.Context(), &ListConversationsRequest{SearchTerm: "needle"})
