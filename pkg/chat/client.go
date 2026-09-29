@@ -476,6 +476,9 @@ func (r *Client) QueryConversations(ctx context.Context, options conversations.L
 	if r != nil && r.runnerID != "" {
 		query.Set("runnerId", r.runnerID)
 	}
+	if options.SearchMatches > 0 {
+		query.Set("matches", strconv.Itoa(options.SearchMatches))
+	}
 	if options.StartDate != nil {
 		query.Set("startDate", options.StartDate.Format(time.RFC3339Nano))
 	}

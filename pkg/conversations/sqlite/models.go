@@ -71,6 +71,13 @@ type dbConversationSummary struct {
 	UpdatedAt    time.Time                 `db:"updated_at"`
 }
 
+// dbSearchConversationSummary adds search match counts to a summary row.
+type dbSearchConversationSummary struct {
+	dbConversationSummary
+	SearchMatchCount int `db:"search_match_count"`
+	SearchTotal      int `db:"search_total"`
+}
+
 // ToConversationRecord converts database record to domain model
 func (dbr *dbConversationRecord) ToConversationRecord() conversations.ConversationRecord {
 	record := conversations.ConversationRecord{

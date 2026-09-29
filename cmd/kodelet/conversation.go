@@ -45,6 +45,17 @@ func NewConversationListConfig() *ConversationListConfig {
 	}
 }
 
+type ConversationSearchConfig struct {
+	ConversationListConfig
+	Matches int
+}
+
+func NewConversationSearchConfig() *ConversationSearchConfig {
+	config := &ConversationSearchConfig{ConversationListConfig: *NewConversationListConfig(), Matches: 3}
+	config.SortBy = "relevance"
+	return config
+}
+
 type ConversationDeleteConfig struct {
 	NoConfirm bool
 }
@@ -121,6 +132,21 @@ var conversationListCmd = &cobra.Command{
 	RunE:  runRemoteConversationCommand,
 }
 
+var conversationSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search saved conversations",
+	Long: `Search saved conversations and show highlighted matches, most relevant first.
+
+Search covers conversation titles, IDs, and working directories; user and assistant messages; tool call inputs; and compaction summaries. Thinking and tool output are not searched.
+
+Bare words match as prefixes and "quoted text" matches an exact phrase. All terms must appear in the same message.`,
+	Example: `  kodelet conversation search compaction history
+  kodelet conversation search '"search index" sqlite' --cwd /srv/project
+  kodelet conversation search fts5 --json --matches 5`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runRemoteConversationCommand,
+}
+
 var conversationDeleteCmd = &cobra.Command{
 	Use:   "delete [conversationID]",
 	Short: "Delete a specific conversation",
@@ -168,13 +194,24 @@ func init() {
 	listDefaults := NewConversationListConfig()
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
-	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
+	conversationListCmd.Flags().String("search", listDefaults.Search, "Only list conversations matching this full-text search (see 'conversation search')")
 	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic, openai)")
 	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
 	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
-	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, or messages")
+	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, messages, or relevance (with --search)")
 	conversationListCmd.Flags().String("sort-order", listDefaults.SortOrder, "Sort order: asc (ascending) or desc (descending)")
 	conversationListCmd.Flags().Bool("json", listDefaults.JSONOutput, "Output in JSON format")
+
+	searchDefaults := NewConversationSearchConfig()
+	conversationSearchCmd.Flags().String("start", searchDefaults.StartDate, "Only search conversations created on or after this date (format: YYYY-MM-DD)")
+	conversationSearchCmd.Flags().String("end", searchDefaults.EndDate, "Only search conversations created on or before this date (format: YYYY-MM-DD)")
+	conversationSearchCmd.Flags().String("provider", searchDefaults.Provider, "Only search conversations from this LLM provider (anthropic, openai)")
+	conversationSearchCmd.Flags().Int("limit", searchDefaults.Limit, "Maximum number of conversations to display")
+	conversationSearchCmd.Flags().Int("offset", searchDefaults.Offset, "Offset for pagination")
+	conversationSearchCmd.Flags().Int("matches", searchDefaults.Matches, fmt.Sprintf("Highlighted matches to show per conversation (0-%d)", convtypes.MaxSearchMatches))
+	conversationSearchCmd.Flags().String("sort-by", searchDefaults.SortBy, "Field to sort by: relevance, updated_at, created_at, or messages")
+	conversationSearchCmd.Flags().String("sort-order", searchDefaults.SortOrder, "Sort order: desc (most relevant or newest first) or asc")
+	conversationSearchCmd.Flags().Bool("json", searchDefaults.JSONOutput, "Output in JSON format")
 
 	deleteDefaults := NewConversationDeleteConfig()
 	conversationDeleteCmd.Flags().Bool("no-confirm", deleteDefaults.NoConfirm, "Skip confirmation prompt")
@@ -197,6 +234,7 @@ func init() {
 	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
 
 	conversationCmd.AddCommand(conversationListCmd)
+	conversationCmd.AddCommand(conversationSearchCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
 	conversationCmd.AddCommand(conversationImportCmd)

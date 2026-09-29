@@ -113,64 +113,6 @@ func (s *Server) embeddedRunnerError(err error) {
 	}
 }
 
-// Serve accepts an already-bound listener so service hosts can report its actual
-// address (including port zero) before starting optional embedded execution.
-func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
-	s.server = &http.Server{Addr: listener.Addr().String(), Handler: s.router}
-	serveDone := make(chan error, 1)
-	go func() { serveDone <- s.server.Serve(listener) }()
-	runnerCtx, stopRunner := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopRunner()
-	runnerDone := make(chan struct{})
-	go func() {
-		defer close(runnerDone)
-		if s.config.EmbeddedRunner == nil {
-			return
-		}
-		endpoint, err := embeddedLoopbackEndpoint(listener.Addr())
-		if err != nil {
-			s.embeddedRunnerError(err)
-			return
-		}
-		runner, err := s.newEmbeddedRunner(runnerCtx, endpoint)
-		if err != nil {
-			s.embeddedRunnerError(err)
-			return
-		}
-		if err := runner.Run(runnerCtx); err != nil {
-			s.embeddedRunnerError(err)
-		}
-	}()
-
-	var serveErr error
-	select {
-	case <-ctx.Done():
-	case serveErr = <-serveDone:
-	}
-	// Stop admission and cancel/drain agent work while runner transport is usable.
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
-	drainErr := s.drainExecutions(drainCtx)
-	cancelDrain()
-	stopRunner()
-	var runnerErr error
-	select {
-	case <-runnerDone:
-	case <-time.After(s.httpShutdownTimeout()):
-		runnerErr = errors.New("the built-in runner did not stop before the shutdown timeout")
-	}
-	shutdownErr := s.shutdownHTTPServer()
-	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-		return errors.Wrap(serveErr, "the server stopped accepting connections")
-	}
-	if drainErr != nil {
-		return drainErr
-	}
-	if runnerErr != nil {
-		return runnerErr
-	}
-	return shutdownErr
-}
-
 func (s *Server) drainExecutions(ctx context.Context) error {
 	s.activeChatsMu.Lock()
 	s.stopping = true

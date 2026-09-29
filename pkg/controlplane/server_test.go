@@ -1016,8 +1016,8 @@ func TestServer_handleListConversations(t *testing.T) {
 
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
-			assert.Equal(t, "~/workspace/kodelet", request.SearchTerm)
-			assert.Empty(t, request.SearchCWDTerm, "never expand a runner path against daemon HOME")
+			assert.Equal(t, "~/workspace/kodelet", request.SearchTerm, "never expand a runner path against daemon HOME")
+			assert.Zero(t, request.SearchMatches)
 			assert.Equal(t, "~/workspace/kodelet", request.CWD)
 			assert.Equal(t, "runner-1", request.RunnerID)
 			return &conversations.ListConversationsResponse{
@@ -1142,7 +1142,6 @@ func TestDaemonHistoryFiltersValidateAndPreserveRunnerPaths(t *testing.T) {
 		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			calls++
 			assert.Equal(t, "~/runner-only", request.CWD)
-			assert.Empty(t, request.SearchCWDTerm)
 			assert.Equal(t, "anthropic", request.Provider)
 			assert.Equal(t, "messageCount", request.SortBy)
 			assert.Equal(t, "asc", request.SortOrder)
@@ -1162,7 +1161,7 @@ func TestDaemonHistoryFiltersValidateAndPreserveRunnerPaths(t *testing.T) {
 	assert.Contains(t, response.Body.String(), `"cwd":"/runner/project"`)
 	assert.Equal(t, 1, calls)
 
-	for _, query := range []string{"limit=no", "limit=-1", "offset=-1", "offset=bad", "sortBy=unknown", "sortOrder=other", "startDate=bad", "endDate=bad", "startDate=2026-09-06&endDate=2026-09-05"} {
+	for _, query := range []string{"limit=no", "limit=-1", "offset=-1", "offset=bad", "matches=-1", "matches=11", "sortBy=unknown", "sortBy=relevance", "sortOrder=other", "startDate=bad", "endDate=bad", "startDate=2026-09-06&endDate=2026-09-05"} {
 		t.Run(query, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			server.handleListConversations(response, httptest.NewRequest(http.MethodGet, "/api/conversations?"+query, nil))
@@ -1170,6 +1169,39 @@ func TestDaemonHistoryFiltersValidateAndPreserveRunnerPaths(t *testing.T) {
 			assert.Equal(t, 1, calls, "invalid filters must not silently query different history")
 		})
 	}
+}
+
+func TestDaemonConversationSearchPassesRelevanceAndMatches(t *testing.T) {
+	server := &Server{conversationService: &mockConversationService{
+		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
+			assert.Equal(t, `"exact phrase" word`, request.SearchTerm)
+			assert.Equal(t, "relevance", request.SortBy)
+			assert.Equal(t, 3, request.SearchMatches)
+			return &conversations.ListConversationsResponse{
+				Conversations: []convtypes.ConversationSummary{{
+					ID:       "match",
+					Provider: "anthropic",
+					Search: &convtypes.ConversationSearchResult{MatchCount: 2, Matches: []convtypes.SearchMatch{{
+						EntryIndex: 4, Role: "user", Kind: convtypes.SearchEntryKindText, Snippet: "an **exact phrase**",
+					}}},
+				}},
+				Total:         1,
+				SearchPending: 5,
+			}, nil
+		},
+	}}
+	response := httptest.NewRecorder()
+	query := url.Values{"search": {`"exact phrase" word`}, "sortBy": {"relevance"}, "matches": {"3"}}
+	server.handleListConversations(response, httptest.NewRequest(http.MethodGet, "/api/conversations?"+query.Encode(), nil))
+	require.Equal(t, http.StatusOK, response.Code)
+
+	var body conversations.ListConversationsResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	assert.Equal(t, 5, body.SearchPending)
+	require.Len(t, body.Conversations, 1)
+	require.NotNil(t, body.Conversations[0].Search)
+	assert.Equal(t, 2, body.Conversations[0].Search.MatchCount)
+	assert.Equal(t, "an **exact phrase**", body.Conversations[0].Search.Matches[0].Snippet)
 }
 
 func TestDaemonRawConversationRetainsExportFields(t *testing.T) {

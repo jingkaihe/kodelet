@@ -329,7 +329,7 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
               Search conversations
             </h2>
             <p className="conversation-search-copy">
-              Find a conversation by title, first message, ID, or workspace.
+              Find a conversation by title, message, tool input, ID, or workspace.
             </p>
           </div>
           <button

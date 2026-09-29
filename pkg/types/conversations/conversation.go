@@ -137,17 +137,21 @@ func ConversationForkInitiatorFromMetadata(metadata map[string]any) (Conversatio
 
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
-	StartDate     *time.Time // Filter by start date
-	EndDate       *time.Time // Filter by end date
-	SearchTerm    string     // Text to search for in IDs, working directories, first messages, or summaries
-	SearchCWDTerm string     // Optional normalized override for working-directory matching
-	Provider      string     // Filter by LLM provider (e.g., "anthropic", "openai")
-	CWD           string     // Filter by canonical working directory
-	RunnerID      string     // Filter by durable runner affinity
-	Limit         int        // Maximum number of results
-	Offset        int        // Offset for pagination
-	SortBy        string     // Field to sort by
-	SortOrder     string     // "asc" or "desc"
+	StartDate *time.Time // Filter by start date
+	EndDate   *time.Time // Filter by end date
+	// SearchTerm is a full-text query over conversation titles, IDs, working
+	// directories, user and assistant messages, tool inputs, and compaction
+	// summaries. Bare words match as prefixes, double-quoted text as an exact
+	// phrase, and every term must appear in the same entry.
+	SearchTerm    string
+	SearchMatches int    // Highlighted matches to return per conversation when searching
+	Provider      string // Filter by LLM provider (e.g., "anthropic", "openai")
+	CWD           string // Filter by canonical working directory
+	RunnerID      string // Filter by durable runner affinity
+	Limit         int    // Maximum number of results
+	Offset        int    // Offset for pagination
+	SortBy        string // Field to sort by; "relevance" requires a search term
+	SortOrder     string // "asc" or "desc"
 }
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
@@ -179,6 +183,8 @@ type ConversationSummary struct {
 	CreatedAt            time.Time      `json:"createdAt"`
 	UpdatedAt            time.Time      `json:"updatedAt"`
 	IsRunning            bool           `json:"isRunning,omitempty"`
+	// Search describes how the conversation matched a full-text search.
+	Search *ConversationSearchResult `json:"search,omitempty"`
 }
 
 // QueryResult represents the result of a query operation

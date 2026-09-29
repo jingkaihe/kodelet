@@ -267,20 +267,63 @@ func TestConversationService_ListConversationsPassesFilters(t *testing.T) {
 
 	response, err := service.ListConversations(t.Context(), &ListConversationsRequest{
 		SearchTerm:    "needle",
-		SearchCWDTerm: "/home/test/workspace/kodelet",
+		SearchMatches: 3,
 		CWD:           "/workspace/kodelet",
 		RunnerID:      "runner-1",
 		Provider:      "anthropic",
 		Limit:         1,
+		SortBy:        "relevance",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "needle", received.SearchTerm)
-	assert.Equal(t, "/home/test/workspace/kodelet", received.SearchCWDTerm)
+	assert.Equal(t, 3, received.SearchMatches)
+	assert.Equal(t, "relevance", received.SortBy)
 	assert.Equal(t, "/workspace/kodelet", received.CWD)
 	assert.Equal(t, "runner-1", received.RunnerID)
 	assert.Equal(t, "anthropic", received.Provider)
 	assert.Equal(t, 1, received.Limit)
 	assert.Equal(t, []string{"/workspace/kodelet", "/workspace/other"}, response.CWDs)
+}
+
+type fakeSearchIndex struct {
+	pending int
+	err     error
+	calls   int
+}
+
+func (f *fakeSearchIndex) Refresh(context.Context) (int, error) {
+	f.calls++
+	return f.pending, f.err
+}
+
+func TestConversationService_ListConversationsRefreshesSearchIndex(t *testing.T) {
+	mockStore := newMockConversationStore()
+	refreshedBeforeQuery := false
+	index := &fakeSearchIndex{pending: 7}
+	mockStore.queryFunc = func(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+		refreshedBeforeQuery = index.calls > 0
+		return conversations.QueryResult{QueryOptions: options}, nil
+	}
+	service := NewConversationService(mockStore)
+	service.SetSearchIndex(index)
+
+	response, err := service.ListConversations(t.Context(), &ListConversationsRequest{})
+	require.NoError(t, err)
+	assert.Zero(t, index.calls, "plain listings do not touch the index")
+	assert.Zero(t, response.SearchPending)
+
+	response, err = service.ListConversations(t.Context(), &ListConversationsRequest{SearchTerm: " needle "})
+	require.NoError(t, err)
+	assert.Equal(t, 1, index.calls)
+	assert.True(t, refreshedBeforeQuery)
+	assert.Equal(t, 7, response.SearchPending)
+
+	// A failed refresh still searches the existing index.
+	index.err = assert.AnError
+	index.pending = 2
+	response, err = service.ListConversations(t.Context(), &ListConversationsRequest{SearchTerm: "needle"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, response.SearchPending)
 }
 
 func TestConversationService_ListConversationsHasMoreUsesTotal(t *testing.T) {

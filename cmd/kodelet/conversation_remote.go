@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +21,7 @@ func addRemoteConversationCommands(parent *cobra.Command) {
 	parent.PersistentFlags().String("server", defaultRunnerServer, "Server URL (or KODELET_SERVER)")
 	parent.PersistentFlags().String("auth-token", "", "API authentication token (or KODELET_AUTH_TOKEN)")
 	for _, cmd := range parent.Commands() {
-		if cmd.Name() == "list" || cmd.Name() == "fork" {
+		if cmd.Name() == "list" || cmd.Name() == "search" || cmd.Name() == "fork" {
 			cmd.Flags().String("runner", "", "Filter conversations by exact runner ID (the runner can be offline)")
 			cmd.Flags().String("cwd", "", "Filter conversations by their saved absolute directory on the runner")
 		}
@@ -35,9 +36,21 @@ func runRemoteConversationCommand(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("'kodelet conversation %s' is no longer supported; use 'kodelet conversation export' to save a copy, or 'kodelet conversation move <conversation-id> <runner-id>[:<cwd>]' to assign a runner", cmd.Name())
 	}
 	var query conversations.ListConversationsRequest
-	if cmd.Name() == "list" {
+	if cmd.Name() == "list" || cmd.Name() == "search" {
 		config := getConversationListConfigFromFlags(cmd)
+		if cmd.Name() == "search" {
+			config.Search = strings.TrimSpace(strings.Join(args, " "))
+			if config.Search == "" {
+				return errors.New("search query must not be empty")
+			}
+		}
 		query = conversations.ListConversationsRequest{SearchTerm: config.Search, Provider: config.Provider, Limit: config.Limit, Offset: config.Offset, SortBy: config.SortBy, SortOrder: config.SortOrder}
+		if cmd.Name() == "search" {
+			query.SearchMatches, _ = cmd.Flags().GetInt("matches")
+			if query.SearchMatches < 0 || query.SearchMatches > convtypes.MaxSearchMatches {
+				return errors.Errorf("--matches must be between 0 and %d", convtypes.MaxSearchMatches)
+			}
+		}
 		for name, value := range map[string]string{"start": config.StartDate, "end": config.EndDate} {
 			if value == "" {
 				continue
@@ -96,6 +109,16 @@ func executeRemoteConversation(ctx context.Context, cmd *cobra.Command, args []s
 			format = JSONFormat
 		}
 		return NewConversationListOutput(result.Conversations, metadata, format).Render(cmd.OutOrStdout())
+	case "search":
+		result, err := client.QueryConversations(ctx, query)
+		if err != nil {
+			return err
+		}
+		format := TableFormat
+		if getConversationListConfigFromFlags(cmd).JSONOutput {
+			format = JSONFormat
+		}
+		return NewConversationSearchOutput(result).Render(cmd.OutOrStdout(), format)
 	case "show", "export":
 		record, err := client.LoadConversationRecord(ctx, args[0])
 		if err != nil {

@@ -52,7 +52,7 @@ func TestStoreCompactionHistoryRoundTripAndFork(t *testing.T) {
 	assert.Equal(t, record.CompactionHistory, loaded.CompactionHistory)
 	assert.JSONEq(t, string(record.RawMessages), string(loaded.RawMessages))
 	assert.Contains(t, loaded.ToolResults, "archived-tool")
-	listed, err := store.Query(t.Context(), conversations.QueryOptions{SearchTerm: "original"})
+	listed, err := store.Query(t.Context(), conversations.QueryOptions{})
 	require.NoError(t, err)
 	require.Len(t, listed.ConversationSummaries, 1)
 	assert.Equal(t, "original", listed.ConversationSummaries[0].FirstMessage)
@@ -366,53 +366,10 @@ func TestStore_Query(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Test search by term
-	result, err := store.Query(ctx, conversations.QueryOptions{
-		SearchTerm: "search",
-	})
+	// Working directories are listed independently of filters and pagination.
+	result, err := store.Query(ctx, conversations.QueryOptions{Limit: 1})
 	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 	assert.Equal(t, []string{"/workspace/alpha", "/workspace/beta"}, result.CWDs)
-
-	// Test search by conversation ID and working directory
-	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "conv-3"})
-	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
-
-	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "beta"})
-	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
-
-	// Search visible compact paths against normalized stored CWDs without rewriting
-	// the raw term used for IDs, first messages, and summaries.
-	result, err = store.Query(ctx, conversations.QueryOptions{
-		SearchTerm:    "~/workspace/beta",
-		SearchCWDTerm: "/workspace/beta",
-	})
-	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
-
-	result, err = store.Query(ctx, conversations.QueryOptions{
-		SearchTerm:    "~/other/project",
-		SearchCWDTerm: "/home/test/other/project",
-	})
-	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
-
-	// LIKE wildcard characters are treated as literal user input.
-	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "%"})
-	require.NoError(t, err)
-	assert.Len(t, result.ConversationSummaries, 1)
-	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
-
-	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "_"})
-	require.NoError(t, err)
-	assert.Empty(t, result.ConversationSummaries)
 
 	// Test exact working directory filter
 	result, err = store.Query(ctx, conversations.QueryOptions{CWD: "/workspace/alpha"})

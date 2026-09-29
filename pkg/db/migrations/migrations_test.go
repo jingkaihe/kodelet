@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 18)
+	require.Len(t, migrations, 19)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -44,6 +44,7 @@ func TestAll(t *testing.T) {
 		20260910120000,
 		20260920120000,
 		20260924120000,
+		20260929120000,
 	}, versions)
 }
 
@@ -78,6 +79,10 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "user_login_authorizations")
 	assertTableExists(t, database.DB, "user_access_tokens")
 	assertTableExists(t, database.DB, "user_refresh_tokens")
+	assertTableExists(t, database.DB, "conversation_search")
+	assertTableExists(t, database.DB, "conversation_search_entries")
+	assertTableExists(t, database.DB, "conversation_search_state")
+	assertIndexExists(t, database.DB, "idx_conversation_search_entries_conversation")
 	assertColumnExists(t, database.DB, "user_login_authorizations", "refresh_token_sha256")
 	assertColumnExists(t, database.DB, "conversations", "background_processes")
 	assertColumnExists(t, database.DB, "conversations", "cwd")
@@ -140,6 +145,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260910120000,
 		20260920120000,
 		20260924120000,
+		20260929120000,
 	}, versions)
 }
 
@@ -430,6 +436,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"compaction history down", Migration20260920120000AddCompactionHistory().Down},
 		{"user refresh tokens up", Migration20260924120000CreateUserRefreshTokens().Up},
 		{"user refresh tokens down", Migration20260924120000CreateUserRefreshTokens().Down},
+		{"conversation search up", Migration20260929120000CreateConversationSearch().Up},
+		{"conversation search down", Migration20260929120000CreateConversationSearch().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -444,6 +452,13 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Search rollback drops only the rebuildable projection.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "conversation_search")
+	assertTableMissing(t, database.DB, "conversation_search_entries")
+	assertTableMissing(t, database.DB, "conversation_search_state")
+	assertTableExists(t, database.DB, "conversations")
 
 	// Refresh rollback leaves legacy families intact but removes the token tables.
 	require.NoError(t, runner.Rollback(ctx, All()))
@@ -536,7 +551,7 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	migrations := All()
-	require.NoError(t, runner.Run(t.Context(), migrations[:len(migrations)-1]))
+	require.NoError(t, runner.Run(t.Context(), migrationsBefore(t, migrations, 20260924120000)))
 	now := time.Now().UTC().Truncate(time.Second)
 	for index, state := range []string{"active", "expired", "revoked"} {
 		hash := make([]byte, 32)
@@ -555,7 +570,7 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 		`, state, hash, "issuer", "subject", now.Add(-time.Hour), expiry, revokedAt)
 		require.NoError(t, err)
 	}
-	require.NoError(t, runner.Run(t.Context(), migrations))
+	require.NoError(t, runner.Run(t.Context(), migrationsThrough(t, migrations, 20260924120000)))
 	var copied, unchangedRevocations, refreshTokens int
 	require.NoError(t, database.GetContext(t.Context(), &copied, `
 		SELECT COUNT(*) FROM user_access_tokens a JOIN user_api_credentials c ON c.id = a.credential_id
@@ -598,6 +613,27 @@ func TestUserRefreshTokenMigrationPreservesLegacyCredentials(t *testing.T) {
 	assert.Equal(t, 1, pending)
 	require.NoError(t, database.GetContext(t.Context(), &expired, `SELECT COUNT(*) FROM user_login_authorizations WHERE id = 'refresh-pending' AND status = 'expired'`))
 	assert.Equal(t, 1, expired)
+}
+
+// migrationsBefore returns the prefix applied before version, so upgrade tests
+// stay pinned to their migration when later migrations are added.
+func migrationsBefore(t *testing.T, migrations []db.Migration, version int64) []db.Migration {
+	t.Helper()
+
+	for index, migration := range migrations {
+		if migration.Version == version {
+			return migrations[:index]
+		}
+	}
+	require.FailNowf(t, "migration not found", "version %d", version)
+	return nil
+}
+
+// migrationsThrough returns the prefix ending with version.
+func migrationsThrough(t *testing.T, migrations []db.Migration, version int64) []db.Migration {
+	t.Helper()
+
+	return migrations[:len(migrationsBefore(t, migrations, version))+1]
 }
 
 func openMigrationsTestDB(t *testing.T) *sqlx.DB {

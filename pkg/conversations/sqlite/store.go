@@ -293,6 +293,10 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		return errors.Wrap(err, "failed to delete conversation runner affinity")
 	}
 
+	if err := deleteSearchIndex(ctx, tx, id); err != nil {
+		return err
+	}
+
 	// Delete from both conversation tables.
 	_, err = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id = ?", id)
 	if err != nil {
@@ -313,8 +317,28 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Query performs advanced queries with filtering, sorting, and pagination
+// Query performs advanced queries with filtering, sorting, and pagination.
+// A search term filters through the full-text index; conversations the
+// indexer has not reached yet are not matched, and a term without searchable
+// characters matches nothing.
 func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+	searchMatch := searchMatchExpression(options.SearchTerm)
+	searching := searchMatch != ""
+	if strings.TrimSpace(options.SearchTerm) == "" && options.SortBy == "relevance" {
+		return conversations.QueryResult{}, errors.New("relevance sorting requires a search term")
+	}
+	if !searching && strings.TrimSpace(options.SearchTerm) != "" {
+		cwds, err := s.listCWDs(ctx)
+		if err != nil {
+			return conversations.QueryResult{}, err
+		}
+		return conversations.QueryResult{
+			ConversationSummaries: []conversations.ConversationSummary{},
+			CWDs:                  cwds,
+			QueryOptions:          options,
+		}, nil
+	}
+
 	// Build WHERE conditions
 	conditions := []string{}
 	args := map[string]any{}
@@ -329,20 +353,8 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["end_date"] = *options.EndDate
 	}
 
-	searchTerm := strings.TrimSpace(options.SearchTerm)
-	searchCWDTerm := strings.TrimSpace(options.SearchCWDTerm)
-	if searchTerm != "" || searchCWDTerm != "" {
-		if searchTerm == "" {
-			searchTerm = searchCWDTerm
-		}
-		if searchCWDTerm == "" {
-			searchCWDTerm = searchTerm
-		}
-		searchPattern := "%" + escapeLikePattern(strings.ToLower(searchTerm)) + "%"
-		searchCWDPattern := "%" + escapeLikePattern(strings.ToLower(searchCWDTerm)) + "%"
-		conditions = append(conditions, `(LOWER(id) LIKE :search_term ESCAPE '\' OR LOWER(cwd) LIKE :search_cwd_term ESCAPE '\' OR LOWER(first_message) LIKE :search_term ESCAPE '\' OR LOWER(summary) LIKE :search_term ESCAPE '\')`)
-		args["search_term"] = searchPattern
-		args["search_cwd_term"] = searchCWDPattern
+	if searching {
+		args["search_match"] = searchMatch
 	}
 
 	if options.Provider != "" {
@@ -364,29 +376,50 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["runner_id"] = options.RunnerID
 	}
 
-	// Build ORDER BY clause
-	sortBy := "updated_at"
-	switch options.SortBy {
-	case "createdAt":
-		sortBy = "created_at"
-	case "updatedAt":
-		sortBy = "updated_at"
-	case "messageCount":
-		sortBy = "message_count"
-	}
-
 	sortOrder := "DESC"
 	if options.SortOrder == "asc" {
 		sortOrder = "ASC"
 	}
 
-	// Build main query
-	baseQuery := `SELECT id, cwd, message_count, first_message, summary, provider,
-		metadata, usage, created_at, updated_at FROM conversation_summaries`
-	if len(conditions) > 0 {
-		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
+	// Build ORDER BY clause
+	orderBy := "updated_at " + sortOrder
+	ranked := false
+	switch options.SortBy {
+	case "createdAt":
+		orderBy = "created_at " + sortOrder
+	case "updatedAt":
+		orderBy = "updated_at " + sortOrder
+	case "messageCount":
+		orderBy = "message_count " + sortOrder
+	case "relevance":
+		// Lower bm25 scores are better, so the most relevant first is ascending.
+		scoreOrder := "ASC"
+		if sortOrder == "ASC" {
+			scoreOrder = "DESC"
+		}
+		orderBy = "search_score " + scoreOrder + ", updated_at DESC"
+		ranked = true
 	}
-	baseQuery += " ORDER BY " + sortBy + " " + sortOrder
+
+	// Searches join the matching conversations and their match counts, and
+	// count all matches with a window function so the full-text match runs once.
+	with := ""
+	from := "conversation_summaries"
+	searchColumns := "0 AS search_match_count, 0 AS search_total"
+	if searching {
+		with = searchHitsCTE(ranked)
+		from += " JOIN search_hits ON search_hits.conversation_id = conversation_summaries.id"
+		searchColumns = "search_match_count, COUNT(*) OVER () AS search_total"
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Build main query
+	baseQuery := with + `SELECT id, cwd, message_count, first_message, summary, provider,
+		metadata, usage, created_at, updated_at, ` + searchColumns + `
+		FROM ` + from + where + " ORDER BY " + orderBy
 
 	// Add pagination
 	if options.Limit > 0 {
@@ -400,7 +433,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 
 	// Execute main query
-	var dbSummaries []dbConversationSummary
+	var dbSummaries []dbSearchConversationSummary
 	finalQuery, argsSlice, err := sqlx.Named(baseQuery, args)
 	if err != nil {
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to build named query")
@@ -414,45 +447,49 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 
 	// Convert to domain models
 	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
+	ids := make([]string, len(dbSummaries))
 	for i, dbSummary := range dbSummaries {
 		summaries[i] = dbSummary.ToConversationSummary()
+		ids[i] = dbSummary.ID
 	}
-
-	// Get total count (without pagination)
-	countQuery := "SELECT COUNT(*) FROM conversation_summaries"
-	if len(conditions) > 0 {
-		countQuery += " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	// Remove pagination args for count query
-	countArgs := make(map[string]any)
-	for k, v := range args {
-		if k != "limit" && k != "offset" {
-			countArgs[k] = v
+	if searching {
+		matches, err := s.loadSearchMatches(ctx, searchMatch, ids, min(options.SearchMatches, conversations.MaxSearchMatches))
+		if err != nil {
+			return conversations.QueryResult{}, err
+		}
+		for i := range summaries {
+			summaries[i].Search = &conversations.ConversationSearchResult{
+				MatchCount: dbSummaries[i].SearchMatchCount,
+				Matches:    matches[summaries[i].ID],
+			}
 		}
 	}
 
-	var total int
-	finalCountQuery, countArgsSlice, err := sqlx.Named(countQuery, countArgs)
-	if err != nil {
-		return conversations.QueryResult{}, errors.Wrap(err, "failed to build named count query")
+	// Get total count (without pagination). Search pages carry the total from
+	// their window count; only a search page past the last match needs a query.
+	total := 0
+	if searching && len(dbSummaries) > 0 {
+		total = dbSummaries[0].SearchTotal
+	} else if !searching || options.Offset > 0 {
+		countArgs := make(map[string]any)
+		for k, v := range args {
+			if k != "limit" && k != "offset" {
+				countArgs[k] = v
+			}
+		}
+		finalCountQuery, countArgsSlice, err := sqlx.Named(with+"SELECT COUNT(*) FROM "+from+where, countArgs)
+		if err != nil {
+			return conversations.QueryResult{}, errors.Wrap(err, "failed to build named count query")
+		}
+		err = s.db.GetContext(ctx, &total, s.db.Rebind(finalCountQuery), countArgsSlice...)
+		if err != nil {
+			return conversations.QueryResult{}, errors.Wrap(err, "failed to get total count")
+		}
 	}
 
-	finalCountQuery = s.db.Rebind(finalCountQuery)
-	err = s.db.GetContext(ctx, &total, finalCountQuery, countArgsSlice...)
+	cwds, err := s.listCWDs(ctx)
 	if err != nil {
-		return conversations.QueryResult{}, errors.Wrap(err, "failed to get total count")
-	}
-
-	var cwds []string
-	err = s.db.SelectContext(ctx, &cwds, `
-		SELECT DISTINCT cwd
-		FROM conversation_summaries
-		WHERE TRIM(cwd) <> ''
-		ORDER BY LOWER(cwd), cwd
-	`)
-	if err != nil {
-		return conversations.QueryResult{}, errors.Wrap(err, "failed to list conversation working directories")
+		return conversations.QueryResult{}, err
 	}
 
 	return conversations.QueryResult{
@@ -463,8 +500,19 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}, nil
 }
 
-func escapeLikePattern(value string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+// listCWDs returns all distinct persisted working directories.
+func (s *Store) listCWDs(ctx context.Context) ([]string, error) {
+	var cwds []string
+	err := s.db.SelectContext(ctx, &cwds, `
+		SELECT DISTINCT cwd
+		FROM conversation_summaries
+		WHERE TRIM(cwd) <> ''
+		ORDER BY LOWER(cwd), cwd
+	`)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list conversation working directories")
+	}
+	return cwds, nil
 }
 
 // Close closes the database connection

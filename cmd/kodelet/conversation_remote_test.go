@@ -95,6 +95,34 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	require.Len(t, list.Conversations, 1)
 	assert.Equal(t, record.ID, list.Conversations[0].ID)
 	assert.Equal(t, record.Usage.TotalCost(), list.Conversations[0].TotalCost)
+
+	// Search indexes saved history on demand and shows highlighted matches.
+	output, stderr, err = run("search", "--json", "--cwd="+record.CWD, "history-only")
+	require.NoError(t, err, "%s", stderr)
+	var search ConversationSearchOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &search))
+	require.Len(t, search.Conversations, 1)
+	assert.Equal(t, 1, search.Total)
+	assert.Equal(t, record.ID, search.Conversations[0].ID)
+	assert.Equal(t, "retained history", search.Conversations[0].Title)
+	assert.Equal(t, 1, search.Conversations[0].MatchCount)
+	require.Len(t, search.Conversations[0].Matches, 1)
+	assert.Equal(t, "user", search.Conversations[0].Matches[0].Role)
+	assert.Equal(t, "**history-only** content", search.Conversations[0].Matches[0].Snippet)
+	output, stderr, err = run("search", "other", "provider")
+	require.NoError(t, err, "%s", stderr)
+	assert.Contains(t, output, other.ID)
+	assert.Contains(t, output, "- user: **other** **provider**")
+	assert.NotContains(t, output, record.ID)
+	output, stderr, err = run("list", "--json", "--search=history")
+	require.NoError(t, err, "%s", stderr)
+	require.NoError(t, json.Unmarshal([]byte(output), &list))
+	require.Len(t, list.Conversations, 1)
+	assert.Equal(t, record.ID, list.Conversations[0].ID)
+	output, stderr, err = run("search", "no-such-words")
+	require.NoError(t, err, "%s", stderr)
+	assert.Equal(t, "No conversations match the search.\n", output)
+
 	for _, format := range []string{"raw", "json", "text", "markdown"} {
 		output, stderr, err = run("show", record.ID, "--format="+format)
 		require.NoError(t, err, "%s", stderr)
@@ -125,6 +153,11 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	_, stderr, err = run("show", record.ID)
 	require.Error(t, err)
 	assert.Contains(t, stderr, "HTTP 404")
+	output, stderr, err = run("search", "--json", "history-only")
+	require.NoError(t, err, "%s", stderr)
+	require.NoError(t, json.Unmarshal([]byte(output), &search))
+	require.Len(t, search.Conversations, 1, "deleted conversations leave search")
+	assert.Equal(t, forkID, search.Conversations[0].ID)
 
 	client, err := chat.NewClient(endpoint, "history-token", "")
 	require.NoError(t, err)
@@ -138,7 +171,7 @@ func TestDaemonConversationCLIWithoutLocalStoreOrRunner(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "not a database directory", string(unchanged))
 
-	for _, args := range [][]string{{"import", "/missing"}, {"edit", forkID}, {"fork"}, {"fork", forkID, "--cwd=/other"}, {"list", "--start=invalid"}} {
+	for _, args := range [][]string{{"import", "/missing"}, {"edit", forkID}, {"fork"}, {"fork", forkID, "--cwd=/other"}, {"list", "--start=invalid"}, {"search"}, {"search", " "}, {"search", "x", "--matches=11"}, {"list", "--sort-by=relevance"}} {
 		_, _, err = run(args...)
 		require.Error(t, err, "unsupported or ambiguous operation %v must fail", args)
 	}

@@ -25,6 +25,7 @@ import (
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/conversations/searchindex"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -74,6 +75,8 @@ func (unavailableFrontendHandler) IsPublicPath(string) bool {
 type Server struct {
 	router                *mux.Router
 	conversationService   conversations.ConversationServiceInterface
+	searchIndexer         *searchindex.Indexer
+	searchIndexDone       chan struct{}
 	chatRunner            chat.ChatRunner
 	config                *ServerConfig
 	server                *http.Server
@@ -276,9 +279,15 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 	config.CORSOrigins = normalizedCORSOrigins
 
 	// Get the conversation service
-	conversationService, err := conversations.GetDefaultConversationService(ctx)
+	conversationStore, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create conversation service")
+	}
+	conversationService := conversations.NewConversationService(conversationStore)
+	var searchIndexer *searchindex.Indexer
+	if store, ok := conversationStore.(searchindex.Store); ok {
+		searchIndexer = searchindex.New(store)
+		conversationService.SetSearchIndex(searchIndexer)
 	}
 
 	runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -347,6 +356,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
+		searchIndexer:       searchIndexer,
 		chatRunner: &serverChatRunner{
 			runner: chat.NewExecutor("", nil),
 		},
@@ -1182,7 +1192,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	// All clients receive canonical persisted runner paths, never daemon-home
 	// expansion or shortening of paths that may belong to another host.
 	raw := query.Get("format") == "raw"
-	for name, target := range map[string]*int{"limit": &req.Limit, "offset": &req.Offset} {
+	for name, target := range map[string]*int{"limit": &req.Limit, "offset": &req.Offset, "matches": &req.SearchMatches} {
 		if value := query.Get(name); value != "" {
 			parsed, err := strconv.Atoi(value)
 			if err != nil || parsed < 0 {
@@ -1212,6 +1222,10 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		s.writeErrorResponse(w, http.StatusBadRequest, "startDate must not be after endDate", nil)
 		return
 	}
+	if req.SearchMatches > conversationtypes.MaxSearchMatches {
+		s.writeErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("matches must not exceed %d", conversationtypes.MaxSearchMatches), nil)
+		return
+	}
 	switch req.SortBy {
 	case "", "updated", "updated_at", "updatedAt":
 		req.SortBy = "updatedAt"
@@ -1219,6 +1233,11 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		req.SortBy = "createdAt"
 	case "messages", "messageCount":
 		req.SortBy = "messageCount"
+	case "relevance":
+		if searchTerm == "" {
+			s.writeErrorResponse(w, http.StatusBadRequest, "relevance sorting requires a search term", nil)
+			return
+		}
 	default:
 		s.writeErrorResponse(w, http.StatusBadRequest, "unsupported conversation sort field", nil)
 		return
@@ -2462,6 +2481,67 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.Serve(ctx, listener)
 }
 
+// Serve accepts an already-bound listener so service hosts can report its actual
+// address (including port zero) before starting optional embedded execution.
+// It is the only serving entry point, so it also starts the background search
+// indexer, whether or not the embedded runner is enabled.
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	s.server = &http.Server{Addr: listener.Addr().String(), Handler: s.router}
+	s.startSearchIndexer()
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- s.server.Serve(listener) }()
+	runnerCtx, stopRunner := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopRunner()
+	runnerDone := make(chan struct{})
+	go func() {
+		defer close(runnerDone)
+		if s.config.EmbeddedRunner == nil {
+			return
+		}
+		endpoint, err := embeddedLoopbackEndpoint(listener.Addr())
+		if err != nil {
+			s.embeddedRunnerError(err)
+			return
+		}
+		runner, err := s.newEmbeddedRunner(runnerCtx, endpoint)
+		if err != nil {
+			s.embeddedRunnerError(err)
+			return
+		}
+		if err := runner.Run(runnerCtx); err != nil {
+			s.embeddedRunnerError(err)
+		}
+	}()
+
+	var serveErr error
+	select {
+	case <-ctx.Done():
+	case serveErr = <-serveDone:
+	}
+	// Stop admission and cancel/drain agent work while runner transport is usable.
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
+	drainErr := s.drainExecutions(drainCtx)
+	cancelDrain()
+	stopRunner()
+	var runnerErr error
+	select {
+	case <-runnerDone:
+	case <-time.After(s.httpShutdownTimeout()):
+		runnerErr = errors.New("the built-in runner did not stop before the shutdown timeout")
+	}
+	shutdownErr := s.shutdownHTTPServer()
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return errors.Wrap(serveErr, "the server stopped accepting connections")
+	}
+	if drainErr != nil {
+		return drainErr
+	}
+	if runnerErr != nil {
+		return runnerErr
+	}
+	return shutdownErr
+}
+
 func (s *Server) shutdownHTTPServer() error {
 	s.closeBrowserHandles("", 0)
 	if s.runCancel != nil {
@@ -2600,6 +2680,7 @@ func (s *Server) Close() error {
 			return firstErr
 		}
 	}
+	s.waitForSearchIndexer()
 	if s.conversationService != nil {
 		if err := s.conversationService.Close(); err != nil && firstErr == nil {
 			firstErr = errors.Wrap(err, "failed to close conversation service")

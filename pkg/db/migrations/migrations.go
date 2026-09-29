@@ -28,5 +28,6 @@ func All() []db.Migration {
 		Migration20260910120000CreateImageArtifacts(),
 		Migration20260920120000AddCompactionHistory(),
 		Migration20260924120000CreateUserRefreshTokens(),
+		Migration20260929120000CreateConversationSearch(),
 	}
 }

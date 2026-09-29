@@ -37,9 +37,17 @@ type ConversationServiceInterface interface {
 	Close() error
 }
 
+// SearchIndex keeps the full-text search index current before searches run.
+type SearchIndex interface {
+	// Refresh indexes recently changed conversations within a short budget and
+	// returns how many conversations still await indexing.
+	Refresh(ctx context.Context) (int, error)
+}
+
 // ConversationService provides high-level conversation operations
 type ConversationService struct {
-	store ConversationStore
+	store       ConversationStore
+	searchIndex SearchIndex
 }
 
 // NewConversationService creates a new conversation service
@@ -47,6 +55,11 @@ func NewConversationService(store ConversationStore) *ConversationService {
 	return &ConversationService{
 		store: store,
 	}
+}
+
+// SetSearchIndex refreshes the given index before each conversation search.
+func (s *ConversationService) SetSearchIndex(index SearchIndex) {
+	s.searchIndex = index
 }
 
 // GetDefaultConversationService returns a service with the default store
@@ -63,7 +76,7 @@ type ListConversationsRequest struct {
 	StartDate     *time.Time `json:"startDate,omitempty"`
 	EndDate       *time.Time `json:"endDate,omitempty"`
 	SearchTerm    string     `json:"searchTerm,omitempty"`
-	SearchCWDTerm string     `json:"-"`
+	SearchMatches int        `json:"searchMatches,omitempty"`
 	Provider      string     `json:"provider,omitempty"`
 	CWD           string     `json:"cwd,omitempty"`
 	RunnerID      string     `json:"runnerId,omitempty"`
@@ -82,6 +95,9 @@ type ListConversationsResponse struct {
 	Offset        int                                 `json:"offset"`
 	HasMore       bool                                `json:"hasMore"`
 	Stats         *ConversationStatistics             `json:"stats,omitempty"`
+	// SearchPending counts conversations not yet indexed for search; results
+	// may be incomplete while it is nonzero.
+	SearchPending int `json:"searchPending,omitempty"`
 }
 
 // GetConversationResponse represents the response from getting a conversation
@@ -124,7 +140,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		StartDate:     req.StartDate,
 		EndDate:       req.EndDate,
 		SearchTerm:    req.SearchTerm,
-		SearchCWDTerm: req.SearchCWDTerm,
+		SearchMatches: req.SearchMatches,
 		Provider:      req.Provider,
 		CWD:           req.CWD,
 		RunnerID:      req.RunnerID,
@@ -132,6 +148,15 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		Offset:        req.Offset,
 		SortBy:        req.SortBy,
 		SortOrder:     req.SortOrder,
+	}
+
+	searchPending := 0
+	if strings.TrimSpace(req.SearchTerm) != "" && s.searchIndex != nil {
+		pending, err := s.searchIndex.Refresh(ctx)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to refresh the conversation search index; results may be stale")
+		}
+		searchPending = pending
 	}
 
 	// Query conversations with pagination
@@ -180,6 +205,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		Offset:        req.Offset,
 		HasMore:       hasMore,
 		Stats:         stats,
+		SearchPending: searchPending,
 	}
 
 	logger.G(ctx).WithField("count", len(summaries)).Debug("Listed conversations")
