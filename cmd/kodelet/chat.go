@@ -19,6 +19,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type ChatConfig struct {
@@ -50,16 +51,40 @@ var chatCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		theme, _ := cmd.Flags().GetString("theme")
+		welcomeEffect, err := resolveWelcomeEffect(cmd)
+		if err != nil {
+			return err
+		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
 		return errors.Wrap(tui.Run(cmd.Context(), tui.Config{
-			Remote: true,
-			Theme:  theme,
+			Remote:        true,
+			Theme:         theme,
+			WelcomeEffect: welcomeEffect,
 			Initialize: func(ctx context.Context) (tui.Config, error) {
 				return prepareDaemonChat(ctx, cmd)
 			},
 		}), "could not start chat")
 	},
+}
+
+const (
+	welcomeEffectConfigKey = "welcome_effect"
+	welcomeEffectEnv       = "KODELET_WELCOME_EFFECT"
+)
+
+func resolveWelcomeEffect(cmd *cobra.Command) (string, error) {
+	flag := cmd.Flags().Lookup("welcome-effect")
+	if flag != nil && flag.Changed && strings.TrimSpace(flag.Value.String()) != "" {
+		effect, err := tui.ParseWelcomeEffect(flag.Value.String())
+		return effect, errors.Wrap(err, "invalid --welcome-effect")
+	}
+	if environment := strings.TrimSpace(os.Getenv(welcomeEffectEnv)); environment != "" {
+		effect, err := tui.ParseWelcomeEffect(environment)
+		return effect, errors.Wrapf(err, "invalid %s", welcomeEffectEnv)
+	}
+	effect, err := tui.ParseWelcomeEffect(viper.GetString(welcomeEffectConfigKey))
+	return effect, errors.Wrapf(err, "invalid %s setting", welcomeEffectConfigKey)
 }
 
 func validateRemoteChatFlags(cmd *cobra.Command) error {
@@ -390,6 +415,12 @@ func init() {
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
 	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
 	chatCmd.Flags().String("theme", tui.AutoThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
+	chatCmd.Flags().String(
+		"welcome-effect",
+		"",
+		"TUI welcome effect (available: "+strings.Join(tui.AvailableWelcomeEffects(), ", ")+
+			"; defaults to "+welcomeEffectEnv+", the "+welcomeEffectConfigKey+" setting, or "+tui.DefaultWelcomeEffect+")",
+	)
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")

@@ -61,6 +61,10 @@ func normalizeSingleLinePaste(text string) string {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.PasteMsg:
+		m.finishWelcomeAnimation()
+	}
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
 	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.infoDialogOpen() && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
 		return m, m.insertTextareaNewline()
@@ -91,13 +95,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg.config.Remote = true
 		m.configure(msg.config)
 		m.resize()
+		welcomeCmd := m.startWelcomeAnimation()
 		m.refreshViewport(false)
-		return m, tea.Batch(m.initialResourceCommands()...)
+		return m, tea.Batch(append(m.initialResourceCommands(), welcomeCmd)...)
+
+	case welcomeTickMsg:
+		return m, m.updateWelcomeAnimation(time.Time(msg))
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+		cmds = append(cmds, m.startWelcomeAnimation())
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)
 

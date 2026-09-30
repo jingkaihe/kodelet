@@ -15,6 +15,11 @@ log_format: "json"
 # Set this in ~/.kodelet/config.yaml or KODELET_CONFIG_FILE, not repository config.
 # server: "https://kodelet.example"
 
+# Welcome animation for new `kodelet chat` conversations: beams (default),
+# matrix, or none for a static wordmark. This is a client display setting.
+# KODELET_WELCOME_EFFECT overrides this setting; --welcome-effect overrides both.
+# welcome_effect: "beams"
+
 # Browser settings for `serve` and `runner start` (trusted config only).
 # Precedence: --browser-* flags > KODELET_BROWSER_* env vars > YAML.
 # browser:

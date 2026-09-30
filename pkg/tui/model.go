@@ -28,6 +28,9 @@ func Run(ctx context.Context, config Config) error {
 	if config.Runner == nil && config.Initialize == nil {
 		return errors.New("chat requires a server connection; start 'kodelet serve' before opening chat")
 	}
+	if _, err := ParseWelcomeEffect(config.WelcomeEffect); err != nil {
+		return err
+	}
 	// Bubble Tea otherwise opens the controlling TTY when stdin is redirected,
 	// which can suspend a background process instead of failing non-interactively.
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -125,6 +128,7 @@ func newModel(ctx context.Context, config Config) model {
 		runCh:               runCh,
 		terminalTitleEpoch:  time.Now(),
 	}
+	m.welcome = newWelcomeAnimation(config.WelcomeEffect)
 	m.configure(config)
 	return m
 }

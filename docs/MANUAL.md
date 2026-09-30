@@ -181,6 +181,8 @@ kodelet chat -r CONVERSATION_ID        # short form
 kodelet chat --theme catppuccin-mocha   # force the bundled dark theme
 kodelet chat --theme catppuccin-latte   # force the bundled light theme
 kodelet chat --theme tokyo-night        # select another bundled theme
+kodelet chat --welcome-effect matrix    # reveal the wordmark with falling characters
+kodelet chat --welcome-effect none      # show a static welcome without animation
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
@@ -199,6 +201,8 @@ The TUI streams responses and persists conversations for later resume. Use `Ctrl
 Press `Ctrl+R` to search sent messages, then press it again to cycle matches. `Enter` copies a match into the composer; `Esc` restores your draft. History persists on the runner per Git worktree (or directory outside Git). Extensions can override this shortcut.
 
 The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
+
+Set a default welcome effect with `KODELET_WELCOME_EFFECT` or `welcome_effect` in user configuration.
 
 Before the first message, use `Ctrl+T`, `/model`, or click the model name to choose a `profile/model`; use `Ctrl+Y` for reasoning effort. Type to filter, use arrow keys to navigate, and press `Enter` to select or `Esc` to cancel. `/model <profile/model>` selects directly; `/model <id>` uses the current profile. Selection applies the profile and model only to this conversation, without editing configuration. Settings lock after the first message.
 

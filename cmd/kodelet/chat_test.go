@@ -23,6 +23,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,6 +59,78 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.True(t, config.NoTools)
 	assert.Equal(t, "runner-1", config.Runner)
 	assert.Equal(t, "workspace", config.RunnerProfile)
+}
+
+func TestChatWelcomeEffectFlag(t *testing.T) {
+	flag := chatCmd.Flags().Lookup("welcome-effect")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
+	assert.Contains(t, flag.Usage, strings.Join(tui.AvailableWelcomeEffects(), ", "))
+	assert.Contains(t, flag.Usage, welcomeEffectEnv)
+	assert.Contains(t, flag.Usage, welcomeEffectConfigKey)
+}
+
+func TestResolveWelcomeEffect(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		env        string
+		configured string
+		want       string
+	}{
+		{name: "default", want: tui.DefaultWelcomeEffect},
+		{name: "flag", args: []string{"--welcome-effect", " MATRIX "}, want: "matrix"},
+		{name: "environment", env: " None ", want: "none"},
+		{name: "configuration", configured: "Matrix", want: "matrix"},
+		{name: "environment overrides configuration", env: "beams", configured: "none", want: "beams"},
+		{name: "flag overrides environment", args: []string{"--welcome-effect=none"}, env: "matrix", want: "none"},
+		{name: "flag overrides configuration", args: []string{"--welcome-effect=beams"}, configured: "none", want: "beams"},
+		{name: "blank flag falls through", args: []string{"--welcome-effect= "}, configured: "none", want: "none"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(welcomeEffectEnv, test.env)
+			setWelcomeEffectConfigForTest(t, test.configured)
+			effect, err := resolveWelcomeEffect(daemonChatCommandForTest(t, test.args...))
+			require.NoError(t, err)
+			assert.Equal(t, test.want, effect)
+		})
+	}
+}
+
+func TestChatRejectsInvalidWelcomeEffectBeforeStartup(t *testing.T) {
+	var calls atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(daemon.Close)
+	for _, test := range []struct {
+		name       string
+		flag       string
+		env        string
+		configured string
+		source     string
+	}{
+		{name: "flag", flag: "matirx", source: "--welcome-effect"},
+		{name: "environment", env: "false", source: welcomeEffectEnv},
+		{name: "configuration", configured: "sparkles", source: welcomeEffectConfigKey + " setting"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(welcomeEffectEnv, test.env)
+			setWelcomeEffectConfigForTest(t, test.configured)
+			args := []string{"--server=" + daemon.URL}
+			if test.flag != "" {
+				args = append(args, "--welcome-effect="+test.flag)
+			}
+			err := chatCmd.RunE(daemonChatCommandForTest(t, args...), nil)
+			require.ErrorContains(t, err, "invalid "+test.source)
+			assert.ErrorContains(t, err, test.flag+test.env+test.configured)
+		})
+	}
+	assert.Zero(t, calls.Load(), "invalid effects must fail before the TUI starts or contacts the daemon")
+}
+
+func setWelcomeEffectConfigForTest(t *testing.T, value string) {
+	t.Helper()
+	viper.Set(welcomeEffectConfigKey, value)
+	t.Cleanup(func() { viper.Set(welcomeEffectConfigKey, nil) })
 }
 
 func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
@@ -259,6 +332,7 @@ func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
 	cmd := remoteRunCommandForTest()
 	cmd.Use = "chat"
 	cmd.Flags().String("theme", tui.AutoThemeName, "")
+	cmd.Flags().String("welcome-effect", "", "")
 	require.NoError(t, cmd.ParseFlags(append([]string{"--auth-token=client"}, args...)))
 	return cmd
 }
@@ -485,7 +559,17 @@ func TestPrepareDaemonChatUsesRunnerDirectoriesAndTypedRestrictions(t *testing.T
 	invalidStore := filepath.Join(t.TempDir(), "no-local-state")
 	require.NoError(t, os.WriteFile(invalidStore, []byte("not a directory"), 0o600))
 	t.Setenv("KODELET_BASE_PATH", invalidStore)
-	cmd := daemonChatCommandForTest(t, "--server="+daemon.URL, "--cwd=~/selected", "--runner-profile=environment", "--model=central", "--no-extensions", "--no-skills", "--allowed-tools=", "--no-tools=false", "--max-turns=0")
+	cmd := daemonChatCommandForTest(t,
+		"--server="+daemon.URL,
+		"--cwd=~/selected",
+		"--runner-profile=environment",
+		"--model=central",
+		"--no-extensions",
+		"--no-skills",
+		"--allowed-tools=",
+		"--no-tools=false",
+		"--max-turns=0",
+	)
 	config, err := prepareDaemonChat(t.Context(), cmd)
 	require.NoError(t, err)
 	assert.True(t, config.Remote)

@@ -32,6 +32,7 @@ type Config struct {
 	CWD                     string
 	DefaultCWD              string
 	Theme                   string
+	WelcomeEffect           string
 	ServerURL               string          // Connected control-plane base URL for relative image links.
 	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.
 	// Initialize optionally prepares the daemon connection after the TUI renders.
@@ -293,6 +294,7 @@ type model struct {
 	viewport viewport.Model
 	textarea textarea.Model
 	spinner  spinner.Model
+	welcome  welcomeAnimation
 
 	width  int
 	height int

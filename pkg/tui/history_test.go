@@ -84,6 +84,7 @@ func TestRemoteMessageHistoryLoadsAfterInitializationAndRefreshesSearch(t *testi
 		return Config{Runner: runner, CWD: "/runner/project/subdir", Profile: "work", EnvironmentProfile: "sandbox"}, nil
 	}})
 	t.Cleanup(m.cancel)
+	m.welcome.done = true
 	m.width, m.height = 100, 30
 	updated, initial := m.Update(m.initializeCommand()())
 	m = updated.(model)
