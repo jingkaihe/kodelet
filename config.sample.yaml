@@ -20,6 +20,11 @@ log_format: "json"
 # KODELET_WELCOME_EFFECT overrides this setting; --welcome-effect overrides both.
 # welcome_effect: "beams"
 
+# Welcome wordmark: block (default) or plain text without decorative effects.
+# Small terminals fall back to plain text. This is a client display setting.
+# KODELET_WELCOME_STYLE overrides this setting; --welcome-style overrides both.
+# welcome_style: "block"
+
 # Browser settings for `serve` and `runner start` (trusted config only).
 # Precedence: --browser-* flags > KODELET_BROWSER_* env vars > YAML.
 # browser:

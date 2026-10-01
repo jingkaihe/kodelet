@@ -32,6 +32,7 @@ type Config struct {
 	CWD                     string
 	DefaultCWD              string
 	Theme                   string
+	WelcomeStyle            string
 	WelcomeEffect           string
 	ServerURL               string          // Connected control-plane base URL for relative image links.
 	Runner                  chat.ChatRunner // Required unless Initialize is set; the daemon owns execution.

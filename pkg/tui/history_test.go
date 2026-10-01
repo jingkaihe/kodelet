@@ -294,7 +294,7 @@ func TestInitialHistoryErrorIsVisibleInTranscript(t *testing.T) {
 	assert.ErrorContains(t, m.err, "conversation not found")
 	assert.Contains(t, content, "Failed to resume conversation")
 	assert.Contains(t, content, "conversation not found")
-	assert.NotContains(t, content, "Hello! What would you like me to work on?")
+	assert.NotContains(t, content, "? for shortcuts")
 }
 
 func TestInitialHistoryDoesNotClobberLocalEntries(t *testing.T) {

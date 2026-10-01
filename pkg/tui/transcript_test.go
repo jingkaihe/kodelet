@@ -1144,7 +1144,7 @@ func TestRenderTranscriptShowsQueuedSteeringErrorOnEmptyTranscript(t *testing.T)
 	content, regions := m.renderTranscript()
 
 	assert.Empty(t, regions)
-	assert.Contains(t, content, "Hello! What would you like me to work on?")
+	assert.Contains(t, xansi.Strip(content), "? for shortcuts")
 	assert.Contains(t, content, "could not queue")
 }
 

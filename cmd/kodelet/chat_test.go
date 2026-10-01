@@ -133,6 +133,84 @@ func setWelcomeEffectConfigForTest(t *testing.T, value string) {
 	t.Cleanup(func() { viper.Set(welcomeEffectConfigKey, nil) })
 }
 
+func TestChatWelcomeStyleFlag(t *testing.T) {
+	flag := chatCmd.Flags().Lookup("welcome-style")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
+	assert.Contains(t, flag.Usage, strings.Join(tui.AvailableWelcomeStyles(), ", "))
+	assert.Contains(t, flag.Usage, welcomeStyleEnv)
+	assert.Contains(t, flag.Usage, welcomeStyleConfigKey)
+	assert.Contains(t, flag.Usage, "plain disables animation")
+}
+
+func TestResolveWelcomeStyle(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		env        string
+		configured string
+		want       string
+	}{
+		{name: "default", want: tui.DefaultWelcomeStyle},
+		{name: "flag", args: []string{"--welcome-style", " PLAIN "}, want: "plain"},
+		{name: "environment", env: " Plain ", want: "plain"},
+		{name: "configuration", configured: "Plain", want: "plain"},
+		{name: "environment overrides configuration", env: "block", configured: "plain", want: "block"},
+		{name: "flag overrides environment", args: []string{"--welcome-style=plain"}, env: "block", want: "plain"},
+		{name: "flag overrides configuration", args: []string{"--welcome-style=block"}, configured: "plain", want: "block"},
+		{name: "blank flag falls through", args: []string{"--welcome-style= "}, configured: "plain", want: "plain"},
+		{name: "blank environment falls through", env: " ", configured: "plain", want: "plain"},
+		{name: "flag masks invalid defaults", args: []string{"--welcome-style=plain"}, env: "invalid", configured: "invalid", want: "plain"},
+		{name: "environment masks invalid configuration", env: "plain", configured: "invalid", want: "plain"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(welcomeStyleEnv, test.env)
+			setWelcomeStyleConfigForTest(t, test.configured)
+			style, err := resolveWelcomeStyle(daemonChatCommandForTest(t, test.args...))
+			require.NoError(t, err)
+			assert.Equal(t, test.want, style)
+		})
+	}
+}
+
+func TestChatRejectsInvalidWelcomeStyleBeforeStartup(t *testing.T) {
+	t.Setenv(welcomeEffectEnv, "")
+	setWelcomeEffectConfigForTest(t, "")
+	var calls atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(daemon.Close)
+	for _, test := range []struct {
+		name       string
+		flag       string
+		env        string
+		configured string
+		source     string
+	}{
+		{name: "flag", flag: "palin", source: "--welcome-style"},
+		{name: "environment", env: "false", source: welcomeStyleEnv},
+		{name: "configuration", configured: "minimal", source: welcomeStyleConfigKey + " setting"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(welcomeStyleEnv, test.env)
+			setWelcomeStyleConfigForTest(t, test.configured)
+			args := []string{"--server=" + daemon.URL}
+			if test.flag != "" {
+				args = append(args, "--welcome-style="+test.flag)
+			}
+			err := chatCmd.RunE(daemonChatCommandForTest(t, args...), nil)
+			require.ErrorContains(t, err, "invalid "+test.source)
+			assert.ErrorContains(t, err, test.flag+test.env+test.configured)
+		})
+	}
+	assert.Zero(t, calls.Load(), "invalid styles must fail before the TUI starts or contacts the daemon")
+}
+
+func setWelcomeStyleConfigForTest(t *testing.T, value string) {
+	t.Helper()
+	viper.Set(welcomeStyleConfigKey, value)
+	t.Cleanup(func() { viper.Set(welcomeStyleConfigKey, nil) })
+}
+
 func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
 	t.Setenv(controlPlaneAuthTokenEnv, " control-plane-secret ")
 	cmd := &cobra.Command{Use: "chat"}
@@ -333,6 +411,7 @@ func daemonChatCommandForTest(t *testing.T, args ...string) *cobra.Command {
 	cmd.Use = "chat"
 	cmd.Flags().String("theme", tui.AutoThemeName, "")
 	cmd.Flags().String("welcome-effect", "", "")
+	cmd.Flags().String("welcome-style", "", "")
 	require.NoError(t, cmd.ParseFlags(append([]string{"--auth-token=client"}, args...)))
 	return cmd
 }

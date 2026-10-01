@@ -28,6 +28,9 @@ func Run(ctx context.Context, config Config) error {
 	if config.Runner == nil && config.Initialize == nil {
 		return errors.New("chat requires a server connection; start 'kodelet serve' before opening chat")
 	}
+	if _, err := ParseWelcomeStyle(config.WelcomeStyle); err != nil {
+		return err
+	}
 	if _, err := ParseWelcomeEffect(config.WelcomeEffect); err != nil {
 		return err
 	}
@@ -128,7 +131,7 @@ func newModel(ctx context.Context, config Config) model {
 		runCh:               runCh,
 		terminalTitleEpoch:  time.Now(),
 	}
-	m.welcome = newWelcomeAnimation(config.WelcomeEffect)
+	m.welcome = newWelcomeAnimation(config.WelcomeStyle, config.WelcomeEffect)
 	m.configure(config)
 	return m
 }

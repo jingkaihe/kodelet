@@ -183,6 +183,7 @@ kodelet chat --theme catppuccin-latte   # force the bundled light theme
 kodelet chat --theme tokyo-night        # select another bundled theme
 kodelet chat --welcome-effect matrix    # reveal the wordmark with falling characters
 kodelet chat --welcome-effect none      # show a static welcome without animation
+kodelet chat --welcome-style plain      # show a small text wordmark without animation
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
@@ -202,7 +203,7 @@ Press `Ctrl+R` to search sent messages, then press it again to cycle matches. `E
 
 The default `auto` theme follows the terminal's light or dark appearance. Use `--theme` at startup or `/theme` in the TUI.
 
-Set a default welcome effect with `KODELET_WELCOME_EFFECT` or `welcome_effect` in user configuration.
+Set a default welcome style (`block` or `plain`) with `KODELET_WELCOME_STYLE` or `welcome_style` in user configuration; `--welcome-style` overrides both. The default `block` style uses the welcome effect selected by `--welcome-effect`, `KODELET_WELCOME_EFFECT`, or `welcome_effect` (default: `beams`); `plain` ignores decorative effects, and small terminals fall back to plain text.
 
 Before the first message, use `Ctrl+T`, `/model`, or click the model name to choose a `profile/model`; use `Ctrl+Y` for reasoning effort. Type to filter, use arrow keys to navigate, and press `Enter` to select or `Esc` to cancel. `/model <profile/model>` selects directly; `/model <id>` uses the current profile. Selection applies the profile and model only to this conversation, without editing configuration. Settings lock after the first message.
 

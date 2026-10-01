@@ -14,6 +14,12 @@ import (
 )
 
 const (
+	welcomeStyleBlock = "block"
+	welcomeStylePlain = "plain"
+
+	// DefaultWelcomeStyle is used when no logo style is selected.
+	DefaultWelcomeStyle = welcomeStyleBlock
+
 	welcomeEffectBeams  = "beams"
 	welcomeEffectMatrix = "matrix"
 	welcomeEffectNone   = "none"
@@ -22,27 +28,35 @@ const (
 	DefaultWelcomeEffect = welcomeEffectBeams
 )
 
-var welcomeEffects = []string{welcomeEffectBeams, welcomeEffectMatrix, welcomeEffectNone}
+var (
+	welcomeStyles  = []string{welcomeStyleBlock, welcomeStylePlain}
+	welcomeEffects = []string{welcomeEffectBeams, welcomeEffectMatrix, welcomeEffectNone}
+)
 
 const (
 	welcomeFrameInterval = time.Second / 60
 	welcomeFrames        = 240
 	welcomeLogoHeight    = (len(welcomeLogo) + 1) / 2
-	welcomeCanvasWidth   = 41
+	welcomeCanvasWidth   = 39
 	welcomeCanvasHeight  = 9
 	welcomeLogoTop       = (welcomeCanvasHeight - welcomeLogoHeight) / 2
 	welcomePaletteSize   = 21
 )
 
+// Lowercase kodelet. drawn for terminal cells, rather than a scaled font bitmap.
+// The last column is the brand's accent dot.
 var welcomeLogo = [...]string{
-	"#   #  ###  ####  ##### #     ##### #####",
-	"#  #  #   # #   # #     #     #       #  ",
-	"###   #   # #   # ####  #     ####    #  ",
-	"#  #  #   # #   # #     #     #       #  ",
-	"#   #  ###  ####  ##### ##### #####   #  ",
+	"#              #       #          #    ",
+	"#              #       #          #    ",
+	"#  #  ###   ####  ###  #    ###  ###   ",
+	"# #  #   # #   # #   # #   #   #  #    ",
+	"##   #   # #   # ##### #   #####  #    ",
+	"# #  #   # #   # #     #   #      #    ",
+	"#  #  ###   ####  ####  ##  ####   ## #",
 }
 
 type welcomeAnimation struct {
+	style     string
 	effect    string
 	animated  bool
 	startedAt time.Time
@@ -51,6 +65,27 @@ type welcomeAnimation struct {
 }
 
 type welcomeTickMsg time.Time
+
+// AvailableWelcomeStyles returns the supported welcome wordmark styles.
+func AvailableWelcomeStyles() []string {
+	return slices.Clone(welcomeStyles)
+}
+
+// ParseWelcomeStyle normalizes a logo style; blank selects the default.
+func ParseWelcomeStyle(style string) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(style))
+	if name == "" {
+		return DefaultWelcomeStyle, nil
+	}
+	if !slices.Contains(welcomeStyles, name) {
+		return "", errors.Errorf(
+			"unknown welcome style %q (available: %s)",
+			strings.TrimSpace(style),
+			strings.Join(welcomeStyles, ", "),
+		)
+	}
+	return name, nil
+}
 
 // AvailableWelcomeEffects returns the supported startup animation names.
 func AvailableWelcomeEffects() []string {
@@ -73,13 +108,17 @@ func ParseWelcomeEffect(effect string) (string, error) {
 	return name, nil
 }
 
-func newWelcomeAnimation(effect string) welcomeAnimation {
+func newWelcomeAnimation(style, effect string) welcomeAnimation {
+	logoStyle, err := ParseWelcomeStyle(style)
+	if err != nil {
+		logoStyle = DefaultWelcomeStyle
+	}
 	name, err := ParseWelcomeEffect(effect)
 	if err != nil {
 		name = DefaultWelcomeEffect
 	}
-	animated := name != welcomeEffectNone && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
-	return welcomeAnimation{effect: name, animated: animated, done: !animated}
+	animated := logoStyle == welcomeStyleBlock && name != welcomeEffectNone && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	return welcomeAnimation{style: logoStyle, effect: name, animated: animated, done: !animated}
 }
 
 func welcomeTick() tea.Cmd {
@@ -90,9 +129,11 @@ func welcomeTick() tea.Cmd {
 
 func (m model) welcomeLogoRows() int {
 	switch {
-	case m.viewport.Width() < welcomeCanvasWidth || m.viewport.Height() < welcomeLogoHeight+6:
+	case m.viewport.Width() < len("kodelet.") || m.viewport.Height() < 3:
 		return 0
-	case m.welcome.animated && m.viewport.Height() >= welcomeCanvasHeight+5:
+	case m.welcome.style == welcomeStylePlain || m.viewport.Width() < welcomeCanvasWidth || m.viewport.Height() < welcomeLogoHeight+2:
+		return 1
+	case m.welcome.animated && m.viewport.Height() >= welcomeCanvasHeight+2:
 		return welcomeCanvasHeight
 	default:
 		return welcomeLogoHeight
@@ -147,7 +188,14 @@ func (m *model) updateWelcomeAnimation(now time.Time) tea.Cmd {
 }
 
 func (m model) renderWelcomeLogo(width int) []string {
+	if m.welcomeLogoRows() == 1 {
+		text := lipgloss.NewStyle().Foreground(themeColor(m.theme.Assistant)).Bold(true).Render("kodelet")
+		dot := lipgloss.NewStyle().Foreground(themeColor(m.welcomeDotColor())).Bold(true).Render(".")
+		return []string{centerVisible(text+dot, width)}
+	}
 	palette := m.welcomePalette()
+	textPalette := cachedWelcomePalette(welcomePaletteKey{accent: m.theme.Assistant, highlight: m.theme.Assistant, dark: m.theme.Dark})
+	dotPalette := cachedWelcomePalette(welcomePaletteKey{accent: m.welcomeDotColor(), highlight: m.theme.Assistant, dark: m.theme.Dark})
 	frame := m.welcome.frame
 	if m.welcome.done {
 		frame = welcomeFrames
@@ -160,11 +208,23 @@ func (m model) renderWelcomeLogo(width int) []string {
 	for y := range height {
 		var line strings.Builder
 		line.Grow(len(welcomeLogo[0]) * 8)
-		previousColor := -1
+		previousColor := ""
 		for x := range len(welcomeLogo[0]) {
-			symbol, color := welcomeCell(x, y+top, frame, m.welcome.effect)
+			symbol, shade := welcomeCell(x, y+top, frame, m.welcome.effect)
+			color := palette[shade]
+			if symbol != ' ' && symbol == welcomeSymbol(x, y+top) {
+				// Keep the existing beam/rain colors, but resolve revealed cells
+				// into the shared wordmark colors. Finish the fade without a jump.
+				if shade < 10 {
+					shade += (10 - shade) * max(0, frame-(welcomeFrames-30)) / 30
+				}
+				color = textPalette[shade]
+				if x == welcomeCanvasWidth-1 {
+					color = dotPalette[shade]
+				}
+			}
 			if symbol != ' ' && color != previousColor {
-				line.WriteString(palette[color])
+				line.WriteString(color)
 				previousColor = color
 			}
 			line.WriteRune(symbol)
@@ -173,6 +233,14 @@ func (m model) renderWelcomeLogo(width int) []string {
 		lines[y] = centerVisible(line.String(), width)
 	}
 	return lines
+}
+
+func (m model) welcomeDotColor() string {
+	// Match the Web UI wordmark's orange punctuation in light and dark themes.
+	if m.theme.Dark {
+		return "#fe8019"
+	}
+	return "#d97757"
 }
 
 type welcomePaletteKey struct {
@@ -190,6 +258,10 @@ func (m model) welcomePalette() *[welcomePaletteSize]string {
 	if !key.matrix {
 		key.accent, key.highlight = m.theme.ComposerFlow, m.theme.Assistant
 	}
+	return cachedWelcomePalette(key)
+}
+
+func cachedWelcomePalette(key welcomePaletteKey) *[welcomePaletteSize]string {
 	welcomePalettes.Lock()
 	defer welcomePalettes.Unlock()
 	palette, ok := welcomePalettes.byKey[key]

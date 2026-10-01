@@ -159,41 +159,32 @@ func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {
 }
 
 func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
-	m := newModel(context.Background(), Config{})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
-	m.refreshViewport(true)
+	for _, style := range AvailableWelcomeStyles() {
+		t.Run(style, func(t *testing.T) {
+			m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: style, WelcomeEffect: "none"})
+			t.Cleanup(m.cancel)
+			m.width = 80
+			m.height = 24
+			m.resize()
+			m.refreshViewport(true)
 
-	view := xansi.Strip(m.View().Content)
-	lines := strings.Split(view, "\n")
-	messageLine := ""
-	hintLine := ""
-	messageIndex := -1
-	hintIndex := -1
-	for i, line := range lines {
-		if strings.Contains(line, "Hello! What would you like me to work on?") {
-			messageLine = line
-			messageIndex = i
-		}
-		if strings.Contains(line, "? for shortcuts") {
-			hintLine = line
-			hintIndex = i
-		}
+			view := xansi.Strip(m.View().Content)
+			assert.NotContains(t, view, "Hello!")
+			assert.Contains(t, view, "Ask kodelet...")
+			lines := strings.Split(view, "\n")
+			hintIndex := welcomeShortcutRow(t, m)
+			assert.Equal(t, tuiLeftMargin+(m.viewport.Width()-len("? for shortcuts"))/2, strings.Index(lines[hintIndex], "? for shortcuts"))
+			assert.Empty(t, strings.TrimSpace(lines[hintIndex-1]), "a blank row separates logo and hint")
+			assert.NotEmpty(t, strings.TrimSpace(lines[hintIndex-2]), "the logo is directly above the hint")
+			assert.Less(t, hintIndex, m.viewport.Height())
+			assert.Contains(t, lines[m.height-inputHeight-2], "╭", "composer stays at the bottom")
+			assert.Contains(t, lines[m.height-1], "╰")
+			assert.Equal(t, m.height, len(lines))
+
+			assistantStart, _ := styleSequences(assistantStyle)
+			assert.Contains(t, m.View().Content, assistantStart+"?")
+		})
 	}
-
-	assert.NotEmpty(t, messageLine)
-	assert.NotEmpty(t, hintLine)
-	messageStart := strings.Index(messageLine, "Hello!")
-	hintStart := strings.Index(hintLine, "? for shortcuts")
-	assert.Greater(t, messageStart, 10)
-	assert.Equal(t, messageStart, hintStart)
-	assert.Equal(t, messageIndex+3, hintIndex)
-
-	rawView := m.View().Content
-	assistantStart, _ := styleSequences(assistantStyle)
-	assert.Contains(t, rawView, assistantStart+"?")
 }
 
 func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {

@@ -37,7 +37,7 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 			assert.Equal(t, 20, m.welcome.frame, "elapsed time skips missed frames")
 			assert.NotNil(t, cmd)
 			assert.NotEqual(t, initial, m.View().Content)
-			assert.Contains(t, xansi.Strip(m.View().Content), "Hello! What would you like me to work on?")
+			assert.Contains(t, xansi.Strip(m.View().Content), "? for shortcuts")
 
 			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames * welcomeFrameInterval)))
 			m = updated.(model)
@@ -123,15 +123,19 @@ func TestWelcomeAnimationStaticFallbacks(t *testing.T) {
 		noColor string
 		term    string
 		compact bool
+		plain   bool
 	}{
-		{name: "narrow", width: 30, height: 24},
-		{name: "short", width: 80, height: 10},
+		{name: "narrow", width: 30, height: 24, plain: true},
+		{name: "short", width: 80, height: 10, plain: true},
+		{name: "plain", width: 80, height: 24, config: Config{WelcomeStyle: "plain"}, plain: true},
+		{name: "plain matrix", width: 80, height: 24, config: Config{WelcomeStyle: "plain", WelcomeEffect: "matrix"}, plain: true},
+		{name: "plain none", width: 80, height: 24, config: Config{WelcomeStyle: "plain", WelcomeEffect: "none"}, plain: true},
 		{name: "no color", width: 80, height: 24, noColor: "1", compact: true},
 		{name: "dumb terminal", width: 80, height: 24, term: "dumb", compact: true},
 		{name: "resume", width: 80, height: 24, config: Config{ConversationID: "saved"}},
 		{name: "none", width: 80, height: 24, config: Config{WelcomeEffect: "none"}, compact: true},
 		{name: "matrix no color", width: 80, height: 24, noColor: "1", config: Config{WelcomeEffect: "matrix"}, compact: true},
-		{name: "matrix narrow", width: 30, height: 24, config: Config{WelcomeEffect: "matrix"}},
+		{name: "matrix narrow", width: 30, height: 24, config: Config{WelcomeEffect: "matrix"}, plain: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("NO_COLOR", tt.noColor)
@@ -148,13 +152,21 @@ func TestWelcomeAnimationStaticFallbacks(t *testing.T) {
 				assert.Equal(t, welcomeLogoHeight, m.welcomeLogoRows())
 				assert.Len(t, m.renderWelcomeLogo(m.viewport.Width()), welcomeLogoHeight)
 			}
+			if tt.plain {
+				assert.True(t, m.welcomeLogoVisible())
+				assert.Equal(t, 1, m.welcomeLogoRows())
+				logo := m.renderWelcomeLogo(m.viewport.Width())
+				require.Len(t, logo, 1)
+				assert.Equal(t, "kodelet.", strings.TrimSpace(xansi.Strip(logo[0])))
+			}
 		})
 	}
 }
 
-func TestWelcomeGreetingStaysPutThroughStartup(t *testing.T) {
+func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
+		style   string
 		effect  string
 		noColor string
 		resumed bool
@@ -162,20 +174,22 @@ func TestWelcomeGreetingStaysPutThroughStartup(t *testing.T) {
 		{name: "beams", effect: DefaultWelcomeEffect},
 		{name: "matrix", effect: "matrix"},
 		{name: "none", effect: "none"},
+		{name: "plain", style: "plain", effect: "matrix"},
 		{name: "no color", effect: DefaultWelcomeEffect, noColor: "1"},
 		{name: "resumed", effect: DefaultWelcomeEffect, resumed: true},
 		{name: "resumed none", effect: "none", resumed: true},
+		{name: "resumed plain", style: "plain", resumed: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("NO_COLOR", tt.noColor)
 			t.Setenv("TERM", "xterm-256color")
-			m := newModel(t.Context(), Config{WelcomeEffect: tt.effect, Initialize: func(context.Context) (Config, error) {
+			m := newModel(t.Context(), Config{WelcomeStyle: tt.style, WelcomeEffect: tt.effect, Initialize: func(context.Context) (Config, error) {
 				return Config{}, nil
 			}})
 			t.Cleanup(m.cancel)
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 			m = updated.(model)
-			starting := welcomeGreetingRow(t, m)
+			starting := welcomeShortcutRow(t, m)
 
 			config := Config{Runner: &recordingRunner{}, Remote: true}
 			if tt.resumed {
@@ -183,26 +197,30 @@ func TestWelcomeGreetingStaysPutThroughStartup(t *testing.T) {
 			}
 			updated, _ = m.Update(initializedMsg{config: config})
 			m = updated.(model)
-			assert.Equal(t, starting, welcomeGreetingRow(t, m), "the greeting must not jump when startup finishes")
+			assert.Equal(t, starting, welcomeShortcutRow(t, m), "the shortcut must not jump when startup finishes")
+			if tt.style == "plain" {
+				assert.Equal(t, "plain", m.welcome.style, "daemon configuration must preserve the client's style")
+				assert.False(t, m.welcome.animated)
+			}
 			if tt.resumed {
 				assert.False(t, m.welcomeLogoVisible(), "resumed conversations keep blank space until history arrives")
 				return
 			}
 			require.True(t, m.welcomeLogoVisible())
 			m.finishWelcomeAnimation()
-			assert.Equal(t, starting, welcomeGreetingRow(t, m), "nor when the intro settles")
+			assert.Equal(t, starting, welcomeShortcutRow(t, m), "nor when the intro settles")
 		})
 	}
 }
 
-func welcomeGreetingRow(t *testing.T, m model) int {
+func welcomeShortcutRow(t *testing.T, m model) int {
 	t.Helper()
 	for row, line := range strings.Split(xansi.Strip(m.View().Content), "\n") {
-		if strings.Contains(line, "Hello! What would you like me to work on?") {
+		if strings.Contains(line, "? for shortcuts") {
 			return row
 		}
 	}
-	require.FailNow(t, "the greeting is not rendered")
+	require.FailNow(t, "the shortcut hint is not rendered")
 	return -1
 }
 
@@ -302,10 +320,10 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 				settled := strings.Join(m.renderWelcomeLogo(78), "\n")
 				assert.False(t, strings.ContainsAny(xansi.Strip(settled), "▂▁_▌▍▎▏"))
 				assert.NotEqual(t, animatedFrame, settled)
-				if effect == DefaultWelcomeEffect {
-					accent, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.ComposerFlow)))
-					assert.Equal(t, welcomeLogoHeight, strings.Count(settled, accent), "one accent span per settled row")
-				}
+				text, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Assistant)))
+				dot, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.welcomeDotColor())))
+				assert.Equal(t, welcomeLogoHeight, strings.Count(settled, text), "one text span per settled row")
+				assert.Equal(t, 1, strings.Count(settled, dot), "only the punctuation is orange")
 				m.welcome.animated = false
 				static := m.renderWelcomeLogo(78)
 				require.Len(t, static, welcomeLogoHeight, "static welcomes omit the empty rain rows")
@@ -324,6 +342,93 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 			assert.LessOrEqual(t, lipgloss.Width(line), size[0])
 		}
 	}
+}
+
+func TestWelcomeStyleSelection(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: "block"},
+		{input: " BLOCK ", want: "block"},
+		{input: " Plain ", want: "plain"},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			style, err := ParseWelcomeStyle(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, style)
+			m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: tt.input})
+			t.Cleanup(m.cancel)
+			assert.Equal(t, tt.want, m.welcome.style)
+			if tt.want == "plain" {
+				assert.False(t, m.welcome.animated)
+				assert.True(t, m.welcome.done)
+			}
+		})
+	}
+	assert.Equal(t, []string{"block", "plain"}, AvailableWelcomeStyles())
+	_, err := ParseWelcomeStyle("unknown")
+	require.ErrorContains(t, err, "available: block, plain")
+	err = Run(t.Context(), Config{Runner: &recordingRunner{}, WelcomeStyle: "unknown"})
+	require.ErrorContains(t, err, `unknown welcome style "unknown"`)
+}
+
+func TestWelcomePlainWordmarkUsesBrandColors(t *testing.T) {
+	for _, theme := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
+		t.Run(theme, func(t *testing.T) {
+			m := newModel(t.Context(), Config{Remote: true, Theme: theme, WelcomeStyle: "plain"})
+			t.Cleanup(m.cancel)
+			logo := m.renderWelcomeLogo(78)
+			require.Len(t, logo, 1)
+			assert.Equal(t, 78, lipgloss.Width(logo[0]))
+			assert.Equal(t, "kodelet.", strings.TrimSpace(xansi.Strip(logo[0])))
+			text := lipgloss.NewStyle().Foreground(themeColor(m.theme.Assistant)).Bold(true).Render("kodelet")
+			dot := lipgloss.NewStyle().Foreground(themeColor(m.welcomeDotColor())).Bold(true).Render(".")
+			assert.Contains(t, logo[0], text+dot)
+		})
+	}
+}
+
+func TestWelcomeResponsiveLayout(t *testing.T) {
+	for _, style := range AvailableWelcomeStyles() {
+		for _, effect := range AvailableWelcomeEffects() {
+			m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: style, WelcomeEffect: effect})
+			t.Cleanup(m.cancel)
+			for _, width := range []int{1, 7, 8, 30, welcomeCanvasWidth - 1, welcomeCanvasWidth, 80} {
+				for _, height := range []int{1, 2, 3, welcomeLogoHeight + 1, welcomeLogoHeight + 2, welcomeCanvasHeight + 1, welcomeCanvasHeight + 2, 24} {
+					m.viewport.SetWidth(width)
+					m.viewport.SetHeight(height)
+					lines := m.renderInitialMessage()
+					require.LessOrEqual(t, len(lines), height, "%s/%s: %dx%d", style, effect, width, height)
+					for _, line := range lines {
+						require.LessOrEqual(t, lipgloss.Width(line), width, "%s/%s: %dx%d", style, effect, width, height)
+					}
+					if width >= len("kodelet.") && height >= 3 && (style == "plain" || width < welcomeCanvasWidth || height < welcomeLogoHeight+2) {
+						assert.Contains(t, xansi.Strip(strings.Join(lines, "\n")), "kodelet.")
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestWelcomeFallbackDoesNotChangeSelectedStyle(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: "block"})
+	t.Cleanup(m.cancel)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
+	m = updated.(model)
+	assert.Equal(t, "block", m.welcome.style)
+	assert.Contains(t, xansi.Strip(m.viewport.View()), "kodelet.")
+	assert.True(t, m.welcome.done)
+
+	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(model)
+	assert.Nil(t, cmd, "growing the terminal must not replay the effect")
+	assert.Equal(t, "block", m.welcome.style)
+	assert.NotContains(t, xansi.Strip(m.viewport.View()), "kodelet.")
+	assert.Contains(t, xansi.Strip(m.viewport.View()), "█")
 }
 
 func TestWelcomeEffectSelection(t *testing.T) {

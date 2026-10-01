@@ -166,16 +166,8 @@ func (m model) renderInitialMessage() []string {
 	width = max(1, width)
 	height := max(1, m.viewport.Height())
 
-	messageText := fitVisible("Hello! What would you like me to work on?", width)
-	messageStart := max(0, (width-lipgloss.Width(messageText))/2)
-	message := renderPersistentStyle(assistantStyle, centerVisible(messageText, width))
-	shortcutHint := renderInitialShortcutHint(width, messageStart)
-	contentLines := []string{message}
-	if height >= 4 {
-		contentLines = append(contentLines, "", "", shortcutHint)
-	} else if height >= 2 {
-		contentLines = append(contentLines, shortcutHint)
-	}
+	shortcutStart := max(0, (width-len("? for shortcuts"))/2)
+	contentLines := []string{renderInitialShortcutHint(width, shortcutStart)}
 	switch rows := m.welcomeLogoRows(); {
 	case rows == 0:
 	case m.welcomeLogoVisible():

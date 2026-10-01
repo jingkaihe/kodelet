@@ -55,12 +55,17 @@ var chatCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		welcomeStyle, err := resolveWelcomeStyle(cmd)
+		if err != nil {
+			return err
+		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
 		return errors.Wrap(tui.Run(cmd.Context(), tui.Config{
 			Remote:        true,
 			Theme:         theme,
 			WelcomeEffect: welcomeEffect,
+			WelcomeStyle:  welcomeStyle,
 			Initialize: func(ctx context.Context) (tui.Config, error) {
 				return prepareDaemonChat(ctx, cmd)
 			},
@@ -71,6 +76,8 @@ var chatCmd = &cobra.Command{
 const (
 	welcomeEffectConfigKey = "welcome_effect"
 	welcomeEffectEnv       = "KODELET_WELCOME_EFFECT"
+	welcomeStyleConfigKey  = "welcome_style"
+	welcomeStyleEnv        = "KODELET_WELCOME_STYLE"
 )
 
 func resolveWelcomeEffect(cmd *cobra.Command) (string, error) {
@@ -85,6 +92,20 @@ func resolveWelcomeEffect(cmd *cobra.Command) (string, error) {
 	}
 	effect, err := tui.ParseWelcomeEffect(viper.GetString(welcomeEffectConfigKey))
 	return effect, errors.Wrapf(err, "invalid %s setting", welcomeEffectConfigKey)
+}
+
+func resolveWelcomeStyle(cmd *cobra.Command) (string, error) {
+	flag := cmd.Flags().Lookup("welcome-style")
+	if flag != nil && flag.Changed && strings.TrimSpace(flag.Value.String()) != "" {
+		style, err := tui.ParseWelcomeStyle(flag.Value.String())
+		return style, errors.Wrap(err, "invalid --welcome-style")
+	}
+	if environment := strings.TrimSpace(os.Getenv(welcomeStyleEnv)); environment != "" {
+		style, err := tui.ParseWelcomeStyle(environment)
+		return style, errors.Wrapf(err, "invalid %s", welcomeStyleEnv)
+	}
+	style, err := tui.ParseWelcomeStyle(viper.GetString(welcomeStyleConfigKey))
+	return style, errors.Wrapf(err, "invalid %s setting", welcomeStyleConfigKey)
 }
 
 func validateRemoteChatFlags(cmd *cobra.Command) error {
@@ -418,8 +439,14 @@ func init() {
 	chatCmd.Flags().String(
 		"welcome-effect",
 		"",
-		"TUI welcome effect (available: "+strings.Join(tui.AvailableWelcomeEffects(), ", ")+
+		"TUI welcome effect for block style (available: "+strings.Join(tui.AvailableWelcomeEffects(), ", ")+
 			"; defaults to "+welcomeEffectEnv+", the "+welcomeEffectConfigKey+" setting, or "+tui.DefaultWelcomeEffect+")",
+	)
+	chatCmd.Flags().String(
+		"welcome-style",
+		"",
+		"TUI welcome style (available: "+strings.Join(tui.AvailableWelcomeStyles(), ", ")+
+			"; plain disables animation; defaults to "+welcomeStyleEnv+", the "+welcomeStyleConfigKey+" setting, or "+tui.DefaultWelcomeStyle+")",
 	)
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")
