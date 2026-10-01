@@ -4,7 +4,20 @@ import "math/rand/v2"
 
 var welcomeMatrixSymbols = []rune(`2598Z*):."=+-¦|_ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ`)
 
-const welcomeMatrixRainEnd = 90
+const (
+	welcomeMatrixRainEnd     = 90
+	welcomeMatrixSettleFrame = welcomeFrames
+	welcomeMatrixFrames      = welcomeMatrixSettleFrame + 30
+)
+
+func (m model) welcomeMatrixLogoPalette(frame int) *[welcomePaletteSize]string {
+	return cachedWelcomePalette(welcomePaletteKey{
+		matrix:       true,
+		dark:         m.theme.Dark,
+		accent:       m.theme.Assistant,
+		matrixSettle: min(welcomeMatrixFrames-welcomeMatrixSettleFrame, max(0, frame-welcomeMatrixSettleFrame)),
+	})
+}
 
 type welcomeRainColumn struct {
 	start, delay, length int
@@ -50,11 +63,10 @@ func buildWelcomeMatrixColumns() [welcomeCanvasWidth]welcomeRainColumn {
 
 func welcomeMatrixCell(x, y, frame int, symbol rune) (rune, int) {
 	col := &welcomeMatrixColumns[x]
-	dx, dy := x-welcomeCanvasWidth/2, y-welcomeCanvasHeight/2
-	finalColor := 10 - min(6, max(dx, -dx)*4/(welcomeCanvasWidth/2)+max(dy, -dy))
 	if frame >= col.resolve[y] {
 		step := min(8, (frame-col.resolve[y])/3)
-		return symbol, 20 - (20-finalColor)*step/8
+		// Resolve into one steady green before the whole wordmark fades together.
+		return symbol, 20 - 10*step/8
 	}
 	if frame < col.start && frame < col.fillStart {
 		return ' ', 0

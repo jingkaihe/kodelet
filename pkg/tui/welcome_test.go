@@ -18,8 +18,10 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
 		t.Run(effect, func(t *testing.T) {
 			interval := welcomeFrameInterval
+			frames := welcomeMatrixFrames
 			if effect == welcomeEffectBeams {
 				interval = 10 * time.Millisecond
+				frames = welcomeFrames
 			}
 			t.Setenv("NO_COLOR", "")
 			t.Setenv("TERM", "xterm-256color")
@@ -46,14 +48,14 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 			canvasStart := (m.viewport.Height() - welcomeCanvasHeight - 2) / 2
 			assert.Equal(t, m.renderWelcomeLogo(m.viewport.Width()), m.renderInitialMessage()[canvasStart:canvasStart+welcomeCanvasHeight], "the hidden hint must not overwrite beam or rain cells")
 
-			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames*interval - time.Nanosecond)))
+			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(time.Duration(frames)*interval - time.Nanosecond)))
 			m = updated.(model)
 			assert.False(t, m.welcome.done, "keep animating through the final fade")
 			assert.NotNil(t, cmd)
 			before := strings.Split(xansi.Strip(m.View().Content), "\n")
 			assert.NotContains(t, strings.Join(before, "\n"), "? for shortcuts")
 
-			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames * interval)))
+			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(time.Duration(frames) * interval)))
 			m = updated.(model)
 			assert.True(t, m.welcome.done)
 			assert.Nil(t, cmd, "stop scheduling work after the final frame")
@@ -359,13 +361,13 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 				for _, row := range welcomeLogo {
 					assert.Len(t, row, welcomeCanvasWidth)
 				}
-				for frame := range welcomeFrames + 1 {
+				for frame := range m.welcome.frames() + 1 {
 					m.welcome.frame = frame
 					lines := m.renderWelcomeLogo(78)
 					require.Len(t, lines, welcomeCanvasHeight)
 					for y, line := range lines {
 						assert.Equal(t, 78, lipgloss.Width(line), "frame %d row %d", frame, y)
-						if frame == welcomeFrames {
+						if frame == m.welcome.frames() {
 							if y < welcomeLogoTop || y >= welcomeLogoTop+welcomeLogoHeight {
 								assert.Empty(t, strings.TrimSpace(xansi.Strip(line)))
 								continue
@@ -543,7 +545,7 @@ func TestWelcomeMatrixRainAndResolve(t *testing.T) {
 		filled = max(filled, col.fillStart+(welcomeCanvasHeight-1)*col.fillDelay)
 		for y := range welcomeCanvasHeight {
 			resolve = min(resolve, col.resolve[y])
-			assert.Less(t, col.resolve[y]+24, welcomeFrames, "resolve fades must finish before the timer stops")
+			assert.LessOrEqual(t, col.resolve[y]+24+15, welcomeMatrixSettleFrame, "hold the complete green wordmark for at least a quarter second before fading")
 			frame := col.start + y*col.delay
 			if frame >= welcomeMatrixRainEnd {
 				continue
@@ -562,7 +564,7 @@ func TestWelcomeMatrixRainAndResolve(t *testing.T) {
 			assert.NotEqual(t, ' ', glyph, "all columns fill before resolving")
 			want := welcomeSymbol(x, y)
 			for _, effect := range []string{"matrix", "none"} {
-				frame := welcomeFrames - 1
+				frame := welcomeMatrixFrames - 1
 				if effect == "none" {
 					frame = 0
 				}
@@ -575,6 +577,71 @@ func TestWelcomeMatrixRainAndResolve(t *testing.T) {
 	}
 }
 
+func TestWelcomeMatrixGreenHoldAndNeutralFade(t *testing.T) {
+	assert.Equal(t, 270, welcomeMatrixFrames, "Matrix lasts 4.5 seconds at 60 frames per second")
+	resolved := 0
+	for _, col := range welcomeMatrixColumns {
+		for _, frame := range col.resolve {
+			resolved = max(resolved, frame+24)
+		}
+	}
+	for _, theme := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
+		t.Run(theme, func(t *testing.T) {
+			t.Setenv("NO_COLOR", "")
+			t.Setenv("TERM", "xterm-256color")
+			m := newModel(t.Context(), Config{Remote: true, Theme: theme, WelcomeEffect: "matrix"})
+			t.Cleanup(m.cancel)
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m = updated.(model)
+			green := m.welcomePalette()
+			text, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Assistant)))
+			dot, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.welcomeDotColor())))
+			x, y := 0, welcomeLogoTop
+			for _, age := range []int{0, 12, 24} {
+				frame := welcomeMatrixColumns[x].resolve[y] + age
+				m.updateWelcomeAnimation(m.welcome.startedAt.Add(time.Duration(frame) * welcomeFrameInterval))
+				glyph, shade := welcomeMatrixCell(x, y, frame, welcomeSymbol(x, y))
+				assert.Contains(t, m.renderWelcomeLogo(78)[y], green[shade]+string(glyph), "letters remain green throughout their reveal")
+			}
+			var held string
+			for _, frame := range []int{resolved, welcomeMatrixSettleFrame} {
+				m.updateWelcomeAnimation(m.welcome.startedAt.Add(time.Duration(frame) * welcomeFrameInterval))
+				logo := strings.Join(m.renderWelcomeLogo(78), "\n")
+				assert.Equal(t, welcomeLogoHeight, strings.Count(logo, green[10]), "hold a uniform green logo after all rain resolves")
+				assert.Equal(t, 1, strings.Count(logo, dot))
+				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
+				if held != "" {
+					assert.Equal(t, held, logo, "the hold must not shimmer")
+				}
+				held = logo
+			}
+			midpoint := (welcomeMatrixSettleFrame + welcomeMatrixFrames) / 2
+			m.updateWelcomeAnimation(m.welcome.startedAt.Add(time.Duration(midpoint) * welcomeFrameInterval))
+			middle := m.welcomeMatrixLogoPalette(midpoint)
+			assert.Same(t, middle, m.welcomeMatrixLogoPalette(midpoint), "reuse cached fade colors")
+			assert.NotEqual(t, green[10], middle[10])
+			assert.NotEqual(t, text, middle[10], "blend smoothly rather than snapping to neutral")
+			logo := strings.Join(m.renderWelcomeLogo(78), "\n")
+			assert.Equal(t, welcomeLogoHeight, strings.Count(logo, middle[10]), "the entire wordmark fades together")
+			assert.Equal(t, 1, strings.Count(logo, dot), "the orange dot does not fade to neutral")
+			assert.Equal(t, xansi.Strip(held), xansi.Strip(logo), "fading must not change geometry")
+			assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts", "wait for the final fade")
+			assert.Equal(t, text, m.welcomeMatrixLogoPalette(welcomeMatrixFrames)[10], "the last fade color matches the resting theme")
+			interrupted := m
+			updated, _ = interrupted.Update(textKeyPress("hello"))
+			interrupted = updated.(model)
+			assert.True(t, interrupted.welcome.done)
+			assert.Equal(t, "hello", interrupted.textarea.Value())
+			assert.Nil(t, m.updateWelcomeAnimation(m.welcome.startedAt.Add(welcomeMatrixFrames*welcomeFrameInterval)))
+			settled := strings.Join(m.renderWelcomeLogo(78), "\n")
+			assert.Equal(t, settled, strings.Join(interrupted.renderWelcomeLogo(78), "\n"), "input skips directly to the neutral resting wordmark")
+			assert.Equal(t, welcomeLogoHeight, strings.Count(settled, text))
+			assert.Equal(t, 1, strings.Count(settled, dot))
+			assert.Contains(t, xansi.Strip(m.View().Content), "? for shortcuts")
+		})
+	}
+}
+
 func BenchmarkWelcomeFrame(b *testing.B) {
 	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
 		b.Run(effect, func(b *testing.B) {
@@ -584,7 +651,7 @@ func BenchmarkWelcomeFrame(b *testing.B) {
 			m.welcome.effect, m.welcome.animated = effect, true
 			b.ReportAllocs()
 			for i := 0; b.Loop(); i++ {
-				m.welcome.frame = i % welcomeFrames
+				m.welcome.frame = i % m.welcome.frames()
 				m.renderWelcomeLogo(78)
 			}
 		})

@@ -181,7 +181,7 @@ kodelet chat -r CONVERSATION_ID        # short form
 kodelet chat --theme catppuccin-mocha   # force the bundled dark theme
 kodelet chat --theme catppuccin-latte   # force the bundled light theme
 kodelet chat --theme tokyo-night        # select another bundled theme
-kodelet chat --welcome-effect matrix    # reveal the wordmark with falling characters
+kodelet chat --welcome-effect matrix    # green rain, then a theme-colored wordmark
 kodelet chat --welcome-effect none      # show a static welcome without animation
 kodelet chat --welcome-style plain      # show a small text wordmark without animation
 kodelet chat --profile openai --reasoning-effort high
