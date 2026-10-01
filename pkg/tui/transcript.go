@@ -167,18 +167,23 @@ func (m model) renderInitialMessage() []string {
 	height := max(1, m.viewport.Height())
 
 	shortcutStart := max(0, (width-len("? for shortcuts"))/2)
-	contentLines := []string{renderInitialShortcutHint(width, shortcutStart)}
-	if m.welcome.animated && !m.welcome.done && m.welcomeLogoRows() == welcomeCanvasHeight {
-		// Reserve the hint's row, including during startup, so the reveal never
-		// flashes the hint early or shifts the logo and composer when it finishes.
-		contentLines[0] = ""
-	}
-	switch rows := m.welcomeLogoRows(); {
+	rows := m.welcomeLogoRows()
+	contentLines := []string{""}
+	switch {
 	case rows == 0:
 	case m.welcomeLogoVisible():
-		contentLines = append(append(m.renderWelcomeLogo(width), ""), contentLines...)
+		contentLines = append(m.renderWelcomeLogo(width), "", "")
 	case m.welcomeLogoPending():
-		contentLines = append(make([]string, rows+1), contentLines...)
+		contentLines = make([]string, rows+2)
+	}
+	hintRow := len(contentLines) - 1
+	if rows == welcomeCanvasHeight && len(contentLines) > 1 {
+		// Use the canvas padding below the visible logo, without shrinking the
+		// reserved animation area or moving the logo when the hint appears.
+		hintRow = welcomeLogoTop + welcomeLogoHeight + 1
+	}
+	if !m.welcome.animated || m.welcome.done || rows != welcomeCanvasHeight {
+		contentLines[hintRow] = renderInitialShortcutHint(width, shortcutStart)
 	}
 
 	lines := make([]string, 0, height)

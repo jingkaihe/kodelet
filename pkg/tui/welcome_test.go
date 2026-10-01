@@ -43,6 +43,8 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 			assert.NotNil(t, cmd)
 			assert.NotEqual(t, initial, m.View().Content)
 			assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
+			canvasStart := (m.viewport.Height() - welcomeCanvasHeight - 2) / 2
+			assert.Equal(t, m.renderWelcomeLogo(m.viewport.Width()), m.renderInitialMessage()[canvasStart:canvasStart+welcomeCanvasHeight], "the hidden hint must not overwrite beam or rain cells")
 
 			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames*interval - time.Nanosecond)))
 			m = updated.(model)
@@ -59,6 +61,9 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 			hintRow := welcomeShortcutRow(t, m)
 			assert.Empty(t, strings.TrimSpace(before[hintRow]), "the hidden hint reserves a blank row")
 			after := strings.Split(xansi.Strip(settled), "\n")
+			assert.Empty(t, strings.TrimSpace(after[hintRow-1]), "one blank row separates logo and hint")
+			assert.NotEmpty(t, strings.TrimSpace(after[hintRow-2]), "place the hint below the visible logo, not the animation canvas")
+			assert.Equal(t, before[:hintRow], after[:hintRow], "revealing the hint must not move the logo")
 			assert.Equal(t, before[hintRow+1:], after[hintRow+1:], "revealing the hint must not move the composer")
 			updated, cmd = m.Update(welcomeTickMsg(time.Now()))
 			m = updated.(model)
@@ -208,11 +213,15 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			t.Cleanup(m.cancel)
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 			m = updated.(model)
-			starting := len(m.renderInitialMessage()) - 1
+			starting := len(m.renderInitialMessage())
+			hintRow := starting - 1
+			if m.welcomeLogoRows() == welcomeCanvasHeight {
+				hintRow -= welcomeCanvasHeight - welcomeLogoTop - welcomeLogoHeight
+			}
 			if m.welcome.animated {
 				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts", "do not flash the hint before the animation starts")
 			} else {
-				assert.Equal(t, starting, welcomeShortcutRow(t, m))
+				assert.Equal(t, hintRow, welcomeShortcutRow(t, m))
 			}
 
 			config := Config{Runner: &recordingRunner{}, Remote: true}
@@ -221,9 +230,9 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			}
 			updated, _ = m.Update(initializedMsg{config: config})
 			m = updated.(model)
-			assert.Equal(t, starting, len(m.renderInitialMessage())-1, "keep the same row reserved through startup")
+			assert.Equal(t, starting, len(m.renderInitialMessage()), "keep the same area reserved through startup")
 			if m.welcome.done {
-				assert.Equal(t, starting, welcomeShortcutRow(t, m))
+				assert.Equal(t, hintRow, welcomeShortcutRow(t, m))
 			} else {
 				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
 			}
@@ -237,7 +246,7 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			}
 			require.True(t, m.welcomeLogoVisible())
 			m.finishWelcomeAnimation()
-			assert.Equal(t, starting, welcomeShortcutRow(t, m), "nor when the intro settles")
+			assert.Equal(t, hintRow, welcomeShortcutRow(t, m), "the hint appears in the reserved row when the intro settles")
 		})
 	}
 }
