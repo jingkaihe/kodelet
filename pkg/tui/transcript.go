@@ -168,6 +168,11 @@ func (m model) renderInitialMessage() []string {
 
 	shortcutStart := max(0, (width-len("? for shortcuts"))/2)
 	contentLines := []string{renderInitialShortcutHint(width, shortcutStart)}
+	if m.welcome.animated && !m.welcome.done && m.welcomeLogoRows() == welcomeCanvasHeight {
+		// Reserve the hint's row, including during startup, so the reveal never
+		// flashes the hint early or shifts the logo and composer when it finishes.
+		contentLines[0] = ""
+	}
 	switch rows := m.welcomeLogoRows(); {
 	case rows == 0:
 	case m.welcomeLogoVisible():

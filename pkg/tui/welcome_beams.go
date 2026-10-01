@@ -1,6 +1,37 @@
 package tui
 
-import "math/rand/v2"
+import (
+	"fmt"
+	"math/rand/v2"
+	"time"
+)
+
+const (
+	// Advance the effect faster without increasing the terminal's repaint rate.
+	welcomeBeamFrameInterval = 10 * time.Millisecond
+	welcomeBeamSettleFrame   = welcomeFrames - 16
+)
+
+func welcomeBeamGradient(dark bool) [3]string {
+	if dark {
+		return [3]string{"#8a008a", "#00d1ff", "#ffffff"}
+	}
+	// White beam tips disappear on light backgrounds; use ink and deeper cyan.
+	return [3]string{"#8a008a", "#007c91", "#173b6c"}
+}
+
+func (m model) welcomeBeamLogoPalette(y, frame int, finalColor string) *[welcomePaletteSize]string {
+	stops := welcomeBeamGradient(m.theme.Dark)
+	position := float64(y-welcomeLogoTop) * 2 / float64(welcomeLogoHeight-1)
+	c := welcomeBlend(themeColor(stops[2]), themeColor(stops[1]), min(1, position))
+	if position > 1 {
+		c = welcomeBlend(themeColor(stops[1]), themeColor(stops[0]), position-1)
+	}
+	settle := float64(min(welcomeFrames-welcomeBeamSettleFrame, max(0, frame-welcomeBeamSettleFrame))) / float64(welcomeFrames-welcomeBeamSettleFrame)
+	c = welcomeBlend(c, themeColor(finalColor), settle)
+	accent := fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+	return cachedWelcomePalette(welcomePaletteKey{accent: accent, highlight: accent, dark: m.theme.Dark})
+}
 
 type welcomeBeamHit struct {
 	frame  int
@@ -107,10 +138,10 @@ func welcomeBeamCell(x, y, frame int, symbol rune) (rune, int) {
 		step := age / 2
 		if hit.column {
 			glyphs := [...]rune{'▌', '▌', '▌', '▍', '▍', '▍', '▎', '▎', '▏', '▏'}
-			return glyphs[step], 20 - step
+			return glyphs[step], 20 - step*2
 		}
 		glyphs := [...]rune{'▂', '▂', '▂', '▂', '▁', '▁', '▁', '_', '_', '_'}
-		return glyphs[step], 20 - step
+		return glyphs[step], 20 - step*2
 	}
 	return symbol, max(0, 10-(age-20)/2)
 }

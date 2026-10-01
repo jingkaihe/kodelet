@@ -17,6 +17,10 @@ import (
 func TestWelcomeAnimationLifecycle(t *testing.T) {
 	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
 		t.Run(effect, func(t *testing.T) {
+			interval := welcomeFrameInterval
+			if effect == welcomeEffectBeams {
+				interval = 10 * time.Millisecond
+			}
 			t.Setenv("NO_COLOR", "")
 			t.Setenv("TERM", "xterm-256color")
 			m := newModel(t.Context(), Config{Remote: true, Theme: DefaultThemeName, WelcomeEffect: effect})
@@ -31,19 +35,31 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 			assert.False(t, m.welcome.startedAt.IsZero())
 			assert.Nil(t, m.startWelcomeAnimation(), "do not create duplicate tick chains")
 			initial := m.View().Content
+			assert.NotContains(t, xansi.Strip(initial), "? for shortcuts")
 
-			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(20 * welcomeFrameInterval)))
+			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(20 * interval)))
 			m = updated.(model)
 			assert.Equal(t, 20, m.welcome.frame, "elapsed time skips missed frames")
 			assert.NotNil(t, cmd)
 			assert.NotEqual(t, initial, m.View().Content)
-			assert.Contains(t, xansi.Strip(m.View().Content), "? for shortcuts")
+			assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
 
-			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames * welcomeFrameInterval)))
+			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames*interval - time.Nanosecond)))
+			m = updated.(model)
+			assert.False(t, m.welcome.done, "keep animating through the final fade")
+			assert.NotNil(t, cmd)
+			before := strings.Split(xansi.Strip(m.View().Content), "\n")
+			assert.NotContains(t, strings.Join(before, "\n"), "? for shortcuts")
+
+			updated, cmd = m.Update(welcomeTickMsg(m.welcome.startedAt.Add(welcomeFrames * interval)))
 			m = updated.(model)
 			assert.True(t, m.welcome.done)
 			assert.Nil(t, cmd, "stop scheduling work after the final frame")
 			settled := m.View().Content
+			hintRow := welcomeShortcutRow(t, m)
+			assert.Empty(t, strings.TrimSpace(before[hintRow]), "the hidden hint reserves a blank row")
+			after := strings.Split(xansi.Strip(settled), "\n")
+			assert.Equal(t, before[hintRow+1:], after[hintRow+1:], "revealing the hint must not move the composer")
 			updated, cmd = m.Update(welcomeTickMsg(time.Now()))
 			m = updated.(model)
 			assert.Nil(t, cmd, "stale ticks must not restart the effect")
@@ -73,6 +89,7 @@ func TestWelcomeAnimationInputIsNotConsumed(t *testing.T) {
 				updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 				m = updated.(model)
 				require.False(t, m.welcome.done)
+				assert.NotContains(t, xansi.Strip(m.viewport.View()), "? for shortcuts")
 
 				updated, _ = m.Update(tt.msg)
 				m = updated.(model)
@@ -80,6 +97,7 @@ func TestWelcomeAnimationInputIsNotConsumed(t *testing.T) {
 				assert.Equal(t, tt.want, m.textarea.Value())
 				assert.Equal(t, tt.name == "shortcuts", m.shortcutsOpen)
 				assert.Nil(t, m.updateWelcomeAnimation(time.Now()))
+				assert.Contains(t, xansi.Strip(m.viewport.View()), "? for shortcuts", "interrupting the effect reveals the hint immediately")
 			})
 		}
 	}
@@ -147,6 +165,7 @@ func TestWelcomeAnimationStaticFallbacks(t *testing.T) {
 			assert.True(t, m.welcome.done)
 			assert.True(t, m.welcome.startedAt.IsZero())
 			assert.Nil(t, m.startWelcomeAnimation())
+			assert.Contains(t, xansi.Strip(m.View().Content), "? for shortcuts", "static and compact welcomes show the hint immediately")
 			if tt.compact {
 				assert.True(t, m.welcomeLogoVisible())
 				assert.Equal(t, welcomeLogoHeight, m.welcomeLogoRows())
@@ -189,7 +208,12 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			t.Cleanup(m.cancel)
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 			m = updated.(model)
-			starting := welcomeShortcutRow(t, m)
+			starting := len(m.renderInitialMessage()) - 1
+			if m.welcome.animated {
+				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts", "do not flash the hint before the animation starts")
+			} else {
+				assert.Equal(t, starting, welcomeShortcutRow(t, m))
+			}
 
 			config := Config{Runner: &recordingRunner{}, Remote: true}
 			if tt.resumed {
@@ -197,7 +221,12 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			}
 			updated, _ = m.Update(initializedMsg{config: config})
 			m = updated.(model)
-			assert.Equal(t, starting, welcomeShortcutRow(t, m), "the shortcut must not jump when startup finishes")
+			assert.Equal(t, starting, len(m.renderInitialMessage())-1, "keep the same row reserved through startup")
+			if m.welcome.done {
+				assert.Equal(t, starting, welcomeShortcutRow(t, m))
+			} else {
+				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
+			}
 			if tt.style == "plain" {
 				assert.Equal(t, "plain", m.welcome.style, "daemon configuration must preserve the client's style")
 				assert.False(t, m.welcome.animated)
@@ -229,8 +258,10 @@ func TestWelcomePaletteIsCachedPerThemeAndEffect(t *testing.T) {
 	m.welcome.effect = DefaultWelcomeEffect
 	palette := m.welcomePalette()
 	assert.Same(t, palette, m.welcomePalette(), "frames must reuse the resolved palette")
-	accent, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.ComposerFlow)))
-	assert.Equal(t, accent, palette[10])
+	for i, hex := range map[int]string{0: "#8a008a", 10: "#00d1ff", 20: "#ffffff"} {
+		color, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(hex)))
+		assert.Equal(t, color, palette[i], "beams need distinct tails, bodies, and tips")
+	}
 
 	m.welcome.effect = "matrix"
 	assert.NotSame(t, palette, m.welcomePalette(), "matrix has its own colors")
@@ -239,8 +270,40 @@ func TestWelcomePaletteIsCachedPerThemeAndEffect(t *testing.T) {
 	m.theme = themes[LightThemeName]
 	light := m.welcomePalette()
 	assert.NotSame(t, palette, light)
-	lightAccent, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.ComposerFlow)))
-	assert.Equal(t, lightAccent, light[10], "switching themes must not reuse stale colors")
+	for i, hex := range map[int]string{0: "#8a008a", 10: "#007c91", 20: "#173b6c"} {
+		color, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(hex)))
+		assert.Equal(t, color, light[i], "light backgrounds need darker beams, not white tips")
+	}
+}
+
+func TestWelcomeBeamColorRevealAndSettle(t *testing.T) {
+	for _, theme := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
+		t.Run(theme, func(t *testing.T) {
+			m := newModel(t.Context(), Config{Remote: true, Theme: theme})
+			t.Cleanup(m.cancel)
+			m.welcome.animated, m.welcome.done = true, false
+			m.welcome.frame = welcomeBeamSettleFrame
+			lines := m.renderWelcomeLogo(78)
+			rowColors := map[string]bool{}
+			for y := welcomeLogoTop; y < welcomeLogoTop+welcomeLogoHeight; y++ {
+				palette := m.welcomeBeamLogoPalette(y, welcomeBeamSettleFrame, m.theme.Assistant)
+				assert.Same(t, palette, m.welcomeBeamLogoPalette(y, 0, m.theme.Assistant), "retain the gradient until the entire wipe completes")
+				assert.Contains(t, lines[y], palette[10], "the actual renderer must use the colored reveal")
+				rowColors[palette[10]] = true
+				for _, finalColor := range []string{m.theme.Assistant, m.welcomeDotColor()} {
+					start := m.welcomeBeamLogoPalette(y, welcomeBeamSettleFrame, finalColor)
+					middle := m.welcomeBeamLogoPalette(y, (welcomeBeamSettleFrame+welcomeFrames)/2, finalColor)
+					end := m.welcomeBeamLogoPalette(y, welcomeFrames, finalColor)
+					assert.Equal(t, palette, start, "even the dot remains colored until the settle")
+					assert.NotEqual(t, start[10], middle[10], "fade rather than snapping to brand colors")
+					assert.NotEqual(t, middle[10], end[10])
+					want, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(finalColor)))
+					assert.Equal(t, want, end[10])
+				}
+			}
+			assert.Len(t, rowColors, welcomeLogoHeight, "the reveal needs a spatial gradient, not a flat accent")
+		})
+	}
 }
 
 func TestWelcomeAnimationStopsWhenLeavingWelcome(t *testing.T) {
@@ -520,6 +583,7 @@ func BenchmarkWelcomeFrame(b *testing.B) {
 }
 
 func TestWelcomeBeamSchedule(t *testing.T) {
+	assert.Equal(t, 2400*time.Millisecond, welcomeFrames*welcomeBeamFrameInterval)
 	assert.Equal(t, welcomeBeams, buildWelcomeBeamSchedule(), "the activation schedule must be reproducible")
 	var rows, columns [welcomeCanvasHeight][welcomeCanvasWidth]int
 	lastHit := 0
@@ -541,7 +605,7 @@ func TestWelcomeBeamSchedule(t *testing.T) {
 		}
 	}
 	assert.Equal(t, lastHit+42, welcomeBeams.wipeStart, "the wipe must wait for the last complete scene")
-	assert.Less(t, welcomeBeams.wipeStart+(welcomeCanvasWidth+welcomeCanvasHeight-2)/3+40, welcomeFrames)
+	assert.LessOrEqual(t, welcomeBeams.wipeStart+(welcomeCanvasWidth+welcomeCanvasHeight-2)/3+40, welcomeBeamSettleFrame, "finish the colored wipe before fading to the quiet wordmark")
 
 	rowForward, rowReverse, columnForward, columnReverse := false, false, false, false
 	for y := range welcomeCanvasHeight {
@@ -575,6 +639,7 @@ func TestWelcomeBeamSchedule(t *testing.T) {
 
 func TestWelcomeBeamFrameBoundsAndSettle(t *testing.T) {
 	seen := map[rune]bool{}
+	beamColors := map[int]bool{}
 	for frame := -1; frame <= welcomeFrames; frame++ {
 		for y := range welcomeCanvasHeight {
 			for x := range welcomeCanvasWidth {
@@ -584,6 +649,9 @@ func TestWelcomeBeamFrameBoundsAndSettle(t *testing.T) {
 				require.LessOrEqual(t, color, 20, "frame %d cell (%d,%d)", frame, x, y)
 				require.Equal(t, 1, lipgloss.Width(string(glyph)), "frame %d cell (%d,%d)", frame, x, y)
 				seen[glyph] = true
+				if glyph != final && glyph != ' ' {
+					beamColors[color] = true
+				}
 				if frame < welcomeBeams.hits[y][x][0].frame {
 					assert.Equal(t, ' ', glyph, "cells must remain hidden before their first sweep")
 				}
@@ -600,6 +668,9 @@ func TestWelcomeBeamFrameBoundsAndSettle(t *testing.T) {
 	}
 	for _, glyph := range "▂▁_▌▍▎▏" {
 		assert.True(t, seen[glyph], "the animation must display thinning glyph %q", glyph)
+	}
+	for _, shade := range []int{20, 10, 2} {
+		assert.True(t, beamColors[shade], "moving trails must span the palette, not just its brightest half")
 	}
 }
 

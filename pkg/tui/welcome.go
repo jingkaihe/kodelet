@@ -178,7 +178,11 @@ func (m *model) updateWelcomeAnimation(now time.Time) tea.Cmd {
 		m.finishWelcomeAnimation()
 		return nil
 	}
-	m.welcome.frame = max(0, int(now.Sub(m.welcome.startedAt)/welcomeFrameInterval))
+	interval := welcomeFrameInterval
+	if m.welcome.effect == welcomeEffectBeams {
+		interval = welcomeBeamFrameInterval
+	}
+	m.welcome.frame = max(0, int(now.Sub(m.welcome.startedAt)/interval))
 	if m.welcome.frame >= welcomeFrames {
 		m.finishWelcomeAnimation()
 		return nil
@@ -206,6 +210,13 @@ func (m model) renderWelcomeLogo(width int) []string {
 	}
 	lines := make([]string, height)
 	for y := range height {
+		logoPalette, punctuationPalette := textPalette, dotPalette
+		if m.welcome.effect == welcomeEffectBeams && frame < welcomeFrames && y+top >= welcomeLogoTop && y+top < welcomeLogoTop+welcomeLogoHeight {
+			logoPalette = m.welcomeBeamLogoPalette(y+top, frame, m.theme.Assistant)
+			if y+top == welcomeLogoTop+welcomeLogoHeight-1 {
+				punctuationPalette = m.welcomeBeamLogoPalette(y+top, frame, m.welcomeDotColor())
+			}
+		}
 		var line strings.Builder
 		line.Grow(len(welcomeLogo[0]) * 8)
 		previousColor := ""
@@ -213,14 +224,14 @@ func (m model) renderWelcomeLogo(width int) []string {
 			symbol, shade := welcomeCell(x, y+top, frame, m.welcome.effect)
 			color := palette[shade]
 			if symbol != ' ' && symbol == welcomeSymbol(x, y+top) {
-				// Keep the existing beam/rain colors, but resolve revealed cells
-				// into the shared wordmark colors. Finish the fade without a jump.
-				if shade < 10 {
+				// Matrix's uneven reveal finishes at the shared wordmark brightness.
+				// Beams retain their gradient until the diagonal wipe has finished.
+				if m.welcome.effect == welcomeEffectMatrix && shade < 10 {
 					shade += (10 - shade) * max(0, frame-(welcomeFrames-30)) / 30
 				}
-				color = textPalette[shade]
+				color = logoPalette[shade]
 				if x == welcomeCanvasWidth-1 {
-					color = dotPalette[shade]
+					color = punctuationPalette[shade]
 				}
 			}
 			if symbol != ' ' && color != previousColor {
@@ -244,8 +255,8 @@ func (m model) welcomeDotColor() string {
 }
 
 type welcomePaletteKey struct {
-	accent, highlight string
-	dark, matrix      bool
+	dim, accent, highlight string
+	dark, matrix           bool
 }
 
 var welcomePalettes = struct {
@@ -255,7 +266,10 @@ var welcomePalettes = struct {
 
 func (m model) welcomePalette() *[welcomePaletteSize]string {
 	key := welcomePaletteKey{dark: m.theme.Dark, matrix: m.welcome.effect == welcomeEffectMatrix}
-	if !key.matrix {
+	if m.welcome.effect == welcomeEffectBeams {
+		stops := welcomeBeamGradient(m.theme.Dark)
+		key.dim, key.accent, key.highlight = stops[0], stops[1], stops[2]
+	} else if !key.matrix {
 		key.accent, key.highlight = m.theme.ComposerFlow, m.theme.Assistant
 	}
 	return cachedWelcomePalette(key)
@@ -286,6 +300,9 @@ func buildWelcomePalette(key welcomePaletteKey) *[welcomePaletteSize]string {
 			background = color.White
 		}
 		dim = welcomeBlend(background, accent, 0.3)
+		if key.dim != "" {
+			dim = themeColor(key.dim)
+		}
 	}
 	var palette [welcomePaletteSize]string
 	for i := range palette {

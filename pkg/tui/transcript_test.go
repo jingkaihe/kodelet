@@ -1134,7 +1134,7 @@ func TestApplyPatchGroupsRenderPartialDiffAndErrorOnFailure(t *testing.T) {
 }
 
 func TestRenderTranscriptShowsQueuedSteeringErrorOnEmptyTranscript(t *testing.T) {
-	m := newModel(context.Background(), Config{})
+	m := newModel(context.Background(), Config{WelcomeEffect: "none"})
 	t.Cleanup(m.cancel)
 	m.width = 80
 	m.height = 24
