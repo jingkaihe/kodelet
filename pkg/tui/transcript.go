@@ -171,6 +171,9 @@ func (m model) renderInitialMessage() []string {
 	contentLines := []string{""}
 	switch {
 	case rows == 0:
+	case m.welcomeLogoVisible() && m.welcomeSpin.active():
+		rows = welcomeCanvasHeight
+		contentLines = append(m.renderWelcomeSpin(width, rows, m.welcomeSpin.elapsed), "", "")
 	case m.welcomeLogoVisible():
 		contentLines = append(m.renderWelcomeLogo(width), "", "")
 	case m.welcomeLogoPending():
@@ -182,7 +185,7 @@ func (m model) renderInitialMessage() []string {
 		// reserved animation area or moving the logo when the hint appears.
 		hintRow = welcomeLogoTop + welcomeLogoHeight + 1
 	}
-	if !m.welcome.animated || m.welcome.done || rows != welcomeCanvasHeight {
+	if !m.welcomeSpin.active() && (!m.welcome.animated || m.welcome.done || rows != welcomeCanvasHeight) {
 		contentLines[hintRow] = renderInitialShortcutHint(width, shortcutStart)
 	}
 

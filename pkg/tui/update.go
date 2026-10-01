@@ -64,6 +64,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case tea.KeyPressMsg, tea.PasteMsg:
 		m.finishWelcomeAnimation()
+		m.stopWelcomeSpin()
 	}
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
 	if key, ok := msg.(tea.KeyPressMsg); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.modelPickerOpen && !m.infoDialogOpen() && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(key.String()) {
@@ -102,10 +103,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case welcomeTickMsg:
 		return m, m.updateWelcomeAnimation(time.Time(msg))
 
+	case welcomeSpinTickMsg:
+		return m, m.updateWelcomeSpin(msg)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+		if m.welcomeSpin.active() && !m.welcomeSpinAvailable() {
+			m.stopWelcomeSpin()
+		}
 		cmds = append(cmds, m.startWelcomeAnimation())
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)
@@ -992,6 +999,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
+			}
+			if mouse.Mod == 0 && m.welcomeLogoContains(mouse.X, mouse.Y) {
+				return m, m.toggleWelcomeSpin()
 			}
 			if m.toggleDetailAt(mouse.Y) {
 				m.refreshViewport(false)

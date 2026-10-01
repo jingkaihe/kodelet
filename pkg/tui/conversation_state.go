@@ -119,6 +119,7 @@ func (m *model) activateConversation(key string) (bool, tea.Cmd) {
 
 	m.saveActiveConversationPresentation()
 	m.welcome.done = true
+	m.welcomeSpin = welcomeSpinAnimation{}
 	m.activeConversationKey = state.key
 	m.conversationState = state
 	state.unread = false
