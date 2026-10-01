@@ -1001,7 +1001,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if mouse.Mod == 0 && m.welcomeLogoContains(mouse.X, mouse.Y) {
-				return m, m.toggleWelcomeSpin()
+				return m, m.playWelcomeParticles(mouse.X, mouse.Y)
 			}
 			if m.toggleDetailAt(mouse.Y) {
 				m.refreshViewport(false)

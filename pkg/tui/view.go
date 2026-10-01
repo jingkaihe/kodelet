@@ -41,6 +41,10 @@ var tuiFlowFrames = []string{
 }
 
 func (m *model) refreshViewport(scrollBottom bool) {
+	// Settled particles have no ticking command to notice a hidden welcome.
+	if m.welcomeSpin.active() && !m.welcomeSpinAvailable() {
+		m.welcomeSpin = welcomeSpinAnimation{}
+	}
 	spinnerFrames := m.spinner.Spinner.Frames
 	placeholderFrames := make([]string, len(spinnerFrames))
 	for i := range placeholderFrames {
@@ -59,6 +63,9 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	if scrollBottom {
 		m.autoFollow = true
 		m.viewport.GotoBottom()
+	}
+	if m.welcomeLogoVisible() {
+		m.viewport.GotoTop() // Keep the fixed canvas visible even in a short terminal.
 	}
 }
 

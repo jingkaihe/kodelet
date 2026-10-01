@@ -172,8 +172,10 @@ func (m model) renderInitialMessage() []string {
 	switch {
 	case rows == 0:
 	case m.welcomeLogoVisible() && m.welcomeSpin.active():
-		rows = welcomeCanvasHeight
-		contentLines = append(m.renderWelcomeSpin(width, rows, m.welcomeSpin.elapsed), "", "")
+		rows = m.welcomeParticleRows()
+		yaw, phase := m.welcomeSpin.pose()
+		canvas := rasterWelcomeParticles(m.welcomeSpin.particles, m.welcomeSpin.elapsed, rows, yaw, phase)
+		contentLines = append(m.renderWelcomeSpinCanvas(width, rows, canvas), "", "")
 	case m.welcomeLogoVisible():
 		contentLines = append(m.renderWelcomeLogo(width), "", "")
 	case m.welcomeLogoPending():
