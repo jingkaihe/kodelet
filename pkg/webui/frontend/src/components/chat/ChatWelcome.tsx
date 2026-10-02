@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
 const greeting = 'Hello! What would you like me to work on?';
-const columns = 64;
+// Match the TUI's largest Braille raster, including its dot density.
+const columns = 78;
 const rows = 24;
-const scale = 3.4;
+const scale = 4;
 const frameInterval = 1000 / 30;
 const turnDuration = 6000;
 const impulseDuration = 1500;
@@ -18,17 +19,24 @@ type Particle = { x: number; y: number; z: number; edge: boolean; accent: boolea
 type Impulse = { at: number; x: number; y: number };
 
 function createParticles(): Particle[] {
-  // Follow the favicon's strokes and spacing without the TUI's extra gap for
-  // terminal downsampling. Two faces keep the mark readable through a full turn.
+  // Keep the silhouette in sync with pkg/tui/welcome_particles.go.
+  // Two faces keep the mark readable through a full turn.
+  // Inset the lower arm along its slope by the angled cap's vertical reach.
+  const lowerArmInset = (3 * 14) / Math.hypot(14, 18);
   const strokes = [
     [16, 15, 16, 49, 6],
     [16, 37, 34, 20, 6],
-    [22, 31, 36, 49, 6],
-    [41, 49, 53, 49, 6],
+    [22, 31, 36 - (lowerArmInset * 14) / 18, 49 - lowerArmInset, 6],
+    [39, 47, 51, 47, 4],
   ];
   const particles: Particle[] = [];
-  for (let y = 13.25; y < 52; y += 0.5) {
-    for (let x = 12.25; x < 55; x += 0.5) {
+  // Sample the final dot centers so straight edges are quantized only once.
+  for (let dotY = 0; dotY < rows * 4; dotY++) {
+    const py = (dotY + 0.5 - rows * 2) / scale;
+    const y = py / 0.48 + 33;
+    for (let dotX = 0; dotX < columns * 2; dotX++) {
+      const px = (dotX + 0.5 - columns) / scale;
+      const x = px / 0.48 + 32;
       let distance = Number.POSITIVE_INFINITY;
       for (const [x1, y1, x2, y2, width] of strokes) {
         const dx = x2 - x1;
@@ -45,11 +53,11 @@ function createParticles(): Particle[] {
       const seed = particles.length;
       for (const z of [-0.42, 0.42]) {
         particles.push({
-          x: (x - 33) * 0.48,
-          y: (y - 33) * 0.48,
+          x: px,
+          y: py,
           z,
           edge: distance > -0.9 && seed % 5 < 2,
-          accent: x > 40,
+          accent: x > 38,
           seed,
         });
       }
@@ -162,10 +170,22 @@ export default function ChatWelcome() {
     // Reduced motion keeps the reveal still; clicking the logo explicitly opts in.
     if (motion.matches) settle();
     else paint(started);
+    // Braille fallback fonts have different cell metrics across platforms.
+    // Fit the text to a square-dot grid without measuring every animation frame.
+    const raster = bodyRef.current?.parentElement;
+    const resize = new ResizeObserver(([entry]) => {
+      if (!raster) return;
+      const width = raster.parentElement?.clientWidth || 0;
+      const { width: textWidth, height: textHeight } = entry.contentRect;
+      if (!textWidth || !textHeight) return;
+      raster.style.transform = `translate(-50%, -50%) scale(${width / textWidth}, ${(width * rows * 2) / (columns * textHeight)})`;
+    });
+    if (raster) resize.observe(raster);
     motion.addEventListener('change', settle);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelAnimationFrame(frame);
+      resize.disconnect();
       motion.removeEventListener('change', settle);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       playRef.current = () => {};

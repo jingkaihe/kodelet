@@ -79,6 +79,8 @@ func TestWelcomeParticlesFrontSilhouetteAndScale(t *testing.T) {
 	for _, height := range []int{9, 12, 18, 24} {
 		canvas := rasterWelcomeParticles(particles, 0, height, 0, 0)
 		lastBody, firstAccent, bodyDots, accentDots := 0, canvas.width, 0, 0
+		stemBottom, armBottom, accentBottom := -1, -1, -1
+		armRows := make([]int, canvas.height)
 		runs, previous := 0, false
 		for x := range canvas.width {
 			occupied := false
@@ -90,8 +92,15 @@ func TestWelcomeParticlesFrontSilhouetteAndScale(t *testing.T) {
 				occupied = true
 				if ink <= welcomeSpinShades {
 					lastBody, bodyDots = max(lastBody, x), bodyDots+1
+					if x < canvas.width/3 {
+						stemBottom = max(stemBottom, y)
+					} else {
+						armBottom = max(armBottom, y)
+						armRows[y]++
+					}
 				} else {
 					firstAccent, accentDots = min(firstAccent, x), accentDots+1
+					accentBottom = max(accentBottom, y)
 				}
 			}
 			if occupied && !previous {
@@ -100,9 +109,14 @@ func TestWelcomeParticlesFrontSilhouetteAndScale(t *testing.T) {
 			previous = occupied
 		}
 		assert.Equal(t, 2, runs, "the K and underscore have separate continuous silhouettes at %d rows", height)
-		assert.GreaterOrEqual(t, firstAccent-lastBody, 4, "preserve the underscore's separation")
+		assert.GreaterOrEqual(t, firstAccent-lastBody, 2, "preserve the underscore's separation")
 		assert.Greater(t, bodyDots, accentDots*4)
 		assert.Greater(t, accentDots, 10)
+		assert.Equal(t, stemBottom, armBottom, "the lower arm shares the stem's baseline at %d rows", height)
+		assert.Equal(t, stemBottom, accentBottom, "the underscore shares the stem's baseline at %d rows", height)
+		if height == welcomeParticleMaxHeight {
+			assert.Less(t, armRows[armBottom], armRows[armBottom-4], "the angled cap tapers instead of being clipped flat")
+		}
 		assert.Equal(t, welcomeParticleWidth(height)*2, canvas.width)
 		assert.Equal(t, height*4, canvas.height)
 	}

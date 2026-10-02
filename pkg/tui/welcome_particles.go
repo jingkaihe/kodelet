@@ -23,13 +23,14 @@ type welcomeParticle struct {
 }
 
 func newWelcomeParticles() []welcomeParticle {
-	// The four strokes follow assets/logo.svg, with a lighter underscore moved
-	// right so it never joins the lower arm after terminal downsampling.
+	// Keep the silhouette in sync with the Web UI's ChatWelcome.tsx.
+	// Inset the lower arm along its slope by the angled cap's vertical reach.
+	lowerArmInset := 3 * 14 / math.Hypot(14, 18)
 	strokes := [...][5]float64{
 		{16, 15, 16, 49, 6},
 		{16, 37, 34, 20, 6},
-		{22, 31, 36, 49, 6},
-		{45, 49, 57, 49, 4},
+		{22, 31, 36 - lowerArmInset*14/18, 49 - lowerArmInset, 6},
+		{39, 47, 51, 47, 4},
 	}
 	distance := func(x, y float64) float64 {
 		nearest := math.Inf(1)
@@ -43,28 +44,33 @@ func newWelcomeParticles() []welcomeParticle {
 		return nearest
 	}
 	particles := make([]welcomeParticle, 0, 4096)
-	const step, scale = 0.5, 0.48
-	for row := range 78 {
-		y := 13.25 + float64(row)*step
-		for column := range 94 {
-			x := 12.25 + float64(column)*step
+	// Sample at the largest raster's dot centers, avoiding a second quantization
+	// that makes straight edges wobble. Smaller terminal sizes downsample this grid.
+	const dotsPerUnit = 2 * float64(welcomeParticleMaxHeight) / welcomeParticleCanvasHeight
+	width, height := welcomeParticleWidth(welcomeParticleMaxHeight)*2, welcomeParticleMaxHeight*4
+	for row := range height {
+		hy := (float64(row) + 0.5 - float64(height)/2) / dotsPerUnit
+		y := hy/0.48 + 33
+		for column := range width {
+			hx := (float64(column) + 0.5 - float64(width)/2) / dotsPerUnit
+			x := hx/0.48 + 32
 			d := distance(x, y)
 			if d > 0 {
 				continue
 			}
-			seed := uint32(row*94 + column + 1)
+			seed := uint32(row*width + column + 1)
 			outward := welcomeSpinPoint{x: distance(x+0.25, y) - distance(x-0.25, y), y: distance(x, y+0.25) - distance(x, y-0.25)}
 			if length := math.Hypot(outward.x, outward.y); length > 0 {
 				outward.x, outward.y = outward.x/length, outward.y/length
 			}
 			edge := max(0, 1+d/0.9)
 			p := welcomeParticle{
-				home:      welcomeSpinPoint{x: (x - 35) * scale, y: (y - 33) * scale},
+				home:      welcomeSpinPoint{x: hx, y: hy},
 				outward:   outward,
 				damping:   5.5 + welcomeParticleNoise(seed+1),
 				frequency: 9 + 2*welcomeParticleNoise(seed+2),
 				seed:      seed,
-				accent:    x > 42,
+				accent:    x > 38,
 				peel:      d > -0.9 && welcomeParticleNoise(seed) < 0.45,
 			}
 			for _, side := range []float64{-1, 1} {

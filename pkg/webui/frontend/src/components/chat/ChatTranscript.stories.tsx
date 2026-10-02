@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { sampleChatMessages } from '../../stories/fixtures';
 import type {
   ApplyPatchMetadata,
@@ -136,6 +136,14 @@ export const WelcomeParticles: Story = {
     await expect(logo).toHaveFocus();
     await userEvent.keyboard(' ');
     await expect(logo).toBeVisible();
+    // Braille fallback fonts must not flatten the 156 × 96 dot raster.
+    await waitFor(() => {
+      const raster = logo.querySelector('.chat-welcome-particles');
+      if (!raster) throw new Error('Particle raster was not rendered');
+      const rect = raster.getBoundingClientRect();
+      expect(rect.width / rect.height).toBeCloseTo(13 / 8, 2);
+      expect(Math.abs(rect.width - logo.getBoundingClientRect().width)).toBeLessThan(1);
+    });
   },
 };
 

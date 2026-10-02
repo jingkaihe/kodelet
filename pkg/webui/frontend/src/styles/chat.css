@@ -127,8 +127,9 @@
 }
 
 .chat-welcome-sculpture {
-  width: min(40rem, 100cqw, 160cqh);
-  aspect-ratio: 8 / 5;
+  position: relative;
+  width: min(40rem, 100cqw, 162.5cqh);
+  aspect-ratio: 13 / 8;
   padding: 0;
   container-type: inline-size;
   contain: strict;
@@ -137,7 +138,11 @@
 }
 
 .chat-welcome-particles {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: grid;
+  width: max-content;
   color: var(--kodelet-dark);
   font-family: monospace;
   font-size: 2cqw;

@@ -103,11 +103,19 @@ describe('ChatTranscript', () => {
   describe('empty welcome', () => {
     beforeEach(() => {
       vi.useFakeTimers();
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          disconnect() {}
+        }
+      );
     });
 
     afterEach(() => {
       vi.useRealTimers();
       vi.restoreAllMocks();
+      vi.unstubAllGlobals();
     });
 
     it('reveals, spins and settles the particle mark only on request', () => {
