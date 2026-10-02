@@ -120,6 +120,7 @@ describe('ChatTranscript', () => {
 
       fireEvent.click(greeting);
       const logo = screen.getByRole('button', { name: 'Spin the kodelet particle logo' });
+      expect(logo).not.toHaveAttribute('title');
       const front = logo.textContent;
       expect(front).toMatch(/[\u2801-\u28ff]/);
       act(() => vi.advanceTimersByTime(1200));
@@ -164,9 +165,56 @@ describe('ChatTranscript', () => {
     });
 
     it.each([
+      60, 144,
+    ])('caps updates at 30 fps on a %s Hz display and skips identical frames', (refreshRate) => {
+      let pendingFrame: FrameRequestCallback | undefined;
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+      const { container, unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
+      const raster = container.querySelector('.chat-welcome-particles > span');
+      assert(raster?.firstChild);
+      const text = raster.firstChild as Text;
+      const writes = vi.spyOn(text, 'data', 'set');
+      const advanceFrame = (now: number) => {
+        const callback = pendingFrame;
+        pendingFrame = undefined;
+        act(() => callback?.(now));
+      };
+
+      for (let frame = 1; frame <= refreshRate / 3; frame++)
+        advanceFrame((frame * 1000) / refreshRate);
+      expect(writes).not.toHaveBeenCalled(); // The opening front-facing hold is unchanged.
+      for (let frame = 0; frame <= refreshRate; frame++)
+        advanceFrame(1000 + (frame * 1000) / refreshRate);
+      expect(writes.mock.calls.length).toBeGreaterThan(0);
+      expect(writes.mock.calls.length).toBeLessThanOrEqual(31);
+      expect(raster.firstChild).toBe(text); // Don't rebuild text nodes and invalidate styles each frame.
+      advanceFrame(6100);
+      expect(pendingFrame).toBeUndefined();
+      unmount();
+    });
+
+    it('settles and cancels animation when the tab becomes hidden', () => {
+      const { unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
+      const logo = screen.getByRole('button', { name: /Spin the kodelet/ });
+      const front = logo.textContent;
+      act(() => vi.advanceTimersByTime(1200));
+      expect(logo.textContent).not.toBe(front);
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      fireEvent(document, new Event('visibilitychange'));
+      expect(logo.textContent).toBe(front);
+      expect(vi.getTimerCount()).toBe(0);
+      unmount();
+    });
+
+    it.each([
       true,
       false,
-    ])('honors reduced motion (initially %s) and preference changes', (initiallyReduced) => {
+    ])('allows explicit replay after reduced-motion reveal or preference change (initially %s)', (initiallyReduced) => {
       const motion = {
         ...window.matchMedia('(prefers-reduced-motion: reduce)'),
         matches: initiallyReduced,
@@ -185,7 +233,16 @@ describe('ChatTranscript', () => {
         motion.matches = true;
         act(() => onChange(new Event('change')));
       }
+      expect(logo.textContent).toBe(front);
+      expect(vi.getTimerCount()).toBe(0);
+
       fireEvent.click(logo);
+      act(() => vi.advanceTimersByTime(200));
+      expect(logo.textContent).not.toBe(front);
+      expect(vi.getTimerCount()).toBe(1);
+      act(() => vi.advanceTimersByTime(1300));
+      expect(logo.textContent).not.toBe(front);
+      act(() => vi.advanceTimersByTime(5000));
       expect(logo.textContent).toBe(front);
       expect(vi.getTimerCount()).toBe(0);
       unmount();

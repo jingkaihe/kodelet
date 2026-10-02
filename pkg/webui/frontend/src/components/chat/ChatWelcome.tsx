@@ -4,6 +4,7 @@ const greeting = 'Hello! What would you like me to work on?';
 const columns = 64;
 const rows = 24;
 const scale = 3.4;
+const frameInterval = 1000 / 30;
 const turnDuration = 6000;
 const impulseDuration = 1500;
 const brailleBits = [
@@ -17,17 +18,17 @@ type Particle = { x: number; y: number; z: number; edge: boolean; accent: boolea
 type Impulse = { at: number; x: number; y: number };
 
 function createParticles(): Particle[] {
-  // Match the TUI sculpture: the favicon's four strokes, with a lighter,
-  // separated underscore. Two faces keep the mark readable through a full turn.
+  // Follow the favicon's strokes and spacing without the TUI's extra gap for
+  // terminal downsampling. Two faces keep the mark readable through a full turn.
   const strokes = [
     [16, 15, 16, 49, 6],
     [16, 37, 34, 20, 6],
     [22, 31, 36, 49, 6],
-    [45, 49, 57, 49, 4],
+    [41, 49, 53, 49, 6],
   ];
   const particles: Particle[] = [];
   for (let y = 13.25; y < 52; y += 0.5) {
-    for (let x = 12.25; x < 59; x += 0.5) {
+    for (let x = 12.25; x < 55; x += 0.5) {
       let distance = Number.POSITIVE_INFINITY;
       for (const [x1, y1, x2, y2, width] of strokes) {
         const dx = x2 - x1;
@@ -44,11 +45,11 @@ function createParticles(): Particle[] {
       const seed = particles.length;
       for (const z of [-0.42, 0.42]) {
         particles.push({
-          x: (x - 35) * 0.48,
+          x: (x - 33) * 0.48,
           y: (y - 33) * 0.48,
           z,
           edge: distance > -0.9 && seed % 5 < 2,
-          accent: x > 42,
+          accent: x > 40,
           seed,
         });
       }
@@ -116,42 +117,57 @@ export default function ChatWelcome() {
   useEffect(() => {
     if (!revealed) return;
     const particles = createParticles();
+    const bodyText = document.createTextNode('');
+    const accentText = document.createTextNode('');
+    bodyRef.current?.replaceChildren(bodyText);
+    accentRef.current?.replaceChildren(accentText);
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0;
     let started = performance.now();
     let elapsed = 0;
+    let lastFrame = -1;
     let impulses: Impulse[] = [];
 
     const paint = (now: number) => {
-      elapsed = motion.matches ? turnDuration : Math.min(turnDuration, now - started);
+      const nextFrame = Math.floor(now / frameInterval);
+      if (nextFrame === lastFrame) {
+        frame = requestAnimationFrame(paint);
+        return;
+      }
+      lastFrame = nextFrame;
+      elapsed = Math.min(turnDuration, now - started);
       impulses = impulses.filter((impulse) => now - impulse.at < impulseDuration);
       const [body, accent] = renderParticles(particles, elapsed, now, impulses);
-      if (bodyRef.current) bodyRef.current.textContent = body;
-      if (accentRef.current) accentRef.current.textContent = accent;
-      frame =
-        !motion.matches && (elapsed < turnDuration || impulses.length > 0)
-          ? requestAnimationFrame(paint)
-          : 0;
+      if (bodyText.data !== body) bodyText.data = body;
+      if (accentText.data !== accent) accentText.data = accent;
+      frame = elapsed < turnDuration || impulses.length > 0 ? requestAnimationFrame(paint) : 0;
     };
     const settle = () => {
       cancelAnimationFrame(frame);
       started = performance.now() - turnDuration;
       impulses = [];
+      lastFrame = -1;
       paint(performance.now());
     };
+    const onVisibilityChange = () => {
+      if (document.hidden) settle();
+    };
     playRef.current = (x, y) => {
-      if (motion.matches) return;
       const now = performance.now();
       if (elapsed >= turnDuration) started = now;
       impulses.push({ at: now, x, y });
       // Keep one clock: repeated clicks add a ripple, not a second animation loop.
       if (!frame) frame = requestAnimationFrame(paint);
     };
-    paint(started);
+    // Reduced motion keeps the reveal still; clicking the logo explicitly opts in.
+    if (motion.matches) settle();
+    else paint(started);
     motion.addEventListener('change', settle);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelAnimationFrame(frame);
       motion.removeEventListener('change', settle);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       playRef.current = () => {};
     };
   }, [revealed]);
@@ -163,7 +179,6 @@ export default function ChatWelcome() {
           type="button"
           className={`chat-welcome-button${revealed ? ' chat-welcome-sculpture' : ''}`}
           aria-label={revealed ? 'Spin the kodelet particle logo' : undefined}
-          title={revealed ? 'Click to scatter and spin' : undefined}
           onClick={(event) => {
             if (!revealed) {
               setRevealed(true);

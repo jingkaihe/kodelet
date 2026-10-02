@@ -127,10 +127,13 @@
 }
 
 .chat-welcome-sculpture {
-  width: min(28rem, 100cqw, 160cqh);
+  width: min(40rem, 100cqw, 160cqh);
   aspect-ratio: 8 / 5;
   padding: 0;
   container-type: inline-size;
+  contain: strict;
+  /* Keep glyph repaints on a small layer, not the entire high-resolution page. */
+  will-change: transform;
 }
 
 .chat-welcome-particles {
