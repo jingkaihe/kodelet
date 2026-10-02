@@ -25,7 +25,7 @@ const (
 	welcomeEffectNone   = "none"
 
 	// DefaultWelcomeEffect is used when no effect is selected.
-	DefaultWelcomeEffect = welcomeEffectBeams
+	DefaultWelcomeEffect = welcomeEffectNone
 )
 
 var (

@@ -25,7 +25,7 @@ func newWelcomeTestModel(t *testing.T, config Config) model {
 }
 
 func TestWelcomeAnimationLifecycle(t *testing.T) {
-	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
+	for _, effect := range []string{"beams", "matrix"} {
 		t.Run(effect, func(t *testing.T) {
 			interval := welcomeFrameInterval
 			frames := welcomeMatrixFrames
@@ -93,7 +93,7 @@ func TestWelcomeInputIsNotConsumed(t *testing.T) {
 	}{
 		{name: "beams", effect: "beams"},
 		{name: "matrix", effect: "matrix"},
-		{name: "particles", particles: true},
+		{name: "particles", effect: "beams", particles: true},
 	} {
 		for _, tt := range []struct {
 			name string
@@ -142,14 +142,15 @@ func TestWelcomeAnimationStaticFallbacks(t *testing.T) {
 		compact bool
 		plain   bool
 	}{
-		{name: "narrow", width: 30, height: 24, plain: true},
-		{name: "short", width: 80, height: 10, plain: true},
-		{name: "plain", width: 80, height: 24, config: Config{WelcomeStyle: "plain"}, plain: true},
+		{name: "default", width: 80, height: 24, compact: true},
+		{name: "narrow", width: 30, height: 24, config: Config{WelcomeEffect: "beams"}, plain: true},
+		{name: "short", width: 80, height: 10, config: Config{WelcomeEffect: "beams"}, plain: true},
+		{name: "plain", width: 80, height: 24, config: Config{WelcomeStyle: "plain", WelcomeEffect: "beams"}, plain: true},
 		{name: "plain matrix", width: 80, height: 24, config: Config{WelcomeStyle: "plain", WelcomeEffect: "matrix"}, plain: true},
 		{name: "plain none", width: 80, height: 24, config: Config{WelcomeStyle: "plain", WelcomeEffect: "none"}, plain: true},
-		{name: "no color", width: 80, height: 24, noColor: "1", compact: true},
-		{name: "dumb terminal", width: 80, height: 24, term: "dumb", compact: true},
-		{name: "resume", width: 80, height: 24, config: Config{ConversationID: "saved"}},
+		{name: "no color", width: 80, height: 24, noColor: "1", config: Config{WelcomeEffect: "beams"}, compact: true},
+		{name: "dumb terminal", width: 80, height: 24, term: "dumb", config: Config{WelcomeEffect: "beams"}, compact: true},
+		{name: "resume", width: 80, height: 24, config: Config{ConversationID: "saved", WelcomeEffect: "beams"}},
 		{name: "none", width: 80, height: 24, config: Config{WelcomeEffect: "none"}, compact: true},
 		{name: "matrix no color", width: 80, height: 24, noColor: "1", config: Config{WelcomeEffect: "matrix"}, compact: true},
 		{name: "matrix narrow", width: 30, height: 24, config: Config{WelcomeEffect: "matrix"}, plain: true},
@@ -189,12 +190,13 @@ func TestWelcomeDeferredStartupAndLayout(t *testing.T) {
 		noColor string
 		resumed bool
 	}{
-		{name: "beams", effect: DefaultWelcomeEffect},
+		{name: "default"},
+		{name: "beams", effect: "beams"},
 		{name: "matrix", effect: "matrix"},
 		{name: "none", effect: "none"},
 		{name: "plain", style: "plain", effect: "matrix"},
-		{name: "no color", effect: DefaultWelcomeEffect, noColor: "1"},
-		{name: "resumed", effect: DefaultWelcomeEffect, resumed: true},
+		{name: "no color", effect: "beams", noColor: "1"},
+		{name: "resumed", effect: "beams", resumed: true},
 		{name: "resumed matrix", effect: "matrix", resumed: true},
 		{name: "resumed none", effect: "none", resumed: true},
 		{name: "resumed plain", style: "plain", resumed: true},
@@ -263,7 +265,7 @@ func welcomeShortcutRow(t *testing.T, m model) int {
 
 func TestWelcomePaletteIsCachedPerThemeAndEffect(t *testing.T) {
 	m := model{theme: themes[DefaultThemeName]}
-	m.welcome.effect = DefaultWelcomeEffect
+	m.welcome.effect = welcomeEffectBeams
 	palette := m.welcomePalette()
 	assert.Same(t, palette, m.welcomePalette(), "frames must reuse the resolved palette")
 	for i, hex := range map[int]string{0: "#8a008a", 10: "#00d1ff", 20: "#ffffff"} {
@@ -274,7 +276,7 @@ func TestWelcomePaletteIsCachedPerThemeAndEffect(t *testing.T) {
 	m.welcome.effect = "matrix"
 	assert.NotSame(t, palette, m.welcomePalette(), "matrix has its own colors")
 
-	m.welcome.effect = DefaultWelcomeEffect
+	m.welcome.effect = welcomeEffectBeams
 	m.theme = themes[LightThemeName]
 	light := m.welcomePalette()
 	assert.NotSame(t, palette, light)
@@ -287,7 +289,7 @@ func TestWelcomePaletteIsCachedPerThemeAndEffect(t *testing.T) {
 func TestWelcomeBeamColorRevealAndSettle(t *testing.T) {
 	for _, theme := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(theme, func(t *testing.T) {
-			m := newModel(t.Context(), Config{Remote: true, Theme: theme})
+			m := newModel(t.Context(), Config{Remote: true, Theme: theme, WelcomeEffect: "beams"})
 			t.Cleanup(m.cancel)
 			m.welcome.animated, m.welcome.done = true, false
 			m.welcome.frame = welcomeBeamSettleFrame
@@ -317,7 +319,7 @@ func TestWelcomeBeamColorRevealAndSettle(t *testing.T) {
 func TestWelcomeAnimationStopsWhenLeavingWelcome(t *testing.T) {
 	for _, reason := range []string{"resize", "transcript", "new conversation"} {
 		t.Run(reason, func(t *testing.T) {
-			m := newWelcomeTestModel(t, Config{})
+			m := newWelcomeTestModel(t, Config{WelcomeEffect: "beams"})
 			switch reason {
 			case "resize":
 				updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 10})
@@ -346,7 +348,7 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 	for _, row := range welcomeLogo {
 		assert.Len(t, row, welcomeCanvasWidth)
 	}
-	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
+	for _, effect := range []string{"beams", "matrix"} {
 		for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 			t.Run(effect+"/"+themeName, func(t *testing.T) {
 				m := newModel(t.Context(), Config{Theme: themeName, WelcomeEffect: effect})
@@ -376,7 +378,7 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 				}
 				m.welcome.frame = 50
 				animatedFrame := strings.Join(m.renderWelcomeLogo(78), "\n")
-				if effect == DefaultWelcomeEffect {
+				if effect == welcomeEffectBeams {
 					assert.True(t, strings.ContainsAny(animatedFrame, "▂▁_▌▍▎▏"))
 				} else {
 					assert.True(t, strings.ContainsAny(animatedFrame, string(welcomeMatrixSymbols)))
@@ -469,7 +471,7 @@ func TestWelcomeResponsiveLayout(t *testing.T) {
 func TestWelcomeFallbackDoesNotChangeSelectedStyle(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
-	m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: "block"})
+	m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: "block", WelcomeEffect: "beams"})
 	t.Cleanup(m.cancel)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
 	m = updated.(model)
@@ -490,7 +492,8 @@ func TestWelcomeEffectSelection(t *testing.T) {
 		input string
 		want  string
 	}{
-		{input: "", want: "beams"},
+		{input: "", want: "none"},
+		{input: "  ", want: "none"},
 		{input: "beams", want: "beams"},
 		{input: " Matrix ", want: "matrix"},
 		{input: " none ", want: "none"},
@@ -503,6 +506,7 @@ func TestWelcomeEffectSelection(t *testing.T) {
 			t.Cleanup(m.cancel)
 			assert.Equal(t, tt.want, m.welcome.effect)
 			if tt.want == "none" {
+				assert.False(t, m.welcome.animated)
 				assert.True(t, m.welcome.done)
 				assert.Nil(t, m.startWelcomeAnimation())
 			}
@@ -618,7 +622,7 @@ func TestWelcomeMatrixGreenHoldAndNeutralFade(t *testing.T) {
 }
 
 func BenchmarkWelcomeFrame(b *testing.B) {
-	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
+	for _, effect := range []string{"beams", "matrix"} {
 		b.Run(effect, func(b *testing.B) {
 			m := model{theme: themes[DefaultThemeName]}
 			m.viewport.SetWidth(80)

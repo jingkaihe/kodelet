@@ -68,7 +68,7 @@ func TestChatWelcomeSettings(t *testing.T) {
 		parse                        func(string) (string, error)
 	}{
 		{
-			name: "effect", defaultValue: tui.DefaultWelcomeEffect, selected: "matrix",
+			name: "effect", defaultValue: "none", selected: "matrix",
 			available: tui.AvailableWelcomeEffects(), parse: tui.ParseWelcomeEffect,
 		},
 		{
@@ -86,6 +86,7 @@ func TestChatWelcomeSettings(t *testing.T) {
 			assert.Contains(t, flag.Usage, strings.Join(setting.available, ", "))
 			assert.Contains(t, flag.Usage, env)
 			assert.Contains(t, flag.Usage, key)
+			assert.Contains(t, flag.Usage, "or "+setting.defaultValue+")")
 			if setting.name == "style" {
 				assert.Contains(t, flag.Usage, "plain disables animation")
 			}

@@ -71,7 +71,7 @@ kodelet chat
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --resume CONVERSATION_ID
 kodelet chat --theme catppuccin-latte
-kodelet chat --welcome-effect none  # or matrix; beams is the default
+kodelet chat --welcome-effect beams  # or matrix; none (static) is the default
 kodelet chat --runner project-runner --cwd ../another-project --server https://kodelet.example
 ```
 

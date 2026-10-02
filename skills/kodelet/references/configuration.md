@@ -43,7 +43,7 @@ Runner enrollment state is also outside project configuration. Run `kodelet runn
 
 ## Terminal chat display
 
-New `kodelet chat` conversations open with an animated wordmark that any key press skips. Select `beams` (default), `matrix`, or `none` for a static wordmark with `--welcome-effect`, then `KODELET_WELCOME_EFFECT`, then `welcome_effect` in trusted client configuration:
+New `kodelet chat` conversations open with a static wordmark by default (`none`). Opt into `beams` or `matrix` startup animation, which any key press skips, with `--welcome-effect`, then `KODELET_WELCOME_EFFECT`, then `welcome_effect` in trusted client configuration:
 
 ```yaml
 welcome_effect: none
