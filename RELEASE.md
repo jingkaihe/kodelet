@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.7.3-beta
+
+Added a welcome screen to the TUI and Web UI, configurable with `welcome_style` and `welcome_effect`.
+
 ## 0.7.2-beta
 
 Added full-text search for saved conversations. The new `kodelet conversation search` command finds conversations by title, ID, workspace, and by what was said in them: user messages, agent replies, and the commands and files the agent worked with. Results are ranked with matching words highlighted, and support prefix matching, `"quoted phrases"`, `--cwd`, `--sort-by updated_at`, and `--json`. `conversation list --search`, the Web UI search, and the TUI picker use the same matching. Tool output is not searched. After upgrading, older conversations may take a short while to be indexed; results are flagged as incomplete until indexing finishes.
