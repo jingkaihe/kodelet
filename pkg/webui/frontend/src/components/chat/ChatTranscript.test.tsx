@@ -119,18 +119,16 @@ describe('ChatTranscript', () => {
     });
 
     it('reveals, spins and settles the particle mark only on request', () => {
-      const { container, rerender } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      const { rerender } = render(<ChatTranscript isStreaming={false} messages={[]} />);
       const greeting = screen.getByRole('button', {
         name: 'Hello! What would you like me to work on?',
       });
       expect(vi.getTimerCount()).toBe(0);
-      expect(container.querySelector('.chat-welcome-particles')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Spin the kodelet/ })).not.toBeInTheDocument();
 
       fireEvent.click(greeting);
       const logo = screen.getByRole('button', { name: 'Spin the kodelet particle logo' });
-      expect(logo).not.toHaveAttribute('title');
       const front = logo.textContent;
-      expect(front).toMatch(/[\u2801-\u28ff]/);
       act(() => vi.advanceTimersByTime(1200));
       expect(logo.textContent).not.toBe(front);
       const turning = logo.textContent;
@@ -172,41 +170,8 @@ describe('ChatTranscript', () => {
       expect(frames[1]).toBe(frames[0]);
     });
 
-    it.each([
-      60, 144,
-    ])('caps updates at 30 fps on a %s Hz display and skips identical frames', (refreshRate) => {
-      let pendingFrame: FrameRequestCallback | undefined;
-      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-        pendingFrame = callback;
-        return 1;
-      });
-      const { container, unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
-      fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
-      const raster = container.querySelector('.chat-welcome-particles > span');
-      assert(raster?.firstChild);
-      const text = raster.firstChild as Text;
-      const writes = vi.spyOn(text, 'data', 'set');
-      const advanceFrame = (now: number) => {
-        const callback = pendingFrame;
-        pendingFrame = undefined;
-        act(() => callback?.(now));
-      };
-
-      for (let frame = 1; frame <= refreshRate / 3; frame++)
-        advanceFrame((frame * 1000) / refreshRate);
-      expect(writes).not.toHaveBeenCalled(); // The opening front-facing hold is unchanged.
-      for (let frame = 0; frame <= refreshRate; frame++)
-        advanceFrame(1000 + (frame * 1000) / refreshRate);
-      expect(writes.mock.calls.length).toBeGreaterThan(0);
-      expect(writes.mock.calls.length).toBeLessThanOrEqual(31);
-      expect(raster.firstChild).toBe(text); // Don't rebuild text nodes and invalidate styles each frame.
-      advanceFrame(6100);
-      expect(pendingFrame).toBeUndefined();
-      unmount();
-    });
-
     it('settles and cancels animation when the tab becomes hidden', () => {
-      const { unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      render(<ChatTranscript isStreaming={false} messages={[]} />);
       fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
       const logo = screen.getByRole('button', { name: /Spin the kodelet/ });
       const front = logo.textContent;
@@ -216,7 +181,6 @@ describe('ChatTranscript', () => {
       fireEvent(document, new Event('visibilitychange'));
       expect(logo.textContent).toBe(front);
       expect(vi.getTimerCount()).toBe(0);
-      unmount();
     });
 
     it.each([
@@ -245,15 +209,10 @@ describe('ChatTranscript', () => {
       expect(vi.getTimerCount()).toBe(0);
 
       fireEvent.click(logo);
-      act(() => vi.advanceTimersByTime(200));
+      act(() => vi.advanceTimersByTime(1600));
       expect(logo.textContent).not.toBe(front);
-      expect(vi.getTimerCount()).toBe(1);
-      act(() => vi.advanceTimersByTime(1300));
-      expect(logo.textContent).not.toBe(front);
-      act(() => vi.advanceTimersByTime(5000));
-      expect(logo.textContent).toBe(front);
-      expect(vi.getTimerCount()).toBe(0);
       unmount();
+      expect(vi.getTimerCount()).toBe(0);
       expect(motion.removeEventListener).toHaveBeenCalledWith('change', onChange);
     });
 

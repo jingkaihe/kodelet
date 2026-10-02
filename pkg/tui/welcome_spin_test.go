@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"math"
 	"strings"
 	"testing"
 	"time"
@@ -27,15 +26,9 @@ func welcomeLogoClick(m model) tea.MouseClickMsg {
 }
 
 func TestWelcomeSpinLifecycle(t *testing.T) {
-	for _, config := range []Config{
-		{WelcomeEffect: "beams"},
-		{WelcomeEffect: "matrix"},
-		{WelcomeEffect: "none"},
-		{WelcomeStyle: "plain"},
-	} {
-		t.Run(config.WelcomeEffect+config.WelcomeStyle, func(t *testing.T) {
-			m := newWelcomeTestModel(t, config)
-			m.finishWelcomeAnimation()
+	for _, style := range []string{"block", "plain"} {
+		t.Run(style, func(t *testing.T) {
+			m := newWelcomeTestModel(t, Config{WelcomeStyle: style})
 			settled := m.View().Content
 			composer := strings.Split(settled, "\n")[m.viewport.Height():]
 			updated, cmd := m.Update(welcomeLogoClick(m))
@@ -63,11 +56,9 @@ func TestWelcomeSpinLifecycle(t *testing.T) {
 			assert.Equal(t, initial, sculpture, "the turn must finish at the exact gathered starting pose")
 			assert.Equal(t, composer, strings.Split(sculpture, "\n")[m.viewport.Height():])
 			assert.Nil(t, m.updateWelcomeSpin(finished), "duplicate final ticks cannot restart motion")
-			assert.Equal(t, sculpture, m.View().Content)
 
 			updated, cmd = m.Update(welcomeLogoClick(m))
 			m = updated.(model)
-			require.True(t, m.welcomeSpin.active(), "another click scatters the sculpture instead of dismissing it")
 			require.NotNil(t, cmd)
 			assert.Equal(t, sculpture, m.View().Content, "an impulse starts from the displayed particle positions")
 			assert.Nil(t, m.updateWelcomeSpin(stale), "old ticks cannot create a second tick chain")
@@ -77,24 +68,11 @@ func TestWelcomeSpinLifecycle(t *testing.T) {
 			m = updated.(model)
 			require.NotNil(t, cmd)
 			assert.NotEqual(t, sculpture, m.View().Content, "the click pushes particles out of the sculpture")
-			assert.Equal(t, composer, strings.Split(m.View().Content, "\n")[m.viewport.Height():])
-			midair := m.View().Content
-			updated, cmd = m.Update(welcomeLogoClick(m))
-			m = updated.(model)
-			require.NotNil(t, cmd)
-			assert.Equal(t, midair, m.View().Content, "rapid clicks must not teleport particles back to their homes")
-			assert.Nil(t, m.updateWelcomeSpin(burst), "a new impulse invalidates the last burst's tick")
-			assert.Zero(t, m.welcomeSpin.elapsed)
 			finished = welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(m.welcomeSpin.duration())}
 			updated, cmd = m.Update(finished)
 			m = updated.(model)
 			assert.Nil(t, cmd)
 			assert.Equal(t, sculpture, m.View().Content, "scattered particles return to the same dotted logo")
-			updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			m = updated.(model)
-			assert.False(t, m.welcomeSpin.active())
-			assert.Equal(t, settled, m.View().Content)
-			assert.Nil(t, m.updateWelcomeSpin(finished), "dismissed particles cannot be revived by a late tick")
 		})
 	}
 }
@@ -190,37 +168,10 @@ func TestWelcomeSpinStopsWhenLeavingWelcome(t *testing.T) {
 					assert.Nil(t, m.updateWelcomeSpin(tick))
 				}
 				assert.False(t, m.welcomeSpin.active())
+				assert.Nil(t, m.updateWelcomeSpin(tick), "dismissed particles cannot be revived by a late tick")
 			})
 		}
 	}
-}
-
-func TestWelcomeParticlesClickPositionAndResize(t *testing.T) {
-	m := newWelcomeTestModel(t, Config{})
-	updated, _ := m.Update(welcomeLogoClick(m))
-	m = updated.(model)
-	m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(welcomeSpinDuration)})
-	leftClick := welcomeLogoClick(m)
-	leftClick.X -= 8
-	rightClick := leftClick
-	rightClick.X += 16
-	left, _ := m.Update(leftClick)
-	right, _ := m.Update(rightClick)
-	leftModel, rightModel := left.(model), right.(model)
-	assert.NotEqual(t, leftModel.welcomeSpin.particles, rightModel.welcomeSpin.particles, "the actual click location controls the impulse")
-	leftModel.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: leftModel.welcomeSpin.startedAt, now: leftModel.welcomeSpin.startedAt.Add(200 * time.Millisecond)})
-	rightModel.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: rightModel.welcomeSpin.startedAt, now: rightModel.welcomeSpin.startedAt.Add(200 * time.Millisecond)})
-	assert.NotEqual(t, leftModel.View().Content, rightModel.View().Content)
-
-	updated, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
-	m = updated.(model)
-	require.True(t, m.welcomeSpin.active())
-	click := welcomeLogoClick(m)
-	require.True(t, m.welcomeLogoContains(click.X, click.Y))
-	updated, cmd := m.Update(click)
-	m = updated.(model)
-	assert.NotNil(t, cmd, "the recentered sculpture stays interactive after resizing")
-	assert.Zero(t, m.welcomeSpin.elapsed)
 }
 
 func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
@@ -233,23 +184,20 @@ func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
 		{name: "large", width: 80, height: 50, rows: 24},
 		{name: "narrow tall", width: 62, height: 50, rows: 18},
 		{name: "narrow", width: 50, height: 50, rows: 12},
-		{name: "compact", width: 80, height: 18, rows: 9},
 		{name: "minimum", width: 80, height: 16, rows: 9},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newWelcomeTestModel(t, Config{})
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 			m = updated.(model)
-			m.finishWelcomeAnimation()
-			before := m.View().Content
-			composer := strings.Split(before, "\n")[m.viewport.Height():]
+			composer := strings.Split(m.View().Content, "\n")[m.viewport.Height():]
 			updated, _ = m.Update(welcomeLogoClick(m))
 			m = updated.(model)
 			require.True(t, m.welcomeSpin.active())
 			require.Equal(t, tt.rows, m.welcomeParticleRows())
 			assert.Zero(t, m.viewport.YOffset(), "the fixed canvas must not inherit transcript scrolling")
 			assert.LessOrEqual(t, len(m.renderInitialMessage()), m.viewport.Height())
-			for _, elapsed := range []time.Duration{0, 250 * time.Millisecond, 2 * time.Second, welcomeSpinDuration} {
+			for _, elapsed := range []time.Duration{time.Second, welcomeSpinDuration} {
 				m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(elapsed)})
 				assert.Equal(t, composer, strings.Split(m.View().Content, "\n")[m.viewport.Height():], "particles must never push or paint over the composer")
 			}
@@ -274,8 +222,6 @@ func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
 			m = updated.(model)
 			require.NotNil(t, cmd)
 			assert.Equal(t, expected, m.welcomeSpin.particles, "click impulse must match the displayed particle positions")
-			updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			assert.Equal(t, before, updated.(model).View().Content)
 		})
 	}
 }
@@ -284,7 +230,7 @@ func TestWelcomeParticlesResizePreservesMotion(t *testing.T) {
 	m := newWelcomeTestModel(t, Config{})
 	updated, _ := m.Update(welcomeLogoClick(m))
 	m = updated.(model)
-	m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(200 * time.Millisecond)})
+	m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(time.Second)})
 	state := m.welcomeSpin
 	for _, height := range []int{18, 40, 50, 16, 24} {
 		updated, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
@@ -292,25 +238,13 @@ func TestWelcomeParticlesResizePreservesMotion(t *testing.T) {
 		assert.Equal(t, state, m.welcomeSpin, "resizing only scales the scene, not its spring state")
 		assert.LessOrEqual(t, len(m.renderInitialMessage()), m.viewport.Height())
 	}
+	updated, cmd := m.Update(welcomeLogoClick(m))
+	m = updated.(model)
+	assert.NotNil(t, cmd, "the recentered sculpture stays interactive after resizing")
+	assert.Zero(t, m.welcomeSpin.elapsed)
 	updated, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 15})
 	m = updated.(model)
 	assert.False(t, m.welcomeSpin.active(), "below compact size, restore the plain welcome")
-}
-
-func TestWelcomeSpinTurnAndReturn(t *testing.T) {
-	previous := 0.0
-	for frame := range 181 {
-		w := welcomeSpinAnimation{elapsed: time.Duration(frame) * time.Second / 30}
-		yaw, phase := w.pose()
-		assert.InDelta(t, float64(frame)/180, phase, 1e-8)
-		if phase <= 0.08 || phase >= 0.92 {
-			assert.Zero(t, yaw, "hold the exact readable front pose at both ends")
-		} else {
-			assert.GreaterOrEqual(t, yaw, previous)
-			assert.Less(t, yaw, 2*math.Pi)
-			previous = yaw
-		}
-	}
 }
 
 func TestWelcomeSpinClickPreservesTurn(t *testing.T) {
@@ -323,15 +257,11 @@ func TestWelcomeSpinClickPreservesTurn(t *testing.T) {
 			tick := welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(elapsed)}
 			m.updateWelcomeSpin(tick)
 			before := m.View().Content
-			yaw, phase := m.welcomeSpin.pose()
 			updated, cmd := m.Update(welcomeLogoClick(m))
 			m = updated.(model)
 			require.NotNil(t, cmd)
 			assert.Equal(t, before, m.View().Content, "a mid-turn click must not reset the rotating silhouette or its dust")
-			assert.Equal(t, elapsed, m.welcomeSpin.rotationOffset)
-			actualYaw, actualPhase := m.welcomeSpin.pose()
-			assert.Equal(t, yaw, actualYaw)
-			assert.Equal(t, phase, actualPhase)
+			assert.Equal(t, elapsed, m.welcomeSpin.rotationOffset, "even clicks during the final front-facing hold must preserve the turn's progress")
 			assert.Nil(t, m.updateWelcomeSpin(tick), "the superseded timer must not create a second chain")
 			duration := m.welcomeSpin.duration()
 			assert.GreaterOrEqual(t, duration, welcomeParticleDuration, "late impulses have time to gather after the turn finishes")

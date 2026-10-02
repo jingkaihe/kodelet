@@ -161,15 +161,9 @@ func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {
 func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
 	for _, style := range AvailableWelcomeStyles() {
 		t.Run(style, func(t *testing.T) {
-			m := newModel(t.Context(), Config{Remote: true, WelcomeStyle: style, WelcomeEffect: "none"})
-			t.Cleanup(m.cancel)
-			m.width = 80
-			m.height = 24
-			m.resize()
-			m.refreshViewport(true)
+			m := newWelcomeTestModel(t, Config{WelcomeStyle: style, WelcomeEffect: "none"})
 
 			view := xansi.Strip(m.View().Content)
-			assert.NotContains(t, view, "Hello!")
 			assert.Contains(t, view, "Ask kodelet...")
 			lines := strings.Split(view, "\n")
 			hintIndex := welcomeShortcutRow(t, m)

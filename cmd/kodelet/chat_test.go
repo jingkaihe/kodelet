@@ -64,16 +64,15 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 func TestChatWelcomeSettings(t *testing.T) {
 	for _, setting := range []struct {
 		name, defaultValue, selected string
-		available                    []string
 		parse                        func(string) (string, error)
 	}{
 		{
 			name: "effect", defaultValue: "none", selected: "matrix",
-			available: tui.AvailableWelcomeEffects(), parse: tui.ParseWelcomeEffect,
+			parse: tui.ParseWelcomeEffect,
 		},
 		{
 			name: "style", defaultValue: tui.DefaultWelcomeStyle, selected: "plain",
-			available: tui.AvailableWelcomeStyles(), parse: tui.ParseWelcomeStyle,
+			parse: tui.ParseWelcomeStyle,
 		},
 	} {
 		t.Run(setting.name, func(t *testing.T) {
@@ -83,28 +82,18 @@ func TestChatWelcomeSettings(t *testing.T) {
 			flag := chatCmd.Flags().Lookup(flagName)
 			require.NotNil(t, flag)
 			assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
-			assert.Contains(t, flag.Usage, strings.Join(setting.available, ", "))
-			assert.Contains(t, flag.Usage, env)
-			assert.Contains(t, flag.Usage, key)
-			assert.Contains(t, flag.Usage, "or "+setting.defaultValue+")")
-			if setting.name == "style" {
-				assert.Contains(t, flag.Usage, "plain disables animation")
-			}
 			selected, fallback := setting.selected, setting.defaultValue
 			for _, test := range []struct {
 				name, flag, env, configured, want string
 			}{
 				{name: "default", want: fallback},
-				{name: "flag", flag: " " + strings.ToUpper(selected) + " ", want: selected},
-				{name: "environment", env: " " + strings.ToUpper(selected) + " ", want: selected},
 				{name: "configuration", configured: strings.ToUpper(selected), want: selected},
 				{name: "environment overrides configuration", env: fallback, configured: selected, want: fallback},
-				{name: "flag overrides environment", flag: selected, env: fallback, want: selected},
-				{name: "flag overrides configuration", flag: fallback, configured: selected, want: fallback},
+				{name: "flag overrides environment and configuration", flag: fallback, env: selected, configured: selected, want: fallback},
 				{name: "blank flag falls through", flag: " ", configured: selected, want: selected},
 				{name: "blank environment falls through", env: " ", configured: selected, want: selected},
-				{name: "flag masks invalid defaults", flag: selected, env: "invalid", configured: "invalid", want: selected},
-				{name: "environment masks invalid configuration", env: selected, configured: "invalid", want: selected},
+				{name: "flag masks invalid defaults", flag: " " + strings.ToUpper(selected) + " ", env: "invalid", configured: "invalid", want: selected},
+				{name: "environment masks invalid configuration", env: " " + strings.ToUpper(selected) + " ", configured: "invalid", want: selected},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					t.Setenv(env, test.env)

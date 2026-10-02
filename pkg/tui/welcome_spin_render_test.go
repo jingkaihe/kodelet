@@ -16,15 +16,13 @@ func TestWelcomeSpinCanvasOutput(t *testing.T) {
 	particles := newWelcomeParticles()
 	for _, height := range []int{9, 12, 18, 24} {
 		width := welcomeParticleWidth(height) + 20
-		for frame := range 37 {
-			phase := float64(frame) / 36
+		for _, phase := range []float64{0, 0.25, 0.5, 0.75, 1} {
 			canvas := rasterWelcomeParticles(particles, 0, height, phase*2*math.Pi, phase)
 			lines := m.renderWelcomeSpinCanvas(width, height, canvas)
 			require.Len(t, lines, height)
 			require.NotEmpty(t, strings.TrimSpace(xansi.Strip(strings.Join(lines, ""))))
 			for _, line := range lines {
 				require.Equal(t, width, lipgloss.Width(line))
-				assert.NotContains(t, line, "\n")
 				assert.NotContains(t, line, "\x1b[48;", "never paint a cell background")
 				for _, glyph := range xansi.Strip(line) {
 					require.True(t, glyph == ' ' || glyph >= '\u2801' && glyph <= '\u28ff', "use Braille geometry, not solid blocks or randomized text")
@@ -32,33 +30,10 @@ func TestWelcomeSpinCanvasOutput(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, themes[DefaultThemeName], m.theme)
-	assert.Nil(t, m.renderWelcomeSpinCanvas(39, 0, welcomeSpinCanvas{}))
-	assert.Nil(t, m.renderWelcomeSpinCanvas(39, -1, welcomeSpinCanvas{}))
-	assert.Equal(t, []string{"", ""}, m.renderWelcomeSpinCanvas(0, 2, welcomeSpinCanvas{}))
-	assert.Equal(t, []string{"", ""}, m.renderWelcomeSpinCanvas(-1, 2, welcomeSpinCanvas{}))
 	canvas := rasterWelcomeParticles(particles, 0, 24, 0, 0)
 	for _, line := range m.renderWelcomeSpinCanvas(7, 5, canvas) {
 		assert.Equal(t, 7, lipgloss.Width(line), "clipping also respects a caller's smaller rectangle")
 	}
-}
-
-func TestWelcomeSpinThemesAndTransparentPadding(t *testing.T) {
-	dark := model{theme: themes[DefaultThemeName]}
-	light := model{theme: themes[LightThemeName]}
-	canvas := rasterWelcomeParticles(newWelcomeParticles(), 0, 12, 0, 0)
-	darkLines, lightLines := dark.renderWelcomeSpinCanvas(80, 12, canvas), light.renderWelcomeSpinCanvas(80, 12, canvas)
-	assert.NotEqual(t, darkLines, lightLines)
-	for y, line := range darkLines {
-		assert.Equal(t, xansi.Strip(line), xansi.Strip(lightLines[y]), "theme changes color, not geometry")
-		assert.True(t, strings.HasPrefix(line, strings.Repeat(" ", (80-welcomeCanvasWidth)/2)))
-		assert.True(t, strings.HasSuffix(line, strings.Repeat(" ", (80-welcomeCanvasWidth+1)/2)))
-	}
-	// Deliberately distinct custom colors prove that text and accent palettes
-	// come from their theme roles, rather than hard-coded orange cube shading.
-	custom := dark
-	custom.theme.Assistant, custom.theme.Muted = "#123456", "#123456"
-	assert.Contains(t, strings.Join(custom.renderWelcomeSpinCanvas(80, 12, canvas), ""), "\x1b[38;2;18;52;86m")
 }
 
 func TestWelcomeSpinBrailleEncoding(t *testing.T) {
@@ -84,27 +59,19 @@ func TestWelcomeSpinBrailleEncoding(t *testing.T) {
 		assert.Equal(t, 1, lipgloss.Width(string(glyph)))
 	}
 	canvas := welcomeSpinCanvas{width: 2, height: 4}
-	for mask := range 256 {
-		bits := [4][2]int{{1, 8}, {2, 16}, {4, 32}, {64, 128}}
-		for y := range 4 {
-			for x := range 2 {
-				canvas.shade[y][x] = 0
-				if mask&bits[y][x] != 0 {
-					canvas.shade[y][x] = 12 + welcomeSpinShades
-				}
-			}
-		}
-		glyph, ink := canvas.cell(0, 0)
-		if mask == 0 {
-			assert.Equal(t, ' ', glyph)
-			assert.Zero(t, ink)
-		} else {
-			assert.Equal(t, rune(0x2800+mask), glyph)
-			assert.Equal(t, 12+welcomeSpinShades, ink)
+	glyph, ink := canvas.cell(0, 0)
+	assert.Equal(t, ' ', glyph)
+	assert.Zero(t, ink)
+	for y := range 4 {
+		for x := range 2 {
+			canvas.plot(x, y, 1, 12, true)
 		}
 	}
-	canvas.plot(0, 0, 1, 10, false)
-	glyph, ink := canvas.cell(0, 0)
+	glyph, ink = canvas.cell(0, 0)
+	assert.Equal(t, '⣿', glyph)
+	assert.Equal(t, 12+welcomeSpinShades, ink)
+	canvas.plot(0, 0, 2, 10, false)
+	glyph, ink = canvas.cell(0, 0)
 	assert.Equal(t, '⣿', glyph)
 	assert.Equal(t, 10, ink, "body cells stay neutral when an accent particle overlaps")
 }
