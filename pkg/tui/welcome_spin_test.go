@@ -12,17 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newWelcomeSpinTestModel(t *testing.T, config Config) model {
-	t.Helper()
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("TERM", "xterm-256color")
-	config.Remote = true
-	m := newModel(t.Context(), config)
-	t.Cleanup(m.cancel)
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	return updated.(model)
-}
-
 func welcomeLogoClick(m model) tea.MouseClickMsg {
 	rows, top := m.welcomeLogoRows(), 0
 	if m.welcomeSpin.active() {
@@ -45,7 +34,7 @@ func TestWelcomeSpinLifecycle(t *testing.T) {
 		{WelcomeStyle: "plain"},
 	} {
 		t.Run(config.WelcomeEffect+config.WelcomeStyle, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, config)
+			m := newWelcomeTestModel(t, config)
 			m.finishWelcomeAnimation()
 			settled := m.View().Content
 			composer := strings.Split(settled, "\n")[m.viewport.Height():]
@@ -110,36 +99,8 @@ func TestWelcomeSpinLifecycle(t *testing.T) {
 	}
 }
 
-func TestWelcomeSpinInputIsNotConsumed(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		msg  tea.Msg
-		want string
-	}{
-		{name: "typing", msg: textKeyPress("hello"), want: "hello"},
-		{name: "paste", msg: tea.PasteMsg{Content: "pasted draft"}, want: "pasted draft"},
-		{name: "newline", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift), want: "\n"},
-		{name: "shortcuts", msg: textKeyPress("?")},
-		{name: "escape", msg: tea.KeyPressMsg{Code: tea.KeyEscape}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
-			updated, _ := m.Update(welcomeLogoClick(m))
-			m = updated.(model)
-			require.True(t, m.welcomeSpin.active())
-			assert.True(t, m.welcome.done, "clicking during the intro must cancel it")
-			assert.Nil(t, m.updateWelcomeAnimation(time.Now()))
-			updated, _ = m.Update(tt.msg)
-			m = updated.(model)
-			assert.False(t, m.welcomeSpin.active())
-			assert.Equal(t, tt.want, m.textarea.Value())
-			assert.Equal(t, tt.name == "shortcuts", m.shortcutsOpen)
-		})
-	}
-}
-
 func TestWelcomeSpinClickBounds(t *testing.T) {
-	m := newWelcomeSpinTestModel(t, Config{})
+	m := newWelcomeTestModel(t, Config{})
 	click := welcomeLogoClick(m)
 	left := tuiLeftMargin + (m.viewport.Width()-welcomeCanvasWidth)/2
 	assert.True(t, m.welcomeLogoContains(left, click.Y))
@@ -181,7 +142,7 @@ func TestWelcomeSpinUnavailable(t *testing.T) {
 		{name: "short", setup: func(m *model) { m.viewport.SetHeight(10) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
+			m := newWelcomeTestModel(t, Config{})
 			click := welcomeLogoClick(m)
 			t.Setenv("NO_COLOR", tt.noColor)
 			if tt.term != "" {
@@ -198,32 +159,44 @@ func TestWelcomeSpinUnavailable(t *testing.T) {
 }
 
 func TestWelcomeSpinStopsWhenLeavingWelcome(t *testing.T) {
-	for _, reason := range []string{"resize", "conversation", "transcript", "overlay"} {
-		t.Run(reason, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
-			updated, _ := m.Update(welcomeLogoClick(m))
-			m = updated.(model)
-			require.True(t, m.welcomeSpin.active())
-			tick := welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(time.Second)}
-			switch reason {
-			case "resize":
-				updated, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 10})
+	for _, state := range []string{"moving", "settled"} {
+		for _, reason := range []string{"resize", "conversation", "transcript", "overlay", "draft"} {
+			t.Run(state+"/"+reason, func(t *testing.T) {
+				m := newWelcomeTestModel(t, Config{})
+				updated, _ := m.Update(welcomeLogoClick(m))
 				m = updated.(model)
-			case "conversation":
-				m.createNewConversation()
-			case "transcript":
-				m.entries = []chatEntry{{kind: entryUser, content: "hello"}}
-			case "overlay":
-				m.shortcutsOpen = true
-			}
-			assert.Nil(t, m.updateWelcomeSpin(tick))
-			assert.False(t, m.welcomeSpin.active())
-		})
+				tick := welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(time.Second)}
+				if state == "settled" {
+					tick.now = m.welcomeSpin.startedAt.Add(welcomeSpinDuration)
+					require.Nil(t, m.updateWelcomeSpin(tick))
+				}
+				require.True(t, m.welcomeSpin.active())
+				switch reason {
+				case "resize":
+					updated, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 10})
+					m = updated.(model)
+				case "conversation":
+					m.createNewConversation()
+				case "transcript":
+					m.entries = []chatEntry{{kind: entryUser, content: "hello"}}
+				case "overlay":
+					m.shortcutsOpen = true
+				case "draft":
+					m.textarea.SetValue("hello")
+				}
+				if state == "settled" {
+					m.refreshViewport(false) // Idle sculptures must notice a hidden welcome without another tick.
+				} else {
+					assert.Nil(t, m.updateWelcomeSpin(tick))
+				}
+				assert.False(t, m.welcomeSpin.active())
+			})
+		}
 	}
 }
 
 func TestWelcomeParticlesClickPositionAndResize(t *testing.T) {
-	m := newWelcomeSpinTestModel(t, Config{})
+	m := newWelcomeTestModel(t, Config{})
 	updated, _ := m.Update(welcomeLogoClick(m))
 	m = updated.(model)
 	m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(welcomeSpinDuration)})
@@ -250,28 +223,6 @@ func TestWelcomeParticlesClickPositionAndResize(t *testing.T) {
 	assert.Zero(t, m.welcomeSpin.elapsed)
 }
 
-func TestWelcomeParticlesIdleCleanup(t *testing.T) {
-	for _, change := range []string{"transcript", "overlay", "draft"} {
-		t.Run(change, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
-			updated, _ := m.Update(welcomeLogoClick(m))
-			m = updated.(model)
-			m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(welcomeSpinDuration)})
-			require.True(t, m.welcomeSpin.active())
-			switch change {
-			case "transcript":
-				m.entries = []chatEntry{{kind: entryUser, content: "hello"}}
-			case "overlay":
-				m.shortcutsOpen = true
-			case "draft":
-				m.textarea.SetValue("hello")
-			}
-			m.refreshViewport(false)
-			assert.False(t, m.welcomeSpin.active(), "settled sculptures must not require a tick to notice a hidden welcome")
-		})
-	}
-}
-
 func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
 	for _, tt := range []struct {
 		name                string
@@ -286,7 +237,7 @@ func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
 		{name: "minimum", width: 80, height: 16, rows: 9},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
+			m := newWelcomeTestModel(t, Config{})
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 			m = updated.(model)
 			m.finishWelcomeAnimation()
@@ -330,7 +281,7 @@ func TestWelcomeParticlesResponsiveCanvas(t *testing.T) {
 }
 
 func TestWelcomeParticlesResizePreservesMotion(t *testing.T) {
-	m := newWelcomeSpinTestModel(t, Config{})
+	m := newWelcomeTestModel(t, Config{})
 	updated, _ := m.Update(welcomeLogoClick(m))
 	m = updated.(model)
 	m.updateWelcomeSpin(welcomeSpinTickMsg{startedAt: m.welcomeSpin.startedAt, now: m.welcomeSpin.startedAt.Add(200 * time.Millisecond)})
@@ -365,7 +316,7 @@ func TestWelcomeSpinTurnAndReturn(t *testing.T) {
 func TestWelcomeSpinClickPreservesTurn(t *testing.T) {
 	for _, elapsed := range []time.Duration{time.Second, 2700 * time.Millisecond, 5800 * time.Millisecond} {
 		t.Run(elapsed.String(), func(t *testing.T) {
-			m := newWelcomeSpinTestModel(t, Config{})
+			m := newWelcomeTestModel(t, Config{})
 			updated, _ := m.Update(welcomeLogoClick(m))
 			m = updated.(model)
 			initial := m.View().Content

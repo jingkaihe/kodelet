@@ -51,11 +51,11 @@ var chatCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return validateRemoteChatFlags(cmd) },
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		theme, _ := cmd.Flags().GetString("theme")
-		welcomeEffect, err := resolveWelcomeEffect(cmd)
+		welcomeEffect, err := resolveWelcomeSetting(cmd, "welcome-effect", tui.ParseWelcomeEffect)
 		if err != nil {
 			return err
 		}
-		welcomeStyle, err := resolveWelcomeStyle(cmd)
+		welcomeStyle, err := resolveWelcomeSetting(cmd, "welcome-style", tui.ParseWelcomeStyle)
 		if err != nil {
 			return err
 		}
@@ -73,39 +73,18 @@ var chatCmd = &cobra.Command{
 	},
 }
 
-const (
-	welcomeEffectConfigKey = "welcome_effect"
-	welcomeEffectEnv       = "KODELET_WELCOME_EFFECT"
-	welcomeStyleConfigKey  = "welcome_style"
-	welcomeStyleEnv        = "KODELET_WELCOME_STYLE"
-)
-
-func resolveWelcomeEffect(cmd *cobra.Command) (string, error) {
-	flag := cmd.Flags().Lookup("welcome-effect")
-	if flag != nil && flag.Changed && strings.TrimSpace(flag.Value.String()) != "" {
-		effect, err := tui.ParseWelcomeEffect(flag.Value.String())
-		return effect, errors.Wrap(err, "invalid --welcome-effect")
+func resolveWelcomeSetting(cmd *cobra.Command, flagName string, parse func(string) (string, error)) (string, error) {
+	key := strings.ReplaceAll(flagName, "-", "_")
+	env := "KODELET_" + strings.ToUpper(key)
+	value, source := viper.GetString(key), key+" setting"
+	if environment := strings.TrimSpace(os.Getenv(env)); environment != "" {
+		value, source = environment, env
 	}
-	if environment := strings.TrimSpace(os.Getenv(welcomeEffectEnv)); environment != "" {
-		effect, err := tui.ParseWelcomeEffect(environment)
-		return effect, errors.Wrapf(err, "invalid %s", welcomeEffectEnv)
+	if flag := cmd.Flags().Lookup(flagName); flag != nil && flag.Changed && strings.TrimSpace(flag.Value.String()) != "" {
+		value, source = flag.Value.String(), "--"+flagName
 	}
-	effect, err := tui.ParseWelcomeEffect(viper.GetString(welcomeEffectConfigKey))
-	return effect, errors.Wrapf(err, "invalid %s setting", welcomeEffectConfigKey)
-}
-
-func resolveWelcomeStyle(cmd *cobra.Command) (string, error) {
-	flag := cmd.Flags().Lookup("welcome-style")
-	if flag != nil && flag.Changed && strings.TrimSpace(flag.Value.String()) != "" {
-		style, err := tui.ParseWelcomeStyle(flag.Value.String())
-		return style, errors.Wrap(err, "invalid --welcome-style")
-	}
-	if environment := strings.TrimSpace(os.Getenv(welcomeStyleEnv)); environment != "" {
-		style, err := tui.ParseWelcomeStyle(environment)
-		return style, errors.Wrapf(err, "invalid %s", welcomeStyleEnv)
-	}
-	style, err := tui.ParseWelcomeStyle(viper.GetString(welcomeStyleConfigKey))
-	return style, errors.Wrapf(err, "invalid %s setting", welcomeStyleConfigKey)
+	setting, err := parse(value)
+	return setting, errors.Wrapf(err, "invalid %s", source)
 }
 
 func validateRemoteChatFlags(cmd *cobra.Command) error {
@@ -440,13 +419,13 @@ func init() {
 		"welcome-effect",
 		"",
 		"TUI welcome effect for block style (available: "+strings.Join(tui.AvailableWelcomeEffects(), ", ")+
-			"; defaults to "+welcomeEffectEnv+", the "+welcomeEffectConfigKey+" setting, or "+tui.DefaultWelcomeEffect+")",
+			"; defaults to KODELET_WELCOME_EFFECT, the welcome_effect setting, or "+tui.DefaultWelcomeEffect+")",
 	)
 	chatCmd.Flags().String(
 		"welcome-style",
 		"",
 		"TUI welcome style (available: "+strings.Join(tui.AvailableWelcomeStyles(), ", ")+
-			"; plain disables animation; defaults to "+welcomeStyleEnv+", the "+welcomeStyleConfigKey+" setting, or "+tui.DefaultWelcomeStyle+")",
+			"; plain disables animation; defaults to KODELET_WELCOME_STYLE, the welcome_style setting, or "+tui.DefaultWelcomeStyle+")",
 	)
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extensions for this conversation")

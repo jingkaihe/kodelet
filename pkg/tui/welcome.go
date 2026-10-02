@@ -80,18 +80,7 @@ func AvailableWelcomeStyles() []string {
 
 // ParseWelcomeStyle normalizes a logo style; blank selects the default.
 func ParseWelcomeStyle(style string) (string, error) {
-	name := strings.ToLower(strings.TrimSpace(style))
-	if name == "" {
-		return DefaultWelcomeStyle, nil
-	}
-	if !slices.Contains(welcomeStyles, name) {
-		return "", errors.Errorf(
-			"unknown welcome style %q (available: %s)",
-			strings.TrimSpace(style),
-			strings.Join(welcomeStyles, ", "),
-		)
-	}
-	return name, nil
+	return parseWelcomeOption("style", style, DefaultWelcomeStyle, welcomeStyles)
 }
 
 // AvailableWelcomeEffects returns the supported startup animation names.
@@ -101,15 +90,19 @@ func AvailableWelcomeEffects() []string {
 
 // ParseWelcomeEffect normalizes an effect name; blank selects the default.
 func ParseWelcomeEffect(effect string) (string, error) {
-	name := strings.ToLower(strings.TrimSpace(effect))
+	return parseWelcomeOption("effect", effect, DefaultWelcomeEffect, welcomeEffects)
+}
+
+func parseWelcomeOption(kind, value, defaultValue string, available []string) (string, error) {
+	value = strings.TrimSpace(value)
+	name := strings.ToLower(value)
 	if name == "" {
-		return DefaultWelcomeEffect, nil
+		return defaultValue, nil
 	}
-	if !slices.Contains(welcomeEffects, name) {
+	if !slices.Contains(available, name) {
 		return "", errors.Errorf(
-			"unknown welcome effect %q (available: %s)",
-			strings.TrimSpace(effect),
-			strings.Join(welcomeEffects, ", "),
+			"unknown welcome %s %q (available: %s)",
+			kind, value, strings.Join(available, ", "),
 		)
 	}
 	return name, nil

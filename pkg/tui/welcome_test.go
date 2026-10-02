@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +12,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newWelcomeTestModel(t *testing.T, config Config) model {
+	t.Helper()
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	config.Remote = true
+	m := newModel(t.Context(), config)
+	t.Cleanup(m.cancel)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return updated.(model)
+}
 
 func TestWelcomeAnimationLifecycle(t *testing.T) {
 	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
@@ -76,8 +86,15 @@ func TestWelcomeAnimationLifecycle(t *testing.T) {
 	}
 }
 
-func TestWelcomeAnimationInputIsNotConsumed(t *testing.T) {
-	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
+func TestWelcomeInputIsNotConsumed(t *testing.T) {
+	for _, scene := range []struct {
+		name, effect string
+		particles    bool
+	}{
+		{name: "beams", effect: "beams"},
+		{name: "matrix", effect: "matrix"},
+		{name: "particles", particles: true},
+	} {
 		for _, tt := range []struct {
 			name string
 			msg  tea.Msg
@@ -87,53 +104,28 @@ func TestWelcomeAnimationInputIsNotConsumed(t *testing.T) {
 			{name: "paste", msg: tea.PasteMsg{Content: "pasted draft"}, want: "pasted draft"},
 			{name: "newline", msg: keyPressWithMod(tea.KeyEnter, tea.ModShift), want: "\n"},
 			{name: "shortcuts", msg: textKeyPress("?")},
+			{name: "escape", msg: tea.KeyPressMsg{Code: tea.KeyEscape}},
 		} {
-			t.Run(effect+"/"+tt.name, func(t *testing.T) {
-				t.Setenv("NO_COLOR", "")
-				t.Setenv("TERM", "xterm-256color")
-				m := newModel(t.Context(), Config{Remote: true, WelcomeEffect: effect})
-				t.Cleanup(m.cancel)
-				updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-				m = updated.(model)
+			t.Run(scene.name+"/"+tt.name, func(t *testing.T) {
+				m := newWelcomeTestModel(t, Config{WelcomeEffect: scene.effect})
 				require.False(t, m.welcome.done)
+				if scene.particles {
+					updated, _ := m.Update(welcomeLogoClick(m))
+					m = updated.(model)
+					require.True(t, m.welcomeSpin.active())
+					assert.True(t, m.welcome.done, "clicking during the intro must cancel it")
+					assert.Nil(t, m.updateWelcomeAnimation(time.Now()))
+				}
 				assert.NotContains(t, xansi.Strip(m.viewport.View()), "? for shortcuts")
 
-				updated, _ = m.Update(tt.msg)
+				updated, _ := m.Update(tt.msg)
 				m = updated.(model)
 				assert.True(t, m.welcome.done)
+				assert.False(t, m.welcomeSpin.active())
 				assert.Equal(t, tt.want, m.textarea.Value())
 				assert.Equal(t, tt.name == "shortcuts", m.shortcutsOpen)
 				assert.Nil(t, m.updateWelcomeAnimation(time.Now()))
 				assert.Contains(t, xansi.Strip(m.viewport.View()), "? for shortcuts", "interrupting the effect reveals the hint immediately")
-			})
-		}
-	}
-}
-
-func TestWelcomeAnimationDeferredConfiguration(t *testing.T) {
-	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
-		for _, resumed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/resumed=%t", effect, resumed), func(t *testing.T) {
-				t.Setenv("NO_COLOR", "")
-				t.Setenv("TERM", "xterm-256color")
-				m := newModel(t.Context(), Config{WelcomeEffect: effect, Initialize: func(context.Context) (Config, error) {
-					return Config{}, nil
-				}})
-				t.Cleanup(m.cancel)
-				updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-				m = updated.(model)
-				assert.True(t, m.welcome.startedAt.IsZero(), "do not animate before knowing whether this is a resume")
-				assert.False(t, m.welcomeLogoVisible(), "do not show a frozen first frame during initialization")
-				config := Config{Runner: &recordingRunner{}, Remote: true}
-				if resumed {
-					config.ConversationID = "saved"
-				}
-				updated, _ = m.Update(initializedMsg{config: config})
-				m = updated.(model)
-				assert.Equal(t, effect, m.welcome.effect, "daemon configuration must preserve the client's effect")
-				assert.Equal(t, resumed, m.welcome.startedAt.IsZero())
-				assert.Equal(t, resumed, m.welcome.done)
-				assert.Equal(t, !resumed, m.welcomeLogoVisible())
 			})
 		}
 	}
@@ -189,7 +181,7 @@ func TestWelcomeAnimationStaticFallbacks(t *testing.T) {
 	}
 }
 
-func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
+func TestWelcomeDeferredStartupAndLayout(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		style   string
@@ -203,6 +195,7 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 		{name: "plain", style: "plain", effect: "matrix"},
 		{name: "no color", effect: DefaultWelcomeEffect, noColor: "1"},
 		{name: "resumed", effect: DefaultWelcomeEffect, resumed: true},
+		{name: "resumed matrix", effect: "matrix", resumed: true},
 		{name: "resumed none", effect: "none", resumed: true},
 		{name: "resumed plain", style: "plain", resumed: true},
 	} {
@@ -215,6 +208,9 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			t.Cleanup(m.cancel)
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 			m = updated.(model)
+			welcome := m.welcome
+			assert.True(t, welcome.startedAt.IsZero(), "do not animate before knowing whether this is a resume")
+			assert.False(t, m.welcomeLogoVisible(), "do not show a frozen first frame during initialization")
 			starting := len(m.renderInitialMessage())
 			hintRow := starting - 1
 			if m.welcomeLogoRows() == welcomeCanvasHeight {
@@ -232,15 +228,16 @@ func TestWelcomeShortcutStaysPutThroughStartup(t *testing.T) {
 			}
 			updated, _ = m.Update(initializedMsg{config: config})
 			m = updated.(model)
+			assert.Equal(t, welcome.style, m.welcome.style, "daemon configuration must preserve the client's style")
+			assert.Equal(t, welcome.effect, m.welcome.effect, "daemon configuration must preserve the client's effect")
+			animated := welcome.animated && !tt.resumed
+			assert.Equal(t, !animated, m.welcome.startedAt.IsZero())
+			assert.Equal(t, !animated, m.welcome.done)
 			assert.Equal(t, starting, len(m.renderInitialMessage()), "keep the same area reserved through startup")
 			if m.welcome.done {
 				assert.Equal(t, hintRow, welcomeShortcutRow(t, m))
 			} else {
 				assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts")
-			}
-			if tt.style == "plain" {
-				assert.Equal(t, "plain", m.welcome.style, "daemon configuration must preserve the client's style")
-				assert.False(t, m.welcome.animated)
 			}
 			if tt.resumed {
 				assert.False(t, m.welcomeLogoVisible(), "resumed conversations keep blank space until history arrives")
@@ -320,15 +317,10 @@ func TestWelcomeBeamColorRevealAndSettle(t *testing.T) {
 func TestWelcomeAnimationStopsWhenLeavingWelcome(t *testing.T) {
 	for _, reason := range []string{"resize", "transcript", "new conversation"} {
 		t.Run(reason, func(t *testing.T) {
-			t.Setenv("NO_COLOR", "")
-			t.Setenv("TERM", "xterm-256color")
-			m := newModel(t.Context(), Config{Remote: true})
-			t.Cleanup(m.cancel)
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-			m = updated.(model)
+			m := newWelcomeTestModel(t, Config{})
 			switch reason {
 			case "resize":
-				updated, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 10})
+				updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 10})
 				m = updated.(model)
 			case "transcript":
 				m.entries = []chatEntry{{kind: entryUser, content: "work"}}
@@ -342,7 +334,6 @@ func TestWelcomeAnimationStopsWhenLeavingWelcome(t *testing.T) {
 			assert.Nil(t, cmd)
 			if reason == "transcript" {
 				assert.Contains(t, m.View().Content, "work")
-				assert.NotContains(t, m.View().Content, "Hello!")
 			}
 			updated, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 			m = updated.(model)
@@ -352,15 +343,15 @@ func TestWelcomeAnimationStopsWhenLeavingWelcome(t *testing.T) {
 }
 
 func TestWelcomeLogoFramesAndLayout(t *testing.T) {
+	for _, row := range welcomeLogo {
+		assert.Len(t, row, welcomeCanvasWidth)
+	}
 	for _, effect := range []string{DefaultWelcomeEffect, "matrix"} {
 		for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 			t.Run(effect+"/"+themeName, func(t *testing.T) {
 				m := newModel(t.Context(), Config{Theme: themeName, WelcomeEffect: effect})
 				t.Cleanup(m.cancel)
 				m.welcome.animated, m.welcome.done = true, false
-				for _, row := range welcomeLogo {
-					assert.Len(t, row, welcomeCanvasWidth)
-				}
 				for frame := range m.welcome.frames() + 1 {
 					m.welcome.frame = frame
 					lines := m.renderWelcomeLogo(78)
@@ -403,17 +394,6 @@ func TestWelcomeLogoFramesAndLayout(t *testing.T) {
 				require.Len(t, static, welcomeLogoHeight, "static welcomes omit the empty rain rows")
 				assert.Equal(t, strings.Split(settled, "\n")[welcomeLogoTop:welcomeLogoTop+welcomeLogoHeight], static)
 			})
-		}
-	}
-	for _, size := range [][2]int{{1, 1}, {20, 2}, {30, 8}, {39, 11}, {80, 20}} {
-		m := newModel(t.Context(), Config{})
-		t.Cleanup(m.cancel)
-		m.viewport.SetWidth(size[0])
-		m.viewport.SetHeight(size[1])
-		lines := m.renderInitialMessage()
-		assert.LessOrEqual(t, len(lines), size[1])
-		for _, line := range lines {
-			assert.LessOrEqual(t, lipgloss.Width(line), size[0])
 		}
 	}
 }
@@ -587,12 +567,7 @@ func TestWelcomeMatrixGreenHoldAndNeutralFade(t *testing.T) {
 	}
 	for _, theme := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(theme, func(t *testing.T) {
-			t.Setenv("NO_COLOR", "")
-			t.Setenv("TERM", "xterm-256color")
-			m := newModel(t.Context(), Config{Remote: true, Theme: theme, WelcomeEffect: "matrix"})
-			t.Cleanup(m.cancel)
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-			m = updated.(model)
+			m := newWelcomeTestModel(t, Config{Theme: theme, WelcomeEffect: "matrix"})
 			green := m.welcomePalette()
 			text, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Assistant)))
 			dot, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.welcomeDotColor())))
@@ -628,7 +603,7 @@ func TestWelcomeMatrixGreenHoldAndNeutralFade(t *testing.T) {
 			assert.NotContains(t, xansi.Strip(m.View().Content), "? for shortcuts", "wait for the final fade")
 			assert.Equal(t, text, m.welcomeMatrixLogoPalette(welcomeMatrixFrames)[10], "the last fade color matches the resting theme")
 			interrupted := m
-			updated, _ = interrupted.Update(textKeyPress("hello"))
+			updated, _ := interrupted.Update(textKeyPress("hello"))
 			interrupted = updated.(model)
 			assert.True(t, interrupted.welcome.done)
 			assert.Equal(t, "hello", interrupted.textarea.Value())

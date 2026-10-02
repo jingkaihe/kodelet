@@ -110,9 +110,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
-		if m.welcomeSpin.active() && !m.welcomeSpinAvailable() {
-			m.stopWelcomeSpin()
-		}
 		cmds = append(cmds, m.startWelcomeAnimation())
 		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)

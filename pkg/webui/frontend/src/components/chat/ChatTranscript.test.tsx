@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyChatStreamEvent, conversationToChatMessages } from '../../features/chat/state';
 import type { ChatAssistantBlock, ChatRenderMessage, ChatStreamEvent } from '../../types';
 import ChatTranscript from './ChatTranscript';
@@ -100,16 +100,103 @@ describe('ChatTranscript', () => {
     expect(container).not.toHaveTextContent('Artifact ID:');
   });
 
-  it('renders the TUI welcome message for an empty conversation', () => {
-    render(<ChatTranscript isStreaming={false} messages={[]} />);
+  describe('empty welcome', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
 
-    expect(
-      screen.getByRole('heading', {
-        level: 1,
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it('reveals, spins and settles the particle mark only on request', () => {
+      const { container, rerender } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      const greeting = screen.getByRole('button', {
         name: 'Hello! What would you like me to work on?',
-      })
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/Ask kodelet to inspect the repo/)).not.toBeInTheDocument();
+      });
+      expect(vi.getTimerCount()).toBe(0);
+      expect(container.querySelector('.chat-welcome-particles')).not.toBeInTheDocument();
+
+      fireEvent.click(greeting);
+      const logo = screen.getByRole('button', { name: 'Spin the kodelet particle logo' });
+      const front = logo.textContent;
+      expect(front).toMatch(/[\u2801-\u28ff]/);
+      act(() => vi.advanceTimersByTime(1200));
+      expect(logo.textContent).not.toBe(front);
+      const turning = logo.textContent;
+      fireEvent.click(logo);
+      expect(logo.textContent).toBe(turning);
+      expect(vi.getTimerCount()).toBe(1);
+      act(() => vi.advanceTimersByTime(5000));
+      expect(logo.textContent).toBe(front);
+      expect(vi.getTimerCount()).toBe(0);
+
+      fireEvent.click(logo);
+      act(() => vi.advanceTimersByTime(1200));
+      expect(logo.textContent).not.toBe(front);
+      rerender(
+        <ChatTranscript isStreaming={false} messages={[{ role: 'user', content: 'Hello' }]} />
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      expect(logo).not.toBeInTheDocument();
+      rerender(<ChatTranscript isStreaming={false} messages={[]} />);
+      expect(screen.getByRole('button', { name: /Hello!/ })).toBeVisible();
+    });
+
+    it('maps pointer clicks to the particle raster, not the larger button', () => {
+      const frames: Array<string | null> = [];
+      for (const detail of [0, 1]) {
+        const { container, unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+        fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
+        act(() => vi.advanceTimersByTime(6100));
+        const raster = container.querySelector('.chat-welcome-particles > span');
+        assert(raster);
+        vi.spyOn(raster, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 60, 400, 240));
+        const logo = screen.getByRole('button', { name: /Spin the kodelet/ });
+        act(() => vi.advanceTimersToNextFrame());
+        fireEvent.click(logo, { detail, clientX: 300, clientY: 180 });
+        act(() => vi.advanceTimersByTime(200));
+        frames.push(logo.textContent);
+        unmount();
+      }
+      expect(frames[1]).toBe(frames[0]);
+    });
+
+    it.each([
+      true,
+      false,
+    ])('honors reduced motion (initially %s) and preference changes', (initiallyReduced) => {
+      const motion = {
+        ...window.matchMedia('(prefers-reduced-motion: reduce)'),
+        matches: initiallyReduced,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+      vi.mocked(window.matchMedia).mockReturnValueOnce(motion);
+      const { unmount } = render(<ChatTranscript isStreaming={false} messages={[]} />);
+      fireEvent.click(screen.getByRole('button', { name: /Hello!/ }));
+      const logo = screen.getByRole('button', { name: /Spin the kodelet/ });
+      const front = logo.textContent;
+      act(() => vi.advanceTimersByTime(1200));
+      const onChange = vi.mocked(motion.addEventListener).mock.calls[0][1] as EventListener;
+      if (!initiallyReduced) {
+        expect(logo.textContent).not.toBe(front);
+        motion.matches = true;
+        act(() => onChange(new Event('change')));
+      }
+      fireEvent.click(logo);
+      expect(logo.textContent).toBe(front);
+      expect(vi.getTimerCount()).toBe(0);
+      unmount();
+      expect(motion.removeEventListener).toHaveBeenCalledWith('change', onChange);
+    });
+
+    it('does not offer the welcome interaction while a turn is running', () => {
+      render(<ChatTranscript isStreaming={true} messages={[]} />);
+      expect(screen.queryByRole('button', { name: /Hello!/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Kodelet is working' })).toBeVisible();
+    });
   });
 
   it.each([

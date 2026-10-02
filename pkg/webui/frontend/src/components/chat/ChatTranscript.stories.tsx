@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import { expect, userEvent } from 'storybook/test';
+import { expect, userEvent, within } from 'storybook/test';
 import { sampleChatMessages } from '../../stories/fixtures';
 import type {
   ApplyPatchMetadata,
@@ -122,6 +122,20 @@ export const CodeBlocks: Story = {
 export const EmptyState: Story = {
   args: {
     messages: [],
+  },
+};
+
+export const WelcomeParticles: Story = {
+  args: { messages: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const greeting = canvas.getByRole('button', { name: /Hello!/ });
+    greeting.focus();
+    await userEvent.keyboard('{Enter}');
+    const logo = canvas.getByRole('button', { name: 'Spin the kodelet particle logo' });
+    await expect(logo).toHaveFocus();
+    await userEvent.keyboard(' ');
+    await expect(logo).toBeVisible();
   },
 };
 

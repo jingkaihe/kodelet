@@ -18,6 +18,7 @@ import { CopyButton } from '../tool-renderers/shared';
 import ChatMessageFrame from './ChatMessageFrame';
 import ChatStreamingIndicator from './ChatStreamingIndicator';
 import ChatToolActivity from './ChatToolActivity';
+import ChatWelcome from './ChatWelcome';
 
 // Highlight only changed message HTML, never the entire document during streaming.
 Prism.manual = true;
@@ -402,11 +403,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
   };
 
   if (messages.length === 0) {
-    return (
-      <div className="chat-empty-state">
-        <h1 className="chat-empty-state-title">Hello! What would you like me to work on?</h1>
-      </div>
-    );
+    return isStreaming ? <ChatStreamingIndicator assistantTurnCount={0} /> : <ChatWelcome />;
   }
 
   return (

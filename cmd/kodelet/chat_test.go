@@ -61,154 +61,102 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "workspace", config.RunnerProfile)
 }
 
-func TestChatWelcomeEffectFlag(t *testing.T) {
-	flag := chatCmd.Flags().Lookup("welcome-effect")
-	require.NotNil(t, flag)
-	assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
-	assert.Contains(t, flag.Usage, strings.Join(tui.AvailableWelcomeEffects(), ", "))
-	assert.Contains(t, flag.Usage, welcomeEffectEnv)
-	assert.Contains(t, flag.Usage, welcomeEffectConfigKey)
-}
-
-func TestResolveWelcomeEffect(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		args       []string
-		env        string
-		configured string
-		want       string
+func TestChatWelcomeSettings(t *testing.T) {
+	for _, setting := range []struct {
+		name, defaultValue, selected string
+		available                    []string
+		parse                        func(string) (string, error)
 	}{
-		{name: "default", want: tui.DefaultWelcomeEffect},
-		{name: "flag", args: []string{"--welcome-effect", " MATRIX "}, want: "matrix"},
-		{name: "environment", env: " None ", want: "none"},
-		{name: "configuration", configured: "Matrix", want: "matrix"},
-		{name: "environment overrides configuration", env: "beams", configured: "none", want: "beams"},
-		{name: "flag overrides environment", args: []string{"--welcome-effect=none"}, env: "matrix", want: "none"},
-		{name: "flag overrides configuration", args: []string{"--welcome-effect=beams"}, configured: "none", want: "beams"},
-		{name: "blank flag falls through", args: []string{"--welcome-effect= "}, configured: "none", want: "none"},
+		{
+			name: "effect", defaultValue: tui.DefaultWelcomeEffect, selected: "matrix",
+			available: tui.AvailableWelcomeEffects(), parse: tui.ParseWelcomeEffect,
+		},
+		{
+			name: "style", defaultValue: tui.DefaultWelcomeStyle, selected: "plain",
+			available: tui.AvailableWelcomeStyles(), parse: tui.ParseWelcomeStyle,
+		},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Setenv(welcomeEffectEnv, test.env)
-			setWelcomeEffectConfigForTest(t, test.configured)
-			effect, err := resolveWelcomeEffect(daemonChatCommandForTest(t, test.args...))
-			require.NoError(t, err)
-			assert.Equal(t, test.want, effect)
+		t.Run(setting.name, func(t *testing.T) {
+			flagName := "welcome-" + setting.name
+			key := "welcome_" + setting.name
+			env := "KODELET_WELCOME_" + strings.ToUpper(setting.name)
+			flag := chatCmd.Flags().Lookup(flagName)
+			require.NotNil(t, flag)
+			assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
+			assert.Contains(t, flag.Usage, strings.Join(setting.available, ", "))
+			assert.Contains(t, flag.Usage, env)
+			assert.Contains(t, flag.Usage, key)
+			if setting.name == "style" {
+				assert.Contains(t, flag.Usage, "plain disables animation")
+			}
+			selected, fallback := setting.selected, setting.defaultValue
+			for _, test := range []struct {
+				name, flag, env, configured, want string
+			}{
+				{name: "default", want: fallback},
+				{name: "flag", flag: " " + strings.ToUpper(selected) + " ", want: selected},
+				{name: "environment", env: " " + strings.ToUpper(selected) + " ", want: selected},
+				{name: "configuration", configured: strings.ToUpper(selected), want: selected},
+				{name: "environment overrides configuration", env: fallback, configured: selected, want: fallback},
+				{name: "flag overrides environment", flag: selected, env: fallback, want: selected},
+				{name: "flag overrides configuration", flag: fallback, configured: selected, want: fallback},
+				{name: "blank flag falls through", flag: " ", configured: selected, want: selected},
+				{name: "blank environment falls through", env: " ", configured: selected, want: selected},
+				{name: "flag masks invalid defaults", flag: selected, env: "invalid", configured: "invalid", want: selected},
+				{name: "environment masks invalid configuration", env: selected, configured: "invalid", want: selected},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					t.Setenv(env, test.env)
+					setWelcomeConfigForTest(t, key, test.configured)
+					var args []string
+					if test.flag != "" {
+						args = append(args, "--"+flagName+"="+test.flag)
+					}
+					value, err := resolveWelcomeSetting(daemonChatCommandForTest(t, args...), flagName, setting.parse)
+					require.NoError(t, err)
+					assert.Equal(t, test.want, value)
+				})
+			}
 		})
 	}
 }
 
-func TestChatRejectsInvalidWelcomeEffectBeforeStartup(t *testing.T) {
+func TestChatRejectsInvalidWelcomeSettingsBeforeStartup(t *testing.T) {
+	for _, name := range []string{"effect", "style"} {
+		t.Setenv("KODELET_WELCOME_"+strings.ToUpper(name), "")
+		setWelcomeConfigForTest(t, "welcome_"+name, "")
+	}
 	var calls atomic.Int32
 	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	t.Cleanup(daemon.Close)
-	for _, test := range []struct {
-		name       string
-		flag       string
-		env        string
-		configured string
-		source     string
-	}{
-		{name: "flag", flag: "matirx", source: "--welcome-effect"},
-		{name: "environment", env: "false", source: welcomeEffectEnv},
-		{name: "configuration", configured: "sparkles", source: welcomeEffectConfigKey + " setting"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Setenv(welcomeEffectEnv, test.env)
-			setWelcomeEffectConfigForTest(t, test.configured)
-			args := []string{"--server=" + daemon.URL}
-			if test.flag != "" {
-				args = append(args, "--welcome-effect="+test.flag)
-			}
-			err := chatCmd.RunE(daemonChatCommandForTest(t, args...), nil)
-			require.ErrorContains(t, err, "invalid "+test.source)
-			assert.ErrorContains(t, err, test.flag+test.env+test.configured)
-		})
+	for _, name := range []string{"effect", "style"} {
+		flagName := "welcome-" + name
+		key := "welcome_" + name
+		env := "KODELET_WELCOME_" + strings.ToUpper(name)
+		for _, test := range []struct {
+			flag, env, configured, source string
+		}{
+			{flag: "invalid", source: "--" + flagName},
+			{env: "invalid", source: env},
+			{configured: "invalid", source: key + " setting"},
+		} {
+			t.Run(test.source, func(t *testing.T) {
+				t.Setenv(env, test.env)
+				setWelcomeConfigForTest(t, key, test.configured)
+				cmd := daemonChatCommandForTest(t, "--server="+daemon.URL, "--"+flagName+"="+test.flag)
+				err := chatCmd.RunE(cmd, nil)
+				require.ErrorContains(t, err, "invalid "+test.source)
+				assert.ErrorContains(t, err, `unknown welcome `+name+` "invalid"`)
+			})
+		}
 	}
-	assert.Zero(t, calls.Load(), "invalid effects must fail before the TUI starts or contacts the daemon")
+	assert.Zero(t, calls.Load(), "invalid settings must fail before the TUI starts or contacts the daemon")
 }
 
-func setWelcomeEffectConfigForTest(t *testing.T, value string) {
+func setWelcomeConfigForTest(t *testing.T, key, value string) {
 	t.Helper()
-	viper.Set(welcomeEffectConfigKey, value)
-	t.Cleanup(func() { viper.Set(welcomeEffectConfigKey, nil) })
-}
-
-func TestChatWelcomeStyleFlag(t *testing.T) {
-	flag := chatCmd.Flags().Lookup("welcome-style")
-	require.NotNil(t, flag)
-	assert.Empty(t, flag.DefValue, "the flag default must not mask the environment or user configuration")
-	assert.Contains(t, flag.Usage, strings.Join(tui.AvailableWelcomeStyles(), ", "))
-	assert.Contains(t, flag.Usage, welcomeStyleEnv)
-	assert.Contains(t, flag.Usage, welcomeStyleConfigKey)
-	assert.Contains(t, flag.Usage, "plain disables animation")
-}
-
-func TestResolveWelcomeStyle(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		args       []string
-		env        string
-		configured string
-		want       string
-	}{
-		{name: "default", want: tui.DefaultWelcomeStyle},
-		{name: "flag", args: []string{"--welcome-style", " PLAIN "}, want: "plain"},
-		{name: "environment", env: " Plain ", want: "plain"},
-		{name: "configuration", configured: "Plain", want: "plain"},
-		{name: "environment overrides configuration", env: "block", configured: "plain", want: "block"},
-		{name: "flag overrides environment", args: []string{"--welcome-style=plain"}, env: "block", want: "plain"},
-		{name: "flag overrides configuration", args: []string{"--welcome-style=block"}, configured: "plain", want: "block"},
-		{name: "blank flag falls through", args: []string{"--welcome-style= "}, configured: "plain", want: "plain"},
-		{name: "blank environment falls through", env: " ", configured: "plain", want: "plain"},
-		{name: "flag masks invalid defaults", args: []string{"--welcome-style=plain"}, env: "invalid", configured: "invalid", want: "plain"},
-		{name: "environment masks invalid configuration", env: "plain", configured: "invalid", want: "plain"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Setenv(welcomeStyleEnv, test.env)
-			setWelcomeStyleConfigForTest(t, test.configured)
-			style, err := resolveWelcomeStyle(daemonChatCommandForTest(t, test.args...))
-			require.NoError(t, err)
-			assert.Equal(t, test.want, style)
-		})
-	}
-}
-
-func TestChatRejectsInvalidWelcomeStyleBeforeStartup(t *testing.T) {
-	t.Setenv(welcomeEffectEnv, "")
-	setWelcomeEffectConfigForTest(t, "")
-	var calls atomic.Int32
-	daemon := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
-	t.Cleanup(daemon.Close)
-	for _, test := range []struct {
-		name       string
-		flag       string
-		env        string
-		configured string
-		source     string
-	}{
-		{name: "flag", flag: "palin", source: "--welcome-style"},
-		{name: "environment", env: "false", source: welcomeStyleEnv},
-		{name: "configuration", configured: "minimal", source: welcomeStyleConfigKey + " setting"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Setenv(welcomeStyleEnv, test.env)
-			setWelcomeStyleConfigForTest(t, test.configured)
-			args := []string{"--server=" + daemon.URL}
-			if test.flag != "" {
-				args = append(args, "--welcome-style="+test.flag)
-			}
-			err := chatCmd.RunE(daemonChatCommandForTest(t, args...), nil)
-			require.ErrorContains(t, err, "invalid "+test.source)
-			assert.ErrorContains(t, err, test.flag+test.env+test.configured)
-		})
-	}
-	assert.Zero(t, calls.Load(), "invalid styles must fail before the TUI starts or contacts the daemon")
-}
-
-func setWelcomeStyleConfigForTest(t *testing.T, value string) {
-	t.Helper()
-	viper.Set(welcomeStyleConfigKey, value)
-	t.Cleanup(func() { viper.Set(welcomeStyleConfigKey, nil) })
+	viper.Set(key, value)
+	t.Cleanup(func() { viper.Set(key, nil) })
 }
 
 func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
