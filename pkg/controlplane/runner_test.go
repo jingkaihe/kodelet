@@ -1086,20 +1086,26 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 		return nil, convtypes.ErrConversationNotFound
 	}}
 	link := newRunnerAPITestLink()
+	var discarded atomic.Bool
 	link.call = func(_ context.Context, method string, params, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceGitDiff:
 			assert.Equal(t, protocol.WorkspaceGitDiffParams{CWD: cwd}, params)
 			*result.(*protocol.WorkspaceGitDiffResult) = protocol.WorkspaceGitDiffResult{CWD: "/runner/resolved"}
 		case protocol.MethodWorkspaceTerminalOpen:
+			if discarded.Load() {
+				return &protocol.RPCError{Code: protocol.ErrorCodeStale, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionDiscarded}}
+			}
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
 			assert.Equal(t, "draft-terminal", terminal.ConversationID)
+			assert.True(t, terminal.Draft)
 			assert.Equal(t, cwd, terminal.CWD)
 			*result.(*protocol.WorkspaceTerminalOpenResult) = protocol.WorkspaceTerminalOpenResult{
 				SessionID: "draft-terminal", CWD: "/runner/resolved", Name: "bash",
 			}
 		case protocol.MethodWorkspaceTerminalRead:
-			*result.(*protocol.WorkspaceTerminalReadResult) = protocol.WorkspaceTerminalReadResult{Exited: true}
+			discarded.Store(true)
+			return &protocol.RPCError{Code: protocol.ErrorCodeStale, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionClosed}}
 		default:
 			return errors.Errorf("draft workspace tools must not start a run or provider turn: %s", method)
 		}
@@ -1131,10 +1137,90 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query+"&conversationId=draft-terminal", nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	assert.Equal(t, "/runner/resolved", readTerminalReady(t, conn).CWD)
+	for attempt := range 2 {
+		conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query+"&conversationId=draft-terminal", nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+		if attempt == 0 {
+			assert.Equal(t, "/runner/resolved", readTerminalReady(t, conn).CWD)
+		}
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+		for err == nil {
+			_, _, err = conn.ReadMessage()
+		}
+		assert.True(t, websocket.IsCloseError(err, websocket.ClosePolicyViolation), "closed sessions and discarded drafts must stop pop-out retries: %v", err)
+	}
+}
+
+func TestDiscardDraftWorkspaceStopsOnlyUnsubmittedDrafts(t *testing.T) {
+	s, registration, link := newBrowserAPITestServer(t)
+	discarded := openBrowserTestHandle(t, s, registration, "alice", "draft")
+	other := openBrowserTestHandle(t, s, registration, "alice", "other")
+	require.NoError(t, s.runnerRegistry.BindConversation(t.Context(), "reserved", registration.RunnerID))
+	s.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+		if id == "saved" {
+			return &conversations.GetConversationResponse{ID: id, CWD: "/workspace"}, nil
+		}
+		return nil, convtypes.ErrConversationNotFound
+	}}
+	calls := 0
+	var cancelRequest context.CancelFunc
+	link.call = func(ctx context.Context, method string, params, _ any) error {
+		calls++
+		assert.Equal(t, protocol.MethodWorkspaceSessionsDiscard, method)
+		assert.Equal(t, protocol.WorkspaceSessionsDiscardParams{ConversationID: "draft"}, params)
+		assert.False(t, s.registerActiveChat("draft", newActiveChatRun(func() {})), "cleanup fences first-turn admission")
+		cancelRequest()
+		assert.NoError(t, ctx.Err(), "accepted cleanup outlives its HTTP observer")
+		return nil
+	}
+	for _, test := range []struct {
+		id     string
+		status int
+	}{
+		{"saved", http.StatusConflict},
+		{"reserved", http.StatusConflict},
+		{"draft", http.StatusNoContent},
+	} {
+		t.Run(test.id, func(t *testing.T) {
+			var requestCtx context.Context
+			requestCtx, cancelRequest = context.WithCancel(t.Context())
+			defer cancelRequest()
+			r := httptest.NewRequest(http.MethodDelete, "/api/workspace/draft?runnerId="+registration.RunnerID+"&conversationId="+test.id, nil)
+			r = r.WithContext(requestCtx)
+			w := httptest.NewRecorder()
+			s.handleDiscardDraftWorkspace(w, r)
+			assert.Equal(t, test.status, w.Code, w.Body.String())
+		})
+	}
+	assert.Equal(t, 1, calls, "saved and reserved IDs never reach the runner")
+	assert.NotContains(t, s.browserHandles, discarded.ID)
+	assert.Contains(t, s.browserHandles, other.ID)
+	assert.Empty(t, s.deletingConversations, "cleanup releases the admission guard")
+}
+
+func TestDraftWorkspaceHeartbeatRoutesRenewalAndExpiry(t *testing.T) {
+	s, registration, link := newBrowserAPITestServer(t)
+	link.call = func(_ context.Context, method string, params, _ any) error {
+		assert.Equal(t, protocol.MethodWorkspaceSessionsHeartbeat, method)
+		id := params.(protocol.WorkspaceSessionsHeartbeatParams).ConversationID
+		if id == "expired" {
+			return &protocol.RPCError{Code: protocol.ErrorCodeStale, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionDiscarded}}
+		}
+		return nil
+	}
+	for id, status := range map[string]int{
+		"..":      http.StatusBadRequest,
+		"draft":   http.StatusNoContent,
+		"expired": http.StatusGone,
+	} {
+		t.Run(id, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/workspace/draft/heartbeat?runnerId="+registration.RunnerID+"&conversationId="+id, nil)
+			w := httptest.NewRecorder()
+			s.handleDraftWorkspaceHeartbeat(w, r)
+			assert.Equal(t, status, w.Code, w.Body.String())
+		})
+	}
 }
 
 func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testing.T) {
@@ -1330,6 +1416,8 @@ func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T
 		{"old runner diff", "conversationId=conversation-scope", server.handleGetGitDiff, http.StatusNotImplemented},
 		{"old runner terminal", "conversationId=conversation-scope", server.handleTerminalWebsocket, http.StatusNotImplemented},
 		{"runner lacks conversation terminals", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"runner lacks draft cleanup", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleDiscardDraftWorkspace, http.StatusNotImplemented},
+		{"runner lacks draft heartbeat", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleDraftWorkspaceHeartbeat, http.StatusNotImplemented},
 		{"old runner browser", "conversationId=conversation-scope", server.handleBrowserOpen, http.StatusNotImplemented},
 		{"old runner discovery", "runnerId=" + registration.RunnerID, server.handleGetSlashCommands, http.StatusNotImplemented},
 		{"wrong directory", "conversationId=conversation-scope&cwd=/runner/startup", server.handleGetSlashCommands, http.StatusBadRequest},
@@ -1397,6 +1485,7 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
 			assert.Equal(t, "conversation-terminal", terminal.ConversationID)
 			assert.Equal(t, "/runner/selected", terminal.CWD)
+			assert.False(t, terminal.Draft)
 			output := result.(*protocol.WorkspaceTerminalOpenResult)
 			*output = protocol.WorkspaceTerminalOpenResult{
 				SessionID:    "terminal-1",
@@ -1497,7 +1586,7 @@ func TestRemoteWorkspaceTerminalPersistsAcrossDraftSaveAndReplaysOutput(t *testi
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
 			assert.Equal(t, "conversation-terminal", terminal.ConversationID)
 			assert.Equal(t, "/runner/project", terminal.CWD)
-			openCount.Add(1)
+			assert.Equal(t, openCount.Add(1) == 1, terminal.Draft, "saved reattachment promotes the draft lease")
 			terminalMu.Lock()
 			writeCursor := uint64(len(terminalOutput))
 			terminalMu.Unlock()

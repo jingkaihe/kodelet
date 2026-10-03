@@ -157,7 +157,7 @@ class MockWebSocket {
     this.listeners.set(type, existing);
   }
 
-  emit(type: string, event?: unknown) {
+  emit(type: string, event: unknown = new Event(type)) {
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }
@@ -919,12 +919,14 @@ describe('TerminalModal', () => {
   it('reconnects a remote terminal without changing its runner target', async () => {
     const firstSocket = new MockWebSocket();
     const secondSocket = new MockWebSocket();
+    const onStopped = vi.fn();
     createTerminalWebSocketMock.mockReturnValueOnce(firstSocket).mockReturnValueOnce(secondSocket);
 
     render(
       <TerminalModal
         cwdLabel="/runner/project"
         onClose={vi.fn()}
+        onStopped={onStopped}
         open
         target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' }}
       />
@@ -957,6 +959,23 @@ describe('TerminalModal', () => {
     expect(firstSocket.send).not.toHaveBeenCalledWith(
       JSON.stringify({ type: 'input', data: '\x03' })
     );
+
+    vi.useFakeTimers();
+    try {
+      act(() =>
+        secondSocket.emit(
+          'close',
+          new CloseEvent('close', { code: 1008, reason: 'Workspace session ended' })
+        )
+      );
+      expect(onStopped).toHaveBeenCalledExactlyOnceWith('Workspace session ended');
+      expect(screen.getByText('Workspace session ended')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Ctrl\+C/ })).toBeDisabled();
+      await act(async () => vi.advanceTimersByTimeAsync(2000));
+      expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('allows ghostty-web to process terminal keystrokes', async () => {

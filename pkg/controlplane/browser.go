@@ -96,7 +96,7 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.URL.Query().Get("conversationId")
 	var info browser.Info
 	if err := s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceBrowserOpen,
-		protocol.WorkspaceBrowserParams{ConversationID: conversationID, CWD: target.CWD}, &info); err != nil {
+		protocol.WorkspaceBrowserParams{ConversationID: conversationID, CWD: target.CWD, Draft: !saved}, &info); err != nil {
 		s.writeErrorResponse(w, http.StatusBadGateway, "could not open runner browser", err)
 		return
 	}

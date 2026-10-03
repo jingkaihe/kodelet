@@ -26,6 +26,10 @@ type webBrowserRelay struct {
 func (s *Service) BrowserManager() *browser.Manager { return s.browserManager }
 
 func (s *Service) handleBrowserRequest(ctx context.Context, method string, raw json.RawMessage) (any, *protocol.RPCError) {
+	if method == protocol.MethodWorkspaceBrowserOpen {
+		s.workspaceSessionsMu.RLock()
+		defer s.finishWorkspaceSessionOpen()
+	}
 	if s.browserManager == nil || !s.browserManager.Enabled() {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "browser support is not enabled on this runner"}
 	}
@@ -53,6 +57,11 @@ func (s *Service) handleBrowserRequest(ctx context.Context, method string, raw j
 	params, rpcErr := decodeParams[protocol.WorkspaceBrowserParams](raw)
 	if rpcErr != nil {
 		return nil, rpcErr
+	}
+	if method == protocol.MethodWorkspaceBrowserOpen {
+		if err := s.beginWorkspaceSession(strings.TrimSpace(params.ConversationID), params.Draft); err != nil {
+			return rpcResult(nil, err)
+		}
 	}
 	cwd, err := s.instanceProvider.ResolveWorkingDirectory(ctx, params.CWD)
 	if err != nil {

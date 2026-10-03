@@ -375,6 +375,45 @@ func (m *Manager) Stop(scope Scope, sessionID string) error {
 	return s.closeErr
 }
 
+// HasConversation reports whether the conversation still owns a session,
+// including a session that is starting or being cleaned up.
+func (m *Manager) HasConversation(conversationID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for scope := range m.sessions {
+		if scope.ConversationID == conversationID {
+			return true
+		}
+	}
+	return false
+}
+
+// StopConversation stops all sessions for an exact conversation ID, including
+// attached or starting sessions, and waits for process/profile cleanup. It does
+// not resolve directories, which may no longer exist. Callers must serialize
+// session creation with this operation if the conversation must stay discarded.
+func (m *Manager) StopConversation(conversationID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("browser conversation ID is required")
+	}
+	m.mu.Lock()
+	var sessions []*session
+	for scope, s := range m.sessions {
+		if scope.ConversationID == conversationID {
+			s.cancel()
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.Unlock()
+	var err error
+	for _, s := range sessions {
+		<-s.done
+		err = stderrors.Join(err, s.closeErr)
+	}
+	return err
+}
+
 // Close stops all sessions and waits for subprocess and temporary-profile cleanup.
 func (m *Manager) Close() error {
 	m.closeOnce.Do(func() {

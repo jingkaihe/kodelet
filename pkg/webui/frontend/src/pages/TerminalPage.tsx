@@ -9,6 +9,7 @@ import {
   TERMINAL_POP_OUT_HEARTBEAT_INTERVAL,
   type TerminalPopOutMessage,
   type TerminalPopOutRecord,
+  terminalPopOutMessageMatchesTarget,
   writeTerminalPopOutRecord,
 } from '../components/workspace/terminalPopOut';
 import apiService from '../services/api';
@@ -22,6 +23,7 @@ const TerminalPage = () => {
   const conversationId = params.get('conversationId')?.trim() || undefined;
   const [target, setTarget] = useState<WorkspaceTarget | null>(null);
   const [canonicalCWD, setCanonicalCWD] = useState<string>();
+  const [stoppedMessage, setStoppedMessage] = useState<string | null>(null);
   const [targetError, setTargetError] = useState<string | null>(
     conversationId ? null : 'A conversation is required to open a remote terminal.'
   );
@@ -74,11 +76,12 @@ const TerminalPage = () => {
   }, [conversationId, runnerId, requestedCWD]);
 
   const ownershipTarget = useMemo<WorkspaceTarget | null>(() => {
+    if (stoppedMessage) return null;
     if (!target || target.kind === 'local') return target;
     const cwd = canonicalCWD || target.cwd;
     if (!cwd?.startsWith('/')) return null;
     return cwd === target.cwd ? target : { ...target, cwd };
-  }, [canonicalCWD, target]);
+  }, [canonicalCWD, target, stoppedMessage]);
 
   useEffect(() => {
     if (!target) {
@@ -161,7 +164,14 @@ const TerminalPage = () => {
     };
 
     const handleChannelMessage = (event: MessageEvent<unknown>) => {
-      if (isTerminalPopOutMessage(event.data) && event.data.type === 'probe') {
+      if (!isTerminalPopOutMessage(event.data)) return;
+      if (
+        event.data.type === 'discarded' &&
+        terminalPopOutMessageMatchesTarget(event.data, ownershipTarget)
+      ) {
+        deactivate(true);
+        setStoppedMessage('This draft was discarded. Its terminal session has stopped.');
+      } else if (event.data.type === 'probe') {
         announce();
       }
     };
@@ -196,11 +206,14 @@ const TerminalPage = () => {
     };
   }, [ownershipTarget]);
 
-  if (!target) {
+  if (!target || stoppedMessage) {
     return (
       <main className="terminal-popout-page" data-testid="terminal-popout-page">
-        <div className="workspace-modal-placeholder" role={targetError ? 'alert' : 'status'}>
-          {targetError || 'Resolving remote terminal…'}
+        <div
+          className="workspace-modal-placeholder"
+          role={stoppedMessage || targetError ? 'alert' : 'status'}
+        >
+          {stoppedMessage || targetError || 'Resolving remote terminal…'}
         </div>
       </main>
     );
@@ -212,6 +225,7 @@ const TerminalPage = () => {
         cwdLabel={ownershipTarget?.cwd || target.cwd || ''}
         open
         onClose={() => window.close()}
+        onStopped={setStoppedMessage}
         onReady={(event) => {
           if (target.kind === 'runner' && event.cwd.startsWith('/')) {
             setCanonicalCWD(event.cwd);

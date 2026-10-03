@@ -40,6 +40,14 @@ const (
 	workspaceTerminalProcessKillWait   = 2 * time.Second
 	workspaceTerminalShutdownWait      = 4 * time.Second
 	workspaceTerminalSessionLimit      = 8
+	workspaceDiscardedSessionLimit     = 1024
+	workspaceDraftLeaseTimeout         = 5 * time.Minute
+	workspaceSessionSweepInterval      = 30 * time.Second
+)
+
+var (
+	errWorkspaceSessionDiscarded = errors.New("workspace sessions were discarded")
+	errWorkspaceSessionClosed    = errors.New("workspace session is closed or no longer available")
 )
 
 type cappedBuffer struct {
@@ -241,7 +249,7 @@ func (m *workspaceTerminalManager) Open(ctx context.Context, rows, cols int) (pr
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		return protocol.WorkspaceTerminalOpenResult{}, errors.New("workspace terminal manager is closed")
+		return protocol.WorkspaceTerminalOpenResult{}, errWorkspaceSessionClosed
 	}
 	if m.current != nil && m.current.isAlive() {
 		if err := m.current.resize(rows, cols); err != nil {
@@ -340,10 +348,10 @@ func (m *workspaceTerminalManager) session(sessionID string) (*workspaceTerminal
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return nil, errors.New("workspace terminal manager is closed")
+		return nil, errWorkspaceSessionClosed
 	}
 	if m.current == nil || m.current.id != sessionID {
-		return nil, errors.New("terminal session was not found")
+		return nil, errWorkspaceSessionClosed
 	}
 	return m.current, nil
 }
@@ -516,7 +524,7 @@ func (s *workspaceTerminalSession) writeInput(ctx context.Context, payload []byt
 		return nil
 	}
 	if !s.isAlive() {
-		return errors.New("terminal session is closed")
+		return errWorkspaceSessionClosed
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -528,7 +536,7 @@ func (s *workspaceTerminalSession) writeInput(ctx context.Context, payload []byt
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.ctx.Done():
-		return errors.New("terminal session is closed")
+		return errWorkspaceSessionClosed
 	}
 }
 
@@ -536,12 +544,16 @@ func (s *workspaceTerminalSession) resize(rows, cols int) error {
 	s.ptyMu.Lock()
 	defer s.ptyMu.Unlock()
 	if !s.isAlive() {
-		return errors.New("terminal session is closed")
+		return errWorkspaceSessionClosed
 	}
-	return pty.Setsize(s.ptmx, &pty.Winsize{
+	err := pty.Setsize(s.ptmx, &pty.Winsize{
 		Rows: uint16(boundedWorkspaceTerminalRows(rows)),
 		Cols: uint16(boundedWorkspaceTerminalCols(cols)),
 	})
+	if err != nil && !s.isAlive() {
+		return errWorkspaceSessionClosed
+	}
+	return err
 }
 
 func (s *workspaceTerminalSession) readPTY() {
@@ -775,9 +787,14 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 	if s == nil || s.terminalManagers == nil {
 		return protocol.WorkspaceTerminalOpenResult{}, errors.New("workspace terminal is unavailable")
 	}
+	s.workspaceSessionsMu.RLock()
+	defer s.finishWorkspaceSessionOpen()
 	conversationID := strings.TrimSpace(params.ConversationID)
 	if conversationID == "" {
 		return protocol.WorkspaceTerminalOpenResult{}, errors.New("terminal conversation ID is required")
+	}
+	if err := s.beginWorkspaceSession(conversationID, params.Draft); err != nil {
+		return protocol.WorkspaceTerminalOpenResult{}, err
 	}
 	cwd, err := s.instanceProvider.ResolveWorkingDirectory(ctx, params.CWD)
 	if err != nil {
@@ -852,12 +869,245 @@ func (s *Service) terminalManagerForSession(id string) (*workspaceTerminalManage
 	if s.closed {
 		return nil, errors.New("runner service is closed")
 	}
+	if strings.TrimSpace(id) == "" {
+		return nil, errors.New("terminal session id is required")
+	}
 	for _, manager := range s.terminalManagers {
 		if _, err := manager.session(id); err == nil {
 			return manager, nil
 		}
 	}
-	return nil, errors.New("terminal session was not found")
+	return nil, errWorkspaceSessionClosed
+}
+
+// Call with the lifecycle read lock. Install the lease before opening so a
+// concurrent first turn can promote even an in-flight workspace session.
+func (s *Service) beginWorkspaceSession(conversationID string, draft bool) error {
+	if conversationID == "" {
+		return errors.New("workspace conversation ID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("runner service is closed")
+	}
+	if _, discarded := s.discardedWorkspaceSessions[conversationID]; discarded {
+		return errWorkspaceSessionDiscarded
+	}
+	if s.workspaceSessionLeases == nil {
+		s.workspaceSessionLeases = make(map[string]time.Time)
+	}
+	for _, run := range s.runs {
+		if run.conversationID == conversationID && (!run.opening || run.checkpointed) {
+			draft = false
+			break
+		}
+	}
+	_, exists := s.workspaceSessionLeases[conversationID]
+	if !draft {
+		s.workspaceSessionLeases[conversationID] = time.Time{}
+	} else if !exists {
+		// A reconnecting orphaned pop-out is not an owner heartbeat.
+		s.workspaceSessionLeases[conversationID] = time.Now().Add(workspaceDraftLeaseTimeout)
+	}
+	return nil
+}
+
+func (s *Service) finishWorkspaceSessionOpen() {
+	s.workspaceSessionsMu.RUnlock()
+	s.workspaceSessionsMu.Lock()
+	defer s.workspaceSessionsMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneWorkspaceSessionLeasesLocked()
+}
+
+// Caller holds mu. Terminal managers with no session (failed starts) do not
+// count as resources; exited sessions still retain their replay state.
+func (s *Service) hasWorkspaceSessionsLocked(conversationID string) bool {
+	for scope, manager := range s.terminalManagers {
+		if scope.ConversationID == conversationID {
+			manager.mu.Lock()
+			hasSession := manager.current != nil
+			manager.mu.Unlock()
+			if hasSession {
+				return true
+			}
+		}
+	}
+	return s.browserManager != nil && s.browserManager.HasConversation(conversationID)
+}
+
+// Caller holds the lifecycle write lock and mu, excluding in-flight opens.
+func (s *Service) pruneWorkspaceSessionLeasesLocked() {
+	for conversationID := range s.workspaceSessionLeases {
+		if s.hasWorkspaceSessionsLocked(conversationID) {
+			continue
+		}
+		active := false
+		for _, run := range s.runs {
+			if run.conversationID == conversationID {
+				active = true
+				break
+			}
+		}
+		if !active {
+			delete(s.workspaceSessionLeases, conversationID)
+		}
+	}
+}
+
+func (s *Service) heartbeatWorkspaceSessions(conversationID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("workspace conversation ID is required")
+	}
+	s.workspaceSessionsMu.RLock()
+	defer s.workspaceSessionsMu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("runner service is closed")
+	}
+	if _, discarded := s.discardedWorkspaceSessions[conversationID]; discarded {
+		return errWorkspaceSessionDiscarded
+	}
+	if deadline, exists := s.workspaceSessionLeases[conversationID]; exists && !deadline.IsZero() && s.hasWorkspaceSessionsLocked(conversationID) {
+		s.workspaceSessionLeases[conversationID] = time.Now().Add(workspaceDraftLeaseTimeout)
+	}
+	return nil
+}
+
+func (s *Service) collectWorkspaceSessions() {
+	defer close(s.workspaceSessionsDone)
+	ticker := time.NewTicker(workspaceSessionSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.workspaceSessionsStop:
+			return
+		case now := <-ticker.C:
+			if err := s.reapWorkspaceSessions(now); err != nil {
+				logger.G(s.ctx).WithError(err).Warn("failed to clean up expired draft workspace sessions")
+			}
+		}
+	}
+}
+
+func (s *Service) reapWorkspaceSessions(now time.Time) error {
+	s.workspaceSessionsMu.Lock()
+	defer s.workspaceSessionsMu.Unlock()
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.pruneWorkspaceSessionLeasesLocked()
+	var expired []string
+	for conversationID, deadline := range s.workspaceSessionLeases {
+		if !deadline.IsZero() && !deadline.After(now) {
+			expired = append(expired, conversationID)
+		}
+	}
+	s.mu.Unlock()
+	var err error
+	for _, conversationID := range expired {
+		err = combineCleanupErrors(err, s.discardWorkspaceSessionsLocked(conversationID, now))
+	}
+	return err
+}
+
+func (s *Service) discardWorkspaceSessions(conversationID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("workspace conversation ID is required")
+	}
+	s.workspaceSessionsMu.Lock()
+	defer s.workspaceSessionsMu.Unlock()
+	return s.discardWorkspaceSessionsLocked(conversationID, time.Time{})
+}
+
+// Caller holds the lifecycle write lock. A nonzero expiry cutoff is rechecked
+// under mu with run admission: a first turn may have promoted the lease after
+// the sweeper observed it. Explicit discard supplies a zero cutoff.
+func (s *Service) discardWorkspaceSessionsLocked(conversationID string, expiredBefore time.Time) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("runner service is closed")
+	}
+	if !expiredBefore.IsZero() {
+		deadline, exists := s.workspaceSessionLeases[conversationID]
+		if !exists || deadline.IsZero() || deadline.After(expiredBefore) {
+			s.mu.Unlock()
+			return nil
+		}
+	}
+	for _, run := range s.runs {
+		if run.conversationID == conversationID {
+			s.mu.Unlock()
+			if !expiredBefore.IsZero() {
+				// An opening first turn pins the resources, but does not make
+				// a failed, unpublished draft permanently nonexpiring.
+				return nil
+			}
+			return errors.New("cannot discard workspace sessions for an active run")
+		}
+	}
+	if s.discardedWorkspaceSessions == nil {
+		s.discardedWorkspaceSessions = make(map[string]struct{})
+	}
+	if _, discarded := s.discardedWorkspaceSessions[conversationID]; !discarded {
+		if len(s.discardedWorkspaceSessionIDs) == workspaceDiscardedSessionLimit {
+			delete(s.discardedWorkspaceSessions, s.discardedWorkspaceSessionIDs[0])
+			copy(s.discardedWorkspaceSessionIDs, s.discardedWorkspaceSessionIDs[1:])
+			s.discardedWorkspaceSessionIDs[len(s.discardedWorkspaceSessionIDs)-1] = conversationID
+		} else {
+			s.discardedWorkspaceSessionIDs = append(s.discardedWorkspaceSessionIDs, conversationID)
+		}
+		s.discardedWorkspaceSessions[conversationID] = struct{}{}
+	}
+	terminals := make(map[workspaceTerminalScope]*workspaceTerminalManager)
+	for scope, manager := range s.terminalManagers {
+		if scope.ConversationID == conversationID {
+			terminals[scope] = manager
+		}
+	}
+	s.mu.Unlock()
+
+	// Keep managers visible to Close until their cleanup finishes. Never hold mu
+	// through process cleanup, which can wait for readers and subprocess exit.
+	results := make(chan error, len(terminals)+1)
+	for scope, manager := range terminals {
+		go func() {
+			err := manager.Close()
+			if err == nil {
+				s.mu.Lock()
+				delete(s.terminalManagers, scope)
+				s.mu.Unlock()
+			}
+			results <- err
+		}()
+	}
+	go func() {
+		var err error
+		if s.browserManager != nil {
+			err = s.browserManager.StopConversation(conversationID)
+		}
+		results <- err
+	}()
+	var err error
+	for range len(terminals) + 1 {
+		err = combineCleanupErrors(err, <-results)
+	}
+	if err == nil {
+		s.mu.Lock()
+		delete(s.workspaceSessionLeases, conversationID)
+		s.mu.Unlock()
+	}
+	return err
 }
 
 func newWorkspaceTerminalSessionID() (string, error) {

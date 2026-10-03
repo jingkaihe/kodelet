@@ -32,54 +32,56 @@ const (
 )
 
 const (
-	MethodRunnerRegister          = "runner.register"
-	MethodRunnerHeartbeat         = "runner.heartbeat"
-	MethodRunnerManifestChanged   = "runner.manifestChanged"
-	MethodRunnerGoodbye           = "runner.goodbye"
-	MethodRunOpen                 = "run.open"
-	MethodRunCheckpoint           = "run.checkpoint"
-	MethodRunClose                = "run.close"
-	MethodRunCancel               = "run.cancel"
-	MethodRunEnvironmentError     = "run.environmentError"
-	MethodCommandExecute          = "command.execute"
-	MethodShortcutExecute         = "shortcut.execute"
-	MethodLifecycleDispatch       = "lifecycle.dispatch"
-	MethodToolExecute             = "tool.execute"
-	MethodToolUpdate              = "tool.update"
-	MethodConversationFork        = "conversation.fork"
-	MethodWorkspaceGitDiff        = "workspace.git.diff"
-	MethodWorkspaceGitPrepare     = "workspace.git.prepareCommit"
-	MethodWorkspaceGitCommit      = "workspace.git.commit"
-	MethodWorkspaceDiscover       = "workspace.discover"
-	MethodWorkspaceInspect        = "workspace.inspect"
-	MethodWorkspaceMessageHistory = "workspace.messageHistory"
-	MethodWorkspaceCWDHints       = "workspace.cwdHints"
-	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
-	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
-	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
-	MethodWorkspaceTerminalResize = "workspace.terminal.resize"
-	MethodWorkspaceBrowserOpen    = "workspace.browser.open"
-	MethodWorkspaceBrowserConnect = "workspace.browser.connect"
-	MethodWorkspaceBrowserStop    = "workspace.browser.stop"
-	MethodWorkspaceBrowserAsset   = "workspace.browser.asset"
-	MethodUIInput                 = "ui.input"
-	MethodUIConfirm               = "ui.confirm"
-	MethodUISelect                = "ui.select"
-	MethodUINotify                = "ui.notify"
-	MethodUIWidgetSet             = "ui.widget.set"
-	MethodUIWidgetFrame           = "ui.widget.frame"
-	MethodUIWidgetRemove          = "ui.widget.remove"
-	MethodUITranscriptAppend      = "ui.transcript.append"
-	MethodUISurfaceOpen           = "ui.surface.open"
-	MethodUISurfaceFrame          = "ui.surface.frame"
-	MethodUISurfaceClose          = "ui.surface.close"
-	MethodUISurfaceInput          = "ui.surface.input"
-	MethodUISurfaceResize         = "ui.surface.resize"
-	MethodUISurfaceInvalidate     = "ui.surface.invalidate"
-	MethodUIExtensionCleanup      = "ui.extension.cleanup"
-	MethodOperationCancel         = "operation.cancel"
-	MethodSessionExtensionsAttach = "session.extensions.attach"
-	MethodSessionExtensionFrame   = "session.extension.frame"
+	MethodRunnerRegister             = "runner.register"
+	MethodRunnerHeartbeat            = "runner.heartbeat"
+	MethodRunnerManifestChanged      = "runner.manifestChanged"
+	MethodRunnerGoodbye              = "runner.goodbye"
+	MethodRunOpen                    = "run.open"
+	MethodRunCheckpoint              = "run.checkpoint"
+	MethodRunClose                   = "run.close"
+	MethodRunCancel                  = "run.cancel"
+	MethodRunEnvironmentError        = "run.environmentError"
+	MethodCommandExecute             = "command.execute"
+	MethodShortcutExecute            = "shortcut.execute"
+	MethodLifecycleDispatch          = "lifecycle.dispatch"
+	MethodToolExecute                = "tool.execute"
+	MethodToolUpdate                 = "tool.update"
+	MethodConversationFork           = "conversation.fork"
+	MethodWorkspaceGitDiff           = "workspace.git.diff"
+	MethodWorkspaceGitPrepare        = "workspace.git.prepareCommit"
+	MethodWorkspaceGitCommit         = "workspace.git.commit"
+	MethodWorkspaceDiscover          = "workspace.discover"
+	MethodWorkspaceInspect           = "workspace.inspect"
+	MethodWorkspaceMessageHistory    = "workspace.messageHistory"
+	MethodWorkspaceCWDHints          = "workspace.cwdHints"
+	MethodWorkspaceTerminalOpen      = "workspace.terminal.open"
+	MethodWorkspaceTerminalRead      = "workspace.terminal.read"
+	MethodWorkspaceTerminalInput     = "workspace.terminal.input"
+	MethodWorkspaceTerminalResize    = "workspace.terminal.resize"
+	MethodWorkspaceSessionsDiscard   = "workspace.sessions.discard"
+	MethodWorkspaceSessionsHeartbeat = "workspace.sessions.heartbeat"
+	MethodWorkspaceBrowserOpen       = "workspace.browser.open"
+	MethodWorkspaceBrowserConnect    = "workspace.browser.connect"
+	MethodWorkspaceBrowserStop       = "workspace.browser.stop"
+	MethodWorkspaceBrowserAsset      = "workspace.browser.asset"
+	MethodUIInput                    = "ui.input"
+	MethodUIConfirm                  = "ui.confirm"
+	MethodUISelect                   = "ui.select"
+	MethodUINotify                   = "ui.notify"
+	MethodUIWidgetSet                = "ui.widget.set"
+	MethodUIWidgetFrame              = "ui.widget.frame"
+	MethodUIWidgetRemove             = "ui.widget.remove"
+	MethodUITranscriptAppend         = "ui.transcript.append"
+	MethodUISurfaceOpen              = "ui.surface.open"
+	MethodUISurfaceFrame             = "ui.surface.frame"
+	MethodUISurfaceClose             = "ui.surface.close"
+	MethodUISurfaceInput             = "ui.surface.input"
+	MethodUISurfaceResize            = "ui.surface.resize"
+	MethodUISurfaceInvalidate        = "ui.surface.invalidate"
+	MethodUIExtensionCleanup         = "ui.extension.cleanup"
+	MethodOperationCancel            = "operation.cancel"
+	MethodSessionExtensionsAttach    = "session.extensions.attach"
+	MethodSessionExtensionFrame      = "session.extension.frame"
 )
 
 const (
@@ -95,9 +97,11 @@ const (
 )
 
 const (
-	ErrorReasonRunnerNotFound = "runner_not_found"
-	ErrorReasonRunNotActive   = "run_not_active"
-	ErrorReasonResultTooLarge = "result_too_large"
+	ErrorReasonRunnerNotFound            = "runner_not_found"
+	ErrorReasonRunNotActive              = "run_not_active"
+	ErrorReasonResultTooLarge            = "result_too_large"
+	ErrorReasonWorkspaceSessionDiscarded = "workspace_session_discarded"
+	ErrorReasonWorkspaceSessionClosed    = "workspace_session_closed"
 )
 
 // RPCErrorData carries stable machine-readable error details.
@@ -218,6 +222,7 @@ type RunnerCapabilities struct {
 	WorkspaceGitCommit            bool `json:"workspaceGitCommit,omitempty"`
 	WorkspaceTerminal             bool `json:"workspaceTerminal,omitempty"`
 	WorkspaceTerminalConversation bool `json:"workspaceTerminalConversation,omitempty"`
+	WorkspaceSessionCleanup       bool `json:"workspaceSessionCleanup,omitempty"`
 	WorkspaceBrowser              bool `json:"workspaceBrowser,omitempty"`
 	WorkspaceDiscovery            bool `json:"workspaceDiscovery,omitempty"`
 	WorkspaceInspection           bool `json:"workspaceInspection,omitempty"`
@@ -619,6 +624,7 @@ type WorkspaceBrowserParams struct {
 	ConversationID string `json:"conversationId"`
 	CWD            string `json:"cwd,omitempty"`
 	SessionID      string `json:"sessionId,omitempty"`
+	Draft          bool   `json:"draft,omitempty"`
 }
 
 // WorkspaceBrowserConnectParams authorizes one outbound streaming attachment.
@@ -635,12 +641,23 @@ type WorkspaceBrowserAssetParams struct {
 	Offset int64  `json:"offset"`
 }
 
+// WorkspaceSessionsDiscardParams discards all workspace sessions for one abandoned draft.
+type WorkspaceSessionsDiscardParams struct {
+	ConversationID string `json:"conversationId"`
+}
+
+// WorkspaceSessionsHeartbeatParams renews an existing draft workspace lease.
+type WorkspaceSessionsHeartbeatParams struct {
+	ConversationID string `json:"conversationId"`
+}
+
 // WorkspaceTerminalOpenParams opens or reattaches to a conversation's terminal in one runner directory.
 type WorkspaceTerminalOpenParams struct {
 	ConversationID string `json:"conversationId"`
 	CWD            string `json:"cwd,omitempty"`
 	Rows           int    `json:"rows,omitempty"`
 	Cols           int    `json:"cols,omitempty"`
+	Draft          bool   `json:"draft,omitempty"`
 }
 
 // WorkspaceTerminalOpenResult describes one persistent runner terminal session.

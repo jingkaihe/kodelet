@@ -440,6 +440,8 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/git/commit", s.requireRole(RoleUser, s.handleWorkspaceCommit)).Methods("GET", "POST")
+	api.HandleFunc("/workspace/draft", s.requireRole(RoleTerminal, s.handleDiscardDraftWorkspace)).Methods("DELETE")
+	api.HandleFunc("/workspace/draft/heartbeat", s.requireRole(RoleTerminal, s.handleDraftWorkspaceHeartbeat)).Methods("POST")
 	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
 	api.HandleFunc("/browser/session", s.requireBrowser(s.handleBrowserOpen)).Methods("POST")
 	api.HandleFunc("/browser/relay", s.handleBrowserRelay).Methods("GET")

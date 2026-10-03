@@ -142,16 +142,27 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	rows := boundedTerminalRows(parseTerminalDimension(r.URL.Query().Get("rows")))
 	cols := boundedTerminalCols(parseTerminalDimension(r.URL.Query().Get("cols")))
 	writer := &websocketWriter{conn: conn}
+	// A discarded or reclaimed session is not a transient runner disconnect.
+	// Tell pop-outs to stop reconnecting rather than create a replacement shell.
+	var operationErr error
+	defer func() {
+		var rpcErr *protocol.RPCError
+		if errors.As(operationErr, &rpcErr) && (rpcErr.Reason() == protocol.ErrorReasonWorkspaceSessionDiscarded || rpcErr.Reason() == protocol.ErrorReasonWorkspaceSessionClosed) {
+			_ = writer.Write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Workspace session ended"))
+		}
+	}()
 	var opened protocol.WorkspaceTerminalOpenResult
 	openCtx, cancelOpen := context.WithTimeout(ctx, remoteTerminalOpenTimeout)
 	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
 		ConversationID: r.URL.Query().Get("conversationId"),
+		Draft:          !saved,
 		CWD:            target.CWD,
 		Rows:           rows,
 		Cols:           cols,
 	}, &opened)
 	cancelOpen()
 	if err != nil {
+		operationErr = err
 		logger.G(r.Context()).WithError(err).Warn("failed to open runner terminal")
 		_ = writer.writeJSON(terminalMessage{Type: "info", Text: "Failed to open runner terminal."})
 		return
@@ -220,6 +231,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 			return
 		case remoteRead := <-remoteReads:
 			if remoteRead.Err != nil {
+				operationErr = remoteRead.Err
 				if ctx.Err() == nil {
 					logger.G(r.Context()).WithError(remoteRead.Err).Debug("runner terminal output stream ended")
 				}
@@ -275,6 +287,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 			switch socketRead.MessageType {
 			case websocket.BinaryMessage:
 				if err := s.callRemoteTerminal(ctx, runnerID, generation, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: opened.SessionID, Data: socketRead.Payload}); err != nil {
+					operationErr = err
 					return
 				}
 			case websocket.TextMessage:
@@ -288,10 +301,12 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 						continue
 					}
 					if err := s.callRemoteTerminal(ctx, runnerID, generation, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: opened.SessionID, Data: []byte(message.Data)}); err != nil {
+						operationErr = err
 						return
 					}
 				case "resize":
 					if err := s.callRemoteTerminal(ctx, runnerID, generation, protocol.MethodWorkspaceTerminalResize, protocol.WorkspaceTerminalResizeParams{SessionID: opened.SessionID, Rows: message.Rows, Cols: message.Cols}); err != nil {
+						operationErr = err
 						return
 					}
 				}

@@ -36,6 +36,7 @@ interface TerminalModalProps {
   onClose: () => void;
   allowPopOut?: boolean;
   onReady?: (event: TerminalReadyEvent) => void;
+  onStopped?: (reason: string) => void;
 }
 
 const FALLBACK_TERMINAL_FONT_FAMILY =
@@ -259,6 +260,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   onClose,
   allowPopOut = true,
   onReady,
+  onStopped,
 }) => {
   const resolvedTheme = useSyncExternalStore(
     subscribeTheme,
@@ -285,6 +287,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   targetRef.current = popOutTarget;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onStoppedRef = useRef(onStopped);
+  onStoppedRef.current = onStopped;
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -738,8 +742,16 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           }
         });
 
-        socket.addEventListener('close', () => {
+        socket.addEventListener('close', (event) => {
           if (!getCurrentConnection()) {
+            return;
+          }
+          if (event.code === 1008) {
+            processExited = true;
+            const reason = event.reason || 'This terminal session has stopped.';
+            setStatusText('Stopped');
+            setConnectionError(reason);
+            onStoppedRef.current?.(reason);
             return;
           }
           if (targetRef.current.kind === 'runner' && !processExited) {

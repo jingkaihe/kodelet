@@ -5,12 +5,14 @@ import {
   ChatPage,
   flushAsyncUpdates,
   makeRunner,
+  mockDiscardDraftWorkspace,
   mockGetChatSettings,
   mockGetConversation,
   mockGetConversations,
   mockGetCWDHints,
   mockGetGitDiff,
   mockGetRunners,
+  mockHeartbeatDraftWorkspace,
   mockNavigate,
   mockStopConversation,
   mockStreamChat,
@@ -71,6 +73,14 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     const draftPanel = await screen.findByTestId(`${view}-panel`);
     const draftId = draftPanel.dataset.conversationId;
     expect(draftId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    let expireHeartbeat = () => {};
+    mockHeartbeatDraftWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          expireHeartbeat = () => reject(Object.assign(new Error('Expired'), { status: 410 }));
+        })
+    );
+    window.dispatchEvent(new Event('pageshow'));
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello remotely' },
     });
@@ -79,6 +89,10 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
     const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
     expect(preallocatedId).toBe(draftId);
+    await act(async () => expireHeartbeat());
+    window.dispatchEvent(new Event('pageshow'));
+    expect(mockHeartbeatDraftWorkspace).toHaveBeenCalledOnce();
+    expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
     expect(screen.getByTestId(`${view}-panel`)).toBe(draftPanel);
     expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
     expect(mockNavigate).toHaveBeenCalledWith(`/c/${draftId}`, { replace: true });
@@ -118,6 +132,8 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     expect(mockStopConversation).not.toHaveBeenCalled();
 
     await act(async () => finishStream());
+    window.dispatchEvent(new Event('pageshow'));
+    expect(mockHeartbeatDraftWorkspace).toHaveBeenCalledOnce();
     setRouteParams({});
     rerender(<ChatPage />);
     const newDraftPanel = await screen.findByTestId(`${view}-panel`);

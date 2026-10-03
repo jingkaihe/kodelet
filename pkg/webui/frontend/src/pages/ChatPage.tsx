@@ -25,6 +25,7 @@ import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
 import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
+import { discardTerminalPopOuts } from '../components/workspace/terminalPopOut';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import { buildUserContent, useChatAttachments } from '../features/chat/useChatAttachments';
 import {
@@ -199,6 +200,12 @@ const ChatPage: React.FC = () => {
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
+  const draftWorkspaceRef = useRef<{
+    conversationId: string;
+    runnerIds: Set<string>;
+    submitted: boolean;
+  } | null>(null);
+  const draftHeartbeatInFlightRef = useRef(false);
   const [runners, setRunners] = useState<Runner[]>([]);
   const [draft, setDraft] = useState('');
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -496,14 +503,89 @@ const ChatPage: React.FC = () => {
       : null;
   const currentConversationIsStreaming = Boolean(activeRunningConversationId);
 
+  const discardDraftWorkspace = useCallback(() => {
+    const workspace = draftWorkspaceRef.current;
+    draftWorkspaceRef.current = null;
+    if (!workspace || workspace.submitted) return false;
+    void (async () => {
+      let failed = false;
+      // The server's deletion guard is per conversation, not per runner.
+      for (const runnerId of workspace.runnerIds) {
+        try {
+          await apiService.discardDraftWorkspace({
+            runnerId,
+            conversationId: workspace.conversationId,
+          });
+          discardTerminalPopOuts(runnerId, workspace.conversationId);
+        } catch (error) {
+          if ((error as { status?: number })?.status === 409) return;
+          console.error('Failed to clean up discarded draft sessions', error);
+          failed = true;
+        }
+      }
+      if (failed) showToast('Some discarded draft sessions could not be stopped.', 'error');
+    })();
+    return true;
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const heartbeat = async () => {
+      const workspace = draftWorkspaceRef.current;
+      if (disposed || !workspace || workspace.submitted || draftHeartbeatInFlightRef.current)
+        return;
+      const stillOwnsDraft = () =>
+        !disposed && draftWorkspaceRef.current === workspace && !workspace.submitted;
+      draftHeartbeatInFlightRef.current = true;
+      try {
+        for (const runnerId of workspace.runnerIds) {
+          if (!stillOwnsDraft()) return;
+          try {
+            await apiService.heartbeatDraftWorkspace({
+              runnerId,
+              conversationId: workspace.conversationId,
+            });
+          } catch (error) {
+            if ((error as { status?: number })?.status === 410 && stillOwnsDraft()) {
+              discardDraftWorkspace();
+              setDraftConversationId(generateConversationId());
+              return;
+            }
+            // Transport failures are left to the runner's authoritative lease expiry.
+          }
+        }
+      } finally {
+        draftHeartbeatInFlightRef.current = false;
+      }
+    };
+    const handlePageShow = () => {
+      void heartbeat();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void heartbeat();
+    };
+    const heartbeatTimer = window.setInterval(() => {
+      void heartbeat();
+    }, 30_000);
+    window.addEventListener('pageshow', handlePageShow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      window.clearInterval(heartbeatTimer);
+      window.removeEventListener('pageshow', handlePageShow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [discardDraftWorkspace]);
+
   useEffect(() => {
     viewedConversationIdRef.current = conversationId;
     routerConversationIdRef.current = conversationId;
-    // Once this draft has its route, reserve a new identity for returning to new chat.
+    const discarded = conversationId ? discardDraftWorkspace() : false;
+    // Submitted and abandoned drafts both need a new identity when returning to new chat.
     setDraftConversationId((draftId) =>
-      draftId === conversationId ? generateConversationId() : draftId
+      discarded || draftId === conversationId ? generateConversationId() : draftId
     );
-  }, [conversationId]);
+  }, [conversationId, discardDraftWorkspace]);
 
   useEffect(() => {
     const optimisticRemoteConversation = optimisticRemoteConversationRef.current;
@@ -743,6 +825,7 @@ const ChatPage: React.FC = () => {
   }, [messages, currentConversationIsStreaming]);
 
   const handleNewChat = () => {
+    discardDraftWorkspace();
     closeMobileSidebar();
     setConversation(null);
     optimisticRemoteConversationRef.current = null;
@@ -1031,6 +1114,9 @@ const ChatPage: React.FC = () => {
         ? selectedCWD.trim() || undefined
         : undefined;
     if (isNewConversation) {
+      if (draftWorkspaceRef.current?.conversationId === targetConversationId) {
+        draftWorkspaceRef.current.submitted = true;
+      }
       optimisticRemoteConversationRef.current = requestRunnerID
         ? {
             conversationId: targetConversationId,
@@ -1455,6 +1541,33 @@ const ChatPage: React.FC = () => {
   );
   const workspaceToolsAvailable =
     workspaceTerminalAvailable || workspaceGitDiffAvailable || workspaceBrowserAvailable;
+
+  useEffect(() => {
+    if (conversationId) return;
+    if (draftWorkspaceRef.current?.conversationId !== draftConversationId) {
+      draftWorkspaceRef.current = {
+        conversationId: draftConversationId,
+        runnerIds: new Set(),
+        submitted: false,
+      };
+    }
+    if (
+      !draftWorkspaceRef.current.submitted &&
+      currentRunner?.workspaceSessionCleanup &&
+      ((workspacePanelView === 'terminal' && workspaceTerminalAvailable) ||
+        (workspacePanelView === 'browser' && workspaceBrowserAvailable))
+    ) {
+      draftWorkspaceRef.current.runnerIds.add(currentRunnerID);
+    }
+  }, [
+    conversationId,
+    draftConversationId,
+    currentRunnerID,
+    currentRunner?.workspaceSessionCleanup,
+    workspacePanelView,
+    workspaceTerminalAvailable,
+    workspaceBrowserAvailable,
+  ]);
 
   const workspaceResize = useWorkspaceResize(
     layout,

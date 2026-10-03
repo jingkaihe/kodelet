@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -14,6 +15,7 @@ import (
 )
 
 func TestRunnerCheckpointPrecedesExtensionEffects(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
 	for _, name := range []string{"success", "save failure", "no peer", "invalid cwd", "invalid policy", "cancelled"} {
 		t.Run(name, func(t *testing.T) {
 			workspace := t.TempDir()
@@ -33,12 +35,26 @@ func TestRunnerCheckpointPrecedesExtensionEffects(t *testing.T) {
 					return agentenv.NewLocalEnvironment(cwd, runtime)
 				},
 			})
+			callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+				ConversationID: "conversation", Draft: true,
+			})
+			service.mu.Lock()
+			deadline := service.workspaceSessionLeases["conversation"]
+			service.mu.Unlock()
+			require.False(t, deadline.IsZero())
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if name == "no peer" {
 				service.Attach(nil)
 			} else {
 				service.Attach(&modelHelperPeer{call: func(_ context.Context, method string, params, _ any) error {
+					// A slow opening first turn pins, rather than promotes, the
+					// draft until the durable checkpoint succeeds.
+					require.NoError(t, service.reapWorkspaceSessions(deadline.Add(time.Second)))
+					service.mu.Lock()
+					assert.Equal(t, deadline, service.workspaceSessionLeases["conversation"])
+					assert.NotContains(t, service.discardedWorkspaceSessions, "conversation")
+					service.mu.Unlock()
 					checkpoints++
 					assert.Equal(t, protocol.MethodRunCheckpoint, method)
 					assert.Equal(t, protocol.RunCheckpointParams{RunID: "run", CWD: workspace}, params)
@@ -68,6 +84,15 @@ func TestRunnerCheckpointPrecedesExtensionEffects(t *testing.T) {
 				_, ids, _ := service.HeartbeatSnapshotRuns()
 				assert.Empty(t, ids)
 			}
+			service.mu.Lock()
+			promoted := service.workspaceSessionLeases["conversation"].IsZero()
+			service.mu.Unlock()
+			assert.Equal(t, name == "success" || name == "cancelled", promoted, "a successful checkpoint persists the conversation even if later work is cancelled")
+			require.NoError(t, service.reapWorkspaceSessions(deadline.Add(time.Second)))
+			service.mu.Lock()
+			_, retained := service.workspaceSessionLeases["conversation"]
+			service.mu.Unlock()
+			assert.Equal(t, promoted, retained, "unpublished failed startup must still expire")
 		})
 	}
 }

@@ -6,6 +6,7 @@ import {
   ChatPage,
   flushAsyncUpdates,
   makeRunner,
+  mockDiscardDraftWorkspace,
   mockGetAuthPrincipal,
   mockGetChatSettings,
   mockGetConversation,
@@ -13,8 +14,10 @@ import {
   mockGetGitDiff,
   mockGetRunners,
   mockGetSlashCommands,
+  mockHeartbeatDraftWorkspace,
   mockStreamChat,
   renderChatWithRunner,
+  selectNewChatOption,
   selectWorkspaceRunner,
   setRouteParams,
   setupChatPageTests,
@@ -72,6 +75,16 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(firstId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     expect(screen.queryByRole('tab', { name: 'Show terminal' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Show changes' })).not.toBeInTheDocument();
+    let expireHeartbeat = () => {};
+    mockHeartbeatDraftWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          expireHeartbeat = () => reject(Object.assign(new Error('Expired'), { status: 410 }));
+        })
+    );
+    window.dispatchEvent(new Event('pageshow'));
+    window.dispatchEvent(new Event('pageshow'));
+    expect(mockHeartbeatDraftWorkspace).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
@@ -83,7 +96,108 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(nextBrowser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     expect(nextBrowser.dataset.conversationId).not.toBe(firstId);
     expect(nextBrowser).toHaveAttribute('data-runner-id', 'runner-1');
+    const nextId = nextBrowser.dataset.conversationId;
+    await act(async () => expireHeartbeat());
+    expect(screen.getByTestId('browser-panel')).toBe(nextBrowser);
+    expect(nextBrowser.dataset.conversationId).toBe(nextId);
     expect(mockStreamChat).not.toHaveBeenCalled();
+    expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
+      runnerId: 'runner-1',
+      conversationId: firstId,
+    });
+  });
+
+  it('discards visited runners sequentially on history navigation', async () => {
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        makeRunner({ workspaceBrowser: true }),
+        makeRunner({ id: 'runner-2', workspaceBrowser: true }),
+      ],
+    });
+    const { rerender } = await renderChatWithRunner();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    const conversationId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
+    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    selectNewChatOption('Environment', 'runner-2');
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(screen.getByTestId('browser-panel')).toHaveAttribute('data-runner-id', 'runner-2');
+    expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
+    let finishFirst = () => {};
+    mockDiscardDraftWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        })
+    );
+    mockGetConversation.mockResolvedValue({ id: 'saved', runnerId: 'runner-1', messages: [] });
+    setRouteParams({ id: 'saved' });
+    rerender(<ChatPage />);
+    await flushAsyncUpdates();
+    expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
+      runnerId: 'runner-1',
+      conversationId,
+    });
+    await act(async () => finishFirst());
+    expect(mockDiscardDraftWorkspace.mock.calls).toEqual([
+      [{ runnerId: 'runner-1', conversationId }],
+      [{ runnerId: 'runner-2', conversationId }],
+    ]);
+  });
+
+  it('renews closed-panel drafts and recovers expired sessions on resume without losing text or settings', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      mockGetRunners.mockResolvedValue({
+        runners: [makeRunner({ workspaceBrowser: true, workspaceCwd: true })],
+      });
+      const { unmount } = await renderChatWithRunner();
+      fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+      fireEvent.change(screen.getByLabelText('Working directory'), {
+        target: { value: '/runner/custom' },
+      });
+      await flushAsyncUpdates();
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+      const draftId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
+      fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+        target: { value: 'Keep my unsent message' },
+      });
+      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(mockHeartbeatDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
+        runnerId: 'runner-1',
+        conversationId: draftId,
+      });
+      expect(mockDiscardDraftWorkspace).not.toHaveBeenCalled();
+      mockHeartbeatDraftWorkspace.mockRejectedValueOnce(
+        Object.assign(new Error('Expired'), { status: 410 })
+      );
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      await flushAsyncUpdates();
+      fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+      const recovered = await screen.findByTestId('browser-panel');
+      expect(recovered.dataset.conversationId).not.toBe(draftId);
+      expect(recovered).toHaveAttribute('data-cwd', '/runner/custom');
+      expect(screen.getByPlaceholderText('Ask kodelet anything...')).toHaveValue(
+        'Keep my unsent message'
+      );
+      expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
+        runnerId: 'runner-1',
+        conversationId: draftId,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await flushAsyncUpdates();
+      expect(mockHeartbeatDraftWorkspace).toHaveBeenLastCalledWith({
+        runnerId: 'runner-1',
+        conversationId: recovered.dataset.conversationId,
+      });
+      unmount();
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(mockHeartbeatDraftWorkspace).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not restore browser access from an older conversation runner snapshot', async () => {

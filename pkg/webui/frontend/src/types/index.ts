@@ -324,6 +324,7 @@ export interface Runner {
   workspaceGitDiff?: boolean;
   workspaceTerminal?: boolean;
   workspaceTerminalConversation?: boolean;
+  workspaceSessionCleanup?: boolean;
   workspaceBrowser?: boolean;
   workspaceDiscovery?: boolean;
   workspaceCwd?: boolean;

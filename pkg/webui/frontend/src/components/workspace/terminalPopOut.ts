@@ -22,6 +22,7 @@ interface TerminalPopOutStore {
 export type TerminalPopOutMessage =
   | { type: 'probe' }
   | { type: 'active'; record: TerminalPopOutRecord }
+  | { type: 'discarded'; runnerId: string; conversationId: string }
   | { type: 'closing'; id: string; target: WorkspaceTarget };
 
 export const getTerminalPopOutTargetKey = (target: WorkspaceTarget): string =>
@@ -189,6 +190,24 @@ export const createTerminalPopOutChannel = (): BroadcastChannel | null => {
   }
 };
 
+export const discardTerminalPopOuts = (runnerId: string, conversationId: string): void => {
+  writeTerminalPopOutRecords(
+    readTerminalPopOutRecords().filter(
+      ({ target }) =>
+        target.kind !== 'runner' ||
+        target.runnerId !== runnerId ||
+        target.conversationId !== conversationId
+    )
+  );
+  const channel = createTerminalPopOutChannel();
+  channel?.postMessage({
+    type: 'discarded',
+    runnerId,
+    conversationId,
+  } satisfies TerminalPopOutMessage);
+  channel?.close();
+};
+
 export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOutMessage => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -199,12 +218,22 @@ export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOut
     record?: unknown;
     id?: unknown;
     target?: unknown;
+    runnerId?: unknown;
+    conversationId?: unknown;
   };
   if (message.type === 'probe') {
     return true;
   }
   if (message.type === 'active') {
     return isTerminalPopOutRecord(message.record);
+  }
+  if (message.type === 'discarded') {
+    return (
+      typeof message.runnerId === 'string' &&
+      message.runnerId.trim() !== '' &&
+      typeof message.conversationId === 'string' &&
+      message.conversationId.trim() !== ''
+    );
   }
   return (
     message.type === 'closing' &&
@@ -219,6 +248,13 @@ export const terminalPopOutMessageMatchesTarget = (
 ): boolean => {
   if (message.type === 'probe') {
     return false;
+  }
+  if (message.type === 'discarded') {
+    return (
+      target.kind === 'runner' &&
+      target.runnerId === message.runnerId &&
+      target.conversationId === message.conversationId
+    );
   }
   if (message.type === 'active') {
     return getTerminalPopOutTargetKey(message.record.target) === getTerminalPopOutTargetKey(target);

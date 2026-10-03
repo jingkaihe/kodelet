@@ -45,7 +45,7 @@ func newBrowserAPITestServer(t *testing.T) (*Server, protocol.RegisterResult, *r
 	}
 	registration, err := s.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{WorkspaceBrowser: true, WorkspaceCWD: true},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceBrowser: true, WorkspaceCWD: true, WorkspaceSessionCleanup: true},
 		Host:             protocol.Host{InstanceID: "browser-test-host", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
 	}, link)
@@ -229,7 +229,7 @@ func TestBrowserCapabilityRequiresServerAndPrincipalPermission(t *testing.T) {
 	}
 }
 
-func TestBrowserOIDCRequiresRoleAndCSRF(t *testing.T) {
+func TestBrowserAndDraftCleanupRequireRoleAndCSRF(t *testing.T) {
 	s, registration, _ := newBrowserAPITestServer(t)
 	store, _ := newAuthStoreTest(t)
 	s.authStore = store
@@ -249,17 +249,30 @@ func TestBrowserOIDCRequiresRoleAndCSRF(t *testing.T) {
 		{"authorized", terminal, csrf, http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId=conversation-1", nil)
-			if test.token != "" {
-				r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: test.token})
+			for _, endpoint := range []struct {
+				method, path string
+				status       int
+			}{
+				{http.MethodPost, "/api/browser/session", http.StatusOK},
+				{http.MethodDelete, "/api/workspace/draft", http.StatusNoContent},
+				{http.MethodPost, "/api/workspace/draft/heartbeat", http.StatusNoContent},
+			} {
+				r := httptest.NewRequest(endpoint.method, endpoint.path+"?runnerId="+registration.RunnerID+"&conversationId=conversation-1", nil)
+				if test.token != "" {
+					r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: test.token})
+				}
+				if test.csrf != "" {
+					r.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: test.csrf})
+					r.Header.Set(webCSRFHeaderName, test.csrf)
+				}
+				w := httptest.NewRecorder()
+				s.router.ServeHTTP(w, r)
+				want := test.want
+				if want == http.StatusOK {
+					want = endpoint.status
+				}
+				assert.Equal(t, want, w.Code, "%s: %s", endpoint.path, w.Body.String())
 			}
-			if test.csrf != "" {
-				r.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: test.csrf})
-				r.Header.Set(webCSRFHeaderName, test.csrf)
-			}
-			w := httptest.NewRecorder()
-			s.router.ServeHTTP(w, r)
-			assert.Equal(t, test.want, w.Code, w.Body.String())
 		})
 	}
 
@@ -337,10 +350,12 @@ func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
 	const requestedCWD = "../other-project"
 	const canonicalCWD = "/runner/other-project"
 	expectedCWD := requestedCWD
+	expectedDraft := true
 	link.call = func(_ context.Context, method string, raw any, result any) error {
 		assert.Equal(t, protocol.MethodWorkspaceBrowserOpen, method, "opening a draft must not start a run or provider turn")
 		params := raw.(protocol.WorkspaceBrowserParams)
 		assert.Equal(t, "conversation-1", params.ConversationID)
+		assert.Equal(t, expectedDraft, params.Draft, "only unsaved workspaces receive expiring draft leases")
 		assert.Equal(t, expectedCWD, params.CWD, "only the runner resolves the requested path")
 		*result.(*browser.Info) = browser.Info{
 			SessionID:      "draft-session",
@@ -372,6 +387,7 @@ func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
 		return &conversations.GetConversationResponse{CWD: cwd}, nil
 	}}
 	expectedCWD = cwd
+	expectedDraft = false
 	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"), "saving the draft retains its browser")
 	w = httptest.NewRecorder()
 	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))

@@ -166,6 +166,28 @@ func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testi
 		assert.Contains(t, rpcErr.Message, "conversation ID is required")
 	}
 	assert.Len(t, service.terminalManagers, 3, "invalid scopes must not create a terminal")
+	var stopped []*workspaceTerminalSession
+	for _, opened := range []protocol.WorkspaceTerminalOpenResult{first, second} {
+		manager, err := service.terminalManagerForSession(opened.SessionID)
+		require.NoError(t, err)
+		session, err := manager.session(opened.SessionID)
+		require.NoError(t, err)
+		stopped = append(stopped, session)
+	}
+	require.NoError(t, os.Remove(selected), "discard does not resolve the deleted working directory")
+	for range 2 {
+		callService[struct{}](t, service, protocol.MethodWorkspaceSessionsDiscard, protocol.WorkspaceSessionsDiscardParams{ConversationID: "conversation"})
+	}
+	assert.Len(t, service.terminalManagers, 1, "all directories of the draft are released, even with browser disabled")
+	for _, session := range stopped {
+		assert.True(t, workspaceTerminalDone(session.done))
+		require.NoError(t, session.cleanupError())
+	}
+	retained := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "other"})
+	assert.Equal(t, other.SessionID, retained.SessionID)
+	for i := range workspaceTerminalSessionLimit - 1 {
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "new-" + strconv.Itoa(i)})
+	}
 	require.NoError(t, service.Close())
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalInput, mustJSON(t, protocol.WorkspaceTerminalInputParams{SessionID: second.SessionID, Data: []byte("pwd\n")}))
 	require.NotNil(t, rpcErr)
@@ -301,7 +323,8 @@ func TestServiceWorkspaceTerminalResizeUsesRPCAndBounds(t *testing.T) {
 		Cols:      80,
 	}))
 	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "terminal session was not found")
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	assert.Equal(t, protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionClosed}, rpcErr.Data)
 }
 
 func TestServiceWorkspaceTerminalRejectsUnavailableManager(t *testing.T) {
@@ -347,7 +370,7 @@ func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
 		{name: "missing session", run: func() error {
 			_, readErr := manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "missing"})
 			return readErr
-		}, want: "session was not found"},
+		}, want: errWorkspaceSessionClosed.Error()},
 		{name: "oversized input", run: func() error {
 			return manager.Write(t.Context(), protocol.WorkspaceTerminalInputParams{Data: make([]byte, workspaceTerminalMaxInputBytes+1)})
 		}, want: "terminal input exceeds"},
@@ -360,9 +383,9 @@ func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
 	require.NoError(t, manager.Close())
 	require.NoError(t, manager.Close())
 	_, err := manager.Open(t.Context(), 24, 80)
-	require.ErrorContains(t, err, "manager is closed")
+	require.ErrorIs(t, err, errWorkspaceSessionClosed)
 	_, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "terminal-1"})
-	require.ErrorContains(t, err, "manager is closed")
+	require.ErrorIs(t, err, errWorkspaceSessionClosed)
 }
 
 func TestWorkspaceTerminalManagerReplacesExitedSession(t *testing.T) {
@@ -384,7 +407,7 @@ func TestWorkspaceTerminalManagerReplacesExitedSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, first.SessionID, second.SessionID)
 	_, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: first.SessionID})
-	require.ErrorContains(t, err, "session was not found")
+	require.ErrorIs(t, err, errWorkspaceSessionClosed)
 	require.NoError(t, manager.Close())
 }
 
@@ -414,11 +437,14 @@ func TestWorkspaceTerminalManagerRetainsSessionAfterCleanupFailure(t *testing.T)
 
 func TestWorkspaceTerminalManagerReturnsShellStartErrors(t *testing.T) {
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
-
-	_, err := manager.Open(t.Context(), 24, 80)
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	_, err = service.openWorkspaceTerminal(t.Context(), protocol.WorkspaceTerminalOpenParams{ConversationID: "failed", Draft: true})
 	require.Error(t, err)
-	require.NoError(t, manager.Close())
+	service.mu.Lock()
+	assert.Empty(t, service.workspaceSessionLeases, "failed PTY startup must not retain draft metadata")
+	service.mu.Unlock()
 }
 
 func TestWorkspaceTerminalOpenHonorsCanceledContext(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,6 +79,142 @@ func fakeBrowserExecutable(t *testing.T) string {
 	require.NoError(t, os.WriteFile(wrapper, fmt.Appendf(nil,
 		"#!/bin/sh\nKODELET_BROWSER_RUNNER_HELPER=1 exec %q -test.run=^TestBrowserRunnerHelperProcess$ -- \"$@\"\n", executable), 0o700))
 	return wrapper
+}
+
+type blockingWorkspaceSessionProvider struct {
+	ExecutionInstanceProvider
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingWorkspaceSessionProvider) ResolveWorkingDirectory(ctx context.Context, cwd string) (string, error) {
+	p.once.Do(func() { close(p.started) })
+	select {
+	case <-p.release:
+		return p.ExecutionInstanceProvider.ResolveWorkingDirectory(ctx, cwd)
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func TestWorkspaceOpenSerializesWithDiscard(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	provider := &blockingWorkspaceSessionProvider{
+		ExecutionInstanceProvider: service.instanceProvider,
+		started:                   make(chan struct{}),
+		release:                   make(chan struct{}),
+	}
+	service.instanceProvider = provider
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	opened := make(chan error, 1)
+	params := protocol.WorkspaceTerminalOpenParams{ConversationID: "draft", Draft: true}
+	go func() {
+		_, err := service.openWorkspaceTerminal(ctx, params)
+		opened <- err
+	}()
+	select {
+	case <-provider.started:
+	case <-ctx.Done():
+		t.Fatal("open did not reach directory resolution")
+	}
+	service.mu.Lock()
+	assert.False(t, service.workspaceSessionLeases["draft"].IsZero(), "lease exists before startup")
+	service.mu.Unlock()
+	discarded := make(chan error, 1)
+	go func() { discarded <- service.discardWorkspaceSessions("draft") }()
+	// A pending writer blocks new readers before directory resolution.
+	require.Eventually(t, func() bool {
+		if !service.workspaceSessionsMu.TryRLock() {
+			return true
+		}
+		service.workspaceSessionsMu.RUnlock()
+		return false
+	}, time.Second, time.Millisecond)
+	late := make(chan error, 1)
+	go func() {
+		_, err := service.openWorkspaceTerminal(ctx, params)
+		late <- err
+	}()
+	close(provider.release)
+	require.NoError(t, <-opened)
+	require.NoError(t, <-discarded)
+	require.ErrorIs(t, <-late, errWorkspaceSessionDiscarded)
+	service.mu.Lock()
+	assert.Empty(t, service.terminalManagers)
+	service.mu.Unlock()
+}
+
+func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		Browser: browser.Config{Executable: fakeBrowserExecutable(t)},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	callService[struct{}](t, service, protocol.MethodWorkspaceSessionsHeartbeat, protocol.WorkspaceSessionsHeartbeatParams{ConversationID: "empty"})
+	service.mu.Lock()
+	assert.Empty(t, service.workspaceSessionLeases, "empty heartbeats leave no metadata")
+	service.mu.Unlock()
+	params := protocol.WorkspaceTerminalOpenParams{ConversationID: "draft", Draft: true}
+	terminal := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
+	manager, err := service.terminalManagerForSession(terminal.SessionID)
+	require.NoError(t, err)
+	session, err := manager.session(terminal.SessionID)
+	require.NoError(t, err)
+	browserParams := protocol.WorkspaceBrowserParams{ConversationID: "draft", Draft: true}
+	callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, browserParams)
+	service.mu.Lock()
+	deadline := service.workspaceSessionLeases["draft"]
+	service.mu.Unlock()
+	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
+	callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, browserParams)
+	service.mu.Lock()
+	assert.Equal(t, deadline, service.workspaceSessionLeases["draft"], "pop-out reconnects do not renew the owner lease")
+	service.workspaceSessionLeases["draft"] = time.Now().Add(-time.Minute)
+	service.mu.Unlock()
+	callService[struct{}](t, service, protocol.MethodWorkspaceSessionsHeartbeat, protocol.WorkspaceSessionsHeartbeatParams{ConversationID: "draft"})
+	require.NoError(t, service.reapWorkspaceSessions(time.Now()))
+	assert.True(t, session.isAlive(), "the owner heartbeat supersedes the old deadline")
+	assert.True(t, service.browserManager.HasConversation("draft"))
+
+	// A saved open promotes both resources, not just the panel being opened.
+	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "saved", Draft: true})
+	savedBrowser := callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: "saved"})
+	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "saved", Draft: true})
+	callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: "saved", Draft: true})
+	callService[struct{}](t, service, protocol.MethodWorkspaceSessionsHeartbeat, protocol.WorkspaceSessionsHeartbeatParams{ConversationID: "saved"})
+	service.mu.Lock()
+	assert.True(t, service.workspaceSessionLeases["saved"].IsZero())
+	service.mu.Unlock()
+	require.NoError(t, service.reapWorkspaceSessions(time.Now().Add(6*time.Minute)))
+	assert.True(t, workspaceTerminalDone(session.done))
+	assert.NoError(t, session.cleanupError())
+	assert.False(t, service.browserManager.HasConversation("draft"))
+	assert.True(t, service.browserManager.HasConversation("saved"))
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceSessionsHeartbeat, mustJSON(t, protocol.WorkspaceSessionsHeartbeatParams{ConversationID: "draft"}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	assert.Equal(t, protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionDiscarded}, rpcErr.Data)
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalRead, mustJSON(t, protocol.WorkspaceTerminalReadParams{SessionID: terminal.SessionID}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionClosed}, rpcErr.Data)
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "late-first-turn", ConversationID: "draft"})
+	require.ErrorIs(t, err, errWorkspaceSessionDiscarded)
+
+	// Browser-only promoted metadata disappears when its last resource stops.
+	callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: "browser-only"})
+	require.NoError(t, service.browserManager.StopConversation("browser-only"))
+	callService[struct{}](t, service, protocol.MethodWorkspaceSessionsHeartbeat, protocol.WorkspaceSessionsHeartbeatParams{ConversationID: "browser-only"})
+	require.NoError(t, service.reapWorkspaceSessions(time.Now()))
+	service.mu.Lock()
+	assert.NotContains(t, service.workspaceSessionLeases, "browser-only")
+	service.mu.Unlock()
+	assert.Equal(t, savedBrowser, callService[browser.Info](t, service, protocol.MethodWorkspaceBrowserOpen, protocol.WorkspaceBrowserParams{ConversationID: "saved"}))
 }
 
 func TestBrowserRunnerLifecycleAndRelaySurviveRequestCompletion(t *testing.T) {

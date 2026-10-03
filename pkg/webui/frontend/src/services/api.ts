@@ -276,6 +276,22 @@ class ApiService {
     return this.request<RunnerListResponse>('/api/runners');
   }
 
+  async discardDraftWorkspace(target: { runnerId: string; conversationId: string }): Promise<void> {
+    const params = new URLSearchParams(target);
+    return this.request<void>(`/api/workspace/draft?${params}`, {
+      method: 'DELETE',
+      keepalive: true,
+    });
+  }
+
+  async heartbeatDraftWorkspace(target: {
+    runnerId: string;
+    conversationId: string;
+  }): Promise<void> {
+    const params = new URLSearchParams(target);
+    return this.request<void>(`/api/workspace/draft/heartbeat?${params}`, { method: 'POST' });
+  }
+
   async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {
     const params = new URLSearchParams();
     if (profile) {

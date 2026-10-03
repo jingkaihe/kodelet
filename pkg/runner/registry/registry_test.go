@@ -237,6 +237,7 @@ func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
 	params.Capabilities.WorkspaceGitDiff = true
 	params.Capabilities.WorkspaceTerminal = true
 	params.Capabilities.WorkspaceTerminalConversation = true
+	params.Capabilities.WorkspaceSessionCleanup = true
 	registration, err := registry.Register(params, link)
 	require.NoError(t, err)
 	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
@@ -260,6 +261,9 @@ func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
 	assert.True(t, runner.WorkspaceGitDiff)
 	assert.True(t, runner.WorkspaceTerminal)
 	assert.True(t, runner.WorkspaceTerminalConversation)
+	assert.True(t, runner.WorkspaceSessionCleanup)
+	require.NoError(t, registry.ValidateRunnerCall(registration.RunnerID, registration.Generation, protocol.MethodWorkspaceSessionsDiscard))
+	require.NoError(t, registry.ValidateRunnerCall(registration.RunnerID, registration.Generation, protocol.MethodWorkspaceSessionsHeartbeat))
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -276,11 +280,13 @@ func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
 	replacement := newFakeLink()
 	params.RunnerID = registration.RunnerID
 	params.Capabilities.WorkspaceTerminalConversation = false
+	params.Capabilities.WorkspaceSessionCleanup = false
 	replacementRegistration, err := registry.Register(params, replacement)
 	require.NoError(t, err)
 	runner, found = registry.Runner(replacementRegistration.RunnerID)
 	require.True(t, found)
 	assert.False(t, runner.WorkspaceTerminalConversation, "reconnecting an older runner must clear the capability")
+	assert.False(t, runner.WorkspaceSessionCleanup)
 	require.NoError(t, registry.Heartbeat(replacementRegistration.RunnerID, replacementRegistration.ConnectionID, replacementRegistration.Generation, protocol.HeartbeatParams{
 		RunnerID:   replacementRegistration.RunnerID,
 		Generation: replacementRegistration.Generation,
@@ -288,6 +294,8 @@ func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
 	}))
 	close(release)
 	require.ErrorContains(t, <-callDone, "connection changed")
+	require.ErrorIs(t, registry.ValidateRunnerCall(replacementRegistration.RunnerID, replacementRegistration.Generation, protocol.MethodWorkspaceSessionsDiscard), ErrRunnerCapabilityUnsupported)
+	require.ErrorIs(t, registry.ValidateRunnerCall(replacementRegistration.RunnerID, replacementRegistration.Generation, protocol.MethodWorkspaceSessionsHeartbeat), ErrRunnerCapabilityUnsupported)
 	require.ErrorContains(t, registry.ValidateRunnerCall(replacementRegistration.RunnerID, registration.Generation, protocol.MethodWorkspaceTerminalOpen), "connection changed")
 
 	registry.Detach(replacementRegistration.RunnerID, replacementRegistration.ConnectionID, replacementRegistration.Generation, nil)

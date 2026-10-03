@@ -117,6 +117,7 @@ type Runner struct {
 	WorkspaceGitCommit            bool               `json:"workspaceGitCommit"`
 	WorkspaceTerminal             bool               `json:"workspaceTerminal"`
 	WorkspaceTerminalConversation bool               `json:"workspaceTerminalConversation"`
+	WorkspaceSessionCleanup       bool               `json:"workspaceSessionCleanup"`
 	WorkspaceBrowser              bool               `json:"workspaceBrowser"`
 	WorkspaceDiscovery            bool               `json:"workspaceDiscovery"`
 	WorkspaceInspection           bool               `json:"workspaceInspection"`
@@ -626,6 +627,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.WorkspaceTerminalConversation = params.Capabilities.WorkspaceTerminalConversation
+	entry.WorkspaceSessionCleanup = params.Capabilities.WorkspaceSessionCleanup
 	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
@@ -762,6 +764,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.WorkspaceTerminalConversation = params.Capabilities.WorkspaceTerminalConversation
+	entry.WorkspaceSessionCleanup = params.Capabilities.WorkspaceSessionCleanup
 	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
 	entry.WorkspaceInspection = params.Capabilities.WorkspaceInspection
@@ -1295,6 +1298,8 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		return entry.WorkspaceGitDiff
 	case protocol.MethodWorkspaceGitPrepare, protocol.MethodWorkspaceGitCommit:
 		return entry.WorkspaceGitCommit
+	case protocol.MethodWorkspaceSessionsDiscard, protocol.MethodWorkspaceSessionsHeartbeat:
+		return entry.WorkspaceSessionCleanup
 	case protocol.MethodWorkspaceBrowserOpen, protocol.MethodWorkspaceBrowserConnect,
 		protocol.MethodWorkspaceBrowserStop, protocol.MethodWorkspaceBrowserAsset:
 		return entry.WorkspaceBrowser

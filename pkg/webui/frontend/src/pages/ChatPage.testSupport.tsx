@@ -75,6 +75,8 @@ const apiMocks = vi.hoisted(() => ({
   getGitDiff: vi.fn(),
   steerConversation: vi.fn(),
   stopConversation: vi.fn(),
+  discardDraftWorkspace: vi.fn(),
+  heartbeatDraftWorkspace: vi.fn(),
   deleteConversation: vi.fn(),
   forkConversation: vi.fn(),
   respondToUIInput: vi.fn(),
@@ -106,6 +108,8 @@ export const {
   getGitDiff: mockGetGitDiff,
   steerConversation: mockSteerConversation,
   stopConversation: mockStopConversation,
+  discardDraftWorkspace: mockDiscardDraftWorkspace,
+  heartbeatDraftWorkspace: mockHeartbeatDraftWorkspace,
   deleteConversation: mockDeleteConversation,
   forkConversation: mockForkConversation,
   respondToUIInput: mockRespondToUIInput,
@@ -133,6 +137,7 @@ export const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
   status: 'idle',
   connected: true,
   workspaceTerminalConversation: true,
+  workspaceSessionCleanup: true,
   generation: 1,
   ...overrides,
 });
@@ -383,6 +388,8 @@ export const setupChatPageTests = () => {
       stopped: true,
     });
     mockDeleteConversation.mockResolvedValue(undefined);
+    mockDiscardDraftWorkspace.mockResolvedValue(undefined);
+    mockHeartbeatDraftWorkspace.mockResolvedValue(undefined);
     mockForkConversation.mockResolvedValue({
       success: true,
       conversation_id: 'conv-copy-123',

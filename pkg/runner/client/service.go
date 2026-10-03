@@ -132,6 +132,18 @@ type Service struct {
 	closeMu               sync.Mutex
 	closeOnce             sync.Once
 	closeErr              error
+
+	// Opens take a read lock; discards take the write lock through cleanup.
+	// Acquire before mu. Shutdown snapshots managers under mu instead of waiting
+	// for opens, so it can cancel an in-flight browser startup. Fences use mu to
+	// also exclude run admission.
+	workspaceSessionsMu          sync.RWMutex
+	discardedWorkspaceSessions   map[string]struct{}
+	discardedWorkspaceSessionIDs []string
+	// Protected by mu: zero deadlines are promoted, nonexpiring sessions.
+	workspaceSessionLeases map[string]time.Time
+	workspaceSessionsStop  chan struct{}
+	workspaceSessionsDone  chan struct{}
 }
 
 type activeRun struct {
@@ -154,6 +166,7 @@ type activeRun struct {
 	updates              atomic.Uint64
 	ops                  sync.WaitGroup
 	opening              bool
+	checkpointed         bool
 	closing              bool
 	stopping             bool
 	cleanupOnce          sync.Once
@@ -217,6 +230,10 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	service.browserManager = browser.NewManager(service.ctx, options.Browser)
 	service.browserRelays = make(map[*webBrowserRelay]struct{})
 	service.terminalManagers = make(map[workspaceTerminalScope]*workspaceTerminalManager)
+	service.workspaceSessionLeases = make(map[string]time.Time)
+	service.workspaceSessionsStop = make(chan struct{})
+	service.workspaceSessionsDone = make(chan struct{})
+	go service.collectWorkspaceSessions()
 	return service, nil
 }
 
@@ -270,6 +287,18 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner service is unavailable"}
 	}
 	switch method {
+	case protocol.MethodWorkspaceSessionsDiscard:
+		value, rpcErr := decodeParams[protocol.WorkspaceSessionsDiscardParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(struct{}{}, s.discardWorkspaceSessions(value.ConversationID))
+	case protocol.MethodWorkspaceSessionsHeartbeat:
+		value, rpcErr := decodeParams[protocol.WorkspaceSessionsHeartbeatParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(struct{}{}, s.heartbeatWorkspaceSessions(value.ConversationID))
 	case protocol.MethodWorkspaceBrowserOpen, protocol.MethodWorkspaceBrowserConnect,
 		protocol.MethodWorkspaceBrowserStop, protocol.MethodWorkspaceBrowserAsset:
 		return s.handleBrowserRequest(ctx, method, params)
@@ -503,6 +532,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner service is closed")
 	}
+	if _, discarded := s.discardedWorkspaceSessions[params.ConversationID]; discarded {
+		s.mu.Unlock()
+		return runnerpayload.Manifest{}, errWorkspaceSessionDiscarded
+	}
 	if s.runnerID == "" || s.generation <= 0 {
 		s.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner has not completed registration")
@@ -688,6 +721,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			s.failOpen(run)
 			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to save the conversation before starting extensions")
 		}
+		s.mu.Lock()
+		run.checkpointed = true
+		if _, exists := s.workspaceSessionLeases[params.ConversationID]; exists {
+			s.workspaceSessionLeases[params.ConversationID] = time.Time{}
+		}
+		s.mu.Unlock()
 		if err := operationCtx.Err(); err != nil {
 			s.failOpen(run)
 			return runnerpayload.Manifest{}, err
@@ -798,6 +837,9 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
 	}
 	run.opening = false
+	if _, exists := s.workspaceSessionLeases[params.ConversationID]; exists {
+		s.workspaceSessionLeases[params.ConversationID] = time.Time{}
+	}
 	s.activateBackgroundTasksLocked(run)
 	if workingDirectory == s.workspace && params.Agent.Profile == "" && variant == "" && params.Options == nil {
 		s.lastManifestDigest = wireManifest.Digest
@@ -1625,6 +1667,14 @@ func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
+		if s.workspaceSessionsStop != nil {
+			close(s.workspaceSessionsStop)
+		}
+		clear(s.workspaceSessionLeases)
+		terminals := make([]*workspaceTerminalManager, 0, len(s.terminalManagers))
+		for _, manager := range s.terminalManagers {
+			terminals = append(terminals, manager)
+		}
 		s.mu.Unlock()
 		s.closeBrowserRelays()
 		cleanupCtx := context.Background()
@@ -1643,11 +1693,11 @@ func (s *Service) Close() error {
 				return s.ownedRuntime.Close()
 			}))
 		}
-		terminalErrors := make(chan error, len(s.terminalManagers))
-		for _, manager := range s.terminalManagers {
+		terminalErrors := make(chan error, len(terminals))
+		for _, manager := range terminals {
 			go func() { terminalErrors <- manager.Close() }()
 		}
-		for range s.terminalManagers {
+		for range terminals {
 			activeErr = combineCleanupErrors(activeErr, <-terminalErrors)
 		}
 		s.mu.Lock()
@@ -1770,6 +1820,10 @@ func rpcResult(result any, err error) (any, *protocol.RPCError) {
 	message := err.Error()
 	code := protocol.ErrorCodeInternal
 	switch {
+	case errors.Is(err, errWorkspaceSessionDiscarded):
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: message, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionDiscarded}}
+	case errors.Is(err, errWorkspaceSessionClosed):
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: message, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionClosed}}
 	case errors.Is(err, errNoActiveRun):
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: message, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonRunNotActive}}
 	case errors.Is(err, ErrInvalidWorkingDirectory):

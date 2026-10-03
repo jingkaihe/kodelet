@@ -399,6 +399,38 @@ func TestAttachmentsReleaseCancellationAndStop(t *testing.T) {
 	assert.Empty(t, m.sessions)
 }
 
+func TestStopConversationCleansAllDirectoriesAndAttachments(t *testing.T) {
+	config, _ := fakeBrowserConfig(t)
+	m := testManager(t, config)
+	firstScope := Scope{ConversationID: "draft", CWD: t.TempDir()}
+	otherScope := Scope{ConversationID: "other", CWD: firstScope.CWD}
+	other, err := m.Open(t.Context(), otherScope)
+	require.NoError(t, err)
+	var stopped []*session
+	var sockets []*websocket.Conn
+	for _, scope := range []Scope{firstScope, {ConversationID: "draft", CWD: t.TempDir()}} {
+		info, err := m.Open(t.Context(), scope)
+		require.NoError(t, err)
+		stopped = append(stopped, openedSession(t, m, info))
+		conn, release, err := m.Connect(t.Context(), scope, info.SessionID)
+		require.NoError(t, err)
+		t.Cleanup(release)
+		sockets = append(sockets, conn)
+		if scope != firstScope {
+			require.NoError(t, os.Remove(scope.CWD), "cleanup must not need the directory to exist")
+		}
+	}
+	require.NoError(t, m.StopConversation("draft"))
+	require.NoError(t, m.StopConversation("draft"), "discard is idempotent")
+	for i, s := range stopped {
+		assertSocketClosed(t, sockets[i])
+		waitSessionDone(t, s)
+	}
+	retained, err := m.Open(t.Context(), otherScope)
+	require.NoError(t, err)
+	assert.Equal(t, other, retained)
+}
+
 func TestAcquireSharedBrowserConnection(t *testing.T) {
 	config, _ := fakeBrowserConfig(t)
 	m := testManager(t, config)

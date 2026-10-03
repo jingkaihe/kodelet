@@ -1188,6 +1188,23 @@ describe('ApiService', () => {
     });
   });
 
+  it.each([
+    ['discardDraftWorkspace', 'DELETE', '', true],
+    ['heartbeatDraftWorkspace', 'POST', '/heartbeat', undefined],
+  ] as const)('%s uses the CSRF-protected draft endpoint', async (operation, method, suffix, keepalive) => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+    setTestCookie('kodelet_csrf=draft-csrf; Path=/');
+    await apiService[operation]({ runnerId: 'runner/1', conversationId: 'draft-id' });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `/api/workspace/draft${suffix}?runnerId=runner%2F1&conversationId=draft-id`,
+      expect.objectContaining({
+        method,
+        headers: expect.objectContaining({ 'X-CSRF-Token': 'draft-csrf' }),
+      })
+    );
+    expect(mockFetch.mock.calls[0][1].keepalive).toBe(keepalive);
+  });
+
   describe('createTerminalWebSocket', () => {
     it('creates a websocket using the current host and query params', () => {
       const originalLocation = window.location;
