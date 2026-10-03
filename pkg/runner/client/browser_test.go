@@ -198,7 +198,6 @@ func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
 	assert.Equal(t, "draft workspace session cleanup", entries[0]["message"])
 	assert.Equal(t, "draft", entries[0]["conversation_id"])
 	assert.Equal(t, "expired", entries[0]["reason"])
-	assert.Equal(t, "success", entries[0]["outcome"])
 	assert.Equal(t, "info", entries[0]["logLevel"])
 	assert.True(t, workspaceTerminalDone(session.done))
 	assert.NoError(t, session.cleanupError())

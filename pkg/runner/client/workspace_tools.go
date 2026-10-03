@@ -1112,7 +1112,7 @@ func (s *Service) discardWorkspaceSessionsLocked(conversationID string, expiredB
 		s.mu.Lock()
 		delete(s.workspaceSessionLeases, conversationID)
 		s.mu.Unlock()
-		log.WithField("outcome", "success").Info("draft workspace session cleanup")
+		log.Info("draft workspace session cleanup")
 	} else {
 		log.WithField("outcome", "failure").WithError(err).Warn("draft workspace session cleanup")
 	}
