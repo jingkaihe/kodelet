@@ -1522,8 +1522,7 @@ const ChatPage: React.FC = () => {
       terminalAuthorized &&
       runnerWorkspaceAvailable &&
       runnerDirectoryAvailable &&
-      currentRunner?.workspaceTerminal &&
-      currentRunner?.workspaceTerminalConversation
+      currentRunner?.workspaceTerminal
   );
   const workspaceGitDiffAvailable = Boolean(
     isRemoteConversation &&

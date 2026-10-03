@@ -308,17 +308,15 @@ describe('ChatPage workspace tools and browsers', () => {
   });
 
   it.each([
-    { name: 'terminal and diff', terminal: true, diff: true, scoped: true },
-    { name: 'terminal only', terminal: true, diff: false, scoped: true },
-    { name: 'diff only', terminal: false, diff: true, scoped: true },
-    { name: 'legacy terminal and diff', terminal: true, diff: true, scoped: undefined },
-    { name: 'neither workspace tool', terminal: false, diff: false, scoped: true },
-  ])('handles keyboard navigation with $name capability', async ({ terminal, diff, scoped }) => {
+    { name: 'terminal and diff', terminal: true, diff: true },
+    { name: 'terminal only', terminal: true, diff: false },
+    { name: 'diff only', terminal: false, diff: true },
+    { name: 'neither workspace tool', terminal: false, diff: false },
+  ])('handles keyboard navigation with $name capability', async ({ terminal, diff }) => {
     mockGetRunners.mockResolvedValue({
       runners: [
         makeRunner({
           workspaceTerminal: terminal,
-          workspaceTerminalConversation: scoped,
           workspaceGitDiff: diff,
         }),
       ],
@@ -332,18 +330,17 @@ describe('ChatPage workspace tools and browsers', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    const terminalAvailable = terminal && scoped;
-    if (!terminalAvailable && !diff) {
+    if (!terminal && !diff) {
       expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
       return;
     }
 
     expect(screen.queryAllByRole('button', { name: 'Show terminal' })).toHaveLength(
-      terminalAvailable ? 1 : 0
+      terminal ? 1 : 0
     );
     expect(screen.queryAllByRole('button', { name: 'Show changes' })).toHaveLength(diff ? 1 : 0);
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    if (terminalAvailable) {
+    if (terminal) {
       expect(screen.getByTestId('workspace-tools-terminal-tab')).toBeInTheDocument();
     } else {
       expect(screen.queryByTestId('workspace-tools-terminal-tab')).not.toBeInTheDocument();
@@ -354,7 +351,7 @@ describe('ChatPage workspace tools and browsers', () => {
       expect(screen.queryByTestId('workspace-tools-diff-tab')).not.toBeInTheDocument();
     }
 
-    if (!terminalAvailable) {
+    if (!terminal) {
       expect(await screen.findByTestId('git-diff-panel')).toBeInTheDocument();
       return;
     }

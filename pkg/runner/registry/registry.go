@@ -103,36 +103,35 @@ const (
 
 // Runner is a safe snapshot of one stable runner registration.
 type Runner struct {
-	ID                            string             `json:"id"`
-	DisplayName                   string             `json:"displayName,omitempty"`
-	Host                          protocol.Host      `json:"host"`
-	Workspace                     protocol.Workspace `json:"workspace"`
-	KodeletVersion                string             `json:"kodeletVersion"`
-	ManifestDigest                string             `json:"manifestDigest,omitempty"`
-	ManifestChanged               bool               `json:"manifestChanged"`
-	CompatibilityError            string             `json:"compatibilityError,omitempty"`
-	Status                        RunnerStatus       `json:"status"`
-	Connected                     bool               `json:"connected"`
-	WorkspaceGitDiff              bool               `json:"workspaceGitDiff"`
-	WorkspaceGitCommit            bool               `json:"workspaceGitCommit"`
-	WorkspaceTerminal             bool               `json:"workspaceTerminal"`
-	WorkspaceTerminalConversation bool               `json:"workspaceTerminalConversation"`
-	WorkspaceSessionCleanup       bool               `json:"workspaceSessionCleanup"`
-	WorkspaceBrowser              bool               `json:"workspaceBrowser"`
-	WorkspaceDiscovery            bool               `json:"workspaceDiscovery"`
-	WorkspaceInspection           bool               `json:"workspaceInspection"`
-	WorkspaceMessageHistory       bool               `json:"workspaceMessageHistory"`
-	WorkspaceCWD                  bool               `json:"workspaceCwd"`
-	RunCheckpoint                 bool               `json:"runCheckpoint"`
-	SessionExtensions             bool               `json:"sessionExtensions"`
-	ActiveRunID                   string             `json:"activeRunId,omitempty"`
-	ActiveRunIDs                  []string           `json:"activeRunIds,omitempty"`
-	ConnectionID                  string             `json:"connectionId,omitempty"`
-	Generation                    int64              `json:"generation"`
-	ConnectedAt                   time.Time          `json:"connectedAt,omitempty"`
-	LastHeartbeatAt               time.Time          `json:"lastHeartbeatAt,omitempty"`
-	CreatedAt                     time.Time          `json:"createdAt"`
-	UpdatedAt                     time.Time          `json:"updatedAt"`
+	ID                      string             `json:"id"`
+	DisplayName             string             `json:"displayName,omitempty"`
+	Host                    protocol.Host      `json:"host"`
+	Workspace               protocol.Workspace `json:"workspace"`
+	KodeletVersion          string             `json:"kodeletVersion"`
+	ManifestDigest          string             `json:"manifestDigest,omitempty"`
+	ManifestChanged         bool               `json:"manifestChanged"`
+	CompatibilityError      string             `json:"compatibilityError,omitempty"`
+	Status                  RunnerStatus       `json:"status"`
+	Connected               bool               `json:"connected"`
+	WorkspaceGitDiff        bool               `json:"workspaceGitDiff"`
+	WorkspaceGitCommit      bool               `json:"workspaceGitCommit"`
+	WorkspaceTerminal       bool               `json:"workspaceTerminal"`
+	WorkspaceSessionCleanup bool               `json:"workspaceSessionCleanup"`
+	WorkspaceBrowser        bool               `json:"workspaceBrowser"`
+	WorkspaceDiscovery      bool               `json:"workspaceDiscovery"`
+	WorkspaceInspection     bool               `json:"workspaceInspection"`
+	WorkspaceMessageHistory bool               `json:"workspaceMessageHistory"`
+	WorkspaceCWD            bool               `json:"workspaceCwd"`
+	RunCheckpoint           bool               `json:"runCheckpoint"`
+	SessionExtensions       bool               `json:"sessionExtensions"`
+	ActiveRunID             string             `json:"activeRunId,omitempty"`
+	ActiveRunIDs            []string           `json:"activeRunIds,omitempty"`
+	ConnectionID            string             `json:"connectionId,omitempty"`
+	Generation              int64              `json:"generation"`
+	ConnectedAt             time.Time          `json:"connectedAt,omitempty"`
+	LastHeartbeatAt         time.Time          `json:"lastHeartbeatAt,omitempty"`
+	CreatedAt               time.Time          `json:"createdAt"`
+	UpdatedAt               time.Time          `json:"updatedAt"`
 }
 
 // Run is a snapshot of one top-level runner environment lease.
@@ -626,7 +625,6 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
-	entry.WorkspaceTerminalConversation = params.Capabilities.WorkspaceTerminalConversation
 	entry.WorkspaceSessionCleanup = params.Capabilities.WorkspaceSessionCleanup
 	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery
@@ -763,7 +761,6 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
 	entry.WorkspaceGitCommit = params.Capabilities.WorkspaceGitCommit
 	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
-	entry.WorkspaceTerminalConversation = params.Capabilities.WorkspaceTerminalConversation
 	entry.WorkspaceSessionCleanup = params.Capabilities.WorkspaceSessionCleanup
 	entry.WorkspaceBrowser = params.Capabilities.WorkspaceBrowser
 	entry.WorkspaceDiscovery = params.Capabilities.WorkspaceDiscovery

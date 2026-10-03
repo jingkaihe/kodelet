@@ -216,18 +216,17 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	SessionExtensions             bool `json:"sessionExtensions,omitempty"`
-	RunCheckpoint                 bool `json:"runCheckpoint,omitempty"`
-	WorkspaceGitDiff              bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceGitCommit            bool `json:"workspaceGitCommit,omitempty"`
-	WorkspaceTerminal             bool `json:"workspaceTerminal,omitempty"`
-	WorkspaceTerminalConversation bool `json:"workspaceTerminalConversation,omitempty"`
-	WorkspaceSessionCleanup       bool `json:"workspaceSessionCleanup,omitempty"`
-	WorkspaceBrowser              bool `json:"workspaceBrowser,omitempty"`
-	WorkspaceDiscovery            bool `json:"workspaceDiscovery,omitempty"`
-	WorkspaceInspection           bool `json:"workspaceInspection,omitempty"`
-	WorkspaceMessageHistory       bool `json:"workspaceMessageHistory,omitempty"`
-	WorkspaceCWD                  bool `json:"workspaceCwd,omitempty"`
+	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
+	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
+	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceSessionCleanup bool `json:"workspaceSessionCleanup,omitempty"`
+	WorkspaceBrowser        bool `json:"workspaceBrowser,omitempty"`
+	WorkspaceDiscovery      bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
+	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
+	WorkspaceCWD            bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.

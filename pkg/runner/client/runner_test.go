@@ -375,7 +375,6 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	entry, found := registry.Runner(registration.RunnerID)
 	require.True(t, found)
-	assert.True(t, entry.WorkspaceTerminalConversation, "the runner must advertise conversation-scoped terminals")
 	assert.True(t, entry.WorkspaceSessionCleanup, "the runner must advertise discarded draft cleanup")
 
 	t.Run("composer-history", func(t *testing.T) {

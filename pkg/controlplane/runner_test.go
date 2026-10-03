@@ -1114,10 +1114,9 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			WorkspaceGitDiff:              true,
-			WorkspaceTerminal:             true,
-			WorkspaceTerminalConversation: true,
-			WorkspaceCWD:                  true,
+			WorkspaceGitDiff:  true,
+			WorkspaceTerminal: true,
+			WorkspaceCWD:      true,
 		},
 		Host:      protocol.Host{InstanceID: "draft-tools", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/startup", Name: "startup"},
@@ -1415,7 +1414,6 @@ func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T
 	}{
 		{"old runner diff", "conversationId=conversation-scope", server.handleGetGitDiff, http.StatusNotImplemented},
 		{"old runner terminal", "conversationId=conversation-scope", server.handleTerminalWebsocket, http.StatusNotImplemented},
-		{"runner lacks conversation terminals", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleTerminalWebsocket, http.StatusNotImplemented},
 		{"runner lacks draft cleanup", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleDiscardDraftWorkspace, http.StatusNotImplemented},
 		{"runner lacks draft heartbeat", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleDraftWorkspaceHeartbeat, http.StatusNotImplemented},
 		{"old runner browser", "conversationId=conversation-scope", server.handleBrowserOpen, http.StatusNotImplemented},
@@ -1518,9 +1516,8 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			WorkspaceTerminal:             true,
-			WorkspaceTerminalConversation: true,
-			WorkspaceCWD:                  true,
+			WorkspaceTerminal: true,
+			WorkspaceCWD:      true,
 		},
 		Host:      protocol.Host{InstanceID: "host-terminal", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
@@ -1624,7 +1621,7 @@ func TestRemoteWorkspaceTerminalPersistsAcrossDraftSaveAndReplaysOutput(t *testi
 	}
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true, WorkspaceTerminalConversation: true},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true},
 		Host:             protocol.Host{InstanceID: "host-terminal-cancel", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace:        protocol.Workspace{Path: "/runner/project", Name: "project"},
 	}, link)

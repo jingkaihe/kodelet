@@ -105,10 +105,6 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
 		return
 	}
-	if !target.Runner.WorkspaceTerminalConversation {
-		s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support conversation-scoped terminals; upgrade the runner", nil)
-		return
-	}
 	if err := s.runnerRegistry.ValidateRunnerCall(target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalOpen); err != nil {
 		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
 			s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support workspace terminal", nil)
