@@ -4,6 +4,7 @@ import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
   getTerminalPopOutSessionId,
+  getTerminalPopOutWindowName,
   isTerminalPopOutMessage,
   TERMINAL_POP_OUT_HEARTBEAT_INTERVAL,
   type TerminalPopOutMessage,
@@ -14,22 +15,29 @@ import apiService from '../services/api';
 import type { WorkspaceTarget } from '../types';
 
 const TerminalPage = () => {
-  const params = new URLSearchParams(window.location.search);
-  const cwdLabel = params.get('cwd') ?? '';
+  // Canonicalizing the URL must not change the attachment request or reload its conversation.
+  const [params] = useState(() => new URLSearchParams(window.location.search));
+  const requestedCWD = params.get('cwd') || undefined;
   const runnerId = params.get('runnerId')?.trim() || undefined;
   const conversationId = params.get('conversationId')?.trim() || undefined;
-  const [resolvedRunnerId, setResolvedRunnerId] = useState(conversationId ? undefined : runnerId);
+  const [target, setTarget] = useState<WorkspaceTarget | null>(() =>
+    conversationId
+      ? null
+      : runnerId
+        ? { kind: 'runner', runnerId, cwd: requestedCWD }
+        : { kind: 'local', cwd: requestedCWD }
+  );
+  const [canonicalCWD, setCanonicalCWD] = useState<string>();
   const [targetError, setTargetError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!conversationId) {
-      setResolvedRunnerId(runnerId);
-      setTargetError(null);
       return undefined;
     }
 
     let cancelled = false;
-    setResolvedRunnerId(undefined);
+    setTarget(null);
+    setCanonicalCWD(undefined);
     setTargetError(null);
     void apiService
       .getConversation(conversationId)
@@ -46,7 +54,12 @@ const TerminalPage = () => {
           setTargetError('The terminal runner does not match this conversation.');
           return;
         }
-        setResolvedRunnerId(affinityRunnerId);
+        setTarget({
+          kind: 'runner',
+          runnerId: affinityRunnerId,
+          conversationId,
+          cwd: conversation.cwd,
+        });
         setTargetError(null);
       })
       .catch(() => {
@@ -60,24 +73,40 @@ const TerminalPage = () => {
     };
   }, [conversationId, runnerId]);
 
-  const target = useMemo<WorkspaceTarget | null>(
-    () =>
-      resolvedRunnerId
-        ? { kind: 'runner', runnerId: resolvedRunnerId, conversationId }
-        : conversationId
-          ? null
-          : { kind: 'local', cwd: cwdLabel || undefined },
-    [conversationId, cwdLabel, resolvedRunnerId]
-  );
+  const ownershipTarget = useMemo<WorkspaceTarget | null>(() => {
+    if (!target || target.kind === 'local') return target;
+    const cwd = canonicalCWD || target.cwd;
+    if (!cwd?.startsWith('/')) return null;
+    return cwd === target.cwd ? target : { ...target, cwd };
+  }, [canonicalCWD, target]);
 
   useEffect(() => {
     if (!target) {
       return undefined;
     }
     const documentClassName = 'terminal-popout-active';
+    document.documentElement.classList.add(documentClassName);
+    document.body.classList.add(documentClassName);
+    return () => {
+      document.documentElement.classList.remove(documentClassName);
+      document.body.classList.remove(documentClassName);
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (!ownershipTarget) {
+      return undefined;
+    }
+    window.name = getTerminalPopOutWindowName(ownershipTarget);
+    if (ownershipTarget.kind === 'runner' && ownershipTarget.cwd) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('runnerId', ownershipTarget.runnerId);
+      url.searchParams.set('cwd', ownershipTarget.cwd);
+      window.history.replaceState(window.history.state, '', url);
+    }
     let record: TerminalPopOutRecord = {
       id: getTerminalPopOutSessionId(),
-      target,
+      target: ownershipTarget,
       state: 'active',
       updatedAt: Date.now(),
     };
@@ -150,8 +179,6 @@ const TerminalPage = () => {
       }
     };
 
-    document.documentElement.classList.add(documentClassName);
-    document.body.classList.add(documentClassName);
     channel?.addEventListener('message', handleChannelMessage);
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('pagehide', handlePageHide);
@@ -166,10 +193,8 @@ const TerminalPage = () => {
       deactivate(!unloading);
       stopHeartbeat();
       channel?.close();
-      document.documentElement.classList.remove(documentClassName);
-      document.body.classList.remove(documentClassName);
     };
-  }, [target]);
+  }, [ownershipTarget]);
 
   if (!target) {
     return (
@@ -184,9 +209,14 @@ const TerminalPage = () => {
   return (
     <main className="terminal-popout-page" data-testid="terminal-popout-page">
       <TerminalModal
-        cwdLabel={cwdLabel}
+        cwdLabel={ownershipTarget?.cwd || target.cwd || ''}
         open
         onClose={() => window.close()}
+        onReady={(event) => {
+          if (target.kind === 'runner' && event.cwd.startsWith('/')) {
+            setCanonicalCWD(event.cwd);
+          }
+        }}
         target={target}
         allowPopOut={false}
       />

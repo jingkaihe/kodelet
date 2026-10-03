@@ -25,7 +25,12 @@ export type TerminalPopOutMessage =
   | { type: 'closing'; id: string; target: WorkspaceTarget };
 
 export const getTerminalPopOutTargetKey = (target: WorkspaceTarget): string =>
-  target.kind === 'runner' ? `runner:${target.runnerId}` : `local:${target.cwd || ''}`;
+  target.kind === 'runner'
+    ? `runner:${target.runnerId}:${target.cwd ? `cwd:${target.cwd}` : `conversation:${target.conversationId || ''}`}`
+    : `local:${target.cwd || ''}`;
+
+export const getTerminalPopOutWindowName = (target: WorkspaceTarget): string =>
+  `kodelet-terminal-${encodeURIComponent(getTerminalPopOutTargetKey(target))}`;
 
 export const createTerminalPopOutId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -60,6 +65,9 @@ const isWorkspaceTarget = (value: unknown): value is WorkspaceTarget => {
     target.kind === 'runner' &&
     typeof target.runnerId === 'string' &&
     target.runnerId.trim() !== '' &&
+    // Old runner-wide leases cannot establish ownership of a directory's terminal.
+    typeof target.cwd === 'string' &&
+    target.cwd.startsWith('/') &&
     (target.conversationId === undefined ||
       (typeof target.conversationId === 'string' && target.conversationId.trim() !== ''))
   );

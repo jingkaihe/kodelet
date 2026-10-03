@@ -6,6 +6,8 @@ import { initializeTheme, setTheme, THEME_STORAGE_KEY, THEMES } from '../../them
 import TerminalModal from './TerminalModal';
 import {
   clearTerminalPopOutRecord,
+  getTerminalPopOutWindowName,
+  isTerminalPopOutMessage,
   readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
   TERMINAL_POP_OUT_STORAGE_KEY,
@@ -592,7 +594,7 @@ describe('TerminalModal', () => {
     expect(terminal.resize).toHaveBeenCalledWith(80, 23);
   });
 
-  it('opens a runner-scoped remote terminal pop-out with conversation validation', async () => {
+  it('opens a directory-scoped remote terminal pop-out with conversation validation', async () => {
     const socket = new MockWebSocket();
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     createTerminalWebSocketMock.mockReturnValue(socket);
@@ -619,13 +621,25 @@ describe('TerminalModal', () => {
         cols: 80,
       })
     );
+    act(() =>
+      socket.emit('message', {
+        data: JSON.stringify({
+          type: 'ready',
+          cwd: '/runner/project',
+          name: 'bash',
+          git: false,
+          pid: 123,
+        }),
+      })
+    );
+    expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
     act(() => {
       screen.getByRole('button', { name: 'Open terminal in new window' }).click();
     });
 
     expect(openSpy).toHaveBeenCalledWith(
-      'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-123',
-      'kodelet-terminal',
+      'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-123&cwd=%2Frunner%2Fproject',
+      'kodelet-terminal-runner%3Arunner-1%3Acwd%3A%2Frunner%2Fproject',
       'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
     );
 
@@ -633,21 +647,15 @@ describe('TerminalModal', () => {
   });
 
   it('keeps remote pop-out disabled until conversation affinity is established', async () => {
+    const target = { kind: 'runner', runnerId: 'runner-1', cwd: '/runner/project' } as const;
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
-    render(
-      <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
-        open
-        target={{ kind: 'runner', runnerId: 'runner-1' }}
-      />
-    );
+    render(<TerminalModal cwdLabel={target.cwd} onClose={vi.fn()} open target={target} />);
 
     await waitFor(() =>
       expect(createTerminalWebSocketMock).toHaveBeenCalledWith({
-        target: { kind: 'runner', runnerId: 'runner-1' },
+        target,
         rows: 23,
         cols: 80,
       })
@@ -657,18 +665,23 @@ describe('TerminalModal', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('recognizes an existing runner pop-out before conversation affinity is established', () => {
+  it('recognizes an existing same-directory pop-out before conversation affinity is established', () => {
     const popOutWindow = {
       closed: false,
       focus: vi.fn(),
       location: {
-        href: 'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-a',
+        href: 'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-a&cwd=%2Frunner%2Fproject',
       },
     };
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(popOutWindow as unknown as Window);
     writeTerminalPopOutRecord({
       id: 'runner-pop-out',
-      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
+      target: {
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-a',
+        cwd: '/runner/project',
+      },
       state: 'active',
       updatedAt: Date.now(),
     });
@@ -678,7 +691,7 @@ describe('TerminalModal', () => {
         cwdLabel="/runner/project"
         onClose={vi.fn()}
         open
-        target={{ kind: 'runner', runnerId: 'runner-1' }}
+        target={{ kind: 'runner', runnerId: 'runner-1', cwd: '/runner/project' }}
       />
     );
 
@@ -702,7 +715,12 @@ describe('TerminalModal', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     writeTerminalPopOutRecord({
       id: 'stale-runner-pop-out',
-      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
+      target: {
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-a',
+        cwd: '/runner/project',
+      },
       state: 'active',
       updatedAt: Date.now(),
     });
@@ -712,7 +730,7 @@ describe('TerminalModal', () => {
         cwdLabel="/runner/project"
         onClose={vi.fn()}
         open
-        target={{ kind: 'runner', runnerId: 'runner-1' }}
+        target={{ kind: 'runner', runnerId: 'runner-1', cwd: '/runner/project' }}
       />
     );
 
@@ -727,52 +745,220 @@ describe('TerminalModal', () => {
     openSpy.mockRestore();
   });
 
-  it('keeps one terminal attachment when conversation validation changes on the same runner', async () => {
-    const socket = new MockWebSocket();
-    createTerminalWebSocketMock.mockReturnValue(socket);
+  it.each([
+    { name: 'same directory', cwd: '/runner/project', nextCWD: '/runner/project', connections: 1 },
+    {
+      name: 'different directory',
+      cwd: '/runner/project',
+      nextCWD: '/runner/other',
+      connections: 2,
+    },
+    { name: 'unresolved directory', cwd: undefined, nextCWD: undefined, connections: 2 },
+  ])('uses directory identity when switching conversations: $name', async ({
+    cwd,
+    nextCWD,
+    connections,
+  }) => {
+    const target = { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a', cwd } as const;
+    const nextTarget = { ...target, conversationId: 'conv-b', cwd: nextCWD };
+    const firstSocket = new MockWebSocket();
+    createTerminalWebSocketMock
+      .mockReturnValueOnce(firstSocket)
+      .mockReturnValue(new MockWebSocket());
     const { rerender } = render(
-      <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
-        open
-        target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' }}
-      />
+      <TerminalModal cwdLabel={cwd || ''} onClose={vi.fn()} open target={target} />
     );
 
-    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
-    rerender(
-      <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
-        open
-        target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-b' }}
-      />
-    );
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
+    const firstTerminal = MockTerminal.instances[0];
+    rerender(<TerminalModal cwdLabel={nextCWD || ''} onClose={vi.fn()} open target={nextTarget} />);
 
     await act(async () => Promise.resolve());
-    expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1);
-    expect(socket.close).not.toHaveBeenCalled();
+    expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(connections);
+    expect(createTerminalWebSocketMock).toHaveBeenLastCalledWith({
+      target: connections === 1 ? target : nextTarget,
+      rows: 23,
+      cols: 80,
+    });
+    expect(firstSocket.close).toHaveBeenCalledTimes(connections - 1);
+    expect(firstTerminal.dispose).toHaveBeenCalledTimes(connections - 1);
   });
 
-  it('recognizes a runner pop-out from every conversation on that runner', () => {
+  it('ignores legacy runner-wide ownership in storage and broadcasts', () => {
+    const record = {
+      id: 'legacy-runner-pop-out',
+      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
+      state: 'active',
+      updatedAt: Date.now(),
+    };
+    window.localStorage.setItem(
+      TERMINAL_POP_OUT_STORAGE_KEY,
+      JSON.stringify({ version: 2, records: [record] })
+    );
+    expect(isTerminalPopOutMessage({ type: 'active', record })).toBe(false);
+    expect(isTerminalPopOutMessage({ type: 'closing', id: record.id, target: record.target })).toBe(
+      false
+    );
+    expect(
+      readTerminalPopOutRecordForTarget({
+        kind: 'runner',
+        runnerId: 'runner-1',
+        cwd: '/runner/project',
+      })
+    ).toBeNull();
+    expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('uses the runner-resolved directory for pop-out handoff and reattachment', async () => {
+    const cwd = '../project';
+    const socket = new MockWebSocket();
+    const onReady = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    const canonicalTarget = {
+      kind: 'runner',
+      runnerId: 'runner-1',
+      conversationId: 'saved',
+      cwd: '/runner/project',
+    } as const;
+    writeTerminalPopOutRecord({
+      id: 'canonical-pop-out',
+      target: canonicalTarget,
+      state: 'active',
+      updatedAt: Date.now(),
+    });
+    render(
+      <TerminalModal
+        cwdLabel={cwd}
+        onClose={vi.fn()}
+        onReady={onReady}
+        open
+        target={{ kind: 'runner', runnerId: 'runner-1', cwd }}
+      />
+    );
+
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
+    expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
+    const ready = { type: 'ready', cwd: canonicalTarget.cwd, name: 'bash', git: false, pid: 123 };
+    act(() => socket.emit('message', { data: JSON.stringify(ready) }));
+
+    expect(onReady).toHaveBeenCalledExactlyOnceWith(ready);
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
+
+    clearTerminalPopOutRecord('canonical-pop-out');
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
+    expect(createTerminalWebSocketMock).toHaveBeenLastCalledWith({
+      target: { kind: 'runner', runnerId: 'runner-1', cwd: '/runner/project' },
+      rows: 23,
+      cols: 80,
+    });
+  });
+
+  it.each([
+    { runnerId: 'runner-1', cwd: '/runner/project', shared: true },
+    { runnerId: 'runner-1', cwd: '/runner/other', shared: false },
+    { runnerId: 'runner-2', cwd: '/runner/project', shared: false },
+  ])('only shares saved conversation pop-outs on the same runner and directory ($runnerId, $cwd)', async ({
+    runnerId,
+    cwd,
+    shared,
+  }) => {
+    createTerminalWebSocketMock.mockReturnValue(new MockWebSocket());
     writeTerminalPopOutRecord({
       id: 'runner-pop-out',
-      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
+      target: {
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-a',
+        cwd: '/runner/project',
+      },
       state: 'active',
       updatedAt: Date.now(),
     });
 
     render(
       <TerminalModal
-        cwdLabel="/runner/project"
+        cwdLabel={cwd}
         onClose={vi.fn()}
         open
-        target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-b' }}
+        target={{ kind: 'runner', runnerId, conversationId: 'conv-b', cwd }}
       />
     );
 
-    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
-    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+    if (shared) {
+      expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+      expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+    } else {
+      expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
+      await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
+    }
+  });
+
+  it('opens and tracks separate windows for different directories on one runner', async () => {
+    const firstTarget = {
+      kind: 'runner',
+      runnerId: 'runner-1',
+      conversationId: 'conv-a',
+      cwd: '/runner/first',
+    } as const;
+    const secondTarget = { ...firstTarget, conversationId: 'conv-b', cwd: '/runner/second' };
+    const firstWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: 'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-a&cwd=%2Frunner%2Ffirst',
+      },
+    };
+    const secondWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: 'http://localhost:3000/terminal?runnerId=runner-1&conversationId=conv-b&cwd=%2Frunner%2Fsecond',
+      },
+    };
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValueOnce(firstWindow as unknown as Window)
+      .mockReturnValueOnce(secondWindow as unknown as Window);
+    createTerminalWebSocketMock.mockImplementation(() => new MockWebSocket());
+    const { rerender } = render(
+      <TerminalModal cwdLabel={firstTarget.cwd} onClose={vi.fn()} open target={firstTarget} />
+    );
+    try {
+      await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole('button', { name: 'Open terminal in new window' }));
+      expect(firstWindow.focus).toHaveBeenCalledOnce();
+
+      rerender(
+        <TerminalModal cwdLabel={secondTarget.cwd} onClose={vi.fn()} open target={secondTarget} />
+      );
+      await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Open terminal in new window' }));
+      expect(secondWindow.focus).toHaveBeenCalledOnce();
+      expect(openSpy.mock.calls[0][1]).toBe(getTerminalPopOutWindowName(firstTarget));
+      expect(openSpy.mock.calls[1][1]).toBe(getTerminalPopOutWindowName(secondTarget));
+      expect(openSpy.mock.calls[0][1]).not.toBe(openSpy.mock.calls[1][1]);
+
+      rerender(
+        <TerminalModal
+          cwdLabel={firstTarget.cwd}
+          onClose={vi.fn()}
+          open
+          target={{ ...firstTarget, conversationId: 'conv-c' }}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Focus pop-out' }));
+      expect(firstWindow.focus).toHaveBeenCalledTimes(2);
+      expect(secondWindow.focus).toHaveBeenCalledOnce();
+      expect(openSpy).toHaveBeenCalledTimes(2);
+      expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2);
+    } finally {
+      firstWindow.closed = true;
+      secondWindow.closed = true;
+      openSpy.mockRestore();
+    }
   });
 
   it('reconnects a remote terminal without changing its runner target', async () => {
@@ -1139,7 +1325,7 @@ describe('TerminalModal', () => {
 
     expect(openSpy).toHaveBeenCalledWith(
       'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
-      'kodelet-terminal',
+      getTerminalPopOutWindowName(localTarget),
       'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
     );
     expect(socket.close).not.toHaveBeenCalled();
@@ -1261,15 +1447,24 @@ describe('TerminalModal', () => {
     expect(readTerminalPopOutRecordForTarget(localTarget)).toBeNull();
   });
 
-  it('preserves active pop-out leases for other working directories', () => {
+  it.each([
+    'local',
+    'runner',
+  ] as const)('preserves %s pop-out leases for other working directories', (kind) => {
     const firstRecord: TerminalPopOutRecord = {
       id: 'first-pop-out',
-      target: { kind: 'local', cwd: '/tmp/first' },
+      target:
+        kind === 'local'
+          ? { kind, cwd: '/tmp/first' }
+          : { kind, runnerId: 'runner-1', conversationId: 'conv-first', cwd: '/tmp/first' },
       updatedAt: Date.now(),
     };
     const secondRecord: TerminalPopOutRecord = {
       id: 'second-pop-out',
-      target: { kind: 'local', cwd: '/tmp/second' },
+      target:
+        kind === 'local'
+          ? { kind, cwd: '/tmp/second' }
+          : { kind, runnerId: 'runner-1', conversationId: 'conv-second', cwd: '/tmp/second' },
       updatedAt: Date.now() + 1,
     };
 
@@ -1293,7 +1488,12 @@ describe('TerminalModal', () => {
     };
     const remoteRecord: TerminalPopOutRecord = {
       id: 'remote-pop-out',
-      target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-123' },
+      target: {
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-123',
+        cwd: '/runner/project',
+      },
       updatedAt: Date.now() + 1,
     };
 
@@ -1301,13 +1501,7 @@ describe('TerminalModal', () => {
     writeTerminalPopOutRecord(remoteRecord);
 
     expect(readTerminalPopOutRecordForTarget(localRecord.target)).toEqual(localRecord);
-    expect(
-      readTerminalPopOutRecordForTarget({
-        kind: 'runner',
-        runnerId: 'runner-1',
-        conversationId: 'conv-123',
-      })
-    ).toEqual(remoteRecord);
+    expect(readTerminalPopOutRecordForTarget(remoteRecord.target)).toEqual(remoteRecord);
   });
 
   it('focuses a persisted pop-out opened from another tab', () => {
@@ -1335,7 +1529,7 @@ describe('TerminalModal', () => {
 
     expect(openSpy).toHaveBeenCalledWith(
       '',
-      'kodelet-terminal',
+      getTerminalPopOutWindowName(localTarget),
       'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
     );
     expect(popOutWindow.focus).toHaveBeenCalledTimes(1);

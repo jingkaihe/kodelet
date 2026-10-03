@@ -7,6 +7,7 @@ import { subscribeTheme } from '../../theme';
 import type {
   TerminalClientMessage,
   TerminalExitEvent,
+  TerminalReadyEvent,
   TerminalServerEvent,
   WorkspaceTarget,
 } from '../../types';
@@ -18,6 +19,7 @@ import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
   getTerminalPopOutTargetKey,
+  getTerminalPopOutWindowName,
   isTerminalPopOutMessage,
   readTerminalPopOutRecordById,
   readTerminalPopOutRecordForTarget,
@@ -33,6 +35,7 @@ interface TerminalModalProps {
   open: boolean;
   onClose: () => void;
   allowPopOut?: boolean;
+  onReady?: (event: TerminalReadyEvent) => void;
 }
 
 const FALLBACK_TERMINAL_FONT_FAMILY =
@@ -98,9 +101,7 @@ const getTerminalTheme = (): ITheme => {
   );
 };
 
-let activeTerminalPopOutWindow: Window | null = null;
-let activeTerminalPopOutTargetKey = '';
-let activeTerminalPopOutPendingUntil = 0;
+const activeTerminalPopOutWindows = new Map<string, { window: Window; pendingUntil: number }>();
 
 const getTerminalPopOutURL = (target: WorkspaceTarget): URL => {
   const url = new URL('/terminal', window.location.origin);
@@ -109,7 +110,8 @@ const getTerminalPopOutURL = (target: WorkspaceTarget): URL => {
     if (target.conversationId) {
       url.searchParams.set('conversationId', target.conversationId);
     }
-  } else if (target.cwd) {
+  }
+  if (target.cwd) {
     url.searchParams.set('cwd', target.cwd);
   }
   return url;
@@ -122,15 +124,10 @@ const getTerminalTargetFromURL = (url: URL): WorkspaceTarget => {
       kind: 'runner',
       runnerId,
       conversationId: url.searchParams.get('conversationId')?.trim() || undefined,
+      cwd: url.searchParams.get('cwd') || undefined,
     };
   }
   return { kind: 'local', cwd: url.searchParams.get('cwd') || undefined };
-};
-
-const clearActiveTerminalPopOutWindow = () => {
-  activeTerminalPopOutWindow = null;
-  activeTerminalPopOutTargetKey = '';
-  activeTerminalPopOutPendingUntil = 0;
 };
 
 const isExpectedTerminalPopOutWindow = (candidate: Window, targetKey: string): boolean => {
@@ -151,28 +148,27 @@ const rememberActiveTerminalPopOutWindow = (
   target: WorkspaceTarget,
   pendingNavigation: boolean
 ) => {
-  activeTerminalPopOutWindow = candidate;
-  activeTerminalPopOutTargetKey = getTerminalPopOutTargetKey(target);
-  activeTerminalPopOutPendingUntil = pendingNavigation
-    ? Date.now() + POP_OUT_NAVIGATION_GRACE_PERIOD
-    : 0;
+  activeTerminalPopOutWindows.set(getTerminalPopOutTargetKey(target), {
+    window: candidate,
+    pendingUntil: pendingNavigation ? Date.now() + POP_OUT_NAVIGATION_GRACE_PERIOD : 0,
+  });
 };
 
-const getActiveTerminalPopOutWindow = (target?: WorkspaceTarget) => {
-  if (activeTerminalPopOutWindow?.closed) {
-    clearActiveTerminalPopOutWindow();
-  } else if (activeTerminalPopOutWindow) {
-    if (isExpectedTerminalPopOutWindow(activeTerminalPopOutWindow, activeTerminalPopOutTargetKey)) {
-      activeTerminalPopOutPendingUntil = 0;
-    } else if (Date.now() >= activeTerminalPopOutPendingUntil) {
-      clearActiveTerminalPopOutWindow();
+const getActiveTerminalPopOutWindow = (target: WorkspaceTarget): Window | null => {
+  const key = getTerminalPopOutTargetKey(target);
+  const active = activeTerminalPopOutWindows.get(key);
+  if (!active) return null;
+  if (!active.window.closed) {
+    if (isExpectedTerminalPopOutWindow(active.window, key)) {
+      active.pendingUntil = 0;
+      return active.window;
+    }
+    if (Date.now() < active.pendingUntil) {
+      return active.window;
     }
   }
-
-  return target === undefined ||
-    activeTerminalPopOutTargetKey === getTerminalPopOutTargetKey(target)
-    ? activeTerminalPopOutWindow
-    : null;
+  activeTerminalPopOutWindows.delete(key);
+  return null;
 };
 
 const loadTerminalFont = async (fontFamily: string) => {
@@ -262,17 +258,33 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   open,
   onClose,
   allowPopOut = true,
+  onReady,
 }) => {
   const resolvedTheme = useSyncExternalStore(
     subscribeTheme,
     () => document.documentElement.dataset.theme
   );
-  const popOutTargetKey = getTerminalPopOutTargetKey(target);
-  const popOutEligible = allowPopOut && (target.kind === 'local' || Boolean(target.conversationId));
-  const terminalConnectionKey =
-    target.kind === 'runner' ? `runner:${target.runnerId}` : `local:${target.cwd || ''}`;
-  const targetRef = useRef(target);
-  targetRef.current = target;
+  const terminalConnectionKey = getTerminalPopOutTargetKey(target);
+  const [resolvedDirectory, setResolvedDirectory] = useState<{
+    connectionKey: string;
+    cwd: string;
+  } | null>(null);
+  const popOutTarget = useMemo(
+    () =>
+      resolvedDirectory?.connectionKey === terminalConnectionKey
+        ? { ...target, cwd: resolvedDirectory.cwd }
+        : target,
+    [resolvedDirectory, target, terminalConnectionKey]
+  );
+  const popOutTargetKey = getTerminalPopOutTargetKey(popOutTarget);
+  const popOutEligible =
+    allowPopOut &&
+    (popOutTarget.kind === 'local' ||
+      Boolean(popOutTarget.conversationId && popOutTarget.cwd?.startsWith('/')));
+  const targetRef = useRef(popOutTarget);
+  targetRef.current = popOutTarget;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -368,7 +380,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   }, [allowPopOut]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(reconnectAttempt): Retry events must restart the connection lifecycle.
-  // biome-ignore lint/correctness/useExhaustiveDependencies(terminalConnectionKey): Reconnect when the target identity changes; targetRef supplies its latest metadata.
   // biome-ignore lint/correctness/useExhaustiveDependencies(resolvedTheme): Ghostty cannot update live palettes; rebuild the view and replay the persistent PTY, as Comet does.
   useEffect(() => {
     if (!open || popOutActive || !terminalHostRef.current) {
@@ -679,6 +690,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
               }
 
               if (payload.type === 'ready') {
+                setResolvedDirectory({ connectionKey: terminalConnectionKey, cwd: payload.cwd });
+                onReadyRef.current?.(payload);
                 setStatusText('Restoring session…');
                 scheduleSettledResize();
                 return;
@@ -875,19 +888,25 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     const pendingCloseTimeouts = new Set<number>();
     const syncPopOutState = () => {
       setPopOutActive(
-        getActiveTerminalPopOutWindow(target) !== null ||
-          readTerminalPopOutRecordForTarget(target) !== null
+        getActiveTerminalPopOutWindow(popOutTarget) !== null ||
+          readTerminalPopOutRecordForTarget(popOutTarget) !== null
       );
     };
     const handleChannelMessage = (event: MessageEvent<unknown>) => {
       if (!isTerminalPopOutMessage(event.data)) {
         return;
       }
-      if (event.data.type === 'active' && terminalPopOutMessageMatchesTarget(event.data, target)) {
+      if (
+        event.data.type === 'active' &&
+        terminalPopOutMessageMatchesTarget(event.data, popOutTarget)
+      ) {
         setPopOutActive(true);
         return;
       }
-      if (event.data.type === 'closing' && terminalPopOutMessageMatchesTarget(event.data, target)) {
+      if (
+        event.data.type === 'closing' &&
+        terminalPopOutMessageMatchesTarget(event.data, popOutTarget)
+      ) {
         const closingId = event.data.id;
         const closingRecord = readTerminalPopOutRecordById(closingId);
         channel?.postMessage({ type: 'probe' });
@@ -895,7 +914,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           pendingCloseTimeouts.delete(closeTimeout);
           const currentRecord = readTerminalPopOutRecordById(closingId);
           if (
-            getActiveTerminalPopOutWindow(target) === null &&
+            getActiveTerminalPopOutWindow(popOutTarget) === null &&
             closingRecord &&
             currentRecord &&
             currentRecord.id === closingId &&
@@ -943,20 +962,24 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       channel?.removeEventListener('message', handleChannelMessage);
       channel?.close();
     };
-  }, [allowPopOut, popOutTargetKey, target]);
+  }, [allowPopOut, popOutTargetKey, popOutTarget]);
 
   const handlePopOut = useCallback(() => {
-    const activePopOut = getActiveTerminalPopOutWindow(target);
+    const activePopOut = getActiveTerminalPopOutWindow(popOutTarget);
     if (activePopOut) {
       activePopOut.focus();
       setPopOutActive(true);
       return;
     }
 
-    const persistedPopOut = readTerminalPopOutRecordForTarget(target);
+    const persistedPopOut = readTerminalPopOutRecordForTarget(popOutTarget);
     if (persistedPopOut) {
       const persistedTarget = persistedPopOut.target;
-      const existingPopOut = window.open('', 'kodelet-terminal', TERMINAL_POP_OUT_WINDOW_FEATURES);
+      const existingPopOut = window.open(
+        '',
+        getTerminalPopOutWindowName(popOutTarget),
+        TERMINAL_POP_OUT_WINDOW_FEATURES
+      );
       if (existingPopOut) {
         const alreadyShowingTerminal = isExpectedTerminalPopOutWindow(
           existingPopOut,
@@ -987,11 +1010,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
 
-    const url = getTerminalPopOutURL(target);
+    const url = getTerminalPopOutURL(popOutTarget);
 
     const popOutWindow = window.open(
       url.toString(),
-      'kodelet-terminal',
+      getTerminalPopOutWindowName(popOutTarget),
       TERMINAL_POP_OUT_WINDOW_FEATURES
     );
 
@@ -999,10 +1022,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
 
-    rememberActiveTerminalPopOutWindow(popOutWindow, target, true);
+    rememberActiveTerminalPopOutWindow(popOutWindow, popOutTarget, true);
     setPopOutActive(true);
     popOutWindow.focus();
-  }, [popOutEligible, popOutTargetKey, target]);
+  }, [popOutEligible, popOutTargetKey, popOutTarget]);
 
   if (!open) {
     return null;
