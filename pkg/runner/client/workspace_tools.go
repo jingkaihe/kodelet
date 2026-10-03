@@ -989,9 +989,7 @@ func (s *Service) collectWorkspaceSessions() {
 		case <-s.workspaceSessionsStop:
 			return
 		case now := <-ticker.C:
-			if err := s.reapWorkspaceSessions(now); err != nil {
-				logger.G(s.ctx).WithError(err).Warn("failed to clean up expired draft workspace sessions")
-			}
+			_ = s.reapWorkspaceSessions(now) // Each cleanup logs its own outcome.
 		}
 	}
 }
@@ -1102,10 +1100,21 @@ func (s *Service) discardWorkspaceSessionsLocked(conversationID string, expiredB
 	for range len(terminals) + 1 {
 		err = combineCleanupErrors(err, <-results)
 	}
+	reason := "discarded"
+	if !expiredBefore.IsZero() {
+		reason = "expired"
+	}
+	log := logger.G(s.ctx).WithFields(map[string]any{
+		"conversation_id": conversationID,
+		"reason":          reason,
+	})
 	if err == nil {
 		s.mu.Lock()
 		delete(s.workspaceSessionLeases, conversationID)
 		s.mu.Unlock()
+		log.WithField("outcome", "success").Info("draft workspace session cleanup")
+	} else {
+		log.WithField("outcome", "failure").WithError(err).Warn("draft workspace session cleanup")
 	}
 	return err
 }

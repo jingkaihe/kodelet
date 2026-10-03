@@ -151,7 +151,8 @@ func TestWorkspaceOpenSerializesWithDiscard(t *testing.T) {
 
 func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
-	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+	logCtx, logOutput := newStructuredRunnerTestLogger(t)
+	service, err := NewService(logCtx, t.TempDir(), ServiceOptions{
 		Browser: browser.Config{Executable: fakeBrowserExecutable(t)},
 	})
 	require.NoError(t, err)
@@ -192,6 +193,13 @@ func TestWorkspaceDraftLeaseExpiryAndOwnerHeartbeat(t *testing.T) {
 	assert.True(t, service.workspaceSessionLeases["saved"].IsZero())
 	service.mu.Unlock()
 	require.NoError(t, service.reapWorkspaceSessions(time.Now().Add(6*time.Minute)))
+	entries := decodeStructuredRunnerLogs(t, logOutput)
+	require.Len(t, entries, 1, "heartbeats stay silent; cleanup logs once")
+	assert.Equal(t, "draft workspace session cleanup", entries[0]["message"])
+	assert.Equal(t, "draft", entries[0]["conversation_id"])
+	assert.Equal(t, "expired", entries[0]["reason"])
+	assert.Equal(t, "success", entries[0]["outcome"])
+	assert.Equal(t, "info", entries[0]["logLevel"])
 	assert.True(t, workspaceTerminalDone(session.done))
 	assert.NoError(t, session.cleanupError())
 	assert.False(t, service.browserManager.HasConversation("draft"))

@@ -433,6 +433,22 @@ func TestWorkspaceTerminalManagerRetainsSessionAfterCleanupFailure(t *testing.T)
 	require.ErrorIs(t, err, cleanupErr)
 	assert.Nil(t, manager.current)
 	require.ErrorIs(t, manager.Close(), cleanupErr)
+
+	logCtx, logOutput := newStructuredRunnerTestLogger(t)
+	service := &Service{
+		ctx: logCtx,
+		terminalManagers: map[workspaceTerminalScope]*workspaceTerminalManager{
+			{ConversationID: "draft", CWD: manager.cwd}: manager,
+		},
+	}
+	require.ErrorIs(t, service.discardWorkspaceSessions("draft"), cleanupErr)
+	entries := decodeStructuredRunnerLogs(t, logOutput)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "draft", entries[0]["conversation_id"])
+	assert.Equal(t, "discarded", entries[0]["reason"])
+	assert.Equal(t, "failure", entries[0]["outcome"])
+	assert.Equal(t, "warning", entries[0]["logLevel"])
+	assert.Contains(t, entries[0]["error"], cleanupErr.Error())
 }
 
 func TestWorkspaceTerminalManagerReturnsShellStartErrors(t *testing.T) {
