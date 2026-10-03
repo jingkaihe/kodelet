@@ -834,7 +834,7 @@ describe('TerminalModal', () => {
     expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
   });
 
-  it('does not close when Escape is pressed inside the terminal', async () => {
+  it('does not dismiss the terminal when Escape is pressed outside its input', async () => {
     const socket = new MockWebSocket();
     const onClose = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
@@ -842,17 +842,18 @@ describe('TerminalModal', () => {
     render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
-    screen.getByTestId('terminal-host').dispatchEvent(
-      new KeyboardEvent('keydown', {
-        bubbles: true,
-        key: 'Escape',
-      })
-    );
+    for (const target of [screen.getByRole('button', { name: 'More keys' }), document.body]) {
+      fireEvent.keyDown(target, { key: 'Escape', code: 'Escape' });
+    }
 
     expect(onClose).not.toHaveBeenCalled();
+    expect(socket.close).not.toHaveBeenCalled();
   });
 
-  it('closes when Escape is pressed outside the terminal', async () => {
+  it('sends Escape keydowns from the Ghostty host and textarea to the socket', async () => {
+    const { Ghostty, InputHandler } =
+      await vi.importActual<typeof import('ghostty-web')>('ghostty-web');
+    const ghostty = await Ghostty.load();
     const socket = new MockWebSocket();
     const onClose = vi.fn();
     createTerminalWebSocketMock.mockReturnValue(socket);
@@ -860,26 +861,37 @@ describe('TerminalModal', () => {
     render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not close behind a higher-priority inert overlay', async () => {
-    const socket = new MockWebSocket();
-    const onClose = vi.fn();
-    createTerminalWebSocketMock.mockReturnValue(socket);
-
-    render(
-      <div inert>
-        <TerminalModal cwdLabel="/tmp/project" onClose={onClose} open target={localTarget} />
-      </div>
+    const terminal = MockTerminal.instances[0];
+    const host = screen.getByTestId('terminal-host');
+    const textarea = document.createElement('textarea');
+    host.append(textarea);
+    // Exercise Ghostty's actual DOM key handling, rather than injecting an encoded escape byte.
+    const inputHandler = new InputHandler(
+      ghostty,
+      host,
+      (data) => terminal.emitData(data),
+      vi.fn(),
+      undefined,
+      (event) => terminal.handleKey(event) ?? false
     );
+    act(() => socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) }));
 
-    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-
-    expect(onClose).not.toHaveBeenCalled();
+    try {
+      for (const target of [host, textarea]) {
+        target.focus();
+        expect(target).toHaveFocus();
+        socket.send.mockClear();
+        expect(fireEvent.keyDown(target, { key: 'Escape', code: 'Escape' })).toBe(false);
+        expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+          JSON.stringify({ type: 'input', data: '\x1b' })
+        );
+        expect(onClose).not.toHaveBeenCalled();
+        expect(socket.close).not.toHaveBeenCalled();
+        expect(target).toHaveFocus();
+      }
+    } finally {
+      inputHandler.dispose();
+    }
   });
 
   describe('touch scrolling', () => {

@@ -945,33 +945,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     };
   }, [allowPopOut, popOutTargetKey, target]);
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) {
-        return;
-      }
-
-      if (terminalHostRef.current?.parentElement?.closest('[inert]')) {
-        return;
-      }
-
-      const target = event.target;
-      if (target instanceof Node && terminalHostRef.current?.contains(target)) {
-        return;
-      }
-
-      event.preventDefault();
-      onClose();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
-
   const handlePopOut = useCallback(() => {
     const activePopOut = getActiveTerminalPopOutWindow(target);
     if (activePopOut) {
