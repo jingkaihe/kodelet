@@ -1070,7 +1070,21 @@ describe('ApiService', () => {
       expect(result).toEqual(mockGitDiff);
     });
 
-    it('fetches git diff for a remote runner conversation', async () => {
+    it.each([
+      { name: 'startup directory', cwd: undefined, conversationId: undefined, query: '' },
+      {
+        name: 'draft directory',
+        cwd: '../project',
+        conversationId: undefined,
+        query: '&cwd=..%2Fproject',
+      },
+      {
+        name: 'saved conversation',
+        cwd: '/runner/project',
+        conversationId: 'conv-123',
+        query: '&conversationId=conv-123',
+      },
+    ])('fetches runner git diff for $name', async ({ cwd, conversationId, query }) => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1081,40 +1095,24 @@ describe('ApiService', () => {
         }),
       });
 
-      await apiService.getGitDiff({
-        kind: 'runner',
-        runnerId: 'runner-1',
-        conversationId: 'conv-123',
-      });
+      await apiService.getGitDiff({ kind: 'runner', runnerId: 'runner-1', cwd, conversationId });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/git/diff?runnerId=runner-1&conversationId=conv-123',
+        `/api/git/diff?runnerId=runner-1${query}`,
         expect.any(Object)
       );
-    });
-
-    it('fetches git diff directly from a selected runner', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          cwd: '/runner/project',
-          diff: '',
-          has_diff: false,
-          exit_code: 0,
-        }),
-      });
-
-      await apiService.getGitDiff({ kind: 'runner', runnerId: 'runner-1' });
-
-      expect(mockFetch).toHaveBeenCalledWith('/api/git/diff?runnerId=runner-1', expect.any(Object));
     });
   });
 
   describe('browser sessions', () => {
-    it('opens a CSRF-protected session with explicit runner and conversation identities', async () => {
+    it.each([
+      { cwd: undefined, query: '' },
+      { cwd: '~/other-project', query: '&cwd=%7E%2Fother-project' },
+    ])('opens a CSRF-protected scoped browser with cwd $cwd', async ({ cwd, query }) => {
       const target: BrowserTarget = {
         runnerId: 'runner/1',
         conversationId: '20260914T000000-0123456789abcdef',
+        cwd,
       };
       const session = {
         id: 'handle-1',
@@ -1127,7 +1125,7 @@ describe('ApiService', () => {
       const signal = new AbortController().signal;
       expect(await apiService.openBrowserSession(target, signal)).toEqual(session);
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/browser/session?runnerId=runner%2F1&conversationId=20260914T000000-0123456789abcdef',
+        `/api/browser/session?runnerId=runner%2F1&conversationId=20260914T000000-0123456789abcdef${query}`,
         expect.objectContaining({
           method: 'POST',
           signal,
@@ -1221,7 +1219,21 @@ describe('ApiService', () => {
       });
     });
 
-    it('creates a websocket for a remote runner conversation', () => {
+    it.each([
+      { name: 'startup directory', cwd: undefined, conversationId: undefined, query: '' },
+      {
+        name: 'draft directory',
+        cwd: '../project',
+        conversationId: undefined,
+        query: '&cwd=..%2Fproject',
+      },
+      {
+        name: 'saved conversation',
+        cwd: '/runner/project',
+        conversationId: 'conv-123',
+        query: '&conversationId=conv-123',
+      },
+    ])('creates a runner terminal websocket for $name', ({ cwd, conversationId, query }) => {
       const originalLocation = window.location;
       const websocketSpy = vi.fn();
 
@@ -1236,47 +1248,13 @@ describe('ApiService', () => {
       });
 
       apiService.createTerminalWebSocket({
-        target: {
-          kind: 'runner',
-          runnerId: 'runner-1',
-          conversationId: 'conv-123',
-        },
+        target: { kind: 'runner', runnerId: 'runner-1', cwd, conversationId },
         rows: 30,
         cols: 120,
       });
 
       expect(websocketSpy).toHaveBeenCalledWith(
-        'wss://kodelet.example/api/terminal/ws?runnerId=runner-1&conversationId=conv-123&rows=30&cols=120'
-      );
-
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: originalLocation,
-      });
-    });
-
-    it('creates a websocket directly for a selected runner', () => {
-      const originalLocation = window.location;
-      const websocketSpy = vi.fn();
-
-      // @ts-expect-error test shim
-      global.WebSocket = websocketSpy;
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: {
-          protocol: 'https:',
-          host: 'kodelet.example',
-        },
-      });
-
-      apiService.createTerminalWebSocket({
-        target: { kind: 'runner', runnerId: 'runner-1' },
-        rows: 30,
-        cols: 120,
-      });
-
-      expect(websocketSpy).toHaveBeenCalledWith(
-        'wss://kodelet.example/api/terminal/ws?runnerId=runner-1&rows=30&cols=120'
+        `wss://kodelet.example/api/terminal/ws?runnerId=runner-1${query}&rows=30&cols=120`
       );
 
       Object.defineProperty(window, 'location', {

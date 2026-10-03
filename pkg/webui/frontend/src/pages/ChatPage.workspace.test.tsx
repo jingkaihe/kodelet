@@ -139,9 +139,19 @@ describe('ChatPage workspace tools and browsers', () => {
     }
   });
 
-  it('does not expose a draft browser for a custom directory before affinity is saved', async () => {
+  it.each([
+    false,
+    true,
+  ])('gates draft directory tools on runner support (%s), not conversation history', async (workspaceCwd) => {
     mockGetRunners.mockResolvedValue({
-      runners: [makeRunner({ workspaceBrowser: true, workspaceCwd: true })],
+      runners: [
+        makeRunner({
+          workspaceBrowser: true,
+          workspaceTerminal: true,
+          workspaceGitDiff: true,
+          workspaceCwd,
+        }),
+      ],
     });
     render(<ChatPage />);
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
@@ -153,8 +163,34 @@ describe('ChatPage workspace tools and browsers', () => {
     });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('browser-panel')).not.toBeInTheDocument();
+    expect(mockStreamChat).not.toHaveBeenCalled();
+    expect(mockGetConversation).not.toHaveBeenCalled();
+    if (!workspaceCwd) {
+      expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+      return;
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show terminal' }));
+    const terminal = await screen.findByTestId('terminal-panel');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(terminal).toHaveAttribute('data-cwd', '/runner/other-project');
+    expect(terminal).not.toHaveAttribute('data-conversation-id');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Show changes' }));
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenCalledWith({
+        kind: 'runner',
+        runnerId: 'runner-1',
+        cwd: '/runner/other-project',
+      })
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    const browser = await screen.findByTestId('browser-panel');
+    expect(browser).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(browser).toHaveAttribute('data-cwd', '/runner/other-project');
+    expect(browser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -363,7 +399,11 @@ describe('ChatPage workspace tools and browsers', () => {
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
 
     await waitFor(() =>
-      expect(mockGetGitDiff).toHaveBeenCalledWith({ kind: 'runner', runnerId: 'runner-1' })
+      expect(mockGetGitDiff).toHaveBeenCalledWith({
+        kind: 'runner',
+        runnerId: 'runner-1',
+        cwd: '/runner/kodelet',
+      })
     );
     expect(screen.getByTestId('workspace-tools-dock')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('git-diff-panel')).toBeInTheDocument());
@@ -403,6 +443,7 @@ describe('ChatPage workspace tools and browsers', () => {
       expect(mockGetGitDiff).toHaveBeenLastCalledWith({
         kind: 'runner',
         runnerId: 'runner-1',
+        cwd: '/runner/kodelet',
       });
 
       await act(async () => {
@@ -480,12 +521,17 @@ describe('ChatPage workspace tools and browsers', () => {
       'data-conversation-id',
       'conv-selected-directory'
     );
+    expect(screen.getByTestId('terminal-panel')).toHaveAttribute(
+      'data-cwd',
+      '/runner/different-directory'
+    );
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
     await waitFor(() =>
       expect(mockGetGitDiff).toHaveBeenCalledWith({
         kind: 'runner',
         runnerId: 'runner-1',
         conversationId: 'conv-selected-directory',
+        cwd: '/runner/different-directory',
       })
     );
     fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
@@ -514,12 +560,14 @@ describe('ChatPage workspace tools and browsers', () => {
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-show-pop-out', 'false');
+    expect(terminal).toHaveAttribute('data-cwd', '/runner/kodelet');
 
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
     await waitFor(() =>
       expect(mockGetGitDiff).toHaveBeenCalledWith({
         kind: 'runner',
         runnerId: 'runner-1',
+        cwd: '/runner/kodelet',
       })
     );
   });
@@ -551,6 +599,7 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(terminal).toHaveAttribute('data-conversation-id', 'conv-remote');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-show-pop-out', 'true');
+    expect(terminal).toHaveAttribute('data-cwd', '/runner/kodelet');
   });
 
   it('hides terminal access from principals without the terminal role', async () => {

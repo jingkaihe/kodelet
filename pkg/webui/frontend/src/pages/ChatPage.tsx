@@ -1429,10 +1429,8 @@ const ChatPage: React.FC = () => {
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
-  // Before affinity is persisted, workspace tools can only address the runner's startup directory.
   const runnerDirectoryAvailable =
-    currentCWDLabel === currentRunner?.workspace.path ||
-    Boolean(remoteWorkspaceConversationID && currentRunner?.workspaceCwd);
+    currentCWDLabel === currentRunner?.workspace.path || Boolean(currentRunner?.workspaceCwd);
   const workspaceTerminalAvailable = Boolean(
     isRemoteConversation &&
       terminalAuthorized &&
@@ -1463,21 +1461,31 @@ const ChatPage: React.FC = () => {
     higherPriorityDialogOpen
   );
 
+  // Drafts address their selected directory directly until saved affinity is available.
+  const draftWorkspaceCWD =
+    !remoteWorkspaceConversationID && currentCWDLabel !== currentRunner?.workspace.path
+      ? currentCWDLabel
+      : undefined;
   const workspaceTarget = useMemo<WorkspaceTarget>(
     () => ({
       kind: 'runner',
       runnerId: currentRunnerID,
       conversationId: remoteWorkspaceConversationID,
+      cwd: currentCWDLabel,
     }),
-    [currentRunnerID, remoteWorkspaceConversationID]
+    [currentRunnerID, remoteWorkspaceConversationID, currentCWDLabel]
   );
   const workspaceTargetKey = `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
   const browserConversationId = conversationId || draftConversationId;
   const browserTarget = useMemo<BrowserTarget>(
-    () => ({ runnerId: currentRunnerID, conversationId: browserConversationId }),
-    [currentRunnerID, browserConversationId]
+    () => ({
+      runnerId: currentRunnerID,
+      conversationId: browserConversationId,
+      cwd: draftWorkspaceCWD,
+    }),
+    [currentRunnerID, browserConversationId, draftWorkspaceCWD]
   );
   const browserTargetKey = `runner:${currentRunnerID}:conversation:${browserConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 

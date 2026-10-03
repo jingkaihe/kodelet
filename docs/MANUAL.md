@@ -472,8 +472,6 @@ Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompa
 
 In the Web UI, choose a runner from **Environment**. **Runner profile** and **Working directory** are optional. Relative paths and `~` resolve on the runner host; a blank directory uses its startup workspace. Suggestions and slash commands follow the selected runner, profile, and directory.
 
-The terminal, browser, and Git diff use the saved conversation's directory; save a custom directory or upgrade an older runner if panels are hidden. Closing a terminal panel leaves its shell running until you exit it or stop the runner. Exit unused shells if the terminal limit is reached.
-
 These buttons send terminal input, not browser shortcuts or clipboard commands. Their effect depends on the running shell or application: **Ctrl+C** commonly interrupts a command, **Ctrl+D** sends end-of-input and can exit a shell at an empty prompt, and **Ctrl+Z** can suspend a foreground job. Keys are unavailable while connecting, restoring the session, disconnected, or after the shell exits; when a pop-out owns the terminal, use its key bar instead.
 
 Swipe vertically inside the terminal to scroll: drag down to read older output and up to return toward the prompt. In full-screen terminal applications, swipes send scroll input to the application instead. Swiping does not open the software keyboard; tap the terminal to type. Two-finger pinch zoom remains available, and the key rows scroll horizontally independently of the terminal output.

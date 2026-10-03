@@ -25,11 +25,13 @@ import {
 describe('ChatPage optimistic conversations and route handoff', () => {
   setupChatPageTests();
 
-  it('keeps the draft browser through submission, route handoff and later turns without changing workspace targets', async () => {
+  it('keeps custom-directory workspace tools available through submission, route handoff and later turns', async () => {
+    const cwd = '/runner/other-project';
     const runner = makeRunner({
       workspaceGitDiff: true,
       workspaceTerminal: true,
       workspaceBrowser: true,
+      workspaceCwd: true,
     });
     mockGetRunners.mockResolvedValue({
       runners: [runner],
@@ -46,7 +48,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
       createdAt: '2026-09-14T00:00:00Z',
       updatedAt: '2026-09-14T00:00:00Z',
       messageCount: 1,
-      cwd: '/runner/kodelet',
+      cwd,
       runnerId: runner.id,
       runner,
       messages: [{ role: 'user', content: 'hello remotely' }],
@@ -55,6 +57,12 @@ describe('ChatPage optimistic conversations and route handoff', () => {
 
     const { rerender } = await renderChatWithRunner();
     await waitForTerminalAccess();
+    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: cwd },
+    });
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
     const draftBrowser = await screen.findByTestId('browser-panel');
@@ -79,11 +87,13 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).not.toHaveAttribute('data-conversation-id');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(terminal).toHaveAttribute('data-cwd', cwd);
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
     await waitFor(() =>
       expect(mockGetGitDiff).toHaveBeenCalledWith({
         kind: 'runner',
         runnerId: 'runner-1',
+        cwd,
       })
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);

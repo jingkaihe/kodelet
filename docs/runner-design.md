@@ -10,7 +10,7 @@ The implemented robustness model includes generation-fenced open reconciliation,
 
 ## Summary
 
-This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process identified by one canonical startup workspace. That workspace is its default working directory and the root of runner-wide terminal and Git-diff operations, while each conversation may select any directory accessible to the runner process as its execution CWD.
+This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process identified by one canonical startup workspace. That workspace is the default working directory for conversations and workspace tools, while each conversation or draft may select any directory accessible to the runner process as its execution CWD.
 
 The runner initiates one persistent WebSocket connection to the control plane. Messages use JSON-RPC 2.0 encoded as one JSON object per WebSocket text frame. The connection carries runner registration, heartbeats, run manifests, extension lifecycle proxy calls, tool execution and progress, cancellation, extension UI requests, and workspace-scoped Web UI operations such as Git diff and terminal sessions.
 
@@ -48,7 +48,7 @@ Kodelet will use the following model:
 1. `kodelet serve` acts as the control plane and client-facing API.
 2. The control plane owns provider clients, provider-native conversation state, the complete model/tool continuation loop, steering, usage accounting, and conversation persistence.
 3. `kodelet runner start` starts a long-running process bound to the command's canonical current working directory.
-4. A runner has exactly one canonical startup workspace for identity, locking, defaults, terminal access, and Git diff, while an assigned conversation may request any working directory accessible to the runner process.
+4. A runner has exactly one canonical startup workspace for identity, locking, and defaults, while conversations and workspace tools may request any working directory accessible to the runner process.
 5. Runner startup takes an exclusive OS-backed advisory file lock for its canonical workspace. The locked file contains diagnostic metadata such as PID, but lock ownership rather than file existence or PID state determines whether a runner is active.
 6. The control plane assigns each runner a stable opaque ID. Hostname, workspace basename, and optional display name are metadata rather than identity, and registration is deduplicated by authenticated owner, stable host instance ID, and canonical workspace path.
 7. The runner discovers and hosts workspace context, runner-scoped skills, runner tools, workspace plugins, extension processes, extension commands, and extension lifecycle handlers.
@@ -100,7 +100,7 @@ A long-running Kodelet process permanently bound to one canonical workspace dire
 
 ### Workspace
 
-The runner's canonical startup directory. It defines runner identity, the advisory lock, the default CWD, runner configuration and environment-profile definitions, and runner-wide terminal and Git-diff operations. A run's selected working directory may differ and supplies that run's local code, context, skills, plugins, extension and command discovery, and dependencies.
+The runner's canonical startup directory. It defines runner identity, the advisory lock, the default CWD, runner configuration and environment-profile definitions, and the default directory for terminal and Git-diff operations. A run's selected working directory may differ and supplies that run's local code, context, skills, plugins, extension and command discovery, and dependencies.
 
 ### Run
 
@@ -719,7 +719,7 @@ The eventual JSON-RPC response is the authoritative final result. Transient upda
 
 ### Workspace-scoped Web UI operations
 
-Git diff and terminal methods are independent of a top-level run, so the Web UI can inspect a directory and keep a terminal session alive between chat turns without a `runId` lease. With a conversation ID, the control plane resolves its runner affinity and loads its stored validated CWD; caller-supplied runner, CWD, or profile mismatches are rejected. A different directory from the startup workspace requires the `workspaceCwd` capability. Without a conversation ID, these panels remain scoped to the startup workspace and reject a custom CWD. Before affinity is persisted, a new-chat custom directory therefore leaves the panels unavailable. A persisted local conversation cannot be rebound by adding a runner ID, and an unreserved conversation ID is rejected.
+Git diff and terminal methods are independent of a top-level run, so the Web UI can inspect a directory and keep a terminal session alive between chat turns without a `runId` lease. With a conversation ID, the control plane resolves its runner affinity and loads its stored validated CWD; caller-supplied runner, CWD, or profile mismatches are rejected. A different directory from the startup workspace requires the `workspaceCwd` capability. Before a conversation is saved, these panels accept a runner ID and optional CWD, resolved and validated on the runner, so a new chat can use its selected directory immediately. A persisted local conversation cannot be rebound by adding a runner ID, and an unreserved conversation ID is rejected by terminal and Git-diff requests. Browser requests retain the draft's eventual conversation ID and may also select a CWD before it is saved; the resulting browser handle is revalidated against the saved workspace once available.
 
 `workspace.git.diff` accepts an optional `cwd`, validated on the runner, and returns a bounded snapshot generated at that directory's Git root. The response includes the canonical requested directory, Git root, diff text, exit status, and a truncation flag. The runner caps diff output so a large repository cannot consume an unbounded JSON-RPC frame.
 
@@ -1035,7 +1035,7 @@ The control plane refuses to remove a connected runner or one with active runs. 
 
 ### Remote Web UI workspace tools
 
-For a remote conversation, the Web UI shows the integrated terminal and Git diff tabs when the connected runner advertises `workspaceTerminal` and `workspaceGitDiff`. A stored conversation directory other than the startup workspace also requires `workspaceCwd`. Terminal visibility additionally requires the human principal's `terminal` or `admin` role, matching the WebSocket endpoint authorization. Both features use the stored conversation directory and are proxied through the control plane; they never interpret the runner's path on the `kodelet serve` host. Older or incompatible runners that omit a required capability keep the corresponding tab hidden.
+For a remote conversation or new chat, the Web UI shows the integrated terminal and Git diff tabs when the connected runner advertises `workspaceTerminal` and `workspaceGitDiff`. A selected directory other than the startup workspace also requires `workspaceCwd`. Terminal visibility additionally requires the human principal's `terminal` or `admin` role, matching the WebSocket endpoint authorization. Both features use the selected draft directory or stored conversation directory and are proxied through the control plane; they never interpret the runner's path on the `kodelet serve` host. Older or incompatible runners that omit a required capability keep the corresponding tab hidden.
 
 The remote terminal survives side-panel close, browser reconnection, and pop-out handoff while its runner process and shell remain alive, with bounded output replay on reattachment. Once a conversation has runner affinity, the pop-out carries only its conversation ID; the control plane resolves the associated runner, stored CWD, and current generation before attaching. Switching conversations, directories, or runner generations remounts the terminal and invalidates pending Git diff responses. Runner-backed CWD suggestions and command discovery are available for runners advertising `workspaceDiscovery`; changing runner or environment profile invalidates in-flight discovery responses.
 

@@ -1079,6 +1079,56 @@ func TestRemoteWorkspaceTargetRejectsUnreservedConversation(t *testing.T) {
 	assert.False(t, called)
 }
 
+func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
+	const cwd = "../selected"
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	link.call = func(_ context.Context, method string, params, result any) error {
+		switch method {
+		case protocol.MethodWorkspaceGitDiff:
+			assert.Equal(t, protocol.WorkspaceGitDiffParams{CWD: cwd}, params)
+			*result.(*protocol.WorkspaceGitDiffResult) = protocol.WorkspaceGitDiffResult{CWD: "/runner/resolved"}
+		case protocol.MethodWorkspaceTerminalOpen:
+			assert.Equal(t, cwd, params.(protocol.WorkspaceTerminalOpenParams).CWD)
+			*result.(*protocol.WorkspaceTerminalOpenResult) = protocol.WorkspaceTerminalOpenResult{
+				SessionID: "draft-terminal", CWD: "/runner/resolved", Name: "bash",
+			}
+		case protocol.MethodWorkspaceTerminalRead:
+			*result.(*protocol.WorkspaceTerminalReadResult) = protocol.WorkspaceTerminalReadResult{Exited: true}
+		default:
+			return errors.Errorf("draft workspace tools must not start a run or provider turn: %s", method)
+		}
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities: protocol.RunnerCapabilities{
+			WorkspaceGitDiff: true, WorkspaceTerminal: true, WorkspaceCWD: true,
+		},
+		Host:      protocol.Host{InstanceID: "draft-tools", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace: protocol.Workspace{Path: "/runner/startup", Name: "startup"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(
+		registration.RunnerID, registration.ConnectionID, registration.Generation,
+		protocol.HeartbeatParams{RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle},
+	))
+	query := url.Values{"runnerId": {registration.RunnerID}, "cwd": {cwd}}.Encode()
+	w := httptest.NewRecorder()
+	server.handleGetGitDiff(w, httptest.NewRequest(http.MethodGet, "/api/git/diff?"+query, nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var diff gitDiffResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &diff))
+	assert.Equal(t, "/runner/resolved", diff.CWD)
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	t.Cleanup(httpServer.Close)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	assert.Equal(t, "/runner/resolved", readTerminalReady(t, conn).CWD)
+}
+
 func TestRunnerDiscoveryRoutesDirectoryAndProfileWithoutLocalWorkspace(t *testing.T) {
 	for _, method := range []string{protocol.MethodWorkspaceDiscover, protocol.MethodWorkspaceCWDHints} {
 		t.Run(method, func(t *testing.T) {
@@ -1243,7 +1293,10 @@ func TestRunnerDiscoveryRoutesModelProfilesIndependentlyOfEnvironmentProfiles(t 
 
 func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T) {
 	server := newRunnerTestServer(t, "")
-	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+	server.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+		if id != "conversation-scope" {
+			return nil, convtypes.ErrConversationNotFound
+		}
 		return &conversations.GetConversationResponse{ID: "conversation-scope", CWD: "/runner/selected"}, nil
 	}}
 	link := newRunnerAPITestLink()
@@ -1253,7 +1306,7 @@ func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T
 	}
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true, WorkspaceTerminal: true},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true, WorkspaceTerminal: true, WorkspaceBrowser: true},
 		Host:             protocol.Host{InstanceID: "host-scope", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace:        protocol.Workspace{Path: "/runner/startup", Name: "startup"},
 	}, link)
@@ -1268,11 +1321,14 @@ func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T
 	}{
 		{"old runner diff", "conversationId=conversation-scope", server.handleGetGitDiff, http.StatusNotImplemented},
 		{"old runner terminal", "conversationId=conversation-scope", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"old runner browser", "conversationId=conversation-scope", server.handleBrowserOpen, http.StatusNotImplemented},
 		{"old runner discovery", "runnerId=" + registration.RunnerID, server.handleGetSlashCommands, http.StatusNotImplemented},
 		{"wrong directory", "conversationId=conversation-scope&cwd=/runner/startup", server.handleGetSlashCommands, http.StatusBadRequest},
 		{"wrong profile", "conversationId=conversation-scope&environmentProfile=default", server.handleGetSlashCommands, http.StatusBadRequest},
 		{"wrong runner", "conversationId=conversation-scope&runnerId=other", server.handleGetSlashCommands, http.StatusBadRequest},
-		{"runner-wide custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleGetGitDiff, http.StatusBadRequest},
+		{"draft diff custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleGetGitDiff, http.StatusNotImplemented},
+		{"draft terminal custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"draft browser custom directory", "runnerId=" + registration.RunnerID + "&conversationId=draft&cwd=/runner/selected", server.handleBrowserOpen, http.StatusNotImplemented},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()

@@ -329,6 +329,8 @@ class ApiService {
       params.append('runnerId', target.runnerId);
       if (target.conversationId) {
         params.append('conversationId', target.conversationId);
+      } else if (target.cwd) {
+        params.append('cwd', target.cwd);
       }
     }
 
@@ -350,6 +352,8 @@ class ApiService {
       params.append('runnerId', options.target.runnerId);
       if (options.target.conversationId) {
         params.append('conversationId', options.target.conversationId);
+      } else if (options.target.cwd) {
+        params.append('cwd', options.target.cwd);
       }
     }
     if (options.rows) {
@@ -374,6 +378,9 @@ class ApiService {
       runnerId: target.runnerId,
       conversationId: target.conversationId,
     });
+    if (target.cwd) {
+      params.append('cwd', target.cwd);
+    }
     return this.request<BrowserSession>(`/api/browser/session?${params}`, {
       method: 'POST',
       signal,

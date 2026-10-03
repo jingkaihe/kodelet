@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -55,9 +56,13 @@ func newBrowserAPITestServer(t *testing.T) (*Server, protocol.RegisterResult, *r
 	return s, registration, link
 }
 
-func openBrowserTestHandle(t *testing.T, s *Server, registration protocol.RegisterResult, owner, conversationID string) *browserHandle {
+func openBrowserTestHandle(t *testing.T, s *Server, registration protocol.RegisterResult, owner, conversationID string, cwd ...string) *browserHandle {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId="+conversationID, nil)
+	query := url.Values{"runnerId": {registration.RunnerID}, "conversationId": {conversationID}}
+	if len(cwd) > 0 {
+		query.Set("cwd", cwd[0])
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?"+query.Encode(), nil)
 	r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal(owner)))
 	w := httptest.NewRecorder()
 	s.requireBrowser(s.handleBrowserOpen)(w, r)
@@ -130,7 +135,6 @@ func TestBrowserRequiresConversationScope(t *testing.T) {
 	}{
 		{name: "missing conversation", want: http.StatusBadRequest},
 		{name: "invalid conversation", query: "&conversationId=..", want: http.StatusBadRequest},
-		{name: "draft cannot override directory", query: "&conversationId=draft&cwd=/other", want: http.StatusBadRequest},
 		{name: "saved conversation cannot bypass affinity", query: "&conversationId=saved", saved: true, want: http.StatusBadRequest},
 		{name: "store failure is not a draft", query: "&conversationId=draft", storeErr: errors.New("store unavailable"), want: http.StatusInternalServerError},
 	} {
@@ -316,35 +320,89 @@ func TestBrowserRelayTicketsSingleUseExpiryAndGeneration(t *testing.T) {
 }
 
 func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
-	s, registration, _ := newBrowserAPITestServer(t)
-	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1")
+	s, registration, link := newBrowserAPITestServer(t)
+	const requestedCWD = "../other-project"
+	const canonicalCWD = "/runner/other-project"
+	expectedCWD := requestedCWD
+	link.call = func(_ context.Context, method string, raw any, result any) error {
+		assert.Equal(t, protocol.MethodWorkspaceBrowserOpen, method, "opening a draft must not start a run or provider turn")
+		params := raw.(protocol.WorkspaceBrowserParams)
+		assert.Equal(t, "conversation-1", params.ConversationID)
+		assert.Equal(t, expectedCWD, params.CWD, "only the runner resolves the requested path")
+		*result.(*browser.Info) = browser.Info{
+			SessionID:      "draft-session",
+			ConversationID: params.ConversationID,
+			CWD:            canonicalCWD,
+		}
+		return nil
+	}
+	handle := openBrowserTestHandle(t, s, registration, "alice", "conversation-1", requestedCWD)
+	assert.Equal(t, canonicalCWD, handle.CWD)
 	require.NoError(t, s.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), handle.conversationID, registration.RunnerID, ""))
 	// The first turn reserves affinity before its conversation record is saved.
-	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"))
+	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1", requestedCWD))
 	w := httptest.NewRecorder()
 	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
-	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1", nil)
-	target, targetErr := s.resolveBrowserTarget(r)
+	query := url.Values{"conversationId": {"conversation-1"}, "cwd": {requestedCWD}}
+	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?"+query.Encode(), nil)
+	target, saved, targetErr := s.resolveBrowserTarget(r)
 	require.Nil(t, targetErr)
+	assert.False(t, saved)
 	assert.Equal(t, registration.RunnerID, target.Runner.ID, "a reserved draft must not fall back to another default runner")
-	assert.Equal(t, handle.CWD, target.CWD)
-	for _, query := range []string{"&runnerId=another-runner", "&cwd=/different"} {
-		r = httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1"+query, nil)
-		_, targetErr = s.resolveBrowserTarget(r)
-		require.NotNil(t, targetErr)
-		assert.Equal(t, http.StatusBadRequest, targetErr.status)
-	}
-	cwd := "/workspace"
+	assert.Equal(t, requestedCWD, target.CWD)
+	r = httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1&runnerId=another-runner", nil)
+	_, _, targetErr = s.resolveBrowserTarget(r)
+	require.NotNil(t, targetErr)
+	assert.Equal(t, http.StatusBadRequest, targetErr.status)
+	cwd := canonicalCWD
 	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
 		return &conversations.GetConversationResponse{CWD: cwd}, nil
 	}}
+	expectedCWD = cwd
 	assert.Same(t, handle, openBrowserTestHandle(t, s, registration, "alice", "conversation-1"), "saving the draft retains its browser")
 	w = httptest.NewRecorder()
 	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
+	for _, query := range []string{"&runnerId=another-runner", "&cwd=/different", "&environmentProfile=other", "&profile=other"} {
+		r := httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1"+query, nil)
+		_, saved, targetErr := s.resolveBrowserTarget(r)
+		assert.True(t, saved)
+		require.NotNil(t, targetErr, "saved affinity must reject %s", query)
+		assert.Equal(t, http.StatusBadRequest, targetErr.status)
+	}
 	cwd = "/different"
 	w = httptest.NewRecorder()
 	assert.Nil(t, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
 	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestBrowserRejectsInvalidReturnedDirectory(t *testing.T) {
+	for _, test := range []struct {
+		name, returned string
+		saved          bool
+	}{
+		{name: "blank draft directory", returned: " "},
+		{name: "mismatched saved directory", saved: true, returned: "/other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, registration, link := newBrowserAPITestServer(t)
+			if test.saved {
+				require.NoError(t, s.runnerRegistry.BindConversation(t.Context(), "conversation", registration.RunnerID))
+				s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+					return &conversations.GetConversationResponse{CWD: "/workspace"}, nil
+				}}
+			}
+			link.call = func(_ context.Context, _ string, _ any, result any) error {
+				*result.(*browser.Info) = browser.Info{SessionID: "session", ConversationID: "conversation", CWD: test.returned}
+				return nil
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+"&conversationId=conversation", nil)
+			r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("alice")))
+			w := httptest.NewRecorder()
+			s.handleBrowserOpen(w, r)
+			assert.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+			assert.Empty(t, s.browserHandles)
+		})
+	}
 }
 
 func TestBrowserAttachmentLimitAndShutdown(t *testing.T) {

@@ -22,6 +22,7 @@ vi.mock('../components/workspace/TerminalModal', () => ({
       <div
         data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
         data-runner-id={target.kind === 'runner' ? target.runnerId : undefined}
+        data-cwd={target.cwd}
         data-show-pop-out={String(
           allowPopOut && (target.kind === 'local' || Boolean(target.conversationId))
         )}
@@ -43,6 +44,7 @@ vi.mock('../components/workspace/BrowserPanel', () => ({
       data-testid="browser-panel"
       data-runner-id={target.runnerId}
       data-conversation-id={target.conversationId}
+      data-cwd={target.cwd}
     />
   ),
 }));

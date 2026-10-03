@@ -430,11 +430,12 @@ export interface GitDiffResponse {
 
 export type WorkspaceTarget =
   | { kind: 'local'; cwd?: string }
-  | { kind: 'runner'; runnerId: string; conversationId?: string };
+  | { kind: 'runner'; runnerId: string; conversationId?: string; cwd?: string };
 
 export interface BrowserTarget {
   runnerId: string;
   conversationId: string;
+  cwd?: string;
 }
 
 export interface TerminalReadyEvent {

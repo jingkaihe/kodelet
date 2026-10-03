@@ -1517,7 +1517,7 @@ func TestDefaultRunnerWorkspaceNeverFallsBackToAnotherRunner(t *testing.T) {
 	request("?runnerId="+registrations[1].RunnerID, http.StatusOK)
 	request("?runnerId=unknown", http.StatusNotFound)
 	request("?conversationId=unbound", http.StatusBadRequest)
-	request("?runnerId="+registrations[1].RunnerID+"&cwd=/daemon/local", http.StatusBadRequest)
+	request("?runnerId="+registrations[1].RunnerID+"&cwd=/daemon/local", http.StatusNotImplemented)
 	assert.Equal(t, []string{"embedded", "external"}, calls)
 }
 

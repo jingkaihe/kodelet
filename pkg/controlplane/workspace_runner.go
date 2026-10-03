@@ -36,11 +36,8 @@ func (s *Server) resolveWorkspaceRunnerTarget(r *http.Request) (*workspaceRunner
 	if err != nil {
 		return target, err
 	}
-	if r.URL.Query().Get("conversationId") == "" && r.URL.Query().Get("cwd") != "" {
-		return nil, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "cwd is not accepted for runner-wide workspace tools; select a conversation"}
-	}
 	if target.CWD != "" && target.CWD != target.Runner.Workspace.Path && !target.Runner.WorkspaceCWD {
-		return nil, &workspaceRunnerTargetError{status: http.StatusNotImplemented, message: "runner does not support conversation-directory workspace tools; upgrade the runner"}
+		return nil, &workspaceRunnerTargetError{status: http.StatusNotImplemented, message: "runner does not support selected-directory workspace tools; upgrade the runner"}
 	}
 	return target, nil
 }
