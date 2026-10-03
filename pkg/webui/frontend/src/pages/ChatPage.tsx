@@ -1436,7 +1436,8 @@ const ChatPage: React.FC = () => {
       terminalAuthorized &&
       runnerWorkspaceAvailable &&
       runnerDirectoryAvailable &&
-      currentRunner?.workspaceTerminal
+      currentRunner?.workspaceTerminal &&
+      currentRunner?.workspaceTerminalConversation
   );
   const workspaceGitDiffAvailable = Boolean(
     isRemoteConversation &&
@@ -1478,16 +1479,25 @@ const ChatPage: React.FC = () => {
   const workspaceTargetKey = `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
-  const browserConversationId = conversationId || draftConversationId;
+  const sessionConversationId = conversationId || draftConversationId;
+  const terminalTarget = useMemo<WorkspaceTarget>(
+    () => ({
+      kind: 'runner',
+      runnerId: currentRunnerID,
+      conversationId: sessionConversationId,
+      cwd: currentCWDLabel,
+    }),
+    [currentRunnerID, sessionConversationId, currentCWDLabel]
+  );
   const browserTarget = useMemo<BrowserTarget>(
     () => ({
       runnerId: currentRunnerID,
-      conversationId: browserConversationId,
+      conversationId: sessionConversationId,
       cwd: draftWorkspaceCWD,
     }),
-    [currentRunnerID, browserConversationId, draftWorkspaceCWD]
+    [currentRunnerID, sessionConversationId, draftWorkspaceCWD]
   );
-  const browserTargetKey = `runner:${currentRunnerID}:conversation:${browserConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
+  const sessionTargetKey = `runner:${currentRunnerID}:conversation:${sessionConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
   const slashCommands = useSlashCommands({
     draft,
@@ -1945,10 +1955,10 @@ const ChatPage: React.FC = () => {
             terminalAvailable={workspaceTerminalAvailable}
             gitDiffAvailable={workspaceGitDiffAvailable}
             browserAvailable={workspaceBrowserAvailable}
-            workspaceTarget={workspaceTarget}
-            workspaceTargetKey={workspaceTargetKey}
+            workspaceTarget={terminalTarget}
+            workspaceTargetKey={sessionTargetKey}
             browserTarget={browserTarget}
-            browserTargetKey={browserTargetKey}
+            browserTargetKey={sessionTargetKey}
             cwdLabel={currentRunner?.workspace.path || ''}
             gitDiff={gitDiff}
             gitDiffError={gitDiffError}

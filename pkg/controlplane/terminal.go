@@ -100,9 +100,13 @@ func (w *websocketWriter) writeJSON(message terminalMessage) error {
 }
 
 func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request) {
-	target, targetErr := s.resolveWorkspaceRunnerTarget(r)
+	target, saved, targetErr := s.resolveConversationWorkspaceTarget(r)
 	if targetErr != nil {
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
+		return
+	}
+	if !target.Runner.WorkspaceTerminalConversation {
+		s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support conversation-scoped terminals; upgrade the runner", nil)
 		return
 	}
 	if err := s.runnerRegistry.ValidateRunnerCall(target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalOpen); err != nil {
@@ -113,10 +117,11 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner terminal is unavailable", err)
 		return
 	}
-	s.handleRemoteTerminalWebsocket(w, r, target.Runner.ID, target.Runner.Generation, target.CWD)
+	s.handleRemoteTerminalWebsocket(w, r, target, saved)
 }
 
-func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Request, runnerID string, generation int64, cwd string) {
+func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Request, target *workspaceRunnerTarget, saved bool) {
+	runnerID, generation := target.Runner.ID, target.Runner.Generation
 	if !s.acquireRemoteTerminalAttachment(runnerID) {
 		s.writeErrorResponse(w, http.StatusTooManyRequests, "too many terminal attachments for runner", nil)
 		return
@@ -139,7 +144,12 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	writer := &websocketWriter{conn: conn}
 	var opened protocol.WorkspaceTerminalOpenResult
 	openCtx, cancelOpen := context.WithTimeout(ctx, remoteTerminalOpenTimeout)
-	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: cwd, Rows: rows, Cols: cols}, &opened)
+	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: r.URL.Query().Get("conversationId"),
+		CWD:            target.CWD,
+		Rows:           rows,
+		Cols:           cols,
+	}, &opened)
 	cancelOpen()
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Warn("failed to open runner terminal")
@@ -148,6 +158,11 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	}
 	if strings.TrimSpace(opened.SessionID) == "" {
 		logger.G(r.Context()).Warn("runner terminal returned an empty session id")
+		return
+	}
+	if strings.TrimSpace(opened.CWD) == "" || (saved && opened.CWD != target.CWD) {
+		logger.G(r.Context()).Warn("runner terminal returned an invalid working directory")
+		_ = writer.writeJSON(terminalMessage{Type: "info", Text: "Runner terminal returned an invalid working directory."})
 		return
 	}
 	if opened.ReplayCursor > opened.WriteCursor {

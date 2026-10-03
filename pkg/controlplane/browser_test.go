@@ -126,7 +126,7 @@ func TestBrowserHandlesOwnershipStopAndExpiry(t *testing.T) {
 	assert.NoError(t, otherAttachment.ctx.Err())
 }
 
-func TestBrowserRequiresConversationScope(t *testing.T) {
+func TestWorkspaceSessionsRequireConversationScope(t *testing.T) {
 	for _, test := range []struct {
 		name, query string
 		saved       bool
@@ -149,14 +149,27 @@ func TestBrowserRequiresConversationScope(t *testing.T) {
 				assert.Fail(t, "invalid scope must not reach the runner")
 				return nil
 			}
-			r := httptest.NewRequest(http.MethodPost, "/api/browser/session?runnerId="+registration.RunnerID+test.query, nil)
-			r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("alice")))
-			w := httptest.NewRecorder()
-			s.handleBrowserOpen(w, r)
-			assert.Equal(t, test.want, w.Code, w.Body.String())
-			assert.Empty(t, s.browserHandles)
+			for _, endpoint := range []struct {
+				name    string
+				handler http.HandlerFunc
+			}{
+				{name: "browser", handler: s.handleBrowserOpen},
+				{name: "terminal", handler: s.handleTerminalWebsocket},
+			} {
+				t.Run(endpoint.name, func(t *testing.T) {
+					r := httptest.NewRequest(http.MethodPost, "/?runnerId="+registration.RunnerID+test.query, nil)
+					r = r.WithContext(contextWithPrincipal(r.Context(), administrativePrincipal("alice")))
+					w := httptest.NewRecorder()
+					endpoint.handler(w, r)
+					assert.Equal(t, test.want, w.Code, w.Body.String())
+					assert.Empty(t, s.browserHandles)
+				})
+			}
 		})
 	}
+}
+
+func TestBrowserRejectsReturnedConversationMismatch(t *testing.T) {
 	for _, returnedID := range []string{"", "another-conversation"} {
 		t.Run("runner returned scope "+returnedID, func(t *testing.T) {
 			s, registration, link := newBrowserAPITestServer(t)
@@ -345,13 +358,13 @@ func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
 	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
 	query := url.Values{"conversationId": {"conversation-1"}, "cwd": {requestedCWD}}
 	r := httptest.NewRequest(http.MethodPost, "/api/browser/session?"+query.Encode(), nil)
-	target, saved, targetErr := s.resolveBrowserTarget(r)
+	target, saved, targetErr := s.resolveConversationWorkspaceTarget(r)
 	require.Nil(t, targetErr)
 	assert.False(t, saved)
 	assert.Equal(t, registration.RunnerID, target.Runner.ID, "a reserved draft must not fall back to another default runner")
 	assert.Equal(t, requestedCWD, target.CWD)
 	r = httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1&runnerId=another-runner", nil)
-	_, _, targetErr = s.resolveBrowserTarget(r)
+	_, _, targetErr = s.resolveConversationWorkspaceTarget(r)
 	require.NotNil(t, targetErr)
 	assert.Equal(t, http.StatusBadRequest, targetErr.status)
 	cwd := canonicalCWD
@@ -364,7 +377,7 @@ func TestBrowserDraftContinuityAndWorkspaceRevalidation(t *testing.T) {
 	assert.Same(t, handle, s.browserHandleForRequest(w, browserRequest(t, http.MethodGet, handle, "alice")))
 	for _, query := range []string{"&runnerId=another-runner", "&cwd=/different", "&environmentProfile=other", "&profile=other"} {
 		r := httptest.NewRequest(http.MethodPost, "/api/browser/session?conversationId=conversation-1"+query, nil)
-		_, saved, targetErr := s.resolveBrowserTarget(r)
+		_, saved, targetErr := s.resolveConversationWorkspaceTarget(r)
 		assert.True(t, saved)
 		require.NotNil(t, targetErr, "saved affinity must reject %s", query)
 		assert.Equal(t, http.StatusBadRequest, targetErr.status)

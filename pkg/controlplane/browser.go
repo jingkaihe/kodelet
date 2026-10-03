@@ -14,7 +14,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/browser"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
-	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
 
@@ -78,7 +77,7 @@ func (s *Server) requireBrowser(handler http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	target, saved, targetErr := s.resolveBrowserTarget(r)
+	target, saved, targetErr := s.resolveConversationWorkspaceTarget(r)
 	if targetErr != nil {
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
 		return
@@ -151,48 +150,6 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONResponse(w, handle)
 }
 
-// Drafts already have their eventual conversation ID and may have a pending
-// first-turn runner assignment. Their selected directory is resolved on the
-// runner. The boolean marks saved conversations, whose workspace is immutable.
-func (s *Server) resolveBrowserTarget(r *http.Request) (*workspaceRunnerTarget, bool, *workspaceRunnerTargetError) {
-	conversationID := r.URL.Query().Get("conversationId")
-	if !validReceiptID(conversationID) {
-		return nil, false, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "a valid conversationId is required for the browser"}
-	}
-	if s.runnerRegistry == nil || s.conversationService == nil {
-		return nil, false, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "conversation workspace is unavailable"}
-	}
-	affinity, found, err := s.runnerRegistry.ResolveConversationAffinity(r.Context(), conversationID)
-	if err != nil {
-		return nil, false, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to resolve conversation runner", err: err}
-	}
-	if _, err := s.conversationService.GetConversation(r.Context(), conversationID); !errors.Is(err, convtypes.ErrConversationNotFound) {
-		if err != nil {
-			return nil, false, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to load browser conversation", err: err}
-		}
-		target, targetErr := s.resolveWorkspaceRunnerTarget(r)
-		return target, true, targetErr
-	}
-	check := r.Clone(r.Context())
-	query := r.URL.Query()
-	query.Del("conversationId")
-	if found {
-		if runnerID := strings.TrimSpace(query.Get("runnerId")); runnerID != "" && runnerID != affinity.RunnerID {
-			return nil, false, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the runner differs from the conversation's reserved runner"}
-		}
-		query.Set("runnerId", affinity.RunnerID)
-	}
-	check.URL = &url.URL{RawQuery: query.Encode()}
-	target, targetErr := s.resolveWorkspaceRunnerTarget(check)
-	if targetErr != nil {
-		return nil, false, targetErr
-	}
-	if target.CWD == "" {
-		target.CWD = target.Runner.Workspace.Path
-	}
-	return target, false, nil
-}
-
 func (s *Server) browserHandleForRequest(w http.ResponseWriter, r *http.Request) *browserHandle {
 	principal, ok := principalFromContext(r.Context())
 	s.browserMu.Lock()
@@ -215,7 +172,7 @@ func (s *Server) browserHandleForRequest(w http.ResponseWriter, r *http.Request)
 		"conversationId": {handle.conversationID},
 		"cwd":            {handle.CWD},
 	}.Encode()}
-	target, _, targetErr := s.resolveBrowserTarget(check)
+	target, _, targetErr := s.resolveConversationWorkspaceTarget(check)
 	if targetErr != nil || target.CWD != handle.CWD {
 		s.writeErrorResponse(w, http.StatusConflict, "browser conversation workspace changed", nil)
 		return nil

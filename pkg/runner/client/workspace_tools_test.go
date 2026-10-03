@@ -115,19 +115,35 @@ func TestWorkspaceGitDiffUsesRequestedDirectory(t *testing.T) {
 	require.NotNil(t, rpcErr, "startup directory is deliberately not a git repository")
 }
 
-func TestWorkspaceTerminalsStayInTheirRequestedDirectories(t *testing.T) {
+func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	startup, selected := t.TempDir(), t.TempDir()
 	service, err := NewService(t.Context(), startup, ServiceOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{})
-	second := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: selected})
+	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation"})
+	second := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		CWD:            selected,
+	})
 	assert.NotEqual(t, first.SessionID, second.SessionID)
 	assert.Equal(t, startup, first.CWD)
 	assert.Equal(t, selected, second.CWD)
+	other := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "other"})
+	assert.NotEqual(t, first.SessionID, other.SessionID, "conversations in the same directory must have separate shells")
+	assert.NotEqual(t, first.PID, other.PID)
+	alias := filepath.Join(t.TempDir(), "workspace-link")
+	require.NoError(t, os.Symlink(startup, alias))
+	aliased := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		CWD:            alias,
+	})
+	assert.Equal(t, first.SessionID, aliased.SessionID, "aliases of one conversation's directory must reuse its shell")
 	for _, opened := range []protocol.WorkspaceTerminalOpenResult{first, second} {
-		reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: opened.CWD})
+		reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+			ConversationID: "conversation",
+			CWD:            opened.CWD,
+		})
 		assert.Equal(t, opened.SessionID, reopened.SessionID)
 		callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: opened.SessionID, Data: []byte("pwd\n")})
 		var output strings.Builder
@@ -139,39 +155,47 @@ func TestWorkspaceTerminalsStayInTheirRequestedDirectories(t *testing.T) {
 			return strings.Contains(output.String(), opened.CWD)
 		}, 3*time.Second, 10*time.Millisecond)
 	}
-	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{CWD: filepath.Join(selected, "missing")}))
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		CWD:            filepath.Join(selected, "missing"),
+	}))
 	require.NotNil(t, rpcErr)
-	assert.Len(t, service.directoryTerminals, 2, "invalid directories must not create a terminal")
+	for _, conversationID := range []string{"", " \t"} {
+		_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{ConversationID: conversationID}))
+		require.NotNil(t, rpcErr)
+		assert.Contains(t, rpcErr.Message, "conversation ID is required")
+	}
+	assert.Len(t, service.terminalManagers, 3, "invalid scopes must not create a terminal")
 	require.NoError(t, service.Close())
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalInput, mustJSON(t, protocol.WorkspaceTerminalInputParams{SessionID: second.SessionID, Data: []byte("pwd\n")}))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "closed")
 }
 
-func TestWorkspaceTerminalsReclaimExitedDirectories(t *testing.T) {
+func TestWorkspaceTerminalsReclaimExitedSessions(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{})
+	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "first"})
 	manager, err := service.terminalManagerForSession(first.SessionID)
 	require.NoError(t, err)
 	session, err := manager.session(first.SessionID)
 	require.NoError(t, err)
-	for range workspaceTerminalDirectoryLimit - 1 {
-		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: t.TempDir()})
+	for i := range workspaceTerminalSessionLimit - 1 {
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation-" + strconv.Itoa(i)})
 	}
-	nextDirectory := t.TempDir()
-	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, protocol.WorkspaceTerminalOpenParams{CWD: nextDirectory}))
+	nextScope := protocol.WorkspaceTerminalOpenParams{ConversationID: "next"}
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, nextScope))
 	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "directory limit reached")
+	assert.Contains(t, rpcErr.Message, "session limit reached")
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{SessionID: first.SessionID, Data: []byte("exit\n")})
 	require.Eventually(t, func() bool { return workspaceTerminalDone(session.done) }, 3*time.Second, 10*time.Millisecond)
-	require.NoError(t, session.cleanupError(), "normal shell exit must release its directory slot")
-	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{CWD: nextDirectory})
-	assert.Equal(t, nextDirectory, next.CWD)
+	require.NoError(t, session.cleanupError(), "normal shell exit must release its session slot")
+	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, nextScope)
+	assert.NotEqual(t, first.SessionID, next.SessionID)
 	assert.True(t, workspaceTerminalDone(manager.closedCh), "reclaim also releases the manager's context watcher")
-	assert.Len(t, service.directoryTerminals, workspaceTerminalDirectoryLimit)
+	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
 }
 
 func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T) {
@@ -180,7 +204,11 @@ func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 24, Cols: 80})
+	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		Rows:           24,
+		Cols:           80,
+	})
 	require.NotEmpty(t, opened.SessionID)
 	assert.Equal(t, "sh", opened.Name)
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
@@ -202,7 +230,11 @@ func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T
 		return strings.Contains(output.String(), "remote-terminal-ready")
 	}, 3*time.Second, 10*time.Millisecond)
 
-	reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 30, Cols: 100})
+	reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		Rows:           30,
+		Cols:           100,
+	})
 	assert.Equal(t, opened.SessionID, reopened.SessionID)
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
 		SessionID: opened.SessionID,
@@ -238,11 +270,15 @@ func TestServiceWorkspaceTerminalResizeUsesRPCAndBounds(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 24, Cols: 80})
-	service.workspaceTerminals.mu.Lock()
-	session := service.workspaceTerminals.current
-	service.workspaceTerminals.mu.Unlock()
-	require.NotNil(t, session)
+	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		Rows:           24,
+		Cols:           80,
+	})
+	manager, err := service.terminalManagerForSession(opened.SessionID)
+	require.NoError(t, err)
+	session, err := manager.session(opened.SessionID)
+	require.NoError(t, err)
 	assertWorkspaceTerminalSize(t, session, 24, 80)
 
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalResize, protocol.WorkspaceTerminalResizeParams{
@@ -618,7 +654,7 @@ func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) 
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 24, Cols: 80})
+	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", Rows: 24, Cols: 80})
 	var output strings.Builder
 	cursor := opened.ReplayCursor
 	require.Eventually(t, func() bool {

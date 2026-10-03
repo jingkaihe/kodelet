@@ -25,7 +25,10 @@ import {
 describe('ChatPage optimistic conversations and route handoff', () => {
   setupChatPageTests();
 
-  it('keeps custom-directory workspace tools available through submission, route handoff and later turns', async () => {
+  it.each([
+    'browser',
+    'terminal',
+  ])('keeps the draft $0 identity and live panel through submission, route handoff and later turns', async (view) => {
     const cwd = '/runner/other-project';
     const runner = makeRunner({
       workspaceGitDiff: true,
@@ -64,9 +67,9 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
-    const draftBrowser = await screen.findByTestId('browser-panel');
-    const draftId = draftBrowser.dataset.conversationId;
+    fireEvent.click(screen.getByRole('tab', { name: `Show ${view}` }));
+    const draftPanel = await screen.findByTestId(`${view}-panel`);
+    const draftId = draftPanel.dataset.conversationId;
     expect(draftId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'hello remotely' },
@@ -76,16 +79,16 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
     const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
     expect(preallocatedId).toBe(draftId);
-    expect(screen.getByTestId('browser-panel')).toBe(draftBrowser);
+    expect(screen.getByTestId(`${view}-panel`)).toBe(draftPanel);
     expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
     expect(mockNavigate).toHaveBeenCalledWith(`/c/${draftId}`, { replace: true });
     setRouteParams({ id: preallocatedId });
     rerender(<ChatPage />);
-    expect(screen.getByTestId('browser-panel')).toBe(draftBrowser);
+    expect(screen.getByTestId(`${view}-panel`)).toBe(draftPanel);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Show terminal' }));
     const terminal = await screen.findByTestId('terminal-panel');
-    expect(terminal).not.toHaveAttribute('data-conversation-id');
+    expect(terminal).toHaveAttribute('data-conversation-id', draftId);
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-cwd', cwd);
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
@@ -98,12 +101,12 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
-    const pendingBrowser = await screen.findByTestId('browser-panel');
-    expect(pendingBrowser).toHaveAttribute('data-conversation-id', draftId);
+    fireEvent.click(screen.getByRole('tab', { name: `Show ${view}` }));
+    const pendingPanel = await screen.findByTestId(`${view}-panel`);
+    expect(pendingPanel).toHaveAttribute('data-conversation-id', draftId);
     await act(async () => finishStream());
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(draftId));
-    expect(screen.getByTestId('browser-panel')).toBe(pendingBrowser);
+    expect(screen.getByTestId(`${view}-panel`)).toBe(pendingPanel);
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'second turn' },
@@ -111,16 +114,16 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
     expect(mockStreamChat.mock.calls[1]?.[0]?.conversationId).toBe(draftId);
-    expect(screen.getByTestId('browser-panel')).toBe(pendingBrowser);
+    expect(screen.getByTestId(`${view}-panel`)).toBe(pendingPanel);
     expect(mockStopConversation).not.toHaveBeenCalled();
 
     await act(async () => finishStream());
     setRouteParams({});
     rerender(<ChatPage />);
-    const newDraftBrowser = await screen.findByTestId('browser-panel');
-    expect(newDraftBrowser).not.toBe(pendingBrowser);
-    expect(newDraftBrowser.dataset.conversationId).not.toBe(draftId);
-    expect(newDraftBrowser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    const newDraftPanel = await screen.findByTestId(`${view}-panel`);
+    expect(newDraftPanel).not.toBe(pendingPanel);
+    expect(newDraftPanel.dataset.conversationId).not.toBe(draftId);
+    expect(newDraftPanel.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
   });
 
   it('allows correcting runner context before retrying a failed optimistic conversation', async () => {

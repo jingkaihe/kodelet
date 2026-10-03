@@ -1388,7 +1388,11 @@ func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tt.path+"?cwd="+url.QueryEscape(workspace)+"&q=local", nil)
+			query := url.Values{"cwd": {workspace}, "q": {"local"}}
+			if tt.name == "terminal" {
+				query.Set("conversationId", "terminal-draft")
+			}
+			req := httptest.NewRequest(http.MethodGet, tt.path+"?"+query.Encode(), nil)
 			w := httptest.NewRecorder()
 
 			tt.handler(w, req)
@@ -1453,7 +1457,7 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	require.NoError(t, json.Unmarshal(hints.Body.Bytes(), &directories))
 	assert.Contains(t, directories.Hints, protocol.DirectoryHint{Path: filepath.Join(runner.Workspace.Path, "runner-child")})
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(endpoint, "http")+"/api/terminal/ws", http.Header{"Authorization": {"Bearer web-secret"}})
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(endpoint, "http")+"/api/terminal/ws?conversationId=terminal-draft", http.Header{"Authorization": {"Bearer web-secret"}})
 	require.NoError(t, err)
 	defer conn.Close()
 	ready := readTerminalReady(t, conn)

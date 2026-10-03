@@ -1082,6 +1082,9 @@ func TestRemoteWorkspaceTargetRejectsUnreservedConversation(t *testing.T) {
 func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 	const cwd = "../selected"
 	server := newRunnerTestServer(t, "")
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return nil, convtypes.ErrConversationNotFound
+	}}
 	link := newRunnerAPITestLink()
 	link.call = func(_ context.Context, method string, params, result any) error {
 		switch method {
@@ -1089,7 +1092,9 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 			assert.Equal(t, protocol.WorkspaceGitDiffParams{CWD: cwd}, params)
 			*result.(*protocol.WorkspaceGitDiffResult) = protocol.WorkspaceGitDiffResult{CWD: "/runner/resolved"}
 		case protocol.MethodWorkspaceTerminalOpen:
-			assert.Equal(t, cwd, params.(protocol.WorkspaceTerminalOpenParams).CWD)
+			terminal := params.(protocol.WorkspaceTerminalOpenParams)
+			assert.Equal(t, "draft-terminal", terminal.ConversationID)
+			assert.Equal(t, cwd, terminal.CWD)
 			*result.(*protocol.WorkspaceTerminalOpenResult) = protocol.WorkspaceTerminalOpenResult{
 				SessionID: "draft-terminal", CWD: "/runner/resolved", Name: "bash",
 			}
@@ -1103,7 +1108,10 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			WorkspaceGitDiff: true, WorkspaceTerminal: true, WorkspaceCWD: true,
+			WorkspaceGitDiff:              true,
+			WorkspaceTerminal:             true,
+			WorkspaceTerminalConversation: true,
+			WorkspaceCWD:                  true,
 		},
 		Host:      protocol.Host{InstanceID: "draft-tools", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/startup", Name: "startup"},
@@ -1123,7 +1131,7 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query, nil)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query+"&conversationId=draft-terminal", nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	assert.Equal(t, "/runner/resolved", readTerminalReady(t, conn).CWD)
@@ -1321,13 +1329,14 @@ func TestRunnerWorkspaceScopeRejectsUnsupportedAndMismatchedTargets(t *testing.T
 	}{
 		{"old runner diff", "conversationId=conversation-scope", server.handleGetGitDiff, http.StatusNotImplemented},
 		{"old runner terminal", "conversationId=conversation-scope", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"runner lacks conversation terminals", "runnerId=" + registration.RunnerID + "&conversationId=draft", server.handleTerminalWebsocket, http.StatusNotImplemented},
 		{"old runner browser", "conversationId=conversation-scope", server.handleBrowserOpen, http.StatusNotImplemented},
 		{"old runner discovery", "runnerId=" + registration.RunnerID, server.handleGetSlashCommands, http.StatusNotImplemented},
 		{"wrong directory", "conversationId=conversation-scope&cwd=/runner/startup", server.handleGetSlashCommands, http.StatusBadRequest},
 		{"wrong profile", "conversationId=conversation-scope&environmentProfile=default", server.handleGetSlashCommands, http.StatusBadRequest},
 		{"wrong runner", "conversationId=conversation-scope&runnerId=other", server.handleGetSlashCommands, http.StatusBadRequest},
 		{"draft diff custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleGetGitDiff, http.StatusNotImplemented},
-		{"draft terminal custom directory", "runnerId=" + registration.RunnerID + "&cwd=/runner/selected", server.handleTerminalWebsocket, http.StatusNotImplemented},
+		{"draft terminal custom directory", "runnerId=" + registration.RunnerID + "&conversationId=draft&cwd=/runner/selected", server.handleTerminalWebsocket, http.StatusNotImplemented},
 		{"draft browser custom directory", "runnerId=" + registration.RunnerID + "&conversationId=draft&cwd=/runner/selected", server.handleBrowserOpen, http.StatusNotImplemented},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1385,7 +1394,9 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	link.call = func(_ context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceTerminalOpen:
-			assert.Equal(t, "/runner/selected", params.(protocol.WorkspaceTerminalOpenParams).CWD)
+			terminal := params.(protocol.WorkspaceTerminalOpenParams)
+			assert.Equal(t, "conversation-terminal", terminal.ConversationID)
+			assert.Equal(t, "/runner/selected", terminal.CWD)
 			output := result.(*protocol.WorkspaceTerminalOpenResult)
 			*output = protocol.WorkspaceTerminalOpenResult{
 				SessionID:    "terminal-1",
@@ -1418,8 +1429,9 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			WorkspaceTerminal: true,
-			WorkspaceCWD:      true,
+			WorkspaceTerminal:             true,
+			WorkspaceTerminalConversation: true,
+			WorkspaceCWD:                  true,
 		},
 		Host:      protocol.Host{InstanceID: "host-terminal", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
@@ -1469,8 +1481,11 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	assert.Equal(t, 7, *exit.Code)
 }
 
-func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *testing.T) {
+func TestRemoteWorkspaceTerminalPersistsAcrossDraftSaveAndReplaysOutput(t *testing.T) {
 	server := newRunnerTestServer(t, "")
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return nil, convtypes.ErrConversationNotFound
+	}}
 	link := newRunnerAPITestLink()
 	var terminalMu sync.Mutex
 	var terminalOutput []byte
@@ -1479,6 +1494,9 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 	link.call = func(ctx context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceTerminalOpen:
+			terminal := params.(protocol.WorkspaceTerminalOpenParams)
+			assert.Equal(t, "conversation-terminal", terminal.ConversationID)
+			assert.Equal(t, "/runner/project", terminal.CWD)
 			openCount.Add(1)
 			terminalMu.Lock()
 			writeCursor := uint64(len(terminalOutput))
@@ -1517,7 +1535,7 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 	}
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true, WorkspaceTerminalConversation: true},
 		Host:             protocol.Host{InstanceID: "host-terminal-cancel", Hostname: "worker", OS: "linux", Arch: "amd64"},
 		Workspace:        protocol.Workspace{Path: "/runner/project", Name: "project"},
 	}, link)
@@ -1530,7 +1548,8 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?runnerId="+registration.RunnerID, nil)
+	endpoint := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?runnerId=" + registration.RunnerID + "&conversationId=conversation-terminal"
+	conn, _, err := websocket.DefaultDialer.Dial(endpoint, nil)
 	require.NoError(t, err)
 	readTerminalReady(t, conn)
 	_, payload, err := conn.ReadMessage()
@@ -1550,7 +1569,11 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 	terminalOutput = append(terminalOutput, []byte("output while detached")...)
 	terminalMu.Unlock()
 
-	reconnected, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?runnerId="+registration.RunnerID, nil)
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-terminal", registration.RunnerID))
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{ID: "conversation-terminal", CWD: "/runner/project"}, nil
+	}}
+	reconnected, _, err := websocket.DefaultDialer.Dial(endpoint, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reconnected.Close() })
 	ready := readTerminalReady(t, reconnected)

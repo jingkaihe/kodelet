@@ -212,16 +212,17 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
-	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
-	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
-	WorkspaceGitCommit      bool `json:"workspaceGitCommit,omitempty"`
-	WorkspaceTerminal       bool `json:"workspaceTerminal,omitempty"`
-	WorkspaceBrowser        bool `json:"workspaceBrowser,omitempty"`
-	WorkspaceDiscovery      bool `json:"workspaceDiscovery,omitempty"`
-	WorkspaceInspection     bool `json:"workspaceInspection,omitempty"`
-	WorkspaceMessageHistory bool `json:"workspaceMessageHistory,omitempty"`
-	WorkspaceCWD            bool `json:"workspaceCwd,omitempty"`
+	SessionExtensions             bool `json:"sessionExtensions,omitempty"`
+	RunCheckpoint                 bool `json:"runCheckpoint,omitempty"`
+	WorkspaceGitDiff              bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceGitCommit            bool `json:"workspaceGitCommit,omitempty"`
+	WorkspaceTerminal             bool `json:"workspaceTerminal,omitempty"`
+	WorkspaceTerminalConversation bool `json:"workspaceTerminalConversation,omitempty"`
+	WorkspaceBrowser              bool `json:"workspaceBrowser,omitempty"`
+	WorkspaceDiscovery            bool `json:"workspaceDiscovery,omitempty"`
+	WorkspaceInspection           bool `json:"workspaceInspection,omitempty"`
+	WorkspaceMessageHistory       bool `json:"workspaceMessageHistory,omitempty"`
+	WorkspaceCWD                  bool `json:"workspaceCwd,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.
@@ -634,11 +635,12 @@ type WorkspaceBrowserAssetParams struct {
 	Offset int64  `json:"offset"`
 }
 
-// WorkspaceTerminalOpenParams opens or reattaches to the runner workspace terminal.
+// WorkspaceTerminalOpenParams opens or reattaches to a conversation's terminal in one runner directory.
 type WorkspaceTerminalOpenParams struct {
-	CWD  string `json:"cwd,omitempty"`
-	Rows int    `json:"rows,omitempty"`
-	Cols int    `json:"cols,omitempty"`
+	ConversationID string `json:"conversationId"`
+	CWD            string `json:"cwd,omitempty"`
+	Rows           int    `json:"rows,omitempty"`
+	Cols           int    `json:"cols,omitempty"`
 }
 
 // WorkspaceTerminalOpenResult describes one persistent runner terminal session.

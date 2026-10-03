@@ -132,6 +132,7 @@ export const makeRunner = (overrides: Partial<Runner> = {}): Runner => ({
   manifestChanged: false,
   status: 'idle',
   connected: true,
+  workspaceTerminalConversation: true,
   generation: 1,
   ...overrides,
 });

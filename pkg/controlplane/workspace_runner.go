@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -40,6 +42,48 @@ func (s *Server) resolveWorkspaceRunnerTarget(r *http.Request) (*workspaceRunner
 		return nil, &workspaceRunnerTargetError{status: http.StatusNotImplemented, message: "runner does not support selected-directory workspace tools; upgrade the runner"}
 	}
 	return target, nil
+}
+
+// Terminals and browsers use the draft's eventual conversation ID. Saved
+// conversations must use their persisted workspace; drafts resolve on the runner.
+// The boolean distinguishes saved workspaces from unresolved draft paths.
+func (s *Server) resolveConversationWorkspaceTarget(r *http.Request) (*workspaceRunnerTarget, bool, *workspaceRunnerTargetError) {
+	conversationID := r.URL.Query().Get("conversationId")
+	if !validReceiptID(conversationID) {
+		return nil, false, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "a valid conversationId is required for workspace sessions"}
+	}
+	if s.runnerRegistry == nil || s.conversationService == nil {
+		return nil, false, &workspaceRunnerTargetError{status: http.StatusServiceUnavailable, message: "conversation workspace is unavailable"}
+	}
+	affinity, found, err := s.runnerRegistry.ResolveConversationAffinity(r.Context(), conversationID)
+	if err != nil {
+		return nil, false, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to resolve conversation runner", err: err}
+	}
+	if _, err := s.conversationService.GetConversation(r.Context(), conversationID); !errors.Is(err, convtypes.ErrConversationNotFound) {
+		if err != nil {
+			return nil, false, &workspaceRunnerTargetError{status: http.StatusInternalServerError, message: "failed to load workspace conversation", err: err}
+		}
+		target, targetErr := s.resolveWorkspaceRunnerTarget(r)
+		return target, true, targetErr
+	}
+	check := r.Clone(r.Context())
+	query := r.URL.Query()
+	query.Del("conversationId")
+	if found {
+		if runnerID := strings.TrimSpace(query.Get("runnerId")); runnerID != "" && runnerID != affinity.RunnerID {
+			return nil, false, &workspaceRunnerTargetError{status: http.StatusBadRequest, message: "the runner differs from the conversation's reserved runner"}
+		}
+		query.Set("runnerId", affinity.RunnerID)
+	}
+	check.URL = &url.URL{RawQuery: query.Encode()}
+	target, targetErr := s.resolveWorkspaceRunnerTarget(check)
+	if targetErr != nil {
+		return nil, false, targetErr
+	}
+	if target.CWD == "" {
+		target.CWD = target.Runner.Workspace.Path
+	}
+	return target, false, nil
 }
 
 func (s *Server) resolveRunnerTarget(r *http.Request) (*workspaceRunnerTarget, *workspaceRunnerTargetError) {

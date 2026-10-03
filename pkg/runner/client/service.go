@@ -109,10 +109,9 @@ type Service struct {
 	profileConfigLoader   ProfileConfigLoader
 	environmentFactory    EnvironmentFactory
 	instanceProvider      ExecutionInstanceProvider
-	workspaceTerminals    *workspaceTerminalManager
 	browserManager        *browser.Manager
 	browserRelays         map[*webBrowserRelay]struct{}
-	directoryTerminals    map[string]*workspaceTerminalManager
+	terminalManagers      map[workspaceTerminalScope]*workspaceTerminalManager
 	cleanupTimeout        time.Duration
 	snapshotWaitTimeout   time.Duration
 	peer                  Peer
@@ -215,10 +214,9 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		}
 		service.instanceProvider = provider
 	}
-	service.workspaceTerminals = newWorkspaceTerminalManager(service.ctx, service.workspace)
 	service.browserManager = browser.NewManager(service.ctx, options.Browser)
 	service.browserRelays = make(map[*webBrowserRelay]struct{})
-	service.directoryTerminals = map[string]*workspaceTerminalManager{service.workspace: service.workspaceTerminals}
+	service.terminalManagers = make(map[workspaceTerminalScope]*workspaceTerminalManager)
 	return service, nil
 }
 
@@ -1645,11 +1643,11 @@ func (s *Service) Close() error {
 				return s.ownedRuntime.Close()
 			}))
 		}
-		terminalErrors := make(chan error, len(s.directoryTerminals))
-		for _, manager := range s.directoryTerminals {
+		terminalErrors := make(chan error, len(s.terminalManagers))
+		for _, manager := range s.terminalManagers {
 			go func() { terminalErrors <- manager.Close() }()
 		}
-		for range s.directoryTerminals {
+		for range s.terminalManagers {
 			activeErr = combineCleanupErrors(activeErr, <-terminalErrors)
 		}
 		s.mu.Lock()

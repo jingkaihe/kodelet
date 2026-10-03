@@ -349,10 +349,12 @@ class ApiService {
         params.append('cwd', options.target.cwd);
       }
     } else {
+      if (!options.target.runnerId.trim() || !options.target.conversationId?.trim()) {
+        throw new Error('A runner and conversation are required to open a terminal');
+      }
       params.append('runnerId', options.target.runnerId);
-      if (options.target.conversationId) {
-        params.append('conversationId', options.target.conversationId);
-      } else if (options.target.cwd) {
+      params.append('conversationId', options.target.conversationId);
+      if (options.target.cwd) {
         params.append('cwd', options.target.cwd);
       }
     }

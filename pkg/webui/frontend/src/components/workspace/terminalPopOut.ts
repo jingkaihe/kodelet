@@ -1,9 +1,9 @@
 import type { WorkspaceTarget } from '../../types';
 
 export const TERMINAL_POP_OUT_STORAGE_KEY = 'kodelet.terminal.pop-out';
-const TERMINAL_POP_OUT_CHANNEL_NAME = 'kodelet-terminal-pop-out';
+const TERMINAL_POP_OUT_CHANNEL_NAME = 'kodelet-terminal-pop-out-v3';
 const TERMINAL_POP_OUT_SESSION_ID_KEY = 'kodelet.terminal.pop-out.id';
-const TERMINAL_POP_OUT_STORAGE_VERSION = 2;
+const TERMINAL_POP_OUT_STORAGE_VERSION = 3;
 export const TERMINAL_POP_OUT_HEARTBEAT_INTERVAL = 1500;
 export const TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD = 2500;
 
@@ -26,7 +26,7 @@ export type TerminalPopOutMessage =
 
 export const getTerminalPopOutTargetKey = (target: WorkspaceTarget): string =>
   target.kind === 'runner'
-    ? `runner:${target.runnerId}:${target.cwd ? `cwd:${target.cwd}` : `conversation:${target.conversationId || ''}`}`
+    ? `runner:${target.runnerId}:conversation:${target.conversationId || ''}:cwd:${target.cwd || ''}`
     : `local:${target.cwd || ''}`;
 
 export const getTerminalPopOutWindowName = (target: WorkspaceTarget): string =>
@@ -65,11 +65,10 @@ const isWorkspaceTarget = (value: unknown): value is WorkspaceTarget => {
     target.kind === 'runner' &&
     typeof target.runnerId === 'string' &&
     target.runnerId.trim() !== '' &&
-    // Old runner-wide leases cannot establish ownership of a directory's terminal.
     typeof target.cwd === 'string' &&
     target.cwd.startsWith('/') &&
-    (target.conversationId === undefined ||
-      (typeof target.conversationId === 'string' && target.conversationId.trim() !== ''))
+    typeof target.conversationId === 'string' &&
+    target.conversationId.trim() !== ''
   );
 };
 

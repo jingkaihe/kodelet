@@ -20,15 +20,11 @@ const TerminalPage = () => {
   const requestedCWD = params.get('cwd') || undefined;
   const runnerId = params.get('runnerId')?.trim() || undefined;
   const conversationId = params.get('conversationId')?.trim() || undefined;
-  const [target, setTarget] = useState<WorkspaceTarget | null>(() =>
-    conversationId
-      ? null
-      : runnerId
-        ? { kind: 'runner', runnerId, cwd: requestedCWD }
-        : { kind: 'local', cwd: requestedCWD }
-  );
+  const [target, setTarget] = useState<WorkspaceTarget | null>(null);
   const [canonicalCWD, setCanonicalCWD] = useState<string>();
-  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(
+    conversationId ? null : 'A conversation is required to open a remote terminal.'
+  );
 
   useEffect(() => {
     if (!conversationId) {
@@ -62,16 +58,20 @@ const TerminalPage = () => {
         });
         setTargetError(null);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
-          setTargetError('Unable to resolve the remote terminal.');
+          if (runnerId && requestedCWD && (error as { status?: number })?.status === 404) {
+            setTarget({ kind: 'runner', runnerId, conversationId, cwd: requestedCWD });
+          } else {
+            setTargetError('Unable to resolve the remote terminal.');
+          }
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [conversationId, runnerId]);
+  }, [conversationId, runnerId, requestedCWD]);
 
   const ownershipTarget = useMemo<WorkspaceTarget | null>(() => {
     if (!target || target.kind === 'local') return target;

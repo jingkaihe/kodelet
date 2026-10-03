@@ -174,7 +174,7 @@ describe('ChatPage workspace tools and browsers', () => {
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-cwd', '/runner/other-project');
-    expect(terminal).not.toHaveAttribute('data-conversation-id');
+    expect(terminal.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Show changes' }));
     await waitFor(() =>
@@ -189,20 +189,22 @@ describe('ChatPage workspace tools and browsers', () => {
     const browser = await screen.findByTestId('browser-panel');
     expect(browser).toHaveAttribute('data-runner-id', 'runner-1');
     expect(browser).toHaveAttribute('data-cwd', '/runner/other-project');
-    expect(browser.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+    expect(browser.dataset.conversationId).toBe(terminal.dataset.conversationId);
     expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
   it.each([
-    { name: 'terminal and diff', terminal: true, diff: true },
-    { name: 'terminal only', terminal: true, diff: false },
-    { name: 'diff only', terminal: false, diff: true },
-    { name: 'neither workspace tool', terminal: false, diff: false },
-  ])('handles keyboard navigation with $name capability', async ({ terminal, diff }) => {
+    { name: 'terminal and diff', terminal: true, diff: true, scoped: true },
+    { name: 'terminal only', terminal: true, diff: false, scoped: true },
+    { name: 'diff only', terminal: false, diff: true, scoped: true },
+    { name: 'legacy terminal and diff', terminal: true, diff: true, scoped: undefined },
+    { name: 'neither workspace tool', terminal: false, diff: false, scoped: true },
+  ])('handles keyboard navigation with $name capability', async ({ terminal, diff, scoped }) => {
     mockGetRunners.mockResolvedValue({
       runners: [
         makeRunner({
           workspaceTerminal: terminal,
+          workspaceTerminalConversation: scoped,
           workspaceGitDiff: diff,
         }),
       ],
@@ -216,17 +218,18 @@ describe('ChatPage workspace tools and browsers', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    if (!terminal && !diff) {
+    const terminalAvailable = terminal && scoped;
+    if (!terminalAvailable && !diff) {
       expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
       return;
     }
 
     expect(screen.queryAllByRole('button', { name: 'Show terminal' })).toHaveLength(
-      terminal ? 1 : 0
+      terminalAvailable ? 1 : 0
     );
     expect(screen.queryAllByRole('button', { name: 'Show changes' })).toHaveLength(diff ? 1 : 0);
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    if (terminal) {
+    if (terminalAvailable) {
       expect(screen.getByTestId('workspace-tools-terminal-tab')).toBeInTheDocument();
     } else {
       expect(screen.queryByTestId('workspace-tools-terminal-tab')).not.toBeInTheDocument();
@@ -237,7 +240,7 @@ describe('ChatPage workspace tools and browsers', () => {
       expect(screen.queryByTestId('workspace-tools-diff-tab')).not.toBeInTheDocument();
     }
 
-    if (!terminal) {
+    if (!terminalAvailable) {
       expect(await screen.findByTestId('git-diff-panel')).toBeInTheDocument();
       return;
     }
@@ -559,7 +562,8 @@ describe('ChatPage workspace tools and browsers', () => {
 
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
-    expect(terminal).toHaveAttribute('data-show-pop-out', 'false');
+    expect(terminal).toHaveAttribute('data-show-pop-out', 'true');
+    expect(terminal.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
     expect(terminal).toHaveAttribute('data-cwd', '/runner/kodelet');
 
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));

@@ -185,8 +185,6 @@ describe('App', () => {
 });
 
 describe('TerminalPage', () => {
-  const localTarget: WorkspaceTarget = { kind: 'local' };
-
   it('bootstraps a saved pop-out using its directory rather than a stale URL hint', async () => {
     window.history.replaceState(
       {},
@@ -202,6 +200,8 @@ describe('TerminalPage', () => {
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
     expect(terminal).toHaveAttribute('data-cwd-label', '/runner/project');
+    expect(document.documentElement).toHaveClass('terminal-popout-active');
+    expect(document.body).toHaveClass('terminal-popout-active');
     const target: WorkspaceTarget = {
       kind: 'runner',
       runnerId: 'runner-1',
@@ -217,6 +217,8 @@ describe('TerminalPage', () => {
 
     unmount();
     expect(readTerminalPopOutRecordForTarget(target)).toBeNull();
+    expect(document.documentElement).not.toHaveClass('terminal-popout-active');
+    expect(document.body).not.toHaveClass('terminal-popout-active');
   });
 
   it('rejects a mismatched conversation and runner before claiming pop-out ownership', async () => {
@@ -276,12 +278,22 @@ describe('TerminalPage', () => {
     unmount();
   });
 
-  it('resolves draft ownership without changing the live request and retains it on reload', () => {
-    window.history.replaceState({}, '', '/terminal?runnerId=runner-1&cwd=..%2Fproject');
+  it('retains canonical draft ownership and the conversation identity after saving and reloading', async () => {
+    mockGetConversation.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+    window.history.replaceState(
+      {},
+      '',
+      '/terminal?runnerId=runner-1&conversationId=draft-id&cwd=..%2Fproject'
+    );
     const { rerender, unmount } = render(<TerminalPage />);
-    const terminal = screen.getByTestId('terminal-modal');
+    const terminal = await screen.findByTestId('terminal-modal');
     const requestTarget = mockTerminalModal.mock.lastCall?.[0].target;
-    expect(requestTarget).toEqual({ kind: 'runner', runnerId: 'runner-1', cwd: '../project' });
+    expect(requestTarget).toEqual({
+      kind: 'runner',
+      runnerId: 'runner-1',
+      conversationId: 'draft-id',
+      cwd: '../project',
+    });
     expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
 
     act(() =>
@@ -296,6 +308,7 @@ describe('TerminalPage', () => {
     const target: WorkspaceTarget = {
       kind: 'runner',
       runnerId: 'runner-1',
+      conversationId: 'draft-id',
       cwd: '/runner/project',
     };
     const firstRecord = readTerminalPopOutRecordForTarget(target);
@@ -305,7 +318,7 @@ describe('TerminalPage', () => {
     expect(window.name).toBe(getTerminalPopOutWindowName(target));
     rerender(<TerminalPage />);
     expect(mockTerminalModal.mock.lastCall?.[0].target).toBe(requestTarget);
-    expect(mockGetConversation).not.toHaveBeenCalled();
+    expect(mockGetConversation).toHaveBeenCalledExactlyOnceWith('draft-id');
 
     window.dispatchEvent(new Event('beforeunload'));
     unmount();
@@ -313,14 +326,44 @@ describe('TerminalPage', () => {
       expect.objectContaining({ id: firstRecord?.id, state: 'closing' })
     );
 
+    mockGetConversation.mockResolvedValue({
+      id: 'draft-id',
+      runnerId: 'runner-1',
+      cwd: '/runner/project',
+    });
     const { unmount: unmountReloaded } = render(<TerminalPage />);
+    await screen.findByTestId('terminal-modal');
     expect(mockTerminalModal.mock.lastCall?.[0].target).toEqual(target);
-    expect(readTerminalPopOutRecordForTarget(target)).toEqual(
-      expect.objectContaining({ id: firstRecord?.id, state: 'active', target })
+    await waitFor(() =>
+      expect(readTerminalPopOutRecordForTarget(target)).toEqual(
+        expect.objectContaining({ id: firstRecord?.id, state: 'active', target })
+      )
     );
     expect(window.name).toBe(getTerminalPopOutWindowName(target));
     unmountReloaded();
     expect(readTerminalPopOutRecordForTarget(target)).toBeNull();
+  });
+
+  it.each([
+    { query: 'cwd=%2Frunner%2Fproject', status: 404 },
+    { query: 'runnerId=runner-1&cwd=%2Frunner%2Fproject', status: 404 },
+    { query: 'conversationId=draft-id&cwd=%2Frunner%2Fproject', status: 404 },
+    { query: 'runnerId=runner-1&conversationId=draft-id', status: 404 },
+    {
+      query: 'runnerId=runner-1&conversationId=draft-id&cwd=%2Frunner%2Fproject',
+      status: 500,
+    },
+  ])('does not infer draft ownership from incomplete identity or other failures ($query, $status)', async ({
+    query,
+    status,
+  }) => {
+    mockGetConversation.mockRejectedValue(Object.assign(new Error('Failed'), { status }));
+    window.history.replaceState({}, '', `/terminal?${query}`);
+    render(<TerminalPage />);
+
+    await screen.findByRole('alert');
+    expect(screen.queryByTestId('terminal-modal')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
   });
 
   it('rejects a conversation-only pop-out without remote affinity', async () => {
@@ -336,56 +379,24 @@ describe('TerminalPage', () => {
     expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
   });
 
-  it('removes terminal document overflow styles on cleanup', () => {
+  it('releases ownership while cached and reclaims it when restored', async () => {
+    window.history.replaceState({}, '', '/terminal?conversationId=conv-123');
     const { unmount } = render(<TerminalPage />);
-    expect(document.documentElement).toHaveClass('terminal-popout-active');
-    expect(document.body).toHaveClass('terminal-popout-active');
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
-      expect.objectContaining({ target: { kind: 'local' } })
-    );
-
-    unmount();
-    expect(document.documentElement).not.toHaveClass('terminal-popout-active');
-    expect(document.body).not.toHaveClass('terminal-popout-active');
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toBeNull();
-  });
-
-  it('marks a reload handoff and reuses the pop-out identity', () => {
-    const { unmount } = render(<TerminalPage />);
-    const record = readTerminalPopOutRecordForTarget(localTarget);
-    expect(record).not.toBeNull();
-    expect(record).toEqual(expect.objectContaining({ state: 'active' }));
-
-    window.dispatchEvent(new Event('beforeunload'));
-    unmount();
-
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
-      expect.objectContaining({
-        id: record?.id,
-        state: 'closing',
-      })
-    );
-
-    const { unmount: unmountReloadedPage } = render(<TerminalPage />);
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
-      expect.objectContaining({
-        id: record?.id,
-        state: 'active',
-      })
-    );
-    unmountReloadedPage();
-  });
-
-  it('releases ownership while cached and reclaims it when restored', () => {
-    const { unmount } = render(<TerminalPage />);
-    const record = readTerminalPopOutRecordForTarget(localTarget);
+    await screen.findByTestId('terminal-modal');
+    const target: WorkspaceTarget = {
+      kind: 'runner',
+      runnerId: 'runner-1',
+      conversationId: 'conv-123',
+      cwd: '/runner/project',
+    };
+    const record = readTerminalPopOutRecordForTarget(target);
     expect(record).toEqual(expect.objectContaining({ state: 'active' }));
 
     const pageHide = new Event('pagehide');
     Object.defineProperty(pageHide, 'persisted', { value: true });
     window.dispatchEvent(pageHide);
 
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
+    expect(readTerminalPopOutRecordForTarget(target)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'closing',
@@ -396,7 +407,7 @@ describe('TerminalPage', () => {
     Object.defineProperty(pageShow, 'persisted', { value: true });
     window.dispatchEvent(pageShow);
 
-    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
+    expect(readTerminalPopOutRecordForTarget(target)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'active',

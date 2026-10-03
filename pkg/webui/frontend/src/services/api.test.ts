@@ -1220,18 +1220,23 @@ describe('ApiService', () => {
     });
 
     it.each([
-      { name: 'startup directory', cwd: undefined, conversationId: undefined, query: '' },
+      {
+        name: 'startup directory',
+        cwd: undefined,
+        conversationId: 'draft-id',
+        query: '&conversationId=draft-id',
+      },
       {
         name: 'draft directory',
         cwd: '../project',
-        conversationId: undefined,
-        query: '&cwd=..%2Fproject',
+        conversationId: 'draft-id',
+        query: '&conversationId=draft-id&cwd=..%2Fproject',
       },
       {
         name: 'saved conversation',
         cwd: '/runner/project',
         conversationId: 'conv-123',
-        query: '&conversationId=conv-123',
+        query: '&conversationId=conv-123&cwd=%2Frunner%2Fproject',
       },
     ])('creates a runner terminal websocket for $name', ({ cwd, conversationId, query }) => {
       const originalLocation = window.location;
@@ -1261,6 +1266,22 @@ describe('ApiService', () => {
         configurable: true,
         value: originalLocation,
       });
+    });
+
+    it('rejects remote terminals without runner and conversation identity', () => {
+      const websocketSpy = vi.fn();
+      // @ts-expect-error test shim
+      global.WebSocket = websocketSpy;
+      for (const target of [
+        { kind: 'runner', runnerId: 'runner-1', cwd: '/runner/project' },
+        { kind: 'runner', runnerId: 'runner-1', conversationId: ' ' },
+        { kind: 'runner', runnerId: ' ', conversationId: 'conv-123' },
+      ] as const) {
+        expect(() => apiService.createTerminalWebSocket({ target })).toThrow(
+          'A runner and conversation are required to open a terminal'
+        );
+      }
+      expect(websocketSpy).not.toHaveBeenCalled();
     });
   });
 

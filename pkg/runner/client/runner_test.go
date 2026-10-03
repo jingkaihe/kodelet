@@ -261,7 +261,11 @@ func TestRunnerCloseReleasesWorkspaceLockAfterBoundedTerminalCleanup(t *testing.
 	shell := filepath.Join(t.TempDir(), "ignore-hup.sh")
 	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\ntrap '' HUP TERM\nwhile :; do sleep 60; done\n"), 0o700))
 	t.Setenv("SHELL", shell)
-	opened, err := runner.service.workspaceTerminals.Open(t.Context(), 24, 80)
+	opened, err := runner.service.openWorkspaceTerminal(t.Context(), protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		Rows:           24,
+		Cols:           80,
+	})
 	require.NoError(t, err)
 	require.NotEmpty(t, opened.SessionID)
 
@@ -369,6 +373,9 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		entry, ok := registry.Runner(registration.RunnerID)
 		return ok && entry.Status == runnerregistry.RunnerStatusIdle && entry.ManifestDigest != ""
 	}, 5*time.Second, 10*time.Millisecond)
+	entry, found := registry.Runner(registration.RunnerID)
+	require.True(t, found)
+	assert.True(t, entry.WorkspaceTerminalConversation, "the runner must advertise conversation-scoped terminals")
 
 	t.Run("composer-history", func(t *testing.T) {
 		entry, found := registry.Runner(registration.RunnerID)
