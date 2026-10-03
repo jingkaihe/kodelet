@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.7.4-beta
+
+Enabled Web UI terminals, browsers, and Git diffs in a new chat's selected runner directory before sending the first message. Terminal and browser sessions keep their identity when the conversation is saved.
+
+Scoped terminal sessions and pop-out windows to the runner, conversation, and canonical working directory, preventing separate conversations from sharing a shell even in the same directory. Pop-outs resolve saved workspace settings and handle draft directory aliases consistently.
+
+Added runner-managed cleanup for abandoned draft terminals and browsers, including attached pop-outs. Draft sessions use a five-minute lease renewed by the owning chat page; runners reclaim expired sessions even when the UI or daemon is unreachable. Discarding a draft requests immediate cleanup, while saved conversations are exempt from draft expiry. Returning to an expired draft creates a fresh session identity without losing composer text or workspace selections.
+
+Fixed Escape closing the Web UI terminal instead of remaining available to terminal applications.
+
 ## 0.7.3-beta
 
 Added a welcome screen to the TUI and Web UI, configurable with `welcome_style` and `welcome_effect`.
