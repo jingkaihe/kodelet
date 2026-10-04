@@ -1963,7 +1963,7 @@ const ChatPage: React.FC = () => {
 
             <button
               aria-label="Show panel"
-              className="sidebar-toggle-button sidebar-toggle-button-mobile lg:hidden"
+              className="sidebar-toggle-button sidebar-toggle-button-mobile"
               data-testid="sidebar-attached-toggle-mobile"
               inert={workspaceOverlayOpen || undefined}
               onClick={handleSidebarToggle}

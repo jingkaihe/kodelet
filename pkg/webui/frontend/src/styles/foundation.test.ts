@@ -4,6 +4,7 @@ import postcss from 'postcss';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import foundationStyles from './foundation.css?raw';
 import appStyles from './index.css?raw';
+import sidebarStyles from './sidebar.css?raw';
 
 describe('Generated component styles', () => {
   it('excludes unused DaisyUI selectors that scan the transcript on textarea edits', async () => {
@@ -32,6 +33,41 @@ describe('Generated component styles', () => {
     expect(selectors).toContain('.btn');
     expect(selectors).toContain('.flex');
     expect(selectors).toContain(':root[data-theme="gruvbox-dark"]');
+  });
+});
+
+describe('Sidebar toggle visibility', () => {
+  it('hides the mobile toggle on desktop in the same cascade layer as its button styles', () => {
+    const stylesheet = postcss.parse(sidebarStyles);
+    const displayRules: { selector: string; display: string; media?: string }[] = [];
+    stylesheet.walkDecls('display', (declaration) => {
+      const rule = declaration.parent;
+      if (
+        rule?.type !== 'rule' ||
+        !['.sidebar-toggle-button', '.sidebar-toggle-button-mobile'].includes(rule.selector)
+      )
+        return;
+      const parent = rule.parent;
+      if (parent?.type === 'root') {
+        displayRules.push({ selector: rule.selector, display: declaration.value });
+      } else if (parent?.type === 'atrule' && parent.name === 'media') {
+        expect(parent.parent?.type).toBe('root');
+        displayRules.push({
+          selector: rule.selector,
+          display: declaration.value,
+          media: parent.params,
+        });
+      }
+    });
+
+    expect(displayRules).toEqual([
+      { selector: '.sidebar-toggle-button', display: 'inline-flex' },
+      {
+        selector: '.sidebar-toggle-button-mobile',
+        display: 'none',
+        media: '(min-width: 1024px)',
+      },
+    ]);
   });
 });
 

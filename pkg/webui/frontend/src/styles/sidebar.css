@@ -653,6 +653,11 @@
     cursor: pointer;
     opacity: 1;
   }
+
+  .sidebar-toggle-button-mobile {
+    /* Match the unlayered button styles; a layered lg:hidden cannot override their display. */
+    display: none;
+  }
 }
 
 .sidebar-toggle-button-collapsed {
