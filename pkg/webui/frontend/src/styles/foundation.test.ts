@@ -1,29 +1,28 @@
 import path from 'node:path';
+import { compile } from '@tailwindcss/node';
 import postcss from 'postcss';
-import tailwindcss from 'tailwindcss';
-import loadConfig from 'tailwindcss/loadConfig';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import foundationStyles from './foundation.css?raw';
+import appStyles from './index.css?raw';
 
 describe('Generated component styles', () => {
   it('excludes unused DaisyUI selectors that scan the transcript on textarea edits', async () => {
-    const config = loadConfig(path.resolve('tailwind.config.js'));
-    const result = await postcss([
-      tailwindcss({
-        ...config,
-        content: [
-          {
-            // Tailwind detects these prose and method names as class candidates.
-            raw: `// A custom modal dialog
-const text = lines.join(' ');
-const classes = 'btn flex';`,
-            extension: 'tsx',
-          },
-        ],
-      }),
-    ]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
+    const compiler = await compile(appStyles, {
+      base: path.resolve('src/styles'),
+      onDependency: () => {},
+    });
+    // Tailwind detects prose such as "a custom modal dialog" and lines.join(' ') as candidates.
+    const css = compiler.build([
+      'modal',
+      'modal-open',
+      'join',
+      'drawer-toggle',
+      'drawer-side',
+      'btn',
+      'flex',
+    ]);
     const selectors: string[] = [];
-    result.root.walkRules((rule) => {
+    postcss.parse(css).walkRules((rule) => {
       selectors.push(rule.selector);
     });
 
@@ -32,7 +31,7 @@ const classes = 'btn flex';`,
     ).toEqual([]);
     expect(selectors).toContain('.btn');
     expect(selectors).toContain('.flex');
-    expect(result.css).toContain('[data-theme=gruvbox-dark]');
+    expect(selectors).toContain(':root[data-theme="gruvbox-dark"]');
   });
 });
 

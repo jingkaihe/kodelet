@@ -3,9 +3,37 @@
    ============================================ */
 
 /* Palettes change colors only; typography and component geometry stay shared.
-   Keep DaisyUI's semantic colors in tailwind.config.js in sync. */
+   DaisyUI semantic colors are defined alongside each palette. */
 :root {
   color-scheme: light;
+  --color-primary: #d97757;
+  --color-primary-content: oklch(13.4484% 0.026168 38.7559);
+  --color-secondary: #6a9bcc;
+  --color-secondary-content: oklch(13.4835% 0.01803 249.292);
+  --color-accent: #788c5d;
+  --color-accent-content: oklch(12.2368% 0.014267 127.12);
+  --color-neutral: #3c3836;
+  --color-neutral-content: oklch(86.8814% 0.001321 48.5229);
+  --color-base-100: #faf8ef;
+  --color-base-200: #f8f5e9;
+  --color-base-300: #ebdbb2;
+  --color-base-content: #3c3836;
+  --color-info: #6a9bcc;
+  --color-info-content: oklch(13.4835% 0.01803 249.292);
+  --color-success: #788c5d;
+  --color-success-content: oklch(12.2368% 0.014267 127.12);
+  --color-warning: #d97757;
+  --color-warning-content: oklch(13.4484% 0.026168 38.7559);
+  --color-error: #d97757;
+  --color-error-content: oklch(13.4484% 0.026168 38.7559);
+  --radius-selector: 1.9rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
   --kodelet-dark-rgb: 60 56 54;
   --kodelet-light-rgb: 250 248 239;
   --kodelet-mid-gray-rgb: 213 196 161;
@@ -81,6 +109,12 @@
 }
 
 :root[data-theme="kodelet-classic"] {
+  --color-neutral: #141413;
+  --color-neutral-content: oklch(83.8168% 0.000397 106.586);
+  --color-base-100: #faf9f5;
+  --color-base-200: #f4efe5;
+  --color-base-300: #e8e6dc;
+  --color-base-content: #141413;
   --kodelet-dark-rgb: 20 20 19;
   --kodelet-light-rgb: 250 249 245;
   --kodelet-mid-gray-rgb: 176 174 165;
@@ -111,6 +145,26 @@
 
 :root[data-theme="gruvbox-dark"] {
   color-scheme: dark;
+  --color-primary: #fe8019;
+  --color-primary-content: #282828;
+  --color-secondary: #83a598;
+  --color-secondary-content: #282828;
+  --color-accent: #b8bb26;
+  --color-accent-content: #282828;
+  --color-neutral: #504945;
+  --color-neutral-content: #ebdbb2;
+  --color-base-100: #282828;
+  --color-base-200: #252525;
+  --color-base-300: #504945;
+  --color-base-content: #ebdbb2;
+  --color-info: #83a598;
+  --color-info-content: #282828;
+  --color-success: #b8bb26;
+  --color-success-content: #282828;
+  --color-warning: #fabd2f;
+  --color-warning-content: #282828;
+  --color-error: #fb7160;
+  --color-error-content: #282828;
   --kodelet-dark-rgb: 235 219 178;
   --kodelet-light-rgb: 40 40 40;
   --kodelet-mid-gray-rgb: 102 92 84;
@@ -218,11 +272,14 @@ body::before {
   height: var(--app-viewport-height, 100dvh);
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
+/* Element defaults stay below Tailwind utilities such as font-mono and text-xs. */
+@layer base {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
 }
 
 input,
@@ -243,16 +300,18 @@ summary::-webkit-details-marker {
 }
 
 /* Editorial heading styles */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-family: var(--font-heading);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--kodelet-dark);
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--kodelet-dark);
+  }
 }
 
 .eyebrow-label {

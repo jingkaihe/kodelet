@@ -1,5 +1,61 @@
 @import url("https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+
+@source "../../index.html";
+@source "../**/*.{js,ts,jsx,tsx}";
+
+/* DaisyUI supplies only the controls the UI uses; add components here when adopting them.
+   Otherwise prose such as "a modal dialog" and calls such as lines.join(' ') generate unused
+   components, and modal, drawer, and join add :has() rules that make Chromium rescan long
+   transcripts on textarea edits. Theme colors live in foundation.css for the same reason:
+   generated DaisyUI themes add :root:has() selectors. */
+@plugin "daisyui" {
+  themes: false;
+  include: rootcolor, svg, button, input;
+  logs: false;
+}
+
+@theme {
+  /* Fixed line heights keep spacing where component styles override the font size. */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+}
+
+/* foundation.css owns the font stacks, so utilities reference them without emitting copies. */
+@theme reference {
+  --font-heading: var(--font-heading);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+/* Palettes swap the underlying variables, so utilities must resolve them on use. */
+@theme inline {
+  --color-kodelet-dark: var(--kodelet-dark);
+  --color-kodelet-light: var(--kodelet-light);
+  --color-kodelet-mid-gray: var(--kodelet-mid-gray);
+  --color-kodelet-light-gray: var(--kodelet-light-gray);
+  --color-kodelet-orange: var(--kodelet-orange);
+  --color-kodelet-blue: var(--kodelet-blue);
+}
+
+/* Preflight defaults the interface was designed against. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

@@ -664,7 +664,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           aria-label="Browser address"
           autoCapitalize="off"
           autoComplete="off"
-          className="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs"
+          className="input input-sm min-w-0 flex-1 font-mono text-xs"
           onChange={(event) => setURL(event.target.value)}
           spellCheck={false}
           value={url}
@@ -717,7 +717,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           {dialog.type === 'prompt' ? (
             <input
               aria-label="Dialog prompt text"
-              className="input input-bordered input-sm mb-2 w-full"
+              className="input input-sm mb-2 w-full text-sm"
               disabled={dialog.responding || stopping}
               onChange={(event) => setDialog({ ...dialog, promptText: event.target.value })}
               value={dialog.promptText}
@@ -725,7 +725,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           ) : null}
           <div className="flex gap-2">
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm text-sm"
               disabled={dialog.responding || stopping}
               onClick={() => void respondToDialog(true)}
               type="button"
@@ -733,7 +733,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
               Accept
             </button>
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm text-sm"
               disabled={dialog.responding || stopping}
               onClick={() => void respondToDialog(false)}
               type="button"
@@ -828,7 +828,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
           {(['console', 'network', 'inspect', 'devtools'] as const).map((view) => (
             <button
               aria-selected={debugView === view}
-              className={cn('btn btn-ghost btn-xs', debugView === view && 'btn-active')}
+              className={cn('btn btn-ghost btn-xs text-xs', debugView === view && 'btn-active')}
               key={view}
               onClick={() => {
                 setDebugView(debugView === view ? null : view);
@@ -897,19 +897,19 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
               >
                 <input
                   aria-label="Console expression"
-                  className="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs"
+                  className="input input-sm min-w-0 flex-1 font-mono text-xs"
                   disabled={!live}
                   onChange={(event) => setExpression(event.target.value)}
                   placeholder="Evaluate in the runner page"
                   spellCheck={false}
                   value={expression}
                 />
-                <button className="btn btn-ghost btn-sm" disabled={!live} type="submit">
+                <button className="btn btn-ghost btn-sm text-sm" disabled={!live} type="submit">
                   Run
                 </button>
                 <button
                   aria-label="Clear console"
-                  className="btn btn-ghost btn-sm"
+                  className="btn btn-ghost btn-sm text-sm"
                   onClick={() => setConsoleEntries([])}
                   type="button"
                 >
@@ -947,7 +947,7 @@ const BrowserPanel: React.FC<{ target: BrowserTarget }> = ({ target }) => {
             <div className="workspace-browser-debug-output">
               <button
                 aria-pressed={inspecting}
-                className="btn btn-ghost btn-sm mb-2"
+                className="btn btn-ghost btn-sm mb-2 text-sm"
                 disabled={!live}
                 onClick={() => setInspecting(!inspecting)}
                 type="button"

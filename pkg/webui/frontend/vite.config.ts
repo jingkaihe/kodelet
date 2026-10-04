@@ -1,4 +1,5 @@
 import path from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
@@ -29,7 +30,7 @@ const externalizeGhosttyWasm = (): Plugin => ({
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [externalizeGhosttyWasm(), react()],
+  plugins: [externalizeGhosttyWasm(), tailwindcss(), react()],
 
   // Build configuration
   build: {
@@ -110,10 +111,5 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
-  },
-
-  // CSS configuration
-  css: {
-    postcss: './postcss.config.js',
   },
 });

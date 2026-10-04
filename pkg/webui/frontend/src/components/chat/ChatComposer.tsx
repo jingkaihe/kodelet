@@ -239,7 +239,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="relative overflow-hidden rounded-sm border border-kodelet-dark/10 bg-kodelet-light/80 p-2"
+                  className="relative overflow-hidden rounded-xs border border-kodelet-dark/10 bg-kodelet-light/80 p-2"
                 >
                   <img
                     alt={attachment.name}

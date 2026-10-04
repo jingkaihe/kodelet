@@ -1,5 +1,13 @@
-/* Refined button styling */
-button,
+/* Refined button styling: element defaults yield to utilities; .btn overrides DaisyUI. */
+@layer base {
+  button {
+    font-family: var(--font-heading);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
 .btn {
   font-family: var(--font-heading);
   font-weight: 500;
@@ -15,6 +23,23 @@ button:hover,
 button:active,
 .btn:active {
   transform: translateY(0);
+}
+
+/* DaisyUI derives ghost states from base-200, which nearly matches base-100 in every palette. */
+.btn-ghost.btn-active {
+  border-color: transparent;
+  background-color: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+}
+
+@media (hover: hover) {
+  .btn-ghost:hover:not(:disabled) {
+    border-color: transparent;
+    background-color: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  }
+}
+
+.btn-ghost:disabled {
+  background-color: color-mix(in oklab, var(--color-neutral) 20%, transparent);
 }
 
 /* Focus visible for keyboard navigation */

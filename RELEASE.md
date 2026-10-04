@@ -10,6 +10,8 @@ Added runner-managed cleanup for abandoned draft terminals and browsers, includi
 
 Fixed Escape closing the Web UI terminal instead of remaining available to terminal applications.
 
+Fixed high-severity `npm audit` alerts for `braces` (GHSA-vfj7-8cjw-p6xm) by upgrading the Web UI to Tailwind CSS 4 and daisyUI 5, which no longer depend on it. The interface looks the same in every palette.
+
 ## 0.7.3-beta
 
 Added a welcome screen to the TUI and Web UI, configurable with `welcome_style` and `welcome_effect`.
