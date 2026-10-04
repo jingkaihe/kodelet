@@ -429,10 +429,17 @@
 }
 
 .new-chat-context-dialog .composer-cwd-suggestions-inline {
+  top: calc(100% + 8px);
+  overscroll-behavior: contain;
   border-color: color-mix(in srgb, var(--kodelet-muted) 20%, transparent);
   border-radius: 2px;
   background: var(--sidebar-surface-opaque);
   box-shadow: none;
+}
+
+.new-chat-context-dialog .composer-cwd-suggestions-inline.is-above {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 
 .new-chat-context-dialog .composer-cwd-suggestion:hover,

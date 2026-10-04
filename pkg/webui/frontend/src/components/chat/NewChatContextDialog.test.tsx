@@ -48,9 +48,9 @@ const renderDialog = (
     ...overrides,
   };
 
-  render(<NewChatContextDialog {...props} />);
+  const { rerender } = render(<NewChatContextDialog {...props} />);
 
-  return props;
+  return { ...props, rerender };
 };
 
 describe('NewChatContextDialog', () => {
@@ -141,6 +141,83 @@ describe('NewChatContextDialog', () => {
     expect(input).not.toHaveAttribute('aria-controls');
     expect(input).not.toHaveAttribute('aria-activedescendant');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { directoryTop: 580, panelTop: 100, above: true, maxHeight: 224 },
+    { directoryTop: 160, panelTop: 100, above: false, maxHeight: 224 },
+    { directoryTop: 520, panelTop: 400, above: true, maxHeight: 112 },
+  ])('fits directory suggestions in the visible panel: %j', (placement) => {
+    const { rerender, ...props } = renderDialog({ cwdSuggestionsOpen: false });
+    const directory = screen
+      .getByTestId('cwd-input')
+      .closest('.new-chat-field-autocomplete') as HTMLElement;
+    const panel = screen.getByTestId('new-chat-context-panel');
+    vi.spyOn(directory, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, placement.directoryTop, 500, 44)
+    );
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, placement.panelTop, 500, 640 - placement.panelTop)
+    );
+
+    rerender(<NewChatContextDialog {...props} cwdSuggestionsOpen />);
+
+    const suggestions = screen.getByTestId('cwd-suggestions');
+    expect(suggestions.classList.contains('is-above')).toBe(placement.above);
+    expect(suggestions).toHaveStyle({ maxHeight: `${placement.maxHeight}px` });
+    expect(panel.scrollTop).toBe(0);
+  });
+
+  it('repositions directory suggestions on modal scroll and viewport resize', () => {
+    renderDialog();
+    const directory = screen
+      .getByTestId('cwd-input')
+      .closest('.new-chat-field-autocomplete') as HTMLElement;
+    const panel = screen.getByTestId('new-chat-context-panel');
+    const bounds = vi
+      .spyOn(directory, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 580, 500, 44));
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 500, 540));
+    const suggestions = screen.getByTestId('cwd-suggestions');
+
+    fireEvent.scroll(panel);
+    expect(suggestions).toHaveClass('is-above');
+    bounds.mockReturnValue(new DOMRect(0, 160, 500, 44));
+    fireEvent.scroll(panel);
+    expect(suggestions).not.toHaveClass('is-above');
+
+    // A panel extending past the viewport must not provide extra space for the menu.
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 100, 500, window.innerHeight + 200)
+    );
+    bounds.mockReturnValue(new DOMRect(0, window.innerHeight - 60, 500, 44));
+    fireEvent.resize(window);
+    expect(suggestions).toHaveClass('is-above');
+    expect(suggestions).toHaveStyle({ maxHeight: '224px' });
+  });
+
+  it('scrolls only the suggestion list to reveal the keyboard selection', () => {
+    const { rerender, ...props } = renderDialog();
+    const suggestions = screen.getByTestId('cwd-suggestions');
+    const panel = screen.getByTestId('new-chat-context-panel');
+    Object.defineProperty(suggestions, 'clientHeight', { value: 80 });
+    Object.defineProperties(screen.getByTestId('cwd-suggestion-1'), {
+      offsetTop: { value: 80 },
+      offsetHeight: { value: 40 },
+    });
+    panel.scrollTop = 20;
+
+    rerender(<NewChatContextDialog {...props} cwdSuggestionIndex={1} />);
+    expect(suggestions.scrollTop).toBe(40);
+    expect(panel.scrollTop).toBe(20);
+
+    rerender(<NewChatContextDialog {...props} cwdSuggestionIndex={0} />);
+    expect(suggestions.scrollTop).toBe(0);
+    expect(panel.scrollTop).toBe(20);
+
+    suggestions.scrollTop = 40;
+    rerender(<NewChatContextDialog {...props} />);
+    expect(suggestions.scrollTop).toBe(40);
   });
 
   it('keeps dialog actions external', () => {

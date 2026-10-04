@@ -126,6 +126,13 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     ref
   ) => {
     const dialogRef = React.useRef<HTMLDivElement | null>(null);
+    const directoryRef = React.useRef<HTMLDivElement | null>(null);
+    const suggestionsRef = React.useRef<HTMLDivElement | null>(null);
+    const [suggestionsPlacement, setSuggestionsPlacement] = React.useState({
+      above: false,
+      maxHeight: 224,
+    });
+    const suggestionsOpen = cwdSuggestionsOpen && cwdSuggestions.length > 0;
     const onDismiss = React.useEffectEvent(onCancel);
     const setDialogRef = React.useCallback(
       (element: HTMLDivElement | null) => {
@@ -204,38 +211,83 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       };
     }, [returnFocusRef]);
 
+    React.useLayoutEffect(() => {
+      if (!suggestionsOpen) return;
+      // Match the selects: fit inside the visible panel rather than extending its scroll area.
+      const positionSuggestions = () => {
+        const directory = directoryRef.current?.getBoundingClientRect();
+        const panel = directoryRef.current
+          ?.closest('.new-chat-context-panel')
+          ?.getBoundingClientRect();
+        if (!directory || !panel) return;
+        const below = Math.min(panel.bottom, window.innerHeight) - directory.bottom - 8;
+        const above = directory.top - Math.max(panel.top, 0) - 8;
+        const placeAbove = below < 224 && above > below;
+        setSuggestionsPlacement({
+          above: placeAbove,
+          maxHeight: Math.max(0, Math.min(224, placeAbove ? above : below)),
+        });
+      };
+      positionSuggestions();
+      window.addEventListener('resize', positionSuggestions);
+      window.addEventListener('scroll', positionSuggestions, true);
+      return () => {
+        window.removeEventListener('resize', positionSuggestions);
+        window.removeEventListener('scroll', positionSuggestions, true);
+      };
+    }, [suggestionsOpen]);
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: Option and height changes alter the rendered list geometry.
+    React.useLayoutEffect(() => {
+      if (!suggestionsOpen) return;
+      const suggestions = suggestionsRef.current;
+      const activeSuggestion = suggestions?.children[cwdSuggestionIndex] as HTMLElement | undefined;
+      if (!suggestions || !activeSuggestion) return;
+      // Scroll only the list, never the containing modal, when navigating with the keyboard.
+      const top = activeSuggestion.offsetTop;
+      const bottom = top + activeSuggestion.offsetHeight;
+      if (top < suggestions.scrollTop) suggestions.scrollTop = top;
+      else if (bottom > suggestions.scrollTop + suggestions.clientHeight) {
+        suggestions.scrollTop = bottom - suggestions.clientHeight;
+      }
+    }, [cwdSuggestionIndex, cwdSuggestions, suggestionsOpen, suggestionsPlacement.maxHeight]);
+
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
     const selectedRunnerAvailable = Boolean(
       runnerIdDraft &&
         selectedRunner?.connected &&
         (selectedRunner.status === 'idle' || selectedRunner.status === 'busy')
     );
-    const directorySuggestions =
-      cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-        <div
-          aria-label="Working directory suggestions"
-          className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-          data-testid="cwd-suggestions"
-          id="new-chat-cwd-suggestions"
-          role="listbox"
-        >
-          {cwdSuggestions.map((suggestion, index) => (
-            <button
-              aria-selected={index === cwdSuggestionIndex}
-              className={cn('composer-cwd-suggestion', index === cwdSuggestionIndex && 'is-active')}
-              data-testid={`cwd-suggestion-${index}`}
-              id={`new-chat-cwd-suggestion-${index}`}
-              key={suggestion.path}
-              onClick={() => onSelectCwdSuggestion(suggestion.path)}
-              onMouseDown={(event) => event.preventDefault()}
-              role="option"
-              type="button"
-            >
-              <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
-            </button>
-          ))}
-        </div>
-      ) : null;
+    const directorySuggestions = suggestionsOpen ? (
+      <div
+        aria-label="Working directory suggestions"
+        className={cn(
+          'composer-cwd-suggestions composer-cwd-suggestions-inline',
+          suggestionsPlacement.above && 'is-above'
+        )}
+        data-testid="cwd-suggestions"
+        id="new-chat-cwd-suggestions"
+        ref={suggestionsRef}
+        role="listbox"
+        style={{ maxHeight: suggestionsPlacement.maxHeight }}
+      >
+        {cwdSuggestions.map((suggestion, index) => (
+          <button
+            aria-selected={index === cwdSuggestionIndex}
+            className={cn('composer-cwd-suggestion', index === cwdSuggestionIndex && 'is-active')}
+            data-testid={`cwd-suggestion-${index}`}
+            id={`new-chat-cwd-suggestion-${index}`}
+            key={suggestion.path}
+            onClick={() => onSelectCwdSuggestion(suggestion.path)}
+            onMouseDown={(event) => event.preventDefault()}
+            role="option"
+            type="button"
+          >
+            <span className="composer-cwd-suggestion-path">{suggestion.path}</span>
+          </button>
+        ))}
+      </div>
+    ) : null;
     return (
       <div className="new-chat-dialog-backdrop new-chat-context-backdrop">
         <div
@@ -345,7 +397,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     <label className="new-chat-field-label" htmlFor="new-chat-cwd">
                       Working directory
                     </label>
-                    <div className="new-chat-field-autocomplete">
+                    <div className="new-chat-field-autocomplete" ref={directoryRef}>
                       <div className="new-chat-directory-shell">
                         <FolderOpen
                           aria-hidden="true"
