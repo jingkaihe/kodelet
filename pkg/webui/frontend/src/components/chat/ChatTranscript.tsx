@@ -1,4 +1,5 @@
 import { Check, ChevronRight, SquareSlash } from 'lucide-react';
+import { Lexer, type Token } from 'marked';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-bash';
 import 'prismjs/components/prism-go';
@@ -23,8 +24,29 @@ import ChatWelcome from './ChatWelcome';
 // Highlight only changed message HTML, never the entire document during streaming.
 Prism.manual = true;
 
-const parseMarkdown = (content: string): string =>
-  renderSafeMarkdown(content)
+const stableStreamingMarkdown = (content: string): string => {
+  const lineStart = content.lastIndexOf('\n') + 1;
+  const tail = content.slice(lineStart);
+  // A bare "-" can turn the preceding paragraph into a heading, and "* **"
+  // can turn a new bullet into a rule and change the spacing of an entire list.
+  // Hold only marker-only unfinished lines, not ordinary streaming prose.
+  if (!/^[\t ]*(?:(?:[-+*]|\d+[.)])[\t *_]*|#{1,6}[\t ]*|[=_-]+[\t ]*)$/.test(tail)) {
+    return content;
+  }
+  let tokens: Token[] = Lexer.lex(content);
+  let last = tokens[tokens.length - 1];
+  while (last) {
+    if (last.type === 'list') tokens = last.items[last.items.length - 1].tokens;
+    else if (last.type === 'blockquote') tokens = last.tokens || [];
+    else break;
+    last = tokens[tokens.length - 1];
+  }
+  // A literal marker inside fenced/indented code is not Markdown structure.
+  return last?.type === 'code' ? content : content.slice(0, lineStart);
+};
+
+const parseMarkdown = (content: string, isStreaming = false): string =>
+  renderSafeMarkdown(isStreaming ? stableStreamingMarkdown(content) : content)
     .replace(
       /<table>/g,
       '<div class="chat-markdown-table-shell">\n<table class="chat-markdown-table">'
@@ -35,19 +57,22 @@ const parseMarkdown = (content: string): string =>
 
 const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
 
-const renderContent = (content: string | ContentBlock[] | undefined): string => {
+const renderContent = (
+  content: string | ContentBlock[] | undefined,
+  isStreaming = false
+): string => {
   if (!content) {
     return '';
   }
 
   if (typeof content === 'string') {
-    return parseMarkdown(content);
+    return parseMarkdown(content, isStreaming);
   }
 
   return content
     .map((block) => {
       if (block.type === 'text') {
-        return parseMarkdown(block.text || '');
+        return parseMarkdown(block.text || '', isStreaming);
       }
 
       if (block.type === 'slash-command') {
@@ -135,7 +160,7 @@ const normalizeThinkingMarkdown = (content: string): string =>
     .replace(/([.!?])(?=\*\*[A-Z][^*\n]+\*\*)/g, '$1\n\n')
     .replace(/([.!?])(?=#{1,6}\s)/g, '$1\n\n');
 
-const renderThinkingContent = (content: string) => {
+const renderThinkingContent = (content: string, isStreaming = false) => {
   const hasThinkingContent = extractContentText(content).trim().length > 0;
 
   if (!hasThinkingContent) {
@@ -145,7 +170,7 @@ const renderThinkingContent = (content: string) => {
   return (
     <MarkdownContent
       className="chat-prose max-w-none text-kodelet-dark"
-      html={renderContent(normalizeThinkingMarkdown(content))}
+      html={renderContent(normalizeThinkingMarkdown(content), isStreaming)}
     />
   );
 };
@@ -365,7 +390,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
               </div>
               {hasThinkingContent ? (
                 <div className="activity-detail-content activity-detail-content-live">
-                  {renderThinkingContent(block.content)}
+                  {renderThinkingContent(block.content, isStreaming)}
                 </div>
               ) : null}
             </output>
@@ -388,7 +413,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
         <div key={`message-${blockIndex}`} className="group/message relative">
           <MarkdownContent
             className="chat-prose max-w-none text-kodelet-dark"
-            html={renderContent(block.content)}
+            html={renderContent(block.content, isStreaming && Boolean(block.inProgress))}
           />
           {copyText.trim() ? (
             <div className="chat-message-actions">

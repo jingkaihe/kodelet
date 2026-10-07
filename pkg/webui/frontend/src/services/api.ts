@@ -33,6 +33,8 @@ import type {
   WorkspaceTarget,
 } from '../types';
 
+const STREAM_TEXT_UPDATE_INTERVAL_MS = 75;
+
 class ApiService {
   private baseUrl = '';
   private csrfCookieName = 'kodelet_csrf';
@@ -530,9 +532,45 @@ class ApiService {
     const decoder = new TextDecoder();
     let buffer = '';
     const pendingPrompts = new Map<string, string | undefined>();
+    let pendingDelta: ChatStreamEvent | undefined;
+    let deltaTimer: ReturnType<typeof setTimeout> | undefined;
+    let deliveryFailure: { error: unknown } | undefined;
+    const flushDelta = () => {
+      clearTimeout(deltaTimer);
+      deltaTimer = undefined;
+      const event = pendingDelta;
+      pendingDelta = undefined;
+      if (event) onEvent(event);
+    };
     const deliver = (line: string) => {
       const event = JSON.parse(line) as ChatStreamEvent;
       conversationId = event.conversation_id || conversationId;
+      // Coalesce adjacent text updates, not the network stream. Event boundaries
+      // flush immediately so tools, prompts and completion never overtake text.
+      if (event.kind === 'text-delta' || event.kind === 'thinking-delta') {
+        if (
+          pendingDelta &&
+          (pendingDelta.kind !== event.kind ||
+            pendingDelta.conversation_id !== event.conversation_id)
+        ) {
+          flushDelta();
+        }
+        pendingDelta = pendingDelta
+          ? { ...event, delta: (pendingDelta.delta || '') + (event.delta || '') }
+          : event;
+        deltaTimer ??= setTimeout(() => {
+          try {
+            flushDelta();
+          } catch (error) {
+            // Wake the pending read so callback errors reject the stream just
+            // like synchronous delivery, rather than escaping from a timer.
+            deliveryFailure = { error };
+            void reader.cancel().catch(() => {});
+          }
+        }, STREAM_TEXT_UPDATE_INTERVAL_MS);
+        return;
+      }
+      flushDelta();
       const id = event.ui_input?.id || event.ui_confirm?.id || event.ui_select?.id;
       if (id) pendingPrompts.set(id, conversationId);
       if (event.kind === 'ui-request-end' && event.ui_request_id) {
@@ -544,6 +582,7 @@ class ApiService {
     try {
       while (true) {
         const { done, value } = await reader.read();
+        if (deliveryFailure) throw deliveryFailure.error;
         buffer += decoder.decode(value, { stream: !done });
 
         const lines = buffer.split('\n');
@@ -566,16 +605,22 @@ class ApiService {
         }
       }
     } finally {
-      // A disconnected stream loses response authority, not execution ownership.
-      for (const [id, scope] of pendingPrompts) {
-        onEvent({
-          kind: 'ui-request-end',
-          conversation_id: scope,
-          ui_request_id: id,
-        });
+      // Also flush on EOF, cancellation or a failed read; do not lose the tail
+      // of an interrupted answer or leave callbacks alive after the stream ends.
+      try {
+        flushDelta();
+        // A disconnected stream loses response authority, not execution ownership.
+        for (const [id, scope] of pendingPrompts) {
+          onEvent({
+            kind: 'ui-request-end',
+            conversation_id: scope,
+            ui_request_id: id,
+          });
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
     }
   }
 }

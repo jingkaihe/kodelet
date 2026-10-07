@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -136,6 +137,12 @@ const generateConversationId = (): string => {
 const isScrolledNearBottom = (element: HTMLElement): boolean =>
   element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
 
+const getTranscriptScrollPosition = (element: HTMLElement) => ({
+  top: element.scrollTop,
+  height: element.scrollHeight,
+  viewport: element.clientHeight,
+});
+
 const buildConversationPreview = (
   prompt: string,
   attachments: PendingImageAttachment[]
@@ -223,7 +230,14 @@ const ChatPage: React.FC = () => {
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const loadedConversationId = conversation?.id ?? null;
-  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const transcriptScrollPositionRef = useRef<ReturnType<typeof getTranscriptScrollPosition> | null>(
+    null
+  );
+  const transcriptScrollIntentRef = useRef<
+    (ReturnType<typeof getTranscriptScrollPosition> & { direction: number }) | null
+  >(null);
+  const transcriptTouchYRef = useRef<number | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   const sendControllersRef = useRef<Record<string, AbortController>>({});
@@ -604,6 +618,9 @@ const ChatPage: React.FC = () => {
     }
     conversationPathOverrideRef.current = null;
     shouldAutoScrollRef.current = true;
+    transcriptScrollPositionRef.current = null;
+    transcriptScrollIntentRef.current = null;
+    transcriptTouchYRef.current = null;
 
     resumeStreamRef.current += 1;
     setActiveConversationId(conversationId);
@@ -807,22 +824,84 @@ const ChatPage: React.FC = () => {
     refreshConversations,
   ]);
 
+  const recordTranscriptScrollIntent = (element: HTMLElement, direction: number) => {
+    // Compositor scrolling may precede this handler. Upward input must pause
+    // following even if a stream commit has already overwritten that movement.
+    if (direction < 0) shouldAutoScrollRef.current = false;
+    // Keep the first position across input events coalesced before the scroll event.
+    if (
+      direction &&
+      (!transcriptScrollIntentRef.current ||
+        transcriptScrollIntentRef.current.direction * direction < 0)
+    ) {
+      transcriptScrollIntentRef.current = {
+        ...(transcriptScrollPositionRef.current ?? getTranscriptScrollPosition(element)),
+        direction,
+      };
+    }
+  };
+
+  const applyTranscriptScrollIntent = useCallback((element: HTMLElement) => {
+    const intent = transcriptScrollIntentRef.current;
+    if (!intent) return false;
+    if ((element.scrollTop - intent.top) * intent.direction > 0) {
+      // Input can move the viewport before its scroll event runs. Compare with the
+      // pre-input bottom, not content appended by the intervening stream commit.
+      shouldAutoScrollRef.current =
+        intent.direction > 0 &&
+        intent.height - intent.viewport - element.scrollTop <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+      transcriptScrollIntentRef.current = null;
+    }
+    return true;
+  }, []);
+
+  const handleTranscriptKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.defaultPrevented ||
+      (event.target instanceof Element &&
+        event.target.closest('input, textarea, select, button, summary, [contenteditable="true"]'))
+    )
+      return;
+    if (
+      ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ||
+      (event.key === ' ' && event.shiftKey)
+    ) {
+      recordTranscriptScrollIntent(event.currentTarget, -1);
+    } else if (['ArrowDown', 'PageDown', 'End', ' '].includes(event.key)) {
+      recordTranscriptScrollIntent(event.currentTarget, 1);
+    }
+  };
+
   const handleTranscriptScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    shouldAutoScrollRef.current = isScrolledNearBottom(event.currentTarget);
+    const position = getTranscriptScrollPosition(event.currentTarget);
+    const previous = transcriptScrollPositionRef.current;
+    // Resizing/reflow and our own bottom adjustment are not the reader scrolling away.
+    if (
+      !applyTranscriptScrollIntent(event.currentTarget) &&
+      (!previous ||
+        (position.height === previous.height &&
+          position.viewport === previous.viewport &&
+          position.top !== previous.top))
+    ) {
+      shouldAutoScrollRef.current = isScrolledNearBottom(event.currentTarget);
+    }
+    transcriptScrollPositionRef.current = position;
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(messages): New transcript content triggers scrolling when the reader is following the bottom.
   // biome-ignore lint/correctness/useExhaustiveDependencies(currentConversationIsStreaming): Starting or stopping the streaming indicator changes the transcript height.
-  useEffect(() => {
-    if (!shouldAutoScrollRef.current) {
-      return;
+  // biome-ignore lint/correctness/useExhaustiveDependencies(conversationLoading): Replacing the loading view with the transcript changes its height.
+  useLayoutEffect(() => {
+    const element = transcriptScrollRef.current;
+    if (!element) return;
+    applyTranscriptScrollIntent(element);
+    if (shouldAutoScrollRef.current) {
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      // Any remaining input did not move the transcript; do not attribute our scroll to it.
+      transcriptScrollIntentRef.current = null;
     }
-
-    transcriptEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'end',
-    });
-  }, [messages, currentConversationIsStreaming]);
+    transcriptScrollPositionRef.current = getTranscriptScrollPosition(element);
+  }, [messages, currentConversationIsStreaming, conversationLoading, applyTranscriptScrollIntent]);
 
   const handleNewChat = () => {
     discardDraftWorkspace();
@@ -1991,10 +2070,29 @@ const ChatPage: React.FC = () => {
             disabled={currentConversationIsStreaming || steering}
             onWorkspaceOpen={contextIsStatic ? undefined : openChatContext}
           />
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: Observe native scroll-key intent without replacing the browser's keyboard behavior. */}
           <div
+            ref={transcriptScrollRef}
             className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
             data-testid="chat-transcript-scroll"
             onScroll={handleTranscriptScroll}
+            onWheel={(event) => {
+              if (!event.ctrlKey && !event.defaultPrevented) {
+                recordTranscriptScrollIntent(event.currentTarget, event.deltaY);
+              }
+            }}
+            onTouchStart={(event) => {
+              transcriptTouchYRef.current =
+                event.touches.length === 1 ? event.touches[0].clientY : null;
+            }}
+            onTouchMove={(event) => {
+              const y = event.touches.length === 1 ? event.touches[0].clientY : null;
+              if (y !== null && transcriptTouchYRef.current !== null && !event.defaultPrevented) {
+                recordTranscriptScrollIntent(event.currentTarget, transcriptTouchYRef.current - y);
+              }
+              transcriptTouchYRef.current = y;
+            }}
+            onKeyDown={handleTranscriptKeyDown}
           >
             {conversationLoading ? (
               <div className="flex min-h-full items-center justify-center px-4 pb-12 pt-20 sm:px-6 lg:py-12">
@@ -2028,7 +2126,6 @@ const ChatPage: React.FC = () => {
                   environmentProfile={currentEnvironmentProfile}
                 />
                 <PendingSteerList messages={pendingSteerMessages} />
-                <div ref={transcriptEndRef} />
               </>
             )}
           </div>

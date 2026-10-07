@@ -584,6 +584,109 @@ describe('ChatTranscript', () => {
     }
   });
 
+  it('does not reparse earlier bullets for marker-only streaming tails', () => {
+    const base =
+      Array.from({ length: 24 }, (_, index) => `* Point ${index + 1}: ordinary text.`).join('\n') +
+      '\n\n';
+    const messages = (tail: string): ChatRenderMessage[] => [
+      { role: 'assistant', blocks: [{ type: 'message', content: base + tail, inProgress: true }] },
+    ];
+    const { container, rerender } = render(<ChatTranscript isStreaming messages={messages('')} />);
+    const list = screen.getByRole('list');
+    const initialHTML = list.innerHTML;
+    for (const tail of ['* ', '* *', '* **']) {
+      rerender(<ChatTranscript isStreaming messages={messages(tail)} />);
+      expect(screen.getByRole('list')).toBe(list);
+      expect(list.innerHTML).toBe(initialHTML);
+      expect(container.querySelector('hr')).not.toBeInTheDocument();
+    }
+    rerender(<ChatTranscript isStreaming messages={messages('* **Next point**: more text.')} />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(25);
+    expect(screen.getByText('Next point')).toHaveProperty('tagName', 'STRONG');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }));
+    expect(copyToClipboardMock).toHaveBeenLastCalledWith(`${base}* **Next point**: more text.`);
+  });
+
+  it.each([
+    '-',
+    '- ',
+    '- **',
+    '=',
+    '===',
+  ])('does not temporarily turn prose into a heading for the tail %s', (tail) => {
+    render(
+      <ChatTranscript
+        isStreaming
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [{ type: 'message', content: `A long paragraph.\n${tail}`, inProgress: true }],
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText('A long paragraph.')).toHaveProperty('tagName', 'P');
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    'newline',
+    'content-end',
+    'stopped',
+  ])('reveals deferred literal Markdown on %s', (ending) => {
+    const messages = (content: string, inProgress = true): ChatRenderMessage[] => [
+      { role: 'assistant', blocks: [{ type: 'message', content, inProgress }] },
+    ];
+    const { container, rerender } = render(
+      <ChatTranscript isStreaming messages={messages('Paragraph\n---')} />
+    );
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    rerender(
+      <ChatTranscript
+        isStreaming={ending !== 'stopped'}
+        messages={messages(
+          ending === 'newline' ? 'Paragraph\n---\n' : 'Paragraph\n---',
+          ending !== 'content-end'
+        )}
+      />
+    );
+    expect(container.querySelector('h2')).toHaveTextContent('Paragraph');
+  });
+
+  it.each([
+    '```text\n* **',
+    '~~~text\n- ',
+    '    * **',
+    '- Item\n\n  ```text\n  * **',
+  ])('does not hide literal markers in streamed code: %s', (content) => {
+    const { container, rerender } = render(
+      <ChatTranscript
+        isStreaming
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [{ type: 'message', content, inProgress: true }],
+          },
+        ]}
+      />
+    );
+    const code = container.querySelector('pre code');
+    expect(code).toBeInTheDocument();
+    const streamedText = code?.textContent;
+    rerender(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [{ type: 'message', content, inProgress: false }],
+          },
+        ]}
+      />
+    );
+    expect(container.querySelector('pre code')?.textContent).toBe(streamedText);
+  });
+
   it.each([
     ['unordered', '* first item\n* second item', 'UL'],
     ['ordered', '1. first item\n2. second item', 'OL'],

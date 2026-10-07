@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   BrowserTarget,
+  ChatStreamEvent,
   Conversation,
   ConversationListResponse,
   CWDHintsResponse,
@@ -1326,6 +1327,125 @@ describe('ApiService', () => {
   });
 
   describe('streamChat', () => {
+    it.each([
+      'timer',
+      'eof',
+    ])('rejects and releases the reader if a %s callback throws', async (ending) => {
+      vi.useFakeTimers();
+      const failure = new Error('Callback failed');
+      const onEvent = vi.fn(() => {
+        throw failure;
+      });
+      const cancel = vi.fn();
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
+          if (ending === 'eof') controller.close();
+        },
+        cancel,
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body });
+      const outcome = apiService
+        .streamConversation('conv-123', { onEvent })
+        .catch((error: Error) => error);
+      try {
+        await vi.advanceTimersByTimeAsync(100);
+        expect(await outcome).toBe(failure);
+        expect(body.locked).toBe(false);
+        if (ending === 'timer') expect(cancel).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      'run',
+      'observer',
+    ])('coalesces %s text without delaying event boundaries', async (mode) => {
+      vi.useFakeTimers();
+      const onEvent = vi.fn();
+      const stream = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = stream.writable.getWriter();
+      mockFetch.mockResolvedValueOnce({ ok: true, body: stream.readable });
+      const finished =
+        mode === 'run'
+          ? apiService.streamChat({ message: 'hello' }, { onEvent })
+          : apiService.streamConversation('conv-123', { onEvent });
+      const send = async (event: ChatStreamEvent) => {
+        await writer.write(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
+      };
+      try {
+        await send({ kind: 'text-delta', delta: 'first ' });
+        await vi.advanceTimersByTimeAsync(30);
+        await send({ kind: 'text-delta', delta: 'batch' });
+        expect(onEvent).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(45);
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith({
+          kind: 'text-delta',
+          delta: 'first batch',
+        });
+
+        await send({ kind: 'text-delta', delta: 'tail' });
+        await send({ kind: 'thinking-delta', delta: 'reasoning' });
+        await send({ kind: 'tool-use', tool_call_id: 'tool-1' });
+        await send({ kind: 'text-delta', delta: 'last' });
+        await send({ kind: 'done' });
+        expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
+          { kind: 'text-delta', delta: 'first batch' },
+          { kind: 'text-delta', delta: 'tail' },
+          { kind: 'thinking-delta', delta: 'reasoning' },
+          { kind: 'tool-use', tool_call_id: 'tool-1' },
+          { kind: 'text-delta', delta: 'last' },
+          { kind: 'done' },
+        ]);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        await writer.close();
+        await finished;
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      'eof',
+      'error',
+      'abort',
+    ])('flushes buffered text and clears its timer on %s', async (ending) => {
+      vi.useFakeTimers();
+      const onEvent = vi.fn();
+      const stream = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = stream.writable.getWriter();
+      mockFetch.mockResolvedValueOnce({ ok: true, body: stream.readable });
+      const finished = apiService.streamConversation('conv-123', { onEvent });
+      // Attach the rejection handler before simulating an aborted/failed fetch body.
+      const outcome = finished.then(
+        () => null,
+        (error: Error) => error
+      );
+      try {
+        await writer.write(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
+        expect(onEvent).not.toHaveBeenCalled();
+        if (ending === 'eof') await writer.close();
+        else
+          await writer.abort(
+            ending === 'abort'
+              ? new DOMException('Aborted', 'AbortError')
+              : new Error('Disconnected')
+          );
+        const error = await outcome;
+        expect(error?.name ?? null).toBe(
+          ending === 'eof' ? null : ending === 'abort' ? 'AbortError' : 'Error'
+        );
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'tail' });
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(onEvent).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it.each([
       'run',
       'observer',

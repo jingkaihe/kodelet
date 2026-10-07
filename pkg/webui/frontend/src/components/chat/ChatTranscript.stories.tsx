@@ -166,6 +166,62 @@ export const Streaming: Story = {
   },
 };
 
+export const StreamingBulletStability: Story = {
+  render: function Render() {
+    const [step, setStep] = useState(0);
+    const tails = ['', '* ', '* **', '* **Next point**: The list continues.'];
+    const content = `${Array.from(
+      { length: 24 },
+      (_, index) =>
+        `* Point ${index + 1}: Ordinary text that should not change height when a later bullet streams.`
+    ).join('\n')}\n\n${tails[Math.min(step, tails.length - 1)]}`;
+    return (
+      <>
+        <div className="sticky top-0 z-10 flex gap-2 bg-kodelet-light p-3">
+          <button
+            className="btn btn-sm"
+            onClick={() => setStep((current) => current + 1)}
+            disabled={step === 4}
+            type="button"
+          >
+            {step === 3 ? 'Finish stream' : 'Next chunk'}
+          </button>
+          <button className="btn btn-sm" onClick={() => setStep(0)} type="button">
+            Reset stream
+          </button>
+        </div>
+        <ChatTranscript
+          isStreaming={step < 4}
+          messages={[
+            {
+              role: 'assistant',
+              blocks: [{ type: 'message', content, inProgress: step < 4 }],
+            },
+          ]}
+        />
+      </>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    await canvasElement.ownerDocument.fonts.ready;
+    const canvas = within(canvasElement);
+    const heights = () =>
+      Array.from(canvasElement.querySelectorAll('.chat-prose li'))
+        .slice(0, 24)
+        .map((item) => item.getBoundingClientRect().height);
+    const initial = heights();
+    expect(initial).toHaveLength(24);
+    for (let step = 0; step < 3; step += 1) {
+      await userEvent.click(canvas.getByRole('button', { name: 'Next chunk' }));
+      await waitFor(() => expect(heights()).toEqual(initial));
+      expect(canvasElement.querySelector('.chat-prose hr')).toBeNull();
+    }
+    expect(canvas.getAllByRole('listitem')).toHaveLength(25);
+    await userEvent.click(canvas.getByRole('button', { name: 'Finish stream' }));
+    expect(heights()).toEqual(initial);
+  },
+};
+
 const transcriptPath = 'pkg/webui/frontend/src/components/chat/ChatTranscript.tsx';
 const patchInput = [
   '*** Begin Patch',

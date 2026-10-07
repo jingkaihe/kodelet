@@ -265,7 +265,7 @@ describe('ChatPage transcript statistics and scrolling', () => {
     expect(screen.getByText('stream continues')).toBeInTheDocument();
   });
 
-  it('only auto-scrolls streamed updates while the transcript is at the bottom', async () => {
+  const renderScrollingTranscript = async () => {
     setRouteParams({ id: 'conv-123' });
 
     mockGetConversation.mockResolvedValue({
@@ -288,7 +288,7 @@ describe('ChatPage transcript statistics and scrolling', () => {
       return new Promise(() => undefined);
     });
 
-    render(<ChatPage />);
+    const rendered = render(<ChatPage />);
 
     await waitFor(() => expect(streamListener).not.toBeNull());
 
@@ -296,42 +296,146 @@ describe('ChatPage transcript statistics and scrolling', () => {
     scrollIntoView.mockClear();
 
     const transcriptScroll = screen.getByTestId('chat-transcript-scroll');
+    const dimensions = { height: 1500, viewport: 500 };
     Object.defineProperties(transcriptScroll, {
-      clientHeight: { configurable: true, value: 500 },
-      scrollHeight: { configurable: true, value: 1500 },
-      scrollTop: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, get: () => dimensions.viewport },
+      scrollHeight: { configurable: true, get: () => dimensions.height },
     });
+    const emitText = async (delta: string) =>
+      act(async () => {
+        streamListener?.({ kind: 'text-delta', conversation_id: 'conv-123', delta });
+      });
+    await emitText('Initial response. ');
+    expect(transcriptScroll.scrollTop).toBe(1000);
+    return { ...rendered, transcriptScroll, dimensions, emitText, scrollIntoView };
+  };
 
+  it('only follows streamed updates while the reader is near the bottom', async () => {
+    const { transcriptScroll, dimensions, emitText, scrollIntoView } =
+      await renderScrollingTranscript();
+    transcriptScroll.scrollTop = 200;
     fireEvent.scroll(transcriptScroll);
 
-    await act(async () => {
-      streamListener?.({
-        kind: 'text-delta',
-        conversation_id: 'conv-123',
-        delta: 'while reading earlier content',
-      });
-    });
+    dimensions.height = 2500;
+    await emitText('while reading earlier content');
+    expect(screen.getByText(/while reading earlier content/)).toBeInTheDocument();
+    expect(transcriptScroll.scrollTop).toBe(200);
 
-    expect(screen.getByText('while reading earlier content')).toBeInTheDocument();
+    transcriptScroll.scrollTop = 1950;
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 3500;
+    await emitText(' after returning to bottom');
+    expect(transcriptScroll.scrollTop).toBe(3000);
     expect(scrollIntoView).not.toHaveBeenCalled();
+  });
 
-    Object.defineProperty(transcriptScroll, 'scrollTop', {
-      configurable: true,
-      value: 1000,
-    });
+  it('keeps following large bursts despite queued scroll events and content growth', async () => {
+    const { transcriptScroll, dimensions, emitText, scrollIntoView } =
+      await renderScrollingTranscript();
+    for (const height of [5500, 9000, 15000]) {
+      dimensions.height = height;
+      // An event queued by the previous bottom adjustment sees the newer content height.
+      fireEvent.scroll(transcriptScroll);
+      await emitText(' more streamed text');
+      expect(transcriptScroll.scrollTop).toBe(height - dimensions.viewport);
+      fireEvent.scroll(transcriptScroll);
+    }
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('does not mistake browser clamping after content shrinks for reader intent', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    dimensions.height = 800;
+    transcriptScroll.scrollTop = 300;
     fireEvent.scroll(transcriptScroll);
+    dimensions.height = 2000;
+    await emitText(' content grows again');
+    expect(transcriptScroll.scrollTop).toBe(1500);
+  });
 
-    await act(async () => {
-      streamListener?.({
-        kind: 'text-delta',
-        conversation_id: 'conv-123',
-        delta: ' after returning to bottom',
-      });
-    });
+  const scrollInput = (element: HTMLElement, kind: string, direction: number) => {
+    if (kind === 'wheel') fireEvent.wheel(element, { deltaY: direction * 100 });
+    else if (kind === 'keyboard')
+      fireEvent.keyDown(element, { key: direction < 0 ? 'PageUp' : 'End' });
+    else {
+      fireEvent.touchStart(element, { touches: [{ clientY: 200 }] });
+      fireEvent.touchMove(element, { touches: [{ clientY: 200 - direction * 100 }] });
+    }
+  };
 
-    expect(scrollIntoView).toHaveBeenCalledWith({
-      behavior: 'smooth',
-      block: 'end',
-    });
+  it.each([
+    650, 970,
+  ])('preserves compositor movement to %ipx before the wheel handler runs', async (top) => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    transcriptScroll.scrollTop = top;
+    fireEvent.wheel(transcriptScroll, { deltaY: -350 });
+    for (const height of [2500, 3500, 4500]) {
+      dimensions.height = height;
+      await emitText(' streamed after compositor scrolling');
+      fireEvent.scroll(transcriptScroll);
+      expect(transcriptScroll.scrollTop).toBe(top);
+    }
+  });
+
+  it('pauses on upward input even when a stream commit precedes native scrolling', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    fireEvent.wheel(transcriptScroll, { deltaY: -350 });
+    dimensions.height = 2500;
+    await emitText(' before native movement');
+    expect(transcriptScroll.scrollTop).toBe(1000);
+    transcriptScroll.scrollTop = 650;
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 3500;
+    await emitText(' after native movement');
+    expect(transcriptScroll.scrollTop).toBe(650);
+  });
+
+  it('recognizes a compositor return to the old bottom before the downward wheel handler', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    transcriptScroll.scrollTop = 200;
+    fireEvent.scroll(transcriptScroll);
+    transcriptScroll.scrollTop = 1000;
+    fireEvent.wheel(transcriptScroll, { deltaY: 800 });
+    dimensions.height = 2500;
+    await emitText(' after compositor returns to bottom');
+    expect(transcriptScroll.scrollTop).toBe(2000);
+    fireEvent.scroll(transcriptScroll);
+  });
+
+  it.each([
+    'wheel',
+    'touch',
+    'keyboard',
+  ])('preserves upward %s motion before its queued scroll event', async (kind) => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    scrollInput(transcriptScroll, kind, -1);
+    transcriptScroll.scrollTop = 970;
+    scrollInput(transcriptScroll, kind, -1);
+    dimensions.height = 2500;
+    await emitText(' while the user starts reading above');
+    expect(transcriptScroll.scrollTop).toBe(970);
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 3000;
+    await emitText(' and continues reading');
+    expect(transcriptScroll.scrollTop).toBe(970);
+  });
+
+  it.each([
+    'wheel',
+    'touch',
+    'keyboard',
+  ])('resumes on downward %s motion to the old bottom before its scroll event', async (kind) => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    transcriptScroll.scrollTop = 200;
+    fireEvent.scroll(transcriptScroll);
+    scrollInput(transcriptScroll, kind, 1);
+    transcriptScroll.scrollTop = 1000;
+    dimensions.height = 2500;
+    await emitText(' after returning to the previous bottom');
+    expect(transcriptScroll.scrollTop).toBe(2000);
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 3000;
+    await emitText(' with following still enabled');
+    expect(transcriptScroll.scrollTop).toBe(2500);
   });
 });
