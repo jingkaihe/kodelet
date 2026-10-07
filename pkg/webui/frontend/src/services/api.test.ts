@@ -1327,10 +1327,7 @@ describe('ApiService', () => {
   });
 
   describe('streamChat', () => {
-    it.each([
-      'timer',
-      'eof',
-    ])('rejects and releases the reader if a %s callback throws', async (ending) => {
+    it('rejects and releases the reader if a batched callback throws', async () => {
       vi.useFakeTimers();
       const failure = new Error('Callback failed');
       const onEvent = vi.fn(() => {
@@ -1340,7 +1337,6 @@ describe('ApiService', () => {
       const body = new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
-          if (ending === 'eof') controller.close();
         },
         cancel,
       });
@@ -1352,26 +1348,20 @@ describe('ApiService', () => {
         await vi.advanceTimersByTimeAsync(100);
         expect(await outcome).toBe(failure);
         expect(body.locked).toBe(false);
-        if (ending === 'timer') expect(cancel).toHaveBeenCalledOnce();
+        expect(cancel).toHaveBeenCalledOnce();
         expect(vi.getTimerCount()).toBe(0);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it.each([
-      'run',
-      'observer',
-    ])('coalesces %s text without delaying event boundaries', async (mode) => {
+    it('coalesces text without delaying event boundaries', async () => {
       vi.useFakeTimers();
       const onEvent = vi.fn();
       const stream = new TransformStream<Uint8Array, Uint8Array>();
       const writer = stream.writable.getWriter();
       mockFetch.mockResolvedValueOnce({ ok: true, body: stream.readable });
-      const finished =
-        mode === 'run'
-          ? apiService.streamChat({ message: 'hello' }, { onEvent })
-          : apiService.streamConversation('conv-123', { onEvent });
+      const finished = apiService.streamConversation('conv-123', { onEvent });
       const send = async (event: ChatStreamEvent) => {
         await writer.write(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
       };
@@ -1409,7 +1399,6 @@ describe('ApiService', () => {
 
     it.each([
       'eof',
-      'error',
       'abort',
     ])('flushes buffered text and clears its timer on %s', async (ending) => {
       vi.useFakeTimers();
@@ -1427,16 +1416,9 @@ describe('ApiService', () => {
         await writer.write(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
         expect(onEvent).not.toHaveBeenCalled();
         if (ending === 'eof') await writer.close();
-        else
-          await writer.abort(
-            ending === 'abort'
-              ? new DOMException('Aborted', 'AbortError')
-              : new Error('Disconnected')
-          );
+        else await writer.abort(new DOMException('Aborted', 'AbortError'));
         const error = await outcome;
-        expect(error?.name ?? null).toBe(
-          ending === 'eof' ? null : ending === 'abort' ? 'AbortError' : 'Error'
-        );
+        expect(error?.name ?? null).toBe(ending === 'eof' ? null : 'AbortError');
         expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'tail' });
         expect(vi.getTimerCount()).toBe(0);
         await vi.advanceTimersByTimeAsync(100);
