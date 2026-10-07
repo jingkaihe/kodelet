@@ -385,4 +385,114 @@ describe('ChatPage transcript statistics and scrolling', () => {
     await emitText(' after native movement');
     expect(transcriptScroll.scrollTop).toBe(650);
   });
+  const makeNestedScroller = (scrollTop: number) => {
+    const nested = screen.getByText('Existing conversation');
+    nested.style.overflowY = 'auto';
+    Object.defineProperties(nested, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: scrollTop },
+    });
+    return nested;
+  };
+
+  it.each([
+    ['a nested scroller takes it', () => makeNestedScroller(50)],
+    ['a horizontal swipe drifts vertically', null],
+    ['a short transcript is already at the top', null],
+  ])('keeps following when upward input cannot move the transcript because %s', async (reason, nestedTarget) => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    if (reason.startsWith('a short')) {
+      dimensions.height = 500;
+      await emitText(' short');
+      expect(transcriptScroll.scrollTop).toBe(0);
+    }
+    fireEvent.wheel(nestedTarget?.() ?? transcriptScroll, {
+      deltaX: reason.startsWith('a horizontal') ? -80 : 0,
+      deltaY: -30,
+    });
+    dimensions.height = 2500;
+    await emitText(' more streamed text');
+    expect(transcriptScroll.scrollTop).toBe(2000);
+  });
+
+  it('catches up once upward input has moved nothing within the grace period', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    vi.useFakeTimers();
+    try {
+      // A nested scroller already at its top no longer consumes upward input.
+      fireEvent.wheel(makeNestedScroller(0), { deltaY: -30 });
+      dimensions.height = 2500;
+      await emitText(' held while input may still move the transcript');
+      expect(transcriptScroll.scrollTop).toBe(1000);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(transcriptScroll.scrollTop).toBe(2000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops downward input that never moved the transcript before the reader scrolls up', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    fireEvent.wheel(transcriptScroll, { deltaY: 100 });
+    transcriptScroll.scrollTop = 200;
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 2500;
+    await emitText(' while reading above');
+    expect(transcriptScroll.scrollTop).toBe(200);
+  });
+
+  it('holds following while the transcript scrollbar is pressed', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    fireEvent.pointerDown(transcriptScroll);
+    dimensions.height = 2500;
+    await emitText(' during the press');
+    expect(transcriptScroll.scrollTop).toBe(1000);
+    act(() => {
+      fireEvent.pointerUp(window);
+    });
+    expect(transcriptScroll.scrollTop).toBe(2000);
+
+    fireEvent.pointerDown(transcriptScroll);
+    dimensions.height = 3000;
+    await emitText(' before the drag reaches the scroll event');
+    transcriptScroll.scrollTop = 400;
+    fireEvent.scroll(transcriptScroll);
+    act(() => {
+      fireEvent.pointerUp(window);
+    });
+    dimensions.height = 3500;
+    await emitText(' after the drag');
+    expect(transcriptScroll.scrollTop).toBe(400);
+
+    // Pressing transcript content is not a scrollbar drag.
+    transcriptScroll.scrollTop = 3000;
+    fireEvent.scroll(transcriptScroll);
+    fireEvent.pointerDown(screen.getByText('Existing conversation'));
+    dimensions.height = 4000;
+    await emitText(' while pressing content');
+    expect(transcriptScroll.scrollTop).toBe(3500);
+  });
+
+  it('treats scroll keys without a focused control as transcript input', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    const composer = document.querySelector('textarea');
+    expect(composer).not.toBeNull();
+    fireEvent.keyDown(composer as HTMLTextAreaElement, { key: 'PageUp' });
+    dimensions.height = 2000;
+    await emitText(' while typing');
+    expect(transcriptScroll.scrollTop).toBe(1500);
+
+    fireEvent.keyDown(document.body, { key: 'PageUp' });
+    dimensions.height = 2500;
+    await emitText(' before the key scrolls');
+    expect(transcriptScroll.scrollTop).toBe(1500);
+    transcriptScroll.scrollTop = 1100;
+    fireEvent.scroll(transcriptScroll);
+    dimensions.height = 3000;
+    await emitText(' after the key scrolls');
+    expect(transcriptScroll.scrollTop).toBe(1100);
+  });
 });

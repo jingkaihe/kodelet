@@ -24,13 +24,17 @@ import ChatWelcome from './ChatWelcome';
 // Highlight only changed message HTML, never the entire document during streaming.
 Prism.manual = true;
 
+// Optional blockquote markers followed by nothing but a list, heading, rule or setext marker.
+const MARKER_ONLY_LINE =
+  /^[\t ]*(?:>[\t ]*)*(?:(?:[-+*]|\d+[.)])[\t *_]*|#{1,6}[\t ]*|[=_-]+[\t ]*)?$/;
+
 const stableStreamingMarkdown = (content: string): string => {
   const lineStart = content.lastIndexOf('\n') + 1;
   const tail = content.slice(lineStart);
   // A bare "-" can turn the preceding paragraph into a heading, and "* **"
   // can turn a new bullet into a rule and change the spacing of an entire list.
   // Hold only marker-only unfinished lines, not ordinary streaming prose.
-  if (!/^[\t ]*(?:(?:[-+*]|\d+[.)])[\t *_]*|#{1,6}[\t ]*|[=_-]+[\t ]*)$/.test(tail)) {
+  if (!tail.trim() || !MARKER_ONLY_LINE.test(tail)) {
     return content;
   }
   let tokens: Token[] = Lexer.lex(content);

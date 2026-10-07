@@ -1330,13 +1330,17 @@ describe('ApiService', () => {
     it('rejects and releases the reader if a batched callback throws', async () => {
       vi.useFakeTimers();
       const failure = new Error('Callback failed');
-      const onEvent = vi.fn(() => {
-        throw failure;
+      const onEvent = vi.fn((event: ChatStreamEvent) => {
+        if (event.delta === 'tail') throw failure;
       });
       const cancel = vi.fn();
       const body = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
+          controller.enqueue(
+            new TextEncoder().encode(
+              '{"kind":"text-delta","delta":"head"}\n{"kind":"text-delta","delta":"tail"}\n'
+            )
+          );
         },
         cancel,
       });
@@ -1347,6 +1351,7 @@ describe('ApiService', () => {
       try {
         await vi.advanceTimersByTimeAsync(100);
         expect(await outcome).toBe(failure);
+        expect(onEvent.mock.calls.map(([event]) => event.delta)).toEqual(['head', 'tail']);
         expect(body.locked).toBe(false);
         expect(cancel).toHaveBeenCalledOnce();
         expect(vi.getTimerCount()).toBe(0);
@@ -1355,7 +1360,7 @@ describe('ApiService', () => {
       }
     });
 
-    it('coalesces text without delaying event boundaries', async () => {
+    it('shows the first text at once and coalesces the rest without delaying event boundaries', async () => {
       vi.useFakeTimers();
       const onEvent = vi.fn();
       const stream = new TransformStream<Uint8Array, Uint8Array>();
@@ -1366,15 +1371,15 @@ describe('ApiService', () => {
         await writer.write(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
       };
       try {
-        await send({ kind: 'text-delta', delta: 'first ' });
+        await send({ kind: 'text-delta', delta: 'first' });
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'first' });
         await vi.advanceTimersByTimeAsync(30);
-        await send({ kind: 'text-delta', delta: 'batch' });
-        expect(onEvent).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(45);
-        expect(onEvent).toHaveBeenCalledExactlyOnceWith({
-          kind: 'text-delta',
-          delta: 'first batch',
-        });
+        await send({ kind: 'text-delta', delta: ' second' });
+        await send({ kind: 'text-delta', delta: ' batch' });
+        await vi.advanceTimersByTimeAsync(44);
+        expect(onEvent).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(onEvent).toHaveBeenLastCalledWith({ kind: 'text-delta', delta: ' second batch' });
 
         await send({ kind: 'text-delta', delta: 'tail' });
         await send({ kind: 'thinking-delta', delta: 'reasoning' });
@@ -1382,7 +1387,8 @@ describe('ApiService', () => {
         await send({ kind: 'text-delta', delta: 'last' });
         await send({ kind: 'done' });
         expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
-          { kind: 'text-delta', delta: 'first batch' },
+          { kind: 'text-delta', delta: 'first' },
+          { kind: 'text-delta', delta: ' second batch' },
           { kind: 'text-delta', delta: 'tail' },
           { kind: 'thinking-delta', delta: 'reasoning' },
           { kind: 'tool-use', tool_call_id: 'tool-1' },
@@ -1413,16 +1419,21 @@ describe('ApiService', () => {
         (error: Error) => error
       );
       try {
-        await writer.write(new TextEncoder().encode('{"kind":"text-delta","delta":"tail"}\n'));
-        expect(onEvent).not.toHaveBeenCalled();
+        await writer.write(
+          new TextEncoder().encode(
+            '{"kind":"text-delta","delta":"head"}\n{"kind":"text-delta","delta":"tail"}\n'
+          )
+        );
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'head' });
         if (ending === 'eof') await writer.close();
         else await writer.abort(new DOMException('Aborted', 'AbortError'));
         const error = await outcome;
         expect(error?.name ?? null).toBe(ending === 'eof' ? null : 'AbortError');
-        expect(onEvent).toHaveBeenCalledExactlyOnceWith({ kind: 'text-delta', delta: 'tail' });
+        expect(onEvent).toHaveBeenCalledTimes(2);
+        expect(onEvent).toHaveBeenLastCalledWith({ kind: 'text-delta', delta: 'tail' });
         expect(vi.getTimerCount()).toBe(0);
         await vi.advanceTimersByTimeAsync(100);
-        expect(onEvent).toHaveBeenCalledTimes(1);
+        expect(onEvent).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
       }

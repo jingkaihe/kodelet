@@ -534,13 +534,17 @@ class ApiService {
     const pendingPrompts = new Map<string, string | undefined>();
     let pendingDelta: ChatStreamEvent | undefined;
     let deltaTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastDeltaDelivery = Number.NEGATIVE_INFINITY;
     let deliveryFailure: { error: unknown } | undefined;
     const flushDelta = () => {
       clearTimeout(deltaTimer);
       deltaTimer = undefined;
       const event = pendingDelta;
       pendingDelta = undefined;
-      if (event) onEvent(event);
+      if (event) {
+        lastDeltaDelivery = performance.now();
+        onEvent(event);
+      }
     };
     const deliver = (line: string) => {
       const event = JSON.parse(line) as ChatStreamEvent;
@@ -558,7 +562,14 @@ class ApiService {
         pendingDelta = pendingDelta
           ? { ...event, delta: (pendingDelta.delta || '') + (event.delta || '') }
           : event;
-        deltaTimer ??= setTimeout(() => {
+        if (deltaTimer !== undefined) return;
+        // Show the first text of a burst at once, then at most one update per interval.
+        const wait = lastDeltaDelivery + STREAM_TEXT_UPDATE_INTERVAL_MS - performance.now();
+        if (wait <= 0) {
+          flushDelta();
+          return;
+        }
+        deltaTimer = setTimeout(() => {
           try {
             flushDelta();
           } catch (error) {
@@ -567,7 +578,7 @@ class ApiService {
             deliveryFailure = { error };
             void reader.cancel().catch(() => {});
           }
-        }, STREAM_TEXT_UPDATE_INTERVAL_MS);
+        }, wait);
         return;
       }
       flushDelta();

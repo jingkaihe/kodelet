@@ -584,21 +584,26 @@ describe('ChatTranscript', () => {
     }
   });
 
-  it('does not reparse earlier bullets for marker-only streaming tails', () => {
-    const base = '* First point: ordinary text.\n* Second point: more text.\n\n';
+  it.each([
+    ['top-level', ''],
+    ['quoted', '> '],
+  ])('does not reparse earlier %s bullets for marker-only streaming tails', (_, quote) => {
+    const base = `${quote}* First point: ordinary text.\n${quote}* Second point: more text.\n${quote.trim()}\n`;
     const messages = (tail: string): ChatRenderMessage[] => [
       { role: 'assistant', blocks: [{ type: 'message', content: base + tail, inProgress: true }] },
     ];
     const { container, rerender } = render(<ChatTranscript isStreaming messages={messages('')} />);
     const list = screen.getByRole('list');
     const initialHTML = list.innerHTML;
-    for (const tail of ['* ', '* **']) {
+    for (const tail of [quote.trim(), `${quote}* `, `${quote}* **`].filter(Boolean)) {
       rerender(<ChatTranscript isStreaming messages={messages(tail)} />);
       expect(screen.getByRole('list')).toBe(list);
       expect(list.innerHTML).toBe(initialHTML);
       expect(container.querySelector('hr')).not.toBeInTheDocument();
     }
-    rerender(<ChatTranscript isStreaming messages={messages('* **Next point**: more text.')} />);
+    rerender(
+      <ChatTranscript isStreaming messages={messages(`${quote}* **Next point**: more text.`)} />
+    );
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.getByText('Next point')).toHaveProperty('tagName', 'STRONG');
   });
@@ -627,16 +632,14 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('h2')).toHaveTextContent('Paragraph');
   });
 
-  it('does not hide literal markers in streamed code nested inside a list', () => {
+  it.each([
+    ['a list', '- Item\n\n  ```text\n  * **'],
+    ['a quote', '> ```text\n> * **'],
+  ])('does not hide literal markers in streamed code nested inside %s', (_, content) => {
     const { container } = render(
       <ChatTranscript
         isStreaming
-        messages={[
-          {
-            role: 'assistant',
-            blocks: [{ type: 'message', content: '- Item\n\n  ```text\n  * **', inProgress: true }],
-          },
-        ]}
+        messages={[{ role: 'assistant', blocks: [{ type: 'message', content, inProgress: true }] }]}
       />
     );
     expect(container.querySelector('pre code')).toHaveTextContent('* **');
