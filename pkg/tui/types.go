@@ -82,6 +82,7 @@ type toolCall struct {
 	structured      *tooltypes.StructuredToolResult
 	expanded        bool
 	expandedChanges map[int]bool
+	expandedCode    map[string]bool
 }
 
 type assistantBlockKind int
@@ -131,6 +132,8 @@ type detailRegion struct {
 	toolStart   int
 	toolEnd     int
 	changeIndex int
+	codeKey     string
+	expanded    bool
 }
 
 // conversationState contains the presentation and execution state owned by one

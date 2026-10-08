@@ -27,6 +27,8 @@ type toolRenderGroup struct {
 	active       bool
 	failed       bool
 	plainHeader  bool
+	codeKey      string
+	codeParent   bool
 }
 
 type toolRenderLabelPart struct {
@@ -41,7 +43,7 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 		tool := block.tools[idx]
 		switch {
 		case normalizedToolName(tool) == "code_execute":
-			groups = append(groups, buildCodeExecutionToolGroup(block, idx))
+			groups = append(groups, m.buildCodeExecutionToolGroups(block, idx)...)
 			idx++
 
 		case normalizedToolName(tool) == "browser":
@@ -94,25 +96,103 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	return groups
 }
 
-func buildCodeExecutionToolGroup(block assistantBlock, idx int) toolRenderGroup {
+func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []toolRenderGroup {
 	tool := block.tools[idx]
-	label, body := "Code execution", "Waiting for code execution…"
+	var meta tooltypes.CodeExecutionMetadata
 	if tool.structured != nil {
-		var meta tooltypes.CodeExecutionMetadata
-		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
-			label = renderers.CodeExecutionSummary(meta)
-		}
-		body = (&renderers.CodeExecutionRenderer{}).RenderCLI(*tool.structured)
-	} else if tool.done {
-		body = tool.result
+		tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
 	}
-	return toolRenderGroup{
+	label := renderers.CodeExecutionSummary(meta)
+	expanded := func(key string) bool {
+		if value, exists := tool.expandedCode[key]; exists {
+			return value
+		}
+		return block.expanded || (key == "" && (tool.expanded || !tool.done))
+	}
+	parent := toolRenderGroup{
 		toolStart: idx, toolEnd: idx, changeIndex: -1,
-		label: sanitizeExtensionUIText(label), runningLabel: sanitizeExtensionUIText(label),
-		body: sanitizeExtensionTranscriptText(body), wrapBody: true,
-		expanded: block.expanded || tool.expanded || tool.failed,
+		codeParent: true,
+		label:      label, runningLabel: label,
+		expanded: expanded(""),
 		active:   !tool.done, failed: tool.failed,
 	}
+	if tool.failed {
+		parent.body, parent.wrapBody = sanitizeExtensionTranscriptText(fileChangeErrorText(tool)), true
+	}
+	groups := []toolRenderGroup{parent}
+	if !parent.expanded {
+		return groups
+	}
+	body := "Code is unavailable for this invocation."
+	if code := stringField(toolInputFields(tool.input), "code"); code != "" {
+		body = renderers.FencedCodeBlock("javascript", sanitizeExtensionTranscriptText(code))
+	}
+	if tool.done {
+		output := renderers.CodeExecutionOutput(meta)
+		if tool.structured == nil && !tool.failed {
+			output = tool.result
+		}
+		if output != "" {
+			body += "\n\n" + renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(output))
+		}
+		if tool.structured != nil {
+			if images := renderers.ImageAttachmentLines(*tool.structured, m.serverURL); len(images) > 0 {
+				body += "\n\n" + renderers.FencedCodeBlock("text", sanitizeExtensionTranscriptText(strings.Join(images, "\n")))
+			}
+		}
+	}
+	groups = append(groups, toolRenderGroup{
+		toolStart: idx, toolEnd: idx, changeIndex: -1, codeKey: "code",
+		label: "Code", body: body, markdownBody: true, expanded: expanded("code"),
+	})
+	// Reuse normal command aggregation and per-file rendering at the nested width.
+	nested := *m
+	nested.width = max(1, m.width-2)
+	nested.viewport.SetWidth(max(1, m.viewport.Width()-2))
+	for start := 0; start < len(meta.Calls); {
+		call := meta.Calls[start]
+		var children []toolRenderGroup
+		end := start
+		childBlock := assistantBlock{}
+		for tool.done && end < len(meta.Calls) && meta.Calls[end].Result != nil {
+			child := meta.Calls[end]
+			childBlock.tools = append(childBlock.tools, toolCall{
+				id: child.CallID, name: child.ToolName, input: string(child.Input), done: true,
+				failed:     child.Status != "completed" || !child.Result.Success,
+				structured: child.Result, result: structuredToolResultText(child.Result),
+			})
+			end++
+			if !isBashTool(childBlock.tools[0]) || (end < len(meta.Calls) && meta.Calls[end].ToolName != "bash") {
+				break
+			}
+		}
+		if end > start {
+			children = nested.toolRenderGroups(childBlock)
+		} else {
+			note := "Child tool details were not saved for this invocation."
+			if !tool.done {
+				note = "Child tool details are available when code execution finishes."
+			} else if call.DetailsOmitted {
+				note = "Child tool details exceeded the storage limit."
+			}
+			children = []toolRenderGroup{{
+				label: sanitizeExtensionUIText(call.ToolName + " · " + call.Status), body: note, wrapBody: true, changeIndex: -1,
+				failed: call.Status != "completed" && call.Status != "running" && call.Status != "queued",
+			}}
+			end++
+		}
+		for _, child := range children {
+			if len(childBlock.tools) > 0 {
+				child.failed = anyFailedTool(childBlock.tools[child.toolStart : child.toolEnd+1])
+			}
+			child.codeKey = fmt.Sprintf("%s:%d:%d", meta.Calls[start+child.toolStart].CallID, start+child.toolStart, child.changeIndex)
+			child.toolStart, child.toolEnd, child.changeIndex = idx, idx, -1
+			child.expanded = expanded(child.codeKey)
+			groups = append(groups, child)
+		}
+		start = end
+	}
+	return groups
 }
 
 func (m model) buildBrowserToolGroup(block assistantBlock, idx int) toolRenderGroup {

@@ -1846,8 +1846,6 @@ return { status: replies[0].data.output, branch: replies[1].data.output.trim() }
 
 Use `return`, `emit(value)`, and `console.log(...)` to select JSON/text output. Await results before emitting them. Use `try/catch` or `Promise.allSettled` when tool failures are expected. Completed actions are not automatically retried or rolled back.
 
-The Web UI shows one expandable code-execution card containing the JavaScript, nested tool results with their usual command and diff views, and selected output. Child output is available after execution finishes, not streamed. Older calls may have only status summaries; oversized details are marked as omitted. The TUI shows a concise summary. Failed calls remain visible even if the script handles the error.
-
 Select images explicitly:
 
 ```javascript
@@ -1858,8 +1856,6 @@ emit.image(reply.attachments[0]); // Sends pixels to the model.
 ```
 
 Both image APIs accept an attachment or artifact ID returned by a tool in the current script, including MCP tools. To use an existing image, first call `tools.view_image({artifactId})`. `emit.image` requires `view_image` permission and accepts `{detail: "original"}` on compatible models. Returning an ID alone does **not** retain or view it. Selected images remain available in history and forks. Only image artifacts are supported, not PDFs or other files.
-
-Scripts do not keep variables between invocations and cannot use imports or access files, the network, or environment variables directly; use permitted tools for those operations. Each invocation allows up to 120 seconds, 128 tool calls with four running at once, 32 KiB of selected text/JSON, and eight image/artifact emissions, including repeats. Oversized tool replies produce an error rather than rerunning the tool. Cancellation does not undo completed actions.
 
 ## Agentic Skills
 

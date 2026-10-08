@@ -48,6 +48,18 @@ func (*CodeExecutionRenderer) RenderCLI(result tools.StructuredToolResult) strin
 			fmt.Fprintf(&output, " · %s", call.ErrorKind)
 		}
 	}
+	if selected := CodeExecutionOutput(meta); selected != "" {
+		output.WriteString("\n\n" + selected)
+	}
+	if result.Error != "" {
+		output.WriteString("\n\nError: " + result.Error)
+	}
+	return output.String()
+}
+
+// CodeExecutionOutput renders selected values without duplicating the call summary.
+func CodeExecutionOutput(meta tools.CodeExecutionMetadata) string {
+	var output strings.Builder
 	items := meta.Items
 	if items == nil {
 		for _, value := range meta.Outputs {
@@ -74,8 +86,5 @@ func (*CodeExecutionRenderer) RenderCLI(result tools.StructuredToolResult) strin
 			fmt.Fprintf(&output, "\n\nRetained artifact (not sent to model): %s", item.ArtifactID)
 		}
 	}
-	if result.Error != "" {
-		output.WriteString("\n\nError: " + result.Error)
-	}
-	return output.String()
+	return strings.TrimPrefix(output.String(), "\n\n")
 }

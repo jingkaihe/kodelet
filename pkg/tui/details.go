@@ -39,6 +39,12 @@ func (m *model) toggleAllDetails() {
 		for blockIdx := range m.entries[i].blocks {
 			if isDetailBlock(m.entries[i].blocks[blockIdx]) {
 				m.entries[i].blocks[blockIdx].expanded = shouldExpand
+				for toolIdx := range m.entries[i].blocks[blockIdx].tools {
+					tool := &m.entries[i].blocks[blockIdx].tools[toolIdx]
+					if normalizedToolName(*tool) == "code_execute" {
+						tool.expandedCode = map[string]bool{"": shouldExpand}
+					}
+				}
 			}
 		}
 	}
@@ -76,6 +82,14 @@ func (m *model) toggleDetailAt(screenY int) bool {
 		}
 		block := &m.entries[region.entryIndex].blocks[region.blockIndex]
 		if region.kind == detailTools && region.toolStart >= 0 && region.toolStart < len(block.tools) {
+			if normalizedToolName(block.tools[region.toolStart]) == "code_execute" {
+				tool := &block.tools[region.toolStart]
+				if tool.expandedCode == nil {
+					tool.expandedCode = map[string]bool{}
+				}
+				tool.expandedCode[region.codeKey] = !region.expanded
+				return true
+			}
 			if region.changeIndex >= 0 {
 				tool := &block.tools[region.toolStart]
 				if tool.expandedChanges == nil {

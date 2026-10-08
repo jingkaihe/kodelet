@@ -31,6 +31,9 @@ type Handler func(context.Context, Request) (any, error)
 // Tool executors can apply this limit before recording their final child summary.
 const MaxHostResponseBytes = 2 << 20
 
+// MaxConcurrentToolCalls bounds active children in both the VM and runner registry.
+const MaxConcurrentToolCalls = 8
+
 // OutputItem is a selected JSON value, image, or artifact reference. Type is
 // "json", "image", or "artifact", set by the host operation rather than inferred
 // from an emitted JSON value. Value is used only for JSON; ArtifactID is used
@@ -89,9 +92,10 @@ func defaultRuntimeLimits() runtimeLimits {
 		toolCalls:       128,
 		catalogCalls:    256,
 		pendingCalls:    256,
-		toolConcurrency: 4,
-		retainedBytes:   16 << 20,
-		unhandledCount:  256,
+		toolConcurrency: MaxConcurrentToolCalls,
+		// Reserve a response slot for catalog work even when every tool worker is active.
+		retainedBytes:  (MaxConcurrentToolCalls + 1) * MaxHostResponseBytes,
+		unhandledCount: 256,
 	}
 }
 

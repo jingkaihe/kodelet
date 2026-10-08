@@ -324,7 +324,7 @@ Initial host-enforced limits, to validate during the spike:
 | VM memory | 256 MiB |
 | Submitted async function body | 128 KiB |
 | Child calls per invocation, including queued calls | 128 |
-| Simultaneously dispatched child calls | 4 |
+| Simultaneously dispatched child calls | 8 |
 | Catalog requests per invocation | 256 |
 | Outstanding bridge requests, including queued and completed-but-unsettled work | 256 |
 | Selected JSON output and media descriptors | 32 KiB, excluding separately stored image bytes |
@@ -332,7 +332,7 @@ Initial host-enforced limits, to validate during the spike:
 | JSON payload admitted to the VM per child | 2 MiB |
 | Final UI-only child details per invocation | 512 KiB aggregate; oversized details explicitly omitted |
 
-Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 8 MiB retained-byte budgets. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
+Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 18 MiB retained-byte budgets. The response budget accommodates eight tool workers plus one catalog worker at the 2 MiB response limit, so active tools cannot occupy every response slot and starve discovery. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
 
 These are host policy, not script-controlled escape hatches. Also bound host-side result queues, aggregate retained payloads, and script input size; VM memory limits alone do not bound Go allocations. Use normal artifact storage for retained overflow when allowed, and report truncation/overflow explicitly rather than silently dropping selected output. Existing tool-level truncation remains visible through the reply contract.
 
@@ -363,7 +363,7 @@ Example expanded card:
     ▸ Edit file: src/example.ts                (+3 -1)
 ```
 
-The Web UI nests a Code foldout containing JavaScript and its selected output, followed by child tool foldouts reusing ordinary tool renderers. Older histories without retained child details remain readable but cannot reconstruct those results. The TUI retains its concise summary. No new nested event protocol is needed; live results and reloaded history use the same persisted metadata. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.
+The TUI and Web UI nest a Code foldout containing JavaScript and its selected output, followed by child tool foldouts reusing ordinary tool renderers. Adjacent commands are grouped, and patch file rows appear directly under the parent without a separate Apply patch wrapper. TUI fold choices are local presentation state on the parent tool call; mouse hit regions identify each nested group or file, and `Ctrl+O` expands or collapses all details. Older histories without retained child details remain readable but cannot reconstruct those results. No new nested event protocol is needed; live results and reloaded history use the same persisted metadata. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.
 
 ### Explicit image and artifact output
 

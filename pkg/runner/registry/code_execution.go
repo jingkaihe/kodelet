@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -137,7 +138,7 @@ func (r *Registry) codeChild(ctx context.Context, identity UIRequestIdentity, pa
 			active++
 		}
 	}
-	if active >= 4 {
+	if active >= codemode.MaxConcurrentToolCalls {
 		return fail(protocol.ErrorCodeConflict, "code execution active child limit exceeded")
 	}
 	if run.codeChildIDs == nil {

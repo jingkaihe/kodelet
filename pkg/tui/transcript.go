@@ -91,23 +91,32 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					}
 					for _, group := range m.toolRenderGroups(block) {
 						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
+						indent := ""
+						if group.codeKey != "" {
+							indent = "  "
+						}
 						header := m.renderToolGroupHeader(group)
+						header = indent + strings.ReplaceAll(header, "\n", "\n"+indent)
 						b.WriteString(header)
 						b.WriteString("\n")
-						regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line, toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex})
+						regions = append(regions, detailRegion{
+							entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line,
+							toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex,
+							codeKey: group.codeKey, expanded: group.expanded,
+						})
 						line += lineCount(header)
-						if group.expanded || group.active {
+						if group.expanded || (group.active && !group.codeParent) {
 							body := group.body
 							if group.markdownBody {
-								body = m.renderMarkdown(body, m.transcriptTextWidth()-2, markdownAssistant)
+								body = m.renderMarkdown(body, m.transcriptTextWidth()-2-len(indent), markdownAssistant)
 							}
 							if group.wrapBody {
-								body = wrapPreservingWhitespace(body, m.transcriptTextWidth()-2)
+								body = wrapPreservingWhitespace(body, m.transcriptTextWidth()-2-len(indent))
 							}
 							if len(group.bodyLines) > 0 {
 								indentedLines := make([]diffview.RenderedLine, 0, len(group.bodyLines))
 								for _, line := range group.bodyLines {
-									line.Text = "  " + line.Text
+									line.Text = indent + "  " + line.Text
 									indentedLines = append(indentedLines, line)
 								}
 								rendered := renderDiffRenderedLines(indentedLines)
@@ -117,6 +126,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 								continue
 							}
 							body = indentText(body)
+							body = indent + strings.ReplaceAll(body, "\n", "\n"+indent)
 							if strings.TrimSpace(body) != "" {
 								rendered := renderPersistentStyle(toolBodyStyle, body)
 								b.WriteString(rendered)
@@ -279,6 +289,9 @@ func (m model) renderToolGroupHeader(group toolRenderGroup) string {
 	if group.active {
 		prefix := m.spinnerGlyph() + " "
 		suffix := "… ▾"
+		if group.codeParent && !group.expanded {
+			suffix = "… ▸"
+		}
 		maxWidth := max(1, m.transcriptTextWidth()*2/3)
 		labelWidth := max(1, maxWidth-lipgloss.Width(prefix)-lipgloss.Width(suffix))
 		label := strings.TrimSpace(group.runningLabel)

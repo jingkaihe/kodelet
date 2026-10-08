@@ -209,7 +209,7 @@ func TestCodeChildBudgetsAndCancellation(t *testing.T) {
 	defer cleanup()
 	defer cancel()
 	identity := codeRegistryIdentity(session)
-	children := make([]runnerpayload.ToolChildParams, 4)
+	children := make([]runnerpayload.ToolChildParams, 8)
 	for i := range children {
 		children[i] = runnerpayload.ToolChildParams{
 			RunID:            "run-one",
@@ -232,7 +232,7 @@ func TestCodeChildBudgetsAndCancellation(t *testing.T) {
 		_, rpcErr := registry.codeChild(t.Context(), identity, child, false)
 		require.Nil(t, rpcErr)
 	}
-	for i := 4; i < 128; i++ {
+	for i := len(children); i < 128; i++ {
 		extra.ToolCallID = fmt.Sprint(i)
 		_, rpcErr := registry.codeChild(t.Context(), identity, extra, true)
 		require.Nil(t, rpcErr)

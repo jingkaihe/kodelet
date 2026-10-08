@@ -340,14 +340,13 @@ func TestRuntimeParallelToolsAndIndependentCatalog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	result, err := Execute(ctx, `
-const jobs = Array.from({length: 8}, (_, i) => tools.echo({i}));
+const jobs = Array.from({length: 16}, (_, i) => tools.echo({i}));
 const discovery = await catalog.search("release tools");
 return {discovery, values: await Promise.all(jobs)};
 `, func(ctx context.Context, request Request) (any, error) {
 		if request.Operation == "catalog.search" {
-			// Catalog must not be starved by the four tool slots. Allow the
-			// first four tools to enter before releasing their barrier.
-			for entered.Load() < 4 {
+			// Catalog must still run with all eight tool slots occupied.
+			for entered.Load() < 8 {
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -379,9 +378,12 @@ return {discovery, values: await Promise.all(jobs)};
 		return input.I, nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int32(4), maxActive.Load())
+	assert.Equal(t, int32(8), maxActive.Load())
 	require.Len(t, result.Outputs, 1)
-	assert.JSONEq(t, `{"discovery":"ready","values":[0,1,2,3,4,5,6,7]}`, string(result.Outputs[0].Value))
+	assert.JSONEq(t, `{
+  "discovery": "ready",
+  "values": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+}`, string(result.Outputs[0].Value))
 }
 
 func TestRuntimeOutOfOrderCompletionAndCopiedInputs(t *testing.T) {
