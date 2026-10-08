@@ -150,7 +150,7 @@ return {
 };
 ```
 
-For code-mode scripts, also return `structuredContent` as the machine-readable result (`reply.data`) and describe it with an optional raw JSON Schema `outputSchema` on the registration; keep display details in `data`. An optional `group` sets the catalog group that scripts can filter by (default `extension/<extension-id>`). Structured content over 1 MiB is omitted with a notice.
+For code-mode scripts, also return `structuredContent` as the machine-readable result (`reply.data`) and describe it with an optional raw JSON Schema `outputSchema` on the registration; keep display details in `data`. An optional `group` sets the catalog group that scripts can filter by (default `extension/<extension-id>`), and an optional `short` sets the tool's one-line summary in code mode's tool listing (default: the description's first sentence). Structured content over 1 MiB is omitted with a notice.
 
 Per-tool enablement lives under `extensions.tools.<tool-name>.enabled`. Tool timeouts use SDK `timeoutInSec` or the built-in 10 minute fallback.
 

@@ -83,6 +83,11 @@ func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 // FileWriteTool provides functionality to write files
 type FileWriteTool struct{}
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *FileWriteTool) Short() string {
+	return "Create or overwrite a file with the given text."
+}
+
 // Name returns the name of the tool
 func (t *FileWriteTool) Name() string {
 	return "file_write"

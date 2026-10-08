@@ -581,6 +581,7 @@ func snapshotManifest(ctx context.Context, state tooltypes.State, runtime *exten
 			Description:  tool.Description(),
 			InputSchema:  tooltypes.JSONSchemaForTool(tool),
 			OutputSchema: tooltypes.OutputSchemaForTool(tool),
+			Short:        tooltypes.ShortForTool(tool),
 			ModelOnly:    tooltypes.IsModelOnly(tool),
 			Placement:    ToolPlacementEnvironment,
 			Tool:         tool,

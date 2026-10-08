@@ -147,6 +147,7 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 					{Name: "code_execute", Placement: "environment"},
 					{Name: "lookup", Placement: "environment", Group: "mcp/test", OutputSchema: map[string]any{"type": "object"}},
 					{Name: "skill", Placement: "environment", ModelOnly: true},
+					{Name: "summarized", Placement: "environment", Short: "Do one thing."},
 				},
 			}}
 			environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
@@ -172,6 +173,10 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 			require.True(t, found)
 			assert.True(t, skill.ModelOnly)
 			assert.True(t, tooltypes.IsModelOnly(skill.Tool), "the proxy keeps the model-only trait")
+			summarized, found := manifest.ToolDefinition("summarized")
+			require.True(t, found)
+			assert.Equal(t, "Do one thing.", summarized.Short)
+			assert.Equal(t, "Do one thing.", tooltypes.ShortForTool(summarized.Tool))
 			assert.Equal(t, "only", manifest.Config.CodeMode)
 			request := ToolRequest{Name: "code_execute", Input: `{"code":"return 1"}`, ToolCallID: "parent"}
 			_, err = environment.ExecuteTool(t.Context(), request, nil)

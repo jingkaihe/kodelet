@@ -26,6 +26,7 @@ type Tool struct {
 	rawSchema    map[string]any
 	outputSchema map[string]any
 	group        string
+	short        string
 	timeout      time.Duration
 	maxOutput    int
 }
@@ -69,6 +70,7 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 		rawSchema:    rawSchema,
 		outputSchema: outputSchema,
 		group:        registration.Group,
+		short:        registration.Short,
 		timeout:      timeout,
 		maxOutput:    maxOutput,
 	}, nil
@@ -100,6 +102,9 @@ func (t *Tool) RawOutputSchema() map[string]any {
 	_ = json.Unmarshal(payload, &schema)
 	return schema
 }
+
+// Short returns the extension's optional one-line summary for compact listings.
+func (t *Tool) Short() string { return t.short }
 
 // ToolGroup returns recorded provenance without parsing the flattened tool name.
 func (t *Tool) ToolGroup() string {

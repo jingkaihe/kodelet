@@ -120,6 +120,11 @@ type GlobTool struct{}
 // GlobInput reuses the shared glob_tool input schema while preserving pkg/tools schema IDs.
 type GlobInput tooltypes.GlobInput
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *GlobTool) Short() string {
+	return "Find files whose names match a glob pattern, newest first."
+}
+
 // Name returns the name of the tool
 func (t *GlobTool) Name() string {
 	return "glob_tool"

@@ -90,6 +90,11 @@ type WebFetchInput struct {
 	Prompt string `json:"prompt,omitempty" jsonschema:"description=Information to extract from HTML/Markdown content (optional)"`
 }
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *WebFetchTool) Short() string {
+	return "Fetch a public URL, optionally extracting information with a prompt."
+}
+
 // Name returns the name of the tool.
 func (t *WebFetchTool) Name() string {
 	return "web_fetch"

@@ -119,11 +119,8 @@ func executeEnvironmentTool(
 			return ToolExecution{Input: toolInput, Result: result, StructuredResult: result.StructuredData()}
 		}
 		callable := []string{}
-		for _, definition := range manifest.Tools {
-			// Model-only tools are declared directly and never callable from scripts.
-			if definition.Name != "code_execute" && !definition.ModelOnly && ToolAllowedForThread(thread, definition.Name) {
-				callable = append(callable, definition.Name)
-			}
+		for _, definition := range codeCallableDefinitions(thread, manifest) {
+			callable = append(callable, definition.Name)
 		}
 		request.CallableTools = &callable
 	}

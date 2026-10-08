@@ -167,6 +167,11 @@ func (b *BashTool) RawOutputSchema() map[string]any {
 	}
 }
 
+// Short returns the one-line summary used in compact tool listings.
+func (b *BashTool) Short() string {
+	return "Run a bash command and return its combined output and exit code."
+}
+
 // Name returns the name of the tool
 func (b *BashTool) Name() string {
 	return "bash"

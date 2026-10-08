@@ -46,7 +46,7 @@ func newCodeService(t *testing.T, environment agentenv.Environment) (*Service, *
 			Capabilities:     runnerpayload.EnvironmentCapabilities{CodeExecution: true},
 			Tools: []runnerpayload.ToolDefinition{
 				{Name: "code_execute", Placement: "environment"},
-				{Name: "test_tool", Placement: "environment", InputSchema: map[string]any{"type": "object"}},
+				{Name: "test_tool", Placement: "environment", InputSchema: map[string]any{"type": "object"}, Short: "Test things."},
 			},
 		},
 	}
@@ -202,6 +202,14 @@ func TestRunnerCodeAuthorization(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunnerCodeCatalogCarriesSummaries(t *testing.T) {
+	service, run, _, params := newCodeService(t, &codeTestEnvironment{})
+	authority, err := service.codeExecutionContext(t.Context(), run, params)
+	require.NoError(t, err)
+	require.Len(t, authority.Definitions, 1)
+	assert.Equal(t, "Test things.", authority.Definitions[0].Short)
 }
 
 func TestRunnerCodeRegistrationFailureDoesNotExecute(t *testing.T) {

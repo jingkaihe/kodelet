@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,6 +60,60 @@ func (t *streamingTestTool) ExecuteStreaming(
 	t.streamingExecuted = true
 	onUpdate(tooltypes.BaseToolResult{Result: "partial"})
 	return tooltypes.BaseToolResult{Result: "complete"}
+}
+
+func TestBuiltInToolsHaveOneLineSummaries(t *testing.T) {
+	builtIns := []tooltypes.Tool{NewBrowserTool(nil)}
+	for name, tool := range toolRegistry {
+		// code_execute is never listed, and skill is model-only.
+		if name != "code_execute" && name != "skill" {
+			builtIns = append(builtIns, tool)
+		}
+	}
+	for _, tool := range builtIns {
+		short := tooltypes.ShortForTool(tool)
+		assert.NotEmpty(t, short, tool.Name())
+		assert.LessOrEqual(t, len([]rune(short)), 120, tool.Name())
+		assert.NotContains(t, short, "\n", tool.Name())
+		assert.True(t, strings.HasSuffix(short, "."), tool.Name())
+	}
+}
+
+func TestBuiltInSchemasMatchToolDefaults(t *testing.T) {
+	for _, tt := range []struct {
+		tool     tooltypes.Tool
+		required []any
+		defaults map[string]any
+	}{
+		{
+			tool:     &GrepTool{},
+			required: []any{"pattern"},
+			defaults: map[string]any{"ignore_case": false, "fixed_strings": false, "surround_lines": float64(0), "max_results": float64(100)},
+		},
+		{tool: &FileReadTool{}, required: []any{"file_path"}, defaults: map[string]any{"offset": float64(1), "line_limit": float64(2000)}},
+		{tool: &FileEditTool{}, required: []any{"file_path", "old_text", "new_text"}, defaults: map[string]any{"replace_all": false}},
+		{tool: &GlobTool{}, required: []any{"pattern"}},
+	} {
+		t.Run(tt.tool.Name(), func(t *testing.T) {
+			payload, err := json.Marshal(tooltypes.JSONSchemaForTool(tt.tool))
+			require.NoError(t, err)
+			var schema map[string]any
+			require.NoError(t, json.Unmarshal(payload, &schema))
+			assert.Equal(t, tt.required, schema["required"])
+			properties := schema["properties"].(map[string]any)
+			for name, want := range tt.defaults {
+				assert.Equal(t, want, properties[name].(map[string]any)["default"], name)
+			}
+			for name, property := range properties {
+				description, _ := property.(map[string]any)["description"].(string)
+				assert.NotEqual(t, "If true", description, "%s description must not be split at a comma", name)
+			}
+		})
+	}
+	properties := tooltypes.JSONSchemaForTool(&FileEditTool{})["properties"].(map[string]any)
+	assert.Contains(t, properties["replace_all"].(map[string]any)["description"], "old_text must be unique")
+	properties = tooltypes.JSONSchemaForTool(&GrepTool{})["properties"].(map[string]any)
+	assert.Contains(t, properties["include"].(map[string]any)["description"], "'*.{go,py}'")
 }
 
 func TestGetAvailableToolNames(t *testing.T) {

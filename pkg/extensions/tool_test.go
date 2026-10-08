@@ -19,7 +19,10 @@ import (
 
 func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 	t.Run("default schema", func(t *testing.T) {
-		tool, err := newTool("weather", nil, ToolRegistration{Name: "weather", Description: "Weather"}, 0, 100)
+		tool, err := newTool("weather", nil, ToolRegistration{Name: "weather", Description: "Weather", Short: "Get the weather."}, 0, 100)
+		require.NoError(t, err)
+		assert.Equal(t, "Get the weather.", tooltypes.ShortForTool(tool))
+		tool, err = newTool("weather", nil, ToolRegistration{Name: "weather", Description: "Weather"}, 0, 100)
 		require.NoError(t, err)
 		require.NotNil(t, tool.GenerateSchema())
 		assert.Equal(t, "object", tool.GenerateSchema().Type)

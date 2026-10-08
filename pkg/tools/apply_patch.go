@@ -95,6 +95,11 @@ func (r *applyPatchToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *ApplyPatchTool) Short() string {
+	return "Add, update, delete, or move files with an apply_patch patch."
+}
+
 // Name returns the name of the tool.
 func (t *ApplyPatchTool) Name() string {
 	return "apply_patch"

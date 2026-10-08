@@ -37,8 +37,13 @@ type BrowserInput struct {
 	Action     string `json:"action" jsonschema:"enum=open,enum=navigate,enum=evaluate,enum=screenshot,enum=stop,description=Operation on the conversation browser shared with the human within this conversation"`
 	URL        string `json:"url,omitempty" jsonschema:"description=HTTP or HTTPS URL for navigate. Use localhost to access local HTTP services. Navigation does not wait for application readiness."`
 	Expression string `json:"expression,omitempty" jsonschema:"description=JavaScript expression for evaluate. Can inspect the DOM or interact with the page. Promises are awaited."`
-	Path       string `json:"path,omitempty" jsonschema:"description=New PNG output path for screenshot, relative to the workspace or absolute. Existing files are not overwritten."`
+	Path       string `json:"path,omitempty" jsonschema:"description=New PNG output path for screenshot\\, relative to the workspace or absolute. Existing files are not overwritten."`
 	SessionID  string `json:"sessionId,omitempty" jsonschema:"description=Session ID returned by open; required for explicit stop."`
+}
+
+// Short returns the one-line summary used in compact tool listings.
+func (*BrowserTool) Short() string {
+	return "Open, navigate, evaluate, or screenshot the browser page shared with the user."
 }
 
 func (*BrowserTool) Name() string { return "browser" }

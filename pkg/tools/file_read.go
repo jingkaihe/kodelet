@@ -149,6 +149,11 @@ func (r *FileReadTool) RawOutputSchema() map[string]any {
 	}
 }
 
+// Short returns the one-line summary used in compact tool listings.
+func (r *FileReadTool) Short() string {
+	return "Read a text file with line numbers, optionally from an offset."
+}
+
 // Name returns the name of the tool
 func (r *FileReadTool) Name() string {
 	return "file_read"

@@ -21,7 +21,7 @@ import (
 type ViewImageInput struct {
 	Path       string `json:"path,omitempty" jsonschema:"minLength=1,description=Local filesystem path to an image file. Supply exactly one of path or artifactId."`
 	ArtifactID string `json:"artifactId,omitempty" jsonschema:"minLength=1,description=Persisted image artifact ID returned by a tool in this conversation. Supply exactly one of artifactId or path."`
-	Detail     string `json:"detail,omitempty" jsonschema:"description=Optional. Set to 'original' for maximum detail."`
+	Detail     string `json:"detail,omitempty" jsonschema:"enum=original,description=Optional. Set to 'original' for maximum detail."`
 }
 
 // ViewImageToolResult represents the result of a view_image operation.
@@ -100,6 +100,11 @@ type ViewImageTool struct {
 // NewViewImageTool creates a view_image tool configured for the active model/provider.
 func NewViewImageTool(model, provider string) *ViewImageTool {
 	return &ViewImageTool{model: model, provider: provider}
+}
+
+// Short returns the one-line summary used in compact tool listings.
+func (t *ViewImageTool) Short() string {
+	return "View an image from a local path or a tool-returned artifact ID."
 }
 
 func (t *ViewImageTool) Name() string {

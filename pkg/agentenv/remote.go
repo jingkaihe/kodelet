@@ -540,6 +540,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 			InputSchema:  cloneJSONMap(definition.InputSchema),
 			OutputSchema: cloneJSONMap(definition.OutputSchema),
 			Group:        definition.Group,
+			Short:        definition.Short,
 			ModelOnly:    definition.ModelOnly,
 			Placement:    ToolPlacementEnvironment,
 			Tool:         proxy,
@@ -595,6 +596,7 @@ type remoteToolProxy struct {
 	schema       map[string]any
 	outputSchema map[string]any
 	group        string
+	short        string
 	modelOnly    bool
 }
 
@@ -605,6 +607,7 @@ func newRemoteToolProxy(definition runnerpayload.ToolDefinition) *remoteToolProx
 		schema:       cloneJSONMap(definition.InputSchema),
 		outputSchema: cloneJSONMap(definition.OutputSchema),
 		group:        definition.Group,
+		short:        definition.Short,
 		modelOnly:    definition.ModelOnly,
 	}
 }
@@ -625,6 +628,7 @@ func (t *remoteToolProxy) RawInputSchema() map[string]any  { return cloneJSONMap
 func (t *remoteToolProxy) RawOutputSchema() map[string]any { return cloneJSONMap(t.outputSchema) }
 func (t *remoteToolProxy) ToolGroup() string               { return t.group }
 func (t *remoteToolProxy) ModelOnly() bool                 { return t.modelOnly }
+func (t *remoteToolProxy) Short() string                   { return t.short }
 func (t *remoteToolProxy) Name() string                    { return t.name }
 func (t *remoteToolProxy) Description() string             { return t.description }
 func (t *remoteToolProxy) ValidateInput(_ tooltypes.State, parameters string) error {

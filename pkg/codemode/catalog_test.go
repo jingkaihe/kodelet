@@ -218,7 +218,19 @@ func TestCatalogSchemaDeclarations(t *testing.T) {
 	}{
 		{name: "missing", want: "unknown"},
 		{name: "reference", schema: map[string]any{"$ref": "#/$defs/X", "type": "object"}, want: "unknown"},
-		{name: "composition", schema: map[string]any{"anyOf": []any{map[string]any{"type": "string"}}}, want: "unknown"},
+		{name: "single member union", schema: map[string]any{"anyOf": []any{map[string]any{"type": "string"}}}, want: "string"},
+		{
+			name: "nullable union",
+			schema: map[string]any{"anyOf": []any{
+				map[string]any{"type": "string"},
+				map[string]any{"type": "null"},
+			}},
+			want: "string | null",
+		},
+		{name: "one of", schema: map[string]any{"oneOf": []any{map[string]any{"const": "a"}, map[string]any{"const": 1}}}, want: `"a" | 1`},
+		{name: "unrepresentable member", schema: map[string]any{"anyOf": []any{map[string]any{"$ref": "#/$defs/X"}}}, want: "unknown"},
+		{name: "empty union members", schema: map[string]any{"anyOf": []any{}}, want: "unknown"},
+		{name: "intersection", schema: map[string]any{"allOf": []any{map[string]any{"type": "string"}}}, want: "unknown"},
 		{name: "tuple", schema: map[string]any{"type": "array", "prefixItems": []any{}}, want: "unknown"},
 		{name: "enum", schema: map[string]any{"enum": []any{"open", "closed", nil}}, want: `"open" | "closed" | null`},
 		{name: "empty enum", schema: map[string]any{"enum": []any{}}, want: "unknown"},
@@ -267,7 +279,7 @@ func TestCatalogEmptyAndBoundedSummaries(t *testing.T) {
 	page, err = catalog.List(CatalogOptions{})
 	require.NoError(t, err)
 	require.Len(t, page.Tools, 1)
-	assert.Len(t, []rune(page.Tools[0].Description), 240)
+	assert.Len(t, []rune(page.Tools[0].Description), summaryMaxRunes, "listings use the one-line summary")
 	assert.True(t, strings.HasSuffix(page.Tools[0].Description, "…"))
 	description, err := catalog.Describe("tool")
 	require.NoError(t, err)

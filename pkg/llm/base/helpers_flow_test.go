@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/invopop/jsonschema"
@@ -228,6 +229,14 @@ type modelOnlyTool struct{ namedTool }
 
 func (modelOnlyTool) ModelOnly() bool { return true }
 
+func toolNames(tools []tooltypes.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name())
+	}
+	return names
+}
+
 func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 	tools := []tooltypes.Tool{
 		namedTool("bash"),
@@ -241,19 +250,36 @@ func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 			thread := &environmentThreadStub{
 				threadStub: &threadStub{state: state, config: llmtypes.Config{CodeMode: mode}},
 				environment: &recordingAgentEnvironment{open: true, manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
-					{Name: "bash", Tool: tools[0]},
-					{Name: "code_execute", Tool: tools[1]},
-					{Name: "search_issues", Tool: tools[2]},
-					{Name: "skill", Tool: tools[3], ModelOnly: true},
+					{Name: "bash", Description: "test tool", Tool: tools[0]},
+					{Name: "code_execute", Description: "test tool", Tool: tools[1]},
+					{Name: "search_issues", Description: "test tool", Group: "mcp/test", Tool: tools[2]},
+					{Name: "skill", Description: "test tool", Tool: tools[3], ModelOnly: true},
 				}}},
 			}
-			want := tools
+			want := []string{"bash", "code_execute", "search_issues", "skill"}
 			if mode == "only" {
-				want = []tooltypes.Tool{tools[1], tools[3]}
+				want = []string{"code_execute", "skill"}
 			}
-			assert.Equal(t, want, AvailableEnvironmentToolsForThread(thread, false))
-			assert.Equal(t, want, AvailableToolsForThread(thread, state, false))
-			assert.Equal(t, want, AvailableToolsForThread(thread.threadStub, state, false), "state-based advertisement follows the same mode")
+			assert.Equal(t, want, toolNames(AvailableEnvironmentToolsForThread(thread, false)))
+			assert.Equal(t, want, toolNames(AvailableToolsForThread(thread, state, false)))
+			assert.Equal(t, want, toolNames(AvailableToolsForThread(thread.threadStub, state, false)),
+				"state-based advertisement follows the same mode")
+			if mode == "only" {
+				for _, advertised := range [][]tooltypes.Tool{
+					AvailableEnvironmentToolsForThread(thread, false),
+					AvailableToolsForThread(thread.threadStub, state, false),
+				} {
+					description := advertised[0].Description()
+					assert.True(t, strings.HasPrefix(description, "test tool\n\nCallable tools."), "the index follows the base description")
+					assert.Contains(t, description, "Built-in:\n  bash({}) — test tool")
+					assert.Contains(t, description, "mcp/test:\n  search_issues({}) — test tool")
+					assert.NotContains(t, description, "skill", "model-only tools are not script-callable")
+					assert.Equal(t, tooltypes.JSONSchemaForTool(tools[1]), tooltypes.JSONSchemaForTool(advertised[0]))
+				}
+			} else {
+				assert.IsType(t, namedTool(""), AvailableEnvironmentToolsForThread(thread, false)[1],
+					"other modes advertise code_execute unchanged")
+			}
 			assert.True(t, ToolAllowedForThread(thread, "bash"), "core tools remain callable from scripts")
 			assert.True(t, ToolAllowedForThread(thread, "search_issues"), "hiding a schema must not change authorization")
 			assert.Len(t, state.Tools(), 4, "the underlying callable state is unchanged")
@@ -263,10 +289,14 @@ func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 				assert.Empty(t, AvailableEnvironmentToolsForThread(thread, false), "never fall back when code_execute is denied")
 				assert.Empty(t, AvailableToolsForThread(thread.threadStub, state, false))
 				thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash", "skill"})
-				assert.Equal(t, []tooltypes.Tool{tools[3]}, AvailableEnvironmentToolsForThread(thread, false),
+				assert.Equal(t, []string{"skill"}, toolNames(AvailableEnvironmentToolsForThread(thread, false)),
 					"model-only tools stay declared without code_execute")
+				thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"code_execute", "bash"})
+				description := AvailableEnvironmentToolsForThread(thread, false)[0].Description()
+				assert.Contains(t, description, "bash({})")
+				assert.NotContains(t, description, "search_issues", "the index lists only this turn's callable tools")
 			} else {
-				assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, AvailableEnvironmentToolsForThread(thread, false))
+				assert.Equal(t, []string{"bash", "search_issues"}, toolNames(AvailableEnvironmentToolsForThread(thread, false)))
 			}
 		})
 	}

@@ -379,6 +379,11 @@ export interface ToolRegistration<Schema extends ToolInputSchema = ToolInputSche
   outputSchema?: JSONSchema;
   /** Recorded catalog group; defaults to the owning extension on the host. */
   group?: string;
+  /**
+   * One-line summary for compact code-mode tool listings. Defaults to the first
+   * sentence of `description`.
+   */
+  short?: string;
   timeoutInSec?: number;
   execute(input: InferInput<Schema>, ctx: ToolContext): Awaitable<ToolExecutionResult | string>;
 }
@@ -579,6 +584,7 @@ export interface InitializeResult {
     inputSchema: Record<string, unknown>;
     outputSchema?: JSONSchema;
     group?: string;
+    short?: string;
     timeoutInSec?: number;
   }>;
   commands: Array<{

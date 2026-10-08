@@ -90,7 +90,9 @@ type ToolRegistration struct {
 	InputSchema  map[string]any `json:"inputSchema"`
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	Group        string         `json:"group,omitempty"`
-	TimeoutInSec *float64       `json:"timeoutInSec,omitempty"`
+	// Short is an optional one-line summary for compact code-mode listings.
+	Short        string   `json:"short,omitempty"`
+	TimeoutInSec *float64 `json:"timeoutInSec,omitempty"`
 }
 
 // CommandRegistration is returned by an extension during initialization.

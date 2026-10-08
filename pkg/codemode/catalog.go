@@ -24,9 +24,12 @@ const (
 
 // Definition describes one already-authorized tool. Names are exact registered names.
 type Definition struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	Group        string         `json:"group,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Group       string `json:"group,omitempty"`
+	// Short is an explicit one-line summary. Without one, listings use the
+	// first sentence of Description.
+	Short        string         `json:"short,omitempty"`
 	InputSchema  map[string]any `json:"inputSchema"`
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 }
@@ -277,12 +280,12 @@ func (c *Catalog) page(indices []int, operation, query string, options CatalogOp
 	page := Page{Tools: make([]ToolSummary, 0, end-offset)}
 	for _, index := range indices[offset:end] {
 		definition := c.documents[index].definition
-		description := []rune(strings.Join(strings.Fields(definition.Description), " "))
-		if len(description) > 240 {
-			description = append(description[:239], '…')
-		}
+		// Listings use the same one-line summary as the code_execute tool index,
+		// so a tool never appears with two different summaries.
 		page.Tools = append(page.Tools, ToolSummary{
-			Name: definition.Name, Description: string(description), Group: definition.Group,
+			Name:        definition.Name,
+			Description: Summary(definition),
+			Group:       definition.Group,
 		})
 	}
 	if end < len(indices) {
@@ -378,10 +381,34 @@ func catalogSchemaType(schema map[string]any, depth int) string {
 	if len(schema) == 0 || depth > 8 {
 		return "unknown"
 	}
-	for _, key := range []string{"$ref", "$dynamicRef", "allOf", "anyOf", "oneOf", "not", "if", "patternProperties", "prefixItems"} {
+	for _, key := range []string{"$ref", "$dynamicRef", "allOf", "not", "if", "patternProperties", "prefixItems"} {
 		if _, exists := schema[key]; exists {
 			return "unknown"
 		}
+	}
+	// anyOf and oneOf of representable members become a union, such as
+	// string | null; anything else stays unknown.
+	for _, key := range []string{"anyOf", "oneOf"} {
+		members, exists := schema[key]
+		if !exists {
+			continue
+		}
+		list, ok := members.([]any)
+		if !ok || len(list) == 0 || len(list) > 16 {
+			return "unknown"
+		}
+		union := make([]string, 0, len(list))
+		for _, member := range list {
+			memberSchema, _ := member.(map[string]any)
+			typeName := catalogSchemaType(memberSchema, depth+1)
+			if typeName == "unknown" {
+				return "unknown"
+			}
+			if !slices.Contains(union, typeName) {
+				union = append(union, typeName)
+			}
+		}
+		return strings.Join(union, " | ")
 	}
 	if value, exists := schema["const"]; exists {
 		return catalogLiteral(value)
@@ -479,7 +506,9 @@ func catalogSchemaType(schema map[string]any, depth int) string {
 
 func catalogLiteral(value any) string {
 	switch value.(type) {
-	case nil, string, float64, json.Number, bool:
+	// Go-built schemas can carry native integers; decoded JSON uses float64 or json.Number.
+	case nil, string, float64, float32, json.Number, bool,
+		int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		payload, err := json.Marshal(value)
 		if err == nil && len(payload) <= 1024 {
 			return string(payload)

@@ -77,6 +77,7 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			Name:         name,
 			Description:  definition.Description,
 			Group:        definition.Group,
+			Short:        definition.Short,
 			InputSchema:  definition.InputSchema,
 			OutputSchema: definition.OutputSchema,
 		})

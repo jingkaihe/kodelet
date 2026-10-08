@@ -52,7 +52,7 @@ test("machine result schemas are isolated and structured content stays separate 
   const harness = await createTestHarness(defineExtension(ext => {
     ext.registerTool({
       name: "structured", description: "Structured output", inputSchema: z.object({}),
-      outputSchema, group: "mcp/server_with_underscores",
+      outputSchema, group: "mcp/server_with_underscores", short: "Return a structured value.",
       execute: () => ({
         content: "Human readable summary",
         data: { presentation: { summary: "Summary" } },
@@ -64,6 +64,7 @@ test("machine result schemas are isolated and structured content stays separate 
   const initialized = harness.initialize();
   assert.deepEqual(initialized.tools[0]?.outputSchema, expectedSchema);
   assert.equal(initialized.tools[0]?.group, "mcp/server_with_underscores");
+  assert.equal(initialized.tools[0]?.short, "Return a structured value.");
   const snapshot = initialized.tools[0]?.outputSchema;
   assert.ok(snapshot);
   (snapshot.properties as Record<string, unknown>).value = "mutated-output";
@@ -86,6 +87,7 @@ test("machine result payloads preserve falsy and non-object JSON values", async 
     const result = await harness.executeTool({ name: "value", input: {} });
     assert.deepEqual(result.structuredContent, structuredContent);
     assert.equal(harness.initialize().tools[0]?.outputSchema, undefined);
+    assert.equal("short" in (harness.initialize().tools[0] ?? {}), false, "short is omitted unless set");
   }
 });
 

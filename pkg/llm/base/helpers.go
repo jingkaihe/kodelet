@@ -3,6 +3,8 @@ package base
 import (
 	"slices"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/codemode"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -50,11 +52,85 @@ func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []toolt
 	// declared directly whenever they are permitted.
 	var advertised []tooltypes.Tool
 	for _, tool := range available {
-		if tool != nil && (tool.Name() == "code_execute" || tooltypes.IsModelOnly(tool)) {
+		switch {
+		case tool == nil:
+		case tool.Name() == "code_execute":
+			// The hidden tools are listed in its description instead, so the
+			// model knows every callable tool without a discovery round trip.
+			advertised = append(advertised, indexedCodeExecuteTool{
+				Tool:        tool,
+				description: tool.Description() + "\n\n" + codemode.ToolIndex(codeIndexDefinitions(thread, available)),
+			})
+		case tooltypes.IsModelOnly(tool):
 			advertised = append(advertised, tool)
 		}
 	}
 	return advertised
+}
+
+// indexedCodeExecuteTool advertises code_execute with the turn's callable tool
+// index appended to its description. Execution still uses the pinned tool.
+type indexedCodeExecuteTool struct {
+	tooltypes.Tool
+	description string
+}
+
+func (t indexedCodeExecuteTool) Description() string { return t.description }
+
+// RawInputSchema keeps the parent's schema exactly as it would be advertised unwrapped.
+func (t indexedCodeExecuteTool) RawInputSchema() map[string]any {
+	return tooltypes.JSONSchemaForTool(t.Tool)
+}
+
+// codeCallableDefinitions returns the pinned definitions a code_execute script
+// may call this turn. It drives both the callable set sent with the parent and
+// the tool index in its description, so the two can never disagree.
+func codeCallableDefinitions(thread llmtypes.Thread, manifest agentenv.Manifest) []agentenv.ToolDefinition {
+	var callable []agentenv.ToolDefinition
+	for _, definition := range manifest.Tools {
+		// Model-only tools are declared directly and never callable from scripts.
+		if definition.Name != "code_execute" && !definition.ModelOnly && ToolAllowedForThread(thread, definition.Name) {
+			callable = append(callable, definition)
+		}
+	}
+	return callable
+}
+
+// codeIndexDefinitions describes the tools listed in the code_execute
+// description. With an open environment it uses the same pinned definitions as
+// the callable set; otherwise it falls back to the advertised state tools.
+func codeIndexDefinitions(thread llmtypes.Thread, available []tooltypes.Tool) []codemode.Definition {
+	var definitions []codemode.Definition
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		for _, definition := range codeCallableDefinitions(thread, environment.Manifest()) {
+			definitions = append(definitions, codemode.Definition{
+				Name:         definition.Name,
+				Description:  definition.Description,
+				Group:        definition.Group,
+				Short:        definition.Short,
+				InputSchema:  definition.InputSchema,
+				OutputSchema: definition.OutputSchema,
+			})
+		}
+		return definitions
+	}
+	for _, tool := range available {
+		if tool == nil || tool.Name() == "code_execute" || tooltypes.IsModelOnly(tool) || !ToolAllowedForThread(thread, tool.Name()) {
+			continue
+		}
+		definition := codemode.Definition{
+			Name:         tool.Name(),
+			Description:  tool.Description(),
+			Short:        tooltypes.ShortForTool(tool),
+			InputSchema:  tooltypes.JSONSchemaForTool(tool),
+			OutputSchema: tooltypes.OutputSchemaForTool(tool),
+		}
+		if grouped, ok := tool.(tooltypes.ToolGroupProvider); ok {
+			definition.Group = grouped.ToolGroup()
+		}
+		definitions = append(definitions, definition)
+	}
+	return definitions
 }
 
 func availableTools(state tooltypes.State, noToolUse bool, allowed []string) []tooltypes.Tool {

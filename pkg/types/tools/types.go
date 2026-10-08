@@ -60,6 +60,21 @@ type ToolGroupProvider interface {
 	ToolGroup() string
 }
 
+// ShortDescriber supplies a one-line summary for compact tool listings, such as
+// the code-mode tool index. Tools without one fall back to the first sentence of
+// their description.
+type ShortDescriber interface {
+	Short() string
+}
+
+// ShortForTool returns a tool's explicit one-line summary, or "" when it has none.
+func ShortForTool(tool Tool) string {
+	if describer, ok := tool.(ShortDescriber); ok {
+		return describer.Short()
+	}
+	return ""
+}
+
 // ModelOnlyTool marks a tool whose result is meant for the model's own context,
 // such as skill instructions. Code mode declares such a tool to the model
 // directly in every mode, and code-execution scripts can never call it.

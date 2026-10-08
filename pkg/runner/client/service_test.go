@@ -1156,6 +1156,7 @@ func TestBuildWireManifestSendsModelOnlyWithCodeMode(t *testing.T) {
 			Name:        "skill",
 			InputSchema: map[string]any{"type": "object"},
 			ModelOnly:   true,
+			Short:       "Load a skill.",
 			Placement:   agentenv.ToolPlacementEnvironment,
 		}},
 	}
@@ -1166,6 +1167,7 @@ func TestBuildWireManifestSendsModelOnlyWithCodeMode(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, manifest.Tools, 1)
 		assert.Equal(t, want, manifest.Tools[0].ModelOnly, mode)
+		assert.Equal(t, want, manifest.Tools[0].Short != "", mode)
 	}
 }
 

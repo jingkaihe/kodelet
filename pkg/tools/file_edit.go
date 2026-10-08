@@ -160,6 +160,11 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 // FileEditTool provides functionality to edit files by replacing text
 type FileEditTool struct{}
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *FileEditTool) Short() string {
+	return "Replace exact text in a file; old_text must be unique unless replace_all is set."
+}
+
 // Name returns the name of the tool
 func (t *FileEditTool) Name() string {
 	return "file_edit"

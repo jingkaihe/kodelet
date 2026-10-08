@@ -159,6 +159,7 @@ export class ExtensionHost implements ExtensionAPI {
         inputSchema,
         ...(outputSchema === undefined ? {} : { outputSchema: clonePayload(outputSchema) }),
         ...(registration.group === undefined ? {} : { group: registration.group }),
+        ...(registration.short === undefined ? {} : { short: registration.short }),
         ...optionalTimeout(registration.timeoutInSec),
       })),
       commands: [...this.commands.values()].map(({ registration, inputSchema }) => ({

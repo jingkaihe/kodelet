@@ -84,6 +84,8 @@ func TestSnapshotManifestMarksModelOnlyTools(t *testing.T) {
 	bash, found := manifest.ToolDefinition("bash")
 	require.True(t, found)
 	assert.False(t, bash.ModelOnly)
+	assert.Equal(t, tooltypes.ShortForTool(bash.Tool), bash.Short)
+	assert.NotEmpty(t, bash.Short)
 }
 
 func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {

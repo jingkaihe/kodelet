@@ -173,6 +173,11 @@ type GrepTool struct{}
 // CodeSearchInput reuses the shared grep_tool input schema while preserving pkg/tools schema IDs.
 type CodeSearchInput tooltypes.CodeSearchInput
 
+// Short returns the one-line summary used in compact tool listings.
+func (t *GrepTool) Short() string {
+	return "Search file contents for a regex or literal string, newest files first."
+}
+
 // Name returns the name of the tool
 func (t *GrepTool) Name() string {
 	return "grep_tool"
