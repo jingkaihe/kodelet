@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/jingkaihe/kodelet/pkg/codemode"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -124,6 +125,53 @@ func TestToolResultCanonicalDataIsSeparateFromPresentation(t *testing.T) {
 			assert.Equal(t, execution.Data, metadata.Data)
 		})
 	}
+}
+
+func TestToolResultBoundsStructuredContent(t *testing.T) {
+	assert.Less(t, maxStructuredContentBytes, codemode.MaxHostResponseBytes,
+		"text plus structured content must fit one code-mode child reply")
+	const oversizedNotice = "[STRUCTURED CONTENT OMITTED - exceeded the 1 MiB extension structured content limit]"
+	oversized := map[string]any{"rows": strings.Repeat("x", maxStructuredContentBytes)}
+	tool := &Tool{name: "structured_tool", extensionID: "custom", maxOutput: 100}
+	for name, test := range map[string]struct {
+		content string
+		value   any
+		want    string
+	}{
+		"oversized": {
+			content: "summary",
+			value:   oversized,
+			want:    "summary\n\n" + oversizedNotice,
+		},
+		"not JSON": {
+			content: "summary",
+			value:   map[string]any{"invalid": make(chan int)},
+			want:    "summary\n\n[STRUCTURED CONTENT OMITTED - not valid JSON]",
+		},
+		"no text": {
+			value: oversized,
+			want:  oversizedNotice,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := tool.resultFromExecution(ToolExecutionResult{Content: test.content, StructuredContent: test.value}, 0)
+			structured := result.StructuredData()
+			assert.Nil(t, structured.Data)
+			assert.Equal(t, test.want, result.GetResult())
+			var metadata tooltypes.ExtensionToolMetadata
+			require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &metadata))
+			assert.True(t, metadata.Truncated, "code-mode replies report omitted machine data as truncated")
+			assert.Equal(t, test.want, metadata.Output)
+		})
+	}
+
+	withinLimit := map[string]any{"rows": strings.Repeat("x", maxStructuredContentBytes-64)}
+	result := tool.resultFromExecution(ToolExecutionResult{Content: "summary", StructuredContent: withinLimit}, 0)
+	assert.Equal(t, withinLimit, result.StructuredData().Data)
+	assert.Equal(t, "summary", result.GetResult())
+	var metadata tooltypes.ExtensionToolMetadata
+	require.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
+	assert.False(t, metadata.Truncated)
 }
 
 func TestToolTransportFailureHasUnknownOutcome(t *testing.T) {

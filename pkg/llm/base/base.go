@@ -350,7 +350,10 @@ func (t *Thread) AggregateSubagentUsage(usage llmtypes.Usage) {
 
 // SetStructuredToolResult stores the structured result for a tool call.
 // This method is thread-safe and uses mutex locking.
+// Machine-readable Data is runner-local code-mode input, never conversation
+// history, so it is dropped regardless of which environment ran the tool.
 func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	result.Data = nil
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 	if t.ToolResults == nil {

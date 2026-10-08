@@ -114,6 +114,41 @@ func TestRunnerCodeChildUsesEffectiveResultAndLocalExecution(t *testing.T) {
 	}
 }
 
+func TestRunnerMachineDataStaysRunnerLocal(t *testing.T) {
+	machineData := map[string]any{"rows": []any{"machine-row"}}
+	environment := &codeTestEnvironment{execute: func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+		return agentenv.ToolExecution{
+			Input:  request.Input,
+			Result: tooltypes.BaseToolResult{Result: "one row"},
+			StructuredResult: tooltypes.StructuredToolResult{
+				ToolName: request.Name,
+				Success:  true,
+				Data:     machineData,
+				Metadata: tooltypes.ExtensionToolMetadata{Output: "one row"},
+			},
+		}, nil
+	}}
+	service, run, _, params := newCodeService(t, environment)
+	authority, err := service.codeExecutionContext(t.Context(), run, params)
+	require.NoError(t, err)
+	reply, err := authority.Call(t.Context(), "test_tool", `{}`, "child")
+	require.NoError(t, err)
+	assert.Equal(t, machineData, reply.Data, "code-mode children keep machine data")
+
+	direct, err := service.executeRunTool(t.Context(), run, runnerpayload.ToolExecuteParams{
+		RunID:      run.id,
+		ToolCallID: "direct",
+		Name:       "test_tool",
+		Input:      json.RawMessage(`{}`),
+	}, false)
+	require.NoError(t, err)
+	assert.Nil(t, direct.Result.Structured.Data)
+	encoded, err := json.Marshal(direct)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "machine-row", "direct results must not carry machine data over the runner link")
+	assert.Contains(t, string(encoded), "one row")
+}
+
 func TestRunnerCodeAuthorization(t *testing.T) {
 	for _, name := range []string{
 		"missing metadata", "wrong digest", "old central", "old runner", "missing parent", "missing child",

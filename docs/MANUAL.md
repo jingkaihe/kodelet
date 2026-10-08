@@ -1448,7 +1448,7 @@ export default defineExtension((ext) => {
 
 `registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and their inputs are passed directly to `execute`; the handler or upstream server is responsible for validation. Zod schemas retain inferred handler input types and Zod parsing behavior.
 
-For machine-readable results, register an optional `outputSchema` (Zod or JSON Schema) and return `structuredContent` alongside `content`. Code-mode scripts receive this value as `reply.data`; the extension result's `data` field remains presentation metadata. MCP tools expose their upstream output schemas and structured results automatically.
+For machine-readable results, register an optional `outputSchema` (Zod or JSON Schema) and return `structuredContent` alongside `content`. Code-mode scripts receive this value as `reply.data`; the extension result's `data` field remains presentation metadata. MCP tools expose their upstream output schemas and structured results automatically. Structured content is delivered only to code-mode scripts and is not stored in conversation history. If its JSON exceeds 1 MiB, it is omitted, the text result gains a notice, and the reply is marked truncated.
 
 A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
 

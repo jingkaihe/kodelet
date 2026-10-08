@@ -1476,9 +1476,10 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 }
 
 func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult, modified bool) runnerpayload.ToolResult {
-	if modified {
-		structured.Data = nil
-	}
+	// Machine data is runner-local input for code-mode children, which never use
+	// this function. Nothing beyond the runner reads it, so never send it over
+	// the link, where it could exceed the frame limit or enter history.
+	structured.Data = nil
 	// Rebuild code-mode output from the effective, media-pruned snapshot, never
 	// the pre-hook ToolResult. This preserves images a hook chose to keep.
 	var code tooltypes.CodeExecutionMetadata
@@ -1506,6 +1507,7 @@ func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.Struc
 	}
 	if structured.ToolName == "" {
 		structured = result.StructuredData()
+		structured.Data = nil
 	}
 	errorMessage := result.GetError()
 	if errorMessage == "" {

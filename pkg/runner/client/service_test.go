@@ -695,6 +695,45 @@ func TestServiceEmitsStructuredRunLifecycleLogs(t *testing.T) {
 	assert.NotNil(t, closedEntry["duration"])
 }
 
+type machineDataToolResult struct {
+	tooltypes.BaseToolResult
+}
+
+func (r machineDataToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{ToolName: "fallback", Success: true, Data: "fallback machine data"}
+}
+
+func TestSerializeToolResultNeverSendsMachineData(t *testing.T) {
+	data := map[string]any{"rows": "effective machine data"}
+	for name, test := range map[string]struct {
+		result     tooltypes.ToolResult
+		structured tooltypes.StructuredToolResult
+		modified   bool
+	}{
+		"effective result": {
+			result:     tooltypes.BaseToolResult{Result: "summary"},
+			structured: tooltypes.StructuredToolResult{ToolName: "custom", Success: true, Data: data},
+		},
+		"hook-modified result": {
+			result:     tooltypes.BaseToolResult{Result: "summary"},
+			structured: tooltypes.StructuredToolResult{ToolName: "custom", Success: true, Data: data},
+			modified:   true,
+		},
+		"fallback structured result": {
+			result: machineDataToolResult{BaseToolResult: tooltypes.BaseToolResult{Result: "summary"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wire := serializeToolResult(test.result, test.structured, test.modified)
+			assert.Nil(t, wire.Structured.Data)
+			encoded, err := json.Marshal(wire)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "machine data",
+				"final results and tool.update snapshots must not carry machine data over the runner link")
+		})
+	}
+}
+
 func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
 	result := serializeToolResult(
 		tooltypes.BaseToolResult{Result: strings.Repeat("界", maxToolDisplayOutputBytes)},

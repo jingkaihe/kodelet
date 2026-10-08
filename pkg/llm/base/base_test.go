@@ -430,6 +430,21 @@ func TestSetStructuredToolResult_NilMap(t *testing.T) {
 	assert.Equal(t, result, bt.ToolResults["tool-call-1"])
 }
 
+func TestSetStructuredToolResultDropsMachineData(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "")
+
+	bt.SetStructuredToolResult("tool-call-1", tooltypes.StructuredToolResult{
+		ToolName: "bash",
+		Success:  true,
+		Data:     map[string]any{"output": "duplicated machine output"},
+	})
+
+	stored := bt.GetStructuredToolResults()["tool-call-1"]
+	assert.Nil(t, stored.Data, "machine data is runner-local and never enters conversation history")
+	assert.Equal(t, "bash", stored.ToolName)
+	assert.True(t, stored.Success)
+}
+
 func TestSetStructuredToolResult_MultipleResults(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 

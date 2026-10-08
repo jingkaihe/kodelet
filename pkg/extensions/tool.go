@@ -168,6 +168,18 @@ func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime tim
 	if truncated {
 		content = content[:t.maxOutput] + "\n\n[TRUNCATED - Output exceeded extension max output limit]"
 	}
+	structuredContent, omission := boundStructuredContent(result.StructuredContent)
+	if omission != "" {
+		// Machine data cannot be truncated meaningfully, so the text output
+		// becomes the only result and the omission is visible to the model.
+		truncated = true
+		notice := "[STRUCTURED CONTENT OMITTED - " + omission + "]"
+		if content == "" {
+			content = notice
+		} else {
+			content += "\n\n" + notice
+		}
+	}
 	return &ToolResult{
 		toolName:          t.name,
 		extensionID:       t.extensionID,
@@ -176,9 +188,29 @@ func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime tim
 		truncated:         truncated,
 		err:               result.Error,
 		data:              normalizeExtensionResultData(result.Data, t.maxOutput),
-		structuredContent: result.StructuredContent,
+		structuredContent: structuredContent,
 		attachments:       append([]tooltypes.ToolAttachment(nil), result.Attachments...),
 	}
+}
+
+// maxStructuredContentBytes bounds an extension's machine-readable result so
+// that text plus data still fit a 2 MiB code-mode child reply.
+const maxStructuredContentBytes = 1 << 20
+
+// boundStructuredContent keeps structured content only when it is JSON within
+// maxStructuredContentBytes. It returns a reason when the value is dropped.
+func boundStructuredContent(value any) (any, string) {
+	if value == nil {
+		return nil, ""
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, "not valid JSON"
+	}
+	if len(payload) > maxStructuredContentBytes {
+		return nil, fmt.Sprintf("exceeded the %d MiB extension structured content limit", maxStructuredContentBytes>>20)
+	}
+	return value, ""
 }
 
 func normalizeExtensionResultData(data map[string]any, maxOutput int) map[string]any {
