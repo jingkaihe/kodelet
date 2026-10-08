@@ -1448,7 +1448,7 @@ export default defineExtension((ext) => {
 
 `registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and their inputs are passed directly to `execute`; the handler or upstream server is responsible for validation. Zod schemas retain inferred handler input types and Zod parsing behavior.
 
-For machine-readable results, register an optional `outputSchema` (Zod or JSON Schema) and return `structuredContent` alongside `content`. Code-mode scripts receive this value as `reply.data`; the extension result's `data` field remains presentation metadata. MCP tools expose their upstream output schemas and structured results automatically. Structured content is delivered only to code-mode scripts and is not stored in conversation history. If its JSON exceeds 1 MiB, it is omitted, the text result gains a notice, and the reply is marked truncated.
+For machine-readable results, register an optional `outputSchema` (a raw JSON Schema object) and return `structuredContent` alongside `content`. [Code-mode](#tool-calls-as-code) scripts receive this value as `reply.data`, and `catalog.describe` shows its schema; the extension result's `data` field remains presentation metadata. Set `group` to choose the catalog group that scripts can filter by; it defaults to `extension/<extension-id>`. MCP tools expose their upstream output schemas and structured results automatically. Structured content is only available to code-mode scripts. If its JSON exceeds 1 MiB, it is omitted, a notice is added to the text result, and the reply is marked truncated.
 
 A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
 
@@ -1806,7 +1806,7 @@ Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disa
 
 ## Tool calls as code
 
-Code mode lets the model combine tool calls with JavaScript, run independent calls concurrently, and select the results worth keeping in the conversation. This is useful when working with many extension or MCP tools, or when only a small part of a tool's output is relevant.
+Code mode lets the model combine tool calls with JavaScript, run independent calls concurrently, and keep only the results worth adding to the conversation. This is useful when working with many extension or MCP tools, or when only a small part of a tool's output is relevant.
 
 Enable it in the runner's configuration, the workspace's `kodelet-config.yaml`, or an environment profile:
 
@@ -1817,45 +1817,39 @@ code_mode: on
 | Mode | Behavior |
 | --- | --- |
 | `off` (default) | Use ordinary tool calls only. |
-| `on` | Add `code_execute` alongside ordinary tool calls. |
-| `only` | Show only `code_execute`; discover and call core, extension, and MCP tools through code mode. |
+| `on` | Add the `code_execute` tool alongside ordinary tool calls. |
+| `only` | Show only `code_execute`; the model discovers and calls core, extension, and MCP tools from scripts. |
 
-Both daemon and runner must support code mode. Existing tool permissions and extension policies still apply. If you use a tool allowlist, include `code_execute` and each tool the scripts need. The mode changes how tools are discovered, not which tools are permitted.
+Both the daemon and the runner must support code mode. Scripts can call only the tools the agent is already allowed to use, and existing extension policies and hooks apply to every call. If you use a tool allowlist, include `code_execute` and each tool the scripts need. In `only` mode, provider-native web search is unavailable, and there is no fallback to ordinary tool calls if `code_execute` is not allowed; use `on` if you need either.
 
-In `only` mode, provider-native web search is unavailable; use `on` if you need it. There is no fallback to ordinary tool calls if code execution is unavailable or disallowed. Explicit no-tools requests still work. Replace earlier `hybrid` settings with `on`, and `compact` with `only` (which also hides core tools).
-
-The `code_execute` tool accepts `{ "code": "..." }`. Write JavaScript as an **async function body**, using `await` and `return` directly. Discover available tools before calling them:
-
-```javascript
-return await catalog.list({ limit: 20 });
-// Or: return await catalog.search("open pull requests", { group: "mcp/github" });
-// Then: return await catalog.describe("the_exact_registered_tool_name");
-```
-
-`list` and `search` return tool names and short descriptions. Pass a returned `nextCursor` as `cursor` to see another page. Use `describe` to learn a tool's inputs and outputs.
-
-Call tools by their registered names using `tools[name](input)`. Replies contain `data` for structured results (or `null` if unavailable), `text`, `attachments`, and a `truncated` flag. Use `Promise.all` for independent calls:
+A script is the body of an async JavaScript function. The model finds tools with `catalog.list`, `catalog.search`, and `catalog.describe`, calls them as `tools[name](input)`, and chooses what to keep with `return`, `emit(value)`, or `console.log(...)`:
 
 ```javascript
 const replies = await Promise.all([
-  tools.bash({ command: "git status --short" }),
-  tools.bash({ command: "git branch --show-current" }),
+  tools.bash({ command: "git status --short", description: "Show status", timeout: 30 }),
+  tools.bash({ command: "git branch --show-current", description: "Show branch", timeout: 30 }),
 ]);
 return { status: replies[0].data.output, branch: replies[1].data.output.trim() };
 ```
 
-Use `return`, `emit(value)`, and `console.log(...)` to select JSON/text output. Await results before emitting them. Use `try/catch` or `Promise.allSettled` when tool failures are expected. Completed actions are not automatically retried or rolled back.
+Only selected output enters the conversation: strings as plain text and other values as compact JSON. Tool replies that a script reads but does not select stay out of the model's context. Completed actions are not retried or rolled back when a script fails or is cancelled.
 
-Select images explicitly:
+Scripts send an image's pixels to the model only when they select it with `emit.image(...)`, which requires the `view_image` tool to be allowed. `emit.artifact(...)` keeps an image in the conversation without sending its pixels. Selected images remain available in history and forks. Only images are supported, not PDFs or other files.
 
-```javascript
-const reply = await tools.view_image({path: "/tmp/chart.png"});
-emit("Here is the chart:");
-emit.image(reply.attachments[0]); // Sends pixels to the model.
-// Or: emit.artifact(reply.attachments[0]); // Retains it without sending pixels.
-```
+Scripts run in a sandbox with no imports, file system, network, or environment variables of their own; they reach those only through permitted tools. Nothing is kept between invocations. Each invocation is limited to:
 
-Both image APIs accept an attachment or artifact ID returned by a tool in the current script, including MCP tools. To use an existing image, first call `tools.view_image({artifactId})`. `emit.image` requires `view_image` permission and accepts `{detail: "original"}` on compatible models. Returning an ID alone does **not** retain or view it. Selected images remain available in history and forks. Only image artifacts are supported, not PDFs or other files.
+| Resource | Limit |
+| --- | --- |
+| Run time | 120 seconds |
+| Code size | 128 KiB |
+| JavaScript heap | 192 MiB |
+| Tool calls | 128, with 8 running at once; the rest wait for a free slot |
+| Catalog requests | 256 |
+| Selected output | 32 KiB |
+| Image and artifact selections | 8, including repeats |
+| A single tool reply | 2 MiB; a larger reply becomes an error, and the tool, which has already run, is not retried |
+
+The TUI and Web UI show each invocation as one expandable card containing the script, its selected output, and the tool calls it made. Tool call details appear once the script finishes.
 
 ## Agentic Skills
 

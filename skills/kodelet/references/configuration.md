@@ -223,3 +223,16 @@ Restrict model tools for a run:
 ```bash
 kodelet run --allowed-tools "file_read,grep_tool,bash" "analyze code"
 ```
+
+## Code mode
+
+Code mode lets the model call tools from JavaScript scripts through the `code_execute` tool. Set it in the runner's configuration, the workspace's `kodelet-config.yaml`, or an environment profile:
+
+```yaml
+code_mode: on # off (default), on, or only
+```
+
+- `on` adds `code_execute` alongside ordinary tools; `only` advertises just `code_execute`, and the model reaches every other permitted tool from scripts.
+- Scripts can call only tools the agent is already allowed to use, and hooks still apply. A tool allowlist must include `code_execute` and each tool the scripts need.
+- `only` disables provider-native web search and has no fallback to ordinary tool calls.
+- Both the daemon and the runner must support code mode. Limits and behavior are described in the manual's "Tool calls as code" section.

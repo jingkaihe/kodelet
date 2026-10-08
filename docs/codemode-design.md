@@ -169,7 +169,7 @@ Keep the initial advertisement configuration small:
 | `on` | Existing tools plus `code_execute` | Authorized host tools |
 | `only` | Only `code_execute` | Same authorized host tools, including core tools |
 
-Keep `off` as the default. `on` replaces the earlier `hybrid` name; `only` replaces `compact` and also hides core tools. The old values are rejected with a configuration error rather than silently changing semantics. Do not implement `only` by changing `AllowedTools`: the full permitted manifest remains the source for discovery, child authorization, and `agent.init` policy, while only the provider-facing declarations are reduced.
+Keep `off` as the default. Any other value is rejected with a configuration error rather than silently changing semantics. Do not implement `only` by changing `AllowedTools`: the full permitted manifest remains the source for discovery, child authorization, and `agent.init` policy, while only the provider-facing declarations are reduced.
 
 `only` means exactly one advertised tool when permitted, with no fallback to direct tools if `code_execute` is denied. Explicit no-tools requests still advertise no tools. An incompatible daemon/runner must produce a clear compatibility error rather than downgrading `only` to ordinary calls; `on` may retain its ordinary tools with an older daemon. Provider-native web search is suppressed in `only` because it is not callable through the runner catalog; use `on` when native search is needed. Both provider adapters and state-based advertisement must follow these rules.
 
@@ -316,7 +316,7 @@ The owner loop alternates bounded batches of JavaScript jobs, catalog work, and 
 
 ### Limits and termination
 
-Initial host-enforced limits, to validate during the spike:
+Host-enforced limits:
 
 | Resource | Initial bound |
 | --- | --- |

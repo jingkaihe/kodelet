@@ -21,7 +21,8 @@ Run commands from the repository root:
 | --- | --- |
 | `mise run build` | Build the CLI with regenerated, embedded frontend assets. |
 | `mise run build-dev` | Build the CLI without regenerating the frontend. |
-| `mise run code-generation` | Run `go generate ./pkg/webui` to install/build the frontend. |
+| `mise run code-generation` | Generate the embedded code-mode runtime and the frontend (`go generate ./pkg/codemode ./pkg/webui`). Run it on a fresh checkout before plain `go build` or `go test`. |
+| `mise run codemode-generation` | Generate only the code-mode QuickJS runtime from its locked npm dependency. |
 | `mise run format` | Format Go with gofumpt. |
 | `mise run e2e-test-docker` | Run Docker acceptance tests. |
 | `mise run frontend-icons` | Regenerate PNG icons from `logo.svg`; requires uv and Cairo. |
