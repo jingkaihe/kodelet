@@ -11,7 +11,9 @@ import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
 import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
 import BrowserRenderer, { getBrowserMetadata } from '../tool-renderers/BrowserRenderer';
-import { codeExecutionSummary } from '../tool-renderers/CodeExecutionRenderer';
+import CodeExecutionRenderer, {
+  codeExecutionSummary,
+} from '../tool-renderers/CodeExecutionRenderer';
 import {
   getExtensionToolPresentation,
   normalizeToolName,
@@ -653,7 +655,8 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         // Code media stays inline with selected text, not in an outside gallery.
         // Open these cards initially so previews remain visible on completion.
         const codeMedia =
-          (toolCall.name === 'code_execute' || toolCall.result?.metadataType === 'code_execute') &&
+          (normalizeToolName(toolCall.name) === 'code_execute' ||
+            toolCall.result?.metadataType === 'code_execute') &&
           (toolCall.result?.metadata as CodeExecutionMetadata | undefined)?.items?.some(
             (item) => item.type === 'image' || item.type === 'artifact'
           );
@@ -739,7 +742,13 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                           ) : null}
                         </div>
                       ) : null}
-                      {browser && !tool.result?.metadata ? (
+                      {normalizeToolName(tool.name) === 'code_execute' && !tool.result ? (
+                        <CodeExecutionRenderer
+                          isPartial
+                          toolInput={tool.input}
+                          toolResult={{ toolName: tool.name, success: true }}
+                        />
+                      ) : browser && !tool.result?.metadata ? (
                         <BrowserRenderer
                           isPartial={tool.inProgress}
                           toolInput={tool.input}

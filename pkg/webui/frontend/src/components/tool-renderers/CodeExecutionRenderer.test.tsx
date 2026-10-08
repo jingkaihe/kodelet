@@ -46,13 +46,38 @@ const typedResult: ToolResult = {
 describe('CodeExecutionRenderer', () => {
   it('renders selected output and handled child failures after history reload', () => {
     const restored = JSON.parse(JSON.stringify(result));
+    restored.metadata.calls[1].detailsOmitted = true;
     render(<CodeExecutionRenderer toolResult={restored} />);
-    expect(screen.getByText('Selected output')).toBeInTheDocument();
-    expect(screen.getByText('search')).toBeInTheDocument();
-    expect(screen.getByText('write')).toBeInTheDocument();
-    expect(codeExecutionSummary(restored)).toBe(
-      'Code execution · 1 succeeded · 1 failed · 0 running'
-    );
+    expect(screen.getByText('Selected output', { selector: 'code' })).toBeInTheDocument();
+    expect(screen.getByText('search · completed')).toBeInTheDocument();
+    expect(screen.getByText('write · blocked')).toBeInTheDocument();
+    expect(
+      screen.getByText('Child tool details were not saved for this invocation.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Child tool details exceeded the storage limit.')).toBeInTheDocument();
+    expect(codeExecutionSummary(restored)).toBe('Code execution · 1 succeeded · 1 failed');
+  });
+
+  it.each([
+    [[], 'Code execution'],
+    [['completed'], 'Code execution · 1 succeeded'],
+    [['blocked'], 'Code execution · 1 failed'],
+    [['queued', 'running'], 'Code execution · 2 running'],
+  ])('omits zero counts for %j', (statuses, expected) => {
+    expect(
+      codeExecutionSummary({
+        ...result,
+        metadata: {
+          ...(result.metadata as CodeExecutionMetadata),
+          calls: statuses.map((status, i) => ({
+            callId: `${i}`,
+            toolName: 'bash',
+            status,
+            durationMs: 0,
+          })),
+        },
+      })
+    ).toBe(expected);
   });
 
   it('renders parent errors and live snapshots', () => {
@@ -62,12 +87,28 @@ describe('CodeExecutionRenderer', () => {
         toolResult={{ ...result, success: false, error: 'Timed out' }}
       />
     );
-    expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(
+      screen.getAllByText('Child tool details are available when code execution finishes.')
+    ).toHaveLength(2);
     expect(screen.getByText('Timed out')).toBeInTheDocument();
   });
 
-  it('labels a pending invocation without metadata', () => {
+  it('shows code for a pending invocation without metadata', async () => {
     expect(codeExecutionSummary()).toBe('Code execution');
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'pending',
+            name: 'code_execute',
+            input: '{"code":"return 42;"}',
+          },
+        ]}
+      />
+    );
+    await userEvent.click(screen.getByText('Code', { exact: true }));
+    expect(container.querySelector('code.language-javascript')).toBeVisible();
+    expect(container.querySelector('code.language-javascript')).toHaveTextContent('return 42;');
   });
 
   it('shows a withheld result when policy strips metadata', () => {
@@ -84,7 +125,9 @@ describe('CodeExecutionRenderer', () => {
   });
 
   it('renders ordered typed outputs once, without interpreting ordinary JSON as media', () => {
-    const restored = JSON.parse(JSON.stringify(typedResult));
+    const restored = JSON.parse(
+      JSON.stringify({ ...typedResult, toolName: 'Code_execute', metadataType: undefined })
+    );
     const { container } = render(<ToolRenderer toolResult={restored} />);
 
     expect(
@@ -104,7 +147,7 @@ describe('CodeExecutionRenderer', () => {
       'href',
       '/i/retained?download=1'
     );
-    expect(screen.queryByText('Selected output')).not.toBeInTheDocument();
+    expect(screen.queryByText('Selected output', { selector: 'code' })).not.toBeInTheDocument();
   });
 
   it('requires matching authorized attachments and hides transient image previews', () => {
@@ -128,7 +171,7 @@ describe('CodeExecutionRenderer', () => {
     expect(details).toHaveAttribute('open');
     expect(container.querySelectorAll('img')).toHaveLength(2);
     const preview = screen.getByRole('img', { name: 'retained' });
-    expect(preview.closest('details')).toBe(details);
+    expect(preview.closest('details')?.querySelector('summary')).toHaveTextContent('Code');
     expect(preview).toBeVisible();
     if (!summary) throw new Error('Expected a code execution card');
     await user.click(summary);
@@ -138,5 +181,95 @@ describe('CodeExecutionRenderer', () => {
     await user.click(summary);
     expect(preview).toBeVisible();
     expect(container.querySelectorAll('img')).toHaveLength(2);
+  });
+
+  it('nests highlighted code and ordinary child visuals without expanding text output', async () => {
+    const user = userEvent.setup();
+    const code = 'const reply = await tools.bash({command: "echo done"});';
+    const command = {
+      callId: 'command',
+      toolName: 'bash',
+      status: 'unknown',
+      durationMs: 4,
+      input: { command: 'echo done', description: 'Confirm command' },
+      result: {
+        toolName: 'bash',
+        success: true,
+        metadata: { command: 'echo done', output: 'done', exitCode: 0 },
+      },
+    };
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'code',
+            name: 'Code_execute',
+            input: JSON.stringify({ code }),
+            result: {
+              ...result,
+              toolName: 'Code_execute',
+              metadataType: undefined,
+              metadata: {
+                status: 'completed',
+                durationMs: 12,
+                items: [{ type: 'json', value: 'Selected' }],
+                calls: [
+                  command,
+                  { ...command, callId: 'command-2' },
+                  {
+                    callId: 'patch',
+                    toolName: 'apply_patch',
+                    status: 'completed',
+                    durationMs: 4,
+                    result: {
+                      toolName: 'apply_patch',
+                      success: true,
+                      metadata: {
+                        changes: [
+                          {
+                            path: 'test.js',
+                            operation: 'update',
+                            unifiedDiff: '@@ -1 +1 @@\n-old\n+new\n',
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  { ...command, callId: 'command-3' },
+                ],
+              },
+            },
+          },
+        ]}
+      />
+    );
+    expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
+    await user.click(screen.getByText(/^Code execution ·/));
+    expect(screen.getByText('Selected')).not.toBeVisible();
+    await user.click(screen.getByText('Code', { exact: true }));
+    expect(container.querySelector('code.language-javascript')).toHaveTextContent(code);
+    expect(container.querySelector('.token.keyword')).toBeVisible();
+    expect(screen.getByText('Selected')).toBeVisible();
+    expect(screen.queryByText('Selected output')).not.toBeInTheDocument();
+    expect(screen.getByText('Selected').closest('details')).toBe(
+      screen.getByText('Code', { exact: true }).closest('details')
+    );
+    expect(container.querySelector('.tool-terminal')).not.toBeVisible();
+    expect(
+      Array.from(
+        container.querySelectorAll('summary .tool-summary-label'),
+        (node) => node.textContent
+      ).filter((text) => /^(Ran|Apply patch)/.test(text ?? ''))
+    ).toEqual(['Ran 2 commands', 'Apply patch', 'Ran 1 command']);
+    await user.click(screen.getByText('Ran 2 commands'));
+    expect(container.querySelector('.tool-terminal')).toBeVisible();
+    expect(container.querySelector('.bash-tool-badge')).toHaveClass('is-error');
+    const commands = screen.getAllByText('Confirm command');
+    expect(commands[0]).toBeVisible();
+    expect(commands[1]).toBeVisible();
+    expect(commands[2]).not.toBeVisible();
+    await user.click(screen.getByText('Apply patch', { exact: true }));
+    await user.click(screen.getByText('test.js'));
+    expect(container.querySelector('.diff-block')).toBeVisible();
   });
 });

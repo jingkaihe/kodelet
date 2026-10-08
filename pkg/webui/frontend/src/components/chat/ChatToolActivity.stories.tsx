@@ -205,6 +205,49 @@ export const PatchAndSearch: Story = {
   },
 };
 
+export const CodeExecution: Story = {
+  args: {
+    tools: [
+      {
+        callId: 'code-execution',
+        name: 'code_execute',
+        input: JSON.stringify({
+          code: `const command = await tools.bash({
+  command: "npm run test:run -- ChatComposer",
+  description: "Run focused component tests"
+});
+await tools.apply_patch({input: patch});
+return "Tests passed and patch applied.";`,
+        }),
+        result: {
+          toolName: 'code_execute',
+          success: true,
+          metadata: {
+            status: 'completed',
+            durationMs: 1234,
+            items: [{ type: 'json', value: 'Tests passed and patch applied.' }],
+            calls: [successfulTools[0], patchAndSearchTools[0]].map((tool) => ({
+              callId: tool.callId,
+              toolName: tool.name,
+              status: 'completed',
+              durationMs: 617,
+              input: JSON.parse(tool.input),
+              result: tool.result,
+            })),
+          },
+        },
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByText(/Code execution/));
+    await userEvent.click(canvas.getByText('Code', { exact: true }));
+    await userEvent.click(canvas.getByText('Ran 1 command'));
+    await userEvent.click(canvas.getByText('Apply patch', { exact: true }));
+  },
+};
+
 export const FileOperations: Story = {
   args: {
     tools: [

@@ -1,5 +1,9 @@
+import { ChevronRight } from 'lucide-react';
+import Prism from 'prismjs';
 import type React from 'react';
+import { useMemo } from 'react';
 import type { CodeExecutionMetadata, ToolRenderProps, ToolResult } from '../../types';
+import ChatToolActivity from '../chat/ChatToolActivity';
 import { ReferenceCodeBlock, ReferenceToolNote } from './reference';
 import { ImageAttachment } from './ToolImageAttachments';
 
@@ -9,78 +13,166 @@ export const codeExecutionSummary = (result?: ToolResult): string => {
   const succeeded = meta.calls.filter((call) => call.status === 'completed').length;
   const running = meta.calls.filter((call) => ['queued', 'running'].includes(call.status)).length;
   const failed = meta.calls.length - succeeded - running;
-  return `Code execution · ${succeeded} succeeded · ${failed} failed · ${running} running`;
+  return [
+    'Code execution',
+    succeeded && `${succeeded} succeeded`,
+    failed && `${failed} failed`,
+    running && `${running} running`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 };
 
-const CodeExecutionRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial }) => {
+const Section: React.FC<React.PropsWithChildren<{ title: string; open?: boolean }>> = ({
+  title,
+  open,
+  children,
+}) => (
+  <details className="activity-card" open={open}>
+    <summary className="tool-summary activity-summary">
+      <span className="tool-summary-label">{title}</span>
+      <ChevronRight className="tool-summary-chevron" size={12} aria-hidden="true" />
+    </summary>
+    <div className="activity-detail-content">{children}</div>
+  </details>
+);
+
+export default function CodeExecutionRenderer({
+  toolResult,
+  toolInput,
+  isPartial,
+}: ToolRenderProps) {
+  const code = useMemo(() => {
+    try {
+      const value = JSON.parse(toolInput || '{}').code;
+      return typeof value === 'string'
+        ? Prism.highlight(value, Prism.languages.javascript, 'javascript')
+        : '';
+    } catch {
+      return '';
+    }
+  }, [toolInput]);
   const meta = toolResult.metadata as CodeExecutionMetadata | undefined;
-  if (!meta) return toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null;
-  const items = meta.items ?? meta.outputs?.map((value) => ({ type: 'json' as const, value }));
+  const items = meta?.items ?? meta?.outputs?.map((value) => ({ type: 'json' as const, value }));
+  const hasMedia = items?.some((item) => item.type === 'image' || item.type === 'artifact');
+  const groups: CodeExecutionMetadata['calls'][] = [];
+  for (const call of meta?.calls ?? []) {
+    const previous = groups[groups.length - 1];
+    if (
+      !isPartial &&
+      call.result &&
+      previous?.[0].result &&
+      call.toolName === 'bash' &&
+      previous[0].toolName === 'bash'
+    ) {
+      previous.push(call);
+    } else {
+      groups.push([call]);
+    }
+  }
   return (
-    <div className="quiet-tool-detail">
-      <div className="quiet-tool-line">
-        <span>{isPartial ? 'Running' : meta.status}</span>
-        <span className="quiet-tool-muted">{meta.durationMs} ms</span>
-      </div>
-      {meta.calls?.map((call) => (
-        <div className="quiet-tool-line" key={call.callId}>
-          <span>{call.toolName}</span>
-          <span className="quiet-tool-muted">
-            {call.status} · {call.durationMs} ms{call.errorKind ? ` · ${call.errorKind}` : ''}
-          </span>
-        </div>
-      ))}
-      {items?.map((item, index) => {
-        if (item.type === 'json') {
-          return (
-            <ReferenceCodeBlock
-              content={
-                typeof item.value === 'string' ? item.value : JSON.stringify(item.value, null, 2)
+    <div className="activity-stack">
+      <Section title="Code" open={hasMedia || undefined}>
+        {code ? (
+          <pre className="tool-code-block chat-prose">
+            {/* biome-ignore lint/security/noDangerouslySetInnerHtml: Prism escapes the JavaScript source before adding token markup. */}
+            <code className="language-javascript" dangerouslySetInnerHTML={{ __html: code }} />
+          </pre>
+        ) : (
+          <ReferenceToolNote text="Code is unavailable for this invocation." />
+        )}
+        {items?.length ? (
+          <div className="quiet-tool-detail mt-3">
+            {items.map((item, index) => {
+              if (item.type === 'json') {
+                return (
+                  <ReferenceCodeBlock
+                    content={
+                      typeof item.value === 'string'
+                        ? item.value
+                        : JSON.stringify(item.value, null, 2)
+                    }
+                    // biome-ignore lint/suspicious/noArrayIndexKey: output entries are immutable and append-only.
+                    key={index}
+                    language={typeof item.value === 'string' ? 'text' : 'json'}
+                  />
+                );
               }
-              // biome-ignore lint/suspicious/noArrayIndexKey: output entries are immutable and append-only.
-              key={index}
-              language={typeof item.value === 'string' ? 'text' : 'json'}
-            />
-          );
-        }
-        if (item.type !== 'image' && item.type !== 'artifact') return null;
-        const attachment = toolResult.attachments?.find(
-          (candidate) =>
-            candidate.type === 'image' &&
-            candidate.artifactId === item.artifactId &&
-            !!candidate.artifactId &&
-            !candidate.error
-        );
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: the same artifact may be explicitly selected more than once.
-          <div key={index}>
-            <div className="quiet-tool-line">
-              <span>
-                {item.type === 'image'
-                  ? 'Image sent to model'
-                  : 'Retained artifact (not sent to model)'}
-                {item.type === 'image' && item.detail === 'original' ? ' · Original detail' : ''}
-              </span>
-              <code className="quiet-tool-muted">{item.artifactId}</code>
-            </div>
-            {!isPartial ? (
-              attachment ? (
-                <div className="tool-image-attachments">
-                  <ImageAttachment attachment={attachment} viewed={item.type === 'image'} />
+              if (item.type !== 'image' && item.type !== 'artifact') return null;
+              const attachment = toolResult.attachments?.find(
+                (candidate) =>
+                  candidate.type === 'image' &&
+                  candidate.artifactId === item.artifactId &&
+                  !!candidate.artifactId &&
+                  !candidate.error
+              );
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: the same artifact may be explicitly selected more than once.
+                <div key={index}>
+                  <div className="quiet-tool-line">
+                    <span>
+                      {item.type === 'image'
+                        ? 'Image sent to model'
+                        : 'Retained artifact (not sent to model)'}
+                      {item.type === 'image' && item.detail === 'original'
+                        ? ' · Original detail'
+                        : ''}
+                    </span>
+                    <code className="quiet-tool-muted">{item.artifactId}</code>
+                  </div>
+                  {!isPartial ? (
+                    attachment ? (
+                      <div className="tool-image-attachments">
+                        <ImageAttachment attachment={attachment} viewed={item.type === 'image'} />
+                      </div>
+                    ) : (
+                      <p className="quiet-tool-warning">Image preview unavailable.</p>
+                    )
+                  ) : null}
                 </div>
-              ) : (
-                <p className="quiet-tool-warning">Image preview unavailable.</p>
-              )
-            ) : null}
+              );
+            })}
           </div>
+        ) : null}
+      </Section>
+      {groups.map((group) => {
+        const call = group[0];
+        const activity =
+          call.result && !isPartial ? (
+            <ChatToolActivity
+              key={call.callId}
+              tools={group.map((child) => ({
+                callId: child.callId,
+                name: child.toolName,
+                input: JSON.stringify(child.input ?? {}),
+                result: child.result && {
+                  ...child.result,
+                  success: child.result.success && child.status === 'completed',
+                },
+              }))}
+            />
+          ) : (
+            <Section key={call.callId} title={`${call.toolName} · ${call.status}`}>
+              <ReferenceToolNote
+                text={
+                  isPartial
+                    ? 'Child tool details are available when code execution finishes.'
+                    : call.detailsOmitted
+                      ? 'Child tool details exceeded the storage limit.'
+                      : 'Child tool details were not saved for this invocation.'
+                }
+              />
+            </Section>
+          );
+        return call.toolName === 'apply_patch' && call.result && !isPartial ? (
+          <Section key={call.callId} title="Apply patch">
+            {activity}
+          </Section>
+        ) : (
+          activity
         );
       })}
       {toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null}
-      {!isPartial && !toolResult.error && !items?.length ? (
-        <p className="quiet-tool-empty">Code completed without selected output.</p>
-      ) : null}
     </div>
   );
-};
-
-export default CodeExecutionRenderer;
+}

@@ -4,7 +4,7 @@
 
 Implemented as an opt-in feature: runner-side QuickJS/WASM execution, async catalog discovery, shared direct/nested tool execution, machine results, parent-only renderers, explicit image/artifact emission, and `off`/`on`/`only` advertisement. Saved scripts and non-image artifacts remain deferred. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
 
-Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results remain runner-local; selected output and bounded progress return to the control plane. In `on` mode keep ordinary tools directly available alongside code execution; in `only` mode advertise just `code_execute`, with core, extension, and MCP tools discovered through the authorized catalog.
+Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results are processed runner-locally; selected output, bounded progress, and final UI-only child details return to the control plane. In `on` mode keep ordinary tools directly available alongside code execution; in `only` mode advertise just `code_execute`, with core, extension, and MCP tools discovered through the authorized catalog.
 
 The model writes ordinary JavaScript, passes plain objects, receives predictable JSON results, and explicitly chooses what to return. No imports, generated client classes, package installation, or persistent interpreter state are required.
 
@@ -329,7 +329,8 @@ Initial host-enforced limits, to validate during the spike:
 | Outstanding bridge requests, including queued and completed-but-unsettled work | 256 |
 | Selected JSON output and media descriptors | 32 KiB, excluding separately stored image bytes |
 | Explicit media emissions | 8 items, including repeated IDs |
-| JSON payload admitted to the VM per child | 2 MiB; ordinary child bodies are not sent over the runner link |
+| JSON payload admitted to the VM per child | 2 MiB |
+| Final UI-only child details per invocation | 512 KiB aggregate; oversized details explicitly omitted |
 
 Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 8 MiB retained-byte budgets. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
 
@@ -349,25 +350,20 @@ For children, invoke the shared runner executor with no output-update sink. This
 
 The runner-side controller can emit its own bounded, accumulated progress snapshots under the parent's tool-call ID through the parent's normal update hooks and transport, for example `3/8 completed · 2 running · 1 failed`. Limit updates to roughly ten per second and avoid raw child arguments/output in progress metadata. Interactive permission or extension UI requests are not output snapshots and must continue through their existing channels.
 
-Persist a new registered `CodeExecutionMetadata` type containing execution status, duration, selected outputs, and bounded child summaries: call ID, tool name, status, duration, and error kind. No complete child result bodies are stored in the transcript by default. Keep referenced artifacts valid for normal history/resume behavior. A caught failure is still shown in the summary, even when the parent succeeds.
+Persist `CodeExecutionMetadata` containing execution status, duration, selected outputs, and child summaries: call ID, tool name, status, duration, and error kind. The final snapshot also retains bounded effective child inputs and structured display results for nested UI rendering, never in progress updates or the model-facing reply. Exclude duplicate machine data and unselected attachments; omit inputs when result hooks modify output to avoid bypassing display redaction. The aggregate detail budget is 512 KiB; calls beyond the budget retain their summaries with an explicit omission flag. A caught failure is still shown even when the parent succeeds.
 
 Persist ordered typed `items`: `{type: "json", value}`, `{type: "image", artifactId, detail?}`, or `{type: "artifact", artifactId}`. The old untyped `outputs` field remains readable for existing histories but never acquires media semantics. Selected descriptors are deduplicated in the parent's attachments while repeated emissions keep their positions. Normal conversation save, reload, and fork behavior preserves these parent-owned references without retaining every intermediate child attachment.
 
 Example expanded card:
 
 ```text
-Code execution                                  Done · 1.4s
-2 calls succeeded · 1 call failed (handled)
-
-  ✓ search_issues                               0.6s
-  ✓ search_issues                               0.8s
-  ! get_issue_details                           tool_error
-
-Output
-  [{ "id": 42, "title": "Fix login" }]
+▾ Code execution                               Done · 1.4s
+    ▸ Code                                     JavaScript and selected output
+    ▸ Command                                  completed
+    ▸ Apply patch                              completed
 ```
 
-TUI and Web UI need a result renderer, not a new nested event protocol. Live rendering and reloaded history use the same persisted metadata. Register the metadata in Go's custom result decoder; otherwise an unknown metadata type would be discarded on deserialization. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.
+The Web UI nests a Code foldout containing JavaScript and its selected output, followed by child tool foldouts reusing ordinary tool renderers. Older histories without retained child details remain readable but cannot reconstruct those results. The TUI retains its concise summary. No new nested event protocol is needed; live results and reloaded history use the same persisted metadata. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.
 
 ### Explicit image and artifact output
 
@@ -435,4 +431,4 @@ Bridge tests must cover async-body wrapping and source locations, concurrent too
 
 Discovery tests must cover concurrent searches with `Promise.all`, batch descriptions, group filtering, listing/search pagination across fresh VMs, stale cursor rejection, denied-tool schema exclusion, and discovery with file-reading and shell tools disabled. Evaluate top-five search recall with actual tool names, task descriptions, synonyms, competing tools, absent capabilities, and forbidden matches. The catalog and execution authorization must agree without generated files or access to the workspace.
 
-The first end-to-end acceptance case is: discover two data-producing tools, run them in parallel on the runner, join their results, return five selected fields, and inspect one persistent TUI/Web UI card. Capture the runner protocol messages and verify that intermediate result bodies never cross the connection; only ownership metadata, required central-service traffic, parent progress, and the selected final result may do so. The corresponding failure case blocks one child, catches its error in JavaScript, and still displays that blocked call without leaking its input or result.
+The first end-to-end acceptance case is: discover two data-producing tools, run them in parallel on the runner, join their results, return five selected fields, and inspect one persistent TUI/Web UI card. Verify that child details cross the connection only inside the final parent snapshot, never in progress or ownership messages, and that model-facing output contains only selected values. Verify bounded detail retention and policy redaction. The corresponding failure case blocks one child, catches its error in JavaScript, and still displays that blocked call without recovering a withheld input or result.

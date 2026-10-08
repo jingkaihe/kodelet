@@ -159,7 +159,7 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 
 func TestRunnerCodeLoopbackVMAndChildHelper(t *testing.T) {
 	loop := newCodeLoopback(t)
-	const secret = "runner-local-intermediate-never-on-the-wire"
+	const secret = "intermediate-visible-to-user-not-model"
 	filePath := filepath.Join(loop.manifest.WorkingDirectory, "private.txt")
 	require.NoError(t, os.WriteFile(filePath, []byte(secret), 0o600))
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -207,6 +207,14 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 	require.True(t, ok)
 	require.Len(t, metadata.Items, 1)
 	require.Len(t, metadata.Calls, 2)
+	assert.NotContains(t, result.Result.AssistantFacing, secret)
+	for _, call := range metadata.Calls {
+		require.NotNil(t, call.Result, "nested UI details must cross the runner boundary and survive decoding")
+		assert.NotEmpty(t, call.Input)
+		if call.ToolName == "file_read" {
+			assert.Equal(t, []string{secret}, call.Result.Metadata.(tooltypes.FileReadMetadata).Lines)
+		}
+	}
 	assert.JSONEq(t, `{"names":["file_read","web_fetch"],"found":"file_read","schema":"object","lines":1,"dataAvailable":true,"extracted":true}`, string(metadata.Items[0].Value))
 	assert.EqualValues(t, 2, helperCalls.Load(), "direct and nested web_fetch both use the central helper")
 	updateMu.Lock()
@@ -217,9 +225,11 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 	updateMu.Unlock()
 	var begins, ends, helpers int
 	for _, frame := range loop.wire.snapshot() {
-		assert.NotContains(t, string(frame), secret, "unselected file contents must never cross the transport")
 		var message protocol.Message
 		require.NoError(t, json.Unmarshal(frame, &message))
+		if message.Method != "" {
+			assert.NotContains(t, string(frame), secret, "only the final parent result carries UI child details")
+		}
 		switch message.Method {
 		case protocol.MethodToolChildBegin, protocol.MethodToolChildEnd:
 			var ownership map[string]any

@@ -3,7 +3,7 @@ package tools
 import "encoding/json"
 
 // CodeExecutionMetadata is the persisted parent snapshot of a code invocation.
-// Child arguments and result bodies are deliberately not part of this payload.
+// Child details are UI-only; model output contains only explicit selections.
 type CodeExecutionMetadata struct {
 	Status     string                `json:"status"`
 	DurationMs int64                 `json:"durationMs"`
@@ -24,11 +24,14 @@ type CodeExecutionOutput struct {
 // ToolType identifies the code execution result renderer.
 func (CodeExecutionMetadata) ToolType() string { return "code_execute" }
 
-// CodeExecutionCall describes one child without duplicating its full result.
+// CodeExecutionCall describes one child, with bounded final details for the UI.
 type CodeExecutionCall struct {
-	CallID     string `json:"callId"`
-	ToolName   string `json:"toolName"`
-	Status     string `json:"status"`
-	DurationMs int64  `json:"durationMs"`
-	ErrorKind  string `json:"errorKind,omitempty"`
+	CallID         string                `json:"callId"`
+	ToolName       string                `json:"toolName"`
+	Status         string                `json:"status"`
+	DurationMs     int64                 `json:"durationMs"`
+	ErrorKind      string                `json:"errorKind,omitempty"`
+	Input          json.RawMessage       `json:"input,omitempty"`
+	Result         *StructuredToolResult `json:"result,omitempty"`
+	DetailsOmitted bool                  `json:"detailsOmitted,omitempty"`
 }

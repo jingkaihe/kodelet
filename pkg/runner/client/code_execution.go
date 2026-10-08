@@ -157,10 +157,15 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 
 func codeReply(execution runnerpayload.ToolExecuteResult) tools.CodeToolReply {
 	structured := execution.Result.Structured
-	reply := tools.CodeToolReply{Data: structured.Data, Attachments: append([]tooltypes.ToolAttachment{}, structured.Attachments...)}
+	reply := tools.CodeToolReply{
+		Data: structured.Data, Attachments: append([]tooltypes.ToolAttachment{}, structured.Attachments...),
+		Input: execution.Input, Result: &structured,
+	}
 	if execution.Modified {
 		// Legacy result hooks may redact display output without knowing machine data.
 		reply.Data = nil
+		// Do not restore arguments that a result hook may have removed from metadata.
+		reply.Input = nil
 	}
 	for i := range reply.Attachments {
 		// A failed upload must not expose a runner-local path as a usable artifact.

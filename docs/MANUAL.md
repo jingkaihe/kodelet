@@ -1846,7 +1846,7 @@ return { status: replies[0].data.output, branch: replies[1].data.output.trim() }
 
 Use `return`, `emit(value)`, and `console.log(...)` to select JSON/text output. Await results before emitting them. Use `try/catch` or `Promise.allSettled` when tool failures are expected. Completed actions are not automatically retried or rolled back.
 
-The TUI and Web UI show one code-execution card with tool-call status, duration, and selected output. Individual calls do not create separate cards or stream their output into the conversation. Failed calls remain visible even if the script handles the error.
+The Web UI shows one expandable code-execution card containing the JavaScript, nested tool results with their usual command and diff views, and selected output. Child output is available after execution finishes, not streamed. Older calls may have only status summaries; oversized details are marked as omitted. The TUI shows a concise summary. Failed calls remain visible even if the script handles the error.
 
 Select images explicitly:
 

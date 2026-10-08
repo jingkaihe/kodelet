@@ -821,6 +821,9 @@ export interface CodeExecutionMetadata {
     status: string;
     durationMs: number;
     errorKind?: string;
+    input?: Record<string, unknown>;
+    result?: ToolResult;
+    detailsOmitted?: boolean;
   }>;
 }
 

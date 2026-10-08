@@ -41,6 +41,9 @@ type CodeToolReply struct {
 	Text        string                     `json:"text"`
 	Attachments []tooltypes.ToolAttachment `json:"attachments"`
 	Truncated   bool                       `json:"truncated"`
+	// Host-only, effective display details; never exposed to JavaScript.
+	Input  json.RawMessage                 `json:"-"`
+	Result *tooltypes.StructuredToolResult `json:"-"`
 }
 
 // CodeToolError preserves known execution outcomes without implying rollback.
@@ -150,6 +153,7 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 	lastUpdate := time.Time{}
 	var updateSequence, publishedSequence uint64
 	active := true
+	detailBytes := 0
 	inventory := make(map[string]tooltypes.ToolAttachment)
 	// Prepare under mu, then publish outside it. Slow update hooks must neither
 	// prevent VM cancellation nor deliver out-of-order or post-completion updates.
@@ -162,6 +166,9 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		sequence := updateSequence
 		snapshot := meta
 		snapshot.Calls = slices.Clone(meta.Calls)
+		for i := range snapshot.Calls {
+			snapshot.Calls[i].Input, snapshot.Calls[i].Result = nil, nil
+		}
 		snapshot.DurationMs = time.Since(start).Milliseconds()
 		return func() {
 			updateMu.Lock()
@@ -225,11 +232,13 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			encoded, encodeErr = json.Marshal(reply)
 			references = reply.Attachments
 		} else {
+			reply = CodeToolReply{}
 			var toolErr *CodeToolError
 			if errors.As(callErr, &toolErr) {
 				encoded, encodeErr = json.Marshal(toolErr)
 				if toolErr.Result != nil {
 					references = toolErr.Result.Attachments
+					reply = *toolErr.Result
 				}
 			}
 		}
@@ -259,6 +268,22 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			entry := &meta.Calls[index]
 			entry.DurationMs = time.Since(callStart).Milliseconds()
 			entry.Status = "completed"
+			if reply.Result != nil {
+				// Bound persisted UI details across the whole invocation. Do not
+				// duplicate machine data or retain unselected image attachments.
+				display := *reply.Result
+				display.Data, display.Attachments = nil, nil
+				body, err := json.Marshal(display)
+				size := len(body) + len(reply.Input)
+				if err == nil && detailBytes+size <= 512*1024 {
+					entry.Input = slices.Clone(reply.Input)
+					entry.Result = &tooltypes.StructuredToolResult{}
+					_ = json.Unmarshal(body, entry.Result)
+					detailBytes += size
+				} else {
+					entry.DetailsOmitted = true
+				}
+			}
 			if callErr != nil {
 				entry.Status, entry.ErrorKind = "failed", "tool_error"
 				var toolErr *CodeToolError
@@ -318,7 +343,7 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 	return finish(err)
 }
 
-// CodeExecuteResult persists selected output, artifact references, and bounded child summaries.
+// CodeExecuteResult persists selected output, artifact references, and bounded UI child details.
 type CodeExecuteResult struct {
 	Metadata    tooltypes.CodeExecutionMetadata
 	Error       string

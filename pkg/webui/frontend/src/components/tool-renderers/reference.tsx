@@ -76,6 +76,7 @@ export const getExtensionToolPresentation = (
 };
 
 export const normalizeToolName = (toolName: string): string => {
+  if (toolName.toLowerCase() === 'code_execute') return 'code_execute';
   if (toolName === 'grep') {
     return 'grep_tool';
   }

@@ -2,6 +2,7 @@ import { Download, ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { useState } from 'react';
 import type { CodeExecutionMetadata, ToolAttachment, ToolResult } from '../../types';
+import { normalizeToolName } from './reference';
 
 // Build a same-origin URL from the server-issued code. Never fetch extension
 // paths or arbitrary view URLs, including a configured external public origin.
@@ -87,7 +88,8 @@ const ToolImageAttachments: React.FC<{ toolResult: ToolResult }> = ({ toolResult
   // Typed code outputs own their inline media order; a second gallery would
   // duplicate previews and lose the image-versus-retained-artifact distinction.
   if (
-    (toolResult.toolName === 'code_execute' || toolResult.metadataType === 'code_execute') &&
+    (normalizeToolName(toolResult.toolName) === 'code_execute' ||
+      toolResult.metadataType === 'code_execute') &&
     Array.isArray((toolResult.metadata as CodeExecutionMetadata | undefined)?.items)
   ) {
     return null;

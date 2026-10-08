@@ -22,13 +22,21 @@ func TestCodeExecuteToolDiscoveryAndCalls(t *testing.T) {
 			assert.Equal(t, "lookup", name)
 			assert.JSONEq(t, `{"id":42}`, input)
 			assert.NotEmpty(t, callID)
-			return CodeToolReply{Data: map[string]any{"id": 42, "secret": "omit me"}}, nil
+			return CodeToolReply{
+				Data: map[string]any{"id": 42, "secret": "omit me"}, Input: json.RawMessage(input),
+				Result: &tooltypes.StructuredToolResult{
+					ToolName: name, Success: true, Data: "do not duplicate machine data",
+					Metadata:    tooltypes.ExtensionToolMetadata{Output: "UI-only detail"},
+					Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "unselected"}},
+				},
+			}, nil
 		},
 	})
 	params, err := json.Marshal(codeExecuteInput{Code: `
 const [listing, matches] = await Promise.all([catalog.list(), catalog.search("issue")]);
 if (listing.tools[0].name !== "lookup" || matches.tools[0].name !== "lookup") throw new Error("discovery failed");
 const result = await tools.lookup({id: 42});
+if ("result" in result || "input" in result) throw new Error("UI details entered the VM");
 return {id: result.data.id};
 `})
 	require.NoError(t, err)
@@ -36,21 +44,51 @@ return {id: result.data.id};
 	result := tool.ExecuteStreaming(ctx, nil, string(params), func(snapshot tooltypes.ToolResult) {
 		updates++
 		assert.Equal(t, "code_execute", snapshot.StructuredData().ToolName)
+		for _, call := range snapshot.(CodeExecuteResult).Metadata.Calls {
+			assert.Nil(t, call.Input)
+			assert.Nil(t, call.Result, "progress must not stream child bodies")
+		}
 	})
 	require.False(t, result.IsError(), result.GetError())
 	assert.Positive(t, updates)
 	assert.Contains(t, result.AssistantFacing(), `"id":42`)
 	assert.NotContains(t, result.AssistantFacing(), "omit me")
+	assert.NotContains(t, result.AssistantFacing(), "UI-only detail")
 	var metadata tooltypes.CodeExecutionMetadata
 	require.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
 	require.Len(t, metadata.Calls, 1)
 	assert.Equal(t, "completed", metadata.Calls[0].Status)
-	// Persisted metadata must decode identically, with no child body.
+	assert.JSONEq(t, `{"id":42}`, string(metadata.Calls[0].Input))
+	require.NotNil(t, metadata.Calls[0].Result)
+	assert.Equal(t, tooltypes.ExtensionToolMetadata{Output: "UI-only detail"}, metadata.Calls[0].Result.Metadata)
+	assert.Nil(t, metadata.Calls[0].Result.Data)
+	assert.Empty(t, metadata.Calls[0].Result.Attachments)
+	// UI details must survive history reload without entering selected output.
 	encoded, err := json.Marshal(result.StructuredData())
 	require.NoError(t, err)
 	var restored tooltypes.StructuredToolResult
 	require.NoError(t, json.Unmarshal(encoded, &restored))
 	assert.Equal(t, result.StructuredData().Metadata, restored.Metadata)
+}
+
+func TestCodeExecuteToolBoundsChildDetails(t *testing.T) {
+	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+		Definitions: []codemode.Definition{{Name: "lookup"}},
+		Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+			return CodeToolReply{Result: &tooltypes.StructuredToolResult{
+				ToolName: "lookup", Success: true,
+				Metadata: tooltypes.ExtensionToolMetadata{Output: strings.Repeat("x", 300*1024)},
+			}}, nil
+		},
+	})
+	result := (&CodeExecuteTool{}).Execute(ctx, nil, `{"code":"await tools.lookup({}); await tools.lookup({}); return 42;"}`)
+	require.False(t, result.IsError(), result.GetError())
+	calls := result.(CodeExecuteResult).Metadata.Calls
+	require.Len(t, calls, 2)
+	require.NotNil(t, calls[0].Result)
+	assert.Nil(t, calls[1].Result)
+	assert.True(t, calls[1].DetailsOmitted, "the budget applies across children, not per child")
+	assert.Contains(t, result.AssistantFacing(), "42")
 }
 
 func TestCodeExecuteToolCaughtFailure(t *testing.T) {
@@ -69,6 +107,8 @@ func TestCodeExecuteToolCaughtFailure(t *testing.T) {
 	require.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
 	require.Len(t, metadata.Calls, 1)
 	assert.Equal(t, "blocked", metadata.Calls[0].Status)
+	assert.Nil(t, metadata.Calls[0].Result)
+	assert.Nil(t, metadata.Calls[0].Input)
 }
 
 func TestCodeExecuteToolRequiresHostAuthority(t *testing.T) {
@@ -100,7 +140,10 @@ func TestCodeExecuteToolRetainsArtifactsFromEffectiveErrorReply(t *testing.T) {
 		Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
 			return CodeToolReply{Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "raw-image"}}}, &CodeToolError{
 				Kind: "tool_error", Tool: name, CallID: callID, Outcome: "completed", Message: "partial failure",
-				Result: &CodeToolReply{Attachments: []tooltypes.ToolAttachment{attachment}},
+				Result: &CodeToolReply{
+					Attachments: []tooltypes.ToolAttachment{attachment},
+					Result:      &tooltypes.StructuredToolResult{ToolName: name, Error: "effective failure"},
+				},
 			}
 		},
 	})
@@ -118,6 +161,7 @@ func TestCodeExecuteToolRetainsArtifactsFromEffectiveErrorReply(t *testing.T) {
 			result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
 			assert.Equal(t, test.fail, result.IsError(), result.GetError())
 			assert.Equal(t, []tooltypes.ToolAttachment{attachment}, result.StructuredData().Attachments)
+			assert.Equal(t, "effective failure", result.(CodeExecuteResult).Metadata.Calls[0].Result.Error)
 		})
 	}
 }

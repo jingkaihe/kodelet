@@ -26,6 +26,12 @@ func TestCodeExecutionRenderer(t *testing.T) {
 	assert.Contains(t, output, "blocked  edit")
 	assert.Contains(t, output, "Stopped")
 	assert.Equal(t, "Code execution: Bad metadata", (&CodeExecutionRenderer{}).RenderCLI(tools.StructuredToolResult{Error: "Bad metadata"}))
+	assert.Equal(t, "Code execution", CodeExecutionSummary(tools.CodeExecutionMetadata{}))
+	for status, label := range map[string]string{"completed": "succeeded", "blocked": "failed", "queued": "running"} {
+		assert.Equal(t, "Code execution · 1 "+label, CodeExecutionSummary(tools.CodeExecutionMetadata{
+			Calls: []tools.CodeExecutionCall{{Status: status}},
+		}))
+	}
 }
 
 func TestCodeExecutionRendererTypedOutputOrder(t *testing.T) {

@@ -24,7 +24,13 @@ func CodeExecutionSummary(meta tools.CodeExecutionMetadata) string {
 			failed++
 		}
 	}
-	return fmt.Sprintf("Code execution · %d succeeded · %d failed · %d running", completed, failed, running)
+	parts := []string{"Code execution"}
+	for i, count := range []int{completed, failed, running} {
+		if count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", count, []string{"succeeded", "failed", "running"}[i]))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // RenderCLI omits child inputs and result bodies, preserving selected output.
