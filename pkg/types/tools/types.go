@@ -41,6 +41,25 @@ type RawInputSchemaProvider interface {
 	RawInputSchema() map[string]any
 }
 
+// RawOutputSchemaProvider describes the canonical StructuredToolResult.Data value.
+// Tools without a machine-readable result need not implement this interface.
+type RawOutputSchemaProvider interface {
+	RawOutputSchema() map[string]any
+}
+
+// OutputSchemaForTool returns a tool's optional machine-result JSON Schema.
+func OutputSchemaForTool(tool Tool) map[string]any {
+	if provider, ok := tool.(RawOutputSchemaProvider); ok {
+		return provider.RawOutputSchema()
+	}
+	return nil
+}
+
+// ToolGroupProvider supplies recorded provenance for tool catalog grouping.
+type ToolGroupProvider interface {
+	ToolGroup() string
+}
+
 // JSONSchemaForTool returns the model-facing schema without narrowing raw
 // extension schemas through the typed jsonschema representation.
 func JSONSchemaForTool(tool Tool) map[string]any {
@@ -68,6 +87,12 @@ type ToolResult interface {
 	GetError() string  // xxx: to be removed
 	GetResult() string // xxx: to be removed
 	StructuredData() StructuredToolResult
+}
+
+// ToolFailureProvider records host-known execution failures independently of
+// hook-editable display metadata. Empty fields mean no additional provenance.
+type ToolFailureProvider interface {
+	ToolFailure() (kind, outcome string)
 }
 
 // ToolResultContentPartType enumerates rich tool result content block types.
@@ -99,9 +124,14 @@ type MultiModalToolResult interface {
 
 // BaseToolResult provides a basic implementation of the ToolResult interface
 type BaseToolResult struct {
-	Result string `json:"result"`
-	Error  string `json:"error"`
+	Result         string `json:"result"`
+	Error          string `json:"error"`
+	FailureKind    string `json:"-"`
+	FailureOutcome string `json:"-"`
 }
+
+// ToolFailure returns execution provenance that result hooks cannot change.
+func (t BaseToolResult) ToolFailure() (string, string) { return t.FailureKind, t.FailureOutcome }
 
 // AssistantFacing returns a formatted string representation of the result for the LLM
 func (t BaseToolResult) AssistantFacing() string {

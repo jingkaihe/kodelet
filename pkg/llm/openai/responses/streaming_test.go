@@ -13,6 +13,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -345,6 +346,116 @@ func TestRemoteCompactionFallbackSharesModelSpan(t *testing.T) {
 	assert.True(t, sawFallback)
 }
 
+type codeModeResponsesEnvironment struct {
+	agentenv.Environment
+	request agentenv.ToolRequest
+}
+
+func (e *codeModeResponsesEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, sink agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	e.request = request
+	// Model the runner boundary: authority comes from the host request, never
+	// the model's JSON. The actual tool lifecycle and VM still run locally.
+	if request.CallableTools != nil {
+		var definitions []codemode.Definition
+		for _, name := range *request.CallableTools {
+			definition, _ := e.Manifest().ToolDefinition(name)
+			definitions = append(definitions, codemode.Definition{
+				Name: name, Description: definition.Description, Group: definition.Group,
+				InputSchema: definition.InputSchema,
+			})
+		}
+		ctx = tools.ContextWithCodeExecution(ctx, tools.CodeExecutionContext{
+			Definitions: definitions,
+			Call: func(ctx context.Context, name, input, callID string) (tools.CodeToolReply, error) {
+				child, err := e.Environment.ExecuteTool(ctx, agentenv.ToolRequest{Name: name, Input: input, ToolCallID: callID}, nil)
+				if err != nil {
+					return tools.CodeToolReply{}, err
+				}
+				return tools.CodeToolReply{Text: child.Result.GetResult()}, nil
+			},
+		})
+	}
+	return e.Environment.ExecuteTool(ctx, request, sink)
+}
+
+type codeModeResponsesTool struct{ responsesTestTool }
+
+func (codeModeResponsesTool) ToolGroup() string { return "mcp/test" }
+
+func (codeModeResponsesTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{Result: "grouped tool ran"}
+}
+
+func TestResponsesCodeExecuteAdvertisementAndDispatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, mode := range []string{"hybrid", "compact"} {
+		t.Run(mode, func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "openai", CodeMode: mode,
+				OpenAI:       &llmtypes.OpenAIConfig{Platform: "openai", APIMode: llmtypes.OpenAIAPIModeResponses},
+				AllowedTools: []string{"code_execute", "bash", "search_issues", "delete_issues"},
+			}
+			local := agentenv.NewLocalEnvironment(t.TempDir(), nil,
+				codeModeResponsesTool{responsesTestTool{name: "search_issues"}},
+				codeModeResponsesTool{responsesTestTool{name: "delete_issues"}},
+			)
+			_, err := local.Open(t.Context(), agentenv.RunSpec{Config: config})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
+			environment := &codeModeResponsesEnvironment{Environment: local}
+			thread := &Thread{Thread: base.NewThread(config, "code-mode")}
+			thread.SetEnvironment(environment)
+			thread.SetMetadataValue("allowed_tools", []string{"code_execute", "bash", "search_issues"})
+
+			definitions := buildToolsForThread(thread, nil, false)
+			var names []string
+			var schema map[string]any
+			for _, definition := range definitions {
+				require.NotNil(t, definition.OfFunction)
+				names = append(names, definition.OfFunction.Name)
+				if definition.OfFunction.Name == "code_execute" {
+					schema = definition.OfFunction.Parameters
+				}
+			}
+			wantNames := []string{"bash", "code_execute"}
+			if mode == "hybrid" {
+				wantNames = append(wantNames, "search_issues")
+			}
+			assert.ElementsMatch(t, wantNames, names)
+			require.NotNil(t, schema)
+			properties := schema["properties"].(map[string]any)
+			require.Len(t, properties, 1, "host-owned callable permissions must not appear in the model schema")
+			assert.Contains(t, properties, "code")
+
+			input, err := json.Marshal(map[string]any{"code": `
+const names = (await catalog.list()).tools.map(tool => tool.name).sort();
+const reply = await tools.search_issues({});
+const blocked = await tools.delete_issues({}).catch(error => error.kind);
+return {names, text: reply.text, blocked};
+`})
+			require.NoError(t, err)
+			results, err := thread.executeFunctionCallsParallel(t.Context(), []functionCallInvocation{{
+				name: "code_execute", callID: "parent-code", arguments: string(input),
+			}}, &captureStreamHandler{})
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "code_execute", environment.request.Name)
+			assert.Equal(t, "parent-code", environment.request.ToolCallID)
+			assert.JSONEq(t, string(input), environment.request.Input)
+			require.NotNil(t, environment.request.CallableTools)
+			assert.ElementsMatch(t, []string{"bash", "search_issues"}, *environment.request.CallableTools)
+			result, ok := results[0].Result.(tools.CodeExecuteResult)
+			require.True(t, ok)
+			require.False(t, result.IsError(), result.GetError())
+			require.Len(t, result.Metadata.Items, 1)
+			assert.JSONEq(t, `{"names":["bash","search_issues"],"text":"grouped tool ran","blocked":"blocked"}`, string(result.Metadata.Items[0].Value))
+			require.Len(t, result.Metadata.Calls, 2)
+			assert.Equal(t, "completed", result.Metadata.Calls[0].Status)
+			assert.Equal(t, "blocked", result.Metadata.Calls[1].Status)
+		})
+	}
+}
+
 type failingResponsesToolEnvironment struct {
 	agentenv.Environment
 	err error
@@ -518,7 +629,7 @@ func TestBuildStoredFunctionCallOutputPreservesMultimodalContent(t *testing.T) {
 	const descriptor = "Artifact ID: art_test"
 	const imageURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 	for _, tc := range []struct {
-		name, text, detail, wantJSON string
+		name, text, detail, suffix, wantJSON string
 	}{
 		{
 			name:     "image only",
@@ -530,6 +641,10 @@ func TestBuildStoredFunctionCallOutputPreservesMultimodalContent(t *testing.T) {
 			detail:   "original",
 			wantJSON: `[{"type":"input_text","text":"Artifact ID: art_test"},{"type":"input_image","image_url":"` + imageURL + `","detail":"original"}]`,
 		},
+		{
+			name: "ordered mixed output", text: descriptor, suffix: "after image",
+			wantJSON: `[{"type":"input_text","text":"Artifact ID: art_test"},{"type":"input_image","image_url":"` + imageURL + `","detail":"auto"},{"type":"input_text","text":"after image"}]`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := fakeMultiModalToolResult{
@@ -539,6 +654,7 @@ func TestBuildStoredFunctionCallOutputPreservesMultimodalContent(t *testing.T) {
 					{Type: tooltypes.ToolResultContentPartTypeText, Text: tc.text},
 					{Type: tooltypes.ToolResultContentPartTypeImage},
 					{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: imageURL, MimeType: "image/png", Detail: tc.detail},
+					{Type: tooltypes.ToolResultContentPartTypeText, Text: tc.suffix},
 				},
 			}
 

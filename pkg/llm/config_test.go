@@ -282,6 +282,24 @@ func TestModelProfileValidation(t *testing.T) {
 	}
 }
 
+func TestCodeModeConfiguration(t *testing.T) {
+	for _, mode := range []string{"", "off", "hybrid", "compact"} {
+		t.Run(mode, func(t *testing.T) {
+			config, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{"code_mode": mode}, "")
+			require.NoError(t, err)
+			assert.Equal(t, mode, config.CodeMode)
+		})
+	}
+	_, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{"code_mode": "enabled"}, "")
+	require.ErrorContains(t, err, "code_mode must be off, hybrid, or compact")
+	config, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{
+		"code_mode":            "off",
+		"environment_profiles": map[string]any{"code": map[string]any{"code_mode": "compact"}},
+	}, "code")
+	require.NoError(t, err)
+	assert.Equal(t, "compact", config.CodeMode)
+}
+
 func TestValidateModelProfiles(t *testing.T) {
 	for _, test := range []struct {
 		name, key, wantErr string

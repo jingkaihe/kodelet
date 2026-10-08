@@ -312,6 +312,14 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 #   toolset, and ensures apply_patch is available
 tool_mode: full
 
+# Runner-side JavaScript orchestration (disabled by default).
+# - off: existing direct tools only
+# - hybrid: direct tools plus code_execute
+# - compact: core tools plus code_execute; discover extension/MCP tools via catalog
+# Set on the runner, in workspace config, or in an environment profile.
+# Tool/command restrictions still apply; explicit allowlists must include code_execute.
+code_mode: off
+
 # Enable built-in filesystem search tools (glob_tool and grep_tool).
 # Disabled by default; the agent is instructed to use fd/rg via the bash tool instead.
 # enable_fs_search_tools: true

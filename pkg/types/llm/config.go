@@ -77,6 +77,7 @@ type Config struct {
 	AllowedTools            []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                                                         // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
 	WorkingDirectory        string             `mapstructure:"working_directory" json:"working_directory" yaml:"working_directory"`
 	ToolMode                ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                    // ToolMode controls file-interaction behavior (e.g. full or patch)
+	CodeMode                string             `mapstructure:"code_mode" json:"code_mode,omitempty" yaml:"code_mode,omitempty"`                // Runner-owned code execution: off (default), hybrid, or compact.
 	AnthropicAPIAccess      AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`   // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	AnthropicAccount        string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
 	Aliases                 map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names

@@ -25,18 +25,34 @@ func AvailableTools(state tooltypes.State, noToolUse bool) []tooltypes.Tool {
 // AvailableToolsForThread returns tools filtered by any per-turn extension tool-list patch.
 func AvailableToolsForThread(thread llmtypes.Thread, state tooltypes.State, noToolUse bool) []tooltypes.Tool {
 	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
-		return filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread))
+		return advertisedTools(thread, filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread)))
 	}
-	return availableTools(state, noToolUse, currentAllowedTools(thread))
+	return advertisedTools(thread, availableTools(state, noToolUse, currentAllowedTools(thread)))
 }
 
 // AvailableEnvironmentToolsForThread returns tools from the run-pinned environment manifest.
 func AvailableEnvironmentToolsForThread(thread llmtypes.Thread, noToolUse bool) []tooltypes.Tool {
 	environment := EnvironmentForThread(thread)
 	if environment == nil || !environment.IsOpen() {
-		return availableTools(threadState(thread), noToolUse, currentAllowedTools(thread))
+		return advertisedTools(thread, availableTools(threadState(thread), noToolUse, currentAllowedTools(thread)))
 	}
-	return filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread))
+	return advertisedTools(thread, filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread)))
+}
+
+func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []tooltypes.Tool {
+	if thread == nil || thread.GetConfig().CodeMode != "compact" || !slices.ContainsFunc(available, func(tool tooltypes.Tool) bool {
+		return tool != nil && tool.Name() == "code_execute"
+	}) {
+		return available
+	}
+	result := make([]tooltypes.Tool, 0, len(available))
+	for _, tool := range available {
+		if grouped, ok := tool.(tooltypes.ToolGroupProvider); ok && grouped.ToolGroup() != "" {
+			continue
+		}
+		result = append(result, tool)
+	}
+	return result
 }
 
 func availableTools(state tooltypes.State, noToolUse bool, allowed []string) []tooltypes.Tool {

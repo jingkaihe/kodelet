@@ -220,6 +220,39 @@ func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
 	assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, available)
 }
 
+type groupedTool struct{ namedTool }
+
+func (groupedTool) ToolGroup() string { return "mcp/test" }
+
+func TestCompactCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
+	tools := []tooltypes.Tool{namedTool("bash"), namedTool("code_execute"), groupedTool{namedTool("search_issues")}}
+	state := &toolState{tools: tools}
+	for _, mode := range []string{"off", "hybrid", "compact"} {
+		t.Run(mode, func(t *testing.T) {
+			thread := &environmentThreadStub{
+				threadStub: &threadStub{state: state, config: llmtypes.Config{CodeMode: mode}},
+				environment: &recordingAgentEnvironment{open: true, manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
+					{Name: "bash", Tool: tools[0]},
+					{Name: "code_execute", Tool: tools[1]},
+					{Name: "search_issues", Tool: tools[2]},
+				}}},
+			}
+			want := tools
+			if mode == "compact" {
+				want = tools[:2]
+			}
+			assert.Equal(t, want, AvailableEnvironmentToolsForThread(thread, false))
+			assert.Equal(t, want, AvailableToolsForThread(thread, state, false))
+			assert.True(t, ToolAllowedForThread(thread, "search_issues"), "hiding a schema must not change authorization")
+			assert.Len(t, state.Tools(), 3, "the underlying callable state is unchanged")
+			assert.Empty(t, AvailableEnvironmentToolsForThread(thread, true))
+			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash", "search_issues"})
+			assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, AvailableEnvironmentToolsForThread(thread, false), "keep direct access when code_execute is denied")
+		})
+	}
+	assert.Equal(t, tools, AvailableToolsForThread(nil, state, false))
+}
+
 func TestAgentInitAllowedToolsUsesEffectiveStateToolsByDefault(t *testing.T) {
 	state := &toolState{tools: []tooltypes.Tool{namedTool("file_read"), nil, namedTool("bash")}}
 

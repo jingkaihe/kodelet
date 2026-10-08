@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import type { ExtensionAPI } from "../../types.js";
+import type { ExtensionAPI, ToolAttachment } from "../../types.js";
 import type { MCPConfig, MCPOAuthGlobalConfig, MCPServerConfig } from "./config.js";
 import { KodeletMCPOAuthProvider } from "./oauth.js";
 
@@ -243,6 +243,8 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
       name: toolName,
       description: tool.description?.trim() || tool.title?.trim() || tool.name,
       inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      group: `mcp/${server.name}`,
       timeoutInSec: mcpToolTimeoutInSec,
       async execute(input) {
         const start = Date.now();
@@ -257,15 +259,25 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
 
         const contentBlocks = result.content.map((block) => normalizeContentBlock(block));
         const contentText = contentBlocks.map((block) => block.text ?? "").join("");
+        const attachments = result.content.flatMap((block): ToolAttachment[] => {
+          if (block.type !== "image" || typeof block.data !== "string") {
+            return [];
+          }
+          return [{ type: "image", data: block.data, mimeType: typeof block.mimeType === "string" ? block.mimeType : undefined }];
+        });
         if (result.isError) {
           return {
             content: contentText,
+            structuredContent: result.structuredContent,
+            attachments: attachments.length > 0 ? attachments : undefined,
             error: contentText || `MCP tool ${server.name}.${tool.name} returned an error`,
             data: mcpData(server.name, tool.name, input as Record<string, unknown>, contentText, contentBlocks, Date.now() - start),
           };
         }
         return {
           content: contentText,
+          structuredContent: result.structuredContent,
+          attachments: attachments.length > 0 ? attachments : undefined,
           data: mcpData(server.name, tool.name, input as Record<string, unknown>, contentText, contentBlocks, Date.now() - start),
         };
       },

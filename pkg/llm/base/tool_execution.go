@@ -108,11 +108,25 @@ func executeEnvironmentTool(
 		}
 	}
 
-	execution, err := environment.ExecuteTool(ctx, agentenv.ToolRequest{
+	request := agentenv.ToolRequest{
 		Name:       toolName,
 		Input:      toolInput,
 		ToolCallID: toolCallID,
-	}, updateSink)
+	}
+	if toolName == "code_execute" {
+		if !ToolAllowedForThread(thread, toolName) {
+			result := tooltypes.NewBlockedToolResult(toolName, "code execution is not allowed for this turn")
+			return ToolExecution{Input: toolInput, Result: result, StructuredResult: result.StructuredData()}
+		}
+		callable := []string{}
+		for _, definition := range manifest.Tools {
+			if definition.Name != "code_execute" && ToolAllowedForThread(thread, definition.Name) {
+				callable = append(callable, definition.Name)
+			}
+		}
+		request.CallableTools = &callable
+	}
+	execution, err := environment.ExecuteTool(ctx, request, updateSink)
 	if updateSink != nil {
 		updateMu.Lock()
 		acceptUpdates = false

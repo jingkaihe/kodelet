@@ -113,6 +113,7 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"GrepMetadata", GrepMetadata{}, "grep_tool"},
 		{"GlobMetadata", GlobMetadata{}, "glob_tool"},
 		{"BashMetadata", BashMetadata{}, "bash"},
+		{"CodeExecutionMetadata", CodeExecutionMetadata{}, "code_execute"},
 		{"ExtensionToolMetadata", ExtensionToolMetadata{}, "extension_tool"},
 		{"ViewImageMetadata", ViewImageMetadata{}, "view_image"},
 		{"BrowserMetadata", BrowserMetadata{}, "browser"},

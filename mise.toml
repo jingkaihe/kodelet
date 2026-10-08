@@ -44,6 +44,7 @@ run = [
 
 [tasks.build-dev]
 description = "Build the application without web UI (faster for development)"
+depends = ["codemode-generation"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary (without frontend)...'",
@@ -51,8 +52,13 @@ run = [
 ]
 
 [tasks.code-generation]
-description = "Generate frontend assets"
+description = "Generate embedded runtime and frontend assets"
+depends = ["codemode-generation"]
 run = ["go generate ./pkg/webui"]
+
+[tasks.codemode-generation]
+description = "Generate the embedded QuickJS runtime from its locked npm dependency"
+run = ["go generate ./pkg/codemode"]
 
 [tasks.dev-server]
 description = "Run development server with auto-reload"

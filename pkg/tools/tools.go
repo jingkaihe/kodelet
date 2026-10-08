@@ -31,16 +31,17 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 
 // toolRegistry holds all available tools mapped by their names
 var toolRegistry = map[string]tooltypes.Tool{
-	"bash":        &BashTool{},
-	"apply_patch": &ApplyPatchTool{},
-	"file_read":   &FileReadTool{},
-	"file_write":  &FileWriteTool{},
-	"file_edit":   &FileEditTool{},
-	"grep_tool":   &GrepTool{},
-	"glob_tool":   &GlobTool{},
-	"web_fetch":   &WebFetchTool{},
-	"view_image":  NewViewImageTool("", ""),
-	"skill":       NewSkillTool(nil, false, false),
+	"code_execute": &CodeExecuteTool{},
+	"bash":         &BashTool{},
+	"apply_patch":  &ApplyPatchTool{},
+	"file_read":    &FileReadTool{},
+	"file_write":   &FileWriteTool{},
+	"file_edit":    &FileEditTool{},
+	"grep_tool":    &GrepTool{},
+	"glob_tool":    &GlobTool{},
+	"web_fetch":    &WebFetchTool{},
+	"view_image":   NewViewImageTool("", ""),
+	"skill":        NewSkillTool(nil, false, false),
 }
 
 var virtualToolNames = []string{
@@ -238,7 +239,9 @@ func RunToolWithUpdates(
 	tool, err := findTool(toolName, state)
 	if err != nil {
 		return tooltypes.BaseToolResult{
-			Error: errors.Wrap(err, "failed to find tool").Error(),
+			Error:          errors.Wrap(err, "failed to find tool").Error(),
+			FailureKind:    "blocked",
+			FailureOutcome: "not_started",
 		}
 	}
 	return RunToolImplementationWithUpdates(ctx, state, tool, parameters, onUpdate)
@@ -253,7 +256,11 @@ func RunToolImplementationWithUpdates(
 	onUpdate tooltypes.ToolUpdateCallback,
 ) tooltypes.ToolResult {
 	if tool == nil {
-		return tooltypes.BaseToolResult{Error: "tool implementation is required"}
+		return tooltypes.BaseToolResult{
+			Error:          "tool implementation is required",
+			FailureKind:    "blocked",
+			FailureOutcome: "not_started",
+		}
 	}
 
 	var kvs []attribute.KeyValue
@@ -277,7 +284,9 @@ func RunToolImplementationWithUpdates(
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return tooltypes.BaseToolResult{
-			Error: err.Error(),
+			Error:          err.Error(),
+			FailureKind:    "invalid_input",
+			FailureOutcome: "not_started",
 		}
 	}
 

@@ -1,0 +1,12 @@
+{
+  "name": "kodelet-codemode-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-runtime.mjs"
+  },
+  "dependencies": {
+    "quickjs-wasi": "3.6.2"
+  }
+}

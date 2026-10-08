@@ -199,6 +199,76 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 	}
 }
 
+func TestStructuredToolResult_MachineDataRoundTrip(t *testing.T) {
+	for _, payload := range []string{
+		`{"items":[{"id":42}],"empty":null,"enabled":false}`,
+		`[1,"value",null,false]`,
+		`false`,
+		`0`,
+		`""`,
+		`{}`,
+		`null`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			var data any
+			require.NoError(t, json.Unmarshal([]byte(payload), &data))
+			original := StructuredToolResult{
+				ToolName: "structured_tool",
+				Success:  true,
+				Data:     data,
+				Metadata: ExtensionToolMetadata{Output: "Display text", Data: map[string]any{"presentation": "separate"}},
+			}
+			encoded, err := json.Marshal(original)
+			require.NoError(t, err)
+			var restored StructuredToolResult
+			require.NoError(t, json.Unmarshal(encoded, &restored))
+			assert.Equal(t, data, restored.Data)
+			assert.Equal(t, original.Metadata, restored.Metadata)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(encoded, &fields))
+			if data != nil {
+				assert.JSONEq(t, payload, string(fields["data"]))
+			} else {
+				assert.NotContains(t, fields, "data")
+			}
+		})
+	}
+
+	t.Run("decoding clears previous data and metadata", func(t *testing.T) {
+		result := StructuredToolResult{Data: "secret", Metadata: BashMetadata{Output: "secret"}}
+		require.NoError(t, json.Unmarshal([]byte(`{"toolName":"redacted","success":true}`), &result))
+		assert.Nil(t, result.Data)
+		assert.Nil(t, result.Metadata)
+	})
+
+	t.Run("unknown metadata does not discard machine data", func(t *testing.T) {
+		var result StructuredToolResult
+		require.NoError(t, json.Unmarshal([]byte(`{"toolName":"future","data":{"id":42},"metadataType":"future","metadata":{}}`), &result))
+		assert.Equal(t, map[string]any{"id": float64(42)}, result.Data)
+		assert.Nil(t, result.Metadata)
+	})
+}
+
+func TestStructuredToolResult_CodeExecutionMetadataRoundTrip(t *testing.T) {
+	result := StructuredToolResult{
+		ToolName: "code_execute",
+		Success:  true,
+		Metadata: CodeExecutionMetadata{
+			Status:     "completed",
+			DurationMs: 25,
+			Outputs:    []json.RawMessage{json.RawMessage(`{"count":2}`)},
+			Calls: []CodeExecutionCall{{
+				CallID: "child-1", ToolName: "bash", Status: "completed", DurationMs: 20,
+			}},
+		},
+	}
+	payload, err := json.Marshal(result)
+	require.NoError(t, err)
+	var decoded StructuredToolResult
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	assert.Equal(t, result.Metadata, decoded.Metadata)
+}
+
 func TestStructuredToolResult_TypeAssertions(t *testing.T) {
 	// Test that type assertions work correctly for both pointer and value types
 	tests := []struct {

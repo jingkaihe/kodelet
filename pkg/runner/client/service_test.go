@@ -699,6 +699,7 @@ func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
 	result := serializeToolResult(
 		tooltypes.BaseToolResult{Result: strings.Repeat("界", maxToolDisplayOutputBytes)},
 		tooltypes.StructuredToolResult{ToolName: "custom", Success: true},
+		false,
 	)
 
 	assert.LessOrEqual(t, len(result.DisplayOutput), maxToolDisplayOutputBytes)

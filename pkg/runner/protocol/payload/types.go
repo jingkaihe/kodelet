@@ -25,11 +25,13 @@ type ContextFile struct {
 
 // ToolDefinition is one serializable model-facing runner tool.
 type ToolDefinition struct {
-	ExtensionID string         `json:"extensionId,omitempty"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	Placement   string         `json:"placement"`
+	ExtensionID  string         `json:"extensionId,omitempty"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+	Group        string         `json:"group,omitempty"`
+	Placement    string         `json:"placement"`
 }
 
 // SkillDefinition describes a skill owned and pinned by the runner.
@@ -45,6 +47,7 @@ type EnvironmentConfig struct {
 	Options             *llmtypes.ExecutionOptions  `json:"options,omitempty"`
 	AllowedCommands     []string                    `json:"allowedCommands,omitempty"`
 	ToolMode            llmtypes.ToolMode           `json:"toolMode,omitempty"`
+	CodeMode            string                      `json:"codeMode,omitempty"`
 	EnableFSSearchTools bool                        `json:"enableFSSearchTools,omitempty"`
 	SystemPromptPath    string                      `json:"systemPromptPath,omitempty"`
 	SystemPromptContent string                      `json:"systemPromptContent,omitempty"`
@@ -54,6 +57,7 @@ type EnvironmentConfig struct {
 
 // EnvironmentCapabilities advertises optional runner behavior.
 type EnvironmentCapabilities struct {
+	CodeExecution      bool `json:"codeExecution,omitempty"`
 	ToolUpdates        bool `json:"toolUpdates"`
 	InteractiveUI      bool `json:"interactiveUI"`
 	PersistentWidgets  bool `json:"persistentWidgets"`
@@ -209,6 +213,18 @@ type ToolExecuteParams struct {
 	Name        string          `json:"name"`
 	Input       json.RawMessage `json:"input"`
 	WantUpdates bool            `json:"wantUpdates,omitempty"`
+	// CallableTools and ManifestDigest are host-owned, not model input.
+	CallableTools  *[]string `json:"callableTools,omitempty"`
+	ManifestDigest string    `json:"manifestDigest,omitempty"`
+}
+
+// ToolChildParams establishes or releases a runner-local child invocation.
+// It carries ownership metadata only, never tool arguments or result bodies.
+type ToolChildParams struct {
+	RunID            string `json:"runId"`
+	ParentToolCallID string `json:"parentToolCallId"`
+	ToolCallID       string `json:"toolCallId"`
+	Name             string `json:"name,omitempty"`
 }
 
 // ToolResult is the serializable authoritative or transient result sent over the runner link.
@@ -225,6 +241,9 @@ type ToolExecuteResult struct {
 	Input    json.RawMessage `json:"input"`
 	Result   ToolResult      `json:"result"`
 	Modified bool            `json:"modified,omitempty"`
+	// Runner-local failure provenance is host-owned, never inferred from hooks.
+	FailureKind    string `json:"-"`
+	FailureOutcome string `json:"-"`
 }
 
 // ConversationForkParams identifies the active runner tool requesting a live fork.

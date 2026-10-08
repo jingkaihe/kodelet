@@ -88,6 +88,8 @@ type ToolRegistration struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
 	InputSchema  map[string]any `json:"inputSchema"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+	Group        string         `json:"group,omitempty"`
 	TimeoutInSec *float64       `json:"timeoutInSec,omitempty"`
 }
 
@@ -229,10 +231,11 @@ type ExtensionCallContext struct {
 
 // ToolExecutionResult is returned by extension.tool.execute.
 type ToolExecutionResult struct {
-	Content     string                     `json:"content"`
-	Data        map[string]any             `json:"data,omitempty"`
-	Error       string                     `json:"error,omitempty"`
-	Attachments []tooltypes.ToolAttachment `json:"attachments,omitempty"`
+	Content           string                     `json:"content"`
+	Data              map[string]any             `json:"data,omitempty"`
+	StructuredContent any                        `json:"structuredContent,omitempty"`
+	Error             string                     `json:"error,omitempty"`
+	Attachments       []tooltypes.ToolAttachment `json:"attachments,omitempty"`
 }
 
 // CommandInvocation describes the user prompt that invoked an extension command.

@@ -11,6 +11,7 @@ go.work
 # Dependency directories
 vendor/
 bin/
+pkg/codemode/node_modules/
 !sdk/src/bin/
 !sdk/src/bin/**
 .kodelet/extensions/*/node_modules/
@@ -36,6 +37,7 @@ build/
 .build/
 dist/
 storybook-static/
+pkg/codemode/runtime_quickjs.wasm
 
 # Air development server
 tmp/

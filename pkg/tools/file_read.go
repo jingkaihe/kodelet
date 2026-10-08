@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -34,6 +33,7 @@ type FileReadToolResult struct {
 	lineLimit        int
 	remainingLines   int
 	truncationReason string
+	linesTruncated   bool
 	err              string
 }
 
@@ -69,8 +69,8 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	// Check if content was truncated (either by bytes or line limit)
-	truncated := len(r.lines) > 0 && (strings.Contains(r.lines[len(r.lines)-1], "truncated") || strings.Contains(r.lines[len(r.lines)-1], "lines remaining"))
+	// Track truncation explicitly rather than guessing from file contents.
+	truncated := r.truncationReason != "" || r.linesTruncated
 
 	// Detect language from file extension
 	language := osutil.DetectLanguageFromPath(r.filename)
@@ -84,6 +84,21 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Language:       language,
 		Truncated:      truncated,
 		RemainingLines: r.remainingLines,
+	}
+	if !r.IsError() {
+		lines := r.lines
+		if r.truncationReason != "" && len(lines) > 0 {
+			// The final line is a display-only notice, not file content.
+			lines = lines[:len(lines)-1]
+		}
+		result.Data = map[string]any{
+			"filePath":       r.filename,
+			"offset":         r.offset,
+			"lineLimit":      r.lineLimit,
+			"lines":          append([]string{}, lines...),
+			"truncated":      truncated,
+			"remainingLines": r.remainingLines,
+		}
 	}
 
 	if r.IsError() {
@@ -102,6 +117,36 @@ type FileReadInput tooltypes.FileReadInput
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (r *FileReadTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[FileReadInput]()
+}
+
+// RawOutputSchema describes file content without display line numbers or notices.
+func (r *FileReadTool) RawOutputSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"filePath": map[string]any{"type": "string"},
+			"offset": map[string]any{
+				"type":        "integer",
+				"description": "One-based line number of the first returned line.",
+			},
+			"lineLimit": map[string]any{"type": "integer"},
+			"lines": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "File lines without display line numbers or trailing truncation notices. Long lines may be shortened.",
+			},
+			"truncated": map[string]any{
+				"type":        "boolean",
+				"description": "Whether content was omitted by byte, line count, or individual line length limits.",
+			},
+			"remainingLines": map[string]any{
+				"type":        "integer",
+				"description": "Number of file lines after the returned range.",
+			},
+		},
+		"required":             []string{"filePath", "offset", "lineLimit", "lines", "truncated", "remainingLines"},
+		"additionalProperties": false,
+	}
 }
 
 // Name returns the name of the tool
@@ -239,34 +284,28 @@ func (r *FileReadTool) Execute(_ context.Context, state tooltypes.State, paramet
 	bytesRead := 0
 	linesRead := 0
 	var lines []string
+	hitByteLimit := false
+	linesTruncated := false
 
 	for linesRead < input.LineLimit && scanner.Scan() {
 		lineText := scanner.Text()
 		// Truncate line if it exceeds MaxLineCharacterLimit characters
 		if len(lineText) > MaxLineCharacterLimit {
 			lineText = lineText[:MaxLineCharacterLimit] + "..."
+			linesTruncated = true
 		}
 
 		// Check if adding this (potentially truncated) line would exceed the byte limit
 		lineBytes := len([]byte(lineText))
 		if bytesRead+lineBytes > MaxOutputBytes {
 			// This line would exceed the limit, so stop here
+			hitByteLimit = true
 			break
 		}
 
 		lines = append(lines, lineText)
 		bytesRead += lineBytes
 		linesRead++
-	}
-
-	// Determine why we stopped reading
-	hitByteLimit := false
-	if linesRead < input.LineLimit {
-		// We didn't reach the line limit, so either we hit byte limit or end of file
-		// Check if there's more content
-		if scanner.Scan() {
-			hitByteLimit = true
-		}
 	}
 
 	// Count remaining lines
@@ -308,5 +347,6 @@ func (r *FileReadTool) Execute(_ context.Context, state tooltypes.State, paramet
 		lineLimit:        input.LineLimit,
 		remainingLines:   remainingLines,
 		truncationReason: truncationReason,
+		linesTruncated:   linesTruncated,
 	}
 }

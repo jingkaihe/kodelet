@@ -40,6 +40,10 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	for idx := 0; idx < len(block.tools); {
 		tool := block.tools[idx]
 		switch {
+		case normalizedToolName(tool) == "code_execute":
+			groups = append(groups, buildCodeExecutionToolGroup(block, idx))
+			idx++
+
 		case normalizedToolName(tool) == "browser":
 			groups = append(groups, m.buildBrowserToolGroup(block, idx))
 			idx++
@@ -88,6 +92,27 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	}
 
 	return groups
+}
+
+func buildCodeExecutionToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	label, body := "Code execution", "Waiting for code execution…"
+	if tool.structured != nil {
+		var meta tooltypes.CodeExecutionMetadata
+		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+			label = renderers.CodeExecutionSummary(meta)
+		}
+		body = (&renderers.CodeExecutionRenderer{}).RenderCLI(*tool.structured)
+	} else if tool.done {
+		body = tool.result
+	}
+	return toolRenderGroup{
+		toolStart: idx, toolEnd: idx, changeIndex: -1,
+		label: sanitizeExtensionUIText(label), runningLabel: sanitizeExtensionUIText(label),
+		body: sanitizeExtensionTranscriptText(body), wrapBody: true,
+		expanded: block.expanded || tool.expanded || tool.failed,
+		active:   !tool.done, failed: tool.failed,
+	}
 }
 
 func (m model) buildBrowserToolGroup(block assistantBlock, idx int) toolRenderGroup {
@@ -856,6 +881,7 @@ func isExtensionPresentationTool(tool toolCall) bool {
 
 func isFallbackAggregateTool(tool toolCall) bool {
 	return normalizedToolName(tool) != "browser" &&
+		normalizedToolName(tool) != "code_execute" &&
 		!isBashTool(tool) &&
 		!isApplyPatchTool(tool) &&
 		!isFileChangeTool(tool) &&

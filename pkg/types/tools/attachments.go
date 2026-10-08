@@ -3,11 +3,13 @@ package tools
 import "context"
 
 // ToolAttachment declares a runner-local output or references an ingested artifact.
-// Path is consumed during ingestion; ArtifactID and ShortCode are assigned by the
-// control plane. ViewURL is presentation-only and is not persisted with history.
+// Exactly one of Path or base64 Data is consumed during ingestion; ArtifactID and
+// ShortCode are assigned by the control plane. ViewURL is presentation-only and
+// is not persisted with history.
 type ToolAttachment struct {
 	Type       string `json:"type"`
 	Path       string `json:"path,omitempty"`
+	Data       string `json:"data,omitempty"`
 	ArtifactID string `json:"artifactId,omitempty"`
 	ShortCode  string `json:"shortCode,omitempty"`
 	ViewURL    string `json:"viewUrl,omitempty"`

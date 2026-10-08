@@ -178,6 +178,7 @@ func (t *Thread) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
 	t.Config.WorkingDirectory = t.Environment.Manifest().WorkingDirectory
 	t.Config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
 	t.Config.ToolMode = config.ToolMode
+	t.Config.CodeMode = config.CodeMode
 	t.Config.EnableFSSearchTools = config.EnableFSSearchTools
 	t.Config.Sysprompt = config.SystemPromptPath
 	t.Config.SyspromptContent = config.SystemPromptContent

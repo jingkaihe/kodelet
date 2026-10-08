@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,6 +22,59 @@ func TestFileReadTool_GenerateSchema(t *testing.T) {
 	assert.NotNil(t, schema)
 
 	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/file-read-input", string(schema.ID))
+}
+
+func TestFileReadCanonicalData(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		content   string
+		limit     int
+		lines     []string
+		truncated bool
+		remaining int
+	}{
+		{name: "empty", lines: []string{}},
+		{name: "plain text containing truncation words", content: "not truncated\nzero lines remaining\n", lines: []string{"not truncated", "zero lines remaining"}},
+		{name: "limited", content: "one\ntwo\nthree\n", limit: 2, lines: []string{"one", "two"}, truncated: true, remaining: 1},
+		{name: "long line", content: strings.Repeat("a", MaxLineCharacterLimit+1), lines: []string{strings.Repeat("a", MaxLineCharacterLimit) + "..."}, truncated: true},
+		{
+			name: "byte limit omits the last line", content: strings.Repeat(strings.Repeat("a", 2000)+"\n", 51),
+			lines:     strings.Split(strings.TrimSuffix(strings.Repeat(strings.Repeat("a", 2000)+"\n", 50), "\n"), "\n"),
+			truncated: true, remaining: 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			filename := filepath.Join(t.TempDir(), "content.txt")
+			require.NoError(t, os.WriteFile(filename, []byte(test.content), 0o600))
+			params, err := json.Marshal(FileReadInput{FilePath: filename, LineLimit: test.limit})
+			require.NoError(t, err)
+			tool := &FileReadTool{}
+			result := tool.Execute(t.Context(), nil, string(params))
+			require.False(t, result.IsError(), result.GetError())
+			data, ok := result.StructuredData().Data.(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, test.lines, data["lines"])
+			assert.Equal(t, test.truncated, data["truncated"])
+			assert.Equal(t, test.remaining, data["remainingLines"])
+			assert.Equal(t, 1, data["offset"])
+			assert.Equal(t, filename, data["filePath"])
+			if len(test.lines) > 0 {
+				data["lines"].([]string)[0] = "changed"
+				assert.Equal(t, test.lines, result.StructuredData().Data.(map[string]any)["lines"])
+			}
+		})
+	}
+	t.Run("failure has no fabricated machine content", func(t *testing.T) {
+		assert.Nil(t, (&FileReadToolResult{err: "missing file"}).StructuredData().Data)
+	})
+	t.Run("output schema", func(t *testing.T) {
+		tool := &FileReadTool{}
+		schema := tooltypes.OutputSchemaForTool(tool)
+		assert.Equal(t, []string{"filePath", "offset", "lineLimit", "lines", "truncated", "remainingLines"}, schema["required"])
+		schema["properties"].(map[string]any)["lines"] = false
+		assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["lines"])
+		assert.Nil(t, tooltypes.OutputSchemaForTool(&FileWriteTool{}))
+	})
 }
 
 func TestFileReadTool_Name(t *testing.T) {

@@ -42,6 +42,101 @@ test("preserves declared image attachments in final tool results", async () => {
   });
 });
 
+test("machine result schemas are isolated and structured content stays separate from presentation", async () => {
+  const outputSchema = {
+    type: "object",
+    properties: { value: { type: ["string", "null"] } },
+    additionalProperties: false,
+  } satisfies JSONSchema;
+  const expectedSchema = structuredClone(outputSchema);
+  const harness = await createTestHarness(defineExtension(ext => {
+    ext.registerTool({
+      name: "structured", description: "Structured output", inputSchema: z.object({}),
+      outputSchema, group: "mcp/server_with_underscores",
+      execute: () => ({
+        content: "Human readable summary",
+        data: { presentation: { summary: "Summary" } },
+        structuredContent: { value: null },
+      }),
+    });
+  }));
+  outputSchema.properties.value.type.push("mutated-input");
+  const initialized = harness.initialize();
+  assert.deepEqual(initialized.tools[0]?.outputSchema, expectedSchema);
+  assert.equal(initialized.tools[0]?.group, "mcp/server_with_underscores");
+  const snapshot = initialized.tools[0]?.outputSchema;
+  assert.ok(snapshot);
+  (snapshot.properties as Record<string, unknown>).value = "mutated-output";
+  assert.deepEqual(harness.initialize().tools[0]?.outputSchema, expectedSchema);
+  assert.deepEqual(await harness.executeTool({ name: "structured", input: {} }), {
+    content: "Human readable summary",
+    data: { presentation: { summary: "Summary" } },
+    structuredContent: { value: null },
+  });
+});
+
+test("machine result payloads preserve falsy and non-object JSON values", async () => {
+  for (const structuredContent of [false, 0, "", null, [1, false]]) {
+    const harness = await createTestHarness(defineExtension(ext => {
+      ext.registerTool({
+        name: "value", description: "Return JSON", inputSchema: {},
+        execute: () => ({ content: "summary", structuredContent }),
+      });
+    }));
+    const result = await harness.executeTool({ name: "value", input: {} });
+    assert.deepEqual(result.structuredContent, structuredContent);
+    assert.equal(harness.initialize().tools[0]?.outputSchema, undefined);
+  }
+});
+
+test("output hooks clear machine data before later handlers without changing the input", async () => {
+  for (const eventName of ["tool.result", "tool.update"] as const) {
+    const original = {
+      toolName: "bash", success: true, data: { output: "secret" },
+      metadata: { output: "secret", data: { presentation: { summary: "private" } } },
+    };
+    const harness = await createTestHarness(defineExtension(ext => {
+      ext.on(eventName, { priority: 2 }, event => {
+        const output = event.tool.output as typeof original;
+        assert.deepEqual(output.data, { output: "secret" });
+        return { output: { ...output, metadata: { output: "redacted", data: { presentation: { summary: "safe" } } } } };
+      });
+      ext.on(eventName, { priority: 1 }, event => {
+        const output = event.tool.output as Record<string, unknown>;
+        assert.equal(output.data, undefined);
+        assert.deepEqual(output.metadata, { output: "redacted", data: { presentation: { summary: "safe" } } });
+      });
+    }));
+    const result = await harness.handleEvent({
+      id: "redact", event: eventName,
+      payload: { tool: { name: "bash", input: {}, output: original } },
+    });
+    assert.deepEqual(result.output, {
+      toolName: "bash", success: true,
+      metadata: { output: "redacted", data: { presentation: { summary: "safe" } } },
+    });
+    assert.deepEqual(original.data, { output: "secret" });
+    assert.equal(original.metadata.output, "secret");
+  }
+});
+
+test("observational output hooks preserve machine data for later observers", async () => {
+  const output = { toolName: "tool", success: true, data: { value: false } };
+  let observed = 0;
+  const harness = await createTestHarness(defineExtension(ext => {
+    for (const priority of [2, 1]) {
+      ext.on("tool.result", { priority }, event => {
+        assert.deepEqual(event.tool.output, output);
+        observed++;
+      });
+    }
+  }));
+  assert.deepEqual(await harness.handleEvent({
+    id: "observe", event: "tool.result", payload: { tool: { name: "tool", input: {}, output } },
+  }), {});
+  assert.equal(observed, 2);
+});
+
 test("remote profiles preserve ordinary configuration JSON and isolate input and manifest snapshots", () => {
   const params: InitializeParams = {
     protocolVersion: "test",
@@ -1683,8 +1778,10 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
           name: "echo",
           description: "Echo text",
           inputSchema: z.object({ text: z.string() }),
+          outputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          group: "extension/rpc",
           execute(input) {
-            return { content: input.text.toUpperCase() };
+            return { content: input.text.toUpperCase(), structuredContent: { text: input.text.toUpperCase() } };
           },
         });
         ext.registerShortcut("ctrl+alt+e", {
@@ -1718,6 +1815,10 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
   });
   assert.equal(init.name, "rpc");
   assert.equal(init.tools[0].name, "echo");
+  assert.deepEqual(init.tools[0].outputSchema, {
+    type: "object", properties: { text: { type: "string" } }, required: ["text"],
+  });
+  assert.equal(init.tools[0].group, "extension/rpc");
   assert.deepEqual(init.shortcuts, [
     { key: "ctrl+alt+e", description: "Record shortcut context" },
     { key: "alt+n", description: "No result" },
@@ -1728,7 +1829,7 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
     input: { text: "hello" },
     context: { conversationId: "conv-rpc", cwd: process.cwd() },
   });
-  assert.deepEqual(result, { content: "HELLO" });
+  assert.deepEqual(result, { content: "HELLO", structuredContent: { text: "HELLO" } });
 
   const shortcutResult = await client.call("extension.shortcut.execute", {
     key: "ctrl+alt+e",

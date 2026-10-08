@@ -222,6 +222,9 @@ func (r *Runtime) DispatchToolCall(ctx context.Context, callContext ExtensionCal
 		result, err := r.dispatchEventToHandler(ctx, handler, EventToolCall, payload, callContext)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension tool.call handler failed")
+			if strictToolPolicy(ctx) {
+				return ToolCallDecision{Input: string(currentInput), Blocked: true, Reason: "tool.call policy failed; execution was not started"}
+			}
 			continue
 		}
 		if result == nil {
@@ -249,9 +252,29 @@ func (r *Runtime) DispatchToolUpdate(ctx context.Context, callContext ExtensionC
 	return r.dispatchToolOutput(ctx, EventToolUpdate, callContext, toolName, toolInput, toolCallID, output, true)
 }
 
+type strictToolPolicyKey struct{}
+
+// ContextWithStrictToolPolicy makes code-mode execution fail closed when a
+// call/result hook fails. The flag is host-owned and cannot be set by JS input.
+func ContextWithStrictToolPolicy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, strictToolPolicyKey{}, true)
+}
+
+func strictToolPolicy(ctx context.Context) bool {
+	strict, _ := ctx.Value(strictToolPolicyKey{}).(bool)
+	return strict
+}
+
 // DispatchToolResult runs tool.result subscriptions sequentially.
 func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult) (tooltypes.StructuredToolResult, bool) {
-	result, modified, _ := r.dispatchToolOutput(ctx, EventToolResult, callContext, toolName, toolInput, toolCallID, output, false)
+	result, modified, accepted := r.dispatchToolOutput(ctx, EventToolResult, callContext, toolName, toolInput, toolCallID, output, strictToolPolicy(ctx))
+	if !accepted {
+		// Do not expose either the raw body or a possibly incomplete redaction.
+		return tooltypes.StructuredToolResult{
+			ToolName: toolName, Success: false, Timestamp: output.Timestamp,
+			Error: "tool.result policy failed; output was withheld (the tool may have had side effects)",
+		}, true
+	}
 	return result, modified
 }
 
@@ -284,6 +307,9 @@ func (r *Runtime) dispatchToolOutput(ctx context.Context, eventName string, call
 			}
 			continue
 		}
+		// Legacy hooks may only redact display metadata. Never retain a second
+		// machine-readable copy when any hook replaces the authoritative result.
+		modified.Data = nil
 		currentOutput = normalizeStructuredExtensionPresentation(modified, r.config.MaxOutputSize)
 		modifiedOutput = true
 	}

@@ -23,11 +23,13 @@ const (
 
 // ToolDefinition is one model-facing tool and its execution placement.
 type ToolDefinition struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	Placement   ToolPlacement  `json:"placement"`
-	Tool        tooltypes.Tool `json:"-"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+	Group        string         `json:"group,omitempty"`
+	Placement    ToolPlacement  `json:"placement"`
+	Tool         tooltypes.Tool `json:"-"`
 }
 
 // Manifest is the immutable environment snapshot pinned to one top-level run.
@@ -44,6 +46,7 @@ type EnvironmentConfig struct {
 	Options             *llmtypes.ExecutionOptions
 	AllowedCommands     []string
 	ToolMode            llmtypes.ToolMode
+	CodeMode            string
 	EnableFSSearchTools bool
 	SystemPromptPath    string
 	SystemPromptContent string
@@ -70,6 +73,7 @@ func (m Manifest) Clone() Manifest {
 	for i, definition := range m.Tools {
 		toolDefinitions[i] = definition
 		toolDefinitions[i].InputSchema = cloneJSONMap(definition.InputSchema)
+		toolDefinitions[i].OutputSchema = cloneJSONMap(definition.OutputSchema)
 	}
 	return Manifest{
 		WorkingDirectory: m.WorkingDirectory,
@@ -85,6 +89,7 @@ func (m Manifest) ToolDefinition(name string) (ToolDefinition, bool) {
 	for _, definition := range m.Tools {
 		if definition.Name == name {
 			definition.InputSchema = cloneJSONMap(definition.InputSchema)
+			definition.OutputSchema = cloneJSONMap(definition.OutputSchema)
 			return definition, true
 		}
 	}
@@ -172,6 +177,9 @@ type ToolRequest struct {
 	Name       string
 	Input      string
 	ToolCallID string
+	// CallableTools is host-owned code-mode authorization. Nil means missing;
+	// an explicit empty slice means no child tool may be called.
+	CallableTools *[]string
 }
 
 // ToolUpdate is one transient post-policy tool result snapshot.
@@ -212,6 +220,10 @@ type ToolExecution struct {
 	Result           tooltypes.ToolResult
 	StructuredResult tooltypes.StructuredToolResult
 	Modified         bool
+	// Host-only provenance; result hooks cannot turn an uncertain operation into
+	// a definitely completed one or claim a rejected call executed.
+	FailureKind    string
+	FailureOutcome string
 }
 
 // CommandAction describes how an environment handled a slash command.

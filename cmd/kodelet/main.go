@@ -73,6 +73,7 @@ func init() {
 	viper.SetDefault("sysprompt", "")
 	viper.SetDefault("sysprompt_args", map[string]string{})
 	viper.SetDefault("tool_mode", "patch")
+	viper.SetDefault("code_mode", "off")
 	viper.SetDefault("enable_fs_search_tools", false)
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("compact_ratio", llmtypes.DefaultCompactRatio)

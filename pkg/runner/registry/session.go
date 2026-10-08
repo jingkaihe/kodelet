@@ -88,6 +88,13 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 		}
 		return s.registry.executeModelHelper(ctx, runnerID, connectionID, generation, value)
 	}
+	if method == protocol.MethodToolChildBegin || method == protocol.MethodToolChildEnd {
+		value, err := decodeParams[runnerpayload.ToolChildParams](params)
+		if err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		return s.registry.codeChild(ctx, UIRequestIdentity{RunnerID: runnerID, ConnectionID: connectionID, Generation: generation}, value, method == protocol.MethodToolChildBegin)
+	}
 	if method == protocol.MethodConversationFork {
 		value, err := decodeParams[runnerpayload.ConversationForkParams](params)
 		if err != nil {

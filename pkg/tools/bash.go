@@ -144,6 +144,29 @@ func (b *BashTool) GenerateSchema() *jsonschema.Schema {
 	return schema
 }
 
+// RawOutputSchema describes the bounded, canonical command result.
+func (b *BashTool) RawOutputSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"command": map[string]any{"type": "string"},
+			"output": map[string]any{
+				"type":        "string",
+				"description": "Bounded combined stdout and stderr; may include a truncation notice.",
+			},
+			"exitCode":   map[string]any{"type": "integer"},
+			"workingDir": map[string]any{"type": "string"},
+			"truncated":  map[string]any{"type": "boolean"},
+			"fullOutputPath": map[string]any{
+				"type":        "string",
+				"description": "Runner-local file containing the complete output, when available after truncation.",
+			},
+		},
+		"required":             []string{"command", "output", "exitCode", "workingDir", "truncated"},
+		"additionalProperties": false,
+	}
+}
+
 // Name returns the name of the tool
 func (b *BashTool) Name() string {
 	return "bash"
@@ -352,6 +375,17 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 	}
 	result.Metadata = metadata
+	data := map[string]any{
+		"command":    r.command,
+		"output":     metadata.Output,
+		"exitCode":   r.exitCode,
+		"workingDir": r.workingDir,
+		"truncated":  r.outputTruncated || metadata.Output != r.combinedOutput,
+	}
+	if metadata.FullOutputPath != "" {
+		data["fullOutputPath"] = metadata.FullOutputPath
+	}
+	result.Data = data
 
 	if r.IsError() {
 		result.Error = r.GetError()

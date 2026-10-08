@@ -18,14 +18,16 @@ var _ tooltypes.StreamingTool = &Tool{}
 
 // Tool is a tool registered by an extension.
 type Tool struct {
-	extensionID string
-	process     *Process
-	name        string
-	description string
-	schema      *jsonschema.Schema
-	rawSchema   map[string]any
-	timeout     time.Duration
-	maxOutput   int
+	extensionID  string
+	process      *Process
+	name         string
+	description  string
+	schema       *jsonschema.Schema
+	rawSchema    map[string]any
+	outputSchema map[string]any
+	group        string
+	timeout      time.Duration
+	maxOutput    int
 }
 
 func newTool(extensionID string, process *Process, registration ToolRegistration, timeout time.Duration, maxOutput int) (*Tool, error) {
@@ -44,6 +46,14 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
 		schema.Type = "object"
 	}
+	outputBytes, err := json.Marshal(registration.OutputSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal extension tool output schema")
+	}
+	var outputSchema map[string]any
+	if err := json.Unmarshal(outputBytes, &outputSchema); err != nil {
+		return nil, errors.Wrap(err, "failed to parse extension tool output schema")
+	}
 	if registration.Name == "" {
 		return nil, errors.New("extension tool name is required")
 	}
@@ -51,14 +61,16 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 		return nil, errors.New("extension tool description is required")
 	}
 	return &Tool{
-		extensionID: extensionID,
-		process:     process,
-		name:        registration.Name,
-		description: registration.Description,
-		schema:      &schema,
-		rawSchema:   rawSchema,
-		timeout:     timeout,
-		maxOutput:   maxOutput,
+		extensionID:  extensionID,
+		process:      process,
+		name:         registration.Name,
+		description:  registration.Description,
+		schema:       &schema,
+		rawSchema:    rawSchema,
+		outputSchema: outputSchema,
+		group:        registration.Group,
+		timeout:      timeout,
+		maxOutput:    maxOutput,
 	}, nil
 }
 
@@ -76,6 +88,26 @@ func (t *Tool) GenerateSchema() *jsonschema.Schema { return t.schema }
 
 // RawInputSchema returns the extension-provided schema without narrowing it.
 func (t *Tool) RawInputSchema() map[string]any { return t.rawSchema }
+
+// RawOutputSchema returns the extension's canonical machine-result schema.
+func (t *Tool) RawOutputSchema() map[string]any {
+	if t.outputSchema == nil {
+		return nil
+	}
+	// The schema was checked at registration; return an isolated snapshot.
+	payload, _ := json.Marshal(t.outputSchema)
+	var schema map[string]any
+	_ = json.Unmarshal(payload, &schema)
+	return schema
+}
+
+// ToolGroup returns recorded provenance without parsing the flattened tool name.
+func (t *Tool) ToolGroup() string {
+	if t.group != "" {
+		return t.group
+	}
+	return "extension/" + t.extensionID
+}
 
 // ValidateInput validates JSON syntax. Schema validation is delegated to the extension SDK/runtime.
 func (t *Tool) ValidateInput(_ tooltypes.State, parameters string) error {
@@ -118,24 +150,34 @@ func (t *Tool) execute(ctx context.Context, parameters string, onUpdate tooltype
 	})
 	executionTime := time.Since(start)
 	if err != nil {
-		return &ToolResult{toolName: t.name, extensionID: t.extensionID, executionTime: executionTime, err: err.Error()}
+		kind := "transport"
+		if execCtx.Err() != nil {
+			kind = "cancelled"
+		}
+		return &ToolResult{
+			toolName: t.name, extensionID: t.extensionID, executionTime: executionTime, err: err.Error(),
+			failureKind: kind, failureOutcome: "unknown",
+		}
 	}
 	return t.resultFromExecution(*result, executionTime)
 }
 
 func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime time.Duration) *ToolResult {
 	content := result.Content
-	if t.maxOutput > 0 && len(content) > t.maxOutput {
+	truncated := t.maxOutput > 0 && len(content) > t.maxOutput
+	if truncated {
 		content = content[:t.maxOutput] + "\n\n[TRUNCATED - Output exceeded extension max output limit]"
 	}
 	return &ToolResult{
-		toolName:      t.name,
-		extensionID:   t.extensionID,
-		executionTime: executionTime,
-		result:        content,
-		err:           result.Error,
-		data:          normalizeExtensionResultData(result.Data, t.maxOutput),
-		attachments:   append([]tooltypes.ToolAttachment(nil), result.Attachments...),
+		toolName:          t.name,
+		extensionID:       t.extensionID,
+		executionTime:     executionTime,
+		result:            content,
+		truncated:         truncated,
+		err:               result.Error,
+		data:              normalizeExtensionResultData(result.Data, t.maxOutput),
+		structuredContent: result.StructuredContent,
+		attachments:       append([]tooltypes.ToolAttachment(nil), result.Attachments...),
 	}
 }
 
@@ -240,14 +282,21 @@ func (t *Tool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 
 // ToolResult is the result of an extension tool execution.
 type ToolResult struct {
-	toolName      string
-	extensionID   string
-	executionTime time.Duration
-	result        string
-	err           string
-	data          map[string]any
-	attachments   []tooltypes.ToolAttachment
+	toolName          string
+	extensionID       string
+	executionTime     time.Duration
+	result            string
+	truncated         bool
+	err               string
+	data              map[string]any
+	structuredContent any
+	attachments       []tooltypes.ToolAttachment
+	failureKind       string
+	failureOutcome    string
 }
+
+// ToolFailure distinguishes a lost/failed RPC from a completed tool error.
+func (r *ToolResult) ToolFailure() (string, string) { return r.failureKind, r.failureOutcome }
 
 // AssistantFacing returns the result for the assistant.
 func (r *ToolResult) AssistantFacing() string {
@@ -268,12 +317,14 @@ func (r *ToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:    r.toolName,
 		Success:     !r.IsError(),
+		Data:        r.structuredContent,
 		Timestamp:   time.Now(),
 		Attachments: append([]tooltypes.ToolAttachment(nil), r.attachments...),
 		Metadata: &tooltypes.ExtensionToolMetadata{
 			ExtensionID:   r.extensionID,
 			ToolName:      r.toolName,
 			Output:        r.result,
+			Truncated:     r.truncated,
 			Data:          r.data,
 			ExecutionTime: r.executionTime,
 		},

@@ -335,6 +335,11 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
+	switch config.CodeMode {
+	case "", "off", "hybrid", "compact":
+	default:
+		return config, errors.New("code_mode must be off, hybrid, or compact")
+	}
 	if config.OpenAI != nil {
 		if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {
 			return config, err

@@ -26,18 +26,22 @@ export interface ExtensionToolData {
   [key: string]: unknown;
 }
 
-/** A runner-local image output ingested and persisted by the host. */
-export interface ToolAttachment {
+/** An image output ingested and persisted by the host; provide exactly one source. */
+export type ToolAttachment = {
   type: "image";
-  path: string;
   filename?: string;
   mimeType?: string;
   alt?: string;
-}
+} & (
+  | { path: string; data?: never }
+  | { path?: never; /** Transient base64 image bytes, not a data URL. */ data: string }
+);
 
 export interface ToolExecutionResult {
   content: string;
   data?: ExtensionToolData;
+  /** Canonical JSON result for programmatic callers, separate from presentation data. */
+  structuredContent?: unknown;
   error?: string;
   attachments?: ToolAttachment[];
 }
@@ -371,6 +375,10 @@ export interface ToolRegistration<Schema extends ToolInputSchema = ToolInputSche
   name: string;
   description: string;
   inputSchema: Schema;
+  /** Optional raw JSON Schema describing structuredContent, not presentation data. */
+  outputSchema?: JSONSchema;
+  /** Recorded catalog group; defaults to the owning extension on the host. */
+  group?: string;
   timeoutInSec?: number;
   execute(input: InferInput<Schema>, ctx: ToolContext): Awaitable<ToolExecutionResult | string>;
 }
@@ -569,6 +577,8 @@ export interface InitializeResult {
     name: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    outputSchema?: JSONSchema;
+    group?: string;
     timeoutInSec?: number;
   }>;
   commands: Array<{

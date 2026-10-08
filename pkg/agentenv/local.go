@@ -94,8 +94,28 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 	}
 
 	manifest := snapshotManifest(ctx, state, runtime)
+	codeEnabled := spec.Config.CodeMode == "hybrid" || spec.Config.CodeMode == "compact"
+	if codeEnabled {
+		codeTool := &tools.CodeExecuteTool{}
+		found := false
+		for _, definition := range manifest.Tools {
+			if definition.Name == codeTool.Name() {
+				if _, builtin := definition.Tool.(*tools.CodeExecuteTool); !builtin {
+					return Manifest{}, errors.New("code_execute is reserved when code mode is enabled")
+				}
+				found = true
+			}
+		}
+		if !found {
+			manifest.Tools = append(manifest.Tools, ToolDefinition{
+				Name: codeTool.Name(), Description: codeTool.Description(),
+				InputSchema: tooltypes.JSONSchemaForTool(codeTool), Placement: ToolPlacementEnvironment, Tool: codeTool,
+			})
+		}
+	}
 	manifest.Tools = slices.DeleteFunc(manifest.Tools, func(tool ToolDefinition) bool {
-		return !spec.Config.ExecutionOptions.ToolAllowed(tool.Name)
+		return !spec.Config.ExecutionOptions.ToolAllowed(tool.Name) ||
+			(tool.Name == "code_execute" && (!codeEnabled || !environmentToolAllowed(spec.Config, tool.Name)))
 	})
 	spec.Config.WorkingDirectory = manifest.WorkingDirectory
 	e.extensions = runtime
@@ -340,6 +360,9 @@ func (e *LocalEnvironment) DispatchToolUpdate(ctx context.Context, request ToolO
 		return ToolOutputDecision{StructuredResult: request.StructuredResult, Accepted: true}, nil
 	}
 	structured, modified, accepted := runtime.DispatchToolUpdate(ctx, callContext, request.Name, request.Input, request.ToolCallID, request.StructuredResult)
+	if request.Name == "code_execute" {
+		structured = tools.PruneCodeExecutionAttachments(structured, request.StructuredResult)
+	}
 	return ToolOutputDecision{StructuredResult: structured, Modified: modified, Accepted: accepted}, nil
 }
 
@@ -350,6 +373,9 @@ func (e *LocalEnvironment) DispatchToolResult(ctx context.Context, request ToolO
 		return ToolOutputDecision{StructuredResult: request.StructuredResult, Accepted: true}, nil
 	}
 	structured, modified := runtime.DispatchToolResult(ctx, callContext, request.Name, request.Input, request.ToolCallID, request.StructuredResult)
+	if request.Name == "code_execute" {
+		structured = tools.PruneCodeExecutionAttachments(structured, request.StructuredResult)
+	}
 	return ToolOutputDecision{StructuredResult: structured, Modified: modified, Accepted: true}, nil
 }
 
@@ -368,7 +394,7 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		result := tooltypes.BaseToolResult{Error: "agent environment is not open"}
 		structured := result.StructuredData()
 		structured.ToolName = request.Name
-		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured}, nil
+		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured, FailureKind: "blocked", FailureOutcome: "not_started"}, nil
 	}
 	decision, err := e.DispatchToolCall(ctx, request)
 	if err != nil {
@@ -385,7 +411,10 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		if err != nil {
 			return ToolExecution{}, err
 		}
-		return ToolExecution{Input: decision.Input, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
+		return ToolExecution{
+			Input: decision.Input, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
+			FailureKind: "blocked", FailureOutcome: "not_started",
+		}, nil
 	}
 	effectiveInput = decision.Input
 	if !environmentToolAllowed(spec.Config, request.Name) {
@@ -399,7 +428,10 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		if err != nil {
 			return ToolExecution{}, err
 		}
-		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
+		return ToolExecution{
+			Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
+			FailureKind: "blocked", FailureOutcome: "not_started",
+		}, nil
 	}
 	commandPolicy := spec.Config.EnvironmentOptions().AllowedCommands
 	if request.Name == "bash" && commandPolicy != nil && len(*commandPolicy) > 0 {
@@ -417,7 +449,10 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 			if dispatchErr != nil {
 				return ToolExecution{}, dispatchErr
 			}
-			return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
+			return ToolExecution{
+				Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
+				FailureKind: "invalid_input", FailureOutcome: "not_started",
+			}, nil
 		}
 	}
 
@@ -447,6 +482,10 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	}
 
 	result := tools.RunToolWithUpdates(ctx, state, request.Name, effectiveInput, onUpdate)
+	var failureKind, failureOutcome string
+	if failure, ok := result.(tooltypes.ToolFailureProvider); ok {
+		failureKind, failureOutcome = failure.ToolFailure()
+	}
 	structured := result.StructuredData()
 	if structured.ToolName == "" || structured.ToolName == "unknown" {
 		structured.ToolName = request.Name
@@ -460,7 +499,10 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	if err != nil {
 		return ToolExecution{}, err
 	}
-	return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
+	return ToolExecution{
+		Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
+		FailureKind: failureKind, FailureOutcome: failureOutcome,
+	}, nil
 }
 
 // Close releases the pinned run snapshot. It does not own or close the persistent extension runtime.
@@ -557,12 +599,16 @@ func snapshotManifest(ctx context.Context, state tooltypes.State, runtime *exten
 			continue
 		}
 		definitions = append(definitions, ToolDefinition{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			InputSchema: tooltypes.JSONSchemaForTool(tool),
-			Placement:   ToolPlacementEnvironment,
-			Tool:        tool,
+			Name:         tool.Name(),
+			Description:  tool.Description(),
+			InputSchema:  tooltypes.JSONSchemaForTool(tool),
+			OutputSchema: tooltypes.OutputSchemaForTool(tool),
+			Placement:    ToolPlacementEnvironment,
+			Tool:         tool,
 		})
+		if grouped, ok := tool.(tooltypes.ToolGroupProvider); ok {
+			definitions[len(definitions)-1].Group = grouped.ToolGroup()
+		}
 	}
 
 	commands := workspaceCommands(ctx, state.WorkingDirectory(), runtime)

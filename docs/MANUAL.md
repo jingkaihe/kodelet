@@ -59,6 +59,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Extension Shortcuts](#extension-shortcuts)
   - [Extension Events](#extension-events)
   - [Extensions Configuration](#extensions-configuration)
+- [Tool calls as code](#tool-calls-as-code)
 - [Agentic Skills](#agentic-skills)
   - [How Skills Work](#how-skills-work)
   - [Creating Skills](#creating-skills)
@@ -1447,6 +1448,8 @@ export default defineExtension((ext) => {
 
 `registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and their inputs are passed directly to `execute`; the handler or upstream server is responsible for validation. Zod schemas retain inferred handler input types and Zod parsing behavior.
 
+For machine-readable results, register an optional `outputSchema` (Zod or JSON Schema) and return `structuredContent` alongside `content`. Code-mode scripts receive this value as `reply.data`; the extension result's `data` field remains presentation metadata. MCP tools expose their upstream output schemas and structured results automatically.
+
 A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
 
 ```text
@@ -1800,6 +1803,61 @@ Extension subprocesses inherit Kodelet's environment. Start Kodelet with any env
 Timeouts are controlled by SDK-declared `timeoutInSec`. Extension events use SDK `timeoutInSec` or the built-in `30s` default, extension tools use SDK `timeoutInSec` or the built-in `10m` default, and extension commands use SDK `timeoutInSec` or no timeout.
 
 Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disable extension loading.
+
+## Tool calls as code
+
+Code mode lets the model combine tool calls with JavaScript, run independent calls concurrently, and select the results worth keeping in the conversation. This is useful when working with many extension or MCP tools, or when only a small part of a tool's output is relevant.
+
+Enable it in the runner's configuration, the workspace's `kodelet-config.yaml`, or an environment profile:
+
+```yaml
+code_mode: hybrid
+```
+
+| Mode | Behavior |
+| --- | --- |
+| `off` (default) | Use ordinary tool calls only. |
+| `hybrid` | Add `code_execute` alongside ordinary tool calls. |
+| `compact` | Keep core tools directly available and discover extension/MCP tools through code mode as needed. |
+
+Both daemon and runner must support code mode. Existing tool permissions and extension policies still apply. If you use a tool allowlist, include `code_execute` and each tool the scripts need. Compact mode changes how tools are discovered, not which tools are permitted.
+
+The `code_execute` tool accepts `{ "code": "..." }`. Write JavaScript as an **async function body**, using `await` and `return` directly. Discover available tools before calling them:
+
+```javascript
+return await catalog.list({ limit: 20 });
+// Or: return await catalog.search("open pull requests", { group: "mcp/github" });
+// Then: return await catalog.describe("the_exact_registered_tool_name");
+```
+
+`list` and `search` return tool names and short descriptions. Pass a returned `nextCursor` as `cursor` to see another page. Use `describe` to learn a tool's inputs and outputs.
+
+Call tools by their registered names using `tools[name](input)`. Replies contain `data` for structured results (or `null` if unavailable), `text`, `attachments`, and a `truncated` flag. Use `Promise.all` for independent calls:
+
+```javascript
+const replies = await Promise.all([
+  tools.bash({ command: "git status --short" }),
+  tools.bash({ command: "git branch --show-current" }),
+]);
+return { status: replies[0].data.output, branch: replies[1].data.output.trim() };
+```
+
+Use `return`, `emit(value)`, and `console.log(...)` to select JSON/text output. Await results before emitting them. Use `try/catch` or `Promise.allSettled` when tool failures are expected. Completed actions are not automatically retried or rolled back.
+
+The TUI and Web UI show one code-execution card with tool-call status, duration, and selected output. Individual calls do not create separate cards or stream their output into the conversation. Failed calls remain visible even if the script handles the error.
+
+Select images explicitly:
+
+```javascript
+const reply = await tools.view_image({path: "/tmp/chart.png"});
+emit("Here is the chart:");
+emit.image(reply.attachments[0]); // Sends pixels to the model.
+// Or: emit.artifact(reply.attachments[0]); // Retains it without sending pixels.
+```
+
+Both image APIs accept an attachment or artifact ID returned by a tool in the current script, including MCP tools. To use an existing image, first call `tools.view_image({artifactId})`. `emit.image` requires `view_image` permission and accepts `{detail: "original"}` on compatible models. Returning an ID alone does **not** retain or view it. Selected images remain available in history and forks. Only image artifacts are supported, not PDFs or other files.
+
+Scripts do not keep variables between invocations and cannot use imports or access files, the network, or environment variables directly; use permitted tools for those operations. Each invocation allows up to 120 seconds, 128 tool calls with four running at once, 32 KiB of selected text/JSON, and eight image/artifact emissions, including repeats. Oversized tool replies produce an error rather than rerunning the tool. Cancellation does not undo completed actions.
 
 ## Agentic Skills
 

@@ -296,6 +296,9 @@ func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 	config := embeddedRunnerTestConfig(t)
 	config.PublicBaseURL = "https://images.example"
+	config.EmbeddedRunner.Settings["code_mode"] = "hybrid"
+	config.EmbeddedRunner.Settings["provider"] = "openai"
+	config.EmbeddedRunner.Settings["model"] = "gpt-4.1"
 	var encoded bytes.Buffer
 	require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 32, 24))))
 	path := filepath.Join(config.EmbeddedRunner.Workspace, "screenshot.png")
@@ -311,6 +314,11 @@ func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 			Environment: local,
 			execute: func(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
 				execution, err := local.ExecuteTool(ctx, request, updates)
+				if request.Name == "code_execute" && strings.Contains(request.Input, "// modified") {
+					// Simulate an effective result hook retaining explicit media.
+					execution.Modified = true
+					execution.Result = tooltypes.BaseToolResult{Result: "pre-hook secret"}
+				}
 				if err == nil && request.Input == `{"path":"vanishing.png"}` {
 					// Losing the source after inspection must not lose the model's pixels.
 					err = os.Remove(vanishingPath)
@@ -323,9 +331,10 @@ func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return server.EmbeddedRunnerStatus().Ready
 	}, 5*time.Second, 10*time.Millisecond)
-	_, err = server.runnerRegistry.OpenRun(t.Context(), server.EmbeddedRunnerStatus().RunnerID, protocol.RunOpenParams{
+	manifest, err := server.runnerRegistry.OpenRun(t.Context(), server.EmbeddedRunnerStatus().RunnerID, protocol.RunOpenParams{
 		RunID:          "view-path-run",
 		ConversationID: "view-path-conversation",
+		CodeExecution:  true,
 	})
 	require.NoError(t, err)
 	controller := artifactController{
@@ -378,6 +387,63 @@ func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 	require.Empty(t, revisited.Result.Error)
 	assert.Equal(t, viewed.Result.ContentParts, revisited.Result.ContentParts)
 	assert.Equal(t, viewed.Result.Structured.Attachments, revisited.Result.Structured.Attachments)
+
+	// A real runner-local VM sees only the child reference. Explicit image
+	// selection is materialized beside the model, retention alone sends no pixels.
+	for _, mode := range []string{"image", "modified image", "artifact", "json", "unsupported detail"} {
+		t.Run("code "+mode, func(t *testing.T) {
+			selection := `emit.` + mode + `(r.attachments[0]);`
+			switch mode {
+			case "modified image":
+				selection = "emit.image(r.attachments[0]); // modified"
+			case "json":
+				selection = `return {type: "image", artifactId: r.attachments[0].artifactId};`
+			case "unsupported detail":
+				selection = `emit.image(r.attachments[0], {detail: "original"});`
+			}
+			input, err := json.Marshal(map[string]string{"code": fmt.Sprintf(`
+const r = await tools.view_image({artifactId: %q});
+emit("before");
+%s
+emit("after");
+`, attachment.ArtifactID, selection)})
+			require.NoError(t, err)
+			result, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
+				RunID: "view-path-run", ToolCallID: "code-" + mode, Name: "code_execute", Input: input,
+				ManifestDigest: manifest.Digest, CallableTools: new([]string{"view_image"}),
+			}, nil)
+			require.NoError(t, err)
+			if mode == "unsupported detail" {
+				assert.Contains(t, result.Result.Error, "compatible models")
+				assert.Empty(t, result.Result.ContentParts)
+				return
+			}
+			require.Empty(t, result.Result.Error)
+			assert.NotContains(t, result.Result.AssistantFacing, "pre-hook secret")
+			assert.False(t, result.Modified, "materialized effective output must reach provider adapters unchanged")
+			meta := result.Result.Structured.Metadata.(tooltypes.CodeExecutionMetadata)
+			require.Len(t, meta.Calls, 1)
+			assert.Equal(t, "completed", meta.Calls[0].Status)
+			if mode == "json" {
+				assert.Empty(t, result.Result.Structured.Attachments)
+				assert.Empty(t, result.Result.ContentParts)
+				return
+			}
+			require.Len(t, result.Result.Structured.Attachments, 1)
+			assert.Equal(t, attachment.ArtifactID, result.Result.Structured.Attachments[0].ArtifactID)
+			if mode == "artifact" {
+				assert.Empty(t, result.Result.ContentParts)
+				assert.Contains(t, result.Result.AssistantFacing, "pixels not sent")
+				return
+			}
+			require.Len(t, result.Result.ContentParts, 6)
+			assert.Equal(t, `"before"`, result.Result.ContentParts[1].Text)
+			assert.Equal(t, viewed.Result.ContentParts[1], result.Result.ContentParts[3])
+			assert.Equal(t, `"after"`, result.Result.ContentParts[4].Text)
+			assert.Contains(t, result.Result.ContentParts[5].Text, "Image URL: "+attachment.ViewURL)
+			assert.NotContains(t, result.Result.ContentParts[5].Text, "Use view_image")
+		})
+	}
 
 	failedUpload, err := controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
 		RunID: "view-path-run", ToolCallID: "vanishing", Name: "view_image", Input: json.RawMessage(`{"path":"vanishing.png"}`),

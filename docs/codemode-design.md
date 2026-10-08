@@ -2,13 +2,13 @@
 
 ## Status and decision
 
-Proposal, not an implemented feature. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
+Implemented as an opt-in feature through phases A–C below: runner-side QuickJS/WASM execution, async catalog discovery, shared direct/nested tool execution, machine results, parent-only renderers, and hybrid/compact advertisement. Phase D (saved scripts and explicit multimodal emission) remains deferred. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
 
 Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results remain runner-local; selected output and bounded progress return to the control plane. Keep core tools directly available. Initially keep extension tools directly available too; hide their model-facing schemas only after discovery and policy parity are proven.
 
 The model writes ordinary JavaScript, passes plain objects, receives predictable JSON results, and explicitly chooses what to return. No imports, generated client classes, package installation, or persistent interpreter state are required.
 
-Go directly to runner-side execution rather than implementing a temporary control-plane VM. The additional work is explicit nested-call ownership and extracting the existing runner execution setup for reuse. That is a meaningful but bounded integration task, not a reason to place the VM centrally. The runtime binding and lifecycle guarantees still need a focused implementation spike before this feasibility assessment is considered proven.
+Execution is runner-side; there is no temporary control-plane VM. Nested-call ownership uses acknowledged `tool.child.begin`/`tool.child.end` reverse RPCs, and the runner shares execution context setup between ordinary requests and script children. Both peers negotiate support before advertising the parent tool. The implementation and tests are in `pkg/codemode`, `pkg/tools/code_execute.go`, and `pkg/runner/{client,registry}/code_execution.go`.
 
 ## 1. Model-facing interface
 
@@ -60,6 +60,10 @@ declare const catalog: {
 };
 
 declare function emit(value: unknown): void;
+declare namespace emit {
+  function image(ref: string | ArtifactRef, options?: { detail?: "original" }): void;
+  function artifact(ref: string | ArtifactRef): void;
+}
 ```
 
 Only `code_execute` is a new model-facing tool. `catalog.*` and `tools[name]` are host-backed APIs exposed inside its VM, not additional provider tool declarations or an `operation` variant of the execution tool. Kodelet can reuse the underlying catalog service for other interfaces without running JavaScript.
@@ -84,7 +88,7 @@ return replies.flatMap(reply => {
 });
 ```
 
-The model sees the selected IDs and titles, not both complete search results. `emit` appends an explicitly selected output; a non-undefined return value appends the final output. `console.log` is an alias for text emission, not a hidden diagnostic channel. All three share an output budget. Output is serialized immediately, rather than retaining mutable VM objects. Await values before emitting them: `emit(await catalog.list())`, not `emit(catalog.list())`. The serializer rejects unresolved promises rather than silently emitting `{}`; returning a promise is supported because the async wrapper waits for it before final serialization.
+The model sees the selected IDs and titles, not both complete search results. `emit` appends an explicitly selected JSON output; a non-undefined return value appends the final JSON output. `console.log` is an alias for text emission, not a hidden diagnostic channel. All three share an output budget. Output is serialized immediately, rather than retaining mutable VM objects. Await values before emitting them: `emit(await catalog.list())`, not `emit(catalog.list())`. The serializer rejects unresolved promises rather than silently emitting `{}`; returning a promise is supported because the async wrapper waits for it before final serialization. `emit.image` and `emit.artifact` are distinct synchronous host-backed operations: arbitrary returned JSON is never interpreted as a media instruction.
 
 A script with no explicit output still returns a short execution summary. This avoids an apparently empty tool response after successful side effects. Arbitrary expressions and intermediate tool replies are never automatically printed.
 
@@ -106,7 +110,7 @@ Add optional output schemas to tool definitions, extension registration, SDK typ
 
 Generate declarations from the same manifest records used by execution. Unsupported JSON Schema constructs degrade conservatively to `unknown`; the original JSON Schema remains available in `catalog.describe`. Descriptions are tool data, not trusted instructions.
 
-The bootstrap description of `code_execute` includes the runtime API, output/error rules, a bounded overview of available tool groups, and these discovery examples:
+The bootstrap description of `code_execute` includes the runtime API, output/error rules, limits, and a discovery example. Recorded tool groups are returned by `catalog.list` and `catalog.search` rather than injected as a second catalog into the bootstrap description. Typical discovery calls are:
 
 ```js
 return await catalog.list({ limit: 20 });
@@ -177,6 +181,8 @@ Initially provide documented machine results for `bash`, file reading, and MCP t
 
 Construct `ToolReply` only from the effective post-policy result. In particular, never read the original `ToolExecution.Result` to recover data that a hook removed or replaced. For compatibility, v1 clears machine `Data` whenever a legacy result hook modifies a child result, before producing the final normalized result. This is deliberately conservative: a hook written to redact display output must not accidentally leave a new machine-readable copy accessible. Explicit machine-data replacement by upgraded hooks can be introduced later with an unambiguous protocol contract.
 
+Code-mode parents and children fail closed when a `tool.call` or `tool.result` hook fails: a failed call hook prevents execution, and a failed result hook withholds the output without implying rollback. Ordinary direct calls retain their existing hook-failure behavior. Execution failure provenance is host-owned, separate from hook-editable metadata, so an RPC timeout cannot be relabeled as a completed operation by a display replacement.
+
 Tool failures reject with a serializable `ToolError`:
 
 ```ts
@@ -242,8 +248,8 @@ The current control-plane registry establishes capabilities around a centrally d
 tool.child.begin({ runId, parentToolCallId, toolCallId, name })
 
 // Runner -> control plane; acknowledged after child work and cleanup finish.
-// Contains bounded status metadata, never the child result body.
-tool.child.end({ runId, parentToolCallId, toolCallId, outcome })
+// Contains ownership metadata only, never the child result body.
+tool.child.end({ runId, parentToolCallId, toolCallId, name })
 ```
 
 For the first version, register every dispatched child before running its hooks or implementation. The control plane validates the authenticated runner connection generation, live run, active `code_execute` parent, unique child ID, allowed tool name, and parent call budget. It retains the parent's resolved authorization and central service context for that invocation; these are not supplied by the script or trusted from a child registration request. Reject recursive code execution and children of children.
@@ -264,7 +270,7 @@ Model-helper requests, artifact transfers, conversation forks, and interactive U
 
 ## 5. Runtime, limits, and lifecycle
 
-The proposed implementation target is QuickJS compiled to WebAssembly, embedded in the Go runner and hosted with wazero. Confirm the binding with a focused spike before committing to a dependency. Required properties are async host calls, pending-job execution, hard context interruption, bounded memory, and no ambient filesystem/network/process access. Do not adopt a convenience wrapper that mounts the working directory or exposes WASI capabilities by default.
+The implementation uses QuickJS compiled to WebAssembly, embedded in the Go runner and hosted with wazero. The package pin, digest, provenance, and upstream licenses are recorded in `pkg/codemode/runtime_wasm_provenance.md`. Code generation installs the locked npm package and checksum-verifies its WASM before embedding it; the generated binary is gitignored. Node/npm are build-time generation dependencies, as for the frontend, but neither Node nor a C toolchain is required at runtime. The adapter provides async host calls, pending-job execution, hard context interruption, bounded memory, and no ambient filesystem/network/process access. It mounts no working directory and supplies no inherited environment or host streams to WASI.
 
 A fresh VM is created per invocation; immutable compiled runtime code may be reused. One goroutine owns the VM. Child tool workers return JSON completions over a channel; they never enter the VM concurrently. No Node, Python, imports, `fetch`, environment access, timers, or persistent globals are exposed. This constrains the orchestration runtime, not the tools: an authorized `bash` call retains its existing host powers.
 
@@ -272,7 +278,7 @@ A fresh VM is created per invocation; immutable compiled runtime code may be reu
 
 JavaScript communicates with the Go runner through host functions exposed by the QuickJS/WASM adapter. This is an in-process bridge, not HTTP, stdin/stdout, a Node server, or direct MCP transport. Keep it distinct from the authenticated runner/control-plane protocol used for child ownership and central services.
 
-The adapter provides an asynchronous request/completion mechanism for both `tools[name](input)` and `catalog.*`. The following ABI is illustrative, not an existing QuickJS API or a fixed binding choice:
+The adapter provides an asynchronous request/completion mechanism for both `tools[name](input)` and `catalog.*`. The following illustrates the boundary; the implementation uses QuickJS host-function value marshalling and a private prelude settlement closure, rather than exposing these literal functions to user code:
 
 ```text
 WASM → Go: submit(request_id, json_pointer, json_length) → admission_status
@@ -312,12 +318,16 @@ Initial host-enforced limits, to validate during the spike:
 | --- | --- |
 | Script wall time, including awaited tools | 120 seconds, also bounded by parent cancellation |
 | VM memory | 256 MiB |
+| Submitted async function body | 128 KiB |
 | Child calls per invocation, including queued calls | 128 |
 | Simultaneously dispatched child calls | 4 |
 | Catalog requests per invocation | 256 |
 | Outstanding bridge requests, including queued and completed-but-unsettled work | 256 |
-| Selected model-facing output | 32 KiB |
+| Selected JSON output and media descriptors | 32 KiB, excluding separately stored image bytes |
+| Explicit media emissions | 8 items, including repeated IDs |
 | JSON payload admitted to the VM per child | 2 MiB; ordinary child bodies are not sent over the runner link |
+
+Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 8 MiB retained-byte budgets. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
 
 These are host policy, not script-controlled escape hatches. Also bound host-side result queues, aggregate retained payloads, and script input size; VM memory limits alone do not bound Go allocations. Use normal artifact storage for retained overflow when allowed, and report truncation/overflow explicitly rather than silently dropping selected output. Existing tool-level truncation remains visible through the reply contract.
 
@@ -337,6 +347,8 @@ The runner-side controller can emit its own bounded, accumulated progress snapsh
 
 Persist a new registered `CodeExecutionMetadata` type containing execution status, duration, selected outputs, and bounded child summaries: call ID, tool name, status, duration, and error kind. No complete child result bodies are stored in the transcript by default. Keep referenced artifacts valid for normal history/resume behavior. A caught failure is still shown in the summary, even when the parent succeeds.
 
+Persist ordered typed `items`: `{type: "json", value}`, `{type: "image", artifactId, detail?}`, or `{type: "artifact", artifactId}`. The old untyped `outputs` field remains readable for existing histories but never acquires media semantics. Selected descriptors are deduplicated in the parent's attachments while repeated emissions keep their positions. Normal conversation save, reload, and fork behavior preserves these parent-owned references without retaining every intermediate child attachment.
+
 Example expanded card:
 
 ```text
@@ -353,7 +365,24 @@ Output
 
 TUI and Web UI need a result renderer, not a new nested event protocol. Live rendering and reloaded history use the same persisted metadata. Register the metadata in Go's custom result decoder; otherwise an unknown metadata type would be discarded on deserialization. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.
 
-For images and other multimodal results, the script receives authorized artifact references, not fabricated local paths or automatically embedded blobs. Initial code mode may return references without adding image content to the model. Explicit attachment emission should be a separate, capability-checked API; keep direct multimodal tools available until that path has parity.
+### Explicit image and artifact output
+
+`emit.image(ref, options?)` selects image pixels for the model; `emit.artifact(ref)` retains an image artifact for the user/history without sending pixels. Both accept an exact artifact ID string or an attachment descriptor containing `artifactId`, returned by an effective child reply in this invocation. Descriptor fields supplied by JavaScript cannot override the host's stored attachment. Plain `return`, `emit(value)`, and console output stay JSON/text, even if the value is an exact ID or an object shaped like an image. The current artifact store is image-only; PDF, ZIP, and other generic files remain a separate extension of this contract.
+
+```javascript
+const image = await tools.view_image({path: "/tmp/chart.png"});
+emit({caption: "Quarterly revenue"});
+emit.image(image.attachments[0]);
+// Instead use emit.artifact(image.attachments[0]) to retain it without pixels.
+```
+
+An existing conversation artifact must first enter the invocation through an authorized child, for example `tools.view_image({artifactId})`. Image emission additionally requires `view_image` in the host-owned callable set and current runner restrictions. The optional `detail: "original"` belongs to the emission and is validated against the active model, just as for direct `view_image`; omission uses the normal resized behavior. Paths, URLs, and inline base64 are not image references. Emission performs local validation only, not a hidden tool call; the producing child and parent retain their ordinary call/result hooks. Policies that control which generated images may be exposed can redact the child's attachments or the parent's explicit items.
+
+The host bridge, not a JSON field chosen by the script, determines an item's type. Before appending it, the VM owner validates structure, output budgets, and membership in the inventory of post-hook, successfully ingested child attachments. These checks are synchronous and do not perform I/O or re-enter the VM from a worker. Partial effective error replies can contribute attachments; rejected or redacted replies cannot. Eight media emissions include duplicates, while image bytes are excluded from the 32 KiB selected-output budget. Earlier valid emissions survive a later script failure; this does not imply rollback.
+
+After parent result hooks, intersect media items with the original authorized selections and retained attachment IDs. Hooks can remove emissions but cannot manufacture references, upgrade retention to pixels, change image detail, or duplicate an authorized emission. Reconstruct model content from this effective snapshot, never the pre-hook result. Streamed snapshots do not carry media, and update hooks cannot inject it.
+
+Binary data stays outside QuickJS. MCP image content is converted by the SDK to a transient inline image attachment, then decoded and uploaded through the ordinary bounded runner artifact channel after child result hooks. Local-path image attachments use that same channel. Raw bytes/base64 are stripped from the effective reply; JavaScript receives only persisted descriptors. The control plane rechecks conversation ownership and materializes only explicitly selected image items using the normal image sizing/provider path. Text and image selections preserve emission order. Artifact-only items keep IDs and authenticated links, never pixels. The parent card distinguishes viewed images from retained artifacts, using the same metadata for live results and history.
 
 ## 7. Reusable scripts without a persistent interpreter
 
@@ -381,7 +410,7 @@ Add compact mode only after the catalog API is sufficient to discover and write 
 
 ### D. Reuse and selective multimodal output
 
-Add saved-script execution and explicit artifact emission. Measure child registration overhead before considering batching or lazy registration; runner-local orchestration is already the baseline.
+Add saved-script execution and, separately, generalize the image-only artifact store if non-image files are needed. Explicit image/artifact emission is implemented in the inline path. Measure child registration overhead before considering batching or lazy registration; runner-local orchestration is already the baseline.
 
 Relevant implementation areas:
 

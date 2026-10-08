@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -119,6 +121,7 @@ type Service struct {
 	generation            int64
 	remoteProfiles        bool
 	conversationHierarchy bool
+	codeExecution         bool
 	runs                  map[string]*activeRun
 	backgrounds           map[string]*runnerBackgroundResources
 	backgroundRunIDs      map[string]*runnerBackgroundResources
@@ -152,6 +155,8 @@ type activeRun struct {
 	conversationID       string
 	invokedBy            string
 	clientCaps           protocol.ClientCapabilities
+	codeExecution        bool
+	codeAllowedTools     *[]string
 	browserEnabled       bool
 	config               llmtypes.Config
 	runtime              *extensions.Runtime
@@ -278,6 +283,8 @@ func (s *Service) SetRegistration(result protocol.RegisterResult) error {
 	s.generation = result.Generation
 	s.remoteProfiles = result.RemoteProfiles
 	s.conversationHierarchy = result.ConversationHierarchy
+	s.codeExecution = result.CodeExecution
+	s.lastManifestDigest = ""
 	return nil
 }
 
@@ -597,6 +604,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		conversationID: params.ConversationID,
 		invokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
 		clientCaps:     params.ClientCapabilities,
+		codeExecution:  params.CodeExecution,
 		browserEnabled: params.BrowserEnabled,
 		resources:      resources,
 		ctx:            runCtx,
@@ -702,6 +710,9 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	config.Model = params.Agent.Model
 	config.Profile = params.Agent.Profile
 	config.RecipeName = params.Agent.RecipeName
+	if !params.CodeExecution {
+		config.CodeMode = ""
+	}
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
 	if err != nil {
 		s.failOpen(run)
@@ -1060,6 +1071,7 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 	}
 	runnerID := s.runnerID
 	generation := s.generation
+	codeExecution := s.codeExecution
 	s.mu.Unlock()
 	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
 	if err != nil {
@@ -1098,6 +1110,9 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to apply runner discovery options"))
 	}
 	config.WorkingDirectory = workingDirectory
+	if !codeExecution {
+		config.CodeMode = ""
+	}
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
 	if err != nil {
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
@@ -1249,6 +1264,15 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.Li
 		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchTurnStart(operationCtx, params.TurnNumber)
 	case runnerpayload.LifecycleAgentInit:
 		decision, err := run.environment.ProcessAgentInit(operationCtx, params.SystemPrompt, params.AllowedTools)
+		if err == nil {
+			s.mu.Lock()
+			run.codeAllowedTools = nil
+			if decision.ToolsModified {
+				allowed := append([]string{}, decision.AllowedTools...)
+				run.codeAllowedTools = &allowed
+			}
+			s.mu.Unlock()
+		}
 		return runnerpayload.LifecycleDispatchResult{
 			SystemPrompt:  decision.SystemPrompt,
 			AllowedTools:  append([]string(nil), decision.AllowedTools...),
@@ -1310,11 +1334,29 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 		return runnerpayload.ToolExecuteResult{}, err
 	}
 	defer finish()
+	return s.executeRunTool(operationCtx, run, params, false)
+}
 
+// executeRunTool is shared by top-level RPCs and runner-local children.
+// Callers own run-operation accounting and the invocation's cancellation context.
+func (s *Service) executeRunTool(operationCtx context.Context, run *activeRun, params runnerpayload.ToolExecuteParams, nested bool) (runnerpayload.ToolExecuteResult, error) {
 	peer := s.currentPeer()
+	if nested || params.Name == "code_execute" {
+		operationCtx = extensions.ContextWithStrictToolPolicy(operationCtx)
+	}
+	if params.Name == "code_execute" {
+		authority, err := s.codeExecutionContext(operationCtx, run, params)
+		if err != nil {
+			return runnerpayload.ToolExecuteResult{}, err
+		}
+		operationCtx = tools.ContextWithCodeExecution(operationCtx, authority)
+	}
 	operationCtx = contextWithRunnerModelHelper(operationCtx, peer, run.id, params.ToolCallID)
 	operationCtx = contextWithRunnerArtifactResolver(operationCtx, peer, run.id, params.ToolCallID)
-	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
+	s.mu.Lock()
+	runConfig := run.config.Clone()
+	s.mu.Unlock()
+	toolContext := tools.ToolContextFromThreadState(runConfig, run.conversationID, run.manifest.WorkingDirectory, nil)
 	if peer != nil {
 		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID, hierarchy: extensions.RuntimeCapabilitiesFromContext(operationCtx).ConversationHierarchy}
 	}
@@ -1337,12 +1379,18 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 			if peer == nil || update.Result == nil {
 				return
 			}
+			wire := serializeToolResult(update.Result, update.StructuredResult, update.Modified)
+			// Inline attachments are final-result ingress only. Updates have no
+			// upload lifecycle and must not carry image bytes over the RPC link.
+			wire.Structured.Attachments = slices.DeleteFunc(slices.Clone(wire.Structured.Attachments), func(attachment tooltypes.ToolAttachment) bool {
+				return attachment.Data != ""
+			})
 			_ = peer.NotifyUpdate(protocol.MethodToolUpdate, runnerpayload.ToolUpdateParams{
 				RunID:      run.id,
 				RequestID:  requestID,
 				ToolCallID: params.ToolCallID,
 				Sequence:   run.updates.Add(1),
-				Result:     serializeToolResult(update.Result, update.StructuredResult),
+				Result:     wire,
 				Modified:   update.Modified,
 			})
 		}
@@ -1359,12 +1407,24 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
-	wire := serializeToolResult(execution.Result, execution.StructuredResult)
-	s.ingestAttachments(operationCtx, peer, run, params.ToolCallID, &wire)
+	var wire runnerpayload.ToolResult
+	if nested {
+		// Local children do not need provider/display formatting or transport truncation.
+		// Never consult the original result after a policy hook replaced it.
+		wire.Structured = execution.StructuredResult
+		if !execution.Modified && wire.Structured.Metadata == nil && execution.Result != nil {
+			wire.DisplayOutput = execution.Result.GetResult()
+		}
+	} else {
+		wire = serializeToolResult(execution.Result, execution.StructuredResult, execution.Modified)
+	}
+	s.ingestAttachments(operationCtx, peer, run, params.ToolCallID, &wire, nested)
 	return runnerpayload.ToolExecuteResult{
-		Input:    input,
-		Result:   wire,
-		Modified: execution.Modified,
+		Input:          input,
+		Result:         wire,
+		Modified:       execution.Modified,
+		FailureKind:    execution.FailureKind,
+		FailureOutcome: execution.FailureOutcome,
 	}, nil
 }
 
@@ -1408,7 +1468,23 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 	return result.ConversationID, nil
 }
 
-func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult) runnerpayload.ToolResult {
+func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult, modified bool) runnerpayload.ToolResult {
+	if modified {
+		structured.Data = nil
+	}
+	// Rebuild code-mode output from the effective, media-pruned snapshot, never
+	// the pre-hook ToolResult. This preserves images a hook chose to keep.
+	var code tooltypes.CodeExecutionMetadata
+	if structured.ToolName == "code_execute" && tooltypes.ExtractMetadata(structured.Metadata, &code) {
+		result = tools.CodeExecuteResult{Metadata: code, Error: structured.Error, Attachments: structured.Attachments}
+		modified = false
+	}
+	if modified {
+		// Result hooks can redact a parent or a streamed snapshot, too. Never
+		// serialize the pre-hook body alongside the effective structured result.
+		output := renderers.NewRendererRegistry().Render(structured)
+		return runnerpayload.ToolResult{AssistantFacing: output, DisplayOutput: output, Error: structured.Error, Structured: structured}
+	}
 	if result == nil {
 		result = tooltypes.BaseToolResult{Error: "runner environment returned no tool result"}
 	}

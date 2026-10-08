@@ -1,7 +1,7 @@
 import { Download, ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { useState } from 'react';
-import type { ToolAttachment, ToolResult } from '../../types';
+import type { CodeExecutionMetadata, ToolAttachment, ToolResult } from '../../types';
 
 // Build a same-origin URL from the server-issued code. Never fetch extension
 // paths or arbitrary view URLs, including a configured external public origin.
@@ -18,7 +18,7 @@ export const imageAttachmentURL = (attachment: ToolAttachment): string | undefin
   return `/i/${attachment.shortCode}`;
 };
 
-const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }> = ({
+export const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }> = ({
   attachment,
   viewed,
 }) => {
@@ -84,6 +84,14 @@ const ImageAttachment: React.FC<{ attachment: ToolAttachment; viewed: boolean }>
 };
 
 const ToolImageAttachments: React.FC<{ toolResult: ToolResult }> = ({ toolResult }) => {
+  // Typed code outputs own their inline media order; a second gallery would
+  // duplicate previews and lose the image-versus-retained-artifact distinction.
+  if (
+    (toolResult.toolName === 'code_execute' || toolResult.metadataType === 'code_execute') &&
+    Array.isArray((toolResult.metadata as CodeExecutionMetadata | undefined)?.items)
+  ) {
+    return null;
+  }
   const images = toolResult.attachments?.filter((attachment) => attachment.type === 'image') || [];
   if (images.length === 0) return null;
 

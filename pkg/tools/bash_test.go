@@ -1167,6 +1167,39 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 	})
 }
 
+func TestBashToolCanonicalData(t *testing.T) {
+	result := &BashToolResult{
+		command: "echo hello", combinedOutput: "hello\n", exitCode: 0, workingDir: "/workspace",
+	}
+	assert.Equal(t, map[string]any{
+		"command": "echo hello", "output": "hello\n", "exitCode": 0, "workingDir": "/workspace", "truncated": false,
+	}, result.StructuredData().Data)
+
+	result.error = "Command exited with status 42"
+	result.exitCode = 42
+	assert.Equal(t, 42, result.StructuredData().Data.(map[string]any)["exitCode"])
+
+	result.outputTruncated = true
+	result.combinedOutput = "bounded snapshot"
+	result.fullOutputComplete = true
+	result.fullOutputPath = "/workspace/full-output.txt"
+	data := result.StructuredData().Data.(map[string]any)
+	assert.Equal(t, "bounded snapshot", data["output"])
+	assert.Equal(t, true, data["truncated"])
+	assert.Equal(t, result.fullOutputPath, data["fullOutputPath"])
+	data["output"] = "changed"
+	assert.Equal(t, "bounded snapshot", result.StructuredData().Data.(map[string]any)["output"])
+
+	result.fullOutputComplete = false
+	assert.NotContains(t, result.StructuredData().Data, "fullOutputPath")
+
+	tool := NewBashTool(nil, false)
+	schema := tooltypes.OutputSchemaForTool(tool)
+	assert.Equal(t, []string{"command", "output", "exitCode", "workingDir", "truncated"}, schema["required"])
+	schema["properties"].(map[string]any)["output"] = false
+	assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["output"])
+}
+
 func TestBashEnvWithPreferredBinDirs(t *testing.T) {
 	env, err := bashEnvWithPreferredBinDirs()
 	assert.NoError(t, err)

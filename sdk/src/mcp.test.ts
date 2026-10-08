@@ -126,6 +126,7 @@ test("loads local MCP config from extension workspace cwd env by default", async
 
 test("MCP extension entrypoint loads config from workspace cwd env", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-entrypoint-cwd-"));
+  const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=";
   const oldHome = process.env.HOME;
   const oldUserProfile = process.env.USERPROFILE;
   const oldWorkspaceCWD = process.env.KODELET_EXTENSION_WORKSPACE_CWD;
@@ -171,9 +172,18 @@ process.stdin.on('data', (chunk) => {
         },
         additionalProperties: false,
         'x-mcp-extension': { enabled: true }
+      }, outputSchema: {
+        type: 'object', properties: { ready: { type: 'boolean' } }, required: ['ready'], additionalProperties: false
       } }] };
     } else if (request.method === 'tools/call') {
-      result = { content: [{ type: 'text', text: JSON.stringify({ cwd: process.cwd(), inherited: process.env.MCP_TEST_ENV_VALUE, bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
+      result = {
+        content: [
+          { type: 'text', text: JSON.stringify({ cwd: process.cwd(), inherited: process.env.MCP_TEST_ENV_VALUE, bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) },
+          { type: 'image', data: ${JSON.stringify(imageData)}, mimeType: 'image/png' }
+        ],
+        structuredContent: { ready: request.params.arguments?.mode !== 'safe' },
+        isError: request.params.arguments?.mode === 'safe'
+      };
     }
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
   }
@@ -209,6 +219,10 @@ process.stdin.on('data', (chunk) => {
       });
       assert.deepEqual(init.tools.map((tool) => tool.name), ["mcp__workspace_ping"]);
       assert.equal(init.tools[0]?.description, "Workspace Ping");
+      assert.equal(init.tools[0]?.group, "mcp/workspace");
+      assert.deepEqual(init.tools[0]?.outputSchema, {
+        type: "object", properties: { ready: { type: "boolean" } }, required: ["ready"], additionalProperties: false,
+      });
       assert.deepEqual(init.tools[0]?.inputSchema, {
         type: "object",
         properties: {
@@ -219,7 +233,16 @@ process.stdin.on('data', (chunk) => {
         "x-mcp-extension": { enabled: true },
       });
       const result = await host.executeTool({ name: "mcp__workspace_ping", input: {}, context: { cwd: workspace } });
-      assert.equal(result.content, JSON.stringify({ cwd: await realpath(workspace), inherited: "expanded-value", bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
+      assert.equal(result.content, JSON.stringify({ cwd: await realpath(workspace), inherited: "expanded-value", bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }) + "[image:image/png]");
+      assert.deepEqual(result.structuredContent, { ready: true });
+      assert.equal(result.data?.kind, "mcp");
+      assert.deepEqual(result.attachments, [{ type: "image", data: imageData, mimeType: "image/png" }]);
+      assert.ok(!JSON.stringify(result.data).includes(imageData), "presentation data must not retain inline image bytes");
+      const failure = await host.executeTool({ name: "mcp__workspace_ping", input: { mode: "safe" }, context: { cwd: workspace } });
+      assert.ok(failure.error);
+      assert.deepEqual(failure.structuredContent, { ready: false });
+      assert.deepEqual(failure.attachments, result.attachments, "partial image outputs survive an MCP error result");
+      assert.ok(!JSON.stringify(failure.data).includes(imageData));
     } finally {
       await host?.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } }).catch(() => undefined);
       process.chdir(oldCwd);

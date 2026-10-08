@@ -44,6 +44,37 @@ func TestLocalEnvironmentAdditionalToolsRespectPolicy(t *testing.T) {
 	assert.False(t, found, "an ordinary environment does not acquire browser support")
 }
 
+func TestLocalEnvironmentCodeModeRequiresOptInAndAuthorization(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, test := range []struct {
+		name    string
+		config  llmtypes.Config
+		include bool
+	}{
+		{name: "default off"},
+		{name: "explicit off", config: llmtypes.Config{CodeMode: "off", AllowedTools: []string{"code_execute"}}},
+		{name: "hybrid", config: llmtypes.Config{CodeMode: "hybrid"}, include: true},
+		{name: "compact", config: llmtypes.Config{CodeMode: "compact"}, include: true},
+		{name: "legacy allowlist excludes parent", config: llmtypes.Config{CodeMode: "hybrid", AllowedTools: []string{"bash"}}},
+		{name: "explicit parent allowed", config: llmtypes.Config{CodeMode: "hybrid", AllowedTools: []string{"code_execute", "bash"}}, include: true},
+		{name: "no tools", config: llmtypes.Config{CodeMode: "hybrid", ExecutionOptions: &llmtypes.ExecutionOptions{NoTools: new(true)}}},
+		{name: "empty allowlist", config: llmtypes.Config{CodeMode: "hybrid", ExecutionOptions: &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			environment := NewLocalEnvironment(t.TempDir(), nil)
+			manifest, err := environment.Open(t.Context(), RunSpec{Config: test.config})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, environment.Close(t.Context())) })
+			definition, found := manifest.ToolDefinition("code_execute")
+			assert.Equal(t, test.include, found)
+			if found {
+				assert.IsType(t, &tools.CodeExecuteTool{}, definition.Tool)
+				assert.Contains(t, definition.Description, "catalog.search")
+			}
+		})
+	}
+}
+
 func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -110,7 +141,8 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 func TestManifestCloneDeepCopiesToolSchemas(t *testing.T) {
 	manifest := Manifest{
 		Tools: []ToolDefinition{{
-			Name: "nested",
+			Name:         "nested",
+			OutputSchema: map[string]any{"properties": map[string]any{"count": map[string]any{"type": "integer"}}},
 			InputSchema: map[string]any{
 				"properties": map[string]any{
 					"path": map[string]any{
@@ -137,6 +169,8 @@ func TestManifestCloneDeepCopiesToolSchemas(t *testing.T) {
 	originalPath := originalProperties["path"].(map[string]any)
 	assert.Equal(t, "string", originalPath["type"])
 	assert.Equal(t, []any{"one", "two"}, originalPath["enum"])
+	clone.Tools[0].OutputSchema["properties"].(map[string]any)["count"].(map[string]any)["type"] = "string"
+	assert.Equal(t, "integer", manifest.Tools[0].OutputSchema["properties"].(map[string]any)["count"].(map[string]any)["type"])
 
 	clone.Config.SystemInformation.Platform = "linux"
 	assert.Equal(t, "darwin", manifest.Config.SystemInformation.Platform)

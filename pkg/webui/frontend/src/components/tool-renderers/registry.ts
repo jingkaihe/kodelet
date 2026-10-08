@@ -3,6 +3,7 @@ import type { ToolRenderProps, ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import BashRenderer from './BashRenderer';
 import BrowserRenderer from './BrowserRenderer';
+import CodeExecutionRenderer from './CodeExecutionRenderer';
 import ExtensionToolRenderer from './ExtensionToolRenderer';
 import FileEditRenderer from './FileEditRenderer';
 import FileReadRenderer from './FileReadRenderer';
@@ -28,6 +29,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   apply_patch: { component: ApplyPatchRenderer, supportsFailureRendering: true },
   bash: { component: BashRenderer, supportsFailureRendering: true },
   browser: { component: BrowserRenderer, supportsFailureRendering: true },
+  code_execute: { component: CodeExecutionRenderer, supportsFailureRendering: true },
   grep_tool: { component: GrepRenderer },
   glob_tool: { component: GlobRenderer },
   web_fetch: { component: WebFetchRenderer },

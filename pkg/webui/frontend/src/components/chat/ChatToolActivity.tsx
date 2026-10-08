@@ -1,11 +1,17 @@
 import { Check, ChevronRight, X } from 'lucide-react';
 import React from 'react';
-import type { ApplyPatchChange, ChatRenderToolCall, ToolResult } from '../../types';
+import type {
+  ApplyPatchChange,
+  ChatRenderToolCall,
+  CodeExecutionMetadata,
+  ToolResult,
+} from '../../types';
 import { cn, formatDuration } from '../../utils';
 import Spinner from '../Spinner';
 import ToolRenderer from '../ToolRenderer';
 import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
 import BrowserRenderer, { getBrowserMetadata } from '../tool-renderers/BrowserRenderer';
+import { codeExecutionSummary } from '../tool-renderers/CodeExecutionRenderer';
 import {
   getExtensionToolPresentation,
   normalizeToolName,
@@ -228,6 +234,9 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const input = parseToolInput(toolCall.input);
   const metadata = getMetadataRecord(toolCall.result);
+  if (normalizedToolName === 'code_execute' || toolCall.result?.metadataType === 'code_execute') {
+    return codeExecutionSummary(toolCall.result);
+  }
   if (normalizedToolName === 'browser' || toolCall.result?.metadataType === 'browser') {
     const browser = getBrowserMetadata(toolCall.result, toolCall.input);
     switch (browser.action) {
@@ -641,6 +650,13 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         }
         const commands = kind === 'commands';
         const browser = kind === 'browser';
+        // Code media stays inline with selected text, not in an outside gallery.
+        // Open these cards initially so previews remain visible on completion.
+        const codeMedia =
+          (toolCall.name === 'code_execute' || toolCall.result?.metadataType === 'code_execute') &&
+          (toolCall.result?.metadata as CodeExecutionMetadata | undefined)?.items?.some(
+            (item) => item.type === 'image' || item.type === 'artifact'
+          );
         const builtin = commands || kind === 'tools';
         const running = group.some((tool) => getToolActivityStatus(tool) === 'running');
         const failedCount = group.filter((tool) => getToolActivityStatus(tool) === 'failed').length;
@@ -668,7 +684,9 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 failedCount > 0 && 'activity-card-error'
               )}
               open={
-                running || ((browser || kind === 'skill') && failedCount > 0) ? true : undefined
+                running || codeMedia || ((browser || kind === 'skill') && failedCount > 0)
+                  ? true
+                  : undefined
               }
             >
               <summary className="tool-summary activity-summary" title={summaryText}>

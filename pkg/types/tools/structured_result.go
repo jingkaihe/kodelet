@@ -13,6 +13,7 @@ type StructuredToolResult struct {
 	ToolName    string           `json:"toolName"`
 	Success     bool             `json:"success"`
 	Error       string           `json:"error,omitempty"`
+	Data        any              `json:"data,omitempty"`
 	Metadata    ToolMetadata     `json:"metadata,omitempty"`
 	Timestamp   time.Time        `json:"timestamp"`
 	Attachments []ToolAttachment `json:"attachments,omitempty"`
@@ -23,6 +24,7 @@ type rawStructuredToolResult struct {
 	ToolName     string           `json:"toolName"`
 	Success      bool             `json:"success"`
 	Error        string           `json:"error,omitempty"`
+	Data         any              `json:"data,omitempty"`
 	MetadataType string           `json:"metadataType,omitempty"`
 	Metadata     json.RawMessage  `json:"metadata,omitempty"`
 	Timestamp    time.Time        `json:"timestamp"`
@@ -35,6 +37,7 @@ func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 		ToolName:    s.ToolName,
 		Success:     s.Success,
 		Error:       s.Error,
+		Data:        s.Data,
 		Timestamp:   s.Timestamp,
 		Attachments: s.Attachments,
 	}
@@ -64,6 +67,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"grep_tool":      reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":      reflect.TypeOf(GlobMetadata{}),
 	"bash":           reflect.TypeOf(BashMetadata{}),
+	"code_execute":   reflect.TypeOf(CodeExecutionMetadata{}),
 	"extension_tool": reflect.TypeOf(ExtensionToolMetadata{}),
 
 	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
@@ -85,8 +89,10 @@ func (s *StructuredToolResult) UnmarshalJSON(data []byte) error {
 	s.ToolName = raw.ToolName
 	s.Success = raw.Success
 	s.Error = raw.Error
+	s.Data = raw.Data
 	s.Timestamp = raw.Timestamp
 	s.Attachments = raw.Attachments
+	s.Metadata = nil
 
 	// Handle metadata based on type
 	if raw.MetadataType != "" && len(raw.Metadata) > 0 {
@@ -279,6 +285,7 @@ type ExtensionToolMetadata struct {
 	ExtensionID   string         `json:"extensionId"`
 	ToolName      string         `json:"toolName"`
 	Output        string         `json:"output"`
+	Truncated     bool           `json:"truncated,omitempty"`
 	Data          map[string]any `json:"data,omitempty"`
 	ExecutionTime time.Duration  `json:"executionTime"`
 }

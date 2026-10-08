@@ -4,6 +4,16 @@ ARG NODE_IMAGE=node:24.16.0-bookworm-slim
 ARG GO_IMAGE=golang:1.27.1-bookworm
 ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot
 
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS codemode-runtime
+
+WORKDIR /src/pkg/codemode
+
+COPY pkg/codemode/package.json pkg/codemode/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
+
+COPY pkg/codemode/generate-runtime.mjs ./
+RUN npm run generate
+
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend
 
 WORKDIR /src/pkg/webui/frontend
@@ -29,6 +39,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
+COPY --from=codemode-runtime /src/pkg/codemode/runtime_quickjs.wasm ./pkg/codemode/runtime_quickjs.wasm
 COPY --from=frontend /src/pkg/webui/dist/ ./pkg/webui/dist/
 
 RUN --mount=type=cache,target=/go/pkg/mod \

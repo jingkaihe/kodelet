@@ -32,6 +32,7 @@ import type {
 interface RegisteredTool {
   registration: ToolRegistration<ToolInputSchema>;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   parseInput(input: unknown): Promise<unknown>;
 }
 
@@ -89,6 +90,7 @@ export class ExtensionHost implements ExtensionAPI {
     this.tools.set(registration.name, {
       registration: registration as ToolRegistration<ToolInputSchema>,
       inputSchema: isZodSchema(inputSchema) ? zodSchemaToJsonSchema(inputSchema) : inputSchema,
+      outputSchema: registration.outputSchema === undefined ? undefined : clonePayload(registration.outputSchema),
       parseInput: isZodSchema(inputSchema)
         ? (input) => inputSchema.parseAsync(input)
         : async (input) => input,
@@ -151,10 +153,12 @@ export class ExtensionHost implements ExtensionAPI {
       name: this.metadata.name ?? params.extension.id,
       version: this.metadata.version,
       ...(this.profiles.size ? { profiles: structuredClone([...this.profiles.values()]) } : {}),
-      tools: [...this.tools.values()].map(({ registration, inputSchema }) => ({
+      tools: [...this.tools.values()].map(({ registration, inputSchema, outputSchema }) => ({
         name: registration.name,
         description: registration.description,
         inputSchema,
+        ...(outputSchema === undefined ? {} : { outputSchema: clonePayload(outputSchema) }),
+        ...(registration.group === undefined ? {} : { group: registration.group }),
         ...optionalTimeout(registration.timeoutInSec),
       })),
       commands: [...this.commands.values()].map(({ registration, inputSchema }) => ({
@@ -244,8 +248,15 @@ export class ExtensionHost implements ExtensionAPI {
         setNestedToolField(event as unknown as Record<string, unknown>, "input", result.input);
       }
       if (result.output !== undefined) {
-        aggregate.output = result.output;
-        setNestedToolField(event as unknown as Record<string, unknown>, "output", result.output);
+        let output = result.output;
+        if ((params.event === "tool.result" || params.event === "tool.update") && isRecord(output)) {
+          // A legacy redactor may replace display output while spreading the
+          // original result. Clear its machine copy before subsequent hooks.
+          output = { ...output };
+          delete (output as Record<string, unknown>).data;
+        }
+        aggregate.output = output;
+        setNestedToolField(event as unknown as Record<string, unknown>, "output", output);
       }
       if (result.message !== undefined) {
         aggregate.message = result.message;

@@ -135,6 +135,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		profile = *e.modelProfile
 	}
 	params := protocol.RunOpenParams{
+		CodeExecution:  true,
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
 		CWD:            strings.TrimSpace(spec.Config.WorkingDirectory),
@@ -384,10 +385,20 @@ func (e *RemoteEnvironment) ExecuteTool(ctx context.Context, request ToolRequest
 		return ToolExecution{}, err
 	}
 	params := runnerpayload.ToolExecuteParams{
-		RunID:      runID,
-		ToolCallID: request.ToolCallID,
-		Name:       request.Name,
-		Input:      input,
+		RunID:         runID,
+		ToolCallID:    request.ToolCallID,
+		Name:          request.Name,
+		Input:         input,
+		CallableTools: request.CallableTools,
+	}
+	if request.Name == "code_execute" {
+		e.mu.RLock()
+		capable, digest := e.wireManifest.Capabilities.CodeExecution, e.wireManifest.Digest
+		e.mu.RUnlock()
+		if !capable || request.CallableTools == nil {
+			return ToolExecution{}, errors.New("runner does not support authorized code execution")
+		}
+		params.ManifestDigest = digest
 	}
 	var updateCallback func(runnerpayload.ToolUpdateParams)
 	if updates != nil && e.CanStreamToolUpdates() {
@@ -512,16 +523,21 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 
 	definitions := make([]ToolDefinition, 0, len(wire.Tools))
 	for _, definition := range wire.Tools {
+		if definition.Name == "code_execute" && !wire.Capabilities.CodeExecution {
+			continue
+		}
 		if !config.EnvironmentOptions().ToolAllowed(definition.Name) {
 			continue
 		}
 		proxy := newRemoteToolProxy(definition)
 		definitions = append(definitions, ToolDefinition{
-			Name:        definition.Name,
-			Description: definition.Description,
-			InputSchema: cloneJSONMap(definition.InputSchema),
-			Placement:   ToolPlacementEnvironment,
-			Tool:        proxy,
+			Name:         definition.Name,
+			Description:  definition.Description,
+			InputSchema:  cloneJSONMap(definition.InputSchema),
+			OutputSchema: cloneJSONMap(definition.OutputSchema),
+			Group:        definition.Group,
+			Placement:    ToolPlacementEnvironment,
+			Tool:         proxy,
 		})
 	}
 
@@ -534,6 +550,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 			Options:             wire.Config.Options.Clone(),
 			AllowedCommands:     slices.Clone(wire.Config.AllowedCommands),
 			ToolMode:            wire.Config.ToolMode,
+			CodeMode:            wire.Config.CodeMode,
 			EnableFSSearchTools: wire.Config.EnableFSSearchTools,
 			SystemPromptPath:    wire.Config.SystemPromptPath,
 			SystemPromptContent: wire.Config.SystemPromptContent,
@@ -568,16 +585,20 @@ func remoteContentDigest(content string) string {
 }
 
 type remoteToolProxy struct {
-	name        string
-	description string
-	schema      map[string]any
+	name         string
+	description  string
+	schema       map[string]any
+	outputSchema map[string]any
+	group        string
 }
 
 func newRemoteToolProxy(definition runnerpayload.ToolDefinition) *remoteToolProxy {
 	return &remoteToolProxy{
-		name:        definition.Name,
-		description: definition.Description,
-		schema:      cloneJSONMap(definition.InputSchema),
+		name:         definition.Name,
+		description:  definition.Description,
+		schema:       cloneJSONMap(definition.InputSchema),
+		outputSchema: cloneJSONMap(definition.OutputSchema),
+		group:        definition.Group,
 	}
 }
 
@@ -593,9 +614,11 @@ func (t *remoteToolProxy) GenerateSchema() *jsonschema.Schema {
 	return &schema
 }
 
-func (t *remoteToolProxy) RawInputSchema() map[string]any { return cloneJSONMap(t.schema) }
-func (t *remoteToolProxy) Name() string                   { return t.name }
-func (t *remoteToolProxy) Description() string            { return t.description }
+func (t *remoteToolProxy) RawInputSchema() map[string]any  { return cloneJSONMap(t.schema) }
+func (t *remoteToolProxy) RawOutputSchema() map[string]any { return cloneJSONMap(t.outputSchema) }
+func (t *remoteToolProxy) ToolGroup() string               { return t.group }
+func (t *remoteToolProxy) Name() string                    { return t.name }
+func (t *remoteToolProxy) Description() string             { return t.description }
 func (t *remoteToolProxy) ValidateInput(_ tooltypes.State, parameters string) error {
 	_, err := rawToolInput(parameters)
 	return err

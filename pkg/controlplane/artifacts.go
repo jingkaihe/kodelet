@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -131,6 +132,14 @@ func (c artifactController) ExecuteTool(
 		result.Result.DisplayOutput = text
 		result.Result.Error = result.Result.Structured.Error
 		result.Result.ContentParts = nil
+		var metadata tooltypes.CodeExecutionMetadata
+		if result.Result.Structured.ToolName == "code_execute" && tooltypes.ExtractMetadata(result.Result.Structured.Metadata, &metadata) {
+			// The runner prunes code selections against the original host-owned
+			// emissions after hooks. Reconstruct only that effective snapshot.
+			code := tools.CodeExecuteResult{Metadata: metadata, Error: result.Result.Error, Attachments: result.Result.Structured.Attachments}
+			result.Result.AssistantFacing = code.AssistantFacing()
+			result.Result.ContentParts = code.ContentParts()
+		}
 		result.Modified = false
 	}
 	c.normalizeAttachments(ctx, &result.Result)
@@ -155,6 +164,12 @@ func hasArtifactContent(parts []tooltypes.ToolResultContentPart) bool {
 }
 
 func (c artifactController) normalizeAttachments(ctx context.Context, result *runnerpayload.ToolResult) {
+	viewed := make(map[string]bool)
+	for _, part := range result.ContentParts {
+		if part.Type == tooltypes.ToolResultContentPartTypeImage {
+			viewed[part.ArtifactID] = true
+		}
+	}
 	attachments := result.Structured.Attachments
 	if len(attachments) > runnerpayload.MaxToolAttachments+1 {
 		attachments = attachments[:runnerpayload.MaxToolAttachments+1]
@@ -192,13 +207,16 @@ func (c artifactController) normalizeAttachments(ctx context.Context, result *ru
 					stored.Height,
 					stored.MimeType,
 				)
-				if !hasArtifactContent(result.ContentParts) {
+				if !viewed[stored.ArtifactID] {
 					hint += " Use view_image with artifactId to inspect it."
 				}
 				if imageURL := c.server.imageViewURL(stored.ShortCode); imageURL != "" {
 					hint += "\nImage URL: " + imageURL + "\nUse this URL when linking the image in your reply, not a runner-local path."
 				}
 				result.AssistantFacing += hint
+				if result.Structured.ToolName == "code_execute" && len(result.ContentParts) > 0 {
+					result.ContentParts = append(result.ContentParts, tooltypes.ToolResultContentPart{Type: tooltypes.ToolResultContentPartTypeText, Text: hint})
+				}
 				continue
 			}
 		}

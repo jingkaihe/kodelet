@@ -3,6 +3,7 @@ package extensions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,6 +78,92 @@ func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 	})
 }
 
+func TestToolOutputSchemaAndProvenance(t *testing.T) {
+	var registration ToolRegistration
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"name":"mcp__ambiguous_server_tool_name",
+		"description":"Structured result",
+		"inputSchema":{"type":"object"},
+		"outputSchema":{"type":"object","properties":{"value":{"type":["string","null"]}},"x-extra":true},
+		"group":"mcp/ambiguous_server"
+	}`), &registration))
+	tool, err := newTool("mcp-extension", nil, registration, 0, 100)
+	require.NoError(t, err)
+	assert.Equal(t, "mcp/ambiguous_server", tool.ToolGroup())
+	assert.Equal(t, registration.OutputSchema, tooltypes.OutputSchemaForTool(tool))
+	registration.OutputSchema["properties"].(map[string]any)["value"] = "changed"
+	first := tooltypes.OutputSchemaForTool(tool)
+	assert.IsType(t, map[string]any{}, first["properties"].(map[string]any)["value"])
+	first["properties"].(map[string]any)["value"] = "changed again"
+	assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["value"])
+
+	tool, err = newTool("custom-extension", nil, ToolRegistration{Name: "tool", Description: "Plain output"}, 0, 100)
+	require.NoError(t, err)
+	assert.Nil(t, tool.RawOutputSchema())
+	assert.Equal(t, "extension/custom-extension", tool.ToolGroup())
+	assert.Nil(t, tooltypes.OutputSchemaForTool(nil))
+
+	_, err = newTool("custom-extension", nil, ToolRegistration{
+		Name: "tool", Description: "Invalid schema", OutputSchema: map[string]any{"invalid": make(chan int)},
+	}, 0, 100)
+	require.ErrorContains(t, err, "failed to marshal extension tool output schema")
+}
+
+func TestToolResultCanonicalDataIsSeparateFromPresentation(t *testing.T) {
+	for _, payload := range []string{`{"items":[{"id":7}]}`, `[1,false]`, `false`, `0`, `""`, `null`} {
+		t.Run(payload, func(t *testing.T) {
+			var execution ToolExecutionResult
+			require.NoError(t, json.Unmarshal([]byte(`{"content":"human text","data":{"presentation":{"summary":"Summary"}},"structuredContent":`+payload+`}`), &execution))
+			tool := &Tool{name: "structured_tool", extensionID: "custom", maxOutput: 100}
+			result := tool.resultFromExecution(execution, 0)
+			structured := result.StructuredData()
+			assert.Equal(t, execution.StructuredContent, structured.Data)
+			assert.Equal(t, "human text", result.GetResult())
+			var metadata tooltypes.ExtensionToolMetadata
+			require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &metadata))
+			assert.Equal(t, execution.Data, metadata.Data)
+		})
+	}
+}
+
+func TestToolTransportFailureHasUnknownOutcome(t *testing.T) {
+	for _, cancelBeforeReply := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%v", cancelBeforeReply), func(t *testing.T) {
+			process, sdk, reader := newEventTraceProcess(t)
+			tool, err := newTool("test", process, ToolRegistration{Name: "test", Description: "test"}, 0, 100)
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan tooltypes.ToolResult, 1)
+			go func() { done <- tool.Execute(ctx, nil, `{}`) }()
+			request, err := readIncomingMessage(reader)
+			require.NoError(t, err)
+			if cancelBeforeReply {
+				cancel()
+				_, err := readIncomingMessage(reader) // Drain the cancellation notification on the unbuffered pipe.
+				require.NoError(t, err)
+			} else {
+				sendEventTraceMessage(t, sdk, map[string]any{
+					"jsonrpc": "2.0", "id": request.ID, "error": &rpcError{Code: -32000, Message: "request failed"},
+				})
+			}
+			result := <-done
+			assert.True(t, result.IsError())
+			kind, outcome := result.(tooltypes.ToolFailureProvider).ToolFailure()
+			assert.Equal(t, "unknown", outcome)
+			if cancelBeforeReply {
+				assert.Equal(t, "cancelled", kind)
+			} else {
+				assert.Equal(t, "transport", kind)
+			}
+		})
+	}
+	result := (&Tool{name: "test"}).resultFromExecution(ToolExecutionResult{Error: "completed tool error"}, 0)
+	kind, outcome := result.ToolFailure()
+	assert.Empty(t, kind)
+	assert.Empty(t, outcome)
+}
+
 func TestToolValidateInputAndTracing(t *testing.T) {
 	tool, err := newTool("weather", nil, ToolRegistration{Name: "get_weather", Description: "Weather"}, 0, 100)
 	require.NoError(t, err)
@@ -119,6 +206,9 @@ func TestToolExecuteHandlesTruncation(t *testing.T) {
 	truncated = extensionTool.Execute(context.Background(), nil, `{"location":"London"}`)
 	assert.False(t, truncated.IsError())
 	assert.Contains(t, truncated.GetResult(), "[TRUNCATED")
+	var metadata tooltypes.ExtensionToolMetadata
+	require.True(t, tooltypes.ExtractMetadata(truncated.StructuredData().Metadata, &metadata))
+	assert.True(t, metadata.Truncated)
 }
 
 func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {

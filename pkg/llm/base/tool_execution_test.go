@@ -147,6 +147,7 @@ func (t *environmentThreadStub) ApplyEnvironmentConfig(config agentenv.Environme
 	t.config.WorkingDirectory = t.environment.Manifest().WorkingDirectory
 	t.config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
 	t.config.ToolMode = config.ToolMode
+	t.config.CodeMode = config.CodeMode
 	t.config.EnableFSSearchTools = config.EnableFSSearchTools
 	t.config.Sysprompt = config.SystemPromptPath
 	t.config.SyspromptContent = config.SystemPromptContent
@@ -324,6 +325,7 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 		Config: &agentenv.EnvironmentConfig{
 			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
+			CodeMode:            "compact",
 			EnableFSSearchTools: true,
 			SystemPromptPath:    "/runner/custom.tmpl",
 			SystemPromptContent: "runner prompt",
@@ -348,6 +350,7 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	assert.Equal(t, "/runner/workspace", config.WorkingDirectory)
 	assert.Equal(t, []string{"go test *"}, config.AllowedCommands)
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.Equal(t, "compact", config.CodeMode)
 	assert.True(t, config.EnableFSSearchTools)
 	assert.Equal(t, "/runner/custom.tmpl", config.Sysprompt)
 	assert.Equal(t, "runner prompt", config.SyspromptContent)
@@ -388,6 +391,49 @@ func TestForkInitiatorBecomesExtensionInvokedBy(t *testing.T) {
 
 	assert.Equal(t, "subagent", environment.spec.InvokedBy)
 	assert.Equal(t, "subagent", buildExtensionCallContext(thread, nil).InvokedBy)
+}
+
+func TestCodeExecutionSnapshotsEffectiveCallableSet(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		allowed []string
+		want    []string
+		blocked bool
+	}{
+		{name: "no extension restriction", want: []string{"bash", "search_issues"}},
+		{name: "agent init narrows catalog", allowed: []string{"code_execute", "search_issues"}, want: []string{"search_issues"}},
+		{name: "empty callable set remains explicit", allowed: []string{"code_execute"}, want: []string{}},
+		{name: "empty agent init denies parent", allowed: []string{}, blocked: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dispatched := false
+			environment := &recordingAgentEnvironment{
+				open: true,
+				manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
+					{Name: "bash"}, {Name: "code_execute"}, {Name: "search_issues", Group: "mcp/test"}, {Name: "host_forbidden"},
+				}},
+				executeTool: func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+					dispatched = true
+					require.NotNil(t, request.CallableTools)
+					assert.Equal(t, test.want, *request.CallableTools)
+					return agentenv.ToolExecution{Result: tooltypes.BaseToolResult{Result: "ok"}}, nil
+				},
+			}
+			thread := &environmentThreadStub{
+				environment: environment,
+				threadStub: &threadStub{config: llmtypes.Config{
+					CodeMode: "compact", AllowedTools: []string{"code_execute", "bash", "search_issues"},
+				}},
+			}
+			if test.allowed != nil {
+				thread.SetMetadataValue(extensionAllowedToolsMetadataKey, test.allowed)
+			}
+			out := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "code_execute", `{"code":"return await catalog.list()"}`, "parent")
+			require.NoError(t, out.Err)
+			assert.Equal(t, !test.blocked, dispatched)
+			assert.Equal(t, test.blocked, out.Result.IsError())
+		})
+	}
 }
 
 func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T) {

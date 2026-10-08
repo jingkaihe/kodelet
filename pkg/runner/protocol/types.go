@@ -45,6 +45,8 @@ const (
 	MethodShortcutExecute            = "shortcut.execute"
 	MethodLifecycleDispatch          = "lifecycle.dispatch"
 	MethodToolExecute                = "tool.execute"
+	MethodToolChildBegin             = "tool.child.begin"
+	MethodToolChildEnd               = "tool.child.end"
 	MethodToolUpdate                 = "tool.update"
 	MethodConversationFork           = "conversation.fork"
 	MethodWorkspaceGitDiff           = "workspace.git.diff"
@@ -277,6 +279,7 @@ type RegisterResult struct {
 	HeartbeatIntervalMS   int64  `json:"heartbeatIntervalMs"`
 	RemoteProfiles        bool   `json:"remoteProfiles,omitempty"`
 	ConversationHierarchy bool   `json:"conversationHierarchy,omitempty"`
+	CodeExecution         bool   `json:"codeExecution,omitempty"`
 }
 
 // RunnerState is the application-level availability reported by heartbeats.
@@ -389,6 +392,8 @@ type ClientCapabilities struct {
 
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
+	// CodeExecution advertises support for runner-owned nested tool capabilities.
+	CodeExecution bool `json:"codeExecution,omitempty"`
 	// BrowserEnabled is a server-authorized grant, never a workspace setting.
 	BrowserEnabled     bool                       `json:"browserEnabled,omitempty"`
 	SessionExtensions  *SessionExtensions         `json:"sessionExtensions,omitempty"`

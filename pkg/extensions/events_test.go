@@ -130,6 +130,66 @@ func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {
 	assert.Equal(t, toolResult, modifiedUpdate)
 }
 
+func TestToolOutputHooksClearMachineDataOnReplacement(t *testing.T) {
+	for _, eventName := range []string{EventToolResult, EventToolUpdate} {
+		for _, replace := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replace=%v", eventName, replace), func(t *testing.T) {
+				process, sdk, reader := newEventTraceProcess(t)
+				runtime := EmptyRuntime()
+				runtime.eventHandlersByName[eventName] = []eventHandler{{process: process}, {process: process}}
+				original := tooltypes.StructuredToolResult{
+					ToolName: "bash",
+					Success:  true,
+					Data:     map[string]any{"output": "secret"},
+					Metadata: tooltypes.BashMetadata{Output: "secret"},
+				}
+				type result struct {
+					output             tooltypes.StructuredToolResult
+					modified, accepted bool
+				}
+				completed := make(chan result, 1)
+				go func() {
+					output, modified, accepted := runtime.dispatchToolOutput(
+						t.Context(), eventName, ExtensionCallContext{}, "bash", `{}`, "child-1", original, true,
+					)
+					completed <- result{output, modified, accepted}
+				}()
+				for index := range 2 {
+					request, err := readIncomingMessage(reader)
+					require.NoError(t, err)
+					var params struct {
+						Payload toolResultPayload `json:"payload"`
+					}
+					require.NoError(t, json.Unmarshal(request.Params, &params))
+					if replace && index == 1 {
+						assert.Nil(t, params.Payload.Tool.Output.Data, "later hooks must not receive the original machine copy")
+					} else {
+						assert.Equal(t, original.Data, params.Payload.Tool.Output.Data)
+					}
+					response := EventResult{}
+					if replace && index == 0 {
+						redacted := original
+						redacted.Metadata = tooltypes.BashMetadata{Output: "redacted"}
+						response.Output, err = json.Marshal(redacted)
+						require.NoError(t, err)
+					}
+					sendEventTraceMessage(t, sdk, map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": response})
+				}
+				got := <-completed
+				assert.True(t, got.accepted)
+				assert.Equal(t, replace, got.modified)
+				if replace {
+					assert.Nil(t, got.output.Data)
+					assert.Equal(t, tooltypes.BashMetadata{Output: "redacted"}, got.output.Metadata)
+				} else {
+					assert.Equal(t, original.Data, got.output.Data)
+				}
+				assert.Equal(t, map[string]any{"output": "secret"}, original.Data)
+			})
+		}
+	}
+}
+
 func TestCanStreamToolUpdatesRequiresMatchingResultExtensionSubscription(t *testing.T) {
 	resultProcess := &Process{}
 	otherProcess := &Process{}
@@ -344,6 +404,53 @@ func TestEventTracingFailuresPreservePolicyAndPrivacy(t *testing.T) {
 				assert.Empty(t, spans[0].Events())
 				assert.NotContains(t, fmt.Sprint(spans[0].Attributes(), spans[0].Status()), "private")
 			}
+		})
+	}
+}
+
+func TestCodeModePolicyFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		event  string
+		rpcErr *rpcError
+		result any
+	}{
+		{name: "call hook failure", event: EventToolCall, rpcErr: &rpcError{Code: -32000, Message: "private failure"}},
+		{name: "result hook failure", event: EventToolResult, rpcErr: &rpcError{Code: -32000, Message: "private failure"}},
+		{name: "invalid redaction", event: EventToolResult, result: EventResult{Output: json.RawMessage(`"private malformed result"`)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			process, sdk, reader := newEventTraceProcess(t)
+			runtime := EmptyRuntime()
+			runtime.eventHandlersByName[test.event] = []eventHandler{{process: process}}
+			ctx := ContextWithStrictToolPolicy(t.Context())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if test.event == EventToolCall {
+					decision := runtime.DispatchToolCall(ctx, ExtensionCallContext{}, "bash", `{}`, "child")
+					assert.True(t, decision.Blocked)
+					assert.NotContains(t, decision.Reason, "private")
+					return
+				}
+				output, modified := runtime.DispatchToolResult(ctx, ExtensionCallContext{}, "bash", `{}`, "child", tooltypes.StructuredToolResult{
+					ToolName: "bash", Success: true, Data: "private data", Metadata: tooltypes.BashMetadata{Output: "private output"},
+					Attachments: []tooltypes.ToolAttachment{{ArtifactID: "private artifact"}},
+				})
+				assert.True(t, modified)
+				assert.False(t, output.Success)
+				assert.Contains(t, output.Error, "output was withheld")
+				assert.NotContains(t, output.Error, "private")
+				assert.Nil(t, output.Data)
+				assert.Nil(t, output.Metadata)
+				assert.Empty(t, output.Attachments)
+			}()
+			request, err := readIncomingMessage(reader)
+			require.NoError(t, err)
+			sendEventTraceMessage(t, sdk, map[string]any{
+				"jsonrpc": "2.0", "id": request.ID, "result": test.result, "error": test.rpcErr,
+			})
+			<-done
 		})
 	}
 }

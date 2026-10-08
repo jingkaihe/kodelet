@@ -68,6 +68,11 @@ func buildWireManifest(
 	definitions := append([]agentenv.ToolDefinition(nil), local.Tools...)
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].Name < definitions[j].Name })
 	wireTools := make([]runnerpayload.ToolDefinition, 0, len(definitions))
+	codeExecution := config.CodeMode == "hybrid" || config.CodeMode == "compact"
+	codeMode := ""
+	if codeExecution {
+		codeMode = config.CodeMode
+	}
 	var skillDefinitions []runnerpayload.SkillDefinition
 	for _, definition := range definitions {
 		if definition.Placement == agentenv.ToolPlacementControlPlane {
@@ -85,6 +90,12 @@ func buildWireManifest(
 			InputSchema: cloneJSONMap(definition.InputSchema),
 			Placement:   string(agentenv.ToolPlacementEnvironment),
 		})
+		// Legacy decoders rehash their typed manifest after dropping unknown
+		// fields. Keep their wire shape identical unless code mode is negotiated.
+		if codeExecution {
+			wireTools[len(wireTools)-1].OutputSchema = cloneJSONMap(definition.OutputSchema)
+			wireTools[len(wireTools)-1].Group = definition.Group
+		}
 		if extensionTool, ok := definition.Tool.(*extensions.Tool); ok {
 			wireTools[len(wireTools)-1].ExtensionID = extensionTool.ExtensionID()
 		}
@@ -128,6 +139,7 @@ func buildWireManifest(
 			Options:             config.EnvironmentOptions(),
 			AllowedCommands:     append([]string(nil), config.AllowedCommands...),
 			ToolMode:            config.ToolMode,
+			CodeMode:            codeMode,
 			EnableFSSearchTools: config.EnableFSSearchTools,
 			SystemPromptPath:    systemPromptPath,
 			SystemPromptContent: systemPromptContent,
@@ -137,6 +149,7 @@ func buildWireManifest(
 		ExtensionGeneration: 1,
 		ExtensionCount:      new(runtime.ExtensionCount()),
 		Capabilities: runnerpayload.EnvironmentCapabilities{
+			CodeExecution:      codeExecution,
 			ToolUpdates:        true,
 			InteractiveUI:      true,
 			PersistentWidgets:  true,

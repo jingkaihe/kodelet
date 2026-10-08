@@ -5,7 +5,7 @@ project_name: kodelet
 before:
   hooks:
     - go mod download
-    - go generate ./pkg/webui
+    - go generate ./pkg/codemode ./pkg/webui
     - ./scripts/prepare-packaging-binaries.sh
 
 builds:

@@ -105,6 +105,12 @@ Installed extension tools can call `await ctx.browser.acquire()` to obtain `{ le
 
 Use `chromium.connectOverCDP(connection.cdpUrl, { noDefaults: true })` from Playwright, resolve the exact `pageTargetId`, and keep all automation in the extension. Disconnect the client and call `connection.release()` in `finally`; also honor `ctx.signal`. The lease ends when the tool invocation ends, and release does not close Chrome or revoke raw CDP access. This is broad browser access for trusted installed extensions, not a per-action permission boundary. See the [wire protocol and lifecycle](../docs/extension-design.md#runner-local-browser-connections).
 
+## Image results
+
+Extension tools can return image attachments with exactly one source: `{type: "image", path: "chart.png"}` for a runner-local file, or `{type: "image", data: pngBytes.toString("base64"), mimeType: "image/png"}` for inline bytes. Optional fields include `filename` and `alt`. Inline data must be strict base64, not a data URL. The runner accepts at most eight images per final result and 32 MiB per decoded image, validates and stores them through the normal artifact pipeline, and replaces sources with persistent artifact references. Attachments belong on final results, not progress updates. The MCP adapter preserves image content blocks using this same path, including partial images in error results.
+
+An image attachment is user-visible but is not automatically sent as pixels to the model. Direct `view_image` can inspect it; inside code mode, use `emit.image(reply.attachments[0])` for model-visible pixels or `emit.artifact(reply.attachments[0])` to retain it without pixels. Returning an ID alone does not select media. See the [code-mode manual](../docs/MANUAL.md#tool-calls-as-code) for permission and emission rules.
+
 ## Development
 
 From the repository root, run `mise run sdk-test` for TypeScript checking, build, SDK tests, and package dry-run. The real SDK/ACP/daemon/runner acceptance gate is `KODELET_TEST_EXTENSION_SDK=typescript mise exec -- go test ./cmd/kodelet -run '^TestSessionExtensionsAcrossProcessBoundary$' -count=1 -timeout=3m`.

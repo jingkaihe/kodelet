@@ -264,6 +264,9 @@ func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
 	missing := RunTool(context.Background(), state, "missing", `{}`)
 	require.True(t, missing.IsError())
 	assert.Contains(t, missing.GetError(), "failed to find tool")
+	kind, outcome := missing.(tooltypes.ToolFailureProvider).ToolFailure()
+	assert.Equal(t, "blocked", kind)
+	assert.Equal(t, "not_started", outcome)
 
 	tool := &testTool{name: "bad_tool", validateErr: assert.AnError}
 	state = NewBasicState(context.Background(), WithExtensionTools([]tooltypes.Tool{tool}))
@@ -271,6 +274,9 @@ func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
 	require.True(t, invalid.IsError())
 	assert.Contains(t, invalid.GetError(), assert.AnError.Error())
 	assert.False(t, tool.executed)
+	kind, outcome = invalid.(tooltypes.ToolFailureProvider).ToolFailure()
+	assert.Equal(t, "invalid_input", kind)
+	assert.Equal(t, "not_started", outcome)
 }
 
 func TestToolTraceContentOptInAndValidationFailure(t *testing.T) {

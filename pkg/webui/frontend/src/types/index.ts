@@ -56,6 +56,7 @@ export interface ToolResult {
     | BatchMetadata
     | ViewImageMetadata
     | BrowserMetadata
+    | CodeExecutionMetadata
     | SkillMetadata
     | OpenAIWebSearchMetadata
     | ReadConversationMetadata
@@ -802,6 +803,25 @@ export interface ReadConversationMetadata {
   conversationId?: string;
   goal?: string;
   content?: string;
+}
+
+export interface CodeExecutionMetadata {
+  status: string;
+  durationMs: number;
+  /** Legacy text/JSON outputs, used only when typed items are absent. */
+  outputs?: unknown[];
+  items?: Array<
+    | { type: 'json'; value: unknown }
+    | { type: 'image'; artifactId: string; detail?: 'original' }
+    | { type: 'artifact'; artifactId: string }
+  >;
+  calls: Array<{
+    callId: string;
+    toolName: string;
+    status: string;
+    durationMs: number;
+    errorKind?: string;
+  }>;
 }
 
 export interface ExtensionToolMetadata {

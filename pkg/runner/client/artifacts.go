@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -31,7 +33,7 @@ func contextWithRunnerArtifactResolver(ctx context.Context, peer Peer, runID, to
 	})
 }
 
-func (s *Service) ingestAttachments(ctx context.Context, peer Peer, run *activeRun, toolCallID string, result *runnerpayload.ToolResult) {
+func (s *Service) ingestAttachments(ctx context.Context, peer Peer, run *activeRun, toolCallID string, result *runnerpayload.ToolResult, resolveReferences bool) {
 	attachments := append([]tooltypes.ToolAttachment(nil), result.Structured.Attachments...)
 	if len(attachments) > runnerpayload.MaxToolAttachments {
 		attachments = append(attachments[:runnerpayload.MaxToolAttachments], tooltypes.ToolAttachment{
@@ -40,12 +42,32 @@ func (s *Service) ingestAttachments(ctx context.Context, peer Peer, run *activeR
 		})
 	}
 	for i, attachment := range attachments {
-		if attachment.Error != "" || (attachment.ArtifactID != "" && attachment.Path == "") {
+		// Inline bytes are an ingress-only source, including for failed outputs.
+		attachments[i].Data = ""
+		if attachment.Error != "" {
+			attachments[i].Path = ""
 			continue
 		}
-		uploaded, err := s.uploadAttachment(ctx, peer, run, toolCallID, attachment)
+		var uploaded tooltypes.ToolAttachment
+		var err error
+		if attachment.ArtifactID != "" && attachment.Path == "" && attachment.Data == "" {
+			if !resolveReferences {
+				continue // Direct results are normalized by the control plane.
+			}
+			resolver := tooltypes.ArtifactResolverFromContext(ctx)
+			if resolver == nil {
+				err = errors.New("artifact authorization is unavailable")
+			} else {
+				uploaded, err = resolver(ctx, attachment.ArtifactID)
+				if err == nil && (uploaded.Type != "image" || uploaded.ArtifactID != attachment.ArtifactID || uploaded.Error != "" || uploaded.Path != "" || uploaded.Data != "") {
+					err = errors.New("artifact is not an available image in this conversation")
+				}
+			}
+		} else {
+			uploaded, err = s.uploadAttachment(ctx, peer, run, toolCallID, attachment)
+		}
 		if err != nil {
-			attachment.ArtifactID, attachment.ShortCode, attachment.ViewURL = "", "", ""
+			attachment.Path, attachment.Data, attachment.ArtifactID, attachment.ShortCode, attachment.ViewURL = "", "", "", "", ""
 			attachment.Error = "Image attachment could not be saved: " + err.Error()
 			attachments[i] = attachment
 		} else {
@@ -62,33 +84,56 @@ func (s *Service) uploadAttachment(
 	toolCallID string,
 	attachment tooltypes.ToolAttachment,
 ) (tooltypes.ToolAttachment, error) {
-	if attachment.Type != "image" || strings.TrimSpace(attachment.Path) == "" || attachment.ArtifactID != "" {
-		return tooltypes.ToolAttachment{}, errors.New("image attachment requires a local path and no artifactId")
+	if attachment.Type != "image" || attachment.ArtifactID != "" ||
+		(attachment.Path != "" && attachment.Data != "") ||
+		(strings.TrimSpace(attachment.Path) == "" && attachment.Data == "") {
+		return tooltypes.ToolAttachment{}, errors.New("image attachment requires exactly one of a local path or base64 data, and no artifactId")
 	}
 	if peer == nil || s.artifactBaseURL == "" {
 		return tooltypes.ToolAttachment{}, errors.New("control-plane image uploads are unavailable")
 	}
-	path := attachment.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(run.manifest.WorkingDirectory, path)
+	var body io.Reader
+	if attachment.Data != "" {
+		if len(attachment.Data) > base64.StdEncoding.EncodedLen(runnerpayload.MaxArtifactBytes) {
+			return tooltypes.ToolAttachment{}, errors.New("image attachment exceeds the 32 MiB limit")
+		}
+		// Strict rejects nonzero padding bits; reject newlines as well rather
+		// than accepting alternate encodings of the same image bytes.
+		if strings.ContainsAny(attachment.Data, "\r\n") {
+			return tooltypes.ToolAttachment{}, errors.New("image attachment requires strict base64 data")
+		}
+		data, err := base64.StdEncoding.Strict().DecodeString(attachment.Data)
+		if err != nil {
+			return tooltypes.ToolAttachment{}, errors.Wrap(err, "invalid image attachment base64 data")
+		}
+		if len(data) == 0 || len(data) > runnerpayload.MaxArtifactBytes {
+			return tooltypes.ToolAttachment{}, errors.New("image attachment must be nonempty and at most 32 MiB")
+		}
+		body = bytes.NewReader(data)
+	} else {
+		path := attachment.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(run.manifest.WorkingDirectory, path)
+		}
+		// Reject FIFOs using the opened descriptor without waiting for a writer.
+		file, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
+		if err != nil {
+			return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to open attachment")
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to inspect attachment")
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > runnerpayload.MaxArtifactBytes {
+			return tooltypes.ToolAttachment{}, errors.New("attachment must be a nonempty regular file of at most 32 MiB")
+		}
+		if attachment.Filename == "" {
+			attachment.Filename = filepath.Base(path)
+		}
+		body = file
 	}
-	// Reject FIFOs using the opened descriptor without waiting for a writer.
-	file, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
-	if err != nil {
-		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to open attachment")
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to inspect attachment")
-	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > runnerpayload.MaxArtifactBytes {
-		return tooltypes.ToolAttachment{}, errors.New("attachment must be a nonempty regular file of at most 32 MiB")
-	}
-	if attachment.Filename == "" {
-		attachment.Filename = filepath.Base(path)
-	}
-	attachment.Path, attachment.ViewURL, attachment.ShortCode = "", "", ""
+	attachment.Path, attachment.Data, attachment.ViewURL, attachment.ShortCode = "", "", "", ""
 	var grant runnerpayload.ArtifactUploadGrant
 	if err := peer.Call(ctx, runnerpayload.MethodArtifactUpload, runnerpayload.ArtifactRequest{
 		RunID:      run.id,
@@ -102,7 +147,7 @@ func (s *Service) uploadAttachment(
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut,
 		strings.TrimRight(s.artifactBaseURL, "/")+runnerpayload.ArtifactUploadPath,
-		io.LimitReader(file, runnerpayload.MaxArtifactBytes+1),
+		io.LimitReader(body, runnerpayload.MaxArtifactBytes+1),
 	)
 	if err != nil {
 		return tooltypes.ToolAttachment{}, errors.Wrap(err, "failed to construct image upload")
@@ -130,5 +175,6 @@ func (s *Service) uploadAttachment(
 	if result.Type != "image" || result.ArtifactID == "" || result.ShortCode == "" {
 		return tooltypes.ToolAttachment{}, errors.New("image upload returned no artifact reference")
 	}
+	result.Path, result.Data = "", ""
 	return result, nil
 }

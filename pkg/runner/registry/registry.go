@@ -238,6 +238,9 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
+	codeExecution     bool
+	codeStopping      bool
+	codeChildIDs      map[string]string
 	sessionExtensions *protocol.SessionExtensions
 	checkpoint        *runCheckpoint
 	connectionID      string
@@ -276,6 +279,7 @@ type Registry struct {
 	toolForkers       map[toolForkKey]*toolForkRegistration
 	modelHelpers      map[modelHelperKey]*modelHelperRegistration
 	artifactTools     map[modelHelperKey]*artifactToolRegistration
+	codeParents       map[modelHelperKey]*codeParentRegistration
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -297,6 +301,7 @@ type toolForkKey struct {
 type toolForkRegistration struct {
 	forker   llmtypes.ConversationForker
 	toolName string
+	ctx      context.Context // Nested forks inherit their child owner's lifetime.
 }
 
 // New creates a live registry and restores any configured durable state.
@@ -684,6 +689,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		HeartbeatIntervalMS:   r.heartbeatInterval.Milliseconds(),
 		RemoteProfiles:        true,
 		ConversationHierarchy: true,
+		CodeExecution:         true,
 	}
 	r.mu.Unlock()
 
@@ -1115,10 +1121,11 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
-		connectionID: connectionID,
-		generation:   generation,
-		leaseCancel:  leaseCancel,
-		checkpoint:   checkpoint,
+		connectionID:  connectionID,
+		generation:    generation,
+		leaseCancel:   leaseCancel,
+		codeExecution: params.CodeExecution,
+		checkpoint:    checkpoint,
 	}
 	if params.SessionExtensions != nil {
 		run.sessionExtensions = &protocol.SessionExtensions{
@@ -1317,6 +1324,13 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 		return runnerpayload.ToolExecuteResult{}, err
 	}
 	defer cleanupArtifacts()
+	if params.Name == "code_execute" {
+		cleanupCode, err := r.registerCodeParent(ctx, params)
+		if err != nil {
+			return runnerpayload.ToolExecuteResult{}, err
+		}
+		defer cleanupCode()
+	}
 	params.WantUpdates = updates != nil
 	cleanup := func() {}
 	if updates != nil {
@@ -1376,12 +1390,22 @@ func (r *Registry) forkToolConversation(ctx context.Context, runnerID, connectio
 	run := r.runs[key.runID]
 	registration := r.toolForkers[key]
 	valid := run != nil && run.Status == RunStatusRunning && run.RunnerID == runnerID && run.connectionID == connectionID && run.generation == generation
-	if !valid || registration == nil || registration.forker == nil {
+	if !valid || registration == nil || registration.forker == nil || (registration.ctx != nil && registration.ctx.Err() != nil) {
 		r.mu.RUnlock()
 		return runnerpayload.ConversationForkResult{}, llmtypes.ErrConversationForkUnavailable
 	}
 	affinity, _ := r.affinities.get(run.ConversationID)
 	r.mu.RUnlock()
+	if registration.ctx != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		stop := context.AfterFunc(registration.ctx, cancel)
+		defer stop()
+		defer cancel()
+		if registration.ctx.Err() != nil {
+			cancel()
+		}
+	}
 	if registration.toolName != "" {
 		ctx = convtypes.ContextWithConversationForkInitiator(ctx, convtypes.ConversationForkInitiator{
 			Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
@@ -1425,6 +1449,7 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 		return err
 	}
 	r.mu.Lock()
+	r.clearRunCodeParentsLocked(runID)
 	r.clearRunModelHelpersLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
 	r.mu.Unlock()
@@ -1454,6 +1479,7 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 		return err
 	}
 	r.mu.Lock()
+	r.clearRunCodeParentsLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
 	r.mu.Unlock()
 	callErr := link.Call(ctx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID}, nil)
@@ -1538,6 +1564,7 @@ func (r *Registry) EnvironmentError(runnerID, connectionID string, generation in
 	}
 	run.Status = RunStatusFailed
 	run.Error = params.Message
+	r.clearRunCodeParentsLocked(params.RunID)
 	r.clearRunArtifactToolsLocked(params.RunID)
 	now := r.now().UTC()
 	run.UpdatedAt = now
@@ -1899,6 +1926,7 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 
 func (r *Registry) clearRunTransientStateLocked(runID string) {
 	r.toolUpdates.clearRun(runID)
+	r.clearRunCodeParentsLocked(runID)
 	r.clearRunModelHelpersLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
 }

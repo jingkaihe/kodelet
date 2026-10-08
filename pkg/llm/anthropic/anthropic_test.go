@@ -15,7 +15,9 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -387,6 +389,7 @@ func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) 
 			{Type: tooltypes.ToolResultContentPartTypeText, Text: descriptor},
 			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/bmp;base64,ignored"},
 			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64," + imageBase64, MimeType: "image/png"},
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: "after image"},
 		},
 	}
 
@@ -395,7 +398,7 @@ func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) 
 	require.NotNil(t, block.OfToolResult)
 	assert.Equal(t, "toolu_1", block.OfToolResult.ToolUseID)
 	assert.False(t, block.OfToolResult.IsError.Value)
-	require.Len(t, block.OfToolResult.Content, 2)
+	require.Len(t, block.OfToolResult.Content, 3)
 	require.NotNil(t, block.OfToolResult.Content[0].OfText)
 	assert.Equal(t, descriptor, block.OfToolResult.Content[0].OfText.Text)
 	require.NotNil(t, block.OfToolResult.Content[1].OfImage)
@@ -403,6 +406,7 @@ func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) 
 	require.NotNil(t, source)
 	assert.Equal(t, imageBase64, source.Data)
 	assert.Equal(t, anthropic.Base64ImageSourceMediaTypeImagePNG, source.MediaType)
+	assert.Equal(t, "after image", block.OfToolResult.Content[2].OfText.Text)
 }
 
 func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
@@ -906,6 +910,131 @@ func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
 	assert.Equal(t, "Use this image", handler.content)
 	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, handler.images)
 	assert.Empty(t, handler.CollectedText())
+}
+
+type codeModeAnthropicEnvironment struct {
+	agentenv.Environment
+	request agentenv.ToolRequest
+}
+
+func (e *codeModeAnthropicEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, sink agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	e.request = request
+	// Model the runner boundary: authority comes from the host request, never
+	// the model's JSON. The actual tool lifecycle and VM still run locally.
+	if request.CallableTools != nil {
+		var definitions []codemode.Definition
+		for _, name := range *request.CallableTools {
+			definition, _ := e.Manifest().ToolDefinition(name)
+			definitions = append(definitions, codemode.Definition{
+				Name: name, Description: definition.Description, Group: definition.Group,
+				InputSchema: definition.InputSchema,
+			})
+		}
+		ctx = tools.ContextWithCodeExecution(ctx, tools.CodeExecutionContext{
+			Definitions: definitions,
+			Call: func(ctx context.Context, name, input, callID string) (tools.CodeToolReply, error) {
+				child, err := e.Environment.ExecuteTool(ctx, agentenv.ToolRequest{Name: name, Input: input, ToolCallID: callID}, nil)
+				if err != nil {
+					return tools.CodeToolReply{}, err
+				}
+				return tools.CodeToolReply{Text: child.Result.GetResult()}, nil
+			},
+		})
+	}
+	return e.Environment.ExecuteTool(ctx, request, sink)
+}
+
+type codeModeAnthropicTool struct{ testTool }
+
+func (codeModeAnthropicTool) ToolGroup() string { return "mcp/test" }
+
+func (codeModeAnthropicTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{Result: "grouped tool ran"}
+}
+
+func TestAnthropicCodeExecuteAdvertisementAndDispatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, tc := range []struct {
+		mode         string
+		subscription bool
+	}{
+		{mode: "hybrid"},
+		{mode: "compact"},
+		{mode: "compact", subscription: true},
+	} {
+		t.Run(tc.mode+"/subscription="+strconv.FormatBool(tc.subscription), func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "anthropic", CodeMode: tc.mode,
+				AllowedTools: []string{"code_execute", "bash", "search_issues", "delete_issues"},
+			}
+			local := agentenv.NewLocalEnvironment(t.TempDir(), nil,
+				codeModeAnthropicTool{testTool{name: "search_issues"}},
+				codeModeAnthropicTool{testTool{name: "delete_issues"}},
+			)
+			_, err := local.Open(t.Context(), agentenv.RunSpec{Config: config})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
+			environment := &codeModeAnthropicEnvironment{Environment: local}
+			thread := &Thread{Thread: base.NewThread(config, "code-mode"), useSubscription: tc.subscription}
+			thread.SetEnvironment(environment)
+			thread.SetMetadataValue("allowed_tools", []string{"code_execute", "bash", "search_issues"})
+
+			definitions, err := thread.requestTools(llmtypes.MessageOpt{})
+			require.NoError(t, err)
+			var names []string
+			var schema map[string]any
+			parentName := "code_execute"
+			if tc.subscription {
+				parentName = "Code_execute"
+			}
+			for _, definition := range definitions {
+				require.NotNil(t, definition.OfTool)
+				names = append(names, thread.normalizeToolName(definition.OfTool.Name))
+				if definition.OfTool.Name == parentName {
+					raw, err := json.Marshal(definition.OfTool.InputSchema)
+					require.NoError(t, err)
+					require.NoError(t, json.Unmarshal(raw, &schema))
+				}
+			}
+			wantNames := []string{"bash", "code_execute"}
+			if tc.mode == "hybrid" {
+				wantNames = append(wantNames, "search_issues")
+			}
+			assert.ElementsMatch(t, wantNames, names)
+			require.NotNil(t, schema)
+			properties := schema["properties"].(map[string]any)
+			require.Len(t, properties, 1, "host-owned callable permissions must not appear in the model schema")
+			assert.Contains(t, properties, "code")
+
+			block := anthropicToolUseBlockForTest(t, "parent-code", map[string]any{"code": `
+const names = (await catalog.list()).tools.map(tool => tool.name).sort();
+const reply = await tools.search_issues({});
+const blocked = await tools.delete_issues({}).catch(error => error.kind);
+return {names, text: reply.text, blocked};
+`}, parentName)
+			handler := &captureAnthropicToolHandler{}
+			results, err := thread.executeToolsParallel(t.Context(), handler, []struct {
+				block   anthropic.ContentBlockUnion
+				variant anthropic.ToolUseBlock
+			}{{block: block, variant: block.AsToolUse()}}, llmtypes.MessageOpt{})
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "code_execute", environment.request.Name)
+			assert.Equal(t, "parent-code", environment.request.ToolCallID)
+			assert.JSONEq(t, block.AsToolUse().JSON.Input.Raw(), environment.request.Input)
+			require.NotNil(t, environment.request.CallableTools)
+			assert.ElementsMatch(t, []string{"bash", "search_issues"}, *environment.request.CallableTools)
+			result, ok := results[0].output.(tools.CodeExecuteResult)
+			require.True(t, ok)
+			require.False(t, result.IsError(), result.GetError())
+			require.Len(t, result.Metadata.Items, 1)
+			assert.JSONEq(t, `{"names":["bash","search_issues"],"text":"grouped tool ran","blocked":"blocked"}`, string(result.Metadata.Items[0].Value))
+			require.Len(t, result.Metadata.Calls, 2)
+			assert.Equal(t, "completed", result.Metadata.Calls[0].Status)
+			assert.Equal(t, "blocked", result.Metadata.Calls[1].Status)
+			assert.Equal(t, []string{"parent-code:code_execute"}, handler.toolResults, "children must not become provider tool results")
+		})
+	}
 }
 
 func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {

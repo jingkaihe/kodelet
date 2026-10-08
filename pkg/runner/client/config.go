@@ -61,7 +61,7 @@ func NewWorkspaceConfigLoader(defaults map[string]any) (WorkspaceConfigLoader, e
 
 func environmentSettings(settings map[string]any) map[string]any {
 	result := make(map[string]any)
-	for _, key := range []string{"allowed_commands", "allowed_domains_file", "allowed_tools", "tool_mode", "bash", "sysprompt", "sysprompt_args", "skills", "context", "extensions", "enable_fs_search_tools", "environment_profiles"} {
+	for _, key := range []string{"allowed_commands", "allowed_domains_file", "allowed_tools", "tool_mode", "code_mode", "bash", "sysprompt", "sysprompt_args", "skills", "context", "extensions", "enable_fs_search_tools", "environment_profiles"} {
 		if value, ok := settings[key]; ok {
 			result[key] = value
 		}
