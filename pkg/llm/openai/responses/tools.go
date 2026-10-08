@@ -68,7 +68,8 @@ func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Too
 	}
 
 	result := make([]responses.ToolUnionParam, 0, len(availableTools)+1)
-	if config.CodeMode != "only" && shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) && config.EnvironmentOptions().ToolAllowed(openAISearchToolName) {
+	if config.CodeMode != "only" && shouldEnableNativeOpenAISearch(llmConfig) &&
+		nativeOpenAISearchAllowed(llmConfig.allowedTools) && config.EnvironmentOptions().ToolAllowed(openAISearchToolName) {
 		result = append(result, buildNativeOpenAISearchTool(llmConfig))
 	}
 

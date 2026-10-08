@@ -339,43 +339,10 @@ func (vm *runtimeVM) reasonError(reason uint64) error {
 // Primitive string conversion cannot execute guest JavaScript. No JS callback,
 // job execution, or tool work is re-entered from this synchronous WASM import.
 func (vm *runtimeVM) hostCall(_ context.Context, module api.Module, _ uint32, _ uint32, _ uint32, argc uint32, argv uint32) uint32 {
-	var failure error
-	if argc != 2 {
-		failure = &Error{Kind: "invalid_input", Message: "host bridge expects an operation and JSON payload"}
-	} else {
-		operationPointer, ok1 := module.Memory().ReadUint32Le(argv)
-		payloadPointer, ok2 := module.Memory().ReadUint32Le(argv + 4)
-		if !ok1 || !ok2 {
-			failure = errors.New("invalid host argument vector")
-		} else {
-			operation, err := vm.readString(uint64(operationPointer), 16)
-			if err != nil {
-				failure = err
-			} else {
-				data, err := vm.readString(uint64(payloadPointer), vm.limits.requestBytes)
-				if err != nil {
-					failure = err
-				} else {
-					switch string(operation) {
-					case "submit":
-						failure = vm.bridge.submit(data)
-					case "emit":
-						failure = vm.bridge.emit(data)
-					case "emit.image":
-						failure = vm.bridge.emitMedia("image", data)
-					case "emit.artifact":
-						failure = vm.bridge.emitMedia("artifact", data)
-					default:
-						failure = &Error{Kind: "invalid_input", Message: "unknown bridge operation"}
-					}
-				}
-			}
-		}
-	}
 	var value uint64
 	var err error
-	if failure != nil {
-		value, err = vm.newString(marshalRuntimeError(failure))
+	if failure := vm.dispatchHostCall(module, argc, argv); failure != nil {
+		value, err = vm.newString(runtimeRequestErrorJSON(Request{}, failure))
 	} else {
 		value, err = vm.call("qjs_get_undefined")
 	}
@@ -384,6 +351,37 @@ func (vm *runtimeVM) hostCall(_ context.Context, module api.Module, _ uint32, _ 
 		return 0
 	}
 	return uint32(value)
+}
+
+func (vm *runtimeVM) dispatchHostCall(module api.Module, argc, argv uint32) error {
+	if argc != 2 {
+		return &Error{Kind: "invalid_input", Message: "host bridge expects an operation and JSON payload"}
+	}
+	operationPointer, operationOK := module.Memory().ReadUint32Le(argv)
+	payloadPointer, payloadOK := module.Memory().ReadUint32Le(argv + 4)
+	if !operationOK || !payloadOK {
+		return errors.New("invalid host argument vector")
+	}
+	operation, err := vm.readString(uint64(operationPointer), 16)
+	if err != nil {
+		return err
+	}
+	data, err := vm.readString(uint64(payloadPointer), vm.limits.requestBytes)
+	if err != nil {
+		return err
+	}
+	switch string(operation) {
+	case "submit":
+		return vm.bridge.submit(data)
+	case "emit":
+		return vm.bridge.emit(data)
+	case "emit.image":
+		return vm.bridge.emitMedia("image", data)
+	case "emit.artifact":
+		return vm.bridge.emitMedia("artifact", data)
+	default:
+		return &Error{Kind: "invalid_input", Message: "unknown bridge operation"}
+	}
 }
 
 func (vm *runtimeVM) promiseRejection(promise, reason, handled uint32) {

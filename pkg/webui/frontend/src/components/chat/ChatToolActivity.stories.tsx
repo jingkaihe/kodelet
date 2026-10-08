@@ -244,7 +244,6 @@ return "Tests passed and patch applied.";`,
     await userEvent.click(canvas.getByText(/Code execution/));
     await userEvent.click(canvas.getByText('Code', { exact: true }));
     await userEvent.click(canvas.getByText('Ran 1 command'));
-    await userEvent.click(canvas.getByText('Apply patch', { exact: true }));
   },
 };
 

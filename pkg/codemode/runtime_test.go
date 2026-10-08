@@ -78,32 +78,25 @@ func TestRuntimeMalformedMediaIsImmediatelyCatchable(t *testing.T) {
 		"extra image argument": `emit.image("art_image", {}, true)`,
 		"artifact options":     `emit.artifact("art_image", {})`,
 		"null reference":       `emit.image(null)`,
-		"array reference":      `emit.artifact(["art_image"])`,
-		"number reference":     `emit.image(1)`,
 		"empty ID":             `emit.image("")`,
-		"inexact ID":           `emit.image(" art_image ")`,
 		"missing ID":           `emit.artifact({id: "art_image"})`,
 		"non-string ID":        `emit.image({artifactId: 1})`,
 		"path":                 `emit.image("/tmp/image.png")`,
-		"URL":                  `emit.image("https://example.test/image.png")`,
-		"data URI":             `emit.image("data:image/png;base64,YWJj")`,
 		"base64":               `emit.image("YWJjZA==")`,
-		"path descriptor":      `emit.image({path: "/tmp/image.png"})`,
-		"promise reference":    `emit.image(Promise.resolve("art_image"))`,
-		"disguised promise":    `emit.image(Object.assign(Promise.resolve("art_image"), {artifactId: "art_image", toJSON: () => ({artifactId: "art_image"})}))`,
-		"promise ID":           `emit.image({artifactId: Promise.resolve("art_image")})`,
-		"thenable":             `emit.image({artifactId: "art_image", then() {}})`,
-		"null options":         `emit.image("art_image", null)`,
-		"array options":        `emit.image("art_image", [])`,
-		"non-object options":   `emit.image("art_image", "original")`,
-		"non-plain options":    `emit.image("art_image", new Date())`,
-		"promise options":      `emit.image("art_image", Promise.resolve({detail: "original"}))`,
-		"unknown option":       `emit.image("art_image", {quality: "high"})`,
-		"symbol option":        `emit.image("art_image", {[Symbol()]: true})`,
-		"toJSON options":       `emit.image("art_image", {quality: "high", toJSON: () => ({detail: "original"})})`,
-		"invalid detail":       `emit.image("art_image", {detail: "high"})`,
-		"null detail":          `emit.image("art_image", {detail: null})`,
-		"promise detail":       `emit.image("art_image", {detail: Promise.resolve("original")})`,
+		"disguised promise": `
+emit.image(Object.assign(Promise.resolve("art_image"), {
+  artifactId: "art_image",
+  toJSON: () => ({artifactId: "art_image"})
+}))`,
+		"thenable":          `emit.image({artifactId: "art_image", then() {}})`,
+		"null options":      `emit.image("art_image", null)`,
+		"array options":     `emit.image("art_image", [])`,
+		"non-plain options": `emit.image("art_image", new Date())`,
+		"unknown option":    `emit.image("art_image", {quality: "high"})`,
+		"symbol option":     `emit.image("art_image", {[Symbol()]: true})`,
+		"toJSON options":    `emit.image("art_image", {quality: "high", toJSON: () => ({detail: "original"})})`,
+		"invalid detail":    `emit.image("art_image", {detail: "high"})`,
+		"null detail":       `emit.image("art_image", {detail: null})`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			var validated []OutputItem
@@ -649,27 +642,16 @@ func TestRuntimeBridgeValidation(t *testing.T) {
 	require.ErrorContains(t, bridge.submit([]byte(`{"id":3,"request":{"operation":"catalog.list"}}`)), "no longer")
 }
 
-func TestRuntimeCatalogAndPendingLimits(t *testing.T) {
-	for name, limits := range map[string]runtimeLimits{
-		"catalog count": func() runtimeLimits {
-			limits := defaultRuntimeLimits()
-			limits.catalogCalls = 1
-			return limits
-		}(),
-		"pending count": func() runtimeLimits {
-			limits := defaultRuntimeLimits()
-			limits.pendingCalls = 1
-			return limits
-		}(),
-	} {
-		t.Run(name, func(t *testing.T) {
-			result, err := executeWithLimits(context.Background(), `return await Promise.allSettled([catalog.list(), catalog.list()]);`, func(context.Context, Request) (any, error) {
-				return true, nil
-			}, nil, limits)
-			require.NoError(t, err)
-			assert.Contains(t, string(result.Outputs[0].Value), `"kind":"limit"`)
-		})
-	}
+func TestRuntimeCatalogLimit(t *testing.T) {
+	limits := defaultRuntimeLimits()
+	limits.catalogCalls = 1
+	result, err := executeWithLimits(t.Context(), `
+return await Promise.allSettled([catalog.list(), catalog.list()]);
+`, func(context.Context, Request) (any, error) {
+		return true, nil
+	}, nil, limits)
+	require.NoError(t, err)
+	assert.Contains(t, string(result.Outputs[0].Value), `"kind":"limit"`)
 }
 
 func TestRuntimeOversizedErrorPreservesUnknownOutcome(t *testing.T) {

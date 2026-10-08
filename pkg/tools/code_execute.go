@@ -117,7 +117,10 @@ func (t *CodeExecuteTool) Execute(ctx context.Context, state tooltypes.State, pa
 
 func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.State, parameters string, update tooltypes.ToolUpdateCallback) tooltypes.ToolResult {
 	start := time.Now()
-	meta := tooltypes.CodeExecutionMetadata{Status: "running", Calls: []tooltypes.CodeExecutionCall{}}
+	meta := tooltypes.CodeExecutionMetadata{
+		Status: "running",
+		Calls:  []tooltypes.CodeExecutionCall{},
+	}
 	var attachments []tooltypes.ToolAttachment
 	finish := func(err error) tooltypes.ToolResult {
 		meta.DurationMs = time.Since(start).Milliseconds()
@@ -209,7 +212,11 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			return nil, errors.New("code execution has ended")
 		}
 		index := len(meta.Calls)
-		meta.Calls = append(meta.Calls, tooltypes.CodeExecutionCall{CallID: callID, ToolName: request.Name, Status: "running"})
+		meta.Calls = append(meta.Calls, tooltypes.CodeExecutionCall{
+			CallID:   callID,
+			ToolName: request.Name,
+			Status:   "running",
+		})
 		publish := progress()
 		mu.Unlock()
 		publish()
@@ -217,9 +224,21 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		var reply CodeToolReply
 		var callErr error
 		if callCtx.Err() != nil {
-			callErr = &CodeToolError{Kind: "cancelled", Tool: request.Name, CallID: callID, Outcome: "not_started", Message: callCtx.Err().Error()}
+			callErr = &CodeToolError{
+				Kind:    "cancelled",
+				Tool:    request.Name,
+				CallID:  callID,
+				Outcome: "not_started",
+				Message: callCtx.Err().Error(),
+			}
 		} else if !allowed[request.Name] {
-			callErr = &CodeToolError{Kind: "blocked", Tool: request.Name, CallID: callID, Outcome: "not_started", Message: "tool is not in the authorized catalog"}
+			callErr = &CodeToolError{
+				Kind:    "blocked",
+				Tool:    request.Name,
+				CallID:  callID,
+				Outcome: "not_started",
+				Message: "tool is not in the authorized catalog",
+			}
 		} else {
 			reply, callErr = authority.Call(callCtx, request.Name, string(request.Input), callID)
 		}
@@ -227,33 +246,31 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		// bridge cannot serialize a mutable tool value a second time.
 		var encoded json.RawMessage
 		var encodeErr error
-		var references []tooltypes.ToolAttachment
+		outcome := "completed"
 		if callErr == nil {
 			encoded, encodeErr = json.Marshal(reply)
-			references = reply.Attachments
 		} else {
 			reply = CodeToolReply{}
+			outcome = "unknown"
 			var toolErr *CodeToolError
 			if errors.As(callErr, &toolErr) {
 				encoded, encodeErr = json.Marshal(toolErr)
+				if toolErr.Outcome != "" {
+					outcome = toolErr.Outcome
+				}
 				if toolErr.Result != nil {
-					references = toolErr.Result.Attachments
 					reply = *toolErr.Result
 				}
 			}
 		}
+		references := reply.Attachments
 		if encodeErr != nil || len(encoded) > codemode.MaxHostResponseBytes {
 			references = nil
-			outcome := "completed"
-			if callErr != nil {
-				outcome = "unknown"
-				var toolErr *CodeToolError
-				if errors.As(callErr, &toolErr) && toolErr.Outcome != "" {
-					outcome = toolErr.Outcome
-				}
-			}
 			callErr = &CodeToolError{
-				Kind: "invalid_output", Tool: request.Name, CallID: callID, Outcome: outcome,
+				Kind:    "invalid_output",
+				Tool:    request.Name,
+				CallID:  callID,
+				Outcome: outcome,
 				Message: "child reply is not valid JSON or exceeds the 2 MiB limit; the tool will not be retried",
 			}
 		}
@@ -261,7 +278,8 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		publish = func() {}
 		if active {
 			for _, attachment := range references {
-				if attachment.Type == "image" && attachment.ArtifactID != "" && attachment.Error == "" && attachment.Path == "" && attachment.Data == "" {
+				if attachment.Type == "image" && attachment.ArtifactID != "" &&
+					attachment.Error == "" && attachment.Path == "" && attachment.Data == "" {
 					inventory[attachment.ArtifactID] = attachment
 				}
 			}
@@ -325,7 +343,10 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 	active = false
 	for _, item := range result.Outputs {
 		meta.Items = append(meta.Items, tooltypes.CodeExecutionOutput{
-			Type: item.Type, Value: item.Value, ArtifactID: item.ArtifactID, Detail: item.Detail,
+			Type:       item.Type,
+			Value:      item.Value,
+			ArtifactID: item.ArtifactID,
+			Detail:     item.Detail,
 		})
 	}
 	for i := range meta.Calls {
@@ -397,12 +418,18 @@ func (r CodeExecuteResult) ContentParts() []tooltypes.ToolResultContentPart {
 	}
 	summary := r
 	summary.Metadata.Items, summary.Metadata.Outputs = nil, nil
-	parts := []tooltypes.ToolResultContentPart{{Type: tooltypes.ToolResultContentPartTypeText, Text: summary.AssistantFacing()}}
+	parts := []tooltypes.ToolResultContentPart{{
+		Type: tooltypes.ToolResultContentPartTypeText,
+		Text: summary.AssistantFacing(),
+	}}
 	hasImage := false
 	for _, item := range r.Metadata.Items {
 		switch item.Type {
 		case "json":
-			parts = append(parts, tooltypes.ToolResultContentPart{Type: tooltypes.ToolResultContentPartTypeText, Text: string(item.Value)})
+			parts = append(parts, tooltypes.ToolResultContentPart{
+				Type: tooltypes.ToolResultContentPartTypeText,
+				Text: string(item.Value),
+			})
 		case "image", "artifact":
 			attachment, ok := attachments[item.ArtifactID]
 			if !ok {
@@ -412,12 +439,17 @@ func (r CodeExecuteResult) ContentParts() []tooltypes.ToolResultContentPart {
 			if item.Type == "image" {
 				label = "Image artifact: "
 			}
-			parts = append(parts, tooltypes.ToolResultContentPart{Type: tooltypes.ToolResultContentPartTypeText, Text: label + item.ArtifactID})
+			parts = append(parts, tooltypes.ToolResultContentPart{
+				Type: tooltypes.ToolResultContentPartTypeText,
+				Text: label + item.ArtifactID,
+			})
 			if item.Type == "image" {
 				hasImage = true
 				parts = append(parts, tooltypes.ToolResultContentPart{
-					Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: item.ArtifactID,
-					MimeType: attachment.MimeType, Detail: item.Detail,
+					Type:       tooltypes.ToolResultContentPartTypeImage,
+					ArtifactID: item.ArtifactID,
+					MimeType:   attachment.MimeType,
+					Detail:     item.Detail,
 				})
 			}
 		}
@@ -430,8 +462,12 @@ func (r CodeExecuteResult) ContentParts() []tooltypes.ToolResultContentPart {
 
 func (r CodeExecuteResult) StructuredData() tooltypes.StructuredToolResult {
 	return tooltypes.StructuredToolResult{
-		ToolName: "code_execute", Success: !r.IsError(), Error: r.Error,
-		Metadata: r.Metadata, Timestamp: time.Now(), Attachments: slices.Clone(r.Attachments),
+		ToolName:    "code_execute",
+		Success:     !r.IsError(),
+		Error:       r.Error,
+		Metadata:    r.Metadata,
+		Timestamp:   time.Now(),
+		Attachments: slices.Clone(r.Attachments),
 	}
 }
 
@@ -478,7 +514,11 @@ func PruneCodeExecutionAttachments(result, original tooltypes.StructuredToolResu
 			continue
 		}
 		selections[key]--
-		items = append(items, tooltypes.CodeExecutionOutput{Type: item.Type, ArtifactID: item.ArtifactID, Detail: item.Detail})
+		items = append(items, tooltypes.CodeExecutionOutput{
+			Type:       item.Type,
+			ArtifactID: item.ArtifactID,
+			Detail:     item.Detail,
+		})
 		if !attached[item.ArtifactID] {
 			result.Attachments = append(result.Attachments, attachment)
 			attached[item.ArtifactID] = true

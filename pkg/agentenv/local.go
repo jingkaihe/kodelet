@@ -108,8 +108,11 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 		}
 		if !found {
 			manifest.Tools = append(manifest.Tools, ToolDefinition{
-				Name: codeTool.Name(), Description: codeTool.Description(),
-				InputSchema: tooltypes.JSONSchemaForTool(codeTool), Placement: ToolPlacementEnvironment, Tool: codeTool,
+				Name:        codeTool.Name(),
+				Description: codeTool.Description(),
+				InputSchema: tooltypes.JSONSchemaForTool(codeTool),
+				Placement:   ToolPlacementEnvironment,
+				Tool:        codeTool,
 			})
 		}
 	}
@@ -394,65 +397,56 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		result := tooltypes.BaseToolResult{Error: "agent environment is not open"}
 		structured := result.StructuredData()
 		structured.ToolName = request.Name
-		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured, FailureKind: "blocked", FailureOutcome: "not_started"}, nil
+		return ToolExecution{
+			Input:            effectiveInput,
+			Result:           result,
+			StructuredResult: structured,
+			FailureKind:      "blocked",
+			FailureOutcome:   "not_started",
+		}, nil
 	}
 	decision, err := e.DispatchToolCall(ctx, request)
 	if err != nil {
 		return ToolExecution{}, err
 	}
-	if decision.Blocked {
-		result := tooltypes.NewBlockedToolResult(request.Name, decision.Reason)
-		outputDecision, err := e.DispatchToolResult(ctx, ToolOutputRequest{
-			Name:             request.Name,
-			Input:            decision.Input,
-			ToolCallID:       request.ToolCallID,
-			StructuredResult: result.StructuredData(),
-		})
-		if err != nil {
-			return ToolExecution{}, err
-		}
-		return ToolExecution{
-			Input: decision.Input, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
-			FailureKind: "blocked", FailureOutcome: "not_started",
-		}, nil
-	}
 	effectiveInput = decision.Input
-	if !environmentToolAllowed(spec.Config, request.Name) {
-		result := tooltypes.NewBlockedToolResult(request.Name, "tool is not allowed by the active workspace command")
+	finish := func(result tooltypes.ToolResult, failureKind, failureOutcome string) (ToolExecution, error) {
+		structured := result.StructuredData()
+		if structured.ToolName == "" || structured.ToolName == "unknown" {
+			structured.ToolName = request.Name
+		}
 		outputDecision, err := e.DispatchToolResult(ctx, ToolOutputRequest{
 			Name:             request.Name,
 			Input:            effectiveInput,
 			ToolCallID:       request.ToolCallID,
-			StructuredResult: result.StructuredData(),
+			StructuredResult: structured,
 		})
 		if err != nil {
 			return ToolExecution{}, err
 		}
 		return ToolExecution{
-			Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
-			FailureKind: "blocked", FailureOutcome: "not_started",
+			Input:            effectiveInput,
+			Result:           result,
+			StructuredResult: outputDecision.StructuredResult,
+			Modified:         outputDecision.Modified,
+			FailureKind:      failureKind,
+			FailureOutcome:   failureOutcome,
 		}, nil
+	}
+	if decision.Blocked {
+		result := tooltypes.NewBlockedToolResult(request.Name, decision.Reason)
+		return finish(result, "blocked", "not_started")
+	}
+	if !environmentToolAllowed(spec.Config, request.Name) {
+		result := tooltypes.NewBlockedToolResult(request.Name, "tool is not allowed by the active workspace command")
+		return finish(result, "blocked", "not_started")
 	}
 	commandPolicy := spec.Config.EnvironmentOptions().AllowedCommands
 	if request.Name == "bash" && commandPolicy != nil && len(*commandPolicy) > 0 {
 		validator := tools.NewBashToolWithTimeout(*commandPolicy, spec.Config.EnableFSSearchTools, spec.Config.BashTimeout())
 		if err := validator.ValidateInput(state, effectiveInput); err != nil {
 			result := tooltypes.BaseToolResult{Error: err.Error()}
-			structured := result.StructuredData()
-			structured.ToolName = request.Name
-			outputDecision, dispatchErr := e.DispatchToolResult(ctx, ToolOutputRequest{
-				Name:             request.Name,
-				Input:            effectiveInput,
-				ToolCallID:       request.ToolCallID,
-				StructuredResult: structured,
-			})
-			if dispatchErr != nil {
-				return ToolExecution{}, dispatchErr
-			}
-			return ToolExecution{
-				Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
-				FailureKind: "invalid_input", FailureOutcome: "not_started",
-			}, nil
+			return finish(result, "invalid_input", "not_started")
 		}
 	}
 
@@ -486,23 +480,7 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	if failure, ok := result.(tooltypes.ToolFailureProvider); ok {
 		failureKind, failureOutcome = failure.ToolFailure()
 	}
-	structured := result.StructuredData()
-	if structured.ToolName == "" || structured.ToolName == "unknown" {
-		structured.ToolName = request.Name
-	}
-	outputDecision, err := e.DispatchToolResult(ctx, ToolOutputRequest{
-		Name:             request.Name,
-		Input:            effectiveInput,
-		ToolCallID:       request.ToolCallID,
-		StructuredResult: structured,
-	})
-	if err != nil {
-		return ToolExecution{}, err
-	}
-	return ToolExecution{
-		Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified,
-		FailureKind: failureKind, FailureOutcome: failureOutcome,
-	}, nil
+	return finish(result, failureKind, failureOutcome)
 }
 
 // Close releases the pinned run snapshot. It does not own or close the persistent extension runtime.

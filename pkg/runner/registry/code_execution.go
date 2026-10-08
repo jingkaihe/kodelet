@@ -65,7 +65,12 @@ func (r *Registry) registerCodeParent(ctx context.Context, params runnerpayload.
 		return nil, errors.New("code execution parent is already active")
 	}
 	parentCtx, cancel := context.WithCancel(ctx)
-	parent := &codeParentRegistration{ctx: parentCtx, cancel: cancel, allowed: allowed, children: make(map[string]bool)}
+	parent := &codeParentRegistration{
+		ctx:      parentCtx,
+		cancel:   cancel,
+		allowed:  allowed,
+		children: make(map[string]bool),
+	}
 	r.codeParents[key] = parent
 	cleanup := func() {
 		r.mu.Lock()
@@ -119,7 +124,8 @@ func (r *Registry) codeChild(ctx context.Context, identity UIRequestIdentity, pa
 	if params.Name == "code_execute" || !parent.allowed[params.Name] {
 		return fail(protocol.ErrorCodeInvalidParams, "child tool is not in the authorized catalog")
 	}
-	if params.ToolCallID == params.ParentToolCallID || r.artifactTools[childKey] != nil || run.codeChildIDs[params.ToolCallID] != "" {
+	if params.ToolCallID == params.ParentToolCallID ||
+		r.artifactTools[childKey] != nil || run.codeChildIDs[params.ToolCallID] != "" {
 		return fail(protocol.ErrorCodeConflict, "child tool call ID has already been used")
 	}
 	if len(parent.children) >= 128 {
@@ -155,7 +161,11 @@ func (r *Registry) codeChild(ctx context.Context, identity UIRequestIdentity, pa
 		if r.toolForkers == nil {
 			r.toolForkers = make(map[toolForkKey]*toolForkRegistration)
 		}
-		r.toolForkers[toolForkKey{params.RunID, params.ToolCallID}] = &toolForkRegistration{forker: forker, toolName: params.Name, ctx: artifactCtx}
+		r.toolForkers[toolForkKey(childKey)] = &toolForkRegistration{
+			forker:   forker,
+			toolName: params.Name,
+			ctx:      artifactCtx,
+		}
 	}
 	return struct{}{}, nil
 }

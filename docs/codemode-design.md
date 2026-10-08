@@ -360,7 +360,7 @@ Example expanded card:
 ▾ Code execution                               Done · 1.4s
     ▸ Code                                     JavaScript and selected output
     ▸ Command                                  completed
-    ▸ Apply patch                              completed
+    ▸ Edit file: src/example.ts                (+3 -1)
 ```
 
 The Web UI nests a Code foldout containing JavaScript and its selected output, followed by child tool foldouts reusing ordinary tool renderers. Older histories without retained child details remain readable but cannot reconstruct those results. The TUI retains its concise summary. No new nested event protocol is needed; live results and reloaded history use the same persisted metadata. Only the parent's explicit output, a concise execution summary, and uncaught errors enter the model-facing result.

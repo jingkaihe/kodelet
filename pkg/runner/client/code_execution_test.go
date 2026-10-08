@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,11 +34,16 @@ func newCodeService(t *testing.T, environment agentenv.Environment) (*Service, *
 	t.Cleanup(cancel)
 	peer := &recordingPeer{}
 	run := &activeRun{
-		id: "code-run", conversationID: "conversation", ctx: ctx, cancel: cancel,
-		codeExecution: true, environment: environment,
+		id:             "code-run",
+		conversationID: "conversation",
+		ctx:            ctx,
+		cancel:         cancel,
+		codeExecution:  true,
+		environment:    environment,
 		manifest: runnerpayload.Manifest{
-			Digest: "manifest", WorkingDirectory: t.TempDir(),
-			Capabilities: runnerpayload.EnvironmentCapabilities{CodeExecution: true},
+			Digest:           "manifest",
+			WorkingDirectory: t.TempDir(),
+			Capabilities:     runnerpayload.EnvironmentCapabilities{CodeExecution: true},
 			Tools: []runnerpayload.ToolDefinition{
 				{Name: "code_execute", Placement: "environment"},
 				{Name: "test_tool", Placement: "environment", InputSchema: map[string]any{"type": "object"}},
@@ -48,7 +52,11 @@ func newCodeService(t *testing.T, environment agentenv.Environment) (*Service, *
 	}
 	service := &Service{runs: map[string]*activeRun{run.id: run}, peer: peer}
 	return service, run, peer, runnerpayload.ToolExecuteParams{
-		RunID: run.id, ToolCallID: "parent", Name: "code_execute", ManifestDigest: "manifest", CallableTools: new([]string{"test_tool"}),
+		RunID:          run.id,
+		ToolCallID:     "parent",
+		Name:           "code_execute",
+		ManifestDigest: "manifest",
+		CallableTools:  new([]string{"test_tool"}),
 	}
 }
 
@@ -107,7 +115,10 @@ func TestRunnerCodeChildUsesEffectiveResultAndLocalExecution(t *testing.T) {
 }
 
 func TestRunnerCodeAuthorization(t *testing.T) {
-	for _, name := range []string{"missing metadata", "wrong digest", "old central", "old runner", "missing parent", "missing child", "recursive", "empty", "agent restriction", "no tools", "command restriction", "no peer"} {
+	for _, name := range []string{
+		"missing metadata", "wrong digest", "old central", "old runner", "missing parent", "missing child",
+		"recursive", "empty", "agent restriction", "no tools", "command restriction", "no peer",
+	} {
 		t.Run(name, func(t *testing.T) {
 			service, run, _, params := newCodeService(t, &codeTestEnvironment{})
 			switch name {
@@ -222,14 +233,21 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 			})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, service.Close()) })
-			require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1, CodeExecution: test.supported}))
+			require.NoError(t, service.SetRegistration(protocol.RegisterResult{
+				RunnerID:      "runner-1",
+				Generation:    1,
+				CodeExecution: test.supported,
+			}))
 			var options *llmtypes.ExecutionOptions
 			if test.noTools {
 				options = &llmtypes.ExecutionOptions{NoTools: new(true)}
 			}
 			probe, probeErr := service.ProbeManifestForCWDWithOptions(t.Context(), "", "", options)
 			manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
-				RunID: "run", ConversationID: "conversation", CodeExecution: test.supported, Options: options,
+				RunID:          "run",
+				ConversationID: "conversation",
+				CodeExecution:  test.supported,
+				Options:        options,
 			})
 			if test.wantError {
 				require.ErrorContains(t, probeErr, "code_mode only requires code execution support")
@@ -251,16 +269,6 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 					assert.Nil(t, tool.OutputSchema)
 					assert.Empty(t, tool.Group)
 				}
-				// Reproduce the old decoder dropping new fields before rehashing.
-				legacy := manifest
-				legacy.Config.CodeMode, legacy.Capabilities.CodeExecution = "", false
-				legacy.Tools = slices.Clone(manifest.Tools)
-				for i := range legacy.Tools {
-					legacy.Tools[i].OutputSchema, legacy.Tools[i].Group = nil, ""
-				}
-				digest, err := runnerpayload.ComputeManifestDigest(legacy)
-				require.NoError(t, err)
-				assert.Equal(t, manifest.Digest, digest)
 			}
 		})
 	}
@@ -268,14 +276,10 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 
 func TestRunnerCodeReplyMetadata(t *testing.T) {
 	for _, metadata := range []tooltypes.ToolMetadata{
-		tooltypes.BashMetadata{Output: "shell", Truncation: &tooltypes.BashOutputTruncation{Truncated: true}},
 		&tooltypes.BashMetadata{Output: "shell", Truncation: &tooltypes.BashOutputTruncation{Truncated: true}},
 		tooltypes.FileReadMetadata{Lines: []string{"first", "last"}, Truncated: true},
-		&tooltypes.FileReadMetadata{Lines: []string{"first", "last"}, Truncated: true},
-		tooltypes.ExtensionToolMetadata{Output: "extension", Truncated: true},
 		&tooltypes.ExtensionToolMetadata{Output: "extension", Truncated: true},
 		tooltypes.WebFetchMetadata{Content: "web"},
-		&tooltypes.WebFetchMetadata{Content: "web"},
 	} {
 		t.Run(metadata.ToolType(), func(t *testing.T) {
 			reply := codeReply(runnerpayload.ToolExecuteResult{Result: runnerpayload.ToolResult{

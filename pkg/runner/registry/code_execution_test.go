@@ -37,8 +37,12 @@ func newCodeRegistry(t *testing.T) (*Registry, *Session, runnerpayload.ToolExecu
 	registry.mu.Unlock()
 	callable := []string{"bash", "web_fetch"}
 	return registry, session, runnerpayload.ToolExecuteParams{
-		RunID: "run-one", ToolCallID: "parent", Name: "code_execute", Input: json.RawMessage(`{"code":"return 1"}`),
-		ManifestDigest: digest, CallableTools: &callable,
+		RunID:          "run-one",
+		ToolCallID:     "parent",
+		Name:           "code_execute",
+		Input:          json.RawMessage(`{"code":"return 1"}`),
+		ManifestDigest: digest,
+		CallableTools:  &callable,
 	}
 }
 
@@ -48,7 +52,10 @@ func codeRegistryIdentity(session *Session) UIRequestIdentity {
 }
 
 func TestCodeParentAuthorization(t *testing.T) {
-	for _, name := range []string{"missing tools", "wrong digest", "unnegotiated", "unsupported runner", "no parent", "unknown tool", "recursive tool", "empty allowlist", "no tools"} {
+	for _, name := range []string{
+		"missing tools", "wrong digest", "unnegotiated", "unsupported runner",
+		"no parent", "unknown tool", "recursive tool", "empty allowlist", "no tools",
+	} {
 		t.Run(name, func(t *testing.T) {
 			registry, _, params := newCodeRegistry(t)
 			run := registry.runs[params.RunID]
@@ -102,7 +109,12 @@ func TestCodeChildrenAuthorityAndTombstones(t *testing.T) {
 	require.NoError(t, err)
 	defer cleanup()
 	identity := codeRegistryIdentity(session)
-	child := runnerpayload.ToolChildParams{RunID: "run-one", ParentToolCallID: "parent", ToolCallID: "child", Name: "web_fetch"}
+	child := runnerpayload.ToolChildParams{
+		RunID:            "run-one",
+		ParentToolCallID: "parent",
+		ToolCallID:       "child",
+		Name:             "web_fetch",
+	}
 	_, rpcErr := session.HandleRequest(t.Context(), protocol.MethodToolChildBegin, mustRegistryJSON(t, child))
 	require.Nil(t, rpcErr)
 	artifactCtx, conversationID, err := registry.ArtifactToolContext(identity, child.RunID, child.ToolCallID)
@@ -141,14 +153,22 @@ func TestCodeChildrenAuthorityAndTombstones(t *testing.T) {
 }
 
 func TestCodeChildRegistrationFences(t *testing.T) {
-	for _, name := range []string{"wrong runner", "wrong generation", "wrong connection", "wrong parent", "wrong run", "recursive", "forbidden", "same ID", "bad ID", "cancelled request"} {
+	for _, name := range []string{
+		"wrong runner", "wrong generation", "wrong connection", "wrong parent", "wrong run",
+		"recursive", "forbidden", "same ID", "bad ID", "cancelled request",
+	} {
 		t.Run(name, func(t *testing.T) {
 			registry, session, params := newCodeRegistry(t)
 			cleanup, err := registry.registerCodeParent(t.Context(), params)
 			require.NoError(t, err)
 			defer cleanup()
 			identity := codeRegistryIdentity(session)
-			child := runnerpayload.ToolChildParams{RunID: "run-one", ParentToolCallID: "parent", ToolCallID: "child", Name: "bash"}
+			child := runnerpayload.ToolChildParams{
+				RunID:            "run-one",
+				ParentToolCallID: "parent",
+				ToolCallID:       "child",
+				Name:             "bash",
+			}
 			ctx := t.Context()
 			switch name {
 			case "wrong runner":
@@ -191,11 +211,21 @@ func TestCodeChildBudgetsAndCancellation(t *testing.T) {
 	identity := codeRegistryIdentity(session)
 	children := make([]runnerpayload.ToolChildParams, 4)
 	for i := range children {
-		children[i] = runnerpayload.ToolChildParams{RunID: "run-one", ParentToolCallID: "parent", ToolCallID: fmt.Sprint(i), Name: "bash"}
+		children[i] = runnerpayload.ToolChildParams{
+			RunID:            "run-one",
+			ParentToolCallID: "parent",
+			ToolCallID:       fmt.Sprint(i),
+			Name:             "bash",
+		}
 		_, rpcErr := registry.codeChild(t.Context(), identity, children[i], true)
 		require.Nil(t, rpcErr)
 	}
-	extra := runnerpayload.ToolChildParams{RunID: "run-one", ParentToolCallID: "parent", ToolCallID: "extra", Name: "bash"}
+	extra := runnerpayload.ToolChildParams{
+		RunID:            "run-one",
+		ParentToolCallID: "parent",
+		ToolCallID:       "extra",
+		Name:             "bash",
+	}
 	_, rpcErr := registry.codeChild(t.Context(), identity, extra, true)
 	require.NotNil(t, rpcErr)
 	for _, child := range children {

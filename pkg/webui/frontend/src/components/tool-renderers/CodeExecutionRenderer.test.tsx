@@ -256,11 +256,10 @@ describe('CodeExecutionRenderer', () => {
     );
     expect(container.querySelector('.tool-terminal')).not.toBeVisible();
     expect(
-      Array.from(
-        container.querySelectorAll('summary .tool-summary-label'),
-        (node) => node.textContent
-      ).filter((text) => /^(Ran|Apply patch)/.test(text ?? ''))
-    ).toEqual(['Ran 2 commands', 'Apply patch', 'Ran 1 command']);
+      Array.from(container.querySelectorAll('summary[title]'), (node) =>
+        node.getAttribute('title')
+      ).filter((text) => /^(Ran|Edit file)/.test(text ?? ''))
+    ).toEqual(['Ran 2 commands', 'Edit file: test.js', 'Ran 1 command']);
     await user.click(screen.getByText('Ran 2 commands'));
     expect(container.querySelector('.tool-terminal')).toBeVisible();
     expect(container.querySelector('.bash-tool-badge')).toHaveClass('is-error');
@@ -268,7 +267,8 @@ describe('CodeExecutionRenderer', () => {
     expect(commands[0]).toBeVisible();
     expect(commands[1]).toBeVisible();
     expect(commands[2]).not.toBeVisible();
-    await user.click(screen.getByText('Apply patch', { exact: true }));
+    expect(screen.queryByText('Apply patch', { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText('test.js')).toBeVisible();
     await user.click(screen.getByText('test.js'));
     expect(container.querySelector('.diff-block')).toBeVisible();
   });

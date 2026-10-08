@@ -73,8 +73,11 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 		}
 		allowed[name] = true
 		definitions = append(definitions, codemode.Definition{
-			Name: name, Description: definition.Description, Group: definition.Group,
-			InputSchema: definition.InputSchema, OutputSchema: definition.OutputSchema,
+			Name:         name,
+			Description:  definition.Description,
+			Group:        definition.Group,
+			InputSchema:  definition.InputSchema,
+			OutputSchema: definition.OutputSchema,
 		})
 	}
 	return tools.CodeExecutionContext{
@@ -91,7 +94,13 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 		},
 		Call: func(callCtx context.Context, name, input, callID string) (tools.CodeToolReply, error) {
 			childError := func(kind, outcome, message string) (tools.CodeToolReply, error) {
-				return tools.CodeToolReply{}, &tools.CodeToolError{Kind: kind, Tool: name, CallID: callID, Outcome: outcome, Message: message}
+				return tools.CodeToolReply{}, &tools.CodeToolError{
+					Kind:    kind,
+					Tool:    name,
+					CallID:  callID,
+					Outcome: outcome,
+					Message: message,
+				}
 			}
 			if !allowed[name] || name == "code_execute" || !s.codeToolAllowed(run, name) {
 				return childError("blocked", "not_started", "tool is not in the authorized catalog")
@@ -112,7 +121,12 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			if childRun != run {
 				return childError("cancelled", "not_started", "code execution run changed")
 			}
-			ownership := runnerpayload.ToolChildParams{RunID: run.id, ParentToolCallID: params.ToolCallID, ToolCallID: callID, Name: name}
+			ownership := runnerpayload.ToolChildParams{
+				RunID:            run.id,
+				ParentToolCallID: params.ToolCallID,
+				ToolCallID:       callID,
+				Name:             name,
+			}
 			if err := peer.Call(operationCtx, protocol.MethodToolChildBegin, ownership, new(struct{})); err != nil {
 				return childError("transport", "not_started", "child registration was not acknowledged: "+err.Error())
 			}
@@ -127,7 +141,10 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 				return childError("cancelled", "not_started", err.Error())
 			}
 			execution, err := s.executeRunTool(operationCtx, run, runnerpayload.ToolExecuteParams{
-				RunID: run.id, ToolCallID: callID, Name: name, Input: json.RawMessage(input),
+				RunID:      run.id,
+				ToolCallID: callID,
+				Name:       name,
+				Input:      json.RawMessage(input),
 			}, true)
 			if err != nil {
 				kind := "transport"
@@ -146,8 +163,12 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 					outcome = "completed"
 				}
 				return reply, &tools.CodeToolError{
-					Kind: kind, Tool: name, CallID: callID, Outcome: outcome,
-					Message: execution.Result.Structured.Error, Result: &reply,
+					Kind:    kind,
+					Tool:    name,
+					CallID:  callID,
+					Outcome: outcome,
+					Message: execution.Result.Structured.Error,
+					Result:  &reply,
 				}
 			}
 			return reply, nil
@@ -158,8 +179,10 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 func codeReply(execution runnerpayload.ToolExecuteResult) tools.CodeToolReply {
 	structured := execution.Result.Structured
 	reply := tools.CodeToolReply{
-		Data: structured.Data, Attachments: append([]tooltypes.ToolAttachment{}, structured.Attachments...),
-		Input: execution.Input, Result: &structured,
+		Data:        structured.Data,
+		Attachments: append([]tooltypes.ToolAttachment{}, structured.Attachments...),
+		Input:       execution.Input,
+		Result:      &structured,
 	}
 	if execution.Modified {
 		// Legacy result hooks may redact display output without knowing machine data.

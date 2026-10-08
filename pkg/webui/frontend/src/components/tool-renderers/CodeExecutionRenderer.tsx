@@ -137,39 +137,31 @@ export default function CodeExecutionRenderer({
       </Section>
       {groups.map((group) => {
         const call = group[0];
-        const activity =
-          call.result && !isPartial ? (
-            <ChatToolActivity
-              key={call.callId}
-              tools={group.map((child) => ({
-                callId: child.callId,
-                name: child.toolName,
-                input: JSON.stringify(child.input ?? {}),
-                result: child.result && {
-                  ...child.result,
-                  success: child.result.success && child.status === 'completed',
-                },
-              }))}
-            />
-          ) : (
-            <Section key={call.callId} title={`${call.toolName} · ${call.status}`}>
-              <ReferenceToolNote
-                text={
-                  isPartial
-                    ? 'Child tool details are available when code execution finishes.'
-                    : call.detailsOmitted
-                      ? 'Child tool details exceeded the storage limit.'
-                      : 'Child tool details were not saved for this invocation.'
-                }
-              />
-            </Section>
-          );
-        return call.toolName === 'apply_patch' && call.result && !isPartial ? (
-          <Section key={call.callId} title="Apply patch">
-            {activity}
-          </Section>
+        return call.result && !isPartial ? (
+          <ChatToolActivity
+            key={call.callId}
+            tools={group.map((child) => ({
+              callId: child.callId,
+              name: child.toolName,
+              input: JSON.stringify(child.input ?? {}),
+              result: child.result && {
+                ...child.result,
+                success: child.result.success && child.status === 'completed',
+              },
+            }))}
+          />
         ) : (
-          activity
+          <Section key={call.callId} title={`${call.toolName} · ${call.status}`}>
+            <ReferenceToolNote
+              text={
+                isPartial
+                  ? 'Child tool details are available when code execution finishes.'
+                  : call.detailsOmitted
+                    ? 'Child tool details exceeded the storage limit.'
+                    : 'Child tool details were not saved for this invocation.'
+              }
+            />
+          </Section>
         );
       })}
       {toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null}

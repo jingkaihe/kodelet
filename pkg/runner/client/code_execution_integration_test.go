@@ -89,7 +89,10 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 				return
 			}
 			done := make(chan struct{})
-			go func() { defer close(done); wire.relay(conn, central) }()
+			go func() {
+				defer close(done)
+				wire.relay(conn, central)
+			}()
 			wire.relay(central, conn)
 			<-done
 			return
@@ -152,8 +155,16 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 	runner, ok := registry.Runner(registration.RunnerID)
 	require.True(t, ok)
 	return &codeLoopback{
-		registry: registry, service: service, peer: peer, manifest: manifest, wire: wire,
-		identity: runnerregistry.UIRequestIdentity{RunnerID: runner.ID, Generation: runner.Generation, ConnectionID: runner.ConnectionID},
+		registry: registry,
+		service:  service,
+		peer:     peer,
+		manifest: manifest,
+		wire:     wire,
+		identity: runnerregistry.UIRequestIdentity{
+			RunnerID:     runner.ID,
+			Generation:   runner.Generation,
+			ConnectionID: runner.ConnectionID,
+		},
 	}
 }
 
@@ -193,9 +204,12 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 	var updateMu sync.Mutex
 	var updates []runnerpayload.ToolUpdateParams
 	result, err := loop.registry.ExecuteTool(ctx, runnerpayload.ToolExecuteParams{
-		RunID: "code-run", ToolCallID: "parent", Name: "code_execute",
+		RunID:          "code-run",
+		ToolCallID:     "parent",
+		Name:           "code_execute",
 		Input:          mustJSON(t, map[string]string{"code": code}),
-		ManifestDigest: loop.manifest.Digest, CallableTools: new([]string{"file_read", "web_fetch"}),
+		ManifestDigest: loop.manifest.Digest,
+		CallableTools:  new([]string{"file_read", "web_fetch"}),
 	}, func(update runnerpayload.ToolUpdateParams) {
 		updateMu.Lock()
 		defer updateMu.Unlock()
@@ -215,7 +229,14 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 			assert.Equal(t, []string{secret}, call.Result.Metadata.(tooltypes.FileReadMetadata).Lines)
 		}
 	}
-	assert.JSONEq(t, `{"names":["file_read","web_fetch"],"found":"file_read","schema":"object","lines":1,"dataAvailable":true,"extracted":true}`, string(metadata.Items[0].Value))
+	assert.JSONEq(t, `{
+  "names": ["file_read", "web_fetch"],
+  "found": "file_read",
+  "schema": "object",
+  "lines": 1,
+  "dataAvailable": true,
+  "extracted": true
+}`, string(metadata.Items[0].Value))
 	assert.EqualValues(t, 2, helperCalls.Load(), "direct and nested web_fetch both use the central helper")
 	updateMu.Lock()
 	for _, update := range updates {

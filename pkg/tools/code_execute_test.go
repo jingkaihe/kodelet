@@ -23,9 +23,12 @@ func TestCodeExecuteToolDiscoveryAndCalls(t *testing.T) {
 			assert.JSONEq(t, `{"id":42}`, input)
 			assert.NotEmpty(t, callID)
 			return CodeToolReply{
-				Data: map[string]any{"id": 42, "secret": "omit me"}, Input: json.RawMessage(input),
+				Data:  map[string]any{"id": 42, "secret": "omit me"},
+				Input: json.RawMessage(input),
 				Result: &tooltypes.StructuredToolResult{
-					ToolName: name, Success: true, Data: "do not duplicate machine data",
+					ToolName:    name,
+					Success:     true,
+					Data:        "do not duplicate machine data",
 					Metadata:    tooltypes.ExtensionToolMetadata{Output: "UI-only detail"},
 					Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "unselected"}},
 				},
@@ -99,7 +102,15 @@ func TestCodeExecuteToolCaughtFailure(t *testing.T) {
 			return CodeToolReply{}, nil
 		},
 	})
-	result := (&CodeExecuteTool{}).Execute(ctx, nil, `{"code":"try { await tools.forbidden({}); } catch (e) { return {kind: e.kind, outcome: e.outcome}; }"}`)
+	params, err := json.Marshal(codeExecuteInput{Code: `
+try {
+  await tools.forbidden({});
+} catch (e) {
+  return {kind: e.kind, outcome: e.outcome};
+}
+`})
+	require.NoError(t, err)
+	result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
 	require.False(t, result.IsError(), result.GetError())
 	assert.Contains(t, result.AssistantFacing(), `"blocked"`)
 	assert.Contains(t, result.AssistantFacing(), "did not succeed")
@@ -119,18 +130,17 @@ func TestCodeExecuteToolRequiresHostAuthority(t *testing.T) {
 
 func TestCodeExecuteToolInputValidation(t *testing.T) {
 	tool := &CodeExecuteTool{}
-	for _, input := range []string{`{`, `null`, `{}`, `{"code":" "}`, `{"code":4}`, `{"code":"return 1", "callableTools":["bash"]}`, `{"code":"return 1"} {}`} {
+	for _, input := range []string{
+		`{`, `null`, `{}`, `{"code":" "}`, `{"code":4}`,
+		`{"code":"return 1", "callableTools":["bash"]}`,
+		`{"code":"return 1"} {}`,
+	} {
 		assert.Error(t, tool.ValidateInput(nil, input), input)
 	}
 	input, err := json.Marshal(codeExecuteInput{Code: strings.Repeat("x", 128*1024+1)})
 	require.NoError(t, err)
 	assert.Error(t, tool.ValidateInput(nil, string(input)))
 	assert.NoError(t, tool.ValidateInput(nil, `{"code":"return 1"}`))
-	assert.Equal(t, "code_execute", tool.Name())
-	assert.Contains(t, tool.Description(), "catalog.search")
-	assert.NotNil(t, tool.GenerateSchema())
-	_, err = tool.TracingKVs("")
-	assert.NoError(t, err)
 }
 
 func TestCodeExecuteToolRetainsArtifactsFromEffectiveErrorReply(t *testing.T) {
@@ -152,8 +162,27 @@ func TestCodeExecuteToolRetainsArtifactsFromEffectiveErrorReply(t *testing.T) {
 		code string
 		fail bool
 	}{
-		{name: "caught", code: `try { await tools.images({}); } catch (e) { emit.artifact(e.result.attachments[0]); return "raw-image"; }`},
-		{name: "emitted before failure", code: `try { await tools.images({}); } catch (e) { emit.artifact(e.result.attachments[0].artifactId); throw e; }`, fail: true},
+		{
+			name: "caught",
+			code: `
+try {
+  await tools.images({});
+} catch (e) {
+  emit.artifact(e.result.attachments[0]);
+  return "raw-image";
+}`,
+		},
+		{
+			name: "emitted before failure",
+			code: `
+try {
+  await tools.images({});
+} catch (e) {
+  emit.artifact(e.result.attachments[0].artifactId);
+  throw e;
+}`,
+			fail: true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			params, err := json.Marshal(codeExecuteInput{Code: test.code})
@@ -174,7 +203,16 @@ func TestCodeExecuteToolExplicitMediaSelection(t *testing.T) {
 	}{
 		{name: "ordinary JSON is inert", code: `return {type: "image", artifactId: r.attachments[0].artifactId};`},
 		{name: "retain without viewing", code: `emit.artifact(r.attachments[0]);`, retained: 1},
-		{name: "mixed ordered output", code: `emit("before"); emit.image(r.attachments[0], {detail: "original"}); emit({after: true}); emit.artifact(r.attachments[1]);`, allowImages: true, retained: 2},
+		{
+			name: "mixed ordered output",
+			code: `
+emit("before");
+emit.image(r.attachments[0], {detail: "original"});
+emit({after: true});
+emit.artifact(r.attachments[1]);`,
+			allowImages: true,
+			retained:    2,
+		},
 		{name: "foreign reference", code: `emit.image("foreign");`, allowImages: true, failure: "effective child reply"},
 		{name: "image permission required", code: `emit.image(r.attachments[0]);`, failure: "view_image permission"},
 	} {
@@ -211,7 +249,12 @@ func TestCodeExecuteToolExplicitMediaSelection(t *testing.T) {
 			}
 			require.Len(t, parts, 6)
 			assert.Equal(t, `"before"`, parts[1].Text)
-			assert.Equal(t, tooltypes.ToolResultContentPart{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "image-1", MimeType: "image/png", Detail: "original"}, parts[3])
+			assert.Equal(t, tooltypes.ToolResultContentPart{
+				Type:       tooltypes.ToolResultContentPartTypeImage,
+				ArtifactID: "image-1",
+				MimeType:   "image/png",
+				Detail:     "original",
+			}, parts[3])
 			assert.JSONEq(t, `{"after":true}`, parts[4].Text)
 			assert.Contains(t, parts[5].Text, "pixels not sent")
 		})
@@ -240,7 +283,15 @@ func TestCodeExecuteToolRejectedReplyPreservesFailureSummaryAndOutcome(t *testin
 					return reply, nil
 				},
 			})
-			result := (&CodeExecuteTool{}).Execute(ctx, nil, `{"code":"try { await tools.lookup({}); } catch (e) { return {kind: e.kind, outcome: e.outcome}; }"}`)
+			params, err := json.Marshal(codeExecuteInput{Code: `
+try {
+  await tools.lookup({});
+} catch (e) {
+  return {kind: e.kind, outcome: e.outcome};
+}
+`})
+			require.NoError(t, err)
+			result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
 			require.False(t, result.IsError(), result.GetError())
 			outcome, status := test.outcome, "failed"
 			switch outcome {

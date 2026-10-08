@@ -1483,14 +1483,23 @@ func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.Struc
 	// the pre-hook ToolResult. This preserves images a hook chose to keep.
 	var code tooltypes.CodeExecutionMetadata
 	if structured.ToolName == "code_execute" && tooltypes.ExtractMetadata(structured.Metadata, &code) {
-		result = tools.CodeExecuteResult{Metadata: code, Error: structured.Error, Attachments: structured.Attachments}
+		result = tools.CodeExecuteResult{
+			Metadata:    code,
+			Error:       structured.Error,
+			Attachments: structured.Attachments,
+		}
 		modified = false
 	}
 	if modified {
 		// Result hooks can redact a parent or a streamed snapshot, too. Never
 		// serialize the pre-hook body alongside the effective structured result.
 		output := renderers.NewRendererRegistry().Render(structured)
-		return runnerpayload.ToolResult{AssistantFacing: output, DisplayOutput: output, Error: structured.Error, Structured: structured}
+		return runnerpayload.ToolResult{
+			AssistantFacing: output,
+			DisplayOutput:   output,
+			Error:           structured.Error,
+			Structured:      structured,
+		}
 	}
 	if result == nil {
 		result = tooltypes.BaseToolResult{Error: "runner environment returned no tool result"}

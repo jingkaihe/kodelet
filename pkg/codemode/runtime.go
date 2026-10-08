@@ -170,7 +170,11 @@ type runtimeBridge struct {
 
 func newRuntimeBridge(ctx context.Context, handler Handler, validator func(OutputItem) error, limits runtimeLimits, result *Result) *runtimeBridge {
 	return &runtimeBridge{
-		ctx: ctx, handler: handler, validator: validator, limits: limits, result: result,
+		ctx:           ctx,
+		handler:       handler,
+		validator:     validator,
+		limits:        limits,
+		result:        result,
 		tools:         make(chan runtimeRequest, limits.pendingCalls),
 		catalog:       make(chan runtimeRequest, limits.pendingCalls),
 		completions:   make(chan runtimeCompletion, limits.pendingCalls),
@@ -256,7 +260,7 @@ func (b *runtimeBridge) handle(request runtimeRequest) (completion runtimeComple
 	return completion
 }
 
-func marshalRuntimeError(err error) json.RawMessage {
+func runtimeRequestErrorJSON(request Request, err error) json.RawMessage {
 	var marshaler json.Marshaler
 	var data []byte
 	if errors.As(err, &marshaler) {
@@ -274,22 +278,13 @@ func marshalRuntimeError(err error) json.RawMessage {
 	if _, ok := fields["kind"]; !ok {
 		fields["kind"] = json.RawMessage(`"tool_error"`)
 	}
-	data, _ = json.Marshal(fields)
-	return data
-}
-
-func runtimeRequestErrorJSON(request Request, err error) json.RawMessage {
-	data := marshalRuntimeError(err)
-	if request.Operation != "tool.call" {
-		return data
-	}
-	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(data, &fields)
-	if _, exists := fields["tool"]; !exists {
-		fields["tool"], _ = json.Marshal(request.Name)
-	}
-	if _, exists := fields["outcome"]; !exists {
-		fields["outcome"] = json.RawMessage(`"unknown"`)
+	if request.Operation == "tool.call" {
+		if _, exists := fields["tool"]; !exists {
+			fields["tool"], _ = json.Marshal(request.Name)
+		}
+		if _, exists := fields["outcome"]; !exists {
+			fields["outcome"] = json.RawMessage(`"unknown"`)
+		}
 	}
 	data, _ = json.Marshal(fields)
 	return data
@@ -383,7 +378,12 @@ func validateRuntimeRequest(request Request) error {
 			return invalid("tool calls require a name and a JSON input object")
 		}
 		if request.Name == "code_execute" {
-			return &Error{Kind: "blocked", Message: "recursive code_execute is not allowed", Tool: request.Name, Outcome: "not_started"}
+			return &Error{
+				Kind:    "blocked",
+				Message: "recursive code_execute is not allowed",
+				Tool:    request.Name,
+				Outcome: "not_started",
+			}
 		}
 	case "catalog.list", "catalog.search":
 		if request.Name != "" || len(request.Input) != 0 || (len(request.Options) != 0 && !isObject(request.Options)) {
@@ -428,7 +428,8 @@ func (b *runtimeBridge) emitMedia(outputType string, data json.RawMessage) error
 	// IDs are opaque tokens, not paths, URLs, short-link resolution, or image data.
 	// The validator supplies exact-ID authority, not a lookup or normalization step.
 	for _, char := range reference.ArtifactID {
-		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' || char == '_' || char == '-' {
 			continue
 		}
 		return &Error{Kind: "invalid_output", Message: "media output requires an exact artifact ID, not a path, URL, or base64 payload"}
