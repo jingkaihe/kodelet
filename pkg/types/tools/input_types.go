@@ -48,7 +48,7 @@ type CodeSearchInput struct {
 type GlobInput struct {
 	Pattern         string `json:"pattern" jsonschema:"description=The glob pattern"`
 	Path            string `json:"path,omitempty" jsonschema:"description=The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified"`
-	IgnoreGitignore bool   `json:"ignore_gitignore,omitempty" jsonschema:"description=If true\\, do not respect .gitignore rules (default: false\\, meaning .gitignore is respected)"`
+	IgnoreGitignore bool   `json:"ignore_gitignore,omitempty" jsonschema:"default=false,description=If true\\, do not respect .gitignore rules (default: false\\, meaning .gitignore is respected)"`
 }
 
 // ReadConversationInput defines the input parameters for the read_conversation tool.

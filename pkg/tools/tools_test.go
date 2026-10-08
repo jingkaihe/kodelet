@@ -92,7 +92,7 @@ func TestBuiltInSchemasMatchToolDefaults(t *testing.T) {
 		},
 		{tool: &FileReadTool{}, required: []any{"file_path"}, defaults: map[string]any{"offset": float64(1), "line_limit": float64(2000)}},
 		{tool: &FileEditTool{}, required: []any{"file_path", "old_text", "new_text"}, defaults: map[string]any{"replace_all": false}},
-		{tool: &GlobTool{}, required: []any{"pattern"}},
+		{tool: &GlobTool{}, required: []any{"pattern"}, defaults: map[string]any{"ignore_gitignore": false}},
 	} {
 		t.Run(tt.tool.Name(), func(t *testing.T) {
 			payload, err := json.Marshal(tooltypes.JSONSchemaForTool(tt.tool))
