@@ -54,7 +54,7 @@ func codeRegistryIdentity(session *Session) UIRequestIdentity {
 func TestCodeParentAuthorization(t *testing.T) {
 	for _, name := range []string{
 		"missing tools", "wrong digest", "unnegotiated", "unsupported runner",
-		"no parent", "unknown tool", "recursive tool", "empty allowlist", "no tools",
+		"no parent", "unknown tool", "recursive tool", "model only tool", "empty allowlist", "no tools",
 	} {
 		t.Run(name, func(t *testing.T) {
 			registry, _, params := newCodeRegistry(t)
@@ -80,6 +80,13 @@ func TestCodeParentAuthorization(t *testing.T) {
 					manifest.Capabilities.CodeExecution = false
 				case "no parent":
 					manifest.Tools = manifest.Tools[:1]
+				case "model only tool":
+					manifest.Tools = append(manifest.Tools, runnerpayload.ToolDefinition{
+						Name:      "skill",
+						Placement: "environment",
+						ModelOnly: true,
+					})
+					params.CallableTools = new([]string{"web_fetch", "skill"})
 				default:
 					manifest.Config.Options = &llmtypes.ExecutionOptions{NoTools: new(true)}
 				}

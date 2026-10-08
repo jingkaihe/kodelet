@@ -6,6 +6,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,6 +14,11 @@ import (
 func TestSkillTool_Name(t *testing.T) {
 	tool := NewSkillTool(nil, true, true)
 	assert.Equal(t, "skill", tool.Name())
+}
+
+func TestSkillTool_IsModelOnly(t *testing.T) {
+	assert.True(t, tooltypes.IsModelOnly(NewSkillTool(nil, true, true)))
+	assert.False(t, tooltypes.IsModelOnly(&BashTool{}))
 }
 
 func TestSkillTool_Description(t *testing.T) {

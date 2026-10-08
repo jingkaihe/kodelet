@@ -75,6 +75,17 @@ func TestLocalEnvironmentCodeModeRequiresOptInAndAuthorization(t *testing.T) {
 	}
 }
 
+func TestSnapshotManifestMarksModelOnlyTools(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	manifest := snapshotManifest(t.Context(), tools.NewBasicState(t.Context()), nil)
+	skill, found := manifest.ToolDefinition("skill")
+	require.True(t, found)
+	assert.True(t, skill.ModelOnly)
+	bash, found := manifest.ToolDefinition("bash")
+	require.True(t, found)
+	assert.False(t, bash.ModelOnly)
+}
+
 func TestLocalEnvironmentPinsManifestForRun(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

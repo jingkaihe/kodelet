@@ -224,8 +224,17 @@ type groupedTool struct{ namedTool }
 
 func (groupedTool) ToolGroup() string { return "mcp/test" }
 
+type modelOnlyTool struct{ namedTool }
+
+func (modelOnlyTool) ModelOnly() bool { return true }
+
 func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
-	tools := []tooltypes.Tool{namedTool("bash"), namedTool("code_execute"), groupedTool{namedTool("search_issues")}}
+	tools := []tooltypes.Tool{
+		namedTool("bash"),
+		namedTool("code_execute"),
+		groupedTool{namedTool("search_issues")},
+		modelOnlyTool{namedTool("skill")},
+	}
 	state := &toolState{tools: tools}
 	for _, mode := range []string{"off", "on", "only"} {
 		t.Run(mode, func(t *testing.T) {
@@ -235,23 +244,27 @@ func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 					{Name: "bash", Tool: tools[0]},
 					{Name: "code_execute", Tool: tools[1]},
 					{Name: "search_issues", Tool: tools[2]},
+					{Name: "skill", Tool: tools[3], ModelOnly: true},
 				}}},
 			}
 			want := tools
 			if mode == "only" {
-				want = tools[1:2]
+				want = []tooltypes.Tool{tools[1], tools[3]}
 			}
 			assert.Equal(t, want, AvailableEnvironmentToolsForThread(thread, false))
 			assert.Equal(t, want, AvailableToolsForThread(thread, state, false))
 			assert.Equal(t, want, AvailableToolsForThread(thread.threadStub, state, false), "state-based advertisement follows the same mode")
 			assert.True(t, ToolAllowedForThread(thread, "bash"), "core tools remain callable from scripts")
 			assert.True(t, ToolAllowedForThread(thread, "search_issues"), "hiding a schema must not change authorization")
-			assert.Len(t, state.Tools(), 3, "the underlying callable state is unchanged")
+			assert.Len(t, state.Tools(), 4, "the underlying callable state is unchanged")
 			assert.Empty(t, AvailableEnvironmentToolsForThread(thread, true))
 			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash", "search_issues"})
 			if mode == "only" {
 				assert.Empty(t, AvailableEnvironmentToolsForThread(thread, false), "never fall back when code_execute is denied")
 				assert.Empty(t, AvailableToolsForThread(thread.threadStub, state, false))
+				thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash", "skill"})
+				assert.Equal(t, []tooltypes.Tool{tools[3]}, AvailableEnvironmentToolsForThread(thread, false),
+					"model-only tools stay declared without code_execute")
 			} else {
 				assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, AvailableEnvironmentToolsForThread(thread, false))
 			}

@@ -28,8 +28,11 @@ type ToolDefinition struct {
 	InputSchema  map[string]any `json:"inputSchema"`
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	Group        string         `json:"group,omitempty"`
-	Placement    ToolPlacement  `json:"placement"`
-	Tool         tooltypes.Tool `json:"-"`
+	// ModelOnly tools are declared to the model directly in every code mode
+	// and are never callable from code-execution scripts.
+	ModelOnly bool           `json:"modelOnly,omitempty"`
+	Placement ToolPlacement  `json:"placement"`
+	Tool      tooltypes.Tool `json:"-"`
 }
 
 // Manifest is the immutable environment snapshot pinned to one top-level run.

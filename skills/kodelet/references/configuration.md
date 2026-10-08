@@ -232,7 +232,7 @@ Code mode lets the model call tools from JavaScript scripts through the `code_ex
 code_mode: on # off (default), on, or only
 ```
 
-- `on` adds `code_execute` alongside ordinary tools; `only` advertises just `code_execute`, and the model reaches every other permitted tool from scripts.
+- `on` adds `code_execute` alongside ordinary tools; `only` advertises just `code_execute` and the `skill` tool, and the model reaches every other permitted tool from scripts.
 - Scripts can call only tools the agent is already allowed to use, and hooks still apply. A tool allowlist must include `code_execute` and each tool the scripts need.
 - `only` disables provider-native web search and has no fallback to ordinary tool calls.
 - Both the daemon and the runner must support code mode. Limits and behavior are described in the manual's "Tool calls as code" section.

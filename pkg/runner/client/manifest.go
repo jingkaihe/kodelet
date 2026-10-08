@@ -95,6 +95,7 @@ func buildWireManifest(
 		if codeExecution {
 			wireTools[len(wireTools)-1].OutputSchema = cloneJSONMap(definition.OutputSchema)
 			wireTools[len(wireTools)-1].Group = definition.Group
+			wireTools[len(wireTools)-1].ModelOnly = definition.ModelOnly
 		}
 		if extensionTool, ok := definition.Tool.(*extensions.Tool); ok {
 			wireTools[len(wireTools)-1].ExtensionID = extensionTool.ExtensionID()

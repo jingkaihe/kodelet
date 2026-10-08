@@ -47,7 +47,9 @@ func (r *Registry) registerCodeParent(ctx context.Context, params runnerpayload.
 	}
 	available := make(map[string]bool, len(manifest.Tools))
 	for _, definition := range manifest.Tools {
-		available[definition.Name] = definition.Placement == "environment" && manifest.Config.Options.ToolAllowed(definition.Name)
+		// Model-only tools are declared directly and never callable from scripts.
+		available[definition.Name] = definition.Placement == "environment" && !definition.ModelOnly &&
+			manifest.Config.Options.ToolAllowed(definition.Name)
 	}
 	if !available["code_execute"] {
 		return nil, errors.New("code execution is not available in the pinned manifest")

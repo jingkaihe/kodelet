@@ -78,7 +78,7 @@ func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Too
 		for _, tool := range availableTools {
 			// Apply the same advertisement rule to both the environment and
 			// state fallback paths, without changing the callable tool catalog.
-			if tool != nil && config.CodeMode == "only" && tool.Name() != "code_execute" {
+			if tool != nil && config.CodeMode == "only" && tool.Name() != "code_execute" && !tooltypes.IsModelOnly(tool) {
 				continue
 			}
 			if tool != nil && config.ExecutionOptions.ToolAllowed(tool.Name()) {

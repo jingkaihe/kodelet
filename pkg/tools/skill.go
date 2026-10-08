@@ -200,6 +200,11 @@ func (t *SkillTool) Execute(_ context.Context, _ tooltypes.State, parameters str
 	}
 }
 
+// ModelOnly keeps the skill tool out of code-execution scripts. Its instructions
+// only reach the model through the direct tool result, and loading a skill marks
+// it active, so a script call would consume the skill without delivering it.
+func (t *SkillTool) ModelOnly() bool { return true }
+
 // GetResult returns the result string
 func (r *SkillToolResult) GetResult() string {
 	return fmt.Sprintf("Skill '%s' loaded", r.skillName)

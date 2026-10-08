@@ -1149,6 +1149,26 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 	require.ErrorContains(t, err, "collides with a reserved server tool")
 }
 
+func TestBuildWireManifestSendsModelOnlyWithCodeMode(t *testing.T) {
+	local := agentenv.Manifest{
+		WorkingDirectory: t.TempDir(),
+		Tools: []agentenv.ToolDefinition{{
+			Name:        "skill",
+			InputSchema: map[string]any{"type": "object"},
+			ModelOnly:   true,
+			Placement:   agentenv.ToolPlacementEnvironment,
+		}},
+	}
+	// Legacy decoders rehash after dropping unknown fields, so the flag is only
+	// sent when code mode is negotiated.
+	for mode, want := range map[string]bool{"": false, "off": false, "on": true, "only": true} {
+		manifest, err := buildWireManifest(local, llmtypes.Config{CodeMode: mode}, nil, "runner-1", "run-1", 1, nil)
+		require.NoError(t, err)
+		require.Len(t, manifest.Tools, 1)
+		assert.Equal(t, want, manifest.Tools[0].ModelOnly, mode)
+	}
+}
+
 func TestServiceAllowsExtensionConversationReader(t *testing.T) {
 	service, peer := newSessionTestService(t, llmtypes.Config{AllowedTools: []string{"read_conversation"}})
 	peer.registration.Tools = []extensions.ToolRegistration{{

@@ -405,13 +405,22 @@ func TestCodeExecutionSnapshotsEffectiveCallableSet(t *testing.T) {
 		{name: "agent init narrows catalog", allowed: []string{"code_execute", "search_issues"}, want: []string{"search_issues"}},
 		{name: "empty callable set remains explicit", allowed: []string{"code_execute"}, want: []string{}},
 		{name: "empty agent init denies parent", allowed: []string{}, blocked: true},
+		{
+			name:    "model-only tools are never callable",
+			allowed: []string{"code_execute", "skill", "search_issues"},
+			want:    []string{"search_issues"},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dispatched := false
 			environment := &recordingAgentEnvironment{
 				open: true,
 				manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
-					{Name: "bash"}, {Name: "code_execute"}, {Name: "search_issues", Group: "mcp/test"}, {Name: "host_forbidden"},
+					{Name: "bash"},
+					{Name: "code_execute"},
+					{Name: "search_issues", Group: "mcp/test"},
+					{Name: "host_forbidden"},
+					{Name: "skill", ModelOnly: true},
 				}},
 				executeTool: func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
 					dispatched = true
@@ -423,7 +432,7 @@ func TestCodeExecutionSnapshotsEffectiveCallableSet(t *testing.T) {
 			thread := &environmentThreadStub{
 				environment: environment,
 				threadStub: &threadStub{config: llmtypes.Config{
-					CodeMode: "only", AllowedTools: []string{"code_execute", "bash", "search_issues"},
+					CodeMode: "only", AllowedTools: []string{"code_execute", "bash", "search_issues", "skill"},
 				}},
 			}
 			if test.allowed != nil {

@@ -31,7 +31,10 @@ type ToolDefinition struct {
 	InputSchema  map[string]any `json:"inputSchema"`
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	Group        string         `json:"group,omitempty"`
-	Placement    string         `json:"placement"`
+	// ModelOnly tools are declared directly in every code mode and are never
+	// callable from code-execution scripts. Sent only when code mode is negotiated.
+	ModelOnly bool   `json:"modelOnly,omitempty"`
+	Placement string `json:"placement"`
 }
 
 // SkillDefinition describes a skill owned and pinned by the runner.

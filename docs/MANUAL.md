@@ -1818,7 +1818,7 @@ code_mode: on
 | --- | --- |
 | `off` (default) | Ordinary tool calls only. |
 | `on` | Adds the `code_execute` tool alongside ordinary tools. |
-| `only` | Shows only `code_execute`; all other tools are used through scripts. |
+| `only` | Shows only `code_execute` and the `skill` tool; all other tools are used through scripts. |
 
 Scripts run in a sandbox and can use only the tools the agent is already allowed to use; existing permissions and hooks still apply. If you use a tool allowlist, include `code_execute` and the tools scripts need. In `only` mode, provider-native web search is unavailable; use `on` if you need it. Both the daemon and the runner must support code mode.
 

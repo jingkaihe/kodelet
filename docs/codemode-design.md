@@ -4,7 +4,7 @@
 
 Implemented as an opt-in feature: runner-side QuickJS/WASM execution, async catalog discovery, shared direct/nested tool execution, machine results, parent-only renderers, explicit image/artifact emission, and `off`/`on`/`only` advertisement. Saved scripts and non-image artifacts remain deferred. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
 
-Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results are processed runner-locally; selected output, bounded progress, and final UI-only child details return to the control plane. In `on` mode keep ordinary tools directly available alongside code execution; in `only` mode advertise just `code_execute`, with core, extension, and MCP tools discovered through the authorized catalog.
+Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results are processed runner-locally; selected output, bounded progress, and final UI-only child details return to the control plane. In `on` mode keep ordinary tools directly available alongside code execution; in `only` mode advertise just `code_execute` and model-only tools such as `skill`, with core, extension, and MCP tools discovered through the authorized catalog.
 
 The model writes ordinary JavaScript, passes plain objects, receives predictable JSON results, and explicitly chooses what to return. No imports, generated client classes, package installation, or persistent interpreter state are required.
 
@@ -166,12 +166,12 @@ Keep the initial advertisement configuration small:
 | Mode | Direct model declarations | Script-callable tools |
 | --- | --- | --- |
 | `off` | Existing behavior | None |
-| `on` | Existing tools plus `code_execute` | Authorized host tools |
-| `only` | Only `code_execute` | Same authorized host tools, including core tools |
+| `on` | Existing tools plus `code_execute` | Authorized host tools except model-only tools |
+| `only` | `code_execute` and model-only tools | Same authorized host tools, including core tools |
 
 Keep `off` as the default. Any other value is rejected with a configuration error rather than silently changing semantics. Do not implement `only` by changing `AllowedTools`: the full permitted manifest remains the source for discovery, child authorization, and `agent.init` policy, while only the provider-facing declarations are reduced.
 
-`only` means exactly one advertised tool when permitted, with no fallback to direct tools if `code_execute` is denied. Explicit no-tools requests still advertise no tools. An incompatible daemon/runner must produce a clear compatibility error rather than downgrading `only` to ordinary calls; `on` may retain its ordinary tools with an older daemon. Provider-native web search is suppressed in `only` because it is not callable through the runner catalog; use `on` when native search is needed. Both provider adapters and state-based advertisement must follow these rules.
+`only` advertises `code_execute` plus any permitted model-only tools, with no fallback to other direct tools if `code_execute` is denied. A model-only tool (`tooltypes.ModelOnlyTool`) returns content meant for the model's own context, so a script could not use its result: `skill` delivers its instructions only through the direct tool result, and a script call would mark the skill active without delivering them. Model-only tools are therefore declared directly in every mode, excluded from the catalog and callable set, and rejected by both the runner and the central registry if a callable set names them. Its description also carries the skills index, which keeps skills discoverable in `only` mode. The manifest carries the flag only when code mode is negotiated, preserving the legacy wire shape. Explicit no-tools requests still advertise no tools. An incompatible daemon/runner must produce a clear compatibility error rather than downgrading `only` to ordinary calls; `on` may retain its ordinary tools with an older daemon. Provider-native web search is suppressed in `only` because it is not callable through the runner catalog; use `on` when native search is needed. Both provider adapters and state-based advertisement must follow these rules.
 
 ## 3. Machine results and errors
 

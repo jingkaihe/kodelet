@@ -60,6 +60,20 @@ type ToolGroupProvider interface {
 	ToolGroup() string
 }
 
+// ModelOnlyTool marks a tool whose result is meant for the model's own context,
+// such as skill instructions. Code mode declares such a tool to the model
+// directly in every mode, and code-execution scripts can never call it.
+type ModelOnlyTool interface {
+	ModelOnly() bool
+}
+
+// IsModelOnly reports whether a tool is declared directly to the model and
+// excluded from code-execution scripts.
+func IsModelOnly(tool Tool) bool {
+	modelOnly, ok := tool.(ModelOnlyTool)
+	return ok && modelOnly.ModelOnly()
+}
+
 // JSONSchemaForTool returns the model-facing schema without narrowing raw
 // extension schemas through the typed jsonschema representation.
 func JSONSchemaForTool(tool Tool) map[string]any {

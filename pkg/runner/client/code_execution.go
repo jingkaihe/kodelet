@@ -54,7 +54,8 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 	}
 	available := make(map[string]runnerpayload.ToolDefinition, len(run.manifest.Tools))
 	for _, definition := range run.manifest.Tools {
-		if definition.Placement == "environment" {
+		// Model-only tools are declared directly and never callable from scripts.
+		if definition.Placement == "environment" && !definition.ModelOnly {
 			available[definition.Name] = definition
 		}
 	}

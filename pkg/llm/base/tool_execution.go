@@ -120,7 +120,8 @@ func executeEnvironmentTool(
 		}
 		callable := []string{}
 		for _, definition := range manifest.Tools {
-			if definition.Name != "code_execute" && ToolAllowedForThread(thread, definition.Name) {
+			// Model-only tools are declared directly and never callable from scripts.
+			if definition.Name != "code_execute" && !definition.ModelOnly && ToolAllowedForThread(thread, definition.Name) {
 				callable = append(callable, definition.Name)
 			}
 		}

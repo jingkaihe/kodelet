@@ -152,7 +152,7 @@ func TestRunnerMachineDataStaysRunnerLocal(t *testing.T) {
 func TestRunnerCodeAuthorization(t *testing.T) {
 	for _, name := range []string{
 		"missing metadata", "wrong digest", "old central", "old runner", "missing parent", "missing child",
-		"recursive", "empty", "agent restriction", "no tools", "command restriction", "no peer",
+		"recursive", "model only", "empty", "agent restriction", "no tools", "command restriction", "no peer",
 	} {
 		t.Run(name, func(t *testing.T) {
 			service, run, _, params := newCodeService(t, &codeTestEnvironment{})
@@ -171,6 +171,13 @@ func TestRunnerCodeAuthorization(t *testing.T) {
 				params.CallableTools = new([]string{"hidden"})
 			case "recursive":
 				params.CallableTools = new([]string{"code_execute"})
+			case "model only":
+				run.manifest.Tools = append(run.manifest.Tools, runnerpayload.ToolDefinition{
+					Name:      "skill",
+					Placement: "environment",
+					ModelOnly: true,
+				})
+				params.CallableTools = new([]string{"test_tool", "skill"})
 			case "empty":
 				params.CallableTools = new([]string{})
 			case "agent restriction":

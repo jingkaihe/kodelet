@@ -46,12 +46,15 @@ func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []toolt
 	// Advertisement is separate from authorization: the full permitted catalog
 	// remains callable inside code_execute, including core tools. No fallback
 	// exposes those tools directly when the parent is unavailable or denied.
+	// Model-only tools, such as skill, are never script-callable, so they stay
+	// declared directly whenever they are permitted.
+	var advertised []tooltypes.Tool
 	for _, tool := range available {
-		if tool != nil && tool.Name() == "code_execute" {
-			return []tooltypes.Tool{tool}
+		if tool != nil && (tool.Name() == "code_execute" || tooltypes.IsModelOnly(tool)) {
+			advertised = append(advertised, tool)
 		}
 	}
-	return nil
+	return advertised
 }
 
 func availableTools(state tooltypes.State, noToolUse bool, allowed []string) []tooltypes.Tool {

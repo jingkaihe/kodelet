@@ -141,9 +141,12 @@ func TestBuildToolsForThreadNativeSearch(t *testing.T) {
 			state := tools.NewBasicState(t.Context(), tools.WithLLMConfig(config), tools.WithExtensionTools([]tooltypes.Tool{&tools.CodeExecuteTool{}}))
 			toolDefs := buildToolsForThread(thread, state, false)
 			if tt.codeMode == "only" {
-				require.Len(t, toolDefs, 1)
-				require.NotNil(t, toolDefs[0].OfFunction)
-				assert.Equal(t, "code_execute", toolDefs[0].OfFunction.Name)
+				names := make([]string, 0, len(toolDefs))
+				for _, toolDef := range toolDefs {
+					require.NotNil(t, toolDef.OfFunction)
+					names = append(names, toolDef.OfFunction.Name)
+				}
+				assert.ElementsMatch(t, []string{"code_execute", "skill"}, names, "only mode keeps model-only tools declared")
 			}
 			if tt.wantSearch {
 				require.NotEmpty(t, toolDefs)
