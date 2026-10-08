@@ -2,6 +2,7 @@ package codemode
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"encoding/json"
 	"strings"
@@ -26,9 +27,15 @@ var runtimePrelude string
 // memory, runtime globals, callbacks, pending promises, and cancellation context.
 var runtimeCompileCache = wazero.NewCompilationCache()
 
+// diagnosticBytes bounds a formatted failure read from the VM. The prelude caps
+// each formatted field so even fully escaped JSON fits within this budget.
+const diagnosticBytes = 64 << 10
+
 type runtimeRejection struct {
 	promise uint64
 	reason  uint64
+	// sequence orders rejections so the earliest one is reported deterministically.
+	sequence uint64
 }
 
 type runtimeVM struct {
@@ -44,6 +51,7 @@ type runtimeVM struct {
 	scratch     uint64
 	fatal       error
 	rejections  map[uint32]runtimeRejection
+	rejectionID uint64
 }
 
 func newRuntimeVM(ctx context.Context, bridge *runtimeBridge, limits runtimeLimits) (_ *runtimeVM, err error) {
@@ -60,8 +68,10 @@ func newRuntimeVM(ctx context.Context, bridge *runtimeBridge, limits runtimeLimi
 			vm.close()
 		}
 	}()
-	// The default WASI module config has no environment, argv, preopened
-	// directories, stdin, stdout/stderr writers, sockets, or host randomness.
+	// The WASI module config has no environment, argv, preopened directories,
+	// stdin, stdout/stderr writers, or sockets. It supplies the host wall clock,
+	// monotonic clock, and a cryptographic random source so Date, performance,
+	// and Math.random behave normally instead of using wazero's fixed fakes.
 	if _, err = wasi_snapshot_preview1.Instantiate(ctx, vm.runtime); err != nil {
 		return nil, err
 	}
@@ -85,7 +95,12 @@ func newRuntimeVM(ctx context.Context, bridge *runtimeBridge, limits runtimeLimi
 	if err != nil {
 		return nil, err
 	}
-	vm.module, err = vm.runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithStartFunctions("_initialize"))
+	moduleConfig := wazero.NewModuleConfig().
+		WithStartFunctions("_initialize").
+		WithSysWalltime().
+		WithSysNanotime().
+		WithRandSource(rand.Reader)
+	vm.module, err = vm.runtime.InstantiateModule(ctx, compiled, moduleConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +315,12 @@ func (vm *runtimeVM) checkException(value uint64) error {
 	return vm.reasonError(reason)
 }
 
+// reasonError formats a terminal failure. Formatting may execute guest code
+// (for example, a Proxy trap), so the bridge stops accepting host work and
+// output first. Every caller returns the resulting error from the invocation.
 func (vm *runtimeVM) reasonError(reason uint64) error {
+	vm.bridge.closed = true
+	vm.bridge.failing = true
 	if vm.ctx.Err() != nil {
 		return vm.ctx.Err()
 	}
@@ -317,7 +337,7 @@ func (vm *runtimeVM) reasonError(reason uint64) error {
 			value, callErr := vm.call("qjs_call", vm.formatError, vm.undefined, 1, pointer)
 			if callErr == nil && value != 0 {
 				defer vm.freeValue(value)
-				if data, readErr := vm.readString(value, vm.limits.outputBytes); readErr == nil {
+				if data, readErr := vm.readString(value, diagnosticBytes); readErr == nil {
 					var failure Error
 					if json.Unmarshal(data, &failure) == nil && failure.Message != "" {
 						if strings.Contains(failure.Message, "out of memory") {
@@ -367,6 +387,14 @@ func (vm *runtimeVM) dispatchHostCall(module api.Module, argc, argv uint32) erro
 		return err
 	}
 	data, err := vm.readString(uint64(payloadPointer), vm.limits.requestBytes)
+	var limit *Error
+	if errors.As(err, &limit) && limit.Kind == "limit" {
+		// The prelude adds tool provenance; the payload was never decoded here.
+		if string(operation) == "submit" {
+			return &Error{Kind: "limit", Message: "host request exceeds the byte limit"}
+		}
+		return &Error{Kind: "limit", Message: "selected output limit exceeded"}
+	}
 	if err != nil {
 		return err
 	}
@@ -406,7 +434,12 @@ func (vm *runtimeVM) promiseRejection(promise, reason, handled uint32) {
 		vm.fatal = &Error{Kind: "limit", Message: "too many unhandled promise rejections"}
 		return
 	}
-	vm.rejections[uint32(identity)] = runtimeRejection{promise: uint64(promise), reason: uint64(reason)}
+	vm.rejectionID++
+	vm.rejections[uint32(identity)] = runtimeRejection{
+		promise:  uint64(promise),
+		reason:   uint64(reason),
+		sequence: vm.rejectionID,
+	}
 }
 
 func (vm *runtimeVM) execute(code string) error {
@@ -474,7 +507,7 @@ func (vm *runtimeVM) execute(code string) error {
 			return err
 		}
 		if jobsPending == 0 {
-			for _, rejection := range vm.rejections {
+			if rejection, ok := vm.earliestRejection(); ok {
 				return vm.reasonError(rejection.reason)
 			}
 			if len(vm.bridge.pending) == 0 {
@@ -507,6 +540,17 @@ func (vm *runtimeVM) execute(code string) error {
 			}
 		}
 	}
+}
+
+func (vm *runtimeVM) earliestRejection() (runtimeRejection, bool) {
+	var earliest runtimeRejection
+	found := false
+	for _, rejection := range vm.rejections {
+		if !found || rejection.sequence < earliest.sequence {
+			earliest, found = rejection, true
+		}
+	}
+	return earliest, found
 }
 
 func (vm *runtimeVM) emitValue(value uint64) error {

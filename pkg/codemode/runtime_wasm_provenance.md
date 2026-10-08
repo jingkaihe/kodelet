@@ -28,7 +28,7 @@ Normal `mise` build, build-dev, lint, and test tasks generate the runtime automa
 
 `TestRuntimeArtifactIntegrity` also checks the embedded digest in the Go tests. To update the runtime, review the new upstream package, update the exact dependency and lockfile, and update the reviewed SHA-256 in `generate-runtime.mjs` and the integrity test together with these pins and licenses. Upstream provides its build recipe in `Makefile` using WASI SDK 32 and optional Binaryen optimization; regeneration from the pinned published artifact, rather than an unpinned local compiler rebuild, is the deterministic artifact update procedure.
 
-The binary imports only the upstream host callback/module-loader stubs and six WASI clock/random/descriptor functions. Kodelet supplies no preopened filesystem, inherited environment, host streams, network, or optional extensions. Modules have a hard linear-memory limit and are interrupted when their context expires. The QuickJS native host callback uses reentrant C value-marshalling exports on the VM owner only; it never invokes guest callbacks, drains jobs, waits for tool work, or enters the VM from a worker.
+The binary imports only the upstream host callback/module-loader stubs and six WASI clock/random/descriptor functions. Kodelet supplies the host wall clock, monotonic clock, and a cryptographic random source, but no preopened filesystem, inherited environment, host streams, network, or optional extensions. Modules have a hard linear-memory limit and are interrupted when their context expires. The QuickJS native host callback uses reentrant C value-marshalling exports on the VM owner only; it never invokes guest callbacks, drains jobs, waits for tool work, or enters the VM from a worker.
 
 ## Licenses
 

@@ -34,6 +34,9 @@ const MaxHostResponseBytes = 2 << 20
 // MaxConcurrentToolCalls bounds active children in both the VM and runner registry.
 const MaxConcurrentToolCalls = 8
 
+// MaxScriptBytes bounds the submitted async function body, before wrapping.
+const MaxScriptBytes = 128 << 10
+
 // OutputItem is a selected JSON value, image, or artifact reference. Type is
 // "json", "image", or "artifact", set by the host operation rather than inferred
 // from an emitted JSON value. Value is used only for JSON; ArtifactID is used
@@ -61,8 +64,26 @@ type Error struct {
 	Result  json.RawMessage `json:"result,omitempty"`
 }
 
-// Error implements error.
-func (e *Error) Error() string { return e.Message }
+// Error implements error. Tool failures name the tool, failure kind, and
+// outcome, so callers that read only the message can tell what failed and
+// whether it ran. Message itself remains the unmodified host or script text.
+func (e *Error) Error() string {
+	if e.Tool == "" {
+		return e.Message
+	}
+	var details []string
+	if e.Kind != "" {
+		details = append(details, e.Kind)
+	}
+	if e.Outcome != "" {
+		details = append(details, "outcome "+e.Outcome)
+	}
+	prefix := "tool " + e.Tool + " failed"
+	if len(details) > 0 {
+		prefix += " (" + strings.Join(details, ", ") + ")"
+	}
+	return prefix + ": " + e.Message
+}
 
 type runtimeLimits struct {
 	timeout         time.Duration
@@ -84,7 +105,7 @@ func defaultRuntimeLimits() runtimeLimits {
 	return runtimeLimits{
 		timeout:         120 * time.Second,
 		memoryBytes:     256 << 20,
-		scriptBytes:     256 << 10,
+		scriptBytes:     MaxScriptBytes,
 		requestBytes:    2 << 20,
 		responseBytes:   MaxHostResponseBytes,
 		outputBytes:     32 << 10,
@@ -93,7 +114,8 @@ func defaultRuntimeLimits() runtimeLimits {
 		catalogCalls:    256,
 		pendingCalls:    256,
 		toolConcurrency: MaxConcurrentToolCalls,
-		// Reserve a response slot for catalog work even when every tool worker is active.
+		// One maximum-size response per tool worker plus one dedicated to catalog
+		// work, so tool completions can never occupy every response reservation.
 		retainedBytes:  (MaxConcurrentToolCalls + 1) * MaxHostResponseBytes,
 		unhandledCount: 256,
 	}
@@ -144,58 +166,71 @@ type runtimeRequest struct {
 }
 
 type runtimeCompletion struct {
-	ID       uint32          `json:"id"`
-	Success  bool            `json:"success"`
-	Value    json.RawMessage `json:"value"`
-	reserved bool
-	request  Request
+	ID      uint32          `json:"id"`
+	Success bool            `json:"success"`
+	Value   json.RawMessage `json:"value"`
+	// slot is the response reservation released when the VM consumes this completion.
+	slot    chan struct{}
+	request Request
 }
 
 // Channels are shared with workers; other bridge bookkeeping is VM-owned.
 type runtimeBridge struct {
-	ctx           context.Context
-	handler       Handler
-	validator     func(OutputItem) error
-	limits        runtimeLimits
-	result        *Result
-	tools         chan runtimeRequest
-	catalog       chan runtimeRequest
-	completions   chan runtimeCompletion
-	responseSlots chan struct{}
-	pending       map[uint32]int
-	lastID        uint32
-	toolCalls     int
-	catalogCalls  int
-	requestBytes  int
-	outputBytes   int
-	mediaCount    int
-	closed        bool
+	ctx         context.Context
+	handler     Handler
+	validator   func(OutputItem) error
+	limits      runtimeLimits
+	result      *Result
+	tools       chan runtimeRequest
+	catalog     chan runtimeRequest
+	completions chan runtimeCompletion
+	// Tool and catalog workers reserve responses from separate pools, so
+	// completed-but-unconsumed tool work cannot starve catalog discovery.
+	toolSlots    chan struct{}
+	catalogSlots chan struct{}
+	pending      map[uint32]int
+	lastID       uint32
+	toolCalls    int
+	catalogCalls int
+	requestBytes int
+	outputBytes  int
+	mediaCount   int
+	closed       bool
+	// failing is set before a terminal failure is formatted. Formatting may run
+	// guest code, which must not start host work or select more output.
+	failing bool
 }
 
 func newRuntimeBridge(ctx context.Context, handler Handler, validator func(OutputItem) error, limits runtimeLimits, result *Result) *runtimeBridge {
+	// The retained response budget is split into one catalog reservation and up
+	// to one reservation per tool worker. Each pool keeps at least one slot.
+	responseSlots := limits.retainedBytes / limits.responseBytes
+	toolSlots := max(1, min(limits.toolConcurrency, responseSlots-1))
 	return &runtimeBridge{
-		ctx:           ctx,
-		handler:       handler,
-		validator:     validator,
-		limits:        limits,
-		result:        result,
-		tools:         make(chan runtimeRequest, limits.pendingCalls),
-		catalog:       make(chan runtimeRequest, limits.pendingCalls),
-		completions:   make(chan runtimeCompletion, limits.pendingCalls),
-		responseSlots: make(chan struct{}, max(1, limits.retainedBytes/limits.responseBytes)),
-		pending:       make(map[uint32]int),
+		ctx:          ctx,
+		handler:      handler,
+		validator:    validator,
+		limits:       limits,
+		result:       result,
+		tools:        make(chan runtimeRequest, limits.pendingCalls),
+		catalog:      make(chan runtimeRequest, limits.pendingCalls),
+		completions:  make(chan runtimeCompletion, limits.pendingCalls),
+		toolSlots:    make(chan struct{}, toolSlots),
+		catalogSlots: make(chan struct{}, 1),
+		pending:      make(map[uint32]int),
 	}
 }
 
 func (b *runtimeBridge) startWorkers() {
 	for range b.limits.toolConcurrency {
-		go b.worker(b.tools)
+		go b.worker(b.tools, b.toolSlots)
 	}
-	// Catalog operations share one bounded worker, not the tool semaphore.
-	go b.worker(b.catalog)
+	// Catalog operations share one bounded worker and response reservation,
+	// not the tool semaphore or tool response pool.
+	go b.worker(b.catalog, b.catalogSlots)
 }
 
-func (b *runtimeBridge) worker(queue <-chan runtimeRequest) {
+func (b *runtimeBridge) worker(queue <-chan runtimeRequest, slots chan struct{}) {
 	for {
 		select {
 		case <-b.ctx.Done():
@@ -204,24 +239,24 @@ func (b *runtimeBridge) worker(queue <-chan runtimeRequest) {
 			// Reserve capacity before executing the handler. Queue saturation
 			// must not convert a completed tool into an unrecorded delivery error.
 			select {
-			case b.responseSlots <- struct{}{}:
+			case slots <- struct{}{}:
 			case <-b.ctx.Done():
 				return
 			}
 			if b.ctx.Err() != nil {
-				<-b.responseSlots
+				<-slots
 				return
 			}
 			completion := b.handle(request)
-			completion.reserved = true
+			completion.slot = slots
 			if b.ctx.Err() != nil {
-				<-b.responseSlots
+				<-slots
 				return
 			}
 			select {
 			case b.completions <- completion:
 			case <-b.ctx.Done():
-				<-b.responseSlots
+				<-slots
 				return
 			}
 		}
@@ -322,7 +357,7 @@ func (b *runtimeBridge) submit(data []byte) (err error) {
 			failure.Outcome = "not_started"
 		}
 	}()
-	if b.closed || b.ctx.Err() != nil {
+	if b.closed || b.failing || b.ctx.Err() != nil {
 		return &Error{Kind: "cancelled", Message: "invocation no longer accepts host requests"}
 	}
 	if len(data) > b.limits.requestBytes {
@@ -450,6 +485,9 @@ func (b *runtimeBridge) emitMedia(outputType string, data json.RawMessage) error
 }
 
 func (b *runtimeBridge) appendOutput(item OutputItem, size int) error {
+	if b.failing {
+		return &Error{Kind: "cancelled", Message: "invocation failed and no longer accepts output"}
+	}
 	if b.outputBytes+size > b.limits.outputBytes || len(b.result.Outputs) >= b.limits.outputCount {
 		return &Error{Kind: "limit", Message: "selected output limit exceeded"}
 	}
@@ -480,8 +518,8 @@ func (b *runtimeBridge) consume(completion runtimeCompletion) bool {
 	}
 	b.requestBytes -= size
 	delete(b.pending, completion.ID)
-	if completion.reserved {
-		<-b.responseSlots
+	if completion.slot != nil {
+		<-completion.slot
 	}
 	return true
 }

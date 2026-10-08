@@ -330,6 +330,7 @@ return await Promise.allSettled([tools.delete({})]);
 	assert.Equal(t, "child-7", failure.CallID)
 	assert.Equal(t, "not_started", failure.Outcome)
 	assert.Equal(t, "not permitted", failure.Message)
+	assert.Equal(t, "tool delete failed (blocked, outcome not_started): not permitted", err.Error())
 }
 
 func TestRuntimeParallelToolsAndIndependentCatalog(t *testing.T) {
@@ -485,17 +486,16 @@ return [typeof leaked, typeof process, typeof require, typeof fetch,
 
 func TestRuntimeErrorsAndUnhandledRejections(t *testing.T) {
 	for name, code := range map[string]string{
-		"syntax":          `const = ;`,
-		"throw":           `throw new Error("broken");`,
-		"unhandled":       `Promise.reject(new Error("unhandled")); return 1;`,
-		"host unhandled":  `tools.nope({});`,
-		"nested promise":  `return {value:Promise.resolve(1)};`,
-		"emit promise":    `emit(Promise.resolve(1));`,
-		"non-finite":      `return NaN;`,
-		"function":        `return () => 1;`,
-		"undefined field": `return {nope:undefined};`,
-		"cycle":           `const value = {}; value.self = value; return value;`,
-		"unresolved":      `await new Promise(() => {});`,
+		"syntax":         `const = ;`,
+		"throw":          `throw new Error("broken");`,
+		"unhandled":      `Promise.reject(new Error("unhandled")); return 1;`,
+		"host unhandled": `tools.nope({});`,
+		"nested promise": `return {value:Promise.resolve(1)};`,
+		"emit promise":   `emit(Promise.resolve(1));`,
+		"non-finite":     `return NaN;`,
+		"function":       `return () => 1;`,
+		"cycle":          `const value = {}; value.self = value; return value;`,
+		"unresolved":     `await new Promise(() => {});`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Execute(context.Background(), code, nil)
@@ -545,8 +545,10 @@ func TestRuntimeHostValidationAndLimits(t *testing.T) {
 		assert.Contains(t, err.Error(), "limit")
 	})
 	t.Run("script", func(t *testing.T) {
-		_, err := Execute(context.Background(), strings.Repeat(" ", 256<<10+1), nil)
+		_, err := Execute(context.Background(), strings.Repeat(" ", MaxScriptBytes+1), nil)
 		require.ErrorContains(t, err, "script byte limit")
+		_, err = Execute(context.Background(), strings.Repeat(" ", MaxScriptBytes), nil)
+		require.NoError(t, err)
 	})
 	t.Run("host response", func(t *testing.T) {
 		limits := defaultRuntimeLimits()

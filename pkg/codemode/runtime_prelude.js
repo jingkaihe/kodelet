@@ -23,12 +23,31 @@
   const remove = Map.prototype.delete.bind(pending);
   const isFiniteNumber = Number.isFinite;
   const toString = String;
+  const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  const apply = Reflect.apply;
+  const stringSlice = String.prototype.slice;
+  // Host-created errors are rejected from the settle callback, so their stack
+  // shows only runtime internals rather than the script's await site.
+  const hostErrors = new WeakSet();
+  const addHostError = WeakSet.prototype.add;
+  const isHostError = WeakSet.prototype.has;
+  // Captured before guest code runs, so failure formatting never calls a
+  // guest-defined stack accessor.
+  const nativeStack = getOwnPropertyDescriptor(NativeError.prototype, "stack");
+  const stackGetter = nativeStack !== undefined && typeof nativeStack.get === "function" ? nativeStack.get : undefined;
+  // Failure diagnostics are capped in UTF-16 units. Even when every unit is
+  // escaped as six JSON bytes, the formatted failure fits the host read limit.
+  const messageLimit = 4096;
+  const stackLimit = 2048;
+  const fieldLimit = 256;
   let nextID = 0;
 
   function serialize(value) {
-    return stringify(value, (_key, item) => {
+    const json = stringify(value, (_key, item) => {
       const type = typeof item;
-      if (type === "function" || type === "symbol" || type === "bigint" || type === "undefined") {
+      // Match JSON.stringify: omit undefined object fields, null in arrays.
+      if (type === "undefined") return undefined;
+      if (type === "function" || type === "symbol" || type === "bigint") {
         throw new NativeTypeError("Only JSON values can cross the host bridge");
       }
       if (type === "number" && !isFiniteNumber(item)) {
@@ -44,6 +63,8 @@
       }
       return item;
     });
+    if (typeof json !== "string") throw new NativeTypeError("Only JSON values can cross the host bridge");
+    return json;
   }
 
   function hostError(fields, operation) {
@@ -57,6 +78,7 @@
       }
     }
     define(error, "toJSON", { value: () => fields });
+    apply(addHostError, hostErrors, [error]);
     return error;
   }
 
@@ -69,7 +91,14 @@
         const failure = native("submit", payload);
         if (failure !== undefined) {
           remove(id);
-          reject(hostError(parse(failure), operation));
+          const fields = parse(failure);
+          // Admission failures happen before dispatch. Oversized payloads are
+          // rejected before the host can decode the tool name.
+          if (operation === "tool.call" && typeof args.name === "string") {
+            if (!hasOwn(fields, "tool")) fields.tool = args.name;
+            if (!hasOwn(fields, "outcome")) fields.outcome = "not_started";
+          }
+          reject(hostError(fields, operation));
         }
       } catch (error) {
         remove(id);
@@ -149,8 +178,39 @@
   } });
   freeze(emit);
   const console = freeze({
-    log: (...args) => emit(args.map(value => typeof value === "string" ? value : serialize(value)).join(" ")),
+    log: (...args) => emit(args.map(value => typeof value === "string" ? value
+      : value === undefined ? "undefined" : serialize(value)).join(" ")),
   });
+  // Failure formatting reads only data properties, so guest getters, Proxy
+  // results, and toString methods cannot change provenance or exceed limits.
+  function dataProperty(value, key) {
+    let target = value;
+    for (let depth = 0; depth < 32 && target !== null
+      && (typeof target === "object" || typeof target === "function"); depth++) {
+      const descriptor = getOwnPropertyDescriptor(target, key);
+      if (descriptor !== undefined) return hasOwn(descriptor, "value") ? descriptor.value : undefined;
+      target = getPrototypeOf(target);
+    }
+    return undefined;
+  }
+
+  function errorStack(error) {
+    const own = getOwnPropertyDescriptor(error, "stack");
+    if (own !== undefined) return hasOwn(own, "value") ? own.value : undefined;
+    if (stackGetter === undefined) return undefined;
+    try {
+      return apply(stackGetter, error, []);
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  function boundedText(value, limit) {
+    if (typeof value !== "string") return undefined;
+    if (value.length <= limit) return value;
+    return apply(stringSlice, value, [0, limit]) + "... [truncated]";
+  }
+
   for (const [name, value] of [["tools", tools], ["catalog", catalog], ["emit", emit], ["console", console]]) {
     define(globalThis, name, { value, enumerable: true });
   }
@@ -165,18 +225,34 @@
       else promise.reject(hostError(completion.value, promise.operation));
     },
     serialize,
+    // formatError returns a bounded diagnostic: message, provenance, and a
+    // trimmed stack. It never includes an error's optional result reply, which
+    // remains available to scripts that catch the error.
     formatError(error) {
-      const data = { kind: "script_error", message: "JavaScript execution failed" };
       try {
-        if (error instanceof NativeError) {
-          data.message = toString(error.message || error.name);
-          if (error.stack) data.message += "\n" + toString(error.stack);
-          for (const key of keys(error)) {
-            if (key !== "__proto__" && key !== "constructor" && key !== "toJSON") data[key] = error[key];
-          }
-        } else {
-          data.message = toString(error);
+        const data = create(null);
+        data.kind = "script_error";
+        data.message = "JavaScript execution failed";
+        if (error === null || (typeof error !== "object" && typeof error !== "function")) {
+          // Primitive conversion cannot run guest code.
+          data.message = boundedText(toString(error), messageLimit);
+          return stringify(data);
         }
+        const name = boundedText(dataProperty(error, "name"), fieldLimit);
+        const message = boundedText(dataProperty(error, "message"), messageLimit);
+        const stack = apply(isHostError, hostErrors, [error]) ? undefined
+          : boundedText(errorStack(error), stackLimit);
+        const kind = boundedText(dataProperty(error, "kind"), fieldLimit);
+        const tool = boundedText(dataProperty(error, "tool"), fieldLimit);
+        const callId = boundedText(dataProperty(error, "callId"), fieldLimit);
+        const outcome = boundedText(dataProperty(error, "outcome"), fieldLimit);
+        let text = message || name || "JavaScript threw a non-Error object";
+        if (stack) text += "\n" + stack;
+        data.message = text;
+        if (kind !== undefined) data.kind = kind;
+        if (tool !== undefined) data.tool = tool;
+        if (callId !== undefined) data.callId = callId;
+        if (outcome !== undefined) data.outcome = outcome;
         return stringify(data);
       } catch (_) {
         return '{"kind":"script_error","message":"JavaScript threw an unserializable error"}';

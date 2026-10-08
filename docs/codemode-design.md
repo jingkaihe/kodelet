@@ -201,7 +201,7 @@ interface ToolError extends Error {
 
 Only report `not_started` when the host knows dispatch did not begin. A returned tool error means the invocation completed, not that it had no side effects. A lost connection, timeout, or cancellation after dispatch can have an unknown outcome. Preserve useful sanitized error details, including in `Promise.allSettled` output, rather than serializing errors to `{}`.
 
-A caught child error does not automatically fail the script, but it remains visible in the final child-call summary. An uncaught exception or unhandled rejection fails the parent. Invalid or oversized child output is an output error after execution; never rerun the tool to obtain a smaller result.
+A caught child error does not automatically fail the script, but it remains visible in the final child-call summary. An uncaught exception or unhandled rejection fails the parent; when several rejections are unhandled, the earliest is reported. Before formatting a failure, the bridge stops accepting host requests and output, because formatting can run guest code. The diagnostic is bounded and contains only the message, kind, tool, call ID, outcome, and a trimmed stack, never the child's reply, which remains available to scripts that catch the error. Invalid or oversized child output is an output error after execution; never rerun the tool to obtain a smaller result.
 
 Failure output follows the same explicit-selection rule as successful output. For diagnostics, catch the error and emit `e.result?.text ?? e.message`, then rethrow if the parent should fail. The bootstrap description must advertise this optional effective reply so the model does not rerun a failed command merely to recover its output.
 
@@ -274,7 +274,7 @@ Model-helper requests, artifact transfers, conversation forks, and interactive U
 
 ## 5. Runtime, limits, and lifecycle
 
-The implementation uses QuickJS compiled to WebAssembly, embedded in the Go runner and hosted with wazero. The package pin, digest, provenance, and upstream licenses are recorded in `pkg/codemode/runtime_wasm_provenance.md`. Code generation installs the locked npm package and checksum-verifies its WASM before embedding it; the generated binary is gitignored. Node/npm are build-time generation dependencies, as for the frontend, but neither Node nor a C toolchain is required at runtime. The adapter provides async host calls, pending-job execution, hard context interruption, bounded memory, and no ambient filesystem/network/process access. It mounts no working directory and supplies no inherited environment or host streams to WASI.
+The implementation uses QuickJS compiled to WebAssembly, embedded in the Go runner and hosted with wazero. The package pin, digest, provenance, and upstream licenses are recorded in `pkg/codemode/runtime_wasm_provenance.md`. Code generation installs the locked npm package and checksum-verifies its WASM before embedding it; the generated binary is gitignored. Node/npm are build-time generation dependencies, as for the frontend, but neither Node nor a C toolchain is required at runtime. The adapter provides async host calls, pending-job execution, hard context interruption, bounded memory, and no ambient filesystem/network/process access. It mounts no working directory and supplies no inherited environment or host streams to WASI. It does supply the host wall clock, monotonic clock, and a cryptographic random source, so `Date`, `performance.now()`, and `Math.random()` behave normally rather than returning wazero's fixed defaults.
 
 A fresh VM is created per invocation; immutable compiled runtime code may be reused. One goroutine owns the VM. Child tool workers return JSON completions over a channel; they never enter the VM concurrently. No Node, Python, imports, `fetch`, environment access, timers, or persistent globals are exposed. This constrains the orchestration runtime, not the tools: an authorized `bash` call retains its existing host powers.
 
@@ -321,7 +321,7 @@ Initial host-enforced limits, to validate during the spike:
 | Resource | Initial bound |
 | --- | --- |
 | Script wall time, including awaited tools | 120 seconds, also bounded by parent cancellation |
-| VM memory | 256 MiB |
+| VM memory | 256 MiB of linear memory; the QuickJS heap is limited to 192 MiB (3/4), leaving headroom for marshalling and the WASM stack |
 | Submitted async function body | 128 KiB |
 | Child calls per invocation, including queued calls | 128 |
 | Simultaneously dispatched child calls | 8 |
@@ -332,7 +332,7 @@ Initial host-enforced limits, to validate during the spike:
 | JSON payload admitted to the VM per child | 2 MiB |
 | Final UI-only child details per invocation | 512 KiB aggregate; oversized details explicitly omitted |
 
-Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 18 MiB retained-byte budgets. The response budget accommodates eight tool workers plus one catalog worker at the 2 MiB response limit, so active tools cannot occupy every response slot and starve discovery. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
+Selected output also has a 1,024-entry bound, and queued request/response payloads have separate 18 MiB retained-byte budgets. The response budget holds one 2 MiB response per tool worker plus one reserved for the catalog worker. Tool and catalog workers reserve from separate pools, so completed-but-unconsumed tool responses can never starve discovery. Overflow is an explicit error, not an automatic spill/retry. Existing tool-owned artifact handling still applies.
 
 These are host policy, not script-controlled escape hatches. Also bound host-side result queues, aggregate retained payloads, and script input size; VM memory limits alone do not bound Go allocations. Use normal artifact storage for retained overflow when allowed, and report truncation/overflow explicitly rather than silently dropping selected output. Existing tool-level truncation remains visible through the reply contract.
 

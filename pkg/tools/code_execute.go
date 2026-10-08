@@ -84,7 +84,7 @@ Call tools with await tools[exact_registered_name](input). Successful calls retu
 Prefer batching independent tool calls and catalog queries in a single invocation with Promise.all to reduce round trips. Use Promise.allSettled when you need every outcome even if some calls fail. Keep dependent calls or operations that could conflict on shared state sequential; batch only work needed for the task.
 Only return values, emit(value), and console.log(...) are included as JSON/text. Await values before emitting them. Intermediate tool results stay local. Calls retain existing permissions and hooks. There is no automatic retry or rollback; a caught child error remains in the execution summary. Recursive code_execute is forbidden.
 Use emit.image(ref, {detail?: "original"}) to send image pixels to the model, or emit.artifact(ref) to retain an image artifact without sending pixels. A ref is an artifactId string or an attachment descriptor from an effective child reply in this invocation. For an existing artifact or local path, call tools.view_image first. Image emission requires view_image permission; original detail must be supported by the active model. Binary data, paths, and URLs are not accepted. Returning IDs or image-shaped JSON does not select media. Example: const r = await tools.view_image({path: "/tmp/chart.png"}); emit.image(r.attachments[0]);
-Limits: 120 seconds, 256 MiB VM memory, 128 child calls, 8 active child calls, 256 catalog requests, 32 KiB selected output, 8 media emissions (including duplicates). Additional child calls queue until a slot opens, within the invocation limits. Large child results are rejected rather than silently truncated.`
+Limits: 120 seconds, 192 MiB JavaScript heap, 128 KiB code, 128 child calls, 8 active child calls, 256 catalog requests, 32 KiB selected output, 8 media emissions (including duplicates). Additional child calls queue until a slot opens, within the invocation limits. Large child results are rejected rather than silently truncated.`
 }
 
 func (*CodeExecuteTool) GenerateSchema() *jsonschema.Schema {
@@ -104,8 +104,8 @@ func (*CodeExecuteTool) ValidateInput(_ tooltypes.State, parameters string) erro
 	if strings.TrimSpace(input.Code) == "" {
 		return errors.New("code is required")
 	}
-	if len(input.Code) > 128*1024 {
-		return errors.New("code exceeds the 128 KiB input limit")
+	if len(input.Code) > codemode.MaxScriptBytes {
+		return errors.Errorf("code exceeds the %d KiB input limit", codemode.MaxScriptBytes>>10)
 	}
 	return nil
 }
