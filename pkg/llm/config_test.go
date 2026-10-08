@@ -283,21 +283,26 @@ func TestModelProfileValidation(t *testing.T) {
 }
 
 func TestCodeModeConfiguration(t *testing.T) {
-	for _, mode := range []string{"", "off", "hybrid", "compact"} {
+	for _, mode := range []string{"", "off", "on", "only"} {
 		t.Run(mode, func(t *testing.T) {
-			config, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{"code_mode": mode}, "")
+			v := viper.New()
+			v.SetConfigType("yaml")
+			require.NoError(t, v.ReadConfig(strings.NewReader("code_mode: "+mode)))
+			config, err := GetConfigFromSettingsWithEnvironmentProfile(v.AllSettings(), "")
 			require.NoError(t, err)
-			assert.Equal(t, mode, config.CodeMode)
+			assert.Equal(t, mode, config.CodeMode, "unquoted YAML modes must remain strings")
 		})
 	}
-	_, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{"code_mode": "enabled"}, "")
-	require.ErrorContains(t, err, "code_mode must be off, hybrid, or compact")
+	for _, invalid := range []any{"enabled", "hybrid", "compact", true, false} {
+		_, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{"code_mode": invalid}, "")
+		require.ErrorContains(t, err, "code_mode must be off, on, or only")
+	}
 	config, err := GetConfigFromSettingsWithEnvironmentProfile(map[string]any{
 		"code_mode":            "off",
-		"environment_profiles": map[string]any{"code": map[string]any{"code_mode": "compact"}},
+		"environment_profiles": map[string]any{"code": map[string]any{"code_mode": "only"}},
 	}, "code")
 	require.NoError(t, err)
-	assert.Equal(t, "compact", config.CodeMode)
+	assert.Equal(t, "only", config.CodeMode)
 }
 
 func TestValidateModelProfiles(t *testing.T) {

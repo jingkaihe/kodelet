@@ -325,7 +325,7 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 		Config: &agentenv.EnvironmentConfig{
 			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
-			CodeMode:            "compact",
+			CodeMode:            "only",
 			EnableFSSearchTools: true,
 			SystemPromptPath:    "/runner/custom.tmpl",
 			SystemPromptContent: "runner prompt",
@@ -350,7 +350,7 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	assert.Equal(t, "/runner/workspace", config.WorkingDirectory)
 	assert.Equal(t, []string{"go test *"}, config.AllowedCommands)
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
-	assert.Equal(t, "compact", config.CodeMode)
+	assert.Equal(t, "only", config.CodeMode)
 	assert.True(t, config.EnableFSSearchTools)
 	assert.Equal(t, "/runner/custom.tmpl", config.Sysprompt)
 	assert.Equal(t, "runner prompt", config.SyspromptContent)
@@ -422,7 +422,7 @@ func TestCodeExecutionSnapshotsEffectiveCallableSet(t *testing.T) {
 			thread := &environmentThreadStub{
 				environment: environment,
 				threadStub: &threadStub{config: llmtypes.Config{
-					CodeMode: "compact", AllowedTools: []string{"code_execute", "bash", "search_issues"},
+					CodeMode: "only", AllowedTools: []string{"code_execute", "bash", "search_issues"},
 				}},
 			}
 			if test.allowed != nil {

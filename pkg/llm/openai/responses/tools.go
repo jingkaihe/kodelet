@@ -68,13 +68,18 @@ func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Too
 	}
 
 	result := make([]responses.ToolUnionParam, 0, len(availableTools)+1)
-	if shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) && config.EnvironmentOptions().ToolAllowed(openAISearchToolName) {
+	if config.CodeMode != "only" && shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) && config.EnvironmentOptions().ToolAllowed(openAISearchToolName) {
 		result = append(result, buildNativeOpenAISearchTool(llmConfig))
 	}
 
 	if len(availableTools) > 0 {
 		allowedTools := make([]tooltypes.Tool, 0, len(availableTools))
 		for _, tool := range availableTools {
+			// Apply the same advertisement rule to both the environment and
+			// state fallback paths, without changing the callable tool catalog.
+			if tool != nil && config.CodeMode == "only" && tool.Name() != "code_execute" {
+				continue
+			}
 			if tool != nil && config.ExecutionOptions.ToolAllowed(tool.Name()) {
 				allowedTools = append(allowedTools, tool)
 			}

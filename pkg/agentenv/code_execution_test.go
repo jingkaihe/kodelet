@@ -124,7 +124,7 @@ func TestCodeExecutionArtifactSelectionSurvivesHooksSaveAndRestart(t *testing.T)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, release()) })
 	environment := agentenv.NewLocalEnvironment(workspace, runtime)
-	_, err = environment.Open(t.Context(), agentenv.RunSpec{ConversationID: "conversation", Config: llmtypes.Config{CodeMode: "hybrid"}})
+	_, err = environment.Open(t.Context(), agentenv.RunSpec{ConversationID: "conversation", Config: llmtypes.Config{CodeMode: "on"}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, environment.Close(t.Context())) })
 	ctx := tools.ContextWithCodeExecution(t.Context(), tools.CodeExecutionContext{

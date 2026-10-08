@@ -958,9 +958,9 @@ func TestAnthropicCodeExecuteAdvertisementAndDispatch(t *testing.T) {
 		mode         string
 		subscription bool
 	}{
-		{mode: "hybrid"},
-		{mode: "compact"},
-		{mode: "compact", subscription: true},
+		{mode: "on"},
+		{mode: "only"},
+		{mode: "only", subscription: true},
 	} {
 		t.Run(tc.mode+"/subscription="+strconv.FormatBool(tc.subscription), func(t *testing.T) {
 			config := llmtypes.Config{
@@ -996,9 +996,9 @@ func TestAnthropicCodeExecuteAdvertisementAndDispatch(t *testing.T) {
 					require.NoError(t, json.Unmarshal(raw, &schema))
 				}
 			}
-			wantNames := []string{"bash", "code_execute"}
-			if tc.mode == "hybrid" {
-				wantNames = append(wantNames, "search_issues")
+			wantNames := []string{"code_execute"}
+			if tc.mode == "on" {
+				wantNames = append(wantNames, "bash", "search_issues")
 			}
 			assert.ElementsMatch(t, wantNames, names)
 			require.NotNil(t, schema)

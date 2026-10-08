@@ -142,7 +142,7 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 				ProtocolVersion: protocol.Version, RunnerID: "runner", RunID: "run", Digest: "manifest-digest",
 				Generation: 1, WorkingDirectory: "/runner/workspace",
 				Capabilities: runnerpayload.EnvironmentCapabilities{CodeExecution: supported},
-				Config:       runnerpayload.EnvironmentConfig{CodeMode: "compact"},
+				Config:       runnerpayload.EnvironmentConfig{CodeMode: "only"},
 				Tools: []runnerpayload.ToolDefinition{
 					{Name: "code_execute", Placement: "environment"},
 					{Name: "lookup", Placement: "environment", Group: "mcp/test", OutputSchema: map[string]any{"type": "object"}},
@@ -150,6 +150,12 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 			}}
 			environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
 			manifest, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation"})
+			if !supported {
+				require.ErrorContains(t, err, "code_mode only requires a runner with code execution support")
+				assert.False(t, environment.IsOpen())
+				assert.Equal(t, protocol.RunStatusFailed, controller.closedStatus)
+				return
+			}
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, environment.Close(t.Context())) })
 			assert.True(t, controller.openParams.CodeExecution, "daemon must negotiate support")
@@ -160,17 +166,12 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 			assert.Equal(t, "mcp/test", lookup.Group)
 			assert.Equal(t, "mcp/test", lookup.Tool.(tooltypes.ToolGroupProvider).ToolGroup())
 			assert.Equal(t, map[string]any{"type": "object"}, tooltypes.OutputSchemaForTool(lookup.Tool))
-			assert.Equal(t, "compact", manifest.Config.CodeMode)
+			assert.Equal(t, "only", manifest.Config.CodeMode)
 			request := ToolRequest{Name: "code_execute", Input: `{"code":"return 1"}`, ToolCallID: "parent"}
 			_, err = environment.ExecuteTool(t.Context(), request, nil)
 			require.Error(t, err, "missing host authorization must fail closed")
 			request.CallableTools = new([]string{})
 			_, err = environment.ExecuteTool(t.Context(), request, nil)
-			if !supported {
-				require.Error(t, err)
-				assert.Empty(t, controller.toolParams.Name)
-				return
-			}
 			require.NoError(t, err)
 			require.NotNil(t, controller.toolParams.CallableTools)
 			assert.Empty(t, *controller.toolParams.CallableTools)

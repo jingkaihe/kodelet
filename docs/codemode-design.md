@@ -2,9 +2,9 @@
 
 ## Status and decision
 
-Implemented as an opt-in feature through phases A–C below: runner-side QuickJS/WASM execution, async catalog discovery, shared direct/nested tool execution, machine results, parent-only renderers, and hybrid/compact advertisement. Phase D (saved scripts and explicit multimodal emission) remains deferred. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
+Implemented as an opt-in feature: runner-side QuickJS/WASM execution, async catalog discovery, shared direct/nested tool execution, machine results, parent-only renderers, explicit image/artifact emission, and `off`/`on`/`only` advertisement. Saved scripts and non-image artifacts remain deferred. This design combines short JavaScript orchestration snippets with an in-memory tool catalog exposed through `catalog.list`, `catalog.search`, and `catalog.describe`. It does not introduce a second implementation of any tool or a generated filesystem catalog.
 
-Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results remain runner-local; selected output and bounded progress return to the control plane. Keep core tools directly available. Initially keep extension tools directly available too; hide their model-facing schemas only after discovery and policy parity are proven.
+Add an opt-in `code_execute` tool. Run a fresh JavaScript VM on the runner for each invocation. Execute every child through shared runner execution machinery, on the same pinned run as a direct tool call. Intermediate results remain runner-local; selected output and bounded progress return to the control plane. In `on` mode keep ordinary tools directly available alongside code execution; in `only` mode advertise just `code_execute`, with core, extension, and MCP tools discovered through the authorized catalog.
 
 The model writes ordinary JavaScript, passes plain objects, receives predictable JSON results, and explicitly chooses what to return. No imports, generated client classes, package installation, or persistent interpreter state are required.
 
@@ -166,10 +166,12 @@ Keep the initial advertisement configuration small:
 | Mode | Direct model declarations | Script-callable tools |
 | --- | --- | --- |
 | `off` | Existing behavior | None |
-| `hybrid` | Existing tools plus `code_execute` | Authorized host tools |
-| `compact` | Core tools plus `code_execute` | Same authorized host tools |
+| `on` | Existing tools plus `code_execute` | Authorized host tools |
+| `only` | Only `code_execute` | Same authorized host tools, including core tools |
 
-Start with `off` as the default and implement `hybrid` first. In `compact`, extension/MCP tools are discovered rather than individually advertised. Do not implement compact mode by changing `AllowedTools`.
+Keep `off` as the default. `on` replaces the earlier `hybrid` name; `only` replaces `compact` and also hides core tools. The old values are rejected with a configuration error rather than silently changing semantics. Do not implement `only` by changing `AllowedTools`: the full permitted manifest remains the source for discovery, child authorization, and `agent.init` policy, while only the provider-facing declarations are reduced.
+
+`only` means exactly one advertised tool when permitted, with no fallback to direct tools if `code_execute` is denied. Explicit no-tools requests still advertise no tools. An incompatible daemon/runner must produce a clear compatibility error rather than downgrading `only` to ordinary calls; `on` may retain its ordinary tools with an older daemon. Provider-native web search is suppressed in `only` because it is not callable through the runner catalog; use `on` when native search is needed. Both provider adapters and state-based advertisement must follow these rules.
 
 ## 3. Machine results and errors
 
@@ -200,6 +202,8 @@ interface ToolError extends Error {
 Only report `not_started` when the host knows dispatch did not begin. A returned tool error means the invocation completed, not that it had no side effects. A lost connection, timeout, or cancellation after dispatch can have an unknown outcome. Preserve useful sanitized error details, including in `Promise.allSettled` output, rather than serializing errors to `{}`.
 
 A caught child error does not automatically fail the script, but it remains visible in the final child-call summary. An uncaught exception or unhandled rejection fails the parent. Invalid or oversized child output is an output error after execution; never rerun the tool to obtain a smaller result.
+
+Failure output follows the same explicit-selection rule as successful output. For diagnostics, catch the error and emit `e.result?.text ?? e.message`, then rethrow if the parent should fail. The bootstrap description must advertise this optional effective reply so the model does not rerun a failed command merely to recover its output.
 
 ## 4. Execution ownership
 
@@ -400,13 +404,13 @@ Prove an embedded runner-side VM can wrap an async function body, await fake too
 
 Treat runtime interruption and child-authority cleanup as release gates. If either requires substantially more work than expected, report that concrete blocker and narrow the initial feature scope explicitly; do not silently relocate the VM or bypass the capability checks.
 
-### B. Hybrid vertical slice
+### B. Code execution alongside direct calls
 
 Implement the runner tool registration, host-owned callable-set propagation and enforcement, child ownership lifecycle, `catalog.list/search/describe`, uniform result/error envelope, basic structured outputs including MCP output schemas/content, and parent-only renderers. Keep current direct tools unchanged and use an opt-in configuration. Add optional manifest/result fields through the full Go/SDK/wire serialization path. Capability-gate the feature on both ends, including the child-registration protocol; do not silently expose it with an incompatible runner or fall back to central execution.
 
-### C. Compact advertisement
+### C. Code-only advertisement
 
-Add compact mode only after the catalog API is sufficient to discover and write correct calls without already knowing tool names or having filesystem access. Verify bounded listing/search, complete per-tool descriptions, and usable pagination across fresh VM invocations. No filesystem catalog is needed for this phase.
+Use `only` mode once the catalog API is sufficient to discover and write correct calls without already knowing tool names or having filesystem access. Verify bounded listing/search, complete per-tool descriptions, usable pagination across fresh VM invocations, and that both core and extension tools remain callable despite being hidden from direct declarations. Suppress provider-native tools, check policy denial without fallback, and report incompatible peers clearly. No filesystem catalog is needed for this phase.
 
 ### D. Reuse and selective multimodal output
 

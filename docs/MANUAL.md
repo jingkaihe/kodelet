@@ -1811,16 +1811,18 @@ Code mode lets the model combine tool calls with JavaScript, run independent cal
 Enable it in the runner's configuration, the workspace's `kodelet-config.yaml`, or an environment profile:
 
 ```yaml
-code_mode: hybrid
+code_mode: on
 ```
 
 | Mode | Behavior |
 | --- | --- |
 | `off` (default) | Use ordinary tool calls only. |
-| `hybrid` | Add `code_execute` alongside ordinary tool calls. |
-| `compact` | Keep core tools directly available and discover extension/MCP tools through code mode as needed. |
+| `on` | Add `code_execute` alongside ordinary tool calls. |
+| `only` | Show only `code_execute`; discover and call core, extension, and MCP tools through code mode. |
 
-Both daemon and runner must support code mode. Existing tool permissions and extension policies still apply. If you use a tool allowlist, include `code_execute` and each tool the scripts need. Compact mode changes how tools are discovered, not which tools are permitted.
+Both daemon and runner must support code mode. Existing tool permissions and extension policies still apply. If you use a tool allowlist, include `code_execute` and each tool the scripts need. The mode changes how tools are discovered, not which tools are permitted.
+
+In `only` mode, provider-native web search is unavailable; use `on` if you need it. There is no fallback to ordinary tool calls if code execution is unavailable or disallowed. Explicit no-tools requests still work. Replace earlier `hybrid` settings with `on`, and `compact` with `only` (which also hides core tools).
 
 The `code_execute` tool accepts `{ "code": "..." }`. Write JavaScript as an **async function body**, using `await` and `return` directly. Discover available tools before calling them:
 

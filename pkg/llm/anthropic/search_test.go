@@ -23,6 +23,7 @@ func TestNativeWebSearchTools(t *testing.T) {
 	require.NoError(t, tools.ValidateTools([]string{anthropicSearchToolName}))
 	for _, tc := range []struct {
 		name         string
+		codeMode     string
 		execution    *llmtypes.ExecutionOptions
 		implicit     bool
 		patch        any
@@ -34,6 +35,9 @@ func TestNativeWebSearchTools(t *testing.T) {
 	}{
 		{name: "disabled by default", implicit: true},
 		{name: "explicit profile", want: true},
+		{name: "code mode on retains native search", codeMode: "on", want: true},
+		{name: "code mode only without parent", codeMode: "only"},
+		{name: "code mode only suppresses unsupported native search", codeMode: "only", copilot: true},
 		{name: "message disables tools", noTools: true},
 		{
 			name:      "request disables tools",
@@ -50,7 +54,7 @@ func TestNativeWebSearchTools(t *testing.T) {
 		{name: "copilot unsupported", copilot: true, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			config := llmtypes.Config{ExecutionOptions: tc.execution}
+			config := llmtypes.Config{CodeMode: tc.codeMode, ExecutionOptions: tc.execution}
 			if !tc.implicit {
 				config.AllowedTools = []string{anthropicSearchToolName}
 			}

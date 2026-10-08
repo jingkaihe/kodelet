@@ -53,12 +53,12 @@ func TestLocalEnvironmentCodeModeRequiresOptInAndAuthorization(t *testing.T) {
 	}{
 		{name: "default off"},
 		{name: "explicit off", config: llmtypes.Config{CodeMode: "off", AllowedTools: []string{"code_execute"}}},
-		{name: "hybrid", config: llmtypes.Config{CodeMode: "hybrid"}, include: true},
-		{name: "compact", config: llmtypes.Config{CodeMode: "compact"}, include: true},
-		{name: "legacy allowlist excludes parent", config: llmtypes.Config{CodeMode: "hybrid", AllowedTools: []string{"bash"}}},
-		{name: "explicit parent allowed", config: llmtypes.Config{CodeMode: "hybrid", AllowedTools: []string{"code_execute", "bash"}}, include: true},
-		{name: "no tools", config: llmtypes.Config{CodeMode: "hybrid", ExecutionOptions: &llmtypes.ExecutionOptions{NoTools: new(true)}}},
-		{name: "empty allowlist", config: llmtypes.Config{CodeMode: "hybrid", ExecutionOptions: &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}}},
+		{name: "on", config: llmtypes.Config{CodeMode: "on"}, include: true},
+		{name: "only", config: llmtypes.Config{CodeMode: "only"}, include: true},
+		{name: "legacy allowlist excludes parent", config: llmtypes.Config{CodeMode: "only", AllowedTools: []string{"bash"}}},
+		{name: "explicit parent allowed", config: llmtypes.Config{CodeMode: "only", AllowedTools: []string{"code_execute", "bash"}}, include: true},
+		{name: "no tools", config: llmtypes.Config{CodeMode: "only", ExecutionOptions: &llmtypes.ExecutionOptions{NoTools: new(true)}}},
+		{name: "empty allowlist", config: llmtypes.Config{CodeMode: "only", ExecutionOptions: &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			environment := NewLocalEnvironment(t.TempDir(), nil)

@@ -296,7 +296,7 @@ func TestImageArtifactRunnerRoundTrip(t *testing.T) {
 func TestViewImageLocalPathRunnerRoundTrip(t *testing.T) {
 	config := embeddedRunnerTestConfig(t)
 	config.PublicBaseURL = "https://images.example"
-	config.EmbeddedRunner.Settings["code_mode"] = "hybrid"
+	config.EmbeddedRunner.Settings["code_mode"] = "on"
 	config.EmbeddedRunner.Settings["provider"] = "openai"
 	config.EmbeddedRunner.Settings["model"] = "gpt-4.1"
 	var encoded bytes.Buffer

@@ -68,7 +68,7 @@ func buildWireManifest(
 	definitions := append([]agentenv.ToolDefinition(nil), local.Tools...)
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].Name < definitions[j].Name })
 	wireTools := make([]runnerpayload.ToolDefinition, 0, len(definitions))
-	codeExecution := config.CodeMode == "hybrid" || config.CodeMode == "compact"
+	codeExecution := config.CodeMode == "on" || config.CodeMode == "only"
 	codeMode := ""
 	if codeExecution {
 		codeMode = config.CodeMode

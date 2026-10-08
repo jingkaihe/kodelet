@@ -52,7 +52,7 @@ func handleWebSearchText(handler llmtypes.MessageHandler, text anthropic.TextBlo
 func (t *Thread) requestTools(opt llmtypes.MessageOpt) ([]anthropic.ToolUnionParam, error) {
 	tools := toAnthropicTools(t.tools(opt), t.useSubscription)
 	// Explicit opt-in lets an extension profile search without enabling it for the parent.
-	if opt.NoToolUse || !slices.Contains(t.Config.AllowedTools, anthropicSearchToolName) ||
+	if opt.NoToolUse || t.Config.CodeMode == "only" || !slices.Contains(t.Config.AllowedTools, anthropicSearchToolName) ||
 		!base.ToolAllowedForThread(t, anthropicSearchToolName) {
 		return tools, nil
 	}

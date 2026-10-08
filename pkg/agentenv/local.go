@@ -94,7 +94,7 @@ func (e *LocalEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, er
 	}
 
 	manifest := snapshotManifest(ctx, state, runtime)
-	codeEnabled := spec.Config.CodeMode == "hybrid" || spec.Config.CodeMode == "compact"
+	codeEnabled := spec.Config.CodeMode == "on" || spec.Config.CodeMode == "only"
 	if codeEnabled {
 		codeTool := &tools.CodeExecuteTool{}
 		found := false

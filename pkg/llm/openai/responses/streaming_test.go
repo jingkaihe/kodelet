@@ -388,7 +388,7 @@ func (codeModeResponsesTool) Execute(context.Context, tooltypes.State, string) t
 
 func TestResponsesCodeExecuteAdvertisementAndDispatch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	for _, mode := range []string{"hybrid", "compact"} {
+	for _, mode := range []string{"on", "only"} {
 		t.Run(mode, func(t *testing.T) {
 			config := llmtypes.Config{
 				Provider: "openai", CodeMode: mode,
@@ -417,9 +417,9 @@ func TestResponsesCodeExecuteAdvertisementAndDispatch(t *testing.T) {
 					schema = definition.OfFunction.Parameters
 				}
 			}
-			wantNames := []string{"bash", "code_execute"}
-			if mode == "hybrid" {
-				wantNames = append(wantNames, "search_issues")
+			wantNames := []string{"code_execute"}
+			if mode == "on" {
+				wantNames = append(wantNames, "bash", "search_issues")
 			}
 			assert.ElementsMatch(t, wantNames, names)
 			require.NotNil(t, schema)

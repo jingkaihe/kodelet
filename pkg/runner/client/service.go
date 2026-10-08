@@ -711,6 +711,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	config.Profile = params.Agent.Profile
 	config.RecipeName = params.Agent.RecipeName
 	if !params.CodeExecution {
+		if config.CodeMode == "only" && !config.ExecutionOptions.ToolsDisabled() {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off")
+		}
 		config.CodeMode = ""
 	}
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
@@ -1111,6 +1115,9 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 	}
 	config.WorkingDirectory = workingDirectory
 	if !codeExecution {
+		if config.CodeMode == "only" && !config.ExecutionOptions.ToolsDisabled() {
+			return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off"))
+		}
 		config.CodeMode = ""
 	}
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)

@@ -113,6 +113,7 @@ func TestBuildToolsForThreadNativeSearch(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
 		platform     string
+		codeMode     string
 		allowedTools []string
 		wantSearch   bool
 	}{
@@ -121,19 +122,29 @@ func TestBuildToolsForThreadNativeSearch(t *testing.T) {
 		{name: "compatible platform", platform: "fireworks"},
 		{name: "excluded by allowlist", platform: "openai", allowedTools: []string{"bash"}},
 		{name: "included by allowlist", platform: "openai", allowedTools: []string{"bash", openAISearchToolName}, wantSearch: true},
+		{name: "code mode on", platform: "openai", codeMode: "on", wantSearch: true},
+		{name: "code mode only", platform: "openai", codeMode: "only"},
+		{name: "code mode only on Codex", platform: "codex", codeMode: "only"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			config := llmtypes.Config{
 				Provider:     "openai",
+				CodeMode:     tt.codeMode,
 				AllowedTools: tt.allowedTools,
 				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: tt.platform,
-					APIMode:  llmtypes.OpenAIAPIModeResponses,
+					Platform:     tt.platform,
+					APIMode:      llmtypes.OpenAIAPIModeResponses,
+					EnableSearch: new(true),
 				},
 			}
 			thread := &Thread{Thread: base.NewThread(config, "conv-tools")}
-			state := tools.NewBasicState(t.Context(), tools.WithLLMConfig(config))
+			state := tools.NewBasicState(t.Context(), tools.WithLLMConfig(config), tools.WithExtensionTools([]tooltypes.Tool{&tools.CodeExecuteTool{}}))
 			toolDefs := buildToolsForThread(thread, state, false)
+			if tt.codeMode == "only" {
+				require.Len(t, toolDefs, 1)
+				require.NotNil(t, toolDefs[0].OfFunction)
+				assert.Equal(t, "code_execute", toolDefs[0].OfFunction.Name)
+			}
 			if tt.wantSearch {
 				require.NotEmpty(t, toolDefs)
 				require.NotNil(t, toolDefs[0].OfWebSearch)

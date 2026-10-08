@@ -116,7 +116,7 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 	service := newRegisteredTestService(t, workspace, ServiceOptions{
 		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
 		ConfigLoader: func(string) (llmtypes.Config, error) {
-			return llmtypes.Config{CodeMode: "hybrid", AllowedTools: []string{"code_execute", "file_read", "web_fetch"}}, nil
+			return llmtypes.Config{CodeMode: "only", AllowedTools: []string{"code_execute", "file_read", "web_fetch"}}, nil
 		},
 	})
 	conn, response, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/relay", nil)

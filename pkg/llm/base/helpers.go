@@ -40,19 +40,18 @@ func AvailableEnvironmentToolsForThread(thread llmtypes.Thread, noToolUse bool) 
 }
 
 func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []tooltypes.Tool {
-	if thread == nil || thread.GetConfig().CodeMode != "compact" || !slices.ContainsFunc(available, func(tool tooltypes.Tool) bool {
-		return tool != nil && tool.Name() == "code_execute"
-	}) {
+	if thread == nil || thread.GetConfig().CodeMode != "only" {
 		return available
 	}
-	result := make([]tooltypes.Tool, 0, len(available))
+	// Advertisement is separate from authorization: the full permitted catalog
+	// remains callable inside code_execute, including core tools. No fallback
+	// exposes those tools directly when the parent is unavailable or denied.
 	for _, tool := range available {
-		if grouped, ok := tool.(tooltypes.ToolGroupProvider); ok && grouped.ToolGroup() != "" {
-			continue
+		if tool != nil && tool.Name() == "code_execute" {
+			return []tooltypes.Tool{tool}
 		}
-		result = append(result, tool)
 	}
-	return result
+	return nil
 }
 
 func availableTools(state tooltypes.State, noToolUse bool, allowed []string) []tooltypes.Tool {

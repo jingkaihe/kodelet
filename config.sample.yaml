@@ -314,8 +314,9 @@ tool_mode: full
 
 # Runner-side JavaScript orchestration (disabled by default).
 # - off: existing direct tools only
-# - hybrid: direct tools plus code_execute
-# - compact: core tools plus code_execute; discover extension/MCP tools via catalog
+# - on: direct tools plus code_execute
+# - only: advertise only code_execute; discover all permitted tools via catalog
+# Native provider web search is unavailable in only mode; use on if needed.
 # Set on the runner, in workspace config, or in an environment profile.
 # Tool/command restrictions still apply; explicit allowlists must include code_execute.
 code_mode: off

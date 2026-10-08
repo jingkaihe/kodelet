@@ -506,6 +506,10 @@ func (e *RemoteEnvironment) dispatchLifecycle(ctx context.Context, params runner
 }
 
 func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config llmtypes.Config) (Manifest, error) {
+	if wire.Config.CodeMode == "only" && !wire.Capabilities.CodeExecution &&
+		!config.ExecutionOptions.ToolsDisabled() && !wire.Config.Options.ToolsDisabled() {
+		return Manifest{}, errors.New("code_mode only requires a runner with code execution support; upgrade the runner or use code_mode on/off")
+	}
 	contexts := make(map[string]string, len(wire.ContextFiles))
 	for _, contextFile := range wire.ContextFiles {
 		path := strings.TrimSpace(contextFile.Path)

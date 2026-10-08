@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -199,25 +200,47 @@ func TestRunnerCodeChildCancellation(t *testing.T) {
 }
 
 func TestRunnerCodeModeNegotiation(t *testing.T) {
-	for _, supported := range []bool{false, true} {
-		t.Run(map[bool]string{true: "new central", false: "old central"}[supported], func(t *testing.T) {
+	for _, test := range []struct {
+		name, mode                    string
+		supported, noTools, wantError bool
+	}{
+		{name: "on supported", mode: "on", supported: true},
+		{name: "on legacy direct tools", mode: "on"},
+		{name: "only supported", mode: "only", supported: true},
+		{name: "only rejects legacy daemon", mode: "only", wantError: true},
+		{name: "only permits explicit no-tools", mode: "only", noTools: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			runtime := extensions.EmptyRuntime()
 			t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 			service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
 				RuntimeProvider: staticRuntimeProvider{runtime: runtime},
-				ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{CodeMode: "hybrid"}, nil },
+				ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{CodeMode: test.mode}, nil },
 			})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, service.Close()) })
-			require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1, CodeExecution: supported}))
-			probe, err := service.ProbeManifest(t.Context(), "")
-			require.NoError(t, err)
-			manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "run", ConversationID: "conversation", CodeExecution: supported})
+			require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1, CodeExecution: test.supported}))
+			var options *llmtypes.ExecutionOptions
+			if test.noTools {
+				options = &llmtypes.ExecutionOptions{NoTools: new(true)}
+			}
+			probe, probeErr := service.ProbeManifestForCWDWithOptions(t.Context(), "", "", options)
+			manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
+				RunID: "run", ConversationID: "conversation", CodeExecution: test.supported, Options: options,
+			})
+			if test.wantError {
+				require.ErrorContains(t, probeErr, "code_mode only requires code execution support")
+				require.ErrorContains(t, err, "code_mode only requires code execution support")
+				assert.Empty(t, service.runs, "failed negotiation must release the run")
+				return
+			}
+			require.NoError(t, probeErr)
 			require.NoError(t, err)
 			assert.Equal(t, probe.Digest, manifest.Digest, "idle discovery and run.open must negotiate the same fields")
-			assert.Equal(t, supported, manifest.Capabilities.CodeExecution)
-			if supported {
+			assert.Equal(t, test.supported, manifest.Capabilities.CodeExecution)
+			if test.supported {
 				assert.Contains(t, manifestToolNames(manifest), "code_execute")
+				assert.Equal(t, test.mode, manifest.Config.CodeMode)
 			} else {
 				assert.NotContains(t, manifestToolNames(manifest), "code_execute")
 				assert.Empty(t, manifest.Config.CodeMode)
@@ -228,7 +251,7 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 				// Reproduce the old decoder dropping new fields before rehashing.
 				legacy := manifest
 				legacy.Config.CodeMode, legacy.Capabilities.CodeExecution = "", false
-				legacy.Tools = append([]runnerpayload.ToolDefinition(nil), manifest.Tools...)
+				legacy.Tools = slices.Clone(manifest.Tools)
 				for i := range legacy.Tools {
 					legacy.Tools[i].OutputSchema, legacy.Tools[i].Group = nil, ""
 				}

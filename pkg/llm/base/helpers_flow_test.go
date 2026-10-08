@@ -224,10 +224,10 @@ type groupedTool struct{ namedTool }
 
 func (groupedTool) ToolGroup() string { return "mcp/test" }
 
-func TestCompactCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
+func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 	tools := []tooltypes.Tool{namedTool("bash"), namedTool("code_execute"), groupedTool{namedTool("search_issues")}}
 	state := &toolState{tools: tools}
-	for _, mode := range []string{"off", "hybrid", "compact"} {
+	for _, mode := range []string{"off", "on", "only"} {
 		t.Run(mode, func(t *testing.T) {
 			thread := &environmentThreadStub{
 				threadStub: &threadStub{state: state, config: llmtypes.Config{CodeMode: mode}},
@@ -238,16 +238,23 @@ func TestCompactCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 				}}},
 			}
 			want := tools
-			if mode == "compact" {
-				want = tools[:2]
+			if mode == "only" {
+				want = tools[1:2]
 			}
 			assert.Equal(t, want, AvailableEnvironmentToolsForThread(thread, false))
 			assert.Equal(t, want, AvailableToolsForThread(thread, state, false))
+			assert.Equal(t, want, AvailableToolsForThread(thread.threadStub, state, false), "state-based advertisement follows the same mode")
+			assert.True(t, ToolAllowedForThread(thread, "bash"), "core tools remain callable from scripts")
 			assert.True(t, ToolAllowedForThread(thread, "search_issues"), "hiding a schema must not change authorization")
 			assert.Len(t, state.Tools(), 3, "the underlying callable state is unchanged")
 			assert.Empty(t, AvailableEnvironmentToolsForThread(thread, true))
 			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash", "search_issues"})
-			assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, AvailableEnvironmentToolsForThread(thread, false), "keep direct access when code_execute is denied")
+			if mode == "only" {
+				assert.Empty(t, AvailableEnvironmentToolsForThread(thread, false), "never fall back when code_execute is denied")
+				assert.Empty(t, AvailableToolsForThread(thread.threadStub, state, false))
+			} else {
+				assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, AvailableEnvironmentToolsForThread(thread, false))
+			}
 		})
 	}
 	assert.Equal(t, tools, AvailableToolsForThread(nil, state, false))
