@@ -195,6 +195,57 @@ try {
 	}
 }
 
+func TestCodeExecuteResultSendsSelectedStringsAsPlainText(t *testing.T) {
+	result := CodeExecuteResult{
+		Metadata: tooltypes.CodeExecutionMetadata{
+			Status:  "completed",
+			Outputs: []json.RawMessage{json.RawMessage(`"legacy\tvalue"`)},
+			Items: []tooltypes.CodeExecutionOutput{
+				{Type: "json", Value: json.RawMessage(`"first line\nsecond \"quoted\" line"`)},
+				{Type: "json", Value: json.RawMessage(`{"count":2,"text":"a\nb"}`)},
+				{Type: "json", Value: json.RawMessage(`42`)},
+				{Type: "json", Value: json.RawMessage(`null`)},
+				{Type: "image", ArtifactID: "image-1"},
+			},
+		},
+		Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "image-1", MimeType: "image/png"}},
+	}
+
+	facing := result.AssistantFacing()
+	assert.Contains(t, facing, "legacy\tvalue\n")
+	assert.Contains(t, facing, "first line\nsecond \"quoted\" line\n")
+	assert.NotContains(t, facing, `"first line`, "strings must not stay JSON-quoted")
+	assert.Contains(t, facing, `{"count":2,"text":"a\nb"}`, "non-string values stay compact JSON")
+	assert.Contains(t, facing, "\n42\n")
+	assert.Contains(t, facing, "\nnull\n")
+
+	parts := result.ContentParts()
+	require.Len(t, parts, 7)
+	assert.Equal(t, "first line\nsecond \"quoted\" line", parts[1].Text)
+	assert.JSONEq(t, `{"count":2,"text":"a\nb"}`, parts[2].Text)
+	assert.Equal(t, "42", parts[3].Text)
+	assert.Equal(t, "null", parts[4].Text)
+	assert.Equal(t, "Image artifact: image-1", parts[5].Text)
+	assert.Equal(t, tooltypes.ToolResultContentPartTypeImage, parts[6].Type)
+}
+
+func TestCodeExecuteToolConsoleLogReachesModelAsText(t *testing.T) {
+	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+		Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+			return CodeToolReply{}, nil
+		},
+	})
+	params, err := json.Marshal(codeExecuteInput{Code: `
+console.log("files:\n" + ["a.go", "b.go"].join("\n"));
+return "done";
+`})
+	require.NoError(t, err)
+	result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
+	require.False(t, result.IsError(), result.GetError())
+	assert.Contains(t, result.AssistantFacing(), "files:\na.go\nb.go\ndone\n")
+	assert.NotContains(t, result.AssistantFacing(), `\n`)
+}
+
 func TestCodeExecuteToolExplicitMediaSelection(t *testing.T) {
 	for _, test := range []struct {
 		name, code, failure string
@@ -248,7 +299,7 @@ emit.artifact(r.attachments[1]);`,
 				return
 			}
 			require.Len(t, parts, 6)
-			assert.Equal(t, `"before"`, parts[1].Text)
+			assert.Equal(t, "before", parts[1].Text, "selected strings reach the model as plain text")
 			assert.Equal(t, tooltypes.ToolResultContentPart{
 				Type:       tooltypes.ToolResultContentPartTypeImage,
 				ArtifactID: "image-1",

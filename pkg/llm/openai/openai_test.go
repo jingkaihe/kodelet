@@ -188,6 +188,19 @@ func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *test
 	}, messages[2], "the image follow-up must not duplicate the artifact descriptor")
 }
 
+func TestOpenAIChatUndeliveredImageNotes(t *testing.T) {
+	notes := openAIChatUndeliveredImageNotes([]tooltypes.ToolResultContentPart{
+		{Type: tooltypes.ToolResultContentPartTypeText, Text: "Image artifact: art_local"},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "art_local", MimeType: "image/png"},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64,ZmFrZQ==", MimeType: "image/png"},
+	})
+	assert.Equal(t, "\n\nImage art_local could not be delivered to the model.", notes)
+	assert.Empty(t, openAIChatUndeliveredImageNotes([]tooltypes.ToolResultContentPart{
+		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64,ZmFrZQ=="},
+		{Type: tooltypes.ToolResultContentPartTypeImage},
+	}), "delivered and empty image parts have nothing to report")
+}
+
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	messagesWithMultipleToolsJSON := `[

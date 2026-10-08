@@ -142,6 +142,18 @@ func executeEnvironmentTool(
 	}
 	if execution.Modified {
 		result = StructuredResultToolResult{Result: execution.StructuredResult, RendererRegistry: rendererRegistry}
+		var code tooltypes.CodeExecutionMetadata
+		if execution.StructuredResult.ToolName == "code_execute" &&
+			tooltypes.ExtractMetadata(execution.StructuredResult.Metadata, &code) {
+			// Environments prune code selections against host-owned emissions
+			// after hooks. Rebuild that effective snapshot so selected images
+			// are not reduced to text, as the control plane does for runners.
+			result = tools.CodeExecuteResult{
+				Metadata:    code,
+				Error:       execution.StructuredResult.Error,
+				Attachments: execution.StructuredResult.Attachments,
+			}
+		}
 	}
 
 	return ToolExecution{

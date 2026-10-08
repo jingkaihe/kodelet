@@ -20,11 +20,15 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/artifacts"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -437,9 +441,9 @@ emit("after");
 				return
 			}
 			require.Len(t, result.Result.ContentParts, 6)
-			assert.Equal(t, `"before"`, result.Result.ContentParts[1].Text)
+			assert.Equal(t, "before", result.Result.ContentParts[1].Text)
 			assert.Equal(t, viewed.Result.ContentParts[1], result.Result.ContentParts[3])
-			assert.Equal(t, `"after"`, result.Result.ContentParts[4].Text)
+			assert.Equal(t, "after", result.Result.ContentParts[4].Text)
 			assert.Contains(t, result.Result.ContentParts[5].Text, "Image URL: "+attachment.ViewURL)
 			assert.NotContains(t, result.Result.ContentParts[5].Text, "Use view_image")
 		})
@@ -458,6 +462,114 @@ emit("after");
 	assert.NotContains(t, failedUpload.Result.AssistantFacing, "Artifact ID:")
 	assert.Equal(t, viewed.Result.ContentParts[1:], failedUpload.Result.ContentParts)
 	require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), "view-path-run", protocol.RunStatusSucceeded, nil))
+}
+
+type staticToolResultController struct {
+	agentenv.RemoteController
+	result runnerpayload.ToolResult
+}
+
+func (c staticToolResultController) ExecuteTool(
+	context.Context,
+	runnerpayload.ToolExecuteParams,
+	func(runnerpayload.ToolUpdateParams),
+) (runnerpayload.ToolExecuteResult, error) {
+	return runnerpayload.ToolExecuteResult{Result: c.result}, nil
+}
+
+func TestImageMaterializationFailurePreservesCodeExecutionResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kodelet.db")
+	database, err := db.Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	store, err := artifacts.Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	var encoded bytes.Buffer
+	require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 8, 8))))
+	stored, err := store.Put(
+		t.Context(),
+		"conversation",
+		"child",
+		tooltypes.ToolAttachment{Type: "image"},
+		bytes.NewReader(encoded.Bytes()),
+	)
+	require.NoError(t, err)
+	missing := tooltypes.ToolAttachment{Type: "image", ArtifactID: "art_missing", MimeType: "image/png"}
+	controller := func(result runnerpayload.ToolResult) artifactController {
+		return artifactController{
+			RemoteController: staticToolResultController{result: result},
+			server:           &Server{artifacts: store},
+			conversationID:   "conversation",
+			config:           llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+		}
+	}
+
+	t.Run("code execution keeps outputs and other images", func(t *testing.T) {
+		code := tools.CodeExecuteResult{
+			Metadata: tooltypes.CodeExecutionMetadata{
+				Status: "completed",
+				Calls:  []tooltypes.CodeExecutionCall{{CallID: "child", ToolName: "bash", Status: "completed"}},
+				Items: []tooltypes.CodeExecutionOutput{
+					{Type: "json", Value: json.RawMessage(`"before"`)},
+					{Type: "image", ArtifactID: stored.ArtifactID},
+					{Type: "image", ArtifactID: missing.ArtifactID},
+					{Type: "json", Value: json.RawMessage(`{"after":true}`)},
+				},
+			},
+			Attachments: []tooltypes.ToolAttachment{stored, missing},
+		}
+		result, err := controller(runnerpayload.ToolResult{
+			AssistantFacing: code.AssistantFacing(),
+			ContentParts:    code.ContentParts(),
+			Structured:      code.StructuredData(),
+		}).ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{Name: "code_execute"}, nil)
+		require.NoError(t, err)
+
+		require.Empty(t, result.Result.Error)
+		assert.True(t, result.Result.Structured.Success)
+		notice := "Image art_missing could not be sent to the model: image artifact is not available in this conversation"
+		assert.Contains(t, result.Result.AssistantFacing, "Code execution completed; 1 child calls.")
+		assert.Contains(t, result.Result.AssistantFacing, notice)
+		var texts []string
+		images := 0
+		for _, part := range result.Result.ContentParts {
+			switch part.Type {
+			case tooltypes.ToolResultContentPartTypeImage:
+				images++
+				assert.True(t, strings.HasPrefix(part.ImageURL, "data:image/png;base64,"))
+				assert.Empty(t, part.ArtifactID)
+			case tooltypes.ToolResultContentPartTypeText:
+				texts = append(texts, part.Text)
+			}
+		}
+		assert.Equal(t, 1, images, "the available selection still reaches the model")
+		assert.Contains(t, texts, "before")
+		assert.Contains(t, texts, notice)
+		assert.Contains(t, texts, `{"after":true}`)
+	})
+
+	t.Run("other tools still fail", func(t *testing.T) {
+		result, err := controller(runnerpayload.ToolResult{
+			AssistantFacing: "Artifact ID: art_missing",
+			ContentParts: []tooltypes.ToolResultContentPart{{
+				Type:       tooltypes.ToolResultContentPartTypeImage,
+				ArtifactID: missing.ArtifactID,
+				MimeType:   "image/png",
+			}},
+			Structured: tooltypes.StructuredToolResult{
+				ToolName:    "view_image",
+				Success:     true,
+				Attachments: []tooltypes.ToolAttachment{missing},
+			},
+		}).ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{Name: "view_image"}, nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, "image artifact is not available in this conversation", result.Result.Error)
+		assert.False(t, result.Result.Structured.Success)
+		assert.Empty(t, result.Result.ContentParts)
+	})
 }
 
 func TestImageArtifactUploadCancellationInterruptsStalledBody(t *testing.T) {

@@ -6,9 +6,24 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestResponseFunctionCallOutputItemsReportsUnmaterializedImages(t *testing.T) {
+	items := responseFunctionCallOutputItems([]tooltypes.ToolResultContentPart{
+		{Type: tooltypes.ToolResultContentPartTypeText, Text: "Image artifact: art_local"},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "art_local", MimeType: "image/png"},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64,ZmFrZQ==", MimeType: "image/png"},
+	})
+
+	require.Len(t, items, 3)
+	require.NotNil(t, items[1].OfInputText)
+	assert.Equal(t, "Image art_local could not be delivered to the model.", items[1].OfInputText.Text)
+	require.NotNil(t, items[2].OfInputImage)
+	assert.Equal(t, "data:image/png;base64,ZmFrZQ==", items[2].OfInputImage.ImageURL.Value)
+}
 
 func TestProcessImage(t *testing.T) {
 	t.Run("handles https URLs", func(t *testing.T) {

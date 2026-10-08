@@ -611,10 +611,12 @@ func (t *Thread) processMessageExchange(
 			Content:    output.AssistantFacing(),
 			ToolCallID: toolCall.ID,
 		}
-		toolResultMessages = append(toolResultMessages, message)
 		if rich, ok := output.(tooltypes.MultiModalToolResult); ok {
-			followupImageParts = append(followupImageParts, openAIChatFollowupImageParts(rich.ContentParts())...)
+			parts := rich.ContentParts()
+			followupImageParts = append(followupImageParts, openAIChatFollowupImageParts(parts)...)
+			message.Content += openAIChatUndeliveredImageNotes(parts)
 		}
+		toolResultMessages = append(toolResultMessages, message)
 	}
 	t.messages = append(t.messages, openAIChatToolResultMessages(toolResultMessages, followupImageParts)...)
 
@@ -648,6 +650,21 @@ func openAIChatFollowupImageParts(parts []tooltypes.ToolResultContentPart) []ope
 		})
 	}
 	return content
+}
+
+// openAIChatUndeliveredImageNotes keeps the tool message honest when an image
+// part has no URL and therefore cannot join the follow-up image message.
+func openAIChatUndeliveredImageNotes(parts []tooltypes.ToolResultContentPart) string {
+	var notes strings.Builder
+	for _, part := range parts {
+		if part.Type != tooltypes.ToolResultContentPartTypeImage || strings.TrimSpace(part.ImageURL) != "" {
+			continue
+		}
+		if notice := base.UndeliveredImageNotice(part); notice != "" {
+			notes.WriteString("\n\n" + notice)
+		}
+	}
+	return notes.String()
 }
 
 func openAIChatFollowupImageMessage(parts []openai.ChatMessagePart) *openai.ChatCompletionMessage {

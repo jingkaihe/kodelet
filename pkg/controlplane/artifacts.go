@@ -231,32 +231,56 @@ func (c artifactController) normalizeAttachments(ctx context.Context, result *ru
 }
 
 func (c artifactController) materializeImages(ctx context.Context, result *runnerpayload.ToolResult) error {
+	// A code execution result reports child side effects that already
+	// happened. Losing one selected image must not hide them, or the model is
+	// likely to rerun the script; replace only that image with a notice.
+	partial := result.Structured.ToolName == "code_execute"
 	for i, part := range result.ContentParts {
 		if part.ArtifactID == "" {
 			continue
 		}
-		if c.server.artifacts == nil || part.Type != tooltypes.ToolResultContentPartTypeImage {
-			return errors.New("image artifact storage is unavailable")
-		}
-		_, path, err := c.server.artifacts.Get(ctx, c.conversationID, part.ArtifactID)
+		materialized, err := c.materializeImage(ctx, part)
 		if err != nil {
-			return errors.New("image artifact is not available in this conversation")
+			if !partial {
+				return err
+			}
+			notice := "Image " + part.ArtifactID + " could not be sent to the model: " + err.Error()
+			result.ContentParts[i] = tooltypes.ToolResultContentPart{
+				Type: tooltypes.ToolResultContentPartTypeText,
+				Text: notice,
+			}
+			result.AssistantFacing += "\n\n" + notice
+			continue
 		}
-		file, err := os.Open(path)
-		if err != nil {
-			return errors.Wrap(err, "failed to open image artifact")
-		}
-		data, err := io.ReadAll(io.LimitReader(file, runnerpayload.MaxArtifactBytes+1))
-		_ = file.Close()
-		if err != nil {
-			return errors.Wrap(err, "failed to read image artifact")
-		}
-		image, err := vision.MakeViewImageResultBytes(data, part.ArtifactID, part.Detail, c.config.Model, c.config.Provider)
-		if err != nil {
-			return err
-		}
-		part.ImageURL, part.MimeType, part.Detail, part.ArtifactID = image.ImageURL, image.MimeType, image.Detail, ""
-		result.ContentParts[i] = part
+		result.ContentParts[i] = materialized
 	}
 	return nil
+}
+
+func (c artifactController) materializeImage(
+	ctx context.Context,
+	part tooltypes.ToolResultContentPart,
+) (tooltypes.ToolResultContentPart, error) {
+	if c.server.artifacts == nil || part.Type != tooltypes.ToolResultContentPartTypeImage {
+		return part, errors.New("image artifact storage is unavailable")
+	}
+	_, path, err := c.server.artifacts.Get(ctx, c.conversationID, part.ArtifactID)
+	if err != nil {
+		return part, errors.New("image artifact is not available in this conversation")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return part, errors.Wrap(err, "failed to open image artifact")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, runnerpayload.MaxArtifactBytes+1))
+	_ = file.Close()
+	if err != nil {
+		return part, errors.Wrap(err, "failed to read image artifact")
+	}
+	image, err := vision.MakeViewImageResultBytes(data, part.ArtifactID, part.Detail, c.config.Model, c.config.Provider)
+	if err != nil {
+		return part, err
+	}
+	part.ImageURL, part.MimeType, part.Detail, part.ArtifactID = image.ImageURL, image.MimeType, image.Detail, ""
+	return part, nil
 }

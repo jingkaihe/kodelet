@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
@@ -552,6 +553,51 @@ func TestExecuteEnvironmentToolHonorsResultMutation(t *testing.T) {
 	assert.True(t, execution.Result.IsError())
 	assert.Equal(t, "redacted by runner policy", execution.Result.GetError())
 	assert.Equal(t, mutated, execution.StructuredResult)
+}
+
+func TestExecuteEnvironmentToolRebuildsModifiedCodeExecutionMedia(t *testing.T) {
+	effective := tooltypes.StructuredToolResult{
+		ToolName: "code_execute",
+		Success:  true,
+		Metadata: tooltypes.CodeExecutionMetadata{
+			Status: "completed",
+			Items: []tooltypes.CodeExecutionOutput{
+				{Type: "json", Value: json.RawMessage(`"kept"`)},
+				{Type: "image", ArtifactID: "art_kept"},
+			},
+		},
+		Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "art_kept", MimeType: "image/png"}},
+	}
+	environment := &recordingAgentEnvironment{
+		open:     true,
+		manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{{Name: "code_execute"}}},
+		executeTool: func(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+			return agentenv.ToolExecution{
+				Result:           tooltypes.BaseToolResult{Result: "pre-hook output"},
+				StructuredResult: effective,
+				Modified:         true,
+			}, nil
+		},
+	}
+	thread := &environmentThreadStub{
+		environment: environment,
+		threadStub:  &threadStub{config: llmtypes.Config{CodeMode: "on"}},
+	}
+
+	out := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "code_execute", `{"code":"return 1"}`, "parent")
+
+	require.NoError(t, out.Err)
+	assert.NotContains(t, out.Result.AssistantFacing(), "pre-hook output")
+	rich, ok := out.Result.(tooltypes.MultiModalToolResult)
+	require.True(t, ok)
+	parts := rich.ContentParts()
+	require.Len(t, parts, 4, "hook-modified code results keep their selected image")
+	assert.Equal(t, "kept", parts[1].Text)
+	assert.Equal(t, tooltypes.ToolResultContentPart{
+		Type:       tooltypes.ToolResultContentPartTypeImage,
+		ArtifactID: "art_kept",
+		MimeType:   "image/png",
+	}, parts[3])
 }
 
 func TestStructuredResultAdapter(t *testing.T) {

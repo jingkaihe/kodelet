@@ -627,6 +627,11 @@ func responseFunctionCallOutputItems(parts []tooltypes.ToolResultContentPart) re
 			result = append(result, responses.ResponseFunctionCallOutputItemParamOfInputText(part.Text))
 		case tooltypes.ToolResultContentPartTypeImage:
 			if strings.TrimSpace(part.ImageURL) == "" {
+				// Keep the result honest when surrounding text names an image
+				// that was never materialized for the model.
+				if notice := base.UndeliveredImageNotice(part); notice != "" {
+					result = append(result, responses.ResponseFunctionCallOutputItemParamOfInputText(notice))
+				}
 				continue
 			}
 			detail := responses.ResponseInputImageContentDetailAuto

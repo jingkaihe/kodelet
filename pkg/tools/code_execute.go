@@ -382,13 +382,13 @@ func (r CodeExecuteResult) AssistantFacing() string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "Code execution %s; %d child calls.\n", r.Metadata.Status, len(r.Metadata.Calls))
 	for _, value := range r.Metadata.Outputs {
-		output.Write(value)
+		output.WriteString(codeOutputText(value))
 		output.WriteByte('\n')
 	}
 	for _, item := range r.Metadata.Items {
 		switch item.Type {
 		case "json":
-			output.Write(item.Value)
+			output.WriteString(codeOutputText(item.Value))
 			output.WriteByte('\n')
 		case "image":
 			fmt.Fprintf(&output, "Image: %s\n", item.ArtifactID)
@@ -429,7 +429,7 @@ func (r CodeExecuteResult) ContentParts() []tooltypes.ToolResultContentPart {
 		case "json":
 			parts = append(parts, tooltypes.ToolResultContentPart{
 				Type: tooltypes.ToolResultContentPartTypeText,
-				Text: string(item.Value),
+				Text: codeOutputText(item.Value),
 			})
 		case "image", "artifact":
 			attachment, ok := attachments[item.ArtifactID]
@@ -459,6 +459,20 @@ func (r CodeExecuteResult) ContentParts() []tooltypes.ToolResultContentPart {
 		return nil
 	}
 	return parts
+}
+
+// codeOutputText sends a selected JSON string, including console.log output,
+// to the model as plain text rather than quoted JSON with escaped newlines.
+// Other values stay compact JSON so their types remain unambiguous.
+func codeOutputText(value json.RawMessage) string {
+	text := strings.TrimSpace(string(value))
+	if strings.HasPrefix(text, `"`) {
+		var decoded string
+		if json.Unmarshal([]byte(text), &decoded) == nil {
+			return decoded
+		}
+	}
+	return string(value)
 }
 
 func (r CodeExecuteResult) StructuredData() tooltypes.StructuredToolResult {

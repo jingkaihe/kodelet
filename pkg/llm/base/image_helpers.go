@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
 
@@ -101,6 +102,20 @@ func ReadImageFileAsDataURL(filePath string) (string, error) {
 // DataURLFromBase64Payload constructs a data URL from mime type and base64 bytes.
 func DataURLFromBase64Payload(mimeType, base64Data string) string {
 	return "data:" + mimeType + ";base64," + base64Data
+}
+
+// UndeliveredImageNotice describes an image part a provider adapter could not
+// attach, so surrounding text such as "Image artifact: X" does not imply that
+// the model received the pixels. An empty part carries nothing to report and
+// returns "".
+func UndeliveredImageNotice(part tooltypes.ToolResultContentPart) string {
+	if artifactID := strings.TrimSpace(part.ArtifactID); artifactID != "" {
+		return "Image " + artifactID + " could not be delivered to the model."
+	}
+	if strings.TrimSpace(part.ImageURL) != "" {
+		return "An image could not be delivered to the model."
+	}
+	return ""
 }
 
 // Base64ImageSourceMediaType validates Anthropic-compatible base64 image MIME types.

@@ -398,15 +398,34 @@ func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) 
 	require.NotNil(t, block.OfToolResult)
 	assert.Equal(t, "toolu_1", block.OfToolResult.ToolUseID)
 	assert.False(t, block.OfToolResult.IsError.Value)
-	require.Len(t, block.OfToolResult.Content, 3)
+	require.Len(t, block.OfToolResult.Content, 4)
 	require.NotNil(t, block.OfToolResult.Content[0].OfText)
 	assert.Equal(t, descriptor, block.OfToolResult.Content[0].OfText.Text)
-	require.NotNil(t, block.OfToolResult.Content[1].OfImage)
-	source := block.OfToolResult.Content[1].OfImage.Source.OfBase64
+	require.NotNil(t, block.OfToolResult.Content[1].OfText)
+	assert.Equal(t, "An image could not be delivered to the model.", block.OfToolResult.Content[1].OfText.Text)
+	require.NotNil(t, block.OfToolResult.Content[2].OfImage)
+	source := block.OfToolResult.Content[2].OfImage.Source.OfBase64
 	require.NotNil(t, source)
 	assert.Equal(t, imageBase64, source.Data)
 	assert.Equal(t, anthropic.Base64ImageSourceMediaTypeImagePNG, source.MediaType)
-	assert.Equal(t, "after image", block.OfToolResult.Content[2].OfText.Text)
+	assert.Equal(t, "after image", block.OfToolResult.Content[3].OfText.Text)
+}
+
+func TestAnthropicToolResultBlockReportsUnmaterializedImages(t *testing.T) {
+	result := fakeAnthropicMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: "fallback"},
+		parts: []tooltypes.ToolResultContentPart{
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: "Image artifact: art_local"},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ArtifactID: "art_local", MimeType: "image/png"},
+		},
+	}
+
+	block := anthropicToolResultBlock("toolu_local", result)
+
+	require.NotNil(t, block.OfToolResult)
+	require.Len(t, block.OfToolResult.Content, 2)
+	require.NotNil(t, block.OfToolResult.Content[1].OfText)
+	assert.Equal(t, "Image art_local could not be delivered to the model.", block.OfToolResult.Content[1].OfText.Text)
 }
 
 func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {

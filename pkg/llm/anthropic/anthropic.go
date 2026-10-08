@@ -773,11 +773,18 @@ func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) ant
 			switch part.Type {
 			case tooltypes.ToolResultContentPartTypeImage:
 				mimeType, encoded, err := base.ParseBase64DataURL(part.ImageURL)
-				if err != nil {
-					continue
+				validatedMimeType := ""
+				if err == nil {
+					validatedMimeType, err = base.Base64ImageSourceMediaType(mimeType)
 				}
-				validatedMimeType, err := base.Base64ImageSourceMediaType(mimeType)
 				if err != nil {
+					// Keep the result honest when surrounding text names an image
+					// that cannot be attached for this provider.
+					if notice := base.UndeliveredImageNotice(part); notice != "" {
+						content = append(content, anthropic.ToolResultBlockParamContentUnion{
+							OfText: &anthropic.TextBlockParam{Text: notice},
+						})
+					}
 					continue
 				}
 				content = append(content, anthropic.ToolResultBlockParamContentUnion{
