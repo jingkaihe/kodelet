@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.0-beta
+
+Added opt-in code mode, letting the model call tools from sandboxed JavaScript scripts via `code_execute`. Enable it with `code_mode: on|only` or per run with `--code-mode`, the SDK `codeMode` option, or a profile's `code_mode`. Existing tool permissions and hooks still apply, and scripts appear as expandable cards in the TUI and Web UI. Extension tools can return `structuredContent` with an optional `outputSchema`, `group`, and `short` summary; MCP tools provide these automatically.
+
+Improved Web UI transcript auto-scrolling and streamed Markdown rendering, keeping the view stable while responses stream in.
+
+Fixed `file_read` reporting truncation based on file contents; truncation is now tracked explicitly.
+
 ## 0.7.4-beta
 
 Enabled Web UI terminals, browsers, and Git diffs in a new chat's selected runner directory before sending the first message. Terminal and browser sessions keep their identity when the conversation is saved.
