@@ -407,7 +407,7 @@ func TestCodeExecuteToolOutputSchemaValidation(t *testing.T) {
 			schema: `{"type":"array","items":{"$ref":"#/$defs/id"},"$defs":{"id":{"type":"integer"}}}`,
 		},
 		{name: "partial failure", schema: objectSchema, data: `{"items":[]}`, outcome: "completed"},
-		{name: "invalid partial failure", schema: objectSchema, data: `"private-output"`, outcome: "unknown", invalid: true},
+		{name: "mismatched partial failure passes through", schema: objectSchema, data: `"partial-output"`, outcome: "unknown"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var schema map[string]any
@@ -461,6 +461,57 @@ try {
 			assert.Equal(t, "invalid_output", metadata.Calls[0].ErrorKind)
 		})
 	}
+}
+
+func TestCodeExecuteToolMismatchedPartialDataKeepsFailure(t *testing.T) {
+	calls := 0
+	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+		Definitions: []codemode.Definition{{
+			Name:         "lookup",
+			OutputSchema: map[string]any{"type": "object", "required": []any{"items"}},
+		}},
+		Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
+			calls++
+			partial := CodeToolReply{
+				Data:        map[string]any{"error": "rate_limited"},
+				Text:        "rate limited; retry after 30s",
+				Attachments: []tooltypes.ToolAttachment{},
+			}
+			return CodeToolReply{}, &CodeToolError{
+				Kind:    "tool_error",
+				Tool:    name,
+				CallID:  callID,
+				Outcome: "completed",
+				Message: "lookup failed: 403",
+				Result:  &partial,
+			}
+		},
+	})
+	params, err := json.Marshal(codeExecuteInput{Code: `
+try {
+  await tools.lookup({});
+} catch (e) {
+  return {kind: e.kind, outcome: e.outcome, message: e.message, result: e.result};
+}
+`})
+	require.NoError(t, err)
+	result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
+	require.False(t, result.IsError(), result.GetError())
+	assert.Equal(t, 1, calls, "a failed call is never retried")
+	metadata := result.(CodeExecuteResult).Metadata
+	require.Len(t, metadata.Items, 1)
+	assert.JSONEq(t, `{
+  "kind": "tool_error",
+  "outcome": "completed",
+  "message": "lookup failed: 403",
+  "result": {
+    "data": {"error": "rate_limited"},
+    "text": "rate limited; retry after 30s",
+    "attachments": [],
+    "truncated": false
+  }
+}`, string(metadata.Items[0].Value), "schema checks never replace a failure's own diagnostics")
+	assert.Equal(t, "tool_error", metadata.Calls[0].ErrorKind)
 }
 
 func TestCodeExecuteToolOutputSchemaCannotLoadExternalResources(t *testing.T) {

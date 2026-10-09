@@ -91,7 +91,7 @@ Discover authorized tools with these asynchronous APIs:
   await catalog.search(query, {group?, limit?, cursor?}) -> the same page shape
   await catalog.describe(name) -> documentation, input/output schemas, and declaration
 list and search return one-line summaries in pages of 20 (limit up to 100); when nextCursor is present, pass it as cursor with the same query and group to see more. describe returns the full description, input/output schemas, and declaration. Output schemas describe reply.data, not the envelope. Use catalog.describe(name) for a tool's full rules and return fields, and catalog.search or catalog.list to find tools you do not already know. Return discovery results to read them before writing calls that depend on unfamiliar return fields; do not guess field names. Example: return await catalog.search("open pull requests");
-Call tools with await tools[exact_registered_name](input). Names never include their catalog group: use tools.get_weather(...), not tools["mcp/weather/get_weather"](...). Successful calls return the fixed envelope {data, text, attachments, truncated}: data holds documented structured fields (null when unavailable or removed by policy); text holds textual output or supplementary information (empty string when absent); attachments holds artifact references, not bytes (empty array when absent); truncated reports content shortened by output limits, not pagination. Non-null data is checked against the declared output schema. Invalid schemas or mismatching data fail with invalid_output after execution, without exposing the invalid payload or retrying the tool. Failures throw serializable errors with kind, tool, callId, outcome, message, and optional result (the effective ToolReply). To inspect failure output, catch the error and explicitly emit e.result?.text || e.message; do not rerun a failed tool just to recover diagnostics.
+Call tools with await tools[exact_registered_name](input). Names never include their catalog group: use tools.get_weather(...), not tools["mcp/weather/get_weather"](...). Successful calls return the fixed envelope {data, text, attachments, truncated}: data holds documented structured fields (null when unavailable or removed by policy); text holds textual output or supplementary information (empty string when absent); attachments holds artifact references, not bytes (empty array when absent); truncated reports content shortened by output limits, not pagination. Non-null data of successful calls is checked against the declared output schema. Invalid schemas or mismatching data fail with invalid_output after execution, without exposing the invalid payload or retrying the tool. Failures throw serializable errors with kind, tool, callId, outcome, message, and optional result (the effective ToolReply; its data is not schema-checked). To inspect failure output, catch the error and explicitly emit e.result?.text || e.message; do not rerun a failed tool just to recover diagnostics.
 Prefer batching independent tool calls and catalog queries in a single invocation with Promise.all to reduce round trips; up to 8 tool calls run at once and the rest queue. Use Promise.allSettled when you need every outcome even if some calls fail. Keep dependent calls or operations that could conflict on shared state sequential; batch only work needed for the task.
 Only return values, emit(value), and console.log(...) are included as JSON/text. Select only needed fields rather than returning entire tool replies. Await values before emitting them. Intermediate tool results stay local. Calls retain existing permissions and hooks. There is no automatic retry or rollback; a caught child error remains in the execution summary. Recursive code_execute is forbidden.
 Use emit.image(ref, {detail?: "original"}) to send image pixels to the model, or emit.artifact(ref) to retain an image artifact without sending pixels. A ref is an artifactId string or an attachment descriptor from an effective child reply in this invocation. For an existing artifact or local path, call tools.view_image first. Image emission requires view_image permission; original detail must be supported by the active model. Binary data, paths, and URLs are not accepted. Returning IDs or image-shaped JSON does not select media. Example: const r = await tools.view_image({path: "/tmp/chart.png"}); emit.image(r.attachments[0]);
@@ -286,21 +286,15 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		var outputErr error
 		if encodeErr != nil || len(encoded) > codemode.MaxHostResponseBytes {
 			outputErr = errors.New("child reply is not valid JSON or exceeds the 2 MiB limit; the tool will not be retried")
-		} else if len(outputSchemas[request.Name]) > 0 && len(encoded) > 0 {
-			// Read only the serialized snapshot, including the effective partial
-			// result of a failed call. Never recover pre-hook or raw reply data.
+		} else if callErr == nil && len(outputSchemas[request.Name]) > 0 {
+			// Validate only successful replies, from the serialized snapshot rather
+			// than raw reply data. A failure's partial result (ToolError.result, typed
+			// unknown) passes through so its diagnostics are never replaced.
 			var snapshot struct {
-				Data   json.RawMessage `json:"data"`
-				Result *struct {
-					Data json.RawMessage `json:"data"`
-				} `json:"result"`
+				Data json.RawMessage `json:"data"`
 			}
 			_ = json.Unmarshal(encoded, &snapshot)
-			data := snapshot.Data
-			if callErr != nil && snapshot.Result != nil {
-				data = snapshot.Result.Data
-			}
-			outputErr = codemode.ValidateOutputData(outputSchemas[request.Name], data)
+			outputErr = codemode.ValidateOutputData(outputSchemas[request.Name], snapshot.Data)
 		}
 		if outputErr != nil {
 			encoded = nil
