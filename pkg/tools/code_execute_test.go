@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +127,13 @@ func TestCodeExecuteToolRequiresHostAuthority(t *testing.T) {
 	result := (&CodeExecuteTool{}).Execute(t.Context(), nil, `{"code":"return 1"}`)
 	assert.True(t, result.IsError())
 	assert.Contains(t, result.GetError(), "authorized runner")
+}
+
+func TestCodeExecuteToolDescriptionMatchesLimits(t *testing.T) {
+	description := (&CodeExecuteTool{}).Description()
+	assert.Contains(t, description, fmt.Sprintf("up to %d tool calls run at once", codemode.MaxConcurrentToolCalls))
+	assert.Contains(t, description, fmt.Sprintf("A tool reply over %d MiB fails", codemode.MaxHostResponseBytes>>20))
+	assert.NotContains(t, description, "code_search", "examples use a generic tool name")
 }
 
 func TestCodeExecuteToolInputValidation(t *testing.T) {
