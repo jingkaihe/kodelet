@@ -43,6 +43,13 @@ func TestBashTool_GenerateSchema_CustomTimeout(t *testing.T) {
 	assert.Equal(t, json.Number("300"), timeoutSchema.Maximum)
 }
 
+func TestBashTool_ShortStatesTimeoutUnit(t *testing.T) {
+	assert.Equal(t,
+		"Run a bash command and return its combined output and exit code; timeout is in seconds (10-120).",
+		(&BashTool{}).Short())
+	assert.Contains(t, NewBashToolWithTimeout(nil, false, 5*time.Minute).Short(), "in seconds (10-300).")
+}
+
 func TestBashTool_Name(t *testing.T) {
 	tool := &BashTool{}
 	assert.Equal(t, "bash", tool.Name())

@@ -168,8 +168,12 @@ func (b *BashTool) RawOutputSchema() map[string]any {
 }
 
 // Short returns the one-line summary used in compact tool listings.
+// The timeout unit is spelled out because JavaScript callers default to milliseconds.
 func (b *BashTool) Short() string {
-	return "Run a bash command and return its combined output and exit code."
+	return fmt.Sprintf(
+		"Run a bash command and return its combined output and exit code; timeout is in seconds (%d-%d).",
+		bashMinTimeoutSeconds, b.maxTimeoutSeconds(),
+	)
 }
 
 // Name returns the name of the tool
