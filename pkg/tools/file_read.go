@@ -144,6 +144,11 @@ func (r *FileReadTool) RawOutputSchema() map[string]any {
 	}
 }
 
+// CodeModeDescription explains where code-mode scripts find file content.
+func (*FileReadTool) CodeModeDescription() string {
+	return "In code mode, file content is in reply.data.lines without display line numbers or notices. reply.text is empty unless structured data is unavailable; reply.truncated indicates omitted or shortened lines. Read failures throw."
+}
+
 // Short returns the one-line summary used in compact tool listings.
 func (r *FileReadTool) Short() string {
 	return "Read a text file with line numbers, optionally from an offset."
@@ -167,8 +172,6 @@ For most files, omit offset and line_limit to read the entire file. Use these pa
 
 The result will include line numbers padded appropriately, followed by the content of each line.
 If there are more lines beyond the line limit, a truncation message will be shown with the exact count of remaining lines.
-
-In code mode, file content is in reply.data.lines without display line numbers or notices. reply.text is empty unless structured data is unavailable; reply.truncated indicates omitted or shortened lines. Read failures throw.
 
 Example:
 

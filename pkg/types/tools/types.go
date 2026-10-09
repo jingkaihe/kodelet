@@ -67,6 +67,21 @@ type ShortDescriber interface {
 	Short() string
 }
 
+// CodeModeDescriber explains a tool's code-mode reply, such as which envelope
+// field carries its output. Runners append it to the tool's description only
+// when code mode is negotiated, so other sessions do not carry it.
+type CodeModeDescriber interface {
+	CodeModeDescription() string
+}
+
+// CodeModeDescriptionForTool returns a tool's code-mode notes, or "" when it has none.
+func CodeModeDescriptionForTool(tool Tool) string {
+	if describer, ok := tool.(CodeModeDescriber); ok {
+		return describer.CodeModeDescription()
+	}
+	return ""
+}
+
 // ShortForTool returns a tool's explicit one-line summary, or "" when it has none.
 func ShortForTool(tool Tool) string {
 	if describer, ok := tool.(ShortDescriber); ok {

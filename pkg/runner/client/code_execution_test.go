@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -374,6 +375,28 @@ func TestRunnerCodeReplyMetadata(t *testing.T) {
 				assert.Equal(t, "web", reply.Text)
 			}
 		})
+	}
+}
+
+func TestBuildWireManifestAddsCodeModeNotesOnlyWithCodeMode(t *testing.T) {
+	bash := tools.NewBashTool(nil, false)
+	local := agentenv.Manifest{
+		WorkingDirectory: t.TempDir(),
+		Tools: []agentenv.ToolDefinition{{
+			Name:        bash.Name(),
+			Description: bash.Description(),
+			InputSchema: map[string]any{"type": "object"},
+			Placement:   agentenv.ToolPlacementEnvironment,
+			Tool:        bash,
+		}},
+	}
+	for mode, want := range map[string]bool{"": false, "off": false, "on": true, "only": true} {
+		manifest, err := buildWireManifest(local, llmtypes.Config{CodeMode: mode}, nil, "runner-1", "run-1", 1, nil)
+		require.NoError(t, err)
+		require.Len(t, manifest.Tools, 1)
+		description := manifest.Tools[0].Description
+		assert.True(t, strings.HasPrefix(description, bash.Description()), mode)
+		assert.Equal(t, want, strings.Contains(description, bash.CodeModeDescription()), mode)
 	}
 }
 

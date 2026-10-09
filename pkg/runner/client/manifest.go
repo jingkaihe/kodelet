@@ -94,6 +94,11 @@ func buildWireManifest(
 			wireTools[len(wireTools)-1].Group = definition.Group
 			wireTools[len(wireTools)-1].Short = definition.Short
 			wireTools[len(wireTools)-1].ModelOnly = definition.ModelOnly
+			// Reply notes only help when scripts can call the tool. Appending them to
+			// the description keeps the wire shape that legacy decoders rehash.
+			if notes := tooltypes.CodeModeDescriptionForTool(definition.Tool); notes != "" {
+				wireTools[len(wireTools)-1].Description += "\n\n" + notes
+			}
 		}
 		if extensionTool, ok := definition.Tool.(*extensions.Tool); ok {
 			wireTools[len(wireTools)-1].ExtensionID = extensionTool.ExtensionID()

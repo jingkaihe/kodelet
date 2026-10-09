@@ -41,6 +41,11 @@ type BrowserInput struct {
 	SessionID  string `json:"sessionId,omitempty" jsonschema:"description=Session ID returned by open; required for explicit stop."`
 }
 
+// CodeModeDescription explains where code-mode scripts find browser results.
+func (*BrowserTool) CodeModeDescription() string {
+	return "In code mode, reply.text contains the rendered operation result and reply.data is null. Screenshots return image references in reply.attachments; use emit.image(ref) to select pixels for the model. Browser operation failures throw."
+}
+
 // Short returns the one-line summary used in compact tool listings.
 func (*BrowserTool) Short() string {
 	return "Open, navigate, evaluate, or screenshot the browser page shared with the user."
@@ -54,8 +59,6 @@ func (*BrowserTool) Description() string {
 	return `Use the shared browser to collaborate visually with the human: show your work, demonstrate an issue, inspect the page they are discussing, or capture screenshots for feedback. You both see and interact with the same live page.
 
 Prefer dedicated browser automation tools, such as Playwright, when available, for automated testing, repetitive interactions, or multi-step workflows that do not need the shared page. Do not assume those tools share this session.
-
-In code mode, reply.text contains the rendered operation result and reply.data is null. Screenshots return image references in reply.attachments; use emit.image(ref) to select pixels for the model. Browser operation failures throw.
 
 Notes:
 - Use localhost to access local HTTP services. Use evaluate for readiness checks, focused inspection, and small interactions.

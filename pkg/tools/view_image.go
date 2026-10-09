@@ -102,6 +102,11 @@ func NewViewImageTool(model, provider string) *ViewImageTool {
 	return &ViewImageTool{model: model, provider: provider}
 }
 
+// CodeModeDescription explains that code-mode calls return image references.
+func (*ViewImageTool) CodeModeDescription() string {
+	return "In code mode, calls return image references in reply.attachments, not pixels. Use emit.image(ref) to select pixels for the model or emit.artifact(ref) for retention only. reply.data is null; reply.text contains image metadata or a diagnostic. Image loading failures throw."
+}
+
 // Short returns the one-line summary used in compact tool listings.
 func (t *ViewImageTool) Short() string {
 	return "View an image from a local path or a tool-returned artifact ID."
@@ -129,8 +134,6 @@ func (t *ViewImageTool) Description() string {
 	return `View an image using exactly one of: a user-supplied local path or a tool-returned artifactId.
 
 Successful calls provide the image pixels. Returned artifact IDs and URLs refer to the same image; do not re-view it just to follow a reference. Skip images already visible in your context.
-
-In code mode, calls return image references in reply.attachments, not pixels. Use emit.image(ref) to select pixels for the model or emit.artifact(ref) for retention only. reply.data is null; reply.text contains image metadata or a diagnostic. Image loading failures throw.
 
 ` + detailText
 }

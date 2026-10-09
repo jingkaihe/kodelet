@@ -59,9 +59,6 @@ Banned commands:
 - description: required, 5-10 words
 - timeout: required, {{.MinTimeoutSeconds}}-{{.MaxTimeoutSeconds}}
 
-# Code mode result
-Combined stdout/stderr is in reply.text. reply.data contains exitCode (null when unknown) and an optional fullOutputPath for saved complete output. reply.truncated indicates shortened output. Nonzero exits and timeouts throw with available output and execution fields in error.result.
-
 # Rules
 - Use parallel tool calling for independent commands.
 - Do not run interactive commands.
@@ -164,6 +161,11 @@ func (b *BashTool) RawOutputSchema() map[string]any {
 		"required":             []string{"exitCode"},
 		"additionalProperties": false,
 	}
+}
+
+// CodeModeDescription explains where code-mode scripts find bash output.
+func (*BashTool) CodeModeDescription() string {
+	return "In code mode, combined stdout/stderr is in reply.text. reply.data contains exitCode (null when unknown) and an optional fullOutputPath for saved complete output. reply.truncated indicates shortened output. Nonzero exits and timeouts throw with available output and execution fields in error.result."
 }
 
 // Short returns the one-line summary used in compact tool listings.
