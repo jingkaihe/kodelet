@@ -51,8 +51,8 @@ func TestCatalogListAndDescribe(t *testing.T) {
 	description, err := catalog.Describe(`git-hub/"issues"`)
 	require.NoError(t, err)
 	assert.Contains(t, description.Declaration, `"git-hub/\"issues\""`)
-	assert.Contains(t, description.Declaration, `"repo": string;`)
-	assert.Contains(t, description.Declaration, `"limit"?: number;`)
+	assert.Contains(t, description.Declaration, `repo: string`)
+	assert.Contains(t, description.Declaration, `limit?: number`)
 	assert.Contains(t, description.Declaration, `Promise<ToolReply<Array<string>>>`)
 	assert.Equal(t, "Find\n repository issues", description.Description)
 	payload, err := json.Marshal(description)
@@ -264,8 +264,18 @@ func TestCatalogSchemaDeclarations(t *testing.T) {
 		{name: "unknown union", schema: map[string]any{"type": []string{"string", "unsupported"}}, want: "unknown"},
 		{name: "empty union", schema: map[string]any{"type": []string{}}, want: "unknown"},
 		{name: "array", schema: map[string]any{"type": "array"}, want: "Array<unknown>"},
-		{name: "empty object", schema: map[string]any{"type": "object"}, want: "{ [key: string]: unknown; }"},
-		{name: "required unknown", schema: map[string]any{"type": "object", "required": []string{"id"}, "additionalProperties": false}, want: `{ "id": unknown; }`},
+		{name: "empty object", schema: map[string]any{"type": "object"}, want: "{ [key: string]: unknown }"},
+		{name: "required unknown", schema: map[string]any{"type": "object", "required": []string{"id"}, "additionalProperties": false}, want: `{ id: unknown }`},
+		{name: "closed empty object", schema: map[string]any{"type": "object", "additionalProperties": false}, want: "{}"},
+		{
+			name: "quoted key",
+			schema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"a-b": map[string]any{"type": "string"}},
+				"additionalProperties": false,
+			},
+			want: `{ "a-b"?: string }`,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			catalog := NewCatalog([]Definition{{Name: "tool", InputSchema: tt.schema, OutputSchema: tt.schema}})

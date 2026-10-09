@@ -24,8 +24,8 @@ const toolIndexHeader = "Callable tools, listed under their catalog group. This 
 	"Call each tool by the exact name that starts its line, as tools[name](input); " +
 	"group headings are for catalog.list({group}) and are never part of a tool name " +
 	"(tools.bash(...), not tools[\"group/bash\"](...)). " +
-	"Signatures show input fields, allowed values, defaults (= value), and ToolReply<T> return types; " +
-	"call catalog.describe(name) for a tool's full schemas and field descriptions."
+	"Signatures show input fields, allowed values, defaults (= value), and a ToolReply<T> return type " +
+	"when the tool declares structured data; call catalog.describe(name) for full schemas and field descriptions."
 
 // Summary returns a tool's one-line summary: its explicit Short, or else the
 // first sentence of its description, on one line and capped in length.
@@ -199,20 +199,26 @@ func (g *indexGroup) render() string {
 	}
 }
 
-// Signature renders input fields and a ToolReply<T> return type from the data
-// schema. Oversized signatures drop input detail before output detail, always
+// Signature renders input fields and, when the tool declares an output schema,
+// a ToolReply<T> return type. Oversized signatures drop input detail before output detail, always
 // retaining a return type and an explicit discovery hint when abbreviated.
 func Signature(definition Definition) string {
 	name := indexIdentifier(definition.Name)
 	// Normalize native Go schema values just as Describe does, so declarations
 	// agree for []string unions, enums, and required fields as well as JSON input.
 	outputType := catalogSchemaType(cloneCatalogSchema(definition.OutputSchema), 0)
-	output := " → ToolReply<" + outputType + ">"
+	// Without an output schema the reply is ToolReply<unknown>; the header says
+	// that once instead of every line repeating it.
+	output, abbreviatedOutput := "", ""
+	if len(definition.OutputSchema) > 0 {
+		output = " → ToolReply<" + outputType + ">"
+		abbreviatedOutput = " → ToolReply<unknown>"
+	}
 	candidates := []string{
 		name + "(" + indexInputType(definition.InputSchema, true) + ")" + output,
 		name + "(" + indexInputType(definition.InputSchema, false) + ")" + output,
 		name + "(…)" + output,
-		name + "(…) → ToolReply<unknown>",
+		name + "(…)" + abbreviatedOutput,
 	}
 	for i, signature := range candidates {
 		if i > 0 || strings.Contains(signature, "…") || outputType == "unknown" && len(definition.OutputSchema) > 0 {

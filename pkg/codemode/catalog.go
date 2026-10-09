@@ -482,17 +482,20 @@ func catalogSchemaType(schema map[string]any, depth int) string {
 		fields := make([]string, 0, len(names)+1)
 		for _, name := range names {
 			property, _ := properties[name].(map[string]any)
-			quotedName, _ := json.Marshal(name)
 			optional := "?"
 			if required[name] {
 				optional = ""
 			}
-			fields = append(fields, string(quotedName)+optional+": "+catalogSchemaType(property, depth+1)+";")
+			// Write keys like input fields: bare identifiers, quoted otherwise.
+			fields = append(fields, indexIdentifier(name)+optional+": "+catalogSchemaType(property, depth+1))
 		}
 		if schema["additionalProperties"] != false {
-			fields = append(fields, "[key: string]: unknown;")
+			fields = append(fields, "[key: string]: unknown")
 		}
-		result := "{ " + strings.Join(fields, " ") + " }"
+		if len(fields) == 0 {
+			return "{}"
+		}
+		result := "{ " + strings.Join(fields, "; ") + " }"
 		if len(result) > 16384 {
 			return "unknown"
 		}

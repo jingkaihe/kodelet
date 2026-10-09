@@ -67,16 +67,16 @@ func TestSignature(t *testing.T) {
 	assert.Equal(t,
 		`spawn_agent({ name: string; task: string; context_mode?: "fork" | "fresh" = "fork"; cwd?: string | null; `+
 			`labels?: (string | number)[]; options?: { depth: number }; timeout_ms?: number = 30000 }) → `+
-			`ToolReply<{ "id": unknown; "status"?: unknown; [key: string]: unknown; }>`,
+			`ToolReply<{ id: unknown; status?: unknown; [key: string]: unknown }>`,
 		Signature(definition))
 
-	assert.Equal(t, `"git-hub/x"({ "a-b"?: string }) → ToolReply<unknown>`, Signature(Definition{
+	assert.Equal(t, `"git-hub/x"({ "a-b"?: string })`, Signature(Definition{
 		Name:        "git-hub/x",
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"a-b": map[string]any{"type": "string"}}},
 	}), "names that are not identifiers are quoted")
-	assert.Equal(t, "noop({}) → ToolReply<unknown>", Signature(Definition{Name: "noop"}))
-	assert.Equal(t, "noop({}) → ToolReply<unknown>", Signature(Definition{Name: "noop", InputSchema: map[string]any{"type": "object"}}))
-	assert.Equal(t, "raw(unknown) → ToolReply<unknown>", Signature(Definition{Name: "raw", InputSchema: map[string]any{"$ref": "#/x"}}))
+	assert.Equal(t, "noop({})", Signature(Definition{Name: "noop"}), "no output schema means no return clause")
+	assert.Equal(t, "noop({})", Signature(Definition{Name: "noop", InputSchema: map[string]any{"type": "object"}}))
+	assert.Equal(t, "raw(unknown)", Signature(Definition{Name: "raw", InputSchema: map[string]any{"$ref": "#/x"}}))
 
 	wide := map[string]any{}
 	for i := range 20 {
@@ -85,7 +85,7 @@ func TestSignature(t *testing.T) {
 	untyped := Signature(Definition{Name: "wide", InputSchema: map[string]any{"type": "object", "properties": wide}})
 	assert.True(t, strings.HasPrefix(untyped, "wide({ field_00?, field_01?"), "oversized signatures drop types first: %s", untyped)
 	assert.Contains(t, untyped, ", …")
-	assert.Contains(t, untyped, "→ ToolReply<unknown>")
+	assert.NotContains(t, untyped, "→", "tools without an output schema have no return clause")
 	assert.Contains(t, untyped, "catalog.describe(name)")
 	assert.LessOrEqual(t, utf8.RuneCountInString(untyped), signatureMaxRunes)
 }
@@ -114,7 +114,7 @@ func TestSignatureReturnTypes(t *testing.T) {
 					"nextCursor": map[string]any{"type": []string{"string", "null"}},
 				},
 			},
-			want: `{ "items": Array<{ "id": number; "title"?: string | null; }>; "nextCursor"?: string | null; }`,
+			want: `{ items: Array<{ id: number; title?: string | null }>; nextCursor?: string | null }`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,12 +159,12 @@ func TestToolIndex(t *testing.T) {
 	index := ToolIndex(definitions)
 	assert.Equal(t, toolIndexHeader+`
 Built-in tools:
-  bash({ command: string }) → ToolReply<unknown> — Run a command.
+  bash({ command: string }) — Run a command.
 Group extension/agents:
-  spawn_agent({}) → ToolReply<unknown> — Start an agent.
-  wait_agent({}) → ToolReply<unknown> — Wait for an agent.
+  spawn_agent({}) — Start an agent.
+  wait_agent({}) — Wait for an agent.
 Group mcp/data:
-  lookup({}) → ToolReply<unknown> — Look up data.`, index)
+  lookup({}) — Look up data.`, index)
 	reversed := []Definition{definitions[4], definitions[3], definitions[2], definitions[1], definitions[0]}
 	assert.Equal(t, ToolIndex(definitions[:3]), ToolIndex([]Definition{definitions[2], definitions[0], definitions[1]}),
 		"output does not depend on input order")
@@ -190,8 +190,8 @@ func TestToolIndexBudget(t *testing.T) {
 	}
 	index := ToolIndex(definitions)
 	assert.LessOrEqual(t, len(index), toolIndexMaxBytes)
-	assert.Contains(t, index, "  core_39({}) → ToolReply<unknown> — Core tool.", "built-in tools are never reduced")
-	assert.Contains(t, index, "Group mcp/notes:\n  note_0({}) → ToolReply<unknown> — Take notes.", "small groups are completed in early rounds")
+	assert.Contains(t, index, "  core_39({}) — Core tool.", "built-in tools are never reduced")
+	assert.Contains(t, index, "Group mcp/notes:\n  note_0({}) — Take notes.", "small groups are completed in early rounds")
 	shown := make(map[string]int)
 	for _, group := range []string{"github", "gitlab"} {
 		match := regexp.MustCompile("Group mcp/" + group + ` \(60 tools, (\d+) shown in full\):`).FindStringSubmatch(index)
@@ -223,13 +223,13 @@ func TestIndexGroupRendering(t *testing.T) {
 	group := newIndexGroup("mcp/x", members)
 	assert.Equal(t, `Group mcp/x (2 tools, names only; call catalog.describe(name) for details): a_tool, "b-tool"`, group.render())
 	group.full[0] = true
-	assert.Equal(t, "Group mcp/x (2 tools, 1 shown in full):\n  a_tool({}) → ToolReply<unknown> — First tool.\n"+
+	assert.Equal(t, "Group mcp/x (2 tools, 1 shown in full):\n  a_tool({}) — First tool.\n"+
 		`  Also callable (call catalog.describe(name) for details): "b-tool"`, group.render())
 	group.full[1] = true
-	assert.Equal(t, "Group mcp/x:\n  a_tool({}) → ToolReply<unknown> — First tool.\n  \"b-tool\"({}) → ToolReply<unknown> — Second tool.", group.render())
+	assert.Equal(t, "Group mcp/x:\n  a_tool({}) — First tool.\n  \"b-tool\"({}) — Second tool.", group.render())
 	group.countOnly = true
 	assert.Equal(t, `Group mcp/x (2 tools): browse with catalog.list({group: "mcp/x"})`, group.render())
 
 	builtIn := newIndexGroup("", []Definition{{Name: "bash", Short: "Run a command."}})
-	assert.Equal(t, "Built-in tools:\n  bash({}) → ToolReply<unknown> — Run a command.", builtIn.render(), "built-in tools start with full lines")
+	assert.Equal(t, "Built-in tools:\n  bash({}) — Run a command.", builtIn.render(), "built-in tools start with full lines")
 }
