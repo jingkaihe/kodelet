@@ -220,6 +220,16 @@ func (c *Catalog) score(document catalogDocument, terms []string) float64 {
 	return score
 }
 
+// OutputSchema returns a defensive copy of a tool's output schema, or nil when
+// the tool is unknown or declares none, without building its declaration.
+func (c *Catalog) OutputSchema(name string) map[string]any {
+	index, ok := c.byName[name]
+	if !ok {
+		return nil
+	}
+	return cloneCatalogSchema(c.documents[index].definition.OutputSchema)
+}
+
 // Describe returns only an exact authorized name, with defensive schema copies.
 // Its declaration uses the shared types in RuntimeDeclaration, which the
 // code_execute description already carries, so they are not repeated here.

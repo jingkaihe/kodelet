@@ -170,8 +170,7 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		}
 		allowed[definition.Name] = true
 		// Use the catalog's immutable snapshot, not the caller's mutable maps.
-		description, _ := catalog.Describe(definition.Name)
-		outputSchemas[definition.Name] = description.OutputSchema
+		outputSchemas[definition.Name] = catalog.OutputSchema(definition.Name)
 	}
 	var mu sync.Mutex
 	var updateMu sync.Mutex

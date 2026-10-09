@@ -87,6 +87,21 @@ func TestCatalogListAndDescribe(t *testing.T) {
 	assert.Nil(t, description.OutputSchema)
 }
 
+func TestCatalogOutputSchema(t *testing.T) {
+	schema := map[string]any{"type": "object", "required": []string{"id"}}
+	catalog := NewCatalog([]Definition{
+		{Name: "typed", OutputSchema: schema},
+		{Name: "untyped"},
+	})
+	got := catalog.OutputSchema("typed")
+	assert.Equal(t, map[string]any{"type": "object", "required": []any{"id"}}, got)
+	got["type"] = "array"
+	schema["type"] = "array"
+	assert.Equal(t, "object", catalog.OutputSchema("typed")["type"], "callers get defensive copies")
+	assert.Nil(t, catalog.OutputSchema("untyped"))
+	assert.Nil(t, catalog.OutputSchema("missing"))
+}
+
 func TestRuntimeDeclarationIsSharedByDescribe(t *testing.T) {
 	for _, field := range []string{
 		"declare const catalog",
