@@ -140,10 +140,14 @@ func TestCodeExecuteToolDescriptionMatchesLimits(t *testing.T) {
 	assert.Contains(t, description, fmt.Sprintf("up to %d tool calls run at once", codemode.MaxConcurrentToolCalls))
 	assert.Contains(t, description, fmt.Sprintf("A tool reply over %d MiB fails", codemode.MaxHostResponseBytes>>20))
 	assert.NotContains(t, description, "code_search", "examples use a generic tool name")
-	assert.Contains(t, description, "Output schemas describe reply.data, not the envelope")
-	assert.Contains(t, description, "before writing calls that depend on unfamiliar return fields")
-	assert.Contains(t, description, "Select only needed fields")
-	assert.Contains(t, description, "Invalid schemas or mismatching data fail with invalid_output")
+	assert.Contains(t, description, codemode.RuntimeDeclaration, "the shared runtime contract is embedded verbatim")
+	assert.Equal(t, 1, strings.Count(description, "interface ToolReply"), "the description has no hand-written copy")
+	assert.Contains(t, description, "never guess field names")
+	assert.Contains(t, description, "Do as much as you can in one code_execute call")
+	assert.Contains(t, description, "run independent calls in parallel with Promise.all, including catalog lookups")
+	assert.Contains(t, description, "return or emit e.result?.text || e.message")
+	assert.Contains(t, description, "throws invalid_output")
+	assert.LessOrEqual(t, len(description), 4<<10, "keep the bootstrap description compact")
 }
 
 func TestCodeExecuteToolInputValidation(t *testing.T) {

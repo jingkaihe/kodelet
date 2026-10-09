@@ -28,43 +28,7 @@ code_execute({ code: string }): CodeExecutionResult
 
 The harness waits for this function's returned promise and emits its resolved value, or reports its rejection. Preserve submitted-source line numbers in errors by accounting for the wrapper. TypeScript declarations describe the API, but executable input is JavaScript, not TypeScript.
 
-The runtime provides:
-
-```ts
-interface ToolReply<T = unknown> {
-  data: T | null;
-  text: string;
-  attachments: ArtifactRef[];
-  truncated: boolean;
-}
-
-declare const tools: {
-  [registeredName: string]: (input: unknown) => Promise<ToolReply>;
-};
-
-interface CatalogPageOptions {
-  group?: string;
-  limit?: number;
-  cursor?: string;
-}
-
-interface ToolPage {
-  tools: ToolSummary[];
-  nextCursor?: string;
-}
-
-declare const catalog: {
-  list(options?: CatalogPageOptions): Promise<ToolPage>;
-  search(query: string, options?: CatalogPageOptions): Promise<ToolPage>;
-  describe(registeredName: string): Promise<ToolDescription>;
-};
-
-declare function emit(value: unknown): void;
-declare namespace emit {
-  function image(ref: string | ArtifactRef, options?: { detail?: "original" }): void;
-  function artifact(ref: string | ArtifactRef): void;
-}
-```
+The runtime API (`catalog`, `tools`, `emit`, `ToolReply`, `ArtifactRef`, and `ToolError`) is declared once, in TypeScript, as `codemode.RuntimeDeclaration` in `pkg/codemode/declaration.go`. The `code_execute` description embeds it verbatim, so the model and this document share one contract instead of hand-maintained copies.
 
 Only `code_execute` is a new model-facing tool. `catalog.*` and `tools[name]` are host-backed APIs exposed inside its VM, not additional provider tool declarations or an `operation` variant of the execution tool. Kodelet can reuse the underlying catalog service for other interfaces without running JavaScript.
 
@@ -106,7 +70,7 @@ Code mode changes advertisement, never authorization. Its callable catalog is th
 
 At invocation start, the control plane snapshots the effective callable set, including its thread-owned `agent.init` restriction, and supplies it as host-only execution metadata bound to the parent call and pinned manifest. The runner intersects that set with its own current policy; it must never broaden it. Discovery only lists the resulting set, and dispatch checks membership before every child call while the environment continues to enforce its own policies. An empty allowlist remains empty, rather than meaning unrestricted. Missing required authorization metadata is an error, not a fallback to the full manifest. Neither script input nor tool-input hooks can edit this host-owned authorization context.
 
-Add optional output schemas to tool definitions, extension registration, SDK types, and runner manifests. The schema describes `ToolReply.data`, not display metadata or the entire envelope. JSON Schema descriptions document structured fields; the existing tool description covers any special text, attachment, or failure behavior. Missing output schemas produce `unknown`, never fabricated return types. Full descriptions include self-contained declarations for the reply, artifact references, tool errors, and callable signature. Declarations always retain the possibility of `data: null`, including policy-modified results. The model must read the description before composing code that depends on unfamiliar return fields; discovery within an already-written script does not retroactively teach it the schema.
+Add optional output schemas to tool definitions, extension registration, SDK types, and runner manifests. The schema describes `ToolReply.data`, not display metadata or the entire envelope. JSON Schema descriptions document structured fields; the existing tool description covers any special text, attachment, or failure behavior. Missing output schemas produce `unknown`, never fabricated return types. `catalog.describe` returns only the tool's callable declaration; the shared reply, artifact, and error types it uses are declared once in the `code_execute` description, so describing several tools does not repeat them. Declarations always retain the possibility of `data: null`, including policy-modified results. The model must read the description before composing code that depends on unfamiliar return fields; discovery within an already-written script does not retroactively teach it the schema.
 
 Generate declarations from the same manifest records used by execution. `anyOf` and `oneOf` of representable members render as unions such as `string | null`. Other unsupported JSON Schema constructs degrade conservatively to `unknown`; the original JSON Schema remains available in `catalog.describe`. Descriptions are tool data, not trusted instructions.
 
@@ -189,19 +153,7 @@ Construct `ToolReply` only from the effective post-policy result. In particular,
 
 Code-mode parents and children fail closed when a `tool.call` or `tool.result` hook fails: a failed call hook prevents execution, and a failed result hook withholds the output without implying rollback. Ordinary direct calls retain their existing hook-failure behavior. Execution failure provenance is host-owned, separate from hook-editable metadata, so an RPC timeout cannot be relabeled as a completed operation by a display replacement.
 
-Tool failures reject with a serializable `ToolError`:
-
-```ts
-interface ToolError extends Error {
-  kind: "blocked" | "invalid_input" | "tool_error" |
-        "transport" | "cancelled" | "limit" | "invalid_output";
-  tool: string;
-  callId: string;
-  outcome: "not_started" | "completed" | "unknown";
-  result?: ToolReply;
-  toJSON(): object;
-}
-```
+Tool failures reject with a serializable `ToolError`, declared in `codemode.RuntimeDeclaration`; a script that returns the error keeps its fields.
 
 Only report `not_started` when the host knows dispatch did not begin. A returned tool error means the invocation completed, not that it had no side effects. A lost connection, timeout, or cancellation after dispatch can have an unknown outcome. Preserve useful sanitized error details, including in `Promise.allSettled` output, rather than serializing errors to `{}`.
 

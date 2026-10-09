@@ -24,10 +24,8 @@ const toolIndexHeader = "Callable tools, listed under their catalog group. This 
 	"Call each tool by the exact name that starts its line, as tools[name](input); " +
 	"group headings are for catalog.list({group}) and are never part of a tool name " +
 	"(tools.bash(...), not tools[\"group/bash\"](...)). " +
-	"Signatures show input fields, allowed values, defaults (= value), and ToolReply<T> returns: " +
-	"{data: T | null, text: string, attachments: ArtifactRef[], truncated: boolean}. " +
-	"outputSchema describes data only; policy hooks may clear data. " +
-	"Call catalog.describe(name) for a tool's full schemas, field descriptions, and return semantics."
+	"Signatures show input fields, allowed values, defaults (= value), and ToolReply<T> return types; " +
+	"call catalog.describe(name) for a tool's full schemas and field descriptions."
 
 // Summary returns a tool's one-line summary: its explicit Short, or else the
 // first sentence of its description, on one line and capped in length.

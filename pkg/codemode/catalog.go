@@ -60,50 +60,6 @@ type Description struct {
 	Declaration string `json:"declaration"`
 }
 
-// toolReplyDeclaration keeps Describe self-contained rather than requiring the
-// caller to infer the envelope or media behavior from the data schema.
-const toolReplyDeclaration = `// outputSchema describes ToolReply.data, not the whole reply.
-// Policy hooks may clear data even when an output schema is declared.
-interface ToolReply<T = unknown> {
-  data: T | null;
-  /** Textual output or supplementary information; empty when unused. */
-  text: string;
-  attachments: ArtifactRef[];
-  /** Content was shortened or omitted by output limits; not pagination. */
-  truncated: boolean;
-}
-
-// Current artifacts are images. References contain no image bytes.
-// Use emit.image(ref) for pixels or emit.artifact(ref) for retention only.
-// Returning these descriptors as JSON does not select media.
-interface ArtifactRef {
-  type: "image";
-  /** Present after successful ingestion; check error before selecting media. */
-  artifactId?: string;
-  shortCode?: string;
-  viewUrl?: string;
-  filename?: string;
-  mimeType?: string;
-  alt?: string;
-  width?: number;
-  height?: number;
-  size?: number;
-  error?: string;
-}
-
-// Tool failures reject with this serializable error; no implicit retry or rollback.
-interface ToolError<T = unknown> extends Error {
-  kind: "blocked" | "invalid_input" | "tool_error" | "transport" | "cancelled" | "limit" | "invalid_output";
-  tool: string;
-  callId?: string;
-  /** completed does not imply success or absence of side effects. */
-  outcome: "not_started" | "completed" | "unknown";
-  result?: ToolReply<T>;
-  toJSON(): object;
-}
-
-`
-
 type catalogField struct {
 	terms  map[string]int
 	length int
@@ -265,6 +221,8 @@ func (c *Catalog) score(document catalogDocument, terms []string) float64 {
 }
 
 // Describe returns only an exact authorized name, with defensive schema copies.
+// Its declaration uses the shared types in RuntimeDeclaration, which the
+// code_execute description already carries, so they are not repeated here.
 func (c *Catalog) Describe(name string) (Description, error) {
 	index, ok := c.byName[name]
 	if !ok {
@@ -278,7 +236,7 @@ func (c *Catalog) Describe(name string) (Description, error) {
 	output := catalogSchemaType(definition.OutputSchema, 0)
 	return Description{
 		Definition: definition,
-		Declaration: toolReplyDeclaration + "declare const tools: {\n  " + string(quotedName) +
+		Declaration: "declare const tools: {\n  " + string(quotedName) +
 			": (input: " + input + ") => Promise<ToolReply<" + output + ">>;\n};",
 	}, nil
 }

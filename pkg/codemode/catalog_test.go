@@ -87,28 +87,25 @@ func TestCatalogListAndDescribe(t *testing.T) {
 	assert.Nil(t, description.OutputSchema)
 }
 
-func TestCatalogSelfContainedReturnContract(t *testing.T) {
-	description, err := NewCatalog([]Definition{{Name: "tool"}}).Describe("tool")
-	require.NoError(t, err)
+func TestRuntimeDeclarationIsSharedByDescribe(t *testing.T) {
 	for _, field := range []string{
+		"declare const catalog",
+		"declare const tools",
 		"interface ToolReply<T = unknown>",
 		"data: T | null;",
-		"text: string;",
 		"attachments: ArtifactRef[];",
-		"truncated: boolean;",
 		"interface ArtifactRef",
-		`type: "image";`,
-		"artifactId?: string;",
-		"interface ToolError<T = unknown> extends Error",
-		"result?: ToolReply<T>;",
-		"callId?: string;",
+		"interface ToolError extends Error",
 		`outcome: "not_started" | "completed" | "unknown";`,
-		"outputSchema describes ToolReply.data",
-		"Policy hooks may clear data",
-		"Returning these descriptors as JSON does not select media",
+		"result?: ToolReply;",
+		"declare namespace emit",
 	} {
-		assert.Contains(t, description.Declaration, field)
+		assert.Contains(t, RuntimeDeclaration, field)
 	}
+	description, err := NewCatalog([]Definition{{Name: "tool"}}).Describe("tool")
+	require.NoError(t, err)
+	assert.Equal(t, "declare const tools: {\n  \"tool\": (input: unknown) => Promise<ToolReply<unknown>>;\n};",
+		description.Declaration, "describe declares only the tool; shared types live in the code_execute description")
 }
 
 func TestCatalogPagination(t *testing.T) {
