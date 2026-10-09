@@ -273,9 +273,9 @@ func TestCodeModeSeparatesAdvertisementFromAuthorization(t *testing.T) {
 					AvailableToolsForThread(thread.threadStub, state, false),
 				} {
 					description := advertised[0].Description()
-					assert.True(t, strings.HasPrefix(description, "test tool\n\nCallable tools."), "the index follows the base description")
-					assert.Contains(t, description, "Built-in:\n  bash({}) — test tool")
-					assert.Contains(t, description, "mcp/test:\n  search_issues({}) — test tool")
+					assert.True(t, strings.HasPrefix(description, "test tool\n\nCallable tools,"), "the index follows the base description")
+					assert.Contains(t, description, "Built-in tools:\n  bash({}) — test tool")
+					assert.Contains(t, description, "Group mcp/test:\n  search_issues({}) — test tool")
 					assert.NotContains(t, description, "skill", "model-only tools are not script-callable")
 					assert.Equal(t, tooltypes.JSONSchemaForTool(tools[1]), tooltypes.JSONSchemaForTool(advertised[0]))
 				}

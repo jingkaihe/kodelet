@@ -19,7 +19,10 @@ const (
 	groupLabelMaxRunes = 100
 )
 
-const toolIndexHeader = "Callable tools. This list is complete: call them directly as tools[name](input). " +
+const toolIndexHeader = "Callable tools, listed under their catalog group. This list is complete. " +
+	"Call each tool by the exact name that starts its line, as tools[name](input); " +
+	"group headings are for catalog.list({group}) and are never part of a tool name " +
+	"(tools.bash(...), not tools[\"group/bash\"](...)). " +
 	"Signatures show input fields, allowed values, defaults (= value), and the shape of reply.data; " +
 	"call catalog.describe(name) for a tool's full rules and field descriptions."
 
@@ -141,7 +144,7 @@ func newIndexGroup(group string, members []Definition) *indexGroup {
 	slices.SortFunc(members, func(a, b Definition) int { return strings.Compare(a.Name, b.Name) })
 	entry := &indexGroup{
 		group:   group,
-		label:   "Built-in",
+		label:   "Built-in tools",
 		builtIn: group == "",
 		members: members,
 		lines:   make([]string, len(members)),
@@ -149,7 +152,8 @@ func newIndexGroup(group string, members []Definition) *indexGroup {
 		order:   make([]int, len(members)),
 	}
 	if !entry.builtIn {
-		entry.label = capRunes(oneLine(group), groupLabelMaxRunes)
+		// Spell the heading as a group so it is not read as a name prefix.
+		entry.label = "Group " + capRunes(oneLine(group), groupLabelMaxRunes)
 	}
 	for i, definition := range members {
 		line := "  " + Signature(definition)

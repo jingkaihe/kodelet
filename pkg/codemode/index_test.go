@@ -89,6 +89,7 @@ func TestSignature(t *testing.T) {
 
 func TestToolIndex(t *testing.T) {
 	assert.Equal(t, "No other tools are callable in this turn.", ToolIndex(nil))
+	assert.Contains(t, toolIndexHeader, "never part of a tool name", "group headings must not read as name prefixes")
 
 	definitions := []Definition{
 		{Name: "wait_agent", Group: "extension/agents", Description: "Wait for an agent."},
@@ -101,12 +102,12 @@ func TestToolIndex(t *testing.T) {
 	}
 	index := ToolIndex(definitions)
 	assert.Equal(t, toolIndexHeader+`
-Built-in:
+Built-in tools:
   bash({ command: string }) — Run a command.
-extension/agents:
+Group extension/agents:
   spawn_agent({}) — Start an agent.
   wait_agent({}) — Wait for an agent.
-mcp/data:
+Group mcp/data:
   lookup({}) — Look up data.`, index)
 	reversed := []Definition{definitions[4], definitions[3], definitions[2], definitions[1], definitions[0]}
 	assert.Equal(t, ToolIndex(definitions[:3]), ToolIndex([]Definition{definitions[2], definitions[0], definitions[1]}),
@@ -134,10 +135,10 @@ func TestToolIndexBudget(t *testing.T) {
 	index := ToolIndex(definitions)
 	assert.LessOrEqual(t, len(index), toolIndexMaxBytes)
 	assert.Contains(t, index, "  core_39({}) — Core tool.", "built-in tools are never reduced")
-	assert.Contains(t, index, "mcp/notes:\n  note_0({}) — Take notes.", "small groups are completed in early rounds")
+	assert.Contains(t, index, "Group mcp/notes:\n  note_0({}) — Take notes.", "small groups are completed in early rounds")
 	shown := make(map[string]int)
 	for _, group := range []string{"github", "gitlab"} {
-		match := regexp.MustCompile("mcp/" + group + ` \(60 tools, (\d+) shown in full\):`).FindStringSubmatch(index)
+		match := regexp.MustCompile("Group mcp/" + group + ` \(60 tools, (\d+) shown in full\):`).FindStringSubmatch(index)
 		require.Len(t, match, 2, "%s is partially listed", group)
 		shown[group], _ = strconv.Atoi(match[1])
 		assert.Positive(t, shown[group])
@@ -152,9 +153,9 @@ func TestToolIndexBudget(t *testing.T) {
 	}
 	index = ToolIndex(definitions)
 	assert.LessOrEqual(t, len(index), toolIndexMaxBytes)
-	assert.Contains(t, index, `mcp/huge (600 tools): browse with catalog.list({group: "mcp/huge"})`,
+	assert.Contains(t, index, `Group mcp/huge (600 tools): browse with catalog.list({group: "mcp/huge"})`,
 		"when names alone do not fit, the largest group is reduced to a count")
-	assert.Contains(t, index, "mcp/notes:\n  note_0({})", "other groups keep their lines")
+	assert.Contains(t, index, "Group mcp/notes:\n  note_0({})", "other groups keep their lines")
 	assert.Contains(t, index, "  core_00({})", "built-in tools stay listed")
 }
 
@@ -164,15 +165,15 @@ func TestIndexGroupRendering(t *testing.T) {
 		{Name: "a_tool", Group: "mcp/x", Description: "First tool."},
 	}
 	group := newIndexGroup("mcp/x", members)
-	assert.Equal(t, `mcp/x (2 tools, names only; call catalog.describe(name) for details): a_tool, "b-tool"`, group.render())
+	assert.Equal(t, `Group mcp/x (2 tools, names only; call catalog.describe(name) for details): a_tool, "b-tool"`, group.render())
 	group.full[0] = true
-	assert.Equal(t, "mcp/x (2 tools, 1 shown in full):\n  a_tool({}) — First tool.\n"+
+	assert.Equal(t, "Group mcp/x (2 tools, 1 shown in full):\n  a_tool({}) — First tool.\n"+
 		`  Also callable (call catalog.describe(name) for details): "b-tool"`, group.render())
 	group.full[1] = true
-	assert.Equal(t, "mcp/x:\n  a_tool({}) — First tool.\n  \"b-tool\"({}) — Second tool.", group.render())
+	assert.Equal(t, "Group mcp/x:\n  a_tool({}) — First tool.\n  \"b-tool\"({}) — Second tool.", group.render())
 	group.countOnly = true
-	assert.Equal(t, `mcp/x (2 tools): browse with catalog.list({group: "mcp/x"})`, group.render())
+	assert.Equal(t, `Group mcp/x (2 tools): browse with catalog.list({group: "mcp/x"})`, group.render())
 
 	builtIn := newIndexGroup("", []Definition{{Name: "bash", Short: "Run a command."}})
-	assert.Equal(t, "Built-in:\n  bash({}) — Run a command.", builtIn.render(), "built-in tools start with full lines")
+	assert.Equal(t, "Built-in tools:\n  bash({}) — Run a command.", builtIn.render(), "built-in tools start with full lines")
 }
