@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -297,6 +298,15 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			}
 			_ = json.Unmarshal(encoded, &snapshot)
 			outputErr = codemode.ValidateOutputData(outputSchemas[request.Name], snapshot.Data)
+			var validationErr *codemode.OutputValidationError
+			if errors.As(outputErr, &validationErr) {
+				// Scripts only see the sanitized message; tool authors need the locations.
+				logger.G(ctx).
+					WithField("tool", request.Name).
+					WithField("call_id", callID).
+					WithField("details", validationErr.Details).
+					Warn("code execution child reply failed its declared outputSchema")
+			}
 		}
 		if outputErr != nil {
 			encoded = nil
