@@ -55,6 +55,8 @@ func (*BrowserTool) Description() string {
 
 Prefer dedicated browser automation tools, such as Playwright, when available, for automated testing, repetitive interactions, or multi-step workflows that do not need the shared page. Do not assume those tools share this session.
 
+In code mode, reply.text contains the rendered operation result and reply.data is null. Screenshots return image references in reply.attachments; use emit.image(ref) to select pixels for the model. Browser operation failures throw.
+
 Notes:
 - Use localhost to access local HTTP services. Use evaluate for readiness checks, focused inspection, and small interactions.
 - Leave the result open for the human to review unless asked to close it.

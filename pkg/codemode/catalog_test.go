@@ -87,6 +87,30 @@ func TestCatalogListAndDescribe(t *testing.T) {
 	assert.Nil(t, description.OutputSchema)
 }
 
+func TestCatalogSelfContainedReturnContract(t *testing.T) {
+	description, err := NewCatalog([]Definition{{Name: "tool"}}).Describe("tool")
+	require.NoError(t, err)
+	for _, field := range []string{
+		"interface ToolReply<T = unknown>",
+		"data: T | null;",
+		"text: string;",
+		"attachments: ArtifactRef[];",
+		"truncated: boolean;",
+		"interface ArtifactRef",
+		`type: "image";`,
+		"artifactId?: string;",
+		"interface ToolError<T = unknown> extends Error",
+		"result?: ToolReply<T>;",
+		"callId?: string;",
+		`outcome: "not_started" | "completed" | "unknown";`,
+		"outputSchema describes ToolReply.data",
+		"Policy hooks may clear data",
+		"Returning these descriptors as JSON does not select media",
+	} {
+		assert.Contains(t, description.Declaration, field)
+	}
+}
+
 func TestCatalogPagination(t *testing.T) {
 	definitions := make([]Definition, 250)
 	for i := range definitions {
@@ -247,10 +271,11 @@ func TestCatalogSchemaDeclarations(t *testing.T) {
 		{name: "required unknown", schema: map[string]any{"type": "object", "required": []string{"id"}, "additionalProperties": false}, want: `{ "id": unknown; }`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			catalog := NewCatalog([]Definition{{Name: "tool", InputSchema: tt.schema}})
+			catalog := NewCatalog([]Definition{{Name: "tool", InputSchema: tt.schema, OutputSchema: tt.schema}})
 			description, err := catalog.Describe("tool")
 			require.NoError(t, err)
 			assert.Contains(t, description.Declaration, "(input: "+tt.want+")")
+			assert.Contains(t, description.Declaration, "Promise<ToolReply<"+tt.want+">>")
 		})
 	}
 	properties := make(map[string]any)

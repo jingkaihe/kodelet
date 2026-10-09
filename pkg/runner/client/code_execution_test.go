@@ -377,6 +377,43 @@ func TestRunnerCodeReplyMetadata(t *testing.T) {
 	}
 }
 
+func TestRunnerCodeReplyBuiltinContracts(t *testing.T) {
+	t.Run("bash output is not duplicated", func(t *testing.T) {
+		tool := tools.NewBashTool(nil, false)
+		result := tool.Execute(t.Context(), tools.NewBasicState(t.Context()),
+			`{"command":"printf 'contract-output'; exit 7","description":"Test return contract","timeout":10}`)
+		require.True(t, result.IsError())
+		reply := codeReply(runnerpayload.ToolExecuteResult{Result: runnerpayload.ToolResult{
+			Structured: result.StructuredData(),
+		}})
+		assert.Equal(t, "contract-output", reply.Text)
+		assert.Equal(t, map[string]any{"exitCode": 7}, reply.Data)
+		assert.Empty(t, reply.Attachments)
+		encoded, err := json.Marshal(reply)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"data":{"exitCode":7},"text":"contract-output","attachments":[],"truncated":false}`, string(encoded))
+	})
+	t.Run("file content is structured with a post-hook text fallback", func(t *testing.T) {
+		execution := runnerpayload.ToolExecuteResult{Result: runnerpayload.ToolResult{
+			Structured: tooltypes.StructuredToolResult{
+				ToolName: "file_read", Success: true,
+				Data:     map[string]any{"lines": []string{"private original"}},
+				Metadata: tooltypes.FileReadMetadata{Lines: []string{"private original"}, Truncated: true},
+			},
+		}}
+		reply := codeReply(execution)
+		assert.Empty(t, reply.Text)
+		assert.Equal(t, execution.Result.Structured.Data, reply.Data)
+		assert.True(t, reply.Truncated)
+		execution.Modified = true
+		execution.Result.Structured.Metadata = tooltypes.FileReadMetadata{Lines: []string{"redacted"}}
+		reply = codeReply(execution)
+		assert.Nil(t, reply.Data)
+		assert.Equal(t, "redacted", reply.Text)
+		assert.False(t, reply.Truncated)
+	})
+}
+
 func TestRunnerCodeFailureProvenanceSurvivesHooks(t *testing.T) {
 	for _, failure := range []struct{ kind, outcome string }{
 		{"invalid_input", "not_started"}, {"blocked", "not_started"}, {"transport", "unknown"}, {"tool_error", "completed"},

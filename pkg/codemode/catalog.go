@@ -60,6 +60,50 @@ type Description struct {
 	Declaration string `json:"declaration"`
 }
 
+// toolReplyDeclaration keeps Describe self-contained rather than requiring the
+// caller to infer the envelope or media behavior from the data schema.
+const toolReplyDeclaration = `// outputSchema describes ToolReply.data, not the whole reply.
+// Policy hooks may clear data even when an output schema is declared.
+interface ToolReply<T = unknown> {
+  data: T | null;
+  /** Textual output or supplementary information; empty when unused. */
+  text: string;
+  attachments: ArtifactRef[];
+  /** Content was shortened or omitted by output limits; not pagination. */
+  truncated: boolean;
+}
+
+// Current artifacts are images. References contain no image bytes.
+// Use emit.image(ref) for pixels or emit.artifact(ref) for retention only.
+// Returning these descriptors as JSON does not select media.
+interface ArtifactRef {
+  type: "image";
+  /** Present after successful ingestion; check error before selecting media. */
+  artifactId?: string;
+  shortCode?: string;
+  viewUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+  error?: string;
+}
+
+// Tool failures reject with this serializable error; no implicit retry or rollback.
+interface ToolError<T = unknown> extends Error {
+  kind: "blocked" | "invalid_input" | "tool_error" | "transport" | "cancelled" | "limit" | "invalid_output";
+  tool: string;
+  callId?: string;
+  /** completed does not imply success or absence of side effects. */
+  outcome: "not_started" | "completed" | "unknown";
+  result?: ToolReply<T>;
+  toJSON(): object;
+}
+
+`
+
 type catalogField struct {
 	terms  map[string]int
 	length int
@@ -234,7 +278,7 @@ func (c *Catalog) Describe(name string) (Description, error) {
 	output := catalogSchemaType(definition.OutputSchema, 0)
 	return Description{
 		Definition: definition,
-		Declaration: "declare const tools: {\n  " + string(quotedName) +
+		Declaration: toolReplyDeclaration + "declare const tools: {\n  " + string(quotedName) +
 			": (input: " + input + ") => Promise<ToolReply<" + output + ">>;\n};",
 	}, nil
 }
@@ -461,12 +505,8 @@ func catalogSchemaType(schema map[string]any, depth int) string {
 			return "unknown"
 		}
 		required := make(map[string]bool)
-		if names, ok := schema["required"].([]any); ok {
-			for _, value := range names {
-				if name, ok := value.(string); ok {
-					required[name] = true
-				}
-			}
+		for _, name := range schemaRequired(schema) {
+			required[name] = true
 		}
 		names := make([]string, 0, len(properties))
 		for name := range properties {

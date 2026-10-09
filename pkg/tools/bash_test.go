@@ -176,6 +176,7 @@ func TestBashTool_Execute_Success(t *testing.T) {
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.False(t, result.IsError())
 	assert.Equal(t, "hello world\n", result.GetResult())
+	assert.Equal(t, map[string]any{"exitCode": 0}, result.StructuredData().Data)
 }
 
 func TestBashTool_Execute_Timeout(t *testing.T) {
@@ -194,6 +195,7 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.GetError(), "Command timed out")
 	assert.Empty(t, result.GetResult())
+	assert.Nil(t, result.StructuredData().Data.(map[string]any)["exitCode"])
 }
 
 func TestBashTool_Execute_Error(t *testing.T) {
@@ -208,6 +210,7 @@ func TestBashTool_Execute_Error(t *testing.T) {
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.GetError(), "Command exited with status 127")
 	assert.Contains(t, result.GetResult(), "nonexistentcommand: command not found")
+	assert.Equal(t, 127, result.StructuredData().Data.(map[string]any)["exitCode"])
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
@@ -1176,10 +1179,10 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 
 func TestBashToolCanonicalData(t *testing.T) {
 	result := &BashToolResult{
-		command: "echo hello", combinedOutput: "hello\n", exitCode: 0, workingDir: "/workspace",
+		command: "echo hello", combinedOutput: "hello\n", exitCode: 0, exitCodeKnown: true, workingDir: "/workspace",
 	}
 	assert.Equal(t, map[string]any{
-		"command": "echo hello", "output": "hello\n", "exitCode": 0, "workingDir": "/workspace", "truncated": false,
+		"exitCode": 0,
 	}, result.StructuredData().Data)
 
 	result.error = "Command exited with status 42"
@@ -1191,20 +1194,26 @@ func TestBashToolCanonicalData(t *testing.T) {
 	result.fullOutputComplete = true
 	result.fullOutputPath = "/workspace/full-output.txt"
 	data := result.StructuredData().Data.(map[string]any)
-	assert.Equal(t, "bounded snapshot", data["output"])
-	assert.Equal(t, true, data["truncated"])
+	assert.NotContains(t, data, "output", "command output belongs only in reply.text")
+	assert.NotContains(t, data, "truncated", "truncation belongs to the reply envelope")
 	assert.Equal(t, result.fullOutputPath, data["fullOutputPath"])
-	data["output"] = "changed"
-	assert.Equal(t, "bounded snapshot", result.StructuredData().Data.(map[string]any)["output"])
+	data["exitCode"] = 100
+	assert.Equal(t, 42, result.StructuredData().Data.(map[string]any)["exitCode"])
+	metadata := result.StructuredData().Metadata.(*tooltypes.BashMetadata)
+	assert.Equal(t, "bounded snapshot", metadata.Output)
+	assert.Equal(t, "echo hello", metadata.Command, "UI metadata keeps the command")
+	assert.True(t, metadata.Truncation.Truncated)
 
 	result.fullOutputComplete = false
 	assert.NotContains(t, result.StructuredData().Data, "fullOutputPath")
+	result.exitCodeKnown = false
+	assert.Nil(t, result.StructuredData().Data.(map[string]any)["exitCode"])
 
 	tool := NewBashTool(nil, false)
 	schema := tooltypes.OutputSchemaForTool(tool)
-	assert.Equal(t, []string{"command", "output", "exitCode", "workingDir", "truncated"}, schema["required"])
-	schema["properties"].(map[string]any)["output"] = false
-	assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["output"])
+	assert.Equal(t, []string{"exitCode"}, schema["required"])
+	schema["properties"].(map[string]any)["exitCode"] = false
+	assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["exitCode"])
 }
 
 func TestBashEnvWithPreferredBinDirs(t *testing.T) {

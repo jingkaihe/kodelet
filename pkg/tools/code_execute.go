@@ -64,6 +64,17 @@ func (e *CodeToolError) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*wire)(e))
 }
 
+// encodedCodeToolError gives the bridge the same error reply that was validated,
+// without serializing a possibly mutable partial result a second time.
+type encodedCodeToolError struct {
+	message string
+	encoded json.RawMessage
+}
+
+func (e *encodedCodeToolError) Error() string { return e.message }
+
+func (e *encodedCodeToolError) MarshalJSON() ([]byte, error) { return e.encoded, nil }
+
 // CodeExecuteTool runs an async JavaScript function body inside the runner.
 type CodeExecuteTool struct{}
 
@@ -79,10 +90,10 @@ Discover authorized tools with these asynchronous APIs:
   await catalog.list({group?, limit?, cursor?}) -> {tools: [{name, description, group}], nextCursor?}
   await catalog.search(query, {group?, limit?, cursor?}) -> the same page shape
   await catalog.describe(name) -> documentation, input/output schemas, and declaration
-list and search return one-line summaries in pages of 20 (limit up to 100); when nextCursor is present, pass it as cursor with the same query and group to see more. describe returns the full description, input/output schemas, and declaration. Use catalog.describe(name) for a tool's full rules, and catalog.search or catalog.list to find tools you do not already know. Return discovery results to read them. Example: return await catalog.search("open pull requests");
-Call tools with await tools[exact_registered_name](input). Names never include their catalog group: use tools.get_weather(...), not tools["mcp/weather/get_weather"](...). Successful calls return {data, text, attachments, truncated}; data is null when unavailable. Failures throw serializable errors with kind, tool, callId, outcome, message, and optional result (the effective ToolReply). To inspect failure output, catch the error and explicitly emit e.result?.text ?? e.message; do not rerun a failed tool just to recover diagnostics.
+list and search return one-line summaries in pages of 20 (limit up to 100); when nextCursor is present, pass it as cursor with the same query and group to see more. describe returns the full description, input/output schemas, and declaration. Output schemas describe reply.data, not the envelope. Use catalog.describe(name) for a tool's full rules and return fields, and catalog.search or catalog.list to find tools you do not already know. Return discovery results to read them before writing calls that depend on unfamiliar return fields; do not guess field names. Example: return await catalog.search("open pull requests");
+Call tools with await tools[exact_registered_name](input). Names never include their catalog group: use tools.get_weather(...), not tools["mcp/weather/get_weather"](...). Successful calls return the fixed envelope {data, text, attachments, truncated}: data holds documented structured fields (null when unavailable or removed by policy); text holds textual output or supplementary information (empty string when absent); attachments holds artifact references, not bytes (empty array when absent); truncated reports content shortened by output limits, not pagination. Non-null data is checked against the declared output schema. Invalid schemas or mismatching data fail with invalid_output after execution, without exposing the invalid payload or retrying the tool. Failures throw serializable errors with kind, tool, callId, outcome, message, and optional result (the effective ToolReply). To inspect failure output, catch the error and explicitly emit e.result?.text || e.message; do not rerun a failed tool just to recover diagnostics.
 Prefer batching independent tool calls and catalog queries in a single invocation with Promise.all to reduce round trips; up to 8 tool calls run at once and the rest queue. Use Promise.allSettled when you need every outcome even if some calls fail. Keep dependent calls or operations that could conflict on shared state sequential; batch only work needed for the task.
-Only return values, emit(value), and console.log(...) are included as JSON/text. Await values before emitting them. Intermediate tool results stay local. Calls retain existing permissions and hooks. There is no automatic retry or rollback; a caught child error remains in the execution summary. Recursive code_execute is forbidden.
+Only return values, emit(value), and console.log(...) are included as JSON/text. Select only needed fields rather than returning entire tool replies. Await values before emitting them. Intermediate tool results stay local. Calls retain existing permissions and hooks. There is no automatic retry or rollback; a caught child error remains in the execution summary. Recursive code_execute is forbidden.
 Use emit.image(ref, {detail?: "original"}) to send image pixels to the model, or emit.artifact(ref) to retain an image artifact without sending pixels. A ref is an artifactId string or an attachment descriptor from an effective child reply in this invocation. For an existing artifact or local path, call tools.view_image first. Image emission requires view_image permission; original detail must be supported by the active model. Binary data, paths, and URLs are not accepted. Returning IDs or image-shaped JSON does not select media. Example: const r = await tools.view_image({path: "/tmp/chart.png"}); emit.image(r.attachments[0]);
 Each invocation allows 120 seconds, 128 tool calls, 32 KiB of selected output (filter or summarize before returning), and 8 image or artifact emissions. A tool reply over 2 MiB fails after the tool has run; narrow the request instead of retrying.`
 }
@@ -149,8 +160,15 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 	})
 	catalog := codemode.NewCatalog(definitions)
 	allowed := make(map[string]bool, len(authority.Definitions))
+	outputSchemas := make(map[string]map[string]any, len(definitions))
 	for _, definition := range definitions {
+		if allowed[definition.Name] {
+			continue // Match the catalog's first-definition-wins rule.
+		}
 		allowed[definition.Name] = true
+		// Use the catalog's immutable snapshot, not the caller's mutable maps.
+		description, _ := catalog.Describe(definition.Name)
+		outputSchemas[definition.Name] = description.OutputSchema
 	}
 	var mu sync.Mutex
 	var updateMu sync.Mutex
@@ -265,14 +283,34 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			}
 		}
 		references := reply.Attachments
+		var outputErr error
 		if encodeErr != nil || len(encoded) > codemode.MaxHostResponseBytes {
+			outputErr = errors.New("child reply is not valid JSON or exceeds the 2 MiB limit; the tool will not be retried")
+		} else if len(outputSchemas[request.Name]) > 0 && len(encoded) > 0 {
+			// Read only the serialized snapshot, including the effective partial
+			// result of a failed call. Never recover pre-hook or raw reply data.
+			var snapshot struct {
+				Data   json.RawMessage `json:"data"`
+				Result *struct {
+					Data json.RawMessage `json:"data"`
+				} `json:"result"`
+			}
+			_ = json.Unmarshal(encoded, &snapshot)
+			data := snapshot.Data
+			if callErr != nil && snapshot.Result != nil {
+				data = snapshot.Result.Data
+			}
+			outputErr = codemode.ValidateOutputData(outputSchemas[request.Name], data)
+		}
+		if outputErr != nil {
+			encoded = nil
 			references = nil
 			callErr = &CodeToolError{
 				Kind:    "invalid_output",
 				Tool:    request.Name,
 				CallID:  callID,
 				Outcome: outcome,
-				Message: "child reply is not valid JSON or exceeds the 2 MiB limit; the tool will not be retried",
+				Message: outputErr.Error(),
 			}
 		}
 		mu.Lock()
@@ -320,6 +358,9 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		}
 		mu.Unlock()
 		publish()
+		if callErr != nil && len(encoded) > 0 {
+			return nil, &encodedCodeToolError{message: callErr.Error(), encoded: encoded}
+		}
 		return encoded, callErr
 	}, func(item codemode.OutputItem) error {
 		if item.Type == "json" {

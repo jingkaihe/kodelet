@@ -54,7 +54,8 @@ func TestFileReadCanonicalData(t *testing.T) {
 			data, ok := result.StructuredData().Data.(map[string]any)
 			require.True(t, ok)
 			assert.Equal(t, test.lines, data["lines"])
-			assert.Equal(t, test.truncated, data["truncated"])
+			assert.NotContains(t, data, "truncated")
+			assert.Equal(t, test.truncated, result.StructuredData().Metadata.(*tooltypes.FileReadMetadata).Truncated)
 			assert.Equal(t, test.remaining, data["remainingLines"])
 			assert.Equal(t, 1, data["offset"])
 			assert.Equal(t, filename, data["filePath"])
@@ -70,7 +71,7 @@ func TestFileReadCanonicalData(t *testing.T) {
 	t.Run("output schema", func(t *testing.T) {
 		tool := &FileReadTool{}
 		schema := tooltypes.OutputSchemaForTool(tool)
-		assert.Equal(t, []string{"filePath", "offset", "lineLimit", "lines", "truncated", "remainingLines"}, schema["required"])
+		assert.Equal(t, []string{"filePath", "offset", "lineLimit", "lines", "remainingLines"}, schema["required"])
 		schema["properties"].(map[string]any)["lines"] = false
 		assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["lines"])
 		assert.Nil(t, tooltypes.OutputSchemaForTool(&FileWriteTool{}))

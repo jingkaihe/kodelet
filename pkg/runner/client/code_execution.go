@@ -207,7 +207,11 @@ func codeReply(execution runnerpayload.ToolExecuteResult) tools.CodeToolReply {
 		reply.Text = bash.Output
 		reply.Truncated = bash.Truncation != nil && bash.Truncation.Truncated
 	case tooltypes.ExtractMetadata(structured.Metadata, &file):
-		reply.Text = strings.Join(file.Lines, "\n")
+		// The canonical lines already carry file content. Retain effective text
+		// only when machine data is unavailable, including hook redaction.
+		if reply.Data == nil {
+			reply.Text = strings.Join(file.Lines, "\n")
+		}
 		reply.Truncated = file.Truncated
 	case tooltypes.ExtractMetadata(structured.Metadata, &extension):
 		reply.Text = extension.Output

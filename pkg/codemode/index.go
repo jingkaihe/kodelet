@@ -11,20 +11,23 @@ import (
 
 const (
 	// toolIndexMaxBytes bounds the code_execute tool index, about 2,000 tokens.
-	toolIndexMaxBytes  = 8 << 10
-	summaryMaxRunes    = 120
-	signatureMaxRunes  = 400
-	signatureMaxFields = 16
-	defaultMaxRunes    = 40
-	groupLabelMaxRunes = 100
+	toolIndexMaxBytes     = 8 << 10
+	summaryMaxRunes       = 120
+	signatureMaxRunes     = 400
+	signatureMaxFields    = 16
+	defaultMaxRunes       = 40
+	groupLabelMaxRunes    = 100
+	signatureDescribeHint = "; call catalog.describe(name) for full contract"
 )
 
 const toolIndexHeader = "Callable tools, listed under their catalog group. This list is complete. " +
 	"Call each tool by the exact name that starts its line, as tools[name](input); " +
 	"group headings are for catalog.list({group}) and are never part of a tool name " +
 	"(tools.bash(...), not tools[\"group/bash\"](...)). " +
-	"Signatures show input fields, allowed values, defaults (= value), and the shape of reply.data; " +
-	"call catalog.describe(name) for a tool's full rules and field descriptions."
+	"Signatures show input fields, allowed values, defaults (= value), and ToolReply<T> returns: " +
+	"{data: T | null, text: string, attachments: ArtifactRef[], truncated: boolean}. " +
+	"outputSchema describes data only; policy hooks may clear data. " +
+	"Call catalog.describe(name) for a tool's full schemas, field descriptions, and return semantics."
 
 // Summary returns a tool's one-line summary: its explicit Short, or else the
 // first sentence of its description, on one line and capped in length.
@@ -198,21 +201,31 @@ func (g *indexGroup) render() string {
 	}
 }
 
-// Signature renders a compact TypeScript-style call signature: the input fields
-// with types, allowed values, and defaults, plus the fields of reply.data when the
-// tool declares an object output schema. Oversized signatures drop types first.
+// Signature renders input fields and a ToolReply<T> return type from the data
+// schema. Oversized signatures drop input detail before output detail, always
+// retaining a return type and an explicit discovery hint when abbreviated.
 func Signature(definition Definition) string {
 	name := indexIdentifier(definition.Name)
-	output := indexOutputFields(definition.OutputSchema)
-	typed := name + "(" + indexInputType(definition.InputSchema, true) + ")" + output
-	if utf8.RuneCountInString(typed) <= signatureMaxRunes {
-		return typed
+	// Normalize native Go schema values just as Describe does, so declarations
+	// agree for []string unions, enums, and required fields as well as JSON input.
+	outputType := catalogSchemaType(cloneCatalogSchema(definition.OutputSchema), 0)
+	output := " → ToolReply<" + outputType + ">"
+	candidates := []string{
+		name + "(" + indexInputType(definition.InputSchema, true) + ")" + output,
+		name + "(" + indexInputType(definition.InputSchema, false) + ")" + output,
+		name + "(…)" + output,
+		name + "(…) → ToolReply<unknown>",
 	}
-	untyped := name + "(" + indexInputType(definition.InputSchema, false) + ")" + output
-	if utf8.RuneCountInString(untyped) <= signatureMaxRunes {
-		return untyped
+	for i, signature := range candidates {
+		if i > 0 || strings.Contains(signature, "…") || outputType == "unknown" && len(definition.OutputSchema) > 0 {
+			signature += signatureDescribeHint
+		}
+		if utf8.RuneCountInString(signature) <= signatureMaxRunes {
+			return signature
+		}
 	}
-	return name + "(…)"
+	// An unusually long registered name must remain exact and callable.
+	return candidates[len(candidates)-1] + signatureDescribeHint
 }
 
 func indexInputType(schema map[string]any, typed bool) string {
@@ -348,37 +361,6 @@ func joinUnion(members []string) string {
 		return "unknown"
 	}
 	return strings.Join(unique, " | ")
-}
-
-// indexOutputFields renders the field names of an object output schema, which
-// describes reply.data.
-func indexOutputFields(schema map[string]any) string {
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok || len(properties) == 0 {
-		return ""
-	}
-	required := make(map[string]bool)
-	for _, name := range schemaRequired(schema) {
-		required[name] = true
-	}
-	names := make([]string, 0, len(properties))
-	for name := range properties {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	fields := make([]string, 0, min(len(names), signatureMaxFields)+1)
-	for i, name := range names {
-		if i == signatureMaxFields {
-			fields = append(fields, "…")
-			break
-		}
-		field := indexIdentifier(name)
-		if !required[name] {
-			field += "?"
-		}
-		fields = append(fields, field)
-	}
-	return " → data: { " + strings.Join(fields, ", ") + " }"
 }
 
 // schemaRequired accepts both decoded JSON ([]any) and Go-built ([]string) lists.

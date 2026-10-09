@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,6 +140,10 @@ func TestCodeExecuteToolDescriptionMatchesLimits(t *testing.T) {
 	assert.Contains(t, description, fmt.Sprintf("up to %d tool calls run at once", codemode.MaxConcurrentToolCalls))
 	assert.Contains(t, description, fmt.Sprintf("A tool reply over %d MiB fails", codemode.MaxHostResponseBytes>>20))
 	assert.NotContains(t, description, "code_search", "examples use a generic tool name")
+	assert.Contains(t, description, "Output schemas describe reply.data, not the envelope")
+	assert.Contains(t, description, "before writing calls that depend on unfamiliar return fields")
+	assert.Contains(t, description, "Select only needed fields")
+	assert.Contains(t, description, "Invalid schemas or mismatching data fail with invalid_output")
 }
 
 func TestCodeExecuteToolInputValidation(t *testing.T) {
@@ -333,7 +343,7 @@ func TestCodeExecuteToolRejectedReplyPreservesFailureSummaryAndOutcome(t *testin
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
-				Definitions: []codemode.Definition{{Name: "lookup"}},
+				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: map[string]any{"type": "invalid"}}},
 				Call: func(context.Context, string, string, string) (CodeToolReply, error) {
 					reply := CodeToolReply{Data: test.data}
 					if test.outcome != "" {
@@ -346,7 +356,7 @@ func TestCodeExecuteToolRejectedReplyPreservesFailureSummaryAndOutcome(t *testin
 try {
   await tools.lookup({});
 } catch (e) {
-  return {kind: e.kind, outcome: e.outcome};
+  return {kind: e.kind, outcome: e.outcome, message: e.message};
 }
 `})
 			require.NoError(t, err)
@@ -361,12 +371,170 @@ try {
 			}
 			assert.Contains(t, result.AssistantFacing(), `"kind":"invalid_output"`)
 			assert.Contains(t, result.AssistantFacing(), `"outcome":"`+outcome+`"`)
+			assert.Contains(t, result.AssistantFacing(), "not valid JSON or exceeds the 2 MiB limit")
+			assert.NotContains(t, result.AssistantFacing(), "outputSchema", "JSON and size checks must run before schema validation")
 			var metadata tooltypes.CodeExecutionMetadata
 			require.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
 			require.Len(t, metadata.Calls, 1)
 			assert.Equal(t, status, metadata.Calls[0].Status)
 			assert.Equal(t, "invalid_output", metadata.Calls[0].ErrorKind)
 			assert.Contains(t, result.AssistantFacing(), "did not succeed")
+		})
+	}
+}
+
+func TestCodeExecuteToolOutputSchemaValidation(t *testing.T) {
+	const objectSchema = `{
+  "type": "object",
+  "properties": {"items": {"type": "array", "items": {"type": "integer"}}},
+  "required": ["items"]
+}`
+	for _, test := range []struct {
+		name    string
+		schema  string
+		data    string
+		outcome string
+		invalid bool
+	}{
+		{name: "structured data", schema: objectSchema, data: `{"items":[42]}`},
+		{name: "type mismatch", schema: objectSchema, data: `{"items":["private-output"]}`, invalid: true},
+		{name: "policy removed data", schema: objectSchema, data: `null`},
+		{name: "no schema", data: `[1,false,"text"]`},
+		{name: "falsy scalar", schema: `{"type":"boolean"}`, data: `false`},
+		{name: "invalid schema", schema: `{"type":"private-output"}`, data: `{}`, invalid: true},
+		{
+			name: "local reference", data: `[1,2]`,
+			schema: `{"type":"array","items":{"$ref":"#/$defs/id"},"$defs":{"id":{"type":"integer"}}}`,
+		},
+		{name: "partial failure", schema: objectSchema, data: `{"items":[]}`, outcome: "completed"},
+		{name: "invalid partial failure", schema: objectSchema, data: `"private-output"`, outcome: "unknown", invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var schema map[string]any
+			if test.schema != "" {
+				require.NoError(t, json.Unmarshal([]byte(test.schema), &schema))
+			}
+			calls := 0
+			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: schema}},
+				Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
+					calls++
+					reply := CodeToolReply{Data: json.RawMessage(test.data)}
+					if test.outcome != "" {
+						return CodeToolReply{Data: "raw-data-must-not-be-used"}, &CodeToolError{
+							Kind: "tool_error", Tool: name, CallID: callID, Outcome: test.outcome,
+							Message: "tool failed", Result: &reply,
+						}
+					}
+					return reply, nil
+				},
+			})
+			params, err := json.Marshal(codeExecuteInput{Code: `
+try {
+  return (await tools.lookup({})).data;
+} catch (e) {
+  if (e.kind === "tool_error") return e.result.data;
+  return e;
+}
+`})
+			require.NoError(t, err)
+			result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
+			require.False(t, result.IsError(), result.GetError())
+			assert.Equal(t, 1, calls, "schema errors must never retry the tool")
+			metadata := result.(CodeExecuteResult).Metadata
+			require.Len(t, metadata.Items, 1)
+			if !test.invalid {
+				assert.JSONEq(t, test.data, string(metadata.Items[0].Value))
+				return
+			}
+			var failure CodeToolError
+			require.NoError(t, json.Unmarshal(metadata.Items[0].Value, &failure))
+			assert.Equal(t, "invalid_output", failure.Kind)
+			outcome := test.outcome
+			if outcome == "" {
+				outcome = "completed"
+			}
+			assert.Equal(t, outcome, failure.Outcome)
+			assert.Nil(t, failure.Result)
+			assert.Contains(t, failure.Message, "outputSchema")
+			assert.NotContains(t, result.AssistantFacing(), "private-output")
+			assert.Equal(t, "invalid_output", metadata.Calls[0].ErrorKind)
+		})
+	}
+}
+
+func TestCodeExecuteToolOutputSchemaCannotLoadExternalResources(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte(`{"type":"object"}`))
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "private-schema.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"type":"object"}`), 0o600))
+	fileURL := (&url.URL{Scheme: "file", Path: path}).String()
+	for _, schema := range []map[string]any{
+		{"$ref": server.URL + "/private-schema"},
+		{"$schema": server.URL + "/private-schema"},
+		{"$ref": fileURL},
+		{"$schema": fileURL},
+	} {
+		ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+			Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: schema}},
+			Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+				return CodeToolReply{Data: map[string]any{}}, nil
+			},
+		})
+		result := (&CodeExecuteTool{}).Execute(ctx, nil, `{"code":"await tools.lookup({});"}`)
+		require.True(t, result.IsError(), schema)
+		assert.Contains(t, result.GetError(), "outputSchema is invalid or requires an external resource")
+		assert.NotContains(t, result.GetError(), server.URL)
+		assert.NotContains(t, result.GetError(), path)
+		assert.Equal(t, "invalid_output", result.(CodeExecuteResult).Metadata.Calls[0].ErrorKind)
+	}
+	assert.Zero(t, requests.Load(), "external refs must not initiate network requests")
+}
+
+type changingCodeToolData struct {
+	marshals int
+}
+
+func (d *changingCodeToolData) MarshalJSON() ([]byte, error) {
+	d.marshals++
+	if d.marshals == 1 {
+		return []byte(`42`), nil
+	}
+	return []byte(`"unvalidated-private-output"`), nil
+}
+
+func TestCodeExecuteToolValidatesAndReturnsSameSnapshot(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failure=%t", failure), func(t *testing.T) {
+			data := &changingCodeToolData{}
+			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: map[string]any{"type": "integer"}}},
+				Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+					reply := CodeToolReply{Data: data}
+					if failure {
+						return reply, &CodeToolError{Kind: "tool_error", Message: "failed", Outcome: "completed", Result: &reply}
+					}
+					return reply, nil
+				},
+			})
+			params, err := json.Marshal(codeExecuteInput{Code: `
+try {
+  return (await tools.lookup({})).data;
+} catch (e) {
+  return e.result.data;
+}
+`})
+			require.NoError(t, err)
+			result := (&CodeExecuteTool{}).Execute(ctx, nil, string(params))
+			require.False(t, result.IsError(), result.GetError())
+			assert.Equal(t, 1, data.marshals, "validation and delivery must share one serialized snapshot")
+			require.Len(t, result.(CodeExecuteResult).Metadata.Items, 1)
+			assert.JSONEq(t, `42`, string(result.(CodeExecuteResult).Metadata.Items[0].Value))
+			assert.NotContains(t, result.AssistantFacing(), "unvalidated-private-output")
 		})
 	}
 }

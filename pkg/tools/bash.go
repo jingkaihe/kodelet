@@ -59,6 +59,9 @@ Banned commands:
 - description: required, 5-10 words
 - timeout: required, {{.MinTimeoutSeconds}}-{{.MaxTimeoutSeconds}}
 
+# Code mode result
+Combined stdout/stderr is in reply.text. reply.data contains exitCode (null when unknown) and an optional fullOutputPath for saved complete output. reply.truncated indicates shortened output. Nonzero exits and timeouts throw with available output and execution fields in error.result.
+
 # Rules
 - Use parallel tool calling for independent commands.
 - Do not run interactive commands.
@@ -149,20 +152,16 @@ func (b *BashTool) RawOutputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command": map[string]any{"type": "string"},
-			"output": map[string]any{
-				"type":        "string",
-				"description": "Bounded combined stdout and stderr; may include a truncation notice.",
+			"exitCode": map[string]any{
+				"type":        []any{"integer", "null"},
+				"description": "Process exit status, or null when no exit status is available (for example a timeout or start failure).",
 			},
-			"exitCode":   map[string]any{"type": "integer"},
-			"workingDir": map[string]any{"type": "string"},
-			"truncated":  map[string]any{"type": "boolean"},
 			"fullOutputPath": map[string]any{
 				"type":        "string",
 				"description": "Runner-local file containing the complete output, when available after truncation.",
 			},
 		},
-		"required":             []string{"command", "output", "exitCode", "workingDir", "truncated"},
+		"required":             []string{"exitCode"},
 		"additionalProperties": false,
 	}
 }
@@ -315,6 +314,7 @@ type BashToolResult struct {
 	combinedOutput     string
 	error              string
 	exitCode           int
+	exitCodeKnown      bool
 	executionTime      time.Duration
 	workingDir         string
 	outputTruncated    bool
@@ -372,7 +372,7 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 		ExecutionTime: r.executionTime,
 		WorkingDir:    r.workingDir,
 	}
-	if r.outputTruncated {
+	if r.outputTruncated || metadata.Output != r.combinedOutput {
 		metadata.Truncation = &tooltypes.BashOutputTruncation{
 			Truncated:  true,
 			TotalLines: r.outputTotalLines,
@@ -384,12 +384,9 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 	}
 	result.Metadata = metadata
-	data := map[string]any{
-		"command":    r.command,
-		"output":     metadata.Output,
-		"exitCode":   r.exitCode,
-		"workingDir": r.workingDir,
-		"truncated":  r.outputTruncated || metadata.Output != r.combinedOutput,
+	data := map[string]any{"exitCode": nil}
+	if r.exitCodeKnown {
+		data["exitCode"] = r.exitCode
 	}
 	if metadata.FullOutputPath != "" {
 		data["fullOutputPath"] = metadata.FullOutputPath
@@ -491,6 +488,7 @@ func (b *BashTool) executeForeground(
 		emitter.stopAndFlush()
 	}
 	result := newBashToolResult(input.Command, workingDir, executionTime, finalSnapshot, true)
+	result.exitCodeKnown = !timedOut && cmd.ProcessState != nil && cmd.ProcessState.Exited()
 
 	if err != nil {
 		if timedOut {

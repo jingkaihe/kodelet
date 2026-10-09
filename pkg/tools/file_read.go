@@ -96,7 +96,6 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 			"offset":         r.offset,
 			"lineLimit":      r.lineLimit,
 			"lines":          append([]string{}, lines...),
-			"truncated":      truncated,
 			"remainingLines": r.remainingLines,
 		}
 	}
@@ -135,16 +134,12 @@ func (r *FileReadTool) RawOutputSchema() map[string]any {
 				"items":       map[string]any{"type": "string"},
 				"description": "File lines without display line numbers or trailing truncation notices. Long lines may be shortened.",
 			},
-			"truncated": map[string]any{
-				"type":        "boolean",
-				"description": "Whether content was omitted by byte, line count, or individual line length limits.",
-			},
 			"remainingLines": map[string]any{
 				"type":        "integer",
 				"description": "Number of file lines after the returned range.",
 			},
 		},
-		"required":             []string{"filePath", "offset", "lineLimit", "lines", "truncated", "remainingLines"},
+		"required":             []string{"filePath", "offset", "lineLimit", "lines", "remainingLines"},
 		"additionalProperties": false,
 	}
 }
@@ -172,6 +167,8 @@ For most files, omit offset and line_limit to read the entire file. Use these pa
 
 The result will include line numbers padded appropriately, followed by the content of each line.
 If there are more lines beyond the line limit, a truncation message will be shown with the exact count of remaining lines.
+
+In code mode, file content is in reply.data.lines without display line numbers or notices. reply.text is empty unless structured data is unavailable; reply.truncated indicates omitted or shortened lines. Read failures throw.
 
 Example:
 
