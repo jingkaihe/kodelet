@@ -5,6 +5,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -42,7 +43,7 @@ func AvailableEnvironmentToolsForThread(thread llmtypes.Thread, noToolUse bool) 
 }
 
 func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []tooltypes.Tool {
-	if thread == nil || thread.GetConfig().CodeMode != "only" {
+	if thread == nil || thread.GetConfig().EffectiveCodeMode() != "only" {
 		return available
 	}
 	// Advertisement is separate from authorization: the full permitted catalog
@@ -51,10 +52,12 @@ func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []toolt
 	// Model-only tools, such as skill, are never script-callable, so they stay
 	// declared directly whenever they are permitted.
 	var advertised []tooltypes.Tool
+	parentAdvertised, hidden := false, 0
 	for _, tool := range available {
 		switch {
 		case tool == nil:
 		case tool.Name() == "code_execute":
+			parentAdvertised = true
 			// The hidden tools are listed in its description instead, so the
 			// model knows every callable tool without a discovery round trip.
 			advertised = append(advertised, indexedCodeExecuteTool{
@@ -63,9 +66,32 @@ func advertisedTools(thread llmtypes.Thread, available []tooltypes.Tool) []toolt
 			})
 		case tooltypes.IsModelOnly(tool):
 			advertised = append(advertised, tool)
+		default:
+			hidden++
 		}
 	}
+	if !parentAdvertised && hidden > 0 {
+		warnCodeModeHidesTools(thread, hidden)
+	}
 	return advertised
+}
+
+type codeModeHiddenWarningClaimer interface {
+	claimCodeModeHiddenWarning() bool
+}
+
+// warnCodeModeHidesTools reports a turn whose tools are all hidden: code_mode
+// only hides script-callable tools, but this turn's tool list (for example an
+// extension's agent.init patch) excludes code_execute. Run-level allowlists that
+// exclude code_execute turn code mode off instead, so only per-turn patches reach
+// this. Threads that can track it warn once; others warn on every occurrence.
+func warnCodeModeHidesTools(thread llmtypes.Thread, hidden int) {
+	if claimer, ok := thread.(codeModeHiddenWarningClaimer); ok && !claimer.claimCodeModeHiddenWarning() {
+		return
+	}
+	logger.L.WithField("conversation_id", thread.GetConversationID()).WithField("hidden_tools", hidden).Warn(
+		"code_mode only hides every permitted tool this turn because code_execute is not in the turn's tool list; " +
+			"include code_execute in the extension's agent.init tool list or use code_mode on")
 }
 
 // indexedCodeExecuteTool advertises code_execute with the turn's callable tool

@@ -56,6 +56,8 @@ func TestLocalEnvironmentCodeModeRequiresOptInAndAuthorization(t *testing.T) {
 		{name: "on", config: llmtypes.Config{CodeMode: "on"}, include: true},
 		{name: "only", config: llmtypes.Config{CodeMode: "only"}, include: true},
 		{name: "legacy allowlist excludes parent", config: llmtypes.Config{CodeMode: "only", AllowedTools: []string{"bash"}}},
+		{name: "option enables code mode", config: llmtypes.Config{ExecutionOptions: &llmtypes.ExecutionOptions{CodeMode: new("on")}}, include: true},
+		{name: "option disables code mode", config: llmtypes.Config{CodeMode: "only", ExecutionOptions: &llmtypes.ExecutionOptions{CodeMode: new("off")}}},
 		{name: "explicit parent allowed", config: llmtypes.Config{CodeMode: "only", AllowedTools: []string{"code_execute", "bash"}}, include: true},
 		{name: "no tools", config: llmtypes.Config{CodeMode: "only", ExecutionOptions: &llmtypes.ExecutionOptions{NoTools: new(true)}}},
 		{name: "empty allowlist", config: llmtypes.Config{CodeMode: "only", ExecutionOptions: &llmtypes.ExecutionOptions{AllowedTools: new([]string{})}}},

@@ -58,6 +58,13 @@ type Thread struct {
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
 
 	conversationForkBlocks atomic.Int32
+	codeModeHiddenWarned   atomic.Bool
+}
+
+// claimCodeModeHiddenWarning reports whether this thread has yet to warn that
+// code_mode only hid every tool, and records that it now has.
+func (t *Thread) claimCodeModeHiddenWarning() bool {
+	return t.codeModeHiddenWarned.CompareAndSwap(false, true)
 }
 
 // BlockConversationFork prevents live conversation forks until the returned

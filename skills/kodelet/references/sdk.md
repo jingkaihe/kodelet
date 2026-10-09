@@ -193,7 +193,7 @@ const searchProfile = ext.registerProfile({
 });
 ```
 
-Profiles use ordinary snake_case configuration and built-in defaults, not daemon or parent model settings. Replace older `reasoningEffort` with `reasoning_effort`; session `ExecutionOptions` stays camelCase. For Claude subscriptions, use `provider: "anthropic"` and `anthropic_api_access: "subscription"`. Credentials stay on the daemon; host/runner restrictions still apply.
+Profiles use ordinary snake_case configuration and built-in defaults, not daemon or parent model settings. Set `code_mode` in a profile to choose code mode for its sessions; otherwise the runner's `code_mode` applies, except that a profile whose `allowed_tools` omits `code_execute` always runs with code mode off. Session options accept the same choice as `codeMode`. Replace older `reasoningEffort` with `reasoning_effort`; session `ExecutionOptions` stays camelCase. For Claude subscriptions, use `provider: "anthropic"` and `anthropic_api_access: "subscription"`. Credentials stay on the daemon; host/runner restrictions still apply.
 
 ### Background extension work
 

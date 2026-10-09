@@ -26,6 +26,7 @@ func TestNativeWebSearchTools(t *testing.T) {
 		codeMode     string
 		execution    *llmtypes.ExecutionOptions
 		implicit     bool
+		allowed      []string
 		patch        any
 		noTools      bool
 		subscription bool
@@ -36,8 +37,18 @@ func TestNativeWebSearchTools(t *testing.T) {
 		{name: "disabled by default", implicit: true},
 		{name: "explicit profile", want: true},
 		{name: "code mode on retains native search", codeMode: "on", want: true},
-		{name: "code mode only without parent", codeMode: "only"},
-		{name: "code mode only suppresses unsupported native search", codeMode: "only", copilot: true},
+		{
+			name:     "code mode only suppresses native search",
+			codeMode: "only",
+			allowed:  []string{anthropicSearchToolName, "code_execute"},
+		},
+		{
+			name:     "code mode only suppresses unsupported native search",
+			codeMode: "only",
+			allowed:  []string{anthropicSearchToolName, "code_execute"},
+			copilot:  true,
+		},
+		{name: "allowlist without code_execute turns code mode off", codeMode: "only", want: true},
 		{name: "message disables tools", noTools: true},
 		{
 			name:      "request disables tools",
@@ -57,6 +68,9 @@ func TestNativeWebSearchTools(t *testing.T) {
 			config := llmtypes.Config{CodeMode: tc.codeMode, ExecutionOptions: tc.execution}
 			if !tc.implicit {
 				config.AllowedTools = []string{anthropicSearchToolName}
+			}
+			if tc.allowed != nil {
+				config.AllowedTools = tc.allowed
 			}
 			thread := &Thread{
 				Thread:          base.NewThread(config, "search"),

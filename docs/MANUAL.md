@@ -1820,7 +1820,9 @@ code_mode: on
 | `on` | Adds the `code_execute` tool alongside ordinary tools. |
 | `only` | Shows only `code_execute` and the `skill` tool; all other tools are used through scripts. |
 
-Scripts run in a sandbox and can use only the tools the agent is already allowed to use; existing permissions and hooks still apply. If you use a tool allowlist, include `code_execute` and the tools scripts need. In `only` mode, provider-native web search is unavailable; use `on` if you need it. Both the daemon and the runner must support code mode.
+Scripts run in a sandbox and can use only the tools the agent is already allowed to use; existing permissions and hooks still apply. A session whose tool allowlist leaves out `code_execute`, such as a narrowly scoped subagent profile, runs with code mode off and uses its allowed tools directly. In `only` mode, provider-native web search is unavailable; use `on` if you need it. Both the daemon and the runner must support code mode.
+
+To choose a mode for a single run, pass `--code-mode off|on|only` to `kodelet run` or `kodelet acp`, set `codeMode` in SDK session options, or set `code_mode` in an extension-registered profile.
 
 Each script appears as one expandable card in the TUI and Web UI, showing the code, its output, and the tool calls it made.
 

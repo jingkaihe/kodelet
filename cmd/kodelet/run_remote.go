@@ -30,6 +30,11 @@ func addRemoteRunFlags(cmd *cobra.Command) {
 	cmd.Flags().String("runner-profile", "", "Runner environment profile")
 }
 
+// addCodeModeFlag adds a per-run code mode override to commands that start agent runs.
+func addCodeModeFlag(cmd *cobra.Command) {
+	cmd.Flags().String("code-mode", "", "Code mode for this run: off, on, or only (defaults to the runner's code_mode)")
+}
+
 func runControlPlaneCommand(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -133,6 +138,7 @@ func remoteRunExecutionOptions(cmd *cobra.Command, ignoredFlags ...string) (*llm
 	for flag, target := range map[string]**string{
 		"provider": &options.Provider, "model": &options.Model,
 		"weak-model": &options.WeakModel, "reasoning-effort": &options.ReasoningEffort,
+		"code-mode": &options.CodeMode,
 	} {
 		if slices.Contains(ignoredFlags, flag) {
 			continue

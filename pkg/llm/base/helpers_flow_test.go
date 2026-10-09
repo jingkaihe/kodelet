@@ -10,10 +10,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -516,4 +519,67 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 		assert.False(t, continued)
 		assert.Empty(t, thread.userMessages)
 	})
+}
+
+func TestCodeModeRunAllowlistWithoutParentDeclaresToolsDirectly(t *testing.T) {
+	tools := []tooltypes.Tool{namedTool("file_read"), namedTool("grep_tool")}
+	thread := &environmentThreadStub{
+		threadStub: &threadStub{config: llmtypes.Config{
+			CodeMode:         "only",
+			ExecutionOptions: &llmtypes.ExecutionOptions{AllowedTools: &[]string{"file_read", "grep_tool"}},
+		}},
+		environment: &recordingAgentEnvironment{open: true, manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
+			{Name: "file_read", Tool: tools[0]},
+			{Name: "grep_tool", Tool: tools[1]},
+		}}},
+	}
+	assert.Equal(t, []string{"file_read", "grep_tool"}, toolNames(AvailableEnvironmentToolsForThread(thread, false)),
+		"a run whose allowlist excludes code_execute runs with code mode off")
+}
+
+type warnOnceThread struct {
+	*environmentThreadStub
+	warned bool
+}
+
+func (t *warnOnceThread) claimCodeModeHiddenWarning() bool {
+	first := !t.warned
+	t.warned = true
+	return first
+}
+
+func TestCodeModeWarnsWhenTurnHidesEveryTool(t *testing.T) {
+	hook := logrustest.NewLocal(logger.L.Logger)
+	t.Cleanup(hook.Reset)
+	tools := []tooltypes.Tool{namedTool("bash"), namedTool("code_execute")}
+	thread := &warnOnceThread{environmentThreadStub: &environmentThreadStub{
+		threadStub: &threadStub{conversationID: "warned", config: llmtypes.Config{CodeMode: "only"}},
+		environment: &recordingAgentEnvironment{open: true, manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
+			{Name: "bash", Tool: tools[0]},
+			{Name: "code_execute", Tool: tools[1]},
+		}}},
+	}}
+	assert.NotEmpty(t, AvailableEnvironmentToolsForThread(thread, false))
+	assert.Empty(t, hook.AllEntries(), "no warning while code_execute is available")
+
+	thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{"bash"})
+	assert.Empty(t, AvailableEnvironmentToolsForThread(thread, false), "a per-turn patch without code_execute stays strict")
+	assert.Empty(t, AvailableEnvironmentToolsForThread(thread, false))
+	require.Len(t, hook.AllEntries(), 1, "the warning is logged once per thread")
+	entry := hook.LastEntry()
+	assert.Equal(t, logrus.WarnLevel, entry.Level)
+	assert.Equal(t, "warned", entry.Data["conversation_id"])
+	assert.Equal(t, 1, entry.Data["hidden_tools"])
+	assert.Contains(t, entry.Message, "code_execute is not in the turn's tool list")
+
+	thread.SetMetadataValue(extensionAllowedToolsMetadataKey, []string{})
+	hook.Reset()
+	assert.Empty(t, AvailableEnvironmentToolsForThread(thread.environmentThreadStub, false))
+	assert.Empty(t, hook.AllEntries(), "an empty tool list hides nothing")
+}
+
+func TestBaseThreadClaimsCodeModeWarningOnce(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "conversation")
+	assert.True(t, thread.claimCodeModeHiddenWarning())
+	assert.False(t, thread.claimCodeModeHiddenWarning())
 }

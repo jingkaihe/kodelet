@@ -32,6 +32,7 @@ import (
 func remoteRunCommandForTest() *cobra.Command {
 	cmd := &cobra.Command{Use: "run"}
 	addRemoteRunFlags(cmd)
+	addCodeModeFlag(cmd)
 	for _, flag := range []string{"resume", "cwd", "profile", "model", "provider", "weak-model", "reasoning-effort", "recipe", "sysprompt", "account", "anthropic-api-access", "allowed-domains-file", "tool-mode"} {
 		cmd.Flags().String(flag, "", "")
 	}
@@ -70,6 +71,20 @@ func TestRemoteRunOptionsPreserveExplicitRestrictions(t *testing.T) {
 	assert.Contains(t, string(encoded), `"allowedTools":[]`)
 	var decoded llmtypes.ExecutionOptions
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
+}
+
+func TestRemoteRunOptionsCodeMode(t *testing.T) {
+	cmd := remoteRunCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--code-mode=off"}))
+	options, err := remoteRunExecutionOptions(cmd)
+	require.NoError(t, err)
+	require.NotNil(t, options.CodeMode)
+	assert.Equal(t, "off", *options.CodeMode)
+
+	cmd = remoteRunCommandForTest()
+	require.NoError(t, cmd.ParseFlags([]string{"--code-mode=compact"}))
+	_, err = remoteRunExecutionOptions(cmd)
+	require.ErrorContains(t, err, "codeMode must be off, on, or only")
 }
 
 func TestDefaultRunnerCWDRequiresMatchingInstallation(t *testing.T) {

@@ -46,6 +46,33 @@ func TestExecutionOptionsChatRequestJSON(t *testing.T) {
 	assert.Equal(t, &llmtypes.ExecutionOptions{}, request.Options)
 }
 
+func TestResolveExtensionProfileCodeMode(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("code_mode", "only")
+	profile := extensions.Profile{Name: "search", ExtensionID: "search", Options: llmtypes.ProfileConfig{
+		"provider": "openai", "model": "search-model",
+	}}
+	config, err := ResolveExtensionProfile(profile, "")
+	require.NoError(t, err)
+	assert.Nil(t, config.EnvironmentOptions().CodeMode, "the daemon's own code_mode never overrides the runner's")
+
+	profile.Options["code_mode"] = "off"
+	config, err = ResolveExtensionProfile(profile, "")
+	require.NoError(t, err)
+	require.NotNil(t, config.RunnerOptions().CodeMode, "an explicit profile code_mode reaches the runner")
+	assert.Equal(t, "off", *config.RunnerOptions().CodeMode)
+
+	resolved, err := resolveExecutionOptions(t.Context(), ChatRequest{}, config)
+	require.NoError(t, err)
+	assert.Equal(t, "off", *resolved.RunnerOptions().CodeMode, "request option merging keeps the profile's mode")
+
+	profile.Options["code_mode"] = "compact"
+	_, err = ResolveExtensionProfile(profile, "")
+	require.ErrorContains(t, err, "code_mode must be off, on, or only")
+}
+
 func TestResolveExtensionProfileIsolatedFromDaemonDefaults(t *testing.T) {
 	previous := viper.AllSettings()
 	viper.Reset()

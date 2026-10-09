@@ -89,7 +89,7 @@ func TestExecutionOptionsRejectInvalidJSON(t *testing.T) {
 
 func TestExecutionOptionsCloneAndRestrictions(t *testing.T) {
 	var options ExecutionOptions
-	require.NoError(t, json.Unmarshal([]byte(`{"provider":"anthropic","model":"main","weakModel":"weak","maxTokens":4096,"weakModelMaxTokens":2048,"thinkingBudgetTokens":1024,"reasoningEffort":"high","maxTurns":2,"useWeakModel":true,"noTools":false,"noExtensions":true,"noSkills":true,"enableFSSearchTools":false,"allowedTools":["file_read"],"allowedCommands":["git status"]}`), &options))
+	require.NoError(t, json.Unmarshal([]byte(`{"provider":"anthropic","model":"main","weakModel":"weak","maxTokens":4096,"weakModelMaxTokens":2048,"thinkingBudgetTokens":1024,"reasoningEffort":"high","maxTurns":2,"useWeakModel":true,"noTools":false,"noExtensions":true,"noSkills":true,"enableFSSearchTools":false,"allowedTools":["file_read"],"allowedCommands":["git status"],"codeMode":"only"}`), &options))
 	cloned := options.Clone()
 	assert.Equal(t, &options, cloned)
 	// All scalar pointers and allowlist storage belong to the clone.
@@ -111,6 +111,7 @@ func TestExecutionOptionsCloneAndRestrictions(t *testing.T) {
 	assert.Nil(t, restrictions.UseWeakModel)
 	assert.Equal(t, options.NoExtensions, restrictions.NoExtensions)
 	assert.Equal(t, options.NoSkills, restrictions.NoSkills)
+	assert.Equal(t, options.CodeMode, restrictions.CodeMode, "code mode is an environment setting that reaches the runner")
 	(*restrictions.AllowedTools)[0] = "changed"
 	assert.Equal(t, "file_read", (*options.AllowedTools)[0])
 	assert.False(t, (&ExecutionOptions{MaxTurns: new(0), UseWeakModel: new(false)}).HasModelOptions())
@@ -303,4 +304,59 @@ func TestApplyEnvironmentOptionsPreservesInheritedRestrictions(t *testing.T) {
 		ExecutionOptions:    &ExecutionOptions{EnableFSSearchTools: new(false)},
 	}, &ExecutionOptions{EnableFSSearchTools: new(true)})
 	require.ErrorContains(t, err, "runner policy")
+}
+
+func TestEffectiveCodeMode(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config Config
+		want   string
+	}{
+		{name: "unset is off", config: Config{}},
+		{name: "explicit off", config: Config{CodeMode: "off"}},
+		{name: "on", config: Config{CodeMode: "on"}, want: "on"},
+		{name: "only", config: Config{CodeMode: "only"}, want: "only"},
+		{
+			name:   "option overrides configured mode",
+			config: Config{CodeMode: "off", ExecutionOptions: &ExecutionOptions{CodeMode: new("only")}},
+			want:   "only",
+		},
+		{name: "option turns code mode off", config: Config{CodeMode: "only", ExecutionOptions: &ExecutionOptions{CodeMode: new("off")}}},
+		{
+			name:   "run allowlist without code_execute turns it off",
+			config: Config{CodeMode: "only", ExecutionOptions: &ExecutionOptions{AllowedTools: &[]string{"file_read", "grep_tool"}}},
+		},
+		{name: "legacy allowlist without code_execute turns it off", config: Config{CodeMode: "only", AllowedTools: []string{"bash"}}},
+		{
+			name:   "allowlist with code_execute keeps it",
+			config: Config{CodeMode: "only", AllowedTools: []string{"bash", "code_execute"}},
+			want:   "only",
+		},
+		{name: "no tools turns it off", config: Config{CodeMode: "on", ExecutionOptions: &ExecutionOptions{NoTools: new(true)}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.config.EffectiveCodeMode())
+		})
+	}
+}
+
+func TestApplyEnvironmentOptionsCodeMode(t *testing.T) {
+	config, err := ApplyEnvironmentOptions(Config{CodeMode: "only"}, &ExecutionOptions{CodeMode: new("off")})
+	require.NoError(t, err)
+	assert.Equal(t, "off", config.CodeMode, "an explicit option replaces the configured mode")
+	assert.Equal(t, "off", *config.ExecutionOptions.CodeMode)
+
+	config, err = ApplyEnvironmentOptions(Config{CodeMode: "on"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "on", config.CodeMode, "without an option the configured mode stays")
+	assert.Nil(t, config.ExecutionOptions.CodeMode)
+
+	inherited, err := ApplyEnvironmentOptions(Config{ExecutionOptions: &ExecutionOptions{CodeMode: new("only")}}, &ExecutionOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "only", inherited.CodeMode, "an inherited option applies when the request sets none")
+
+	_, err = ApplyEnvironmentOptions(Config{}, &ExecutionOptions{CodeMode: new("compact")})
+	require.ErrorContains(t, err, "codeMode must be off, on, or only")
+	var options ExecutionOptions
+	require.ErrorContains(t, json.Unmarshal([]byte(`{"codeMode":"hybrid"}`), &options), "codeMode must be off, on, or only")
 }

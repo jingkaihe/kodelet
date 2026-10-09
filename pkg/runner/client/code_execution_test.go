@@ -267,12 +267,28 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 	for _, test := range []struct {
 		name, mode                    string
 		supported, noTools, wantError bool
+		options                       *llmtypes.ExecutionOptions
+		wantMode                      string
 	}{
 		{name: "on supported", mode: "on", supported: true},
 		{name: "on legacy direct tools", mode: "on"},
 		{name: "only supported", mode: "only", supported: true},
 		{name: "only rejects legacy daemon", mode: "only", wantError: true},
 		{name: "only permits explicit no-tools", mode: "only", noTools: true},
+		{
+			name:      "allowlist without code_execute turns only off",
+			mode:      "only",
+			supported: true,
+			options:   &llmtypes.ExecutionOptions{AllowedTools: &[]string{"file_read", "grep_tool", "glob_tool"}},
+			wantMode:  "",
+		},
+		{
+			name:    "allowlist without code_execute needs no daemon support",
+			mode:    "only",
+			options: &llmtypes.ExecutionOptions{AllowedTools: &[]string{"file_read"}},
+		},
+		{name: "option selects only", mode: "off", supported: true, options: &llmtypes.ExecutionOptions{CodeMode: new("only")}, wantMode: "only"},
+		{name: "option turns code mode off", mode: "only", supported: true, options: &llmtypes.ExecutionOptions{CodeMode: new("off")}, wantMode: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := extensions.EmptyRuntime()
@@ -288,9 +304,13 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 				Generation:    1,
 				CodeExecution: test.supported,
 			}))
-			var options *llmtypes.ExecutionOptions
+			options := test.options
 			if test.noTools {
 				options = &llmtypes.ExecutionOptions{NoTools: new(true)}
+			}
+			wantMode := test.mode
+			if test.options != nil {
+				wantMode = test.wantMode
 			}
 			probe, probeErr := service.ProbeManifestForCWDWithOptions(t.Context(), "", "", options)
 			manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
@@ -308,11 +328,15 @@ func TestRunnerCodeModeNegotiation(t *testing.T) {
 			require.NoError(t, probeErr)
 			require.NoError(t, err)
 			assert.Equal(t, probe.Digest, manifest.Digest, "idle discovery and run.open must negotiate the same fields")
-			assert.Equal(t, test.supported, manifest.Capabilities.CodeExecution)
-			if test.supported {
+			if manifest.Config.Options != nil {
+				assert.Nil(t, manifest.Config.Options.CodeMode, "the settled mode replaces the consumed option")
+			}
+			if test.supported && wantMode != "" {
+				assert.True(t, manifest.Capabilities.CodeExecution)
 				assert.Contains(t, manifestToolNames(manifest), "code_execute")
-				assert.Equal(t, test.mode, manifest.Config.CodeMode)
+				assert.Equal(t, wantMode, manifest.Config.CodeMode)
 			} else {
+				assert.False(t, manifest.Capabilities.CodeExecution)
 				assert.NotContains(t, manifestToolNames(manifest), "code_execute")
 				assert.Empty(t, manifest.Config.CodeMode)
 				for _, tool := range manifest.Tools {

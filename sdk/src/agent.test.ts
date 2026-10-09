@@ -836,8 +836,8 @@ test("Remote session flags preserve runner paths and named profile selection", a
   await client.createSession({ cwd: "/only/on/runner", profile: "work", environmentProfile: "locked", options: { allowedTools: [] } });
   assert.deepEqual(args[0], ["acp", "--server", "http://daemon", "--runner", "runner-one", "--allowed-tools=", "--profile=work", "--runner-profile=locked"]);
   assert.deepEqual(processes[0].requests[1].params, { cwd: "/only/on/runner" });
-  await client.createSession({ resume: "existing", cwd: "/stored/path", options: { noTools: false, enableFSSearchTools: true, allowedCommands: ['echo "a,b"'] } });
-  assert.deepEqual(args[1].slice(5), ["--no-tools=false", '--allowed-commands="echo ""a,b"""', "--enable-fs-search-tools=true"]);
+  await client.createSession({ resume: "existing", cwd: "/stored/path", options: { noTools: false, enableFSSearchTools: true, allowedCommands: ['echo "a,b"'], codeMode: "off" } });
+  assert.deepEqual(args[1].slice(5), ["--no-tools=false", '--allowed-commands="echo ""a,b"""', "--enable-fs-search-tools=true", "--code-mode=off"]);
   assert.equal(processes[1].requests[1].method, "session/load");
   assert.deepEqual(processes[1].requests[1].params, { sessionId: "existing", cwd: "/stored/path" });
   await client.close();

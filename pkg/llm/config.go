@@ -335,9 +335,7 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
-	switch config.CodeMode {
-	case "", "off", "on", "only":
-	default:
+	if !llmtypes.ValidCodeMode(config.CodeMode) {
 		return config, errors.New("code_mode must be off, on, or only")
 	}
 	if config.OpenAI != nil {

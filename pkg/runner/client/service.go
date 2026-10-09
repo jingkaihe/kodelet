@@ -710,8 +710,9 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	config.Model = params.Agent.Model
 	config.Profile = params.Agent.Profile
 	config.RecipeName = params.Agent.RecipeName
+	settleCodeMode(&config)
 	if !params.CodeExecution {
-		if config.CodeMode == "only" && !config.ExecutionOptions.ToolsDisabled() {
+		if config.CodeMode == "only" {
 			s.failOpen(run)
 			return runnerpayload.Manifest{}, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off")
 		}
@@ -1114,8 +1115,9 @@ func (s *Service) probeManifestWithOptionsLocked(ctx context.Context, cwd, model
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to apply runner discovery options"))
 	}
 	config.WorkingDirectory = workingDirectory
+	settleCodeMode(&config)
 	if !codeExecution {
-		if config.CodeMode == "only" && !config.ExecutionOptions.ToolsDisabled() {
+		if config.CodeMode == "only" {
 			return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off"))
 		}
 		config.CodeMode = ""
@@ -1473,6 +1475,17 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 		return "", errors.New("server returned an empty conversation fork ID")
 	}
 	return result.ConversationID, nil
+}
+
+// settleCodeMode resolves a run's code mode once, before its manifest is built:
+// an explicit codeMode option or an allowlist that excludes code_execute applies
+// here. The settled mode travels in the manifest config, so the consumed option is
+// cleared to keep a single source of truth on both sides of the runner link.
+func settleCodeMode(config *llmtypes.Config) {
+	config.CodeMode = config.EffectiveCodeMode()
+	if config.ExecutionOptions != nil {
+		config.ExecutionOptions.CodeMode = nil
+	}
 }
 
 func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult, modified bool) runnerpayload.ToolResult {

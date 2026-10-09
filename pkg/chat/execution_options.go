@@ -190,7 +190,17 @@ func ResolveExtensionProfile(profile extensions.Profile, reasoningEffort string)
 			return llmtypes.Config{}, err
 		}
 	}
-	return restrictExtensionProfile(config)
+	config, err = restrictExtensionProfile(config)
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	// Code mode is runner-owned. Only a mode the profile sets explicitly travels
+	// to the runner, as a codeMode option; otherwise the runner's mode applies.
+	if _, set := profile.Options["code_mode"]; set {
+		mode := config.CodeMode
+		config.ExecutionOptions.CodeMode = &mode
+	}
+	return config, nil
 }
 
 // Host permissions remain independent of isolated model/provider defaults.

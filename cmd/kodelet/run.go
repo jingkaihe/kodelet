@@ -26,6 +26,7 @@ func init() {
 
 func addRunFlags(cmd *cobra.Command) {
 	addRemoteRunFlags(cmd)
+	addCodeModeFlag(cmd)
 	cmd.Flags().String("resume", "", "Resume a specific conversation")
 	cmd.Flags().String("cwd", "", "Working directory on the runner (defaults to your current directory when using this machine's built-in runner)")
 	cmd.Flags().BoolP("follow", "f", false, "Follow the most recent conversation in the selected workspace")

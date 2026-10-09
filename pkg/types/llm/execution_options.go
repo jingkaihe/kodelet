@@ -28,6 +28,9 @@ type ExecutionOptions struct {
 	AllowedTools         *[]string `json:"allowedTools,omitempty"` // Explicit catalog selection within inherited policy, independent of tool mode.
 	AllowedCommands      *[]string `json:"allowedCommands,omitempty"`
 	EnableFSSearchTools  *bool     `json:"enableFSSearchTools,omitempty"`
+	// CodeMode selects off, on, or only for this run instead of the runner's
+	// configured mode. It changes how tools are presented, never which are allowed.
+	CodeMode *string `json:"codeMode,omitempty"`
 }
 
 // MarshalJSON preserves deny-all when a Go caller supplies a non-nil pointer
@@ -90,6 +93,7 @@ func (o *ExecutionOptions) Clone() *ExecutionOptions {
 	c.NoExtensions = cloneOption(o.NoExtensions)
 	c.NoSkills = cloneOption(o.NoSkills)
 	c.EnableFSSearchTools = cloneOption(o.EnableFSSearchTools)
+	c.CodeMode = cloneOption(o.CodeMode)
 	if o.AllowedTools != nil {
 		values := append([]string{}, (*o.AllowedTools)...)
 		c.AllowedTools = &values
@@ -136,6 +140,9 @@ func (o *ExecutionOptions) Validate() error {
 		if _, err := NormalizeReasoningEffort(*o.ReasoningEffort); err != nil {
 			return err
 		}
+	}
+	if o.CodeMode != nil && !ValidCodeMode(*o.CodeMode) {
+		return errors.Errorf("execution option codeMode must be off, on, or only, got %q", *o.CodeMode)
 	}
 	for name, values := range map[string]*[]string{"allowedTools": o.AllowedTools, "allowedCommands": o.AllowedCommands} {
 		if values == nil {
@@ -188,6 +195,35 @@ func (o *ExecutionOptions) ToolAllowed(name string) bool {
 		return false
 	}
 	return o.AllowedTools == nil || slices.Contains(*o.AllowedTools, name)
+}
+
+// ValidCodeMode reports whether mode is a configurable code mode. Empty means off.
+func ValidCodeMode(mode string) bool {
+	switch mode {
+	case "", "off", "on", "only":
+		return true
+	}
+	return false
+}
+
+// EffectiveCodeMode returns the code mode a run actually uses: "on", "only", or
+// "" for off. An explicit codeMode execution option overrides the configured
+// mode. A run whose own tool allowlist or policy excludes code_execute runs with
+// code mode off, so its allowed tools are declared directly instead of being
+// hidden behind a tool it cannot use. Per-turn extension tool-list patches are
+// applied later and do not change the run's mode.
+func (c Config) EffectiveCodeMode() string {
+	mode := strings.TrimSpace(c.CodeMode)
+	if c.ExecutionOptions != nil && c.ExecutionOptions.CodeMode != nil {
+		mode = strings.TrimSpace(*c.ExecutionOptions.CodeMode)
+	}
+	if mode != "on" && mode != "only" {
+		return ""
+	}
+	if !c.EnvironmentOptions().ToolAllowed("code_execute") {
+		return ""
+	}
+	return mode
 }
 
 // EnvironmentOptions returns only non-secret environment restrictions, narrowed
@@ -281,6 +317,12 @@ func ApplyEnvironmentOptions(config Config, options *ExecutionOptions) (Config, 
 		config.EnableFSSearchTools = *o.EnableFSSearchTools
 	} else {
 		o.EnableFSSearchTools = host.EnableFSSearchTools
+	}
+	if o.CodeMode == nil {
+		o.CodeMode = cloneOption(host.CodeMode)
+	}
+	if o.CodeMode != nil {
+		config.CodeMode = *o.CodeMode
 	}
 	if o.AllowedCommands != nil {
 		// Bash consumes Config.AllowedCommands; keep the explicit-empty deny

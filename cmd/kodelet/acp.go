@@ -37,6 +37,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(acpCmd)
 	addRemoteRunFlags(acpCmd)
+	addCodeModeFlag(acpCmd)
 	acpCmd.Flags().Bool("no-extensions", false, "Disable runner extensions for this execution")
 	acpCmd.Flags().Bool("no-tools", false, "Disable all model-callable tools")
 	acpCmd.Flags().Bool("use-weak-model", false, "Use the configured weak model")

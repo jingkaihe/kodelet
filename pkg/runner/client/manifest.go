@@ -68,11 +68,8 @@ func buildWireManifest(
 	definitions := append([]agentenv.ToolDefinition(nil), local.Tools...)
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].Name < definitions[j].Name })
 	wireTools := make([]runnerpayload.ToolDefinition, 0, len(definitions))
-	codeExecution := config.CodeMode == "on" || config.CodeMode == "only"
-	codeMode := ""
-	if codeExecution {
-		codeMode = config.CodeMode
-	}
+	codeMode := config.EffectiveCodeMode()
+	codeExecution := codeMode != ""
 	var skillDefinitions []runnerpayload.SkillDefinition
 	for _, definition := range definitions {
 		if definition.Placement == agentenv.ToolPlacementControlPlane {

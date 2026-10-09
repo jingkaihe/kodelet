@@ -318,7 +318,8 @@ tool_mode: full
 # - only: advertise only code_execute (plus the skill tool); discover all other permitted tools via catalog
 # Native provider web search is unavailable in only mode; use on if needed.
 # Set on the runner, in workspace config, or in an environment profile.
-# Tool/command restrictions still apply; explicit allowlists must include code_execute.
+# Tool/command restrictions still apply. A run whose tool allowlist omits code_execute runs with code mode off.
+# Override per run with --code-mode, the SDK codeMode option, or code_mode in an extension profile.
 code_mode: off
 
 # Enable built-in filesystem search tools (glob_tool and grep_tool).
