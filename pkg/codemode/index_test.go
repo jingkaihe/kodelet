@@ -143,6 +143,26 @@ func TestSignatureReturnBounds(t *testing.T) {
 	}
 }
 
+func TestSignatureKeepsInputNamesBeforeOutputDetail(t *testing.T) {
+	input := map[string]any{}
+	for i := range 12 {
+		input[fmt.Sprintf("input_field_%02d", i)] = map[string]any{"type": "string"}
+	}
+	output := map[string]any{}
+	for i := range 10 {
+		output[fmt.Sprintf("output_field_%02d", i)] = map[string]any{"type": "string"}
+	}
+	signature := Signature(Definition{
+		Name:         "tool",
+		InputSchema:  map[string]any{"type": "object", "properties": input},
+		OutputSchema: map[string]any{"type": "object", "properties": output},
+	})
+	assert.True(t, strings.HasPrefix(signature, "tool({ input_field_00?, input_field_01?"), signature)
+	assert.True(t, strings.HasSuffix(signature, "→ ToolReply<unknown>"+signatureDescribeHint), signature)
+	assert.NotContains(t, signature, "tool(…)", "input names outrank output detail")
+	assert.LessOrEqual(t, utf8.RuneCountInString(signature), signatureMaxRunes)
+}
+
 func TestToolIndex(t *testing.T) {
 	assert.Equal(t, "No other tools are callable in this turn.", ToolIndex(nil))
 	assert.Contains(t, toolIndexHeader, "never part of a tool name", "group headings must not read as name prefixes")

@@ -200,8 +200,9 @@ func (g *indexGroup) render() string {
 }
 
 // Signature renders input fields and, when the tool declares an output schema,
-// a ToolReply<T> return type. Oversized signatures drop input detail before output detail, always
-// retaining a return type and an explicit discovery hint when abbreviated.
+// a ToolReply<T> return type. Oversized signatures shed input types first, then
+// output detail, and input field names last, since a call needs them. Any
+// abbreviation adds a catalog.describe hint.
 func Signature(definition Definition) string {
 	name := indexIdentifier(definition.Name)
 	// Normalize native Go schema values just as Describe does, so declarations
@@ -214,9 +215,12 @@ func Signature(definition Definition) string {
 		output = " → ToolReply<" + outputType + ">"
 		abbreviatedOutput = " → ToolReply<unknown>"
 	}
+	typedInput := name + "(" + indexInputType(definition.InputSchema, true) + ")"
+	untypedInput := name + "(" + indexInputType(definition.InputSchema, false) + ")"
 	candidates := []string{
-		name + "(" + indexInputType(definition.InputSchema, true) + ")" + output,
-		name + "(" + indexInputType(definition.InputSchema, false) + ")" + output,
+		typedInput + output,
+		untypedInput + output,
+		untypedInput + abbreviatedOutput,
 		name + "(…)" + output,
 		name + "(…)" + abbreviatedOutput,
 	}
