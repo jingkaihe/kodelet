@@ -176,7 +176,7 @@ func TestBashTool_Execute_Success(t *testing.T) {
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.False(t, result.IsError())
 	assert.Equal(t, "hello world\n", result.GetResult())
-	assert.Equal(t, map[string]any{"exitCode": 0}, result.StructuredData().Data)
+	assert.Equal(t, map[string]any{"exitCode": 0, "timedOut": false}, result.StructuredData().Data)
 }
 
 func TestBashTool_Execute_Timeout(t *testing.T) {
@@ -193,9 +193,11 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	defer cancel()
 
 	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
+	assert.True(t, result.IsError())
 	assert.Contains(t, result.GetError(), "Command timed out")
 	assert.Empty(t, result.GetResult())
 	assert.Nil(t, result.StructuredData().Data.(map[string]any)["exitCode"])
+	assert.Equal(t, true, result.StructuredData().Data.(map[string]any)["timedOut"])
 }
 
 func TestBashTool_Execute_Error(t *testing.T) {
@@ -218,6 +220,84 @@ func TestBashTool_Execute_InvalidJSON(t *testing.T) {
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
 	assert.True(t, result.IsError())
 	assert.Empty(t, result.GetResult())
+}
+
+func TestBashTool_Execute_CodeMode(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		command  string
+		exitCode any
+		timedOut bool
+		wantErr  bool
+	}{
+		{name: "success", command: "exit 0", exitCode: 0},
+		{name: "nonzero exit", command: "exit 42", exitCode: 42},
+		{name: "command not found", command: "nonexistentcommand", exitCode: 127},
+		{name: "signal", command: "kill -TERM $$", wantErr: true},
+		{name: "start failure", command: "exit 0", wantErr: true},
+		{name: "command timeout", command: "sleep 5", timedOut: true},
+		{name: "parent timeout", command: "sleep 5", timedOut: true, wantErr: true},
+		{name: "cancelled", command: "exit 0", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{})
+			cwd := t.TempDir()
+			switch test.name {
+			case "start failure":
+				cwd = filepath.Join(cwd, "missing")
+			case "parent timeout":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+			case "cancelled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			params, err := json.Marshal(BashInput{
+				Command:     test.command,
+				Description: "Test code-mode bash exit handling",
+				Timeout:     1,
+			})
+			require.NoError(t, err)
+			state := NewBasicState(t.Context(), WithWorkingDirectory(cwd))
+			result := NewBashTool(nil, false).Execute(ctx, state, string(params))
+			assert.Equal(t, test.wantErr, result.IsError(), result.GetError())
+			assert.Equal(t, !test.wantErr, result.StructuredData().Success)
+			assert.Equal(t, test.exitCode, result.StructuredData().Data.(map[string]any)["exitCode"])
+			assert.Equal(t, test.timedOut, result.StructuredData().Data.(map[string]any)["timedOut"])
+			if !test.wantErr {
+				assert.Empty(t, result.GetError())
+			}
+			if test.name == "command timeout" {
+				assert.Equal(t, "[Command timed out after 1 seconds. Output above may be partial.]\n", result.GetResult())
+			} else {
+				assert.NotContains(t, result.GetResult(), "[Command timed out")
+			}
+		})
+	}
+}
+
+func TestBashTool_CodeModeTimeoutNoticeSurvivesTruncation(t *testing.T) {
+	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{})
+	params, err := json.Marshal(BashInput{
+		Command:     "printf '%080000d' 0; sleep 5",
+		Description: "Preserve timeout notice after large output",
+		Timeout:     1,
+	})
+	require.NoError(t, err)
+	result := NewBashTool(nil, false).Execute(ctx, NewBasicState(t.Context()), string(params))
+	require.False(t, result.IsError(), result.GetError())
+	metadata := result.StructuredData().Metadata.(*tooltypes.BashMetadata)
+	require.NotNil(t, metadata.Truncation)
+	assert.True(t, metadata.Truncation.Truncated)
+	wantSuffix := "\n[Command timed out after 1 seconds. Output above may be partial.]\n"
+	assert.True(t, strings.HasSuffix(metadata.Output, wantSuffix))
+	require.NotEmpty(t, metadata.FullOutputPath)
+	t.Cleanup(func() { _ = os.Remove(metadata.FullOutputPath) })
+	fullOutput, err := os.ReadFile(metadata.FullOutputPath)
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("0", 80000)+wantSuffix, string(fullOutput))
 }
 
 func TestBashTool_Execute_ContextCancellation(t *testing.T) {
@@ -1183,6 +1263,7 @@ func TestBashToolCanonicalData(t *testing.T) {
 	}
 	assert.Equal(t, map[string]any{
 		"exitCode": 0,
+		"timedOut": false,
 	}, result.StructuredData().Data)
 
 	result.error = "Command exited with status 42"
@@ -1208,10 +1289,12 @@ func TestBashToolCanonicalData(t *testing.T) {
 	assert.NotContains(t, result.StructuredData().Data, "fullOutputPath")
 	result.exitCodeKnown = false
 	assert.Nil(t, result.StructuredData().Data.(map[string]any)["exitCode"])
+	result.timedOut = true
+	assert.Equal(t, true, result.StructuredData().Data.(map[string]any)["timedOut"])
 
 	tool := NewBashTool(nil, false)
 	schema := tooltypes.OutputSchemaForTool(tool)
-	assert.Equal(t, []string{"exitCode"}, schema["required"])
+	assert.Equal(t, []string{"exitCode", "timedOut"}, schema["required"])
 	schema["properties"].(map[string]any)["exitCode"] = false
 	assert.IsType(t, map[string]any{}, tool.RawOutputSchema()["properties"].(map[string]any)["exitCode"])
 }

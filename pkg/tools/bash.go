@@ -153,19 +153,23 @@ func (b *BashTool) RawOutputSchema() map[string]any {
 				"type":        []any{"integer", "null"},
 				"description": "Process exit status, or null when no exit status is available (for example a timeout or start failure).",
 			},
+			"timedOut": map[string]any{
+				"type":        "boolean",
+				"description": "Whether execution timed out. Output captured before the timeout is retained in reply.text.",
+			},
 			"fullOutputPath": map[string]any{
 				"type":        "string",
 				"description": "Runner-local file containing the complete output, when available after truncation.",
 			},
 		},
-		"required":             []string{"exitCode"},
+		"required":             []string{"exitCode", "timedOut"},
 		"additionalProperties": false,
 	}
 }
 
 // CodeModeDescription explains where code-mode scripts find bash output.
 func (*BashTool) CodeModeDescription() string {
-	return "In code mode, combined stdout/stderr is in reply.text. reply.data contains exitCode (null when unknown) and an optional fullOutputPath for saved complete output. reply.truncated indicates shortened output. Nonzero exits and timeouts throw with available output and execution fields in error.result."
+	return "In code mode, nonzero exits and command timeouts return normally, not as exceptions. Combined stdout/stderr, including partial output before a timeout, is in reply.text. Command timeouts also append a notice to reply.text stating the timeout and that output may be partial. Check reply.data.exitCode and reply.data.timedOut to determine command success; a timeout has exitCode: null and timedOut: true. reply.data may include fullOutputPath for saved complete output, and reply.truncated indicates shortened output. Cancellation, signal termination, and failures to start still throw with available output and execution fields in error.result."
 }
 
 // Short returns the one-line summary used in compact tool listings.
@@ -317,6 +321,7 @@ type BashToolResult struct {
 	error              string
 	exitCode           int
 	exitCodeKnown      bool
+	timedOut           bool
 	executionTime      time.Duration
 	workingDir         string
 	outputTruncated    bool
@@ -386,7 +391,7 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 	}
 	result.Metadata = metadata
-	data := map[string]any{"exitCode": nil}
+	data := map[string]any{"exitCode": nil, "timedOut": r.timedOut}
 	if r.exitCodeKnown {
 		data["exitCode"] = r.exitCode
 	}
@@ -444,7 +449,7 @@ func (b *BashTool) executeForeground(
 	onUpdate tooltypes.ToolUpdateCallback,
 ) tooltypes.ToolResult {
 	startTime := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
+	commandCtx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
 	defer cancel()
 
 	workingDir := cwd
@@ -452,7 +457,7 @@ func (b *BashTool) executeForeground(
 		workingDir, _ = os.Getwd()
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	cmd := exec.CommandContext(commandCtx, "bash", "-c", input.Command)
 	cmd.Dir = workingDir
 	if env, err := bashEnvWithPreferredBinDirs(); err == nil {
 		cmd.Env = env
@@ -482,23 +487,44 @@ func (b *BashTool) executeForeground(
 	if err == nil {
 		err = cmd.Wait()
 	}
-	timedOut := ctx.Err() == context.DeadlineExceeded
+	timedOut := commandCtx.Err() == context.DeadlineExceeded
 	executionTime := time.Since(startTime)
 	completedExecutionTime.Store(int64(executionTime))
+	_, codeMode := ctx.Value(codeExecutionContextKey{}).(CodeExecutionContext)
+	if err != nil && timedOut && codeMode && ctx.Err() == nil {
+		// Include the notice in bounded snapshots and saved output so text-only
+		// code-mode replies still communicate the timeout.
+		separator := ""
+		if captured := output.snapshot().output; captured != "" && !strings.HasSuffix(captured, "\n") {
+			separator = "\n"
+		}
+		fmt.Fprintf(output, "%s[Command timed out after %d seconds. Output above may be partial.]\n", separator, input.Timeout)
+	}
 	finalSnapshot := output.finish()
 	if emitter != nil {
 		emitter.stopAndFlush()
 	}
 	result := newBashToolResult(input.Command, workingDir, executionTime, finalSnapshot, true)
 	result.exitCodeKnown = !timedOut && cmd.ProcessState != nil && cmd.ProcessState.Exited()
+	result.timedOut = timedOut
 
 	if err != nil {
 		if timedOut {
+			// Return partial output for a command timeout, but do not swallow
+			// cancellation or a deadline belonging to the parent invocation.
+			if codeMode && ctx.Err() == nil {
+				return result
+			}
 			result.error = "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds"
 			return result
 		}
 		if status, ok := err.(*exec.ExitError); ok {
 			result.exitCode = status.ExitCode()
+			// A completed process is a normal code-mode reply, even on nonzero
+			// exit, so callers can inspect its output without catching or rerunning it.
+			if codeMode && result.exitCodeKnown && commandCtx.Err() == nil {
+				return result
+			}
 			result.error = fmt.Sprintf("Command exited with status %d", status.ExitCode())
 			return result
 		}

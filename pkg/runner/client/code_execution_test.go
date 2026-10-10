@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -400,6 +402,84 @@ func TestBuildWireManifestAddsCodeModeNotesOnlyWithCodeMode(t *testing.T) {
 	}
 }
 
+func TestRunnerCodeBashReturnsExecutionResults(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		command  string
+		wantData string
+		textOnly bool
+	}{
+		{name: "nonzero exit", command: "exit 7", wantData: `{"exitCode":7,"timedOut":false}`},
+		{name: "command timeout", command: "sleep 5", wantData: `{"exitCode":null,"timedOut":true}`},
+		{name: "text-only timeout", command: "sleep 5", textOnly: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bash := tools.NewBashTool(nil, false)
+			cwd := t.TempDir()
+			state := tools.NewBasicState(t.Context(), tools.WithWorkingDirectory(cwd))
+			var calls int
+			environment := &codeTestEnvironment{execute: func(ctx context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+				calls++
+				assert.Equal(t, "bash", request.Name)
+				result := bash.Execute(ctx, state, request.Input)
+				return agentenv.ToolExecution{
+					Input:            request.Input,
+					Result:           result,
+					StructuredResult: result.StructuredData(),
+				}, nil
+			}}
+			service, run, _, params := newCodeService(t, environment)
+			run.manifest.Tools = append(run.manifest.Tools, runnerpayload.ToolDefinition{
+				Name:         "bash",
+				Placement:    "environment",
+				OutputSchema: bash.RawOutputSchema(),
+			})
+			params.CallableTools = new([]string{"bash"})
+			authority, err := service.codeExecutionContext(t.Context(), run, params)
+			require.NoError(t, err)
+			ctx := tools.ContextWithCodeExecution(t.Context(), authority)
+			bashInput, err := json.Marshal(tools.BashInput{
+				Command:     `printf 'once\n' >> side-effect.txt; printf 'stdout\n'; printf 'stderr\n' >&2; ` + test.command,
+				Description: "Test command results with side effects",
+				Timeout:     1,
+			})
+			require.NoError(t, err)
+			code := "const reply = await tools.bash(" + string(bashInput) + ");"
+			if test.textOnly {
+				code += "return reply.text;"
+			} else {
+				code += "return reply;"
+			}
+			input, err := json.Marshal(map[string]string{"code": code})
+			require.NoError(t, err)
+			result := (&tools.CodeExecuteTool{}).Execute(ctx, state, string(input))
+			require.False(t, result.IsError(), result.GetError())
+			if !test.textOnly {
+				assert.Contains(t, result.GetResult(), test.wantData)
+			}
+			wantText := "stdout\nstderr\n"
+			if test.command == "sleep 5" {
+				wantText += "[Command timed out after 1 seconds. Output above may be partial.]\n"
+			}
+			if test.textOnly {
+				assert.Contains(t, result.GetResult(), wantText)
+			} else {
+				encodedText, err := json.Marshal(wantText)
+				require.NoError(t, err)
+				assert.Contains(t, result.GetResult(), string(encodedText))
+			}
+			assert.Equal(t, 1, calls)
+			output, err := os.ReadFile(filepath.Join(cwd, "side-effect.txt"))
+			require.NoError(t, err)
+			assert.Equal(t, "once\n", string(output))
+			var metadata tooltypes.CodeExecutionMetadata
+			require.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
+			require.Len(t, metadata.Calls, 1)
+			assert.Equal(t, "completed", metadata.Calls[0].Status)
+		})
+	}
+}
+
 func TestRunnerCodeReplyBuiltinContracts(t *testing.T) {
 	t.Run("bash output is not duplicated", func(t *testing.T) {
 		tool := tools.NewBashTool(nil, false)
@@ -410,11 +490,11 @@ func TestRunnerCodeReplyBuiltinContracts(t *testing.T) {
 			Structured: result.StructuredData(),
 		}})
 		assert.Equal(t, "contract-output", reply.Text)
-		assert.Equal(t, map[string]any{"exitCode": 7}, reply.Data)
+		assert.Equal(t, map[string]any{"exitCode": 7, "timedOut": false}, reply.Data)
 		assert.Empty(t, reply.Attachments)
 		encoded, err := json.Marshal(reply)
 		require.NoError(t, err)
-		assert.JSONEq(t, `{"data":{"exitCode":7},"text":"contract-output","attachments":[],"truncated":false}`, string(encoded))
+		assert.JSONEq(t, `{"data":{"exitCode":7,"timedOut":false},"text":"contract-output","attachments":[],"truncated":false}`, string(encoded))
 	})
 	t.Run("file content is structured with a post-hook text fallback", func(t *testing.T) {
 		execution := runnerpayload.ToolExecuteResult{Result: runnerpayload.ToolResult{
