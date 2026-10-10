@@ -22,6 +22,7 @@ import ChatWorkspaceHeader from '../components/chat/ChatWorkspaceHeader';
 import ChatWorkspacePanel from '../components/chat/ChatWorkspacePanel';
 import ConversationStatistics from '../components/chat/ConversationStatistics';
 import ExtensionWidgets from '../components/chat/ExtensionWidgets';
+import KeyboardShortcutsDialog from '../components/chat/KeyboardShortcutsDialog';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
 import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
@@ -217,7 +218,8 @@ const ChatPage: React.FC = () => {
   const [gitDiffError, setGitDiffError] = useState<string | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
+  const [infoDialog, setInfoDialog] = useState<'about' | 'shortcuts' | null>(null);
+  const [composerFocusRequested, setComposerFocusRequested] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const loadedConversationId = conversation?.id ?? null;
@@ -276,7 +278,7 @@ const ChatPage: React.FC = () => {
     uiRequestDialog !== null ||
     newChatDialogOpen ||
     providerSettingsOpen ||
-    aboutOpen ||
+    infoDialog !== null ||
     sidebarSearchOpen;
   const layout = useChatLayout(higherPriorityDialogOpen);
   const {
@@ -296,6 +298,25 @@ const ChatPage: React.FC = () => {
     handleSidebarResizeStart,
     handleSidebarResizeKeyDown,
   } = layout;
+
+  useEffect(() => {
+    if (
+      !composerFocusRequested ||
+      higherPriorityDialogOpen ||
+      sidebarOverlayOpen ||
+      workspaceOverlayOpen
+    ) {
+      return;
+    }
+    // Run after overlay focus restoration so closing a panel cannot steal focus back.
+    const timer = window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]:not(:disabled)')
+        ?.focus();
+      setComposerFocusRequested(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [composerFocusRequested, higherPriorityDialogOpen, sidebarOverlayOpen, workspaceOverlayOpen]);
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -1785,9 +1806,67 @@ const ChatPage: React.FC = () => {
 
   const handleSelectTerminalPanel = () => {
     if (workspaceTerminalAvailable) {
+      if (workspaceOverlayLayout) setSidebarVisible(false);
       setWorkspacePanelView('terminal');
     }
   };
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.isComposing || event.altKey || higherPriorityDialogOpen) {
+      return;
+    }
+
+    let action: (() => void) | undefined;
+    if (
+      event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      (event.key === '`' || event.code === 'Backquote')
+    ) {
+      if (!workspaceTerminalAvailable) return;
+      action = () => {
+        if (workspacePanelView === 'terminal') {
+          setWorkspacePanelView(null);
+          setComposerFocusRequested(true);
+        } else {
+          handleSelectTerminalPanel();
+        }
+      };
+    } else {
+      // Shell applications (notably tmux's Ctrl+B prefix) own all other keys.
+      if (event.target instanceof Element && event.target.closest('.workspace-terminal-host')) {
+        return;
+      }
+      if (event.ctrlKey === event.metaKey) return;
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === 'b') {
+        action = handleSidebarToggle;
+      } else if (!event.shiftKey && key === 'k') {
+        action = handleOpenSidebarSearch;
+      } else if (event.shiftKey && key === 'o') {
+        action = handleNewChat;
+      } else if (event.shiftKey && key === 'l') {
+        action = () => {
+          closeMobileSidebar();
+          if (workspaceOverlayOpen) setWorkspacePanelView(null);
+          setComposerFocusRequested(true);
+        };
+      } else if (!event.shiftKey && key === '/') {
+        action = () => setInfoDialog('shortcuts');
+      }
+    }
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) action();
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => handleShortcut(event);
+    // Capture the terminal toggle before the terminal sends it to the shell.
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
 
   const handleCommitNewChatContext = () => {
     const context = contextSettings.commitDialog();
@@ -1843,9 +1922,13 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      {aboutOpen && !uiRequestDialog ? (
+      {infoDialog === 'shortcuts' && !uiRequestDialog ? (
+        <KeyboardShortcutsDialog onClose={() => setInfoDialog(null)} />
+      ) : null}
+
+      {infoDialog === 'about' && !uiRequestDialog ? (
         <AboutKodeletDialog
-          onClose={() => setAboutOpen(false)}
+          onClose={() => setInfoDialog(null)}
           runner={runners.find((runner) => runner.id === currentRunnerID)}
           terminalAuthorized={terminalAuthorized}
         />
@@ -1855,11 +1938,11 @@ const ChatPage: React.FC = () => {
       !uiRequestDialog &&
       !newChatDialogOpen &&
       !sidebarSearchOpen &&
-      !aboutOpen ? (
+      !infoDialog ? (
         <ProviderSettingsDialog onClose={() => setProviderSettingsOpen(false)} />
       ) : null}
 
-      {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen && !aboutOpen ? (
+      {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen && !infoDialog ? (
         <NewChatContextDialog
           {...contextSettings.dialogProps}
           onCommit={handleCommitNewChatContext}
@@ -1870,7 +1953,7 @@ const ChatPage: React.FC = () => {
       !uiRequestDialog &&
       !newChatDialogOpen &&
       !providerSettingsOpen &&
-      !aboutOpen ? (
+      !infoDialog ? (
         <ConversationSearchDialog
           {...conversationSearch.dialogProps}
           cwdOptions={conversationCWDOptions}
@@ -1916,7 +1999,8 @@ const ChatPage: React.FC = () => {
               onForkConversation={handleForkConversation}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
-              onOpenAbout={() => setAboutOpen(true)}
+              onOpenAbout={() => setInfoDialog('about')}
+              onOpenShortcuts={() => setInfoDialog('shortcuts')}
               onOpenProviderSettings={() => setProviderSettingsOpen(true)}
               onSearch={handleOpenSidebarSearch}
               onSelectConversation={handleSelectConversation}

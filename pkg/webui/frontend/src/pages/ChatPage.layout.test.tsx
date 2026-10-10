@@ -82,6 +82,100 @@ describe('ChatPage layout and accessibility', () => {
     expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
   });
 
+  it.each([
+    'ctrlKey',
+    'metaKey',
+  ])('runs navigation shortcuts with %s from the composer', async (modifier) => {
+    await renderChatWithRunner();
+    const composer = screen.getByTestId('composer-textarea');
+    composer.focus();
+    fireEvent.change(composer, { target: { value: 'Keep this draft' } });
+
+    expect(fireEvent.keyDown(composer, { key: 'b', [modifier]: true })).toBe(false);
+    expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
+    expect(composer).toHaveFocus();
+    expect(composer).toHaveValue('Keep this draft');
+
+    expect(fireEvent.keyDown(composer, { key: 'b', [modifier]: true, repeat: true })).toBe(false);
+    expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
+    fireEvent.keyDown(composer, { key: 'b', [modifier]: true });
+    expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+
+    fireEvent.keyDown(composer, { key: 'k', [modifier]: true });
+    const search = screen.getByRole('searchbox', { name: 'Search conversations' });
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.keyDown(search, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('sidebar-search-toggle')).toHaveFocus());
+    fireEvent.keyDown(window, { key: 'L', shiftKey: true, [modifier]: true });
+    await waitFor(() => expect(composer).toHaveFocus());
+
+    fireEvent.keyDown(composer, { key: '/', [modifier]: true });
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(screen.getByTestId('chat-layout')).toHaveAttribute('inert');
+    const close = within(dialog).getByRole('button', { name: 'Close keyboard shortcuts' });
+    await waitFor(() => expect(close).toHaveFocus());
+    expect(fireEvent.keyDown(close, { key: 'b', [modifier]: true })).toBe(true);
+    expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    await waitFor(() => expect(composer).toHaveFocus());
+
+    fireEvent.keyDown(composer, { key: 'O', shiftKey: true, [modifier]: true });
+    expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
+  });
+
+  it('leaves ordinary typing, extra modifiers, composition and handled events alone', async () => {
+    await renderChatWithRunner();
+    const composer = screen.getByTestId('composer-textarea');
+    for (const options of [
+      {},
+      { ctrlKey: true, altKey: true },
+      { ctrlKey: true, metaKey: true },
+      { ctrlKey: true, shiftKey: true },
+      { ctrlKey: true, isComposing: true },
+    ]) {
+      expect(fireEvent.keyDown(composer, { key: 'b', ...options })).toBe(true);
+      expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+    }
+    const handled = new KeyboardEvent('keydown', {
+      key: 'b',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    handled.preventDefault();
+    fireEvent(composer, handled);
+    expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+  });
+
+  it('toggles the terminal before input reaches the shell and preserves other terminal keys', async () => {
+    await renderChatWithRunner();
+    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    expect(screen.getByTestId('workspace-tools-diff-tab')).toHaveAttribute('aria-selected', 'true');
+    expect(fireEvent.keyDown(window, { key: '`', ctrlKey: true })).toBe(false);
+    const terminal = await screen.findByTestId('terminal-host');
+    terminal.focus();
+    const shellInput = vi.fn();
+    terminal.addEventListener('keydown', shellInput);
+
+    expect(fireEvent.keyDown(terminal, { key: 'b', ctrlKey: true })).toBe(true);
+    expect(shellInput).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+    shellInput.mockClear();
+    expect(fireEvent.keyDown(terminal, { key: 'Dead', code: 'Backquote', ctrlKey: true })).toBe(
+      false
+    );
+    expect(shellInput).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-host')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('composer-textarea')).toHaveFocus());
+  });
+
+  it('does not bypass terminal permissions with the shortcut', async () => {
+    mockGetAuthPrincipal.mockResolvedValue({ id: 'viewer', roles: ['user'] });
+    await renderChatWithRunner();
+    expect(fireEvent.keyDown(window, { key: '`', ctrlKey: true })).toBe(true);
+    expect(screen.queryByTestId('terminal-host')).not.toBeInTheDocument();
+  });
+
   it('returns focus to the mobile sidebar toggle after closing conversation search', async () => {
     vi.stubGlobal(
       'matchMedia',
@@ -195,6 +289,66 @@ describe('ChatPage layout and accessibility', () => {
     expect(await screen.findByText('1.2.3')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Close about Kodelet' }));
     await waitFor(() => expect(about).toHaveFocus());
+  });
+
+  it.each(['user', 'anonymous'])('opens keyboard shortcuts from the %s sidebar', async (role) => {
+    const user = userEvent.setup();
+    if (role !== 'anonymous') {
+      mockGetAuthPrincipal.mockResolvedValue({
+        id: 'https://issuer.example.com|user',
+        issuer: 'https://issuer.example.com',
+        subject: 'user',
+        name: 'Jingkai He',
+        roles: [role],
+      });
+    }
+    render(<ChatPage />);
+    await flushAsyncUpdates();
+    const trigger =
+      role === 'anonymous'
+        ? screen.getByRole('button', { name: 'Keyboard shortcuts' })
+        : screen.getByRole('button', { name: 'Jingkai He account menu' });
+    await user.click(trigger);
+    if (role !== 'anonymous') {
+      await user.click(screen.getByRole('menuitem', { name: 'Keyboard shortcuts' }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    }
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(within(dialog).getByText('Toggle sidebar')).toBeInTheDocument();
+    expect(within(dialog).getByText('Toggle terminal')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Close keyboard shortcuts' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('uses panel shortcuts on mobile without stacking overlays and restores composer focus', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }))
+    );
+    await renderChatWithRunner();
+    const composer = screen.getByTestId('composer-textarea');
+    composer.focus();
+    fireEvent.keyDown(composer, { key: 'b', ctrlKey: true });
+    expect(screen.getByRole('dialog', { name: 'Conversations' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: '`', ctrlKey: true });
+    expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Workspace tools' })).toBeInTheDocument();
+    const terminal = await screen.findByTestId('terminal-host');
+    terminal.focus();
+    fireEvent.keyDown(terminal, { key: '`', ctrlKey: true });
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(composer, { key: 'b', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'L', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('kodelet.chat.sidebar.visible')).toBeNull();
   });
 
   it('starts with the sidebar closed on mobile and closes it before opening a new chat', async () => {

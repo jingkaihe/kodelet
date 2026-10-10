@@ -1,5 +1,6 @@
 import { Check, X } from 'lucide-react';
 import React from 'react';
+import { useDialogFocus } from '../../features/chat/useDialogFocus';
 import apiService from '../../services/api';
 import type { Runner, ServerStatus } from '../../types';
 import KodeletBrand from '../KodeletBrand';
@@ -19,10 +20,10 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
   const [status, setStatus] = React.useState<ServerStatus | null>(null);
   const [error, setError] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
-  const dialogRef = React.useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
-  const onCloseRef = React.useRef(onClose);
-  onCloseRef.current = onClose;
+  const { dialogRef, closeButtonRef } = useDialogFocus(
+    onClose,
+    '.sidebar-account-trigger, [data-testid="sidebar-about-kodelet"]'
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(attempt): Retry reloads the instance version.
   React.useEffect(() => {
@@ -39,53 +40,6 @@ const AboutKodeletDialog: React.FC<AboutKodeletDialogProps> = ({
       disposed = true;
     };
   }, [attempt]);
-
-  React.useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-        ? document.activeElement
-        : null;
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const dialog = dialogRef.current;
-      const buttons = dialog?.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
-      if (!dialog || !buttons?.length) return;
-      const first = buttons[0];
-      const last = buttons[buttons.length - 1];
-      if (!dialog.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      window.clearTimeout(focusTimer);
-      document.removeEventListener('keydown', handleKeyDown, true);
-      // The menu item unmounts on opening; return to its persistent account trigger.
-      window.setTimeout(() => {
-        const target = previousFocus?.isConnected
-          ? previousFocus
-          : document.querySelector<HTMLElement>(
-              '.sidebar-account-trigger, [data-testid="sidebar-about-kodelet"]'
-            );
-        if (!target?.closest('[inert]')) target?.focus();
-      }, 0);
-    };
-  }, []);
 
   const runnerAvailable = Boolean(
     runner?.connected && (runner.status === 'idle' || runner.status === 'busy')

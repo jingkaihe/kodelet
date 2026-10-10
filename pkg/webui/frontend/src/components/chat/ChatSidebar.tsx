@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ChevronRight,
   Info,
+  Keyboard,
   LogOut,
   PanelLeft,
   Search,
@@ -36,6 +37,7 @@ interface ChatSidebarProps {
   onNewChat: () => void;
   onOpenAbout?: () => void;
   onOpenProviderSettings?: () => void;
+  onOpenShortcuts?: () => void;
   onSearch: () => void;
   onSelectConversation: (conversationId: string) => void;
   onForkConversation: (conversationId: string) => void;
@@ -642,6 +644,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onNewChat,
   onOpenAbout,
   onOpenProviderSettings,
+  onOpenShortcuts,
   onSearch,
   onSelectConversation,
   onForkConversation,
@@ -750,6 +753,33 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const account = isOIDCPrincipal(authPrincipal) ? getAccountPresentation(authPrincipal) : null;
   const canManageProviders = Boolean(
     account && onOpenProviderSettings && authPrincipal?.roles.includes('admin')
+  );
+  const infoActions = [
+    {
+      label: 'Keyboard shortcuts',
+      Icon: Keyboard,
+      onOpen: onOpenShortcuts,
+      id: 'keyboard-shortcuts',
+    },
+    { label: 'About Kodelet', Icon: Info, onOpen: onOpenAbout, id: 'about-kodelet' },
+  ].map(({ label, Icon, onOpen, id }) =>
+    onOpen ? (
+      <button
+        aria-haspopup="dialog"
+        className="sidebar-account-menu-item"
+        data-testid={`sidebar-${id}`}
+        key={id}
+        onClick={() => {
+          setAccountMenuOpen(false);
+          onOpen();
+        }}
+        role={account ? 'menuitem' : undefined}
+        type="button"
+      >
+        <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+        <span>{label}</span>
+      </button>
+    ) : null
   );
 
   return (
@@ -1060,21 +1090,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   <span>Provider settings</span>
                 </button>
               ) : null}
-              {onOpenAbout ? (
-                <button
-                  aria-haspopup="dialog"
-                  className="sidebar-account-menu-item"
-                  onClick={() => {
-                    setAccountMenuOpen(false);
-                    onOpenAbout();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Info aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-                  <span>About Kodelet</span>
-                </button>
-              ) : null}
+              {infoActions}
               <a
                 className="sidebar-account-menu-item"
                 href="/auth/logout"
@@ -1105,19 +1121,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <span className="sidebar-account-name">{account.shortName}</span>
           </button>
         </div>
-      ) : onOpenAbout ? (
-        <div className="sidebar-account">
-          <button
-            aria-haspopup="dialog"
-            className="sidebar-account-menu-item"
-            data-testid="sidebar-about-kodelet"
-            onClick={onOpenAbout}
-            type="button"
-          >
-            <Info aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-            <span>About Kodelet</span>
-          </button>
-        </div>
+      ) : onOpenAbout || onOpenShortcuts ? (
+        <div className="sidebar-account">{infoActions}</div>
       ) : null}
     </aside>
   );

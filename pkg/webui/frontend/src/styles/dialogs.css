@@ -1017,7 +1017,8 @@
 }
 
 .provider-settings-backdrop,
-.about-kodelet-backdrop {
+.about-kodelet-backdrop,
+.keyboard-shortcuts-backdrop {
   z-index: 75;
   padding: 1rem;
   background: rgba(20, 20, 19, 0.16);
@@ -1025,7 +1026,8 @@
 }
 
 .provider-settings-dialog,
-.about-kodelet-dialog {
+.about-kodelet-dialog,
+.keyboard-shortcuts-dialog {
   display: flex;
   width: min(40rem, 100%);
   max-height: calc(100% - 2rem);
@@ -1043,7 +1045,8 @@
   padding: 0.65rem 1rem;
 }
 
-.provider-settings-header .new-chat-context-title {
+.provider-settings-header .new-chat-context-title,
+.keyboard-shortcuts-header .new-chat-context-title {
   font-family: var(--font-mono);
   font-size: 1rem;
   font-weight: 600;
@@ -1051,19 +1054,22 @@
 }
 
 .provider-settings-header .new-chat-context-close,
-.about-kodelet-header .new-chat-context-close {
+.about-kodelet-header .new-chat-context-close,
+.keyboard-shortcuts-header .new-chat-context-close {
   width: 2.75rem;
   height: 2.75rem;
   border-radius: 2px;
 }
 
 .provider-settings-header .new-chat-context-close:hover,
-.about-kodelet-header .new-chat-context-close:hover {
+.about-kodelet-header .new-chat-context-close:hover,
+.keyboard-shortcuts-header .new-chat-context-close:hover {
   background: color-mix(in srgb, var(--kodelet-dark) 6%, transparent);
 }
 
 .provider-settings-dialog :is(button, a, input):focus-visible,
-.about-kodelet-dialog button:focus-visible {
+.about-kodelet-dialog button:focus-visible,
+.keyboard-shortcuts-dialog button:focus-visible {
   outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
   box-shadow: none;
@@ -1081,11 +1087,13 @@
   scrollbar-width: thin;
 }
 
-.about-kodelet-dialog {
+.about-kodelet-dialog,
+.keyboard-shortcuts-dialog {
   width: min(32rem, 100%);
 }
 
-.about-kodelet-content {
+.about-kodelet-content,
+.keyboard-shortcuts-content {
   min-height: 0;
   overflow-y: auto;
   padding: 1.25rem;
@@ -1095,7 +1103,8 @@
   scrollbar-width: thin;
 }
 
-.about-kodelet-header {
+.about-kodelet-header,
+.keyboard-shortcuts-header {
   border-bottom: 0;
   padding: 1.25rem 1.25rem 0;
 }
@@ -1110,13 +1119,15 @@
   font-size: 0.72rem;
 }
 
-.about-kodelet-content section + section {
+.about-kodelet-content section + section,
+.keyboard-shortcuts-content section + section {
   margin-top: 1.25rem;
   border-top: 1px solid var(--sidebar-stroke-strong);
   padding-top: 1rem;
 }
 
-.about-kodelet-content h3 {
+.about-kodelet-content h3,
+.keyboard-shortcuts-content h3 {
   margin: 0;
   font-size: 0.8rem;
   font-weight: 600;
@@ -1174,6 +1185,46 @@
   margin-top: 0.5rem;
   color: var(--kodelet-muted);
   font-size: 0.72rem;
+}
+
+.keyboard-shortcuts-list {
+  margin: 0.65rem 0 0;
+}
+
+.keyboard-shortcuts-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+
+.keyboard-shortcuts-list dd {
+  margin: 0;
+  color: var(--kodelet-muted);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.keyboard-shortcuts-list kbd {
+  border: 1px solid var(--sidebar-stroke-strong);
+  border-radius: 0.2rem;
+  padding: 0.1rem 0.3rem;
+  background: color-mix(in srgb, var(--kodelet-muted) 6%, transparent);
+  color: var(--sidebar-surface-ink);
+  font: inherit;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .keyboard-shortcuts-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+
+  .keyboard-shortcuts-list dd {
+    text-align: left;
+  }
 }
 
 .provider-settings-list {
