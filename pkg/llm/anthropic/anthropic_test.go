@@ -438,6 +438,8 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 }
 
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku5_5], getModelPricing(anthropic.ModelClaudeHaiku5_5))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku5_5], getModelPricing("claude-haiku-5-5-custom"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5_5], getModelPricing(anthropic.ModelClaudeSonnet5_5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5_5], getModelPricing("claude-sonnet-5-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing(anthropic.ModelClaudeSonnet5))
@@ -447,7 +449,7 @@ func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing(anthropic.ModelClaudeFable5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing("claude-fable-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
-	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_5], getModelPricing("claude-sonnet-4-5-latest"))
+	assert.Equal(t, ModelPricingMap[modelClaudeSonnet45], getModelPricing("claude-sonnet-4-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus5_5], getModelPricing(anthropic.ModelClaudeOpus5_5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus5_5], getModelPricing("claude-opus-5-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus5], getModelPricing(anthropic.ModelClaudeOpus5))
@@ -459,6 +461,99 @@ func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku4_5], getModelPricing("claude-haiku-4-5-custom"))
 	assert.Equal(t, ModelPricingMap[modelClaude35Haiku], getModelPricing("claude-3-5-haiku-20241022"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing("unknown-model"))
+}
+
+func TestHaiku55Pricing(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeHaiku5_5]
+
+	assert.Equal(t, 0.0000001, pricing.Input)
+	assert.Equal(t, 0.0000005, pricing.Output)
+	assert.Equal(t, 0.000000125, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.0000002, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.00000001, pricing.PromptCachingRead)
+	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestHaiku55UsagePricingTiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      anthropic.Model
+		input      int64
+		cacheRead  int64
+		multiplier float64
+	}{
+		{
+			name:       "output tokens do not affect prompt tier",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			input:      90_000,
+			cacheRead:  3000,
+			multiplier: 1,
+		},
+		{
+			name:       "exactly 100K prompt tokens use base tier",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			input:      94_000,
+			cacheRead:  3000,
+			multiplier: 1,
+		},
+		{
+			name:       "over 100K prompt tokens use higher tier",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			input:      94_001,
+			cacheRead:  3000,
+			multiplier: 5,
+		},
+		{
+			name:       "cached input counts toward threshold",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			input:      1000,
+			cacheRead:  96_001,
+			multiplier: 5,
+		},
+		{
+			name:       "custom family IDs use higher tier",
+			model:      "claude-haiku-5-5-custom",
+			input:      94_001,
+			cacheRead:  3000,
+			multiplier: 5,
+		},
+		{
+			name:       "haiku 4.5 pricing is unchanged",
+			model:      anthropic.ModelClaudeHaiku4_5,
+			input:      94_001,
+			cacheRead:  3000,
+			multiplier: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread, err := NewAnthropicThread(llmtypes.Config{Model: tt.model})
+			require.NoError(t, err)
+			response := &anthropic.Message{Usage: anthropic.Usage{
+				InputTokens:              tt.input,
+				OutputTokens:             20_000,
+				CacheCreationInputTokens: 3000,
+				CacheReadInputTokens:     tt.cacheRead,
+				CacheCreation: anthropic.CacheCreation{
+					Ephemeral5mInputTokens: 1000,
+					Ephemeral1hInputTokens: 2000,
+				},
+			}}
+			// Each request is priced independently, not from cumulative usage.
+			thread.updateUsage(response, tt.model)
+			thread.updateUsage(response, tt.model)
+
+			pricing := getModelPricing(tt.model)
+			assert.InDelta(t, 2*float64(tt.input)*pricing.Input*tt.multiplier, thread.Usage.InputCost, 1e-12)
+			assert.InDelta(t, 2*20_000*pricing.Output*tt.multiplier, thread.Usage.OutputCost, 1e-12)
+			cacheCost := 1000*pricing.PromptCachingWrite5m + 2000*pricing.PromptCachingWrite1h
+			assert.InDelta(t, 2*cacheCost*tt.multiplier, thread.Usage.CacheCreationCost, 1e-12)
+			assert.InDelta(t, 2*float64(tt.cacheRead)*pricing.PromptCachingRead*tt.multiplier, thread.Usage.CacheReadCost, 1e-12)
+			assert.Equal(t, pricing.ContextWindow, thread.Usage.MaxContextWindow)
+			assert.EqualValues(t, tt.input+20_000+3000+tt.cacheRead, thread.Usage.CurrentContextWindow)
+		})
+	}
 }
 
 func TestOpus55Pricing(t *testing.T) {
@@ -1331,6 +1426,11 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "haiku 5.5 supports thinking",
+			model:    anthropic.ModelClaudeHaiku5_5,
+			expected: true,
+		},
+		{
 			name:     "sonnet 5.5 supports thinking",
 			model:    anthropic.ModelClaudeSonnet5_5,
 			expected: true,
@@ -1377,7 +1477,7 @@ func TestIsThinkingModel(t *testing.T) {
 		},
 		{
 			name:     "sonnet 4.5 supports thinking",
-			model:    anthropic.ModelClaudeSonnet4_5,
+			model:    modelClaudeSonnet45,
 			expected: true,
 		},
 		{
@@ -1426,7 +1526,11 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Equal(t, "adaptive", *config.GetType())
 	})
 
-	for _, model := range []anthropic.Model{anthropic.ModelClaudeOpus5_5, anthropic.ModelClaudeSonnet5_5} {
+	for _, model := range []anthropic.Model{
+		anthropic.ModelClaudeOpus5_5,
+		anthropic.ModelClaudeSonnet5_5,
+		anthropic.ModelClaudeHaiku5_5,
+	} {
 		t.Run(model+" uses adaptive thinking regardless of budget", func(t *testing.T) {
 			for _, budget := range []int{0, 4096} {
 				modelThread, err := NewAnthropicThread(llmtypes.Config{
@@ -1446,7 +1550,7 @@ func TestThinkingConfigForModel(t *testing.T) {
 	}
 
 	t.Run("legacy models keep budgeted thinking", func(t *testing.T) {
-		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		config, ok := thread.thinkingConfigForModel(modelClaudeSonnet45)
 		require.True(t, ok)
 		require.NotNil(t, config.OfEnabled)
 		require.NotNil(t, config.GetBudgetTokens())
@@ -1475,11 +1579,25 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Nil(t, config.GetType())
 	})
 
+	t.Run("haiku 5.5 explicitly disables default thinking for none effort", func(t *testing.T) {
+		disabledThread, err := NewAnthropicThread(llmtypes.Config{ReasoningEffort: "none"})
+		require.NoError(t, err)
+
+		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeHaiku5_5)
+		require.True(t, ok)
+		require.NotNil(t, config.OfDisabled)
+		assert.Equal(t, "disabled", *config.GetType())
+		require.NoError(t, disabledThread.validateThinkingConfigForModel(anthropic.ModelClaudeHaiku5_5))
+		outputConfig, ok := disabledThread.outputConfigForModel(anthropic.ModelClaudeHaiku5_5)
+		require.True(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffortLow, outputConfig.Effort)
+	})
+
 	t.Run("zero budget disables manual thinking", func(t *testing.T) {
 		disabledThread, err := NewAnthropicThread(llmtypes.Config{ThinkingBudgetTokens: 0})
 		require.NoError(t, err)
 
-		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		config, ok := disabledThread.thinkingConfigForModel(modelClaudeSonnet45)
 		assert.False(t, ok)
 		assert.Nil(t, config.GetType())
 	})
@@ -1569,6 +1687,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			ok:         true,
 		},
 		{
+			name:       "haiku 5.5 defaults to medium",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			configured: "",
+			expected:   anthropic.OutputConfigEffortMedium,
+			ok:         true,
+		},
+		{
 			name:       "none maps to low for anthropic",
 			model:      anthropic.ModelClaudeOpus4_7,
 			configured: "none",
@@ -1639,6 +1764,20 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			ok:         true,
 		},
 		{
+			name:       "haiku 5.5 supports xhigh",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
+			name:       "haiku 5.5 supports max",
+			model:      anthropic.ModelClaudeHaiku5_5,
+			configured: "max",
+			expected:   anthropic.OutputConfigEffortMax,
+			ok:         true,
+		},
+		{
 			name:       "xhigh falls back to high on sonnet 4.6",
 			model:      anthropic.ModelClaudeSonnet4_6,
 			configured: "xhigh",
@@ -1675,7 +1814,7 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 		},
 		{
 			name:       "non adaptive models do not get output config",
-			model:      anthropic.ModelClaudeSonnet4_5,
+			model:      modelClaudeSonnet45,
 			configured: "medium",
 			expected:   "",
 			ok:         false,
@@ -1709,7 +1848,7 @@ func TestOutputConfigForModel(t *testing.T) {
 	})
 
 	t.Run("unsupported models omit output config", func(t *testing.T) {
-		config, ok := thread.outputConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		config, ok := thread.outputConfigForModel(modelClaudeSonnet45)
 		assert.False(t, ok)
 		assert.Equal(t, anthropic.OutputConfigEffort(""), config.Effort)
 	})

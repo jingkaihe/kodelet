@@ -117,6 +117,7 @@ aliases:
   sonnet-46: "claude-sonnet-4-6"
   sonnet-55: "claude-sonnet-5-5"
   haiku-45: "claude-haiku-4-5-20251001"
+  haiku-55: "claude-haiku-5-5"
   opus-48: "claude-opus-4-8"
   opus-5: "claude-opus-5"
   opus-55: "claude-opus-5-5"

@@ -926,6 +926,12 @@ func (t *Thread) validateThinkingConfigForModel(model anthropic.Model) error {
 
 func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.ThinkingConfigParamUnion, bool) {
 	if !t.shouldUtiliseThinking(model) {
+		// Haiku 5.5 defaults to adaptive thinking when the field is omitted.
+		if model == anthropic.ModelClaudeHaiku5_5 && t.adaptiveThinkingDisabled(model) {
+			return anthropic.ThinkingConfigParamUnion{
+				OfDisabled: &anthropic.ThinkingConfigDisabledParam{Type: "disabled"},
+			}, true
+		}
 		return anthropic.ThinkingConfigParamUnion{}, false
 	}
 
@@ -1004,6 +1010,7 @@ func anthropicReasoningEffort(configured string, supportsXhigh bool) (anthropic.
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
@@ -1033,6 +1040,7 @@ func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
 
 func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
+		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
@@ -1047,6 +1055,7 @@ func isXhighEffortModel(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeHaiku5_5,
 		anthropic.ModelClaudeSonnet5_5,
 		anthropic.ModelClaudeFable5_1,
 		anthropic.ModelClaudeFable5,
@@ -1057,8 +1066,8 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeHaiku4_5_20251001,
 
 		// sonnet 4.6 and 4.5 models
-		anthropic.ModelClaudeSonnet4_5,
-		anthropic.ModelClaudeSonnet4_5_20250929,
+		modelClaudeSonnet45,
+		modelClaudeSonnet4520250929,
 		anthropic.ModelClaudeSonnet4_6,
 		// opus 5 models
 		anthropic.ModelClaudeOpus5_5,
@@ -1304,6 +1313,15 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
+	promptTokens := response.Usage.InputTokens + response.Usage.CacheCreationInputTokens + response.Usage.CacheReadInputTokens
+	if strings.Contains(strings.ToLower(model), "claude-haiku-5-5") && promptTokens > 100_000 {
+		// Haiku 5.5's long-context tier applies to every token category.
+		pricing.Input *= 5
+		pricing.Output *= 5
+		pricing.PromptCachingWrite5m *= 5
+		pricing.PromptCachingWrite1h *= 5
+		pricing.PromptCachingRead *= 5
+	}
 
 	// Calculate individual costs and show usage regardless of subscription.
 	t.Usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input

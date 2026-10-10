@@ -10,6 +10,9 @@ const (
 	modelClaudeMythosPreview   anthropic.Model = "claude-mythos-preview"
 	modelClaude35Haiku         anthropic.Model = "claude-3-5-haiku"
 	modelClaude35Haiku20241022 anthropic.Model = "claude-3-5-haiku-20241022"
+	// Retain supported Sonnet 4.5 IDs despite SDK constant deprecation.
+	modelClaudeSonnet45         anthropic.Model = "claude-sonnet-4-5"
+	modelClaudeSonnet4520250929 anthropic.Model = "claude-sonnet-4-5-20250929"
 )
 
 // ModelPricing holds the per-token pricing for different operations
@@ -24,6 +27,16 @@ type ModelPricing struct {
 
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[anthropic.Model]ModelPricing{
+	anthropic.ModelClaudeHaiku5_5: {
+		// Base rates for prompts up to 100K tokens; longer prompts cost 5x.
+		// https://platform.claude.com/docs/en/models/haiku-5-5/overview
+		Input:                0.0000001,   // $0.10 per million tokens
+		Output:               0.0000005,   // $0.50 per million tokens
+		PromptCachingWrite5m: 0.000000125, // $0.125 per million tokens
+		PromptCachingWrite1h: 0.0000002,   // $0.20 per million tokens
+		PromptCachingRead:    0.00000001,  // $0.01 per million tokens
+		ContextWindow:        1_000_000,
+	},
 	anthropic.ModelClaudeSonnet5_5: {
 		Input:                0.000002,  // $2.00 per million tokens
 		Output:               0.000010,  // $10.00 per million tokens
@@ -88,7 +101,7 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:    0.0000003,  // $0.30 per million tokens
 		ContextWindow:        1_000_000,
 	},
-	anthropic.ModelClaudeSonnet4_5: {
+	modelClaudeSonnet45: {
 		Input:                0.000003,   // $3.00 per million tokens
 		Output:               0.000015,   // $15.00 per million tokens
 		PromptCachingWrite5m: 0.00000375, // $3.75 per million tokens
@@ -96,7 +109,7 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:    0.0000003,  // $0.30 per million tokens
 		ContextWindow:        200_000,
 	},
-	anthropic.ModelClaudeSonnet4_5_20250929: {
+	modelClaudeSonnet4520250929: {
 		Input:                0.000003,   // $3.00 per million tokens
 		Output:               0.000015,   // $15.00 per million tokens
 		PromptCachingWrite5m: 0.00000375, // $3.75 per million tokens
@@ -178,7 +191,9 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	}
 	// Try to find a match based on model family
 	lowerModel := strings.ToLower(model)
-	if strings.Contains(lowerModel, "claude-sonnet-5-5") {
+	if strings.Contains(lowerModel, "claude-haiku-5-5") {
+		return ModelPricingMap[anthropic.ModelClaudeHaiku5_5]
+	} else if strings.Contains(lowerModel, "claude-sonnet-5-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5_5]
 	} else if strings.Contains(lowerModel, "claude-sonnet-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet5]
@@ -195,7 +210,7 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	} else if strings.Contains(lowerModel, "claude-sonnet-4-6") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_6]
 	} else if strings.Contains(lowerModel, "claude-sonnet-4-5") {
-		return ModelPricingMap[anthropic.ModelClaudeSonnet4_5]
+		return ModelPricingMap[modelClaudeSonnet45]
 	} else if strings.Contains(lowerModel, "claude-opus-4-7") {
 		return ModelPricingMap[anthropic.ModelClaudeOpus4_7]
 	} else if strings.Contains(lowerModel, "claude-opus-4-6") {

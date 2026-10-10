@@ -872,7 +872,7 @@ profiles:
     provider: "anthropic"
     model: "claude-sonnet-4-6"
     max_tokens: 8192
-    weak_model: "claude-haiku-4-5-20251001"
+    weak_model: "claude-haiku-5-5"
     weak_model_max_tokens: 8192
   openai:
     provider: "openai"
@@ -995,6 +995,7 @@ profiles:
 aliases:
     fable-5: claude-fable-5
     haiku-45: claude-haiku-4-5-20251001
+    haiku-55: claude-haiku-5-5
     opus-48: claude-opus-4-8
     opus-5: claude-opus-5
     opus-55: claude-opus-5-5
@@ -1160,10 +1161,11 @@ When output exceeds that budget, Kodelet writes the complete byte stream to a lo
 Kodelet supports various Anthropic Claude models:
 - `claude-opus-5-5` (Opus 5.5, 1M-token context window, recommended default for coding and agentic work)
 - `claude-sonnet-5-5` (Sonnet 5.5, 1M-token context window, available through the sample configuration's `sonnet-55` alias)
+- `claude-haiku-5-5` (Haiku 5.5, 1M-token context window, recommended for lightweight tasks and the weak model in `kodelet setup`; available through the sample configuration's `haiku-55` alias)
 - `claude-opus-5` (Opus 5, available through the retained `opus-5` alias)
 - `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)
-- `claude-haiku-4-5-20251001` (recommended for lightweight tasks)
+- `claude-haiku-4-5-20251001` (Haiku 4.5, retained for compatibility)
 - `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
 - `claude-opus-4-1-20250805` (high-end model for complex tasks)
 
