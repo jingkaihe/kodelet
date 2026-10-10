@@ -47,7 +47,9 @@ func WithDefaultDirsForCWD(cwd string) Option {
 		}
 		d.skillDirs = []string{
 			filepath.Join(cwd, ".kodelet", "skills"),     // Repo-local standalone (highest precedence)
+			filepath.Join(cwd, ".agents", "skills"),      // Repo-local shared skills
 			filepath.Join(homeDir, ".kodelet", "skills"), // User-global standalone
+			filepath.Join(homeDir, ".agents", "skills"),  // User-global shared skills
 		}
 
 		d.pluginDirs = []plugins.PluginDirConfig{}

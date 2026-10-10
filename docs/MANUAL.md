@@ -1877,9 +1877,11 @@ Keep `SKILL.md` compact. Supporting files are available from the skill directory
 
 **Skill Locations:**
 - `./.kodelet/skills/<skill_name>/` - Repository-local (higher precedence)
+- `./.agents/skills/<skill_name>/` - Repository-local shared skills
 - `~/.kodelet/skills/<skill_name>/` - User-global
+- `~/.agents/skills/<skill_name>/` - User-global shared skills
 
-Repository-local skills take precedence over user-global skills with the same name.
+Repository-local skills take precedence over user-global skills with the same name. Within each scope, `.kodelet/skills` takes precedence over `.agents/skills`. Shared skills use the same `SKILL.md` format. Repository-local paths are resolved relative to the selected workspace directory, without scanning ancestor directories.
 
 ### Skills Configuration
 

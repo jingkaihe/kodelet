@@ -87,12 +87,14 @@ List common mistakes and how to avoid them.
 Skills are discovered from multiple locations with the following precedence:
 
 1. **Repository-local standalone** (highest): `./.kodelet/skills/<skill_name>/SKILL.md`
-2. **Repository-local plugins**: `./.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
-3. **User-global standalone**: `~/.kodelet/skills/<skill_name>/SKILL.md`
-4. **User-global plugins**: `~/.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
-5. **Built-in**: `skills/<skill_name>/SKILL.md` (embedded in binary)
+2. **Repository-local shared**: `./.agents/skills/<skill_name>/SKILL.md`
+3. **Repository-local plugins**: `./.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
+4. **User-global standalone**: `~/.kodelet/skills/<skill_name>/SKILL.md`
+5. **User-global shared**: `~/.agents/skills/<skill_name>/SKILL.md`
+6. **User-global plugins**: `~/.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
+7. **Built-in**: `skills/<skill_name>/SKILL.md` (embedded in binary)
 
-Repository-local skills take precedence over user-global skills with the same name, allowing project-specific customizations.
+Repository-local standalone skills take precedence over user-global standalone skills with the same name, allowing project-specific customizations. Within each scope, `.kodelet/skills` takes precedence over `.agents/skills`. Shared skills use the same `SKILL.md` format and unprefixed names, so they can be reused across compatible agents without copying them. Repository-local paths are resolved relative to the selected workspace directory; Kodelet does not scan ancestor directories for skills.
 
 ### Plugin-based Skills
 

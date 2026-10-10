@@ -31,14 +31,54 @@ func TestNewDiscoveryWithOptions(t *testing.T) {
 
 func TestSkillDirs(t *testing.T) {
 	discovery, err := NewDiscovery(
-		WithBaseDir("/repo"),
+		WithBaseDir("/repo/.kodelet"),
 		WithHomeDir("/home/user"),
 	)
 	require.NoError(t, err)
 
 	dirs := discovery.SkillDirs()
-	assert.Contains(t, dirs, "/repo/skills")
-	assert.Contains(t, dirs, "/home/user/.kodelet/skills")
+	assert.Equal(t, []string{
+		"/repo/.kodelet/skills",
+		"/repo/.agents/skills",
+		"/home/user/.kodelet/skills",
+		"/home/user/.agents/skills",
+	}, dirs)
+}
+
+func TestDiscoverStandaloneSkillDirsPrecedence(t *testing.T) {
+	locations := []string{
+		"repo/.kodelet/skills",
+		"repo/.agents/skills",
+		"home/.kodelet/skills",
+		"home/.agents/skills",
+	}
+
+	for i, location := range locations {
+		t.Run(location, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			for _, candidate := range locations[i:] {
+				writeSkill(t, filepath.Join(tmpDir, candidate, "shared-skill"), "shared-skill", "A shared skill")
+			}
+
+			discovery, err := NewDiscovery(
+				WithBaseDir(filepath.Join(tmpDir, "repo", kodeletDir)),
+				WithHomeDir(filepath.Join(tmpDir, "home")),
+			)
+			require.NoError(t, err)
+
+			skills, err := discovery.DiscoverSkills()
+			require.NoError(t, err)
+			require.Len(t, skills, 1)
+			require.Contains(t, skills, "shared-skill")
+			assert.Equal(t, filepath.Join(tmpDir, location, "shared-skill"), skills["shared-skill"].Directory())
+
+			allPlugins, err := discovery.DiscoverAll()
+			require.NoError(t, err)
+			require.Len(t, allPlugins, 1)
+			assert.Equal(t, "shared-skill", allPlugins[0].Name())
+			assert.Equal(t, filepath.Join(tmpDir, location, "shared-skill"), allPlugins[0].Directory())
+		})
+	}
 }
 
 func TestRecipeDirs(t *testing.T) {
@@ -326,7 +366,7 @@ func TestIsExecutableFile(t *testing.T) {
 
 func TestSkillAndRecipeDirsIncludePluginDirsInPrecedenceOrder(t *testing.T) {
 	tmpDir := t.TempDir()
-	baseDir := filepath.Join(tmpDir, "repo")
+	baseDir := filepath.Join(tmpDir, "repo", kodeletDir)
 	homeDir := filepath.Join(tmpDir, "home")
 
 	repoPluginSkillsDir := filepath.Join(baseDir, "plugins", "org@skills", "skills")
@@ -347,8 +387,10 @@ func TestSkillAndRecipeDirsIncludePluginDirsInPrecedenceOrder(t *testing.T) {
 
 	assert.Equal(t, []string{
 		filepath.Join(baseDir, "skills"),
+		filepath.Join(tmpDir, "repo", ".agents", "skills"),
 		repoPluginSkillsDir,
 		filepath.Join(homeDir, kodeletDir, "skills"),
+		filepath.Join(homeDir, ".agents", "skills"),
 		globalPluginSkillsDir,
 	}, discovery.SkillDirs())
 	assert.Equal(t, []string{

@@ -17,7 +17,14 @@ func TestNewDiscovery(t *testing.T) {
 		discovery, err := NewDiscovery()
 		require.NoError(t, err)
 		assert.NotNil(t, discovery)
-		assert.Len(t, discovery.skillDirs, 2)
+		homeDir, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, []string{
+			filepath.Join(".kodelet", "skills"),
+			filepath.Join(".agents", "skills"),
+			filepath.Join(homeDir, ".kodelet", "skills"),
+			filepath.Join(homeDir, ".agents", "skills"),
+		}, discovery.skillDirs)
 	})
 
 	t.Run("with custom dirs", func(t *testing.T) {
@@ -26,6 +33,43 @@ func TestNewDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, customDirs, discovery.skillDirs)
 	})
+}
+
+func TestDiscoverDefaultSkillDirsPrecedence(t *testing.T) {
+	locations := []string{
+		"repo/.kodelet/skills",
+		"repo/.agents/skills",
+		"home/.kodelet/skills",
+		"home/.agents/skills",
+	}
+
+	for i, location := range locations {
+		t.Run(location, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", filepath.Join(tmpDir, "home"))
+			content := `---
+name: shared-skill
+description: A shared skill
+---
+
+Shared skill instructions.
+`
+			for _, candidate := range locations[i:] {
+				skillDir := filepath.Join(tmpDir, candidate, "shared-skill")
+				require.NoError(t, os.MkdirAll(skillDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))
+			}
+
+			discovery, err := NewDiscovery(WithDefaultDirsForCWD(filepath.Join(tmpDir, "repo")))
+			require.NoError(t, err)
+			skills, err := discovery.DiscoverSkills()
+			require.NoError(t, err)
+			require.Len(t, skills, 1)
+			require.Contains(t, skills, "shared-skill")
+			assert.Equal(t, filepath.Join(tmpDir, location, "shared-skill"), skills["shared-skill"].Directory)
+			assert.Contains(t, skills["shared-skill"].Content, "Shared skill instructions.")
+		})
+	}
 }
 
 func TestInitializeDisabledBranches(t *testing.T) {
