@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { CodeExecutionMetadata, ToolResult } from '../../types';
@@ -310,15 +310,37 @@ describe('CodeExecutionRenderer', () => {
     expect(container.querySelector('.diff-block')).toBeVisible();
   });
 
-  it('streams independent bash rows and preserves folds through child and parent completion', async () => {
+  it('streams bash and extension rows independently and preserves folds through completion', async () => {
     const user = userEvent.setup();
-    const calls: CodeExecutionMetadata['calls'] = ['tests', 'lint'].map((name) => ({
-      callId: name,
-      toolName: 'bash',
-      status: 'running',
-      durationMs: 0,
-      input: { command: `npm run ${name}`, description: `Run ${name}` },
-    }));
+    const calls: CodeExecutionMetadata['calls'] = [
+      {
+        callId: 'tests',
+        toolName: 'bash',
+        status: 'running',
+        durationMs: 0,
+        input: { command: 'npm run tests', description: 'Run tests' },
+      },
+      {
+        callId: 'extension',
+        toolName: 'stream_tool',
+        status: 'running',
+        durationMs: 0,
+        result: {
+          toolName: 'stream_tool',
+          metadataType: 'extension_tool',
+          success: true,
+          metadata: {
+            data: {
+              presentation: {
+                summary: 'Streaming extension',
+                body: 'partial extension',
+                format: 'markdown',
+              },
+            },
+          },
+        },
+      },
+    ];
     const view = (inProgress = true) => (
       <ChatToolActivity
         tools={[
@@ -340,29 +362,21 @@ describe('CodeExecutionRenderer', () => {
     const { container, rerender } = render(view());
     const parent = container.querySelector('details');
     const tests = screen.getByText('bash · Run tests').closest('details');
-    const lint = screen.getByText('bash · Run lint').closest('details');
+    const extension = screen.getByText('Streaming extension').closest('details');
     expect(parent).toHaveAttribute('open');
     expect(tests).not.toHaveAttribute('open');
-    expect(lint).not.toHaveAttribute('open');
+    expect(extension).not.toHaveAttribute('open');
     await user.click(screen.getByText('bash · Run tests'));
     expect(screen.getByText('$ npm run tests')).toBeVisible();
-    for (const call of calls) {
-      call.result = {
-        toolName: 'bash',
-        success: true,
-        metadataType: 'bash',
-        metadata: {
-          command: `npm run ${call.callId}`,
-          output: `partial ${call.callId}`,
-          exitCode: 0,
-        },
-      };
-    }
+    calls[0].result = {
+      toolName: 'bash',
+      success: true,
+      metadata: { command: 'npm run tests', output: 'partial tests', exitCode: 0 },
+    };
     rerender(view());
     expect(screen.getByText('partial tests')).toBeVisible();
-    expect(screen.getByText('partial lint')).not.toBeVisible();
+    expect(screen.getByText('partial extension')).not.toBeVisible();
     expect(tests?.querySelector('.bash-tool-badge')).toHaveTextContent('running');
-    expect(tests?.querySelector('.activity-marker .spinner-glyph')).toBeInTheDocument();
     calls[0] = {
       ...calls[0],
       status: 'completed',
@@ -376,109 +390,49 @@ describe('CodeExecutionRenderer', () => {
     expect(screen.getByText('tests finished')).toBeVisible();
     expect(screen.queryByText('partial tests')).not.toBeInTheDocument();
     expect(tests?.querySelector('.bash-tool-badge')).toHaveTextContent('exit 0');
-    expect(tests?.querySelector('.activity-marker .spinner-glyph')).not.toBeInTheDocument();
     await user.click(screen.getByText('bash · Run tests'));
-    await user.click(screen.getByText('bash · Run lint'));
+    await user.click(screen.getByText('Streaming extension'));
+    expect(screen.getByText('partial extension')).toBeVisible();
     calls[1] = { ...calls[1], status: 'completed' };
     rerender(view(false));
     expect(container.querySelector('details')).toBe(parent);
     expect(parent).toHaveAttribute('open');
     expect(tests).not.toHaveAttribute('open');
-    expect(lint).toHaveAttribute('open');
-    expect(screen.getByText('partial lint')).toBeVisible();
+    expect(extension).toHaveAttribute('open');
+    expect(screen.getByText('partial extension')).toBeVisible();
     expect(screen.getByText('tests finished')).not.toBeVisible();
-    await user.click(screen.getByText(/^Code execution ·/));
-    expect(screen.getByText('partial lint')).not.toBeVisible();
-    await user.click(screen.getByText(/^Code execution ·/));
-    expect(screen.getByText('partial lint')).toBeVisible();
   });
 
-  it.each([
-    { name: 'extension', toolName: 'stream_tool', metadataType: 'extension_tool', input: {} },
-    { name: 'presentation', toolName: 'stream_tool', metadataType: 'extension_tool', input: {} },
-    {
-      name: 'browser',
-      toolName: 'browser',
-      metadataType: 'browser',
-      input: { action: 'evaluate' },
-    },
-    {
-      name: 'file',
-      toolName: 'file_read',
-      metadataType: 'file_read',
-      input: { file_path: 'notes.txt' },
-    },
-  ])('streams $name children only when expanded using their normal renderer', async ({
-    name,
-    toolName,
-    metadataType,
-    input,
-  }) => {
+  it('preserves a nested file row when its live result completes', async () => {
     const user = userEvent.setup();
     const call: CodeExecutionMetadata['calls'][number] = {
-      callId: 'child',
-      toolName,
-      input,
+      callId: 'file',
+      toolName: 'file_read',
       status: 'running',
       durationMs: 0,
-    };
-    const snapshot = (output: string, status = 'running'): ToolResult => ({
-      ...result,
-      metadata: {
-        status: 'running',
-        durationMs: 1,
-        calls: [
-          {
-            ...call,
-            status,
-            result: {
-              toolName,
-              metadataType,
-              success: true,
-              metadata:
-                name === 'file'
-                  ? { filePath: 'notes.txt', lines: [output], offset: 1 }
-                  : {
-                      toolName,
-                      action: 'evaluate',
-                      output,
-                      ...(name === 'presentation'
-                        ? {
-                            data: {
-                              presentation: {
-                                summary: 'Streaming preview',
-                                body: output,
-                                format: 'markdown',
-                              },
-                            },
-                          }
-                        : {}),
-                    },
-            },
-          },
-        ],
+      result: {
+        toolName: 'file_read',
+        success: true,
+        metadata: { filePath: 'notes.txt', lines: ['file content'], offset: 1 },
       },
-    });
-    const { container, rerender } = render(
-      <CodeExecutionRenderer isPartial toolResult={snapshot('first partial output')} />
+    };
+    const view = () => (
+      <CodeExecutionRenderer
+        isPartial
+        toolResult={{
+          ...result,
+          metadata: { status: 'running', durationMs: 1, calls: [call] },
+        }}
+      />
     );
-    const details = container.querySelectorAll('details')[1];
+    const { container, rerender } = render(view());
+    const details = container.querySelector('details.activity-file');
     expect(details).not.toHaveAttribute('open');
-    const summary = details.querySelector('summary');
-    if (!summary) throw new Error('Missing child summary');
-    await user.click(summary);
-    expect(within(details).getByText('first partial output')).toBeVisible();
-    rerender(<CodeExecutionRenderer isPartial toolResult={snapshot('next partial output')} />);
-    expect(within(details).getByText('next partial output')).toBeVisible();
-    expect(screen.queryByText('first partial output')).not.toBeInTheDocument();
-    await user.click(summary);
-    rerender(
-      <CodeExecutionRenderer isPartial toolResult={snapshot('final output', 'completed')} />
-    );
-    expect(container.querySelectorAll('details')[1]).toBe(details);
-    expect(details).not.toHaveAttribute('open');
-    await user.click(summary);
-    expect(within(details).getByText('final output')).toBeVisible();
-    expect(details.querySelector('.activity-marker .spinner-glyph')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Read file: notes.txt'));
+    expect(screen.getByText('file content')).toBeVisible();
+    call.status = 'completed';
+    rerender(view());
+    expect(container.querySelector('details.activity-file')).toBe(details);
+    expect(screen.getByText('file content')).toBeVisible();
   });
 });

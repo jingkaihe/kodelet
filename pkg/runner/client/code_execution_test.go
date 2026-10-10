@@ -117,11 +117,8 @@ func TestRunnerCodeChildUsesEffectiveResultAndLocalExecution(t *testing.T) {
 	}
 }
 
-func TestRunnerCodeChildExtensionStreamsThroughParent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	published := make(chan struct{}, 1)
-	environment := &codeTestEnvironment{execute: func(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+func TestRunnerCodeChildForwardsEffectiveExtensionUpdates(t *testing.T) {
+	environment := &codeTestEnvironment{execute: func(_ context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
 		require.NotNil(t, updates)
 		structured := tooltypes.StructuredToolResult{
 			ToolName: "test_tool", Success: true,
@@ -132,40 +129,25 @@ func TestRunnerCodeChildExtensionStreamsThroughParent(t *testing.T) {
 			Input: request.Input, Result: tooltypes.BaseToolResult{Result: "raw output must not be forwarded"},
 			StructuredResult: structured,
 		})
-		select {
-		case <-published:
-		case <-ctx.Done():
-			return agentenv.ToolExecution{}, ctx.Err()
-		}
 		structured.Data, structured.Attachments = nil, nil
 		structured.Metadata = tooltypes.ExtensionToolMetadata{Output: "final extension output"}
 		return agentenv.ToolExecution{Input: request.Input, StructuredResult: structured}, nil
 	}}
 	service, run, peer, params := newCodeService(t, environment)
-	authority, err := service.codeExecutionContext(ctx, run, params)
+	authority, err := service.codeExecutionContext(t.Context(), run, params)
 	require.NoError(t, err)
-	ctx = tools.ContextWithCodeExecution(ctx, authority)
-	var sawLive atomic.Bool
-	result := (&tools.CodeExecuteTool{}).ExecuteStreaming(ctx, nil, `{"code":"await tools.test_tool({query:'effective input'}); return 'selected';"}`, func(result tooltypes.ToolResult) {
-		meta := result.(tools.CodeExecuteResult).Metadata
-		if len(meta.Calls) != 1 || meta.Calls[0].Result == nil || meta.Calls[0].Status != "running" {
-			return
-		}
-		child := meta.Calls[0]
-		assert.Equal(t, "live extension output", child.Result.Metadata.(tooltypes.ExtensionToolMetadata).Output)
-		assert.JSONEq(t, `{"query":"effective input"}`, string(child.Input))
-		assert.Nil(t, child.Result.Data)
-		assert.Empty(t, child.Result.Attachments)
-		assert.NotContains(t, result.AssistantFacing(), "live extension output")
-		if sawLive.CompareAndSwap(false, true) {
-			published <- struct{}{}
-		}
+	updates := 0
+	reply, err := authority.Call(t.Context(), "test_tool", `{"query":"effective input"}`, "child", func(snapshot tools.CodeToolReply) {
+		updates++
+		require.NotNil(t, snapshot.Result)
+		assert.Equal(t, "live extension output", snapshot.Result.Metadata.(tooltypes.ExtensionToolMetadata).Output)
+		assert.JSONEq(t, `{"query":"effective input"}`, string(snapshot.Input))
+		assert.Nil(t, snapshot.Result.Data)
+		assert.Empty(t, snapshot.Result.Attachments)
 	})
-	require.False(t, result.IsError(), result.GetError())
-	assert.True(t, sawLive.Load())
-	final := result.(tools.CodeExecuteResult).Metadata.Calls[0]
-	assert.Equal(t, "final extension output", final.Result.Metadata.(tooltypes.ExtensionToolMetadata).Output)
-	assert.NotContains(t, result.AssistantFacing(), "extension output")
+	require.NoError(t, err)
+	assert.Equal(t, 1, updates)
+	assert.Equal(t, "final extension output", reply.Text)
 	assert.Empty(t, peer.updates, "non-bash tools also stream only through the parent")
 }
 

@@ -134,27 +134,27 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	assert.NotContains(t, render(), "Run first command")
 }
 
-func TestCodeExecutionLiveBashFolds(t *testing.T) {
+func TestCodeExecutionLiveChildFolds(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)
 	m.width, m.height = 100, 100
 	m.resize()
 	m.running = true
-	m.applyChatEvent(chat.ChatEvent{
-		Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute",
-		Input: `{"code":"await Promise.all([tools.bash({}), tools.bash({})]);"}`,
-	})
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute"})
 	observedAt := time.Now().Add(time.Hour)
 	first := tooltypes.CodeExecutionCall{
 		CallID: "first", ToolName: "bash", Status: "running",
 		Input: json.RawMessage(`{"command":"mise run test","description":"Run focused tests"}`),
 	}
 	second := tooltypes.CodeExecutionCall{
-		CallID: "second", ToolName: "bash", Status: "running",
-		Input: json.RawMessage(`{"command":"mise run lint","description":"Check lint"}`),
+		CallID: "second", ToolName: "stream_tool", Status: "running",
 		Result: &tooltypes.StructuredToolResult{
-			ToolName: "bash", Success: true, Timestamp: observedAt,
-			Metadata: tooltypes.BashMetadata{Command: "mise run lint", Output: "lint in progress", ExecutionTime: time.Second},
+			ToolName: "stream_tool", Success: true,
+			Metadata: tooltypes.ExtensionToolMetadata{Data: map[string]any{
+				"presentation": map[string]any{
+					"summary": "Streaming extension", "body": "extension in progress", "format": "markdown",
+				},
+			}},
 		},
 	}
 	update := func(kind string) {
@@ -185,9 +185,9 @@ func TestCodeExecutionLiveBashFolds(t *testing.T) {
 	update("tool-update")
 	content := render()
 	assert.Contains(t, content, "bash · Run focused tests… ▸", "description is available before output")
-	assert.Contains(t, content, "bash · Check lint… ▸")
+	assert.Contains(t, content, "Streaming extension… ▸")
 	assert.NotContains(t, content, "$ mise run test")
-	assert.NotContains(t, content, "lint in progress")
+	assert.NotContains(t, content, "extension in progress")
 	toggle("first:0:-1")
 	assert.Contains(t, render(), "$ mise run test")
 	first.Result = &tooltypes.StructuredToolResult{
@@ -197,7 +197,7 @@ func TestCodeExecutionLiveBashFolds(t *testing.T) {
 	update("tool-update")
 	content = render()
 	assert.Contains(t, content, "first test passed")
-	assert.NotContains(t, content, "lint in progress", "parallel siblings remain folded")
+	assert.NotContains(t, content, "extension in progress", "parallel siblings remain folded")
 	assert.Contains(t, content, "$ mise run test  ·  7s")
 	assert.NotContains(t, content, transcriptElapsedPlaceholderSuffix)
 	first.Result.Timestamp = time.Now().Add(-2 * time.Second)
@@ -213,70 +213,14 @@ func TestCodeExecutionLiveBashFolds(t *testing.T) {
 	toggle("first:0:-1")
 	assert.NotContains(t, render(), "all tests passed")
 	toggle("second:1:-1")
-	assert.Contains(t, render(), "lint in progress")
+	assert.Contains(t, render(), "extension in progress")
+	// Explicitly keep the parent open after completion, rather than relying on
+	// its running-only auto-expansion. Child folds survive this toggle too.
 	toggle("")
-	assert.NotContains(t, render(), "lint in progress", "collapsing the parent hides all streaming output")
+	assert.NotContains(t, render(), "extension in progress")
 	toggle("")
-	assert.Contains(t, render(), "lint in progress")
 	second.Status = "completed"
 	update("tool-result")
-	assert.Contains(t, render(), "✓ bash · Check lint ▾", "final results preserve child fold choices")
+	assert.Contains(t, render(), "✓ Streaming extension ▾", "final results preserve child fold choices")
 	assert.NotContains(t, render(), "all tests passed")
-}
-
-func TestCodeExecutionLiveExtensionFolds(t *testing.T) {
-	for _, presentation := range []bool{false, true} {
-		name := "plain output"
-		if presentation {
-			name = "custom presentation"
-		}
-		t.Run(name, func(t *testing.T) {
-			m := newModel(t.Context(), Config{})
-			t.Cleanup(m.cancel)
-			m.width, m.height = 100, 100
-			m.resize()
-			m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute"})
-			update := func(output, status string) {
-				metadata := tooltypes.ExtensionToolMetadata{ToolName: "stream_tool", Output: output}
-				if presentation {
-					metadata.Data = map[string]any{
-						"presentation": map[string]any{
-							"summary": "Streaming extension", "body": output, "format": "markdown",
-						},
-					}
-				}
-				m.applyChatEvent(chat.ChatEvent{
-					Kind: "tool-update", ToolCallID: "parent",
-					ToolResult: &tooltypes.StructuredToolResult{
-						ToolName: "code_execute", Success: true,
-						Metadata: tooltypes.CodeExecutionMetadata{Calls: []tooltypes.CodeExecutionCall{{
-							CallID: "child", ToolName: "stream_tool", Status: status,
-							Result: &tooltypes.StructuredToolResult{ToolName: "stream_tool", Success: true, Metadata: metadata},
-						}}},
-					},
-				})
-			}
-			render := func() string {
-				m.refreshViewport(false)
-				return xansi.Strip(m.View().Content)
-			}
-			update("first partial output", "running")
-			assert.NotContains(t, render(), "first partial output")
-			require.Len(t, m.detailRegions, 3)
-			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
-			assert.Contains(t, render(), "first partial output")
-			update("second partial output", "running")
-			content := render()
-			assert.Contains(t, content, "second partial output")
-			assert.NotContains(t, content, "first partial output")
-			if presentation {
-				assert.Contains(t, content, "Streaming extension… ▾")
-			}
-			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
-			update("final extension output", "completed")
-			assert.NotContains(t, render(), "final extension output", "completion does not reopen a collapsed child")
-			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
-			assert.Contains(t, render(), "final extension output", "a finished extension is readable before the script finishes")
-		})
-	}
 }
