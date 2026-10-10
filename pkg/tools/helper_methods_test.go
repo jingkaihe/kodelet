@@ -453,10 +453,6 @@ description: Review helper
 }
 
 func TestBashAndGrepFormattingHelpers(t *testing.T) {
-	assert.Equal(t, 0, countOutputLines(""))
-	assert.Equal(t, 2, countOutputLines("one\ntwo"))
-	assert.Equal(t, 2, countOutputLines("one\ntwo\n"))
-
 	assert.Equal(t, 0, approxBytesForTokens(0))
 	assert.Equal(t, 12, approxBytesForTokens(3))
 	assert.Equal(t, 0, approxTokensFromByteCount(0))

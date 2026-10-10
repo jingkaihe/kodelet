@@ -716,7 +716,7 @@ func (a *bashOutputAccumulator) snapshotLocked() bashOutputSnapshot {
 	marker := formatBashTruncationMarker(true, approxTokensFromByteCount(int(removedBytes)))
 	prefix := strings.ToValidUTF8(string(prefixBytes), "\uFFFD")
 	tail := strings.ToValidUTF8(string(tailBytes), "\uFFFD")
-	snapshot.output = fmt.Sprintf("Total output lines: %d\n\n%s%s%s", totalLines, prefix, marker, tail)
+	snapshot.output = prefix + marker + tail
 	return snapshot
 }
 
@@ -847,22 +847,7 @@ func truncateBashOutputForModel(content string) string {
 		return content
 	}
 
-	totalLines := countOutputLines(content)
-	truncated := truncateMiddleWithTokenBudget(content, bashMaxOutputTokens)
-	return fmt.Sprintf("Total output lines: %d\n\n%s", totalLines, truncated)
-}
-
-func countOutputLines(content string) int {
-	if content == "" {
-		return 0
-	}
-
-	lineCount := strings.Count(content, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		lineCount++
-	}
-
-	return lineCount
+	return truncateMiddleWithTokenBudget(content, bashMaxOutputTokens)
 }
 
 func truncateMiddleWithTokenBudget(content string, maxTokens int) string {

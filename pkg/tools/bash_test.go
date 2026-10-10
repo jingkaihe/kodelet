@@ -482,6 +482,7 @@ func TestBashOutputAccumulatorSpillsFullOutputWhenSnapshotIsTruncated(t *testing
 	assert.Equal(t, int64(13), snapshot.totalBytes)
 	assert.Equal(t, 1, snapshot.totalLines)
 	assert.Contains(t, snapshot.output, "tokens truncated")
+	assert.NotContains(t, snapshot.output, "Total output lines:")
 	require.NotEmpty(t, snapshot.fullOutputPath)
 	t.Cleanup(func() { _ = os.Remove(snapshot.fullOutputPath) })
 
@@ -493,6 +494,10 @@ func TestBashOutputAccumulatorSpillsFullOutputWhenSnapshotIsTruncated(t *testing
 	assert.Equal(t, "abcdefghijkl\n", result.GetResult())
 	metadata := result.StructuredData().Metadata.(*tooltypes.BashMetadata)
 	assert.Contains(t, metadata.Output, "tokens truncated")
+	assert.NotContains(t, metadata.Output, "Total output lines:")
+	require.NotNil(t, metadata.Truncation)
+	assert.True(t, metadata.Truncation.Truncated)
+	assert.Equal(t, 1, metadata.Truncation.TotalLines)
 	assert.Equal(t, snapshot.fullOutputPath, metadata.FullOutputPath)
 }
 
@@ -560,13 +565,13 @@ func TestBashToolResult_AssistantFacing_TruncatesLargeOutput(t *testing.T) {
 	assistantFacing := result.AssistantFacing()
 
 	assert.Contains(t, assistantFacing, "<result>")
-	assert.Contains(t, assistantFacing, "Total output lines: 15000")
+	assert.NotContains(t, assistantFacing, "Total output lines:")
 	assert.Contains(t, assistantFacing, "tokens truncated")
 	assert.NotContains(t, assistantFacing, longOutput)
 
 	structured := result.StructuredData()
 	metadata := structured.Metadata.(*tooltypes.BashMetadata)
-	assert.Contains(t, metadata.Output, "Total output lines: 15000")
+	assert.NotContains(t, metadata.Output, "Total output lines:")
 	assert.Contains(t, metadata.Output, "tokens truncated")
 	assert.NotContains(t, metadata.Output, longOutput)
 }

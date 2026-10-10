@@ -38,7 +38,7 @@ const maxSerializedOutputBytes = 2 << 20
 
 const serializedOutputLimitMessage = "serialized sandbox output exceeds the 2 MiB per-value limit; select a smaller value before returning or emitting; tools are not retried"
 
-const outputTruncationNotice = "\n[…code-mode output truncated; further output omitted…]\n"
+const outputTruncationNotice = "\n[…code-mode output truncated; middle section omitted…]\n"
 
 // MaxConcurrentToolCalls bounds active children in both the VM and runner registry.
 const MaxConcurrentToolCalls = 8
