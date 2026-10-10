@@ -5,10 +5,14 @@ Skills are model-invoked capabilities. Unlike recipes, users normally do not cal
 ## Skill locations
 
 - `./.kodelet/skills/<name>/SKILL.md` — repository-local standalone.
+- `./.agents/skills/<name>/SKILL.md` — repository-local shared skills, reusable by other compatible agents.
 - `./.kodelet/plugins/<org@repo>/skills/<name>/SKILL.md` — repository-local plugin.
 - `~/.kodelet/skills/<name>/SKILL.md` — user-global standalone.
+- `~/.agents/skills/<name>/SKILL.md` — user-global shared skills, reusable by other compatible agents.
 - `~/.kodelet/plugins/<org@repo>/skills/<name>/SKILL.md` — user-global plugin.
 - `skills/<name>/SKILL.md` — built-in/source-tree skills when packaged or available.
+
+Repository-local skills take precedence over user-global skills with the same name, and `.kodelet/skills` takes precedence over `.agents/skills` within each scope. Repository-local paths are resolved relative to the selected workspace directory without scanning ancestor directories. Plugin skills are name-prefixed by their plugin, so they do not collide with standalone or shared skills.
 
 ## Recommended structure
 

@@ -329,8 +329,9 @@ When working with Kubernetes...
 
 1. **Repository-local for project-specific**: Use `.kodelet/skills/` for skills specific to a project
 2. **Global for personal workflows**: Use `~/.kodelet/skills/` for skills you use across projects
-3. **Share via plugins**: Create a GitHub repo with your skills and share via `kodelet plugin add`
-4. **Share via version control**: Commit repository-local skills to share with your team
+3. **Shared across agents**: Use `.agents/skills/` or `~/.agents/skills/` for skills that other compatible agents should also discover; use `.kodelet/skills/` to override them for Kodelet
+4. **Share via plugins**: Create a GitHub repo with your skills and share via `kodelet plugin add`
+5. **Share via version control**: Commit repository-local skills to share with your team
 
 ### Security Considerations
 

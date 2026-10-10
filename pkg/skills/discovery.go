@@ -45,16 +45,22 @@ func WithDefaultDirsForCWD(cwd string) Option {
 		if err != nil {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
-		d.skillDirs = []string{
+		// Dedupe so a workspace at the home directory scans each location once.
+		d.skillDirs = plugins.DedupeDirs([]string{
 			filepath.Join(cwd, ".kodelet", "skills"),     // Repo-local standalone (highest precedence)
 			filepath.Join(cwd, ".agents", "skills"),      // Repo-local shared skills
 			filepath.Join(homeDir, ".kodelet", "skills"), // User-global standalone
 			filepath.Join(homeDir, ".agents", "skills"),  // User-global shared skills
-		}
+		})
 
+		pluginRoots := plugins.DedupeDirs([]string{
+			filepath.Join(cwd, ".kodelet", "plugins"),
+			filepath.Join(homeDir, ".kodelet", "plugins"),
+		})
 		d.pluginDirs = []plugins.PluginDirConfig{}
-		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(cwd, ".kodelet", "plugins"), "skills")...)
-		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "skills")...)
+		for _, pluginRoot := range pluginRoots {
+			d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(pluginRoot, "skills")...)
+		}
 
 		return nil
 	}

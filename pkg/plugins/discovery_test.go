@@ -81,6 +81,78 @@ func TestDiscoverStandaloneSkillDirsPrecedence(t *testing.T) {
 	}
 }
 
+func TestSkillDirsCleansKodeletBaseDir(t *testing.T) {
+	discovery, err := NewDiscovery(
+		WithBaseDir("/repo/.kodelet/"),
+		WithHomeDir("/home/user"),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		"/repo/.kodelet/skills",
+		"/repo/.agents/skills",
+		"/home/user/.kodelet/skills",
+		"/home/user/.agents/skills",
+	}, discovery.SkillDirs())
+}
+
+func TestDedupeDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	realDir := filepath.Join(tmpDir, "real")
+	require.NoError(t, os.MkdirAll(realDir, 0o755))
+	linkDir := filepath.Join(tmpDir, "link")
+	require.NoError(t, os.Symlink(realDir, linkDir))
+	missingDir := filepath.Join(tmpDir, "missing")
+	t.Chdir(tmpDir)
+
+	assert.Equal(t, []string{"real", linkDir, missingDir}, DedupeDirs([]string{
+		"real",
+		realDir,
+		linkDir,
+		missingDir,
+		missingDir + string(filepath.Separator),
+	}))
+}
+
+func TestSkillDiscoveryDedupesDirsWhenWorkspaceIsHome(t *testing.T) {
+	homeDir := t.TempDir()
+	kodeletBaseDir := filepath.Join(homeDir, kodeletDir)
+	pluginSkillsDir := filepath.Join(kodeletBaseDir, "plugins", "org@repo", "skills")
+	writeSkill(t, filepath.Join(kodeletBaseDir, "skills", "kodelet-skill"), "kodelet-skill", "A Kodelet skill")
+	writeSkill(t, filepath.Join(homeDir, ".agents", "skills", "shared-skill"), "shared-skill", "A shared skill")
+	writeSkill(t, filepath.Join(pluginSkillsDir, "plugin-skill"), "plugin-skill", "A plugin skill")
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(kodeletBaseDir),
+		WithHomeDir(homeDir),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		filepath.Join(kodeletBaseDir, "skills"),
+		filepath.Join(homeDir, ".agents", "skills"),
+		pluginSkillsDir,
+	}, discovery.SkillDirs())
+
+	expectedNames := []string{"kodelet-skill", "shared-skill", "org/repo/plugin-skill"}
+
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+	skillNames := make([]string, 0, len(skills))
+	for name := range skills {
+		skillNames = append(skillNames, name)
+	}
+	assert.ElementsMatch(t, expectedNames, skillNames)
+
+	allPlugins, err := discovery.DiscoverAll()
+	require.NoError(t, err)
+	allNames := make([]string, 0, len(allPlugins))
+	for _, p := range allPlugins {
+		allNames = append(allNames, p.Name())
+	}
+	assert.ElementsMatch(t, expectedNames, allNames)
+}
+
 func TestRecipeDirs(t *testing.T) {
 	discovery, err := NewDiscovery(
 		WithBaseDir("/repo"),
