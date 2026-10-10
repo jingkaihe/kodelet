@@ -45,7 +45,7 @@ func WithDefaultDirsForCWD(cwd string) Option {
 		if err != nil {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
-		// Dedupe so a workspace at the home directory scans each location once.
+		// Dedupe for workspaces at the home directory.
 		d.skillDirs = plugins.DedupeDirs([]string{
 			filepath.Join(cwd, ".kodelet", "skills"),     // Repo-local standalone (highest precedence)
 			filepath.Join(cwd, ".agents", "skills"),      // Repo-local shared skills

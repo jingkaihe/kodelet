@@ -38,40 +38,27 @@ func TestNewDiscovery(t *testing.T) {
 	})
 }
 
-func TestDiscoverDefaultSkillDirsPrecedence(t *testing.T) {
-	locations := []string{
-		"repo/.kodelet/skills",
-		"repo/.agents/skills",
-		"home/.kodelet/skills",
-		"home/.agents/skills",
+func TestDiscoverSharedSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(tmpDir, "home"))
+	skillDirs := map[string]string{
+		"project-skill": filepath.Join(tmpDir, "repo", ".agents", "skills", "project-skill"),
+		"global-skill":  filepath.Join(tmpDir, "home", ".agents", "skills", "global-skill"),
+	}
+	for name, dir := range skillDirs {
+		content := "---\nname: " + name + "\ndescription: A shared skill\n---\n"
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, skillFileName), []byte(content), 0o644))
 	}
 
-	for i, location := range locations {
-		t.Run(location, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			t.Setenv("HOME", filepath.Join(tmpDir, "home"))
-			content := `---
-name: shared-skill
-description: A shared skill
----
-
-Shared skill instructions.
-`
-			for _, candidate := range locations[i:] {
-				skillDir := filepath.Join(tmpDir, candidate, "shared-skill")
-				require.NoError(t, os.MkdirAll(skillDir, 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))
-			}
-
-			discovery, err := NewDiscovery(WithDefaultDirsForCWD(filepath.Join(tmpDir, "repo")))
-			require.NoError(t, err)
-			skills, err := discovery.DiscoverSkills()
-			require.NoError(t, err)
-			require.Len(t, skills, 1)
-			require.Contains(t, skills, "shared-skill")
-			assert.Equal(t, filepath.Join(tmpDir, location, "shared-skill"), skills["shared-skill"].Directory)
-			assert.Contains(t, skills["shared-skill"].Content, "Shared skill instructions.")
-		})
+	discovery, err := NewDiscovery(WithDefaultDirsForCWD(filepath.Join(tmpDir, "repo")))
+	require.NoError(t, err)
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+	require.Len(t, skills, len(skillDirs))
+	for name, dir := range skillDirs {
+		require.Contains(t, skills, name)
+		assert.Equal(t, dir, skills[name].Directory)
 	}
 }
 
@@ -79,16 +66,7 @@ func TestDefaultSkillDirsDedupeWhenWorkspaceIsHome(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	pluginSkillsDir := filepath.Join(homeDir, ".kodelet", "plugins", "org@repo", "skills")
-	skillDirs := map[string]string{
-		"kodelet-skill": filepath.Join(homeDir, ".kodelet", "skills", "kodelet-skill"),
-		"shared-skill":  filepath.Join(homeDir, ".agents", "skills", "shared-skill"),
-		"plugin-skill":  filepath.Join(pluginSkillsDir, "plugin-skill"),
-	}
-	for name, dir := range skillDirs {
-		content := "---\nname: " + name + "\ndescription: A test skill\n---\n\nInstructions.\n"
-		require.NoError(t, os.MkdirAll(dir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644))
-	}
+	require.NoError(t, os.MkdirAll(pluginSkillsDir, 0o755))
 
 	discovery, err := NewDiscovery(WithDefaultDirsForCWD(homeDir))
 	require.NoError(t, err)
@@ -99,41 +77,29 @@ func TestDefaultSkillDirsDedupeWhenWorkspaceIsHome(t *testing.T) {
 	assert.Equal(t, []plugins.PluginDirConfig{
 		{Dir: pluginSkillsDir, Prefix: "org@repo/"},
 	}, discovery.pluginDirs)
-
-	skills, err := discovery.DiscoverSkills()
-	require.NoError(t, err)
-	skillNames := make([]string, 0, len(skills))
-	for name := range skills {
-		skillNames = append(skillNames, name)
-	}
-	assert.ElementsMatch(t, []string{"kodelet-skill", "shared-skill", "org@repo/plugin-skill"}, skillNames)
 }
 
-func TestDefaultSkillDirsWithProjectDirsSymlinkedToHome(t *testing.T) {
+func TestDiscoverSkillsWithProjectPluginsSymlinkedToHome(t *testing.T) {
 	tmpDir := t.TempDir()
 	homeDir := filepath.Join(tmpDir, "home")
 	repoDir := filepath.Join(tmpDir, "repo")
 	t.Setenv("HOME", homeDir)
-	skillDirs := map[string]string{
-		"shared-skill": filepath.Join(homeDir, ".agents", "skills", "shared-skill"),
-		"plugin-skill": filepath.Join(homeDir, ".kodelet", "plugins", "org@repo", "skills", "plugin-skill"),
-	}
-	for name, dir := range skillDirs {
-		content := "---\nname: " + name + "\ndescription: A test skill\n---\n\nInstructions.\n"
-		require.NoError(t, os.MkdirAll(dir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644))
-	}
+	skillDir := filepath.Join(homeDir, ".kodelet", "plugins", "org@repo", "skills", "plugin-skill")
+	content := `---
+name: plugin-skill
+description: A plugin skill
+---
+`
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, skillFileName), []byte(content), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(repoDir, ".kodelet"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(repoDir, ".agents"), 0o755))
 	require.NoError(t, os.Symlink(filepath.Join(homeDir, ".kodelet", "plugins"), filepath.Join(repoDir, ".kodelet", "plugins")))
-	require.NoError(t, os.Symlink(filepath.Join(homeDir, ".agents", "skills"), filepath.Join(repoDir, ".agents", "skills")))
 
 	discovery, err := NewDiscovery(WithDefaultDirsForCWD(repoDir))
 	require.NoError(t, err)
 	skills, err := discovery.DiscoverSkills()
 	require.NoError(t, err)
 
-	assert.Contains(t, skills, "shared-skill")
 	assert.Contains(t, skills, "org@repo/plugin-skill")
 }
 

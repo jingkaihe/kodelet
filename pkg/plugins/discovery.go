@@ -39,7 +39,7 @@ func IsExecutableFile(entry fs.DirEntry) bool {
 
 // Discovery handles plugin discovery from configured directories
 type Discovery struct {
-	baseDir string // repo-local .kodelet directory; shared agent skills live in its sibling .agents directory
+	baseDir string // repo-local .kodelet directory; .agents is its sibling
 	homeDir string
 }
 
@@ -47,7 +47,6 @@ type Discovery struct {
 type DiscoveryOption func(*Discovery) error
 
 // WithBaseDir sets the repo-local .kodelet directory (for testing).
-// Shared agent skills are discovered from its sibling .agents directory.
 func WithBaseDir(dir string) DiscoveryOption {
 	return func(d *Discovery) error {
 		d.baseDir = dir
@@ -92,19 +91,18 @@ func (d *Discovery) SkillDirs() []string {
 		dirs = append(dirs, d.pluginSkillDirs(baseDir)...)
 	}
 
-	return DedupeDirs(dirs)
+	return dirs
 }
 
-// scopeBaseDirs returns the repo-local and user-global .kodelet directories in precedence order.
+// scopeBaseDirs returns the deduped repo-local and user-global .kodelet directories.
 func (d *Discovery) scopeBaseDirs() []string {
-	return []string{
+	return DedupeDirs([]string{
 		d.baseDir,
 		filepath.Join(d.homeDir, kodeletDir),
-	}
+	})
 }
 
-// standaloneSkillDirs returns the unprefixed skill directories for a .kodelet
-// directory: its own skills, then shared agent skills in the sibling .agents directory.
+// standaloneSkillDirs returns .kodelet/skills, then the sibling .agents/skills.
 func standaloneSkillDirs(kodeletBaseDir string) []string {
 	kodeletBaseDir = filepath.Clean(kodeletBaseDir)
 	return []string{
@@ -113,39 +111,22 @@ func standaloneSkillDirs(kodeletBaseDir string) []string {
 	}
 }
 
-// DedupeDirs returns dirs in their original order, keeping only the first
-// occurrence of each path. This matters when the workspace is the home
-// directory, where repo-local and user-global directories are the same.
-// Paths are compared lexically after making them absolute; symlinks are not
-// resolved, so a symlinked alias is scanned as its own directory.
+// DedupeDirs keeps the first occurrence of each absolute path, without resolving symlinks.
 func DedupeDirs(dirs []string) []string {
 	seen := make(map[string]struct{}, len(dirs))
 	deduped := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
-		if markDirSeen(seen, dir) {
-			deduped = append(deduped, dir)
+		key, err := filepath.Abs(dir)
+		if err != nil {
+			key = filepath.Clean(dir)
 		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, dir)
 	}
 	return deduped
-}
-
-// markDirSeen records dir and reports whether its path has not been seen before.
-func markDirSeen(seen map[string]struct{}, dir string) bool {
-	key := dirKey(dir)
-	if _, ok := seen[key]; ok {
-		return false
-	}
-	seen[key] = struct{}{}
-	return true
-}
-
-// dirKey normalizes dir so relative and absolute spellings of the same path compare equal.
-func dirKey(dir string) string {
-	key, err := filepath.Abs(dir)
-	if err != nil {
-		return filepath.Clean(dir)
-	}
-	return key
 }
 
 // RecipeDirs returns the recipe discovery directories in precedence order
@@ -211,13 +192,9 @@ func (d *Discovery) pluginRecipeDirs(baseDir string) []string {
 func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 	var plugins []Plugin
 	seen := make(map[string]bool)
-	scannedDirs := make(map[string]struct{})
 
 	for _, baseDir := range d.scopeBaseDirs() {
 		for _, skillsDir := range standaloneSkillDirs(baseDir) {
-			if !markDirSeen(scannedDirs, skillsDir) {
-				continue
-			}
 			skills, err := d.discoverSkillsFromDir(skillsDir, "")
 			if err != nil {
 				logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover skills")
@@ -242,10 +219,7 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 			}
 		}
 
-		pluginsDir := filepath.Join(baseDir, pluginsSubdir)
-		if markDirSeen(scannedDirs, pluginsDir) {
-			d.discoverFromPluginsDir(pluginsDir, &plugins, seen)
-		}
+		d.discoverFromPluginsDir(filepath.Join(baseDir, pluginsSubdir), &plugins, seen)
 	}
 
 	return plugins, nil
@@ -254,13 +228,9 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 // DiscoverSkills discovers all skills with proper naming and precedence
 func (d *Discovery) DiscoverSkills() (map[string]Plugin, error) {
 	skills := make(map[string]Plugin)
-	scannedDirs := make(map[string]struct{})
 
 	for _, baseDir := range d.scopeBaseDirs() {
 		for _, skillsDir := range standaloneSkillDirs(baseDir) {
-			if !markDirSeen(scannedDirs, skillsDir) {
-				continue
-			}
 			standaloneSkills, err := d.discoverSkillsFromDir(skillsDir, "")
 			if err != nil {
 				logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover standalone skills")
@@ -272,10 +242,7 @@ func (d *Discovery) DiscoverSkills() (map[string]Plugin, error) {
 			}
 		}
 
-		pluginsDir := filepath.Join(baseDir, pluginsSubdir)
-		if markDirSeen(scannedDirs, pluginsDir) {
-			d.discoverSkillsFromPluginsDir(pluginsDir, skills)
-		}
+		d.discoverSkillsFromPluginsDir(filepath.Join(baseDir, pluginsSubdir), skills)
 	}
 
 	return skills, nil
