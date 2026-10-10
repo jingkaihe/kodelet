@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.3-beta
+
+Added shared skill discovery from repository-local `.agents/skills/` and user-global `~/.agents/skills/`, with repository-local skills taking precedence and `.kodelet/skills/` overriding shared skills within each scope.
+
+Added live nested tool output for code-mode executions in the TUI and Web UI, with consistent child status indicators and independent fold states preserved across progress updates and completion.
+
+Added Web UI navigation shortcuts for the sidebar, terminal, conversation search, new chats, and message focus, plus a keyboard shortcuts dialog available from the sidebar or `Ctrl/⌘+/`.
+
 ## 0.8.2-beta
 
 Added Claude Haiku 5.5 (`claude-haiku-5-5`) with adaptive thinking, `xhigh`/`max` reasoning effort, a 1M-token context window, and pricing including the long-context tier above 100K prompt tokens. Setting reasoning effort to `none` explicitly disables thinking. Added the `haiku-55` alias to the sample configuration and made Haiku 5.5 the weak model in setup-generated Anthropic profiles.
