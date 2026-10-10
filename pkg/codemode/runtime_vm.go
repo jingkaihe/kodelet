@@ -386,14 +386,18 @@ func (vm *runtimeVM) dispatchHostCall(module api.Module, argc, argv uint32) erro
 	if err != nil {
 		return err
 	}
-	data, err := vm.readString(uint64(payloadPointer), vm.limits.requestBytes)
+	payloadLimit := vm.limits.requestBytes
+	if string(operation) != "submit" {
+		payloadLimit = maxSerializedOutputBytes
+	}
+	data, err := vm.readString(uint64(payloadPointer), payloadLimit)
 	var limit *Error
 	if errors.As(err, &limit) && limit.Kind == "limit" {
 		// The prelude adds tool provenance; the payload was never decoded here.
 		if string(operation) == "submit" {
 			return &Error{Kind: "limit", Message: "host request exceeds the byte limit"}
 		}
-		return &Error{Kind: "limit", Message: "selected output limit exceeded"}
+		return &Error{Kind: "limit", Message: serializedOutputLimitMessage}
 	}
 	if err != nil {
 		return err
@@ -563,7 +567,11 @@ func (vm *runtimeVM) emitValue(value uint64) error {
 		return err
 	}
 	defer vm.freeValue(serialized)
-	data, err := vm.readString(serialized, vm.limits.outputBytes)
+	data, err := vm.readString(serialized, maxSerializedOutputBytes)
+	var limit *Error
+	if errors.As(err, &limit) && limit.Kind == "limit" {
+		return &Error{Kind: "limit", Message: serializedOutputLimitMessage}
+	}
 	if err != nil {
 		return err
 	}

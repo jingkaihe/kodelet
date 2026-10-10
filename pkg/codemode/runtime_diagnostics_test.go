@@ -34,7 +34,7 @@ func (e runtimeTestLargeToolError) MarshalJSON() ([]byte, error) {
 }
 
 func TestRuntimeUncaughtLargeToolErrorKeepsProvenance(t *testing.T) {
-	// The reply alone exceeds the 32 KiB selected-output budget.
+	// The duplicated output plus metadata exceeds the 40,000-byte display budget.
 	output := strings.Repeat("x", 20_000)
 	handler := func(context.Context, Request) (any, error) {
 		return nil, runtimeTestLargeToolError{output: output}

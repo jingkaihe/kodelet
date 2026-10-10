@@ -98,7 +98,7 @@ How to work:
 - On failure, catch the ToolError and return or emit e.result?.text || e.message instead of rerunning the tool. Nothing is retried or rolled back. A successful reply whose data violates its outputSchema throws invalid_output; the tool already ran.
 - Show an image file or artifact with: const r = await tools.view_image({path: "/tmp/chart.png"}); emit.image(r.attachments[0]); Refs are artifactIds or attachments from this invocation, never paths, URLs, or base64. emit.image needs view_image permission; "original" detail needs model support.
 
-Limits per invocation: 120 seconds, 128 tool calls, 32 KiB of output (filter or summarize before returning), and 8 image or artifact emissions. A tool reply over 2 MiB fails after the tool has run; narrow the request instead of retrying.`
+Limits: 120 seconds, 128 tool calls, 8 media emissions. Total selected output above ~40 KB is truncated; filter or summarize before returning. Tool replies and individual return/emit values are limited to 2 MiB. Output-limit failures do not roll back completed tool calls; check for side effects before retrying.`
 }
 
 func (*CodeExecuteTool) GenerateSchema() *jsonschema.Schema {

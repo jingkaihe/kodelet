@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
 )
@@ -30,6 +31,14 @@ type Handler func(context.Context, Request) (any, error)
 // MaxHostResponseBytes bounds a serialized host response before it enters the VM.
 // Tool executors can apply this limit before recording their final child summary.
 const MaxHostResponseBytes = 2 << 20
+
+// Output transport and model-facing text have separate budgets: JSON escaping
+// must not reduce how much selected text reaches the model.
+const maxSerializedOutputBytes = 2 << 20
+
+const serializedOutputLimitMessage = "serialized sandbox output exceeds the 2 MiB per-value limit; select a smaller value before returning or emitting; tools are not retried"
+
+const outputTruncationNotice = "\n[…code-mode output truncated; further output omitted…]\n"
 
 // MaxConcurrentToolCalls bounds active children in both the VM and runner registry.
 const MaxConcurrentToolCalls = 8
@@ -108,7 +117,7 @@ func defaultRuntimeLimits() runtimeLimits {
 		scriptBytes:     MaxScriptBytes,
 		requestBytes:    2 << 20,
 		responseBytes:   MaxHostResponseBytes,
-		outputBytes:     32 << 10,
+		outputBytes:     10_000 * 4,
 		outputCount:     1024,
 		toolCalls:       128,
 		catalogCalls:    256,
@@ -186,16 +195,18 @@ type runtimeBridge struct {
 	completions chan runtimeCompletion
 	// Tool and catalog workers reserve responses from separate pools, so
 	// completed-but-unconsumed tool work cannot starve catalog discovery.
-	toolSlots    chan struct{}
-	catalogSlots chan struct{}
-	pending      map[uint32]int
-	lastID       uint32
-	toolCalls    int
-	catalogCalls int
-	requestBytes int
-	outputBytes  int
-	mediaCount   int
-	closed       bool
+	toolSlots       chan struct{}
+	catalogSlots    chan struct{}
+	pending         map[uint32]int
+	lastID          uint32
+	toolCalls       int
+	catalogCalls    int
+	requestBytes    int
+	outputBytes     int
+	outputCount     int
+	outputTruncated bool
+	mediaCount      int
+	closed          bool
 	// failing is set before a terminal failure is formatted. Formatting may run
 	// guest code, which must not start host work or select more output.
 	failing bool
@@ -442,10 +453,20 @@ func validateRuntimeRequest(request Request) error {
 }
 
 func (b *runtimeBridge) emit(data json.RawMessage) error {
+	if len(data) > maxSerializedOutputBytes {
+		return &Error{Kind: "limit", Message: serializedOutputLimitMessage}
+	}
 	if !json.Valid(data) {
 		return &Error{Kind: "invalid_output", Message: "output is not valid JSON"}
 	}
-	return b.appendOutput(OutputItem{Type: "json", Value: bytes.Clone(data)}, len(data))
+	data = bytes.TrimSpace(data)
+	size := len(data)
+	if data[0] == '"' {
+		var text string
+		_ = json.Unmarshal(data, &text)
+		size = len(text)
+	}
+	return b.appendOutput(OutputItem{Type: "json", Value: bytes.Clone(data)}, size)
 }
 
 func (b *runtimeBridge) emitMedia(outputType string, data json.RawMessage) error {
@@ -488,8 +509,8 @@ func (b *runtimeBridge) appendOutput(item OutputItem, size int) error {
 	if b.failing {
 		return &Error{Kind: "cancelled", Message: "invocation failed and no longer accepts output"}
 	}
-	if b.outputBytes+size > b.limits.outputBytes || len(b.result.Outputs) >= b.limits.outputCount {
-		return &Error{Kind: "limit", Message: "selected output limit exceeded"}
+	if b.outputCount >= b.limits.outputCount {
+		return &Error{Kind: "limit", Message: "selected output count limit exceeded"}
 	}
 	media := item.Type != "json"
 	if media && b.mediaCount >= 8 {
@@ -503,11 +524,39 @@ func (b *runtimeBridge) appendOutput(item OutputItem, size int) error {
 			return err
 		}
 	}
-	b.result.Outputs = append(b.result.Outputs, item)
-	b.outputBytes += size
+	b.outputCount++
 	if media {
 		b.mediaCount++
 	}
+	if b.outputTruncated {
+		return nil
+	}
+	remaining := b.limits.outputBytes - b.outputBytes
+	if size > remaining {
+		text, label := string(item.Value), "[Truncated JSON preview; not complete JSON]\n"
+		if media {
+			text, label = "", "[Media omitted: code-mode output budget exhausted]\n"
+		} else if item.Value[0] == '"' {
+			_ = json.Unmarshal(item.Value, &text)
+			label = ""
+		}
+		// Keep a UTF-8-safe head and tail, plus a single notice outside the
+		// content budget. Later emissions cannot accumulate extra notices.
+		head := min(remaining/2, len(text))
+		for head > 0 && head < len(text) && !utf8.RuneStart(text[head]) {
+			head--
+		}
+		tail := max(len(text)-(remaining-remaining/2), head)
+		for tail < len(text) && !utf8.RuneStart(text[tail]) {
+			tail++
+		}
+		preview, _ := json.Marshal(label + text[:head] + outputTruncationNotice + text[tail:])
+		item = OutputItem{Type: "json", Value: preview}
+		size = head + len(text) - tail
+		b.outputTruncated = true
+	}
+	b.result.Outputs = append(b.result.Outputs, item)
+	b.outputBytes += size
 	return nil
 }
 

@@ -480,6 +480,51 @@ func TestRunnerCodeBashReturnsExecutionResults(t *testing.T) {
 	}
 }
 
+func TestRunnerCodeBashLargeOutputReturnsNormally(t *testing.T) {
+	bash := tools.NewBashTool(nil, false)
+	state := tools.NewBasicState(t.Context(), tools.WithWorkingDirectory(t.TempDir()))
+	var calls int
+	environment := &codeTestEnvironment{execute: func(ctx context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+		calls++
+		result := bash.Execute(ctx, state, request.Input)
+		structured := result.StructuredData()
+		metadata := structured.Metadata.(*tooltypes.BashMetadata)
+		require.NotNil(t, metadata.Truncation)
+		assert.True(t, metadata.Truncation.Truncated)
+		assert.Greater(t, len(metadata.Output), 40000)
+		t.Cleanup(func() { _ = os.Remove(metadata.FullOutputPath) })
+		return agentenv.ToolExecution{
+			Input:            request.Input,
+			Result:           result,
+			StructuredResult: structured,
+		}, nil
+	}}
+	service, run, _, params := newCodeService(t, environment)
+	run.manifest.Tools = append(run.manifest.Tools, runnerpayload.ToolDefinition{
+		Name: "bash", Placement: "environment", OutputSchema: bash.RawOutputSchema(),
+	})
+	params.CallableTools = new([]string{"bash"})
+	authority, err := service.codeExecutionContext(t.Context(), run, params)
+	require.NoError(t, err)
+	ctx := tools.ContextWithCodeExecution(t.Context(), authority)
+	input, err := json.Marshal(map[string]string{"code": `
+const reply = await tools.bash({
+  command: "printf 'start\n'; printf '%080000d' 0; printf '\nend\n'",
+  description: "Return a large already truncated Bash reply",
+  timeout: 10,
+});
+return reply.text;
+`})
+	require.NoError(t, err)
+	result := (&tools.CodeExecuteTool{}).Execute(ctx, state, string(input))
+	require.False(t, result.IsError(), result.GetError())
+	assert.Equal(t, 1, calls)
+	assert.Contains(t, result.AssistantFacing(), "start\n")
+	assert.Contains(t, result.AssistantFacing(), "\nend\n")
+	assert.Contains(t, result.AssistantFacing(), "code-mode output truncated")
+	assert.Less(t, len(result.AssistantFacing()), 40500)
+}
+
 func TestRunnerCodeReplyBuiltinContracts(t *testing.T) {
 	t.Run("bash output is not duplicated", func(t *testing.T) {
 		tool := tools.NewBashTool(nil, false)

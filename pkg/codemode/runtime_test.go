@@ -204,10 +204,14 @@ for (let i = 0; i < 1024; i++) emit(0);
 		require.NoError(t, bridge.emit(json.RawMessage(`0`)))
 		require.NoError(t, bridge.emitMedia("image", json.RawMessage(`{"artifactId":"art_image","detail":"original"}`)))
 		assert.Equal(t, limits.outputBytes, bridge.outputBytes)
-		require.ErrorContains(t, bridge.emitMedia("artifact", json.RawMessage(`{"artifactId":"art_image"}`)), "limit")
-		require.ErrorContains(t, bridge.emit(json.RawMessage(`0`)), "limit")
-		assert.Equal(t, []OutputItem{{Type: "json", Value: json.RawMessage(`0`)}, item}, result.Outputs)
-		assert.Equal(t, 2, calls)
+		require.NoError(t, bridge.emitMedia("artifact", json.RawMessage(`{"artifactId":"art_image"}`)))
+		assert.Equal(t, []OutputItem{{Type: "json", Value: json.RawMessage(`0`)}, item}, result.Outputs[:2])
+		require.Len(t, result.Outputs, 3)
+		assert.Contains(t, string(result.Outputs[2].Value), "Media omitted")
+		assert.Equal(t, 3, calls)
+		require.NoError(t, bridge.emit(json.RawMessage(`0`)))
+		assert.Len(t, result.Outputs, 3, "later output is omitted without extra notices")
+		assert.Equal(t, 4, calls, "omitted outputs still require authorization")
 	})
 }
 
@@ -539,10 +543,14 @@ func TestRuntimeHostValidationAndLimits(t *testing.T) {
 		})
 	}
 
-	t.Run("output", func(t *testing.T) {
-		_, err := Execute(context.Background(), `return "x".repeat(33000);`, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "limit")
+	t.Run("output budget excludes JSON escaping", func(t *testing.T) {
+		result, err := Execute(t.Context(), `return "\n\t\"\\".repeat(10000);`, nil)
+		require.NoError(t, err)
+		require.Len(t, result.Outputs, 1)
+		assert.Greater(t, len(result.Outputs[0].Value), defaultRuntimeLimits().outputBytes)
+		var text string
+		require.NoError(t, json.Unmarshal(result.Outputs[0].Value, &text))
+		assert.Equal(t, strings.Repeat("\n\t\"\\", 10000), text)
 	})
 	t.Run("script", func(t *testing.T) {
 		_, err := Execute(context.Background(), strings.Repeat(" ", MaxScriptBytes+1), nil)
@@ -571,6 +579,83 @@ return await Promise.allSettled([tools.echo({}), tools.echo({}), tools.echo({})]
 		assert.Contains(t, string(result.Outputs[0].Value), `"kind":"limit"`)
 		assert.Contains(t, string(result.Outputs[0].Value), `"outcome":"not_started"`)
 	})
+}
+
+func TestRuntimeOutputTruncation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code string
+		want string
+	}{
+		{
+			name: "UTF-8 boundaries",
+			code: `return "界".repeat(10);`,
+			want: "界" + outputTruncationNotice + "界",
+		},
+		{
+			name: "structured preview",
+			code: `return {value: "abcdefghij"};`,
+			want: "[Truncated JSON preview; not complete JSON]\n{\"va" + outputTruncationNotice + "ij\"}",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			limits := defaultRuntimeLimits()
+			limits.outputBytes = 8
+			result, err := executeWithLimits(t.Context(), test.code, nil, nil, limits)
+			require.NoError(t, err)
+			require.Len(t, result.Outputs, 1)
+			var text string
+			require.NoError(t, json.Unmarshal(result.Outputs[0].Value, &text))
+			assert.Equal(t, test.want, text)
+		})
+	}
+
+	t.Run("return emit and console share a budget", func(t *testing.T) {
+		limits := defaultRuntimeLimits()
+		limits.outputBytes = 8
+		result, err := executeWithLimits(t.Context(), `
+emit("first");
+console.log("abcdefghij");
+emit("not selected");
+return "also omitted";
+`, nil, nil, limits)
+		require.NoError(t, err)
+		require.Len(t, result.Outputs, 2)
+		assert.JSONEq(t, `"first"`, string(result.Outputs[0].Value))
+		var text string
+		require.NoError(t, json.Unmarshal(result.Outputs[1].Value, &text))
+		assert.Equal(t, "a"+outputTruncationNotice+"ij", text)
+	})
+	t.Run("omitted emissions still count", func(t *testing.T) {
+		limits := defaultRuntimeLimits()
+		limits.outputBytes, limits.outputCount = 1, 2
+		result, err := executeWithLimits(t.Context(), `emit("large"); emit(1); emit(2);`, nil, nil, limits)
+		require.ErrorContains(t, err, "output count limit")
+		assert.Len(t, result.Outputs, 1)
+	})
+}
+
+func TestRuntimeSerializedOutputLimit(t *testing.T) {
+	for name, code := range map[string]string{
+		"return": `return value;`,
+		"emit":   `emit(value);`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Two JSON quote bytes make this exactly 2 MiB on the bridge.
+			result, err := Execute(t.Context(), `const value = "x".repeat(2097150); `+code, nil)
+			require.NoError(t, err)
+			require.Len(t, result.Outputs, 1)
+			var text string
+			require.NoError(t, json.Unmarshal(result.Outputs[0].Value, &text))
+			assert.Len(t, text, 40000+len(outputTruncationNotice))
+			assert.Contains(t, text, outputTruncationNotice)
+
+			result, err = Execute(t.Context(), `emit("before"); const value = "x".repeat(2097151); `+code, nil)
+			require.ErrorContains(t, err, serializedOutputLimitMessage)
+			require.Len(t, result.Outputs, 1, "hard-limit errors preserve earlier output")
+			assert.JSONEq(t, `"before"`, string(result.Outputs[0].Value))
+		})
+	}
 }
 
 func TestRuntimeMemoryLimit(t *testing.T) {
