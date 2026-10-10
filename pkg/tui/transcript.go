@@ -105,7 +105,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 							codeKey: group.codeKey, expanded: group.expanded,
 						})
 						line += lineCount(header)
-						if group.expanded || (group.active && !group.codeParent) {
+						if group.expanded || (group.active && !group.codeParent && group.codeKey == "") {
 							body := group.body
 							if group.markdownBody {
 								body = m.renderMarkdown(body, m.transcriptTextWidth()-2-len(indent), markdownAssistant)
@@ -289,7 +289,7 @@ func (m model) renderToolGroupHeader(group toolRenderGroup) string {
 	if group.active {
 		prefix := m.spinnerGlyph() + " "
 		suffix := "… ▾"
-		if group.codeParent && !group.expanded {
+		if (group.codeParent || group.codeKey != "") && !group.expanded {
 			suffix = "… ▸"
 		}
 		maxWidth := max(1, m.transcriptTextWidth()*2/3)

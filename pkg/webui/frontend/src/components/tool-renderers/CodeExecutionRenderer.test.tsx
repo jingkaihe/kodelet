@@ -93,6 +93,37 @@ describe('CodeExecutionRenderer', () => {
     expect(screen.getByText('Timed out')).toBeInTheDocument();
   });
 
+  it('shows spinners only for queued and running children', () => {
+    const snapshot: ToolResult = {
+      ...result,
+      metadata: {
+        status: 'running',
+        durationMs: 0,
+        calls: ['queued', 'running', 'completed'].map((status) => ({
+          callId: status,
+          toolName: 'bash',
+          status,
+          durationMs: 0,
+        })),
+      },
+    };
+    const { container, rerender } = render(
+      <CodeExecutionRenderer isPartial toolResult={snapshot} />
+    );
+    for (const status of ['queued', 'running']) {
+      const summary = screen.getByText(`bash · ${status}`).closest('summary');
+      expect(summary?.querySelector('.spinner-glyph')).toBeInTheDocument();
+      expect(summary?.querySelector('.lucide-check')).not.toBeInTheDocument();
+    }
+    expect(container.querySelectorAll('.spinner-glyph')).toHaveLength(2);
+    expect(container.querySelectorAll('.lucide-check')).toHaveLength(1);
+
+    rerender(<CodeExecutionRenderer toolResult={result} />);
+    expect(container.querySelector('.spinner-glyph')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.lucide-check')).toHaveLength(1);
+    expect(container.querySelectorAll('.lucide-x')).toHaveLength(1);
+  });
+
   it('shows code for a pending invocation without metadata', async () => {
     expect(codeExecutionSummary()).toBe('Code execution');
     const { container } = render(

@@ -175,8 +175,10 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []to
 			} else if call.DetailsOmitted {
 				note = "Child tool details exceeded the storage limit."
 			}
+			label := sanitizeExtensionUIText(call.ToolName + " · " + call.Status)
 			children = []toolRenderGroup{{
-				label: sanitizeExtensionUIText(call.ToolName + " · " + call.Status), body: note, wrapBody: true, changeIndex: -1,
+				label: label, runningLabel: label, body: note, wrapBody: true, changeIndex: -1,
+				active: call.Status == "running" || call.Status == "queued",
 				failed: call.Status != "completed" && call.Status != "running" && call.Status != "queued",
 			}}
 			end++

@@ -1,9 +1,11 @@
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, X } from 'lucide-react';
 import Prism from 'prismjs';
 import type React from 'react';
 import { useMemo } from 'react';
 import type { CodeExecutionMetadata, ToolRenderProps, ToolResult } from '../../types';
+import { cn } from '../../utils';
 import ChatToolActivity from '../chat/ChatToolActivity';
+import Spinner from '../Spinner';
 import { ReferenceCodeBlock, ReferenceToolNote } from './reference';
 import { ImageAttachment } from './ToolImageAttachments';
 
@@ -23,19 +25,33 @@ export const codeExecutionSummary = (result?: ToolResult): string => {
     .join(' · ');
 };
 
-const Section: React.FC<React.PropsWithChildren<{ title: string; open?: boolean }>> = ({
-  title,
-  open,
-  children,
-}) => (
-  <details className="activity-card" open={open}>
-    <summary className="tool-summary activity-summary">
-      <span className="tool-summary-label">{title}</span>
-      <ChevronRight className="tool-summary-chevron" size={12} aria-hidden="true" />
-    </summary>
-    <div className="activity-detail-content">{children}</div>
-  </details>
-);
+const Section: React.FC<
+  React.PropsWithChildren<{ title: string; open?: boolean; status?: string }>
+> = ({ title, open, status, children }) => {
+  const running = status === 'queued' || status === 'running';
+  const failed = status !== undefined && status !== 'completed' && !running;
+  return (
+    <details
+      className={cn(
+        'activity-card',
+        running && 'activity-card-live',
+        failed && 'activity-card-error'
+      )}
+      open={open}
+    >
+      <summary className="tool-summary activity-summary">
+        {status !== undefined ? (
+          <span className="activity-marker" aria-hidden="true">
+            {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
+          </span>
+        ) : null}
+        <span className="tool-summary-label">{title}</span>
+        <ChevronRight className="tool-summary-chevron" size={12} aria-hidden="true" />
+      </summary>
+      <div className="activity-detail-content">{children}</div>
+    </details>
+  );
+};
 
 export default function CodeExecutionRenderer({
   toolResult,
@@ -151,7 +167,11 @@ export default function CodeExecutionRenderer({
             }))}
           />
         ) : (
-          <Section key={call.callId} title={`${call.toolName} · ${call.status}`}>
+          <Section
+            key={call.callId}
+            title={`${call.toolName} · ${call.status}`}
+            status={call.status}
+          >
             <ReferenceToolNote
               text={
                 isPartial

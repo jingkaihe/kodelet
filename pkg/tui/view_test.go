@@ -637,14 +637,29 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 	m.width = 80
-	m.height = 12
+	m.height = 40
 	m.resize()
 	m.running = true
+	result := tooltypes.StructuredToolResult{
+		ToolName: "code_execute",
+		Success:  true,
+		Metadata: tooltypes.CodeExecutionMetadata{
+			Status: "running",
+			Calls: []tooltypes.CodeExecutionCall{
+				{CallID: "one", ToolName: "bash", Status: "queued"},
+				{CallID: "two", ToolName: "web_fetch", Status: "running"},
+				{CallID: "three", ToolName: "file_read", Status: "completed"},
+			},
+		},
+	}
 	m.entries = []chatEntry{{
 		kind: entryAssistant,
 		blocks: []assistantBlock{{
 			kind:     blockThoughts,
 			thoughts: []thoughtBlock{{text: "working"}},
+		}, {
+			kind:  blockTools,
+			tools: []toolCall{{name: "code_execute", structured: &result}},
 		}},
 	}}
 	m.refreshViewport(true)
@@ -654,7 +669,10 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 	firstView := xansi.Strip(m.View().Content)
 	require.Equal(t, 1, lipgloss.Width(transcriptSpinnerPlaceholder))
 	assert.Contains(t, viewportContent, transcriptSpinnerPlaceholder)
-	assert.Contains(t, firstView, firstGlyph+" Thinking…")
+	labels := []string{"Thinking…", "Code execution", "bash · queued… ▸", "web_fetch · running… ▸"}
+	for _, label := range labels {
+		assert.Contains(t, firstView, firstGlyph+" "+label)
+	}
 
 	updated, _ := m.Update(spinner.TickMsg{})
 	m = updated.(model)
@@ -663,7 +681,11 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 
 	assert.NotEqual(t, firstGlyph, secondGlyph)
 	assert.Equal(t, viewportContent, m.viewport.View())
-	assert.Contains(t, secondView, secondGlyph+" Thinking…")
+	for _, label := range labels {
+		assert.Contains(t, secondView, secondGlyph+" "+label)
+	}
+	assert.Contains(t, secondView, "✓ file_read · completed")
+	assert.NotContains(t, secondView, "Child tool details", "spinners do not expand child rows")
 	assert.NotContains(t, secondView, transcriptSpinnerPlaceholder)
 }
 
