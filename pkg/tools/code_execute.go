@@ -23,7 +23,9 @@ import (
 // never decoded from tool input and cannot be replaced by an input hook.
 type CodeExecutionContext struct {
 	Definitions []codemode.Definition
-	Call        func(context.Context, string, string, string) (CodeToolReply, error)
+	// Call's optional callback carries effective UI-only snapshots, never values
+	// exposed to JavaScript. A nil callback disables transient child updates.
+	Call func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error)
 	// ValidateImage checks current host permissions and model detail support.
 	// It must not perform I/O: emissions run on the VM's owning goroutine.
 	ValidateImage func(detail string) error
@@ -173,40 +175,79 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 		outputSchemas[definition.Name] = catalog.OutputSchema(definition.Name)
 	}
 	var mu sync.Mutex
-	var updateMu sync.Mutex
 	lastUpdate := time.Time{}
-	var updateSequence, publishedSequence uint64
 	active := true
 	detailBytes := 0
-	inventory := make(map[string]tooltypes.ToolAttachment)
-	// Prepare under mu, then publish outside it. Slow update hooks must neither
-	// prevent VM cancellation nor deliver out-of-order or post-completion updates.
-	progress := func() func() {
-		if update == nil || !active || time.Since(lastUpdate) < 100*time.Millisecond {
-			return func() {}
+	var detailSizes []int
+	// Each replacement owns a fresh immutable copy and releases the previous
+	// snapshot's budget. Redactions and oversized updates must not retain stale data.
+	storeDetails := func(index int, reply CodeToolReply) {
+		entry := &meta.Calls[index]
+		detailBytes -= detailSizes[index]
+		detailSizes[index] = 0
+		entry.Input, entry.Result, entry.DetailsOmitted = nil, nil, false
+		if reply.Result == nil {
+			return
 		}
+		display := *reply.Result
+		display.Data, display.Attachments = nil, nil
+		body, err := json.Marshal(display)
+		size := len(body) + len(reply.Input)
+		if err != nil || detailBytes+size > 512*1024 {
+			entry.DetailsOmitted = true
+			return
+		}
+		entry.Input = slices.Clone(reply.Input)
+		entry.Result = &tooltypes.StructuredToolResult{}
+		_ = json.Unmarshal(body, entry.Result)
+		detailSizes[index] = size
+		detailBytes += size
+	}
+	inventory := make(map[string]tooltypes.ToolAttachment)
+	// One publisher owns both the pending timer and any in-flight hook. Coalesce
+	// to the latest snapshot without accumulating goroutines behind slow hooks.
+	// Never hold mu while publishing: cancellation must not wait for hooks.
+	var pendingUpdate *time.Timer
+	publishing, dirty := false, false
+	var publishProgress func()
+	publishProgress = func() {
+		mu.Lock()
+		if !active || ctx.Err() != nil {
+			pendingUpdate, publishing = nil, false
+			mu.Unlock()
+			return
+		}
+		dirty = false
 		lastUpdate = time.Now()
-		updateSequence++
-		sequence := updateSequence
 		snapshot := meta
 		snapshot.Calls = slices.Clone(meta.Calls)
-		for i := range snapshot.Calls {
-			snapshot.Calls[i].Input, snapshot.Calls[i].Result = nil, nil
-		}
 		snapshot.DurationMs = time.Since(start).Milliseconds()
-		return func() {
-			updateMu.Lock()
-			defer updateMu.Unlock()
-			mu.Lock()
-			publish := active && ctx.Err() == nil && sequence > publishedSequence
-			if publish {
-				publishedSequence = sequence
-			}
-			mu.Unlock()
-			if publish {
-				update(CodeExecuteResult{Metadata: snapshot})
-			}
+		mu.Unlock()
+		update(CodeExecuteResult{Metadata: snapshot})
+		mu.Lock()
+		pendingUpdate, publishing = nil, false
+		if dirty && active && ctx.Err() == nil {
+			publishing = true
+			pendingUpdate = time.AfterFunc(max(0, 100*time.Millisecond-time.Since(lastUpdate)), publishProgress)
 		}
+		mu.Unlock()
+	}
+	progress := func() func() {
+		if update == nil || !active || ctx.Err() != nil {
+			return func() {}
+		}
+		dirty = true
+		if publishing {
+			return func() {}
+		}
+		publishing = true
+		if delay := 100*time.Millisecond - time.Since(lastUpdate); delay > 0 {
+			// Flush even without another update, including a silent bash's initial
+			// description or a fast child finishing while other children run.
+			pendingUpdate = time.AfterFunc(delay, publishProgress)
+			return func() {}
+		}
+		return publishProgress
 	}
 	result, err := codemode.ExecuteWithOutputValidator(ctx, input.Code, func(callCtx context.Context, request codemode.Request) (any, error) {
 		var options codemode.CatalogOptions
@@ -238,6 +279,7 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			ToolName: request.Name,
 			Status:   "running",
 		})
+		detailSizes = append(detailSizes, 0)
 		publish := progress()
 		mu.Unlock()
 		publish()
@@ -261,7 +303,21 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 				Message: "tool is not in the authorized catalog",
 			}
 		} else {
-			reply, callErr = authority.Call(callCtx, request.Name, string(request.Input), callID)
+			var childUpdate func(CodeToolReply)
+			if update != nil {
+				childUpdate = func(reply CodeToolReply) {
+					mu.Lock()
+					publish := func() {}
+					if active && callCtx.Err() == nil && meta.Calls[index].Status == "running" {
+						storeDetails(index, reply)
+						meta.Calls[index].DurationMs = time.Since(callStart).Milliseconds()
+						publish = progress()
+					}
+					mu.Unlock()
+					publish()
+				}
+			}
+			reply, callErr = authority.Call(callCtx, request.Name, string(request.Input), callID, childUpdate)
 		}
 		// Validate before recording success. Return the encoded bytes so the
 		// bridge cannot serialize a mutable tool value a second time.
@@ -330,22 +386,7 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 			entry := &meta.Calls[index]
 			entry.DurationMs = time.Since(callStart).Milliseconds()
 			entry.Status = "completed"
-			if reply.Result != nil {
-				// Bound persisted UI details across the whole invocation. Do not
-				// duplicate machine data or retain unselected image attachments.
-				display := *reply.Result
-				display.Data, display.Attachments = nil, nil
-				body, err := json.Marshal(display)
-				size := len(body) + len(reply.Input)
-				if err == nil && detailBytes+size <= 512*1024 {
-					entry.Input = slices.Clone(reply.Input)
-					entry.Result = &tooltypes.StructuredToolResult{}
-					_ = json.Unmarshal(body, entry.Result)
-					detailBytes += size
-				} else {
-					entry.DetailsOmitted = true
-				}
-			}
+			storeDetails(index, reply)
 			if callErr != nil {
 				entry.Status, entry.ErrorKind = "failed", "tool_error"
 				var toolErr *CodeToolError
@@ -388,6 +429,9 @@ func (t *CodeExecuteTool) ExecuteStreaming(ctx context.Context, state tooltypes.
 	mu.Lock()
 	defer mu.Unlock()
 	active = false
+	if pendingUpdate != nil {
+		pendingUpdate.Stop()
+	}
 	for _, item := range result.Outputs {
 		meta.Items = append(meta.Items, tooltypes.CodeExecutionOutput{
 			Type:       item.Type,

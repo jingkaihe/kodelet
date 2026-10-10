@@ -36,6 +36,7 @@ type sessionTestPeer struct {
 	sessionMu    sync.Mutex
 	initializes  []protocol.ExtensionFrame
 	events       map[string][]string
+	handleEvent  func(json.RawMessage) any
 }
 
 func (p *sessionTestPeer) Call(ctx context.Context, method string, params, result any) error {
@@ -74,6 +75,9 @@ func (p *sessionTestPeer) Call(ctx context.Context, method string, params, resul
 		p.sessionMu.Lock()
 		p.events[frame.RunID] = append(p.events[frame.RunID], event.Event)
 		p.sessionMu.Unlock()
+		if p.handleEvent != nil {
+			return p.reply(frame, message.ID, p.handleEvent(message.Params))
+		}
 		return p.reply(frame, message.ID, map[string]any{})
 	default:
 		if len(message.ID) == 0 && message.Method != "$/cancelRequest" {

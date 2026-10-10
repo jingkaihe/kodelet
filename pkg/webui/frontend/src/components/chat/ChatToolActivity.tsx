@@ -25,7 +25,21 @@ import ToolImageAttachments, { imageAttachmentURL } from '../tool-renderers/Tool
 
 interface ChatToolActivityProps {
   tools: ChatRenderToolCall[];
+  nested?: boolean;
 }
+
+// Nested streaming rows and their parent retain the user's fold choice when
+// progress becomes a final result, rather than reopening or remounting.
+const PersistentDetails: React.FC<React.ComponentProps<'details'>> = ({ open, ...props }) => {
+  const [expanded, setExpanded] = React.useState(!!open);
+  return (
+    <details
+      {...props}
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    />
+  );
+};
 
 const formatToolInput = (input: string): string => {
   try {
@@ -440,7 +454,11 @@ const ActivitySummaryText: React.FC<{
   );
 };
 
-const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
+const FileToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }> = ({
+  tool,
+  nested,
+}) => {
+  const Details = nested ? PersistentDetails : 'details';
   const name = normalizeToolName(tool.name);
   const input = parseToolInput(tool.input);
   const metadata = getMetadataRecord(tool.result);
@@ -476,15 +494,15 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
           : getToolSummary(tool);
         const showCounts = name !== 'file_read' && change?.unifiedDiff !== undefined;
         return (
-          <details
+          <Details
             className={cn(
               'activity-card',
               'activity-file',
               running && 'activity-card-live',
               failed && 'activity-card-error'
             )}
-            key={`${change?.path || ''}-${index}-${running ? 'running' : failed ? 'failed' : 'settled'}`}
-            open={running ? true : undefined}
+            key={`${change?.path || ''}-${index}-${nested ? 'nested' : running ? 'running' : failed ? 'failed' : 'settled'}`}
+            open={!nested && running ? true : undefined}
           >
             <summary className="tool-summary activity-summary" title={summaryText}>
               <span className="activity-marker" aria-hidden="true">
@@ -532,7 +550,7 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
                 <p className="tool-awaiting">Awaiting file result…</p>
               )}
             </div>
-          </details>
+          </Details>
         );
       })}
       {tool.result && !tool.inProgress ? <ToolImageAttachments toolResult={tool.result} /> : null}
@@ -540,22 +558,26 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
   );
 };
 
-const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => {
+const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }> = ({
+  tool,
+  nested,
+}) => {
+  const Details = nested ? PersistentDetails : 'details';
   const status = getToolActivityStatus(tool);
   const running = status === 'running';
   const failed = status === 'failed';
   const summary = getToolSummary(tool);
 
   return (
-    <details
+    <Details
       className={cn(
         'activity-card',
         'activity-image',
         running && 'activity-card-live',
         failed && 'activity-card-error'
       )}
-      key={status}
-      open={running || failed ? true : undefined}
+      key={nested ? 'nested' : status}
+      open={!nested && (running || failed) ? true : undefined}
     >
       <summary className="tool-summary activity-summary" title={getViewImagePath(tool) || summary}>
         <span className="activity-marker" aria-hidden="true">
@@ -579,7 +601,7 @@ const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall }> = ({ tool }) => 
         ) : null}
         {tool.result && !running ? <ToolImageAttachments toolResult={tool.result} /> : null}
       </div>
-    </details>
+    </Details>
   );
 };
 
@@ -608,7 +630,7 @@ const toolGroupKind = (
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };
 
-const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
+const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = false }) => {
   if (tools.length === 0) {
     return null;
   }
@@ -619,6 +641,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
     const previous = groups[groups.length - 1];
     const kind = toolGroupKind(tool);
     if (
+      !nested &&
       (kind === 'commands' || kind === 'tools') &&
       previous &&
       toolGroupKind(previous[0]) === kind
@@ -639,6 +662,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
             <FileToolActivity
               key={toolCall.callId || `${toolCall.name}-${groupIndex}`}
               tool={toolCall}
+              nested={nested}
             />
           );
         }
@@ -647,16 +671,20 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
             <ImageToolActivity
               key={toolCall.callId || `${toolCall.name}-${groupIndex}`}
               tool={toolCall}
+              nested={nested}
             />
           );
         }
         const commands = kind === 'commands';
         const browser = kind === 'browser';
+        const codeExecution =
+          normalizeToolName(toolCall.name) === 'code_execute' ||
+          toolCall.result?.metadataType === 'code_execute';
+        const Details = nested || codeExecution ? PersistentDetails : 'details';
         // Code media stays inline with selected text, not in an outside gallery.
         // Open these cards initially so previews remain visible on completion.
         const codeMedia =
-          (normalizeToolName(toolCall.name) === 'code_execute' ||
-            toolCall.result?.metadataType === 'code_execute') &&
+          codeExecution &&
           (toolCall.result?.metadata as CodeExecutionMetadata | undefined)?.items?.some(
             (item) => item.type === 'image' || item.type === 'artifact'
           );
@@ -664,9 +692,15 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
         const running = group.some((tool) => getToolActivityStatus(tool) === 'running');
         const failedCount = group.filter((tool) => getToolActivityStatus(tool) === 'failed').length;
         const noun = commands ? 'command' : 'tool';
-        const summaryText = builtin
-          ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
-          : getToolSummary(toolCall);
+        const description =
+          commands && getStringField(parseToolInput(toolCall.input), 'description');
+        const summaryText = nested
+          ? commands && description
+            ? `bash · ${collapseWhitespace(description)}`
+            : getToolSummary(toolCall)
+          : builtin
+            ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
+            : getToolSummary(toolCall);
         const activityStatus = running
           ? 'running'
           : failedCount
@@ -675,9 +709,9 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
 
         return (
           <React.Fragment
-            key={`${toolCall.callId || `${toolCall.name}-${groupIndex}`}-${running ? 'running' : failedCount ? 'failed' : 'settled'}`}
+            key={`${toolCall.callId || `${toolCall.name}-${groupIndex}`}-${nested || codeExecution ? 'persistent' : running ? 'running' : failedCount ? 'failed' : 'settled'}`}
           >
-            <details
+            <Details
               className={cn(
                 'activity-card',
                 commands && 'activity-command-group',
@@ -687,7 +721,8 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                 failedCount > 0 && 'activity-card-error'
               )}
               open={
-                running || codeMedia || ((browser || kind === 'skill') && failedCount > 0)
+                !nested &&
+                (running || codeMedia || ((browser || kind === 'skill') && failedCount > 0))
                   ? true
                   : undefined
               }
@@ -786,7 +821,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
                   );
                 })}
               </div>
-            </details>
+            </Details>
             {group.map((tool, toolIndex) =>
               !browser && tool.result && !tool.inProgress ? (
                 <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />

@@ -243,7 +243,7 @@ return "Tests passed and patch applied.";`,
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByText(/Code execution/));
     await userEvent.click(canvas.getByText('Code', { exact: true }));
-    await userEvent.click(canvas.getByText('Ran 1 command'));
+    await userEvent.click(canvas.getByText('bash · Run focused component tests'));
   },
 };
 

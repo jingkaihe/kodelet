@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/codemode"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -94,7 +95,7 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			_, err := vision.NormalizeViewImageDetail(detail, model)
 			return err
 		},
-		Call: func(callCtx context.Context, name, input, callID string) (tools.CodeToolReply, error) {
+		Call: func(callCtx context.Context, name, input, callID string, update func(tools.CodeToolReply)) (tools.CodeToolReply, error) {
 			childError := func(kind, outcome, message string) (tools.CodeToolReply, error) {
 				return tools.CodeToolReply{}, &tools.CodeToolError{
 					Kind:    kind,
@@ -142,12 +143,26 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			if err := operationCtx.Err(); err != nil {
 				return childError("cancelled", "not_started", err.Error())
 			}
+			var childUpdates agentenv.ToolUpdateSink
+			if update != nil {
+				childUpdates = func(snapshot agentenv.ToolUpdate) {
+					// Only post-policy display fields enter the parent's snapshot.
+					// Never consult the raw ToolResult or restore redacted arguments.
+					structured := snapshot.StructuredResult
+					structured.Data, structured.Attachments = nil, nil
+					reply := tools.CodeToolReply{Result: &structured}
+					if !snapshot.Modified {
+						reply.Input = json.RawMessage(snapshot.Input)
+					}
+					update(reply)
+				}
+			}
 			execution, err := s.executeRunTool(operationCtx, run, runnerpayload.ToolExecuteParams{
 				RunID:      run.id,
 				ToolCallID: callID,
 				Name:       name,
 				Input:      json.RawMessage(input),
-			}, true)
+			}, true, childUpdates)
 			if err != nil {
 				kind := "transport"
 				if operationCtx.Err() != nil {

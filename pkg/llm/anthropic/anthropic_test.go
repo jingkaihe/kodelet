@@ -1046,7 +1046,7 @@ func (e *codeModeAnthropicEnvironment) ExecuteTool(ctx context.Context, request 
 		}
 		ctx = tools.ContextWithCodeExecution(ctx, tools.CodeExecutionContext{
 			Definitions: definitions,
-			Call: func(ctx context.Context, name, input, callID string) (tools.CodeToolReply, error) {
+			Call: func(ctx context.Context, name, input, callID string, _ func(tools.CodeToolReply)) (tools.CodeToolReply, error) {
 				child, err := e.Environment.ExecuteTool(ctx, agentenv.ToolRequest{Name: name, Input: input, ToolCallID: callID}, nil)
 				if err != nil {
 					return tools.CodeToolReply{}, err

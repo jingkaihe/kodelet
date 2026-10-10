@@ -119,7 +119,7 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 	service := newRegisteredTestService(t, workspace, ServiceOptions{
 		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
 		ConfigLoader: func(string) (llmtypes.Config, error) {
-			return llmtypes.Config{CodeMode: "only", AllowedTools: []string{"code_execute", "file_read", "web_fetch"}}, nil
+			return llmtypes.Config{CodeMode: "only", AllowedTools: []string{"code_execute", "file_read", "web_fetch", "bash"}}, nil
 		},
 	})
 	conn, response, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/relay", nil)
@@ -165,6 +165,92 @@ func newCodeLoopback(t *testing.T) *codeLoopback {
 			Generation:   runner.Generation,
 			ConnectionID: runner.ConnectionID,
 		},
+	}
+}
+
+func TestRunnerCodeLoopbackStreamsBashUnderParent(t *testing.T) {
+	loop := newCodeLoopback(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	code := `
+const reply = await tools.bash({
+  command: "while [ ! -e start ]; do sleep 0.01; done; printf 'streamed output'; while [ ! -e finish ]; do sleep 0.01; done",
+  description: "Wait quietly then print output", timeout: 10
+});
+if ("input" in reply || "result" in reply) throw new Error("UI details entered JavaScript");
+await tools.bash({command: "while [ ! -e parent-finish ]; do sleep 0.01; done", description: "Keep parent running", timeout: 10});
+return "selected";
+`
+	updates := make(chan runnerpayload.ToolUpdateParams, 32)
+	done := make(chan runnerpayload.ToolExecuteResult, 1)
+	go func() {
+		result, err := loop.registry.ExecuteTool(ctx, runnerpayload.ToolExecuteParams{
+			RunID: "code-run", ToolCallID: "parent", Name: "code_execute",
+			Input:          mustJSON(t, map[string]string{"code": code}),
+			ManifestDigest: loop.manifest.Digest, CallableTools: new([]string{"bash"}),
+		}, func(update runnerpayload.ToolUpdateParams) { updates <- update })
+		assert.NoError(t, err)
+		done <- result
+	}()
+	nextSnapshot := func(matches func(tooltypes.CodeExecutionMetadata) bool) tooltypes.CodeExecutionMetadata {
+		t.Helper()
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case update := <-updates:
+				assert.Equal(t, "parent", update.ToolCallID)
+				assert.Equal(t, "code_execute", update.Result.Structured.ToolName)
+				assert.NotContains(t, update.Result.AssistantFacing, "streamed output")
+				meta := update.Result.Structured.Metadata.(tooltypes.CodeExecutionMetadata)
+				for _, child := range meta.Calls {
+					if child.Result != nil {
+						assert.Nil(t, child.Result.Data)
+						assert.Empty(t, child.Result.Attachments)
+					}
+				}
+				if matches(meta) {
+					return meta
+				}
+			case <-timer.C:
+				t.Fatal("parent did not publish child progress")
+				return tooltypes.CodeExecutionMetadata{}
+			}
+		}
+	}
+	initial := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 1 && meta.Calls[0].Result != nil
+	})
+	assert.Contains(t, string(initial.Calls[0].Input), "Wait quietly then print output")
+	assert.Equal(t, "running", initial.Calls[0].Status)
+	assert.Empty(t, initial.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output)
+	require.NoError(t, os.WriteFile(filepath.Join(loop.manifest.WorkingDirectory, "start"), nil, 0o600))
+	nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return meta.Calls[0].Result != nil && meta.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output == "streamed output"
+	})
+	require.NoError(t, os.WriteFile(filepath.Join(loop.manifest.WorkingDirectory, "finish"), nil, 0o600))
+	completed := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 2 && meta.Calls[0].Status == "completed" && meta.Calls[1].Result != nil
+	})
+	assert.Equal(t, "streamed output", completed.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output)
+	assert.Equal(t, "running", completed.Calls[1].Status)
+	require.NoError(t, os.WriteFile(filepath.Join(loop.manifest.WorkingDirectory, "parent-finish"), nil, 0o600))
+	select {
+	case result := <-done:
+		require.True(t, result.Result.Structured.Success, result.Result.AssistantFacing)
+		assert.Contains(t, result.Result.AssistantFacing, "selected")
+		assert.NotContains(t, result.Result.AssistantFacing, "streamed output")
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent did not finish")
+	}
+	for _, frame := range loop.wire.snapshot() {
+		var message protocol.Message
+		require.NoError(t, json.Unmarshal(frame, &message))
+		if message.Method == protocol.MethodToolUpdate {
+			var update runnerpayload.ToolUpdateParams
+			require.NoError(t, json.Unmarshal(message.Params, &update))
+			assert.Equal(t, "parent", update.ToolCallID, "there must be no child top-level update frames")
+		}
 	}
 }
 
@@ -248,8 +334,8 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 	for _, frame := range loop.wire.snapshot() {
 		var message protocol.Message
 		require.NoError(t, json.Unmarshal(frame, &message))
-		if message.Method != "" {
-			assert.NotContains(t, string(frame), secret, "only the final parent result carries UI child details")
+		if message.Method != "" && message.Method != protocol.MethodToolUpdate {
+			assert.NotContains(t, string(frame), secret, "only parent snapshots carry UI child details")
 		}
 		switch message.Method {
 		case protocol.MethodToolChildBegin, protocol.MethodToolChildEnd:
@@ -268,6 +354,7 @@ return {names: page.tools.map(t => t.name), found: matches.tools[0].name,
 			var update runnerpayload.ToolUpdateParams
 			require.NoError(t, json.Unmarshal(message.Params, &update))
 			assert.Equal(t, "parent", update.ToolCallID)
+			assert.NotContains(t, update.Result.AssistantFacing, secret)
 		}
 	}
 	assert.Equal(t, 2, begins)

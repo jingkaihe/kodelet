@@ -189,6 +189,8 @@ type ToolRequest struct {
 
 // ToolUpdate is one transient post-policy tool result snapshot.
 type ToolUpdate struct {
+	// Input is the effective post-call-hook input, omitted after output redaction.
+	Input            string
 	Result           tooltypes.ToolResult
 	StructuredResult tooltypes.StructuredToolResult
 	Modified         bool

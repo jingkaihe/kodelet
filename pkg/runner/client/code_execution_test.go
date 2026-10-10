@@ -96,7 +96,7 @@ func TestRunnerCodeChildUsesEffectiveResultAndLocalExecution(t *testing.T) {
 	authority, err := service.codeExecutionContext(t.Context(), run, params)
 	require.NoError(t, err)
 	require.Len(t, authority.Definitions, 1)
-	reply, err := authority.Call(t.Context(), "test_tool", `{"input":"private input"}`, "child")
+	reply, err := authority.Call(t.Context(), "test_tool", `{"input":"private input"}`, "child", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, calls)
 	assert.Nil(t, reply.Data)
@@ -117,6 +117,126 @@ func TestRunnerCodeChildUsesEffectiveResultAndLocalExecution(t *testing.T) {
 	}
 }
 
+func TestRunnerCodeChildExtensionStreamsThroughParent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	published := make(chan struct{}, 1)
+	environment := &codeTestEnvironment{execute: func(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+		require.NotNil(t, updates)
+		structured := tooltypes.StructuredToolResult{
+			ToolName: "test_tool", Success: true,
+			Metadata: tooltypes.ExtensionToolMetadata{Output: "live extension output"},
+			Data:     "machine-only data", Attachments: []tooltypes.ToolAttachment{{Type: "image", Data: "inline image"}},
+		}
+		updates(agentenv.ToolUpdate{
+			Input: request.Input, Result: tooltypes.BaseToolResult{Result: "raw output must not be forwarded"},
+			StructuredResult: structured,
+		})
+		select {
+		case <-published:
+		case <-ctx.Done():
+			return agentenv.ToolExecution{}, ctx.Err()
+		}
+		structured.Data, structured.Attachments = nil, nil
+		structured.Metadata = tooltypes.ExtensionToolMetadata{Output: "final extension output"}
+		return agentenv.ToolExecution{Input: request.Input, StructuredResult: structured}, nil
+	}}
+	service, run, peer, params := newCodeService(t, environment)
+	authority, err := service.codeExecutionContext(ctx, run, params)
+	require.NoError(t, err)
+	ctx = tools.ContextWithCodeExecution(ctx, authority)
+	var sawLive atomic.Bool
+	result := (&tools.CodeExecuteTool{}).ExecuteStreaming(ctx, nil, `{"code":"await tools.test_tool({query:'effective input'}); return 'selected';"}`, func(result tooltypes.ToolResult) {
+		meta := result.(tools.CodeExecuteResult).Metadata
+		if len(meta.Calls) != 1 || meta.Calls[0].Result == nil || meta.Calls[0].Status != "running" {
+			return
+		}
+		child := meta.Calls[0]
+		assert.Equal(t, "live extension output", child.Result.Metadata.(tooltypes.ExtensionToolMetadata).Output)
+		assert.JSONEq(t, `{"query":"effective input"}`, string(child.Input))
+		assert.Nil(t, child.Result.Data)
+		assert.Empty(t, child.Result.Attachments)
+		assert.NotContains(t, result.AssistantFacing(), "live extension output")
+		if sawLive.CompareAndSwap(false, true) {
+			published <- struct{}{}
+		}
+	})
+	require.False(t, result.IsError(), result.GetError())
+	assert.True(t, sawLive.Load())
+	final := result.(tools.CodeExecuteResult).Metadata.Calls[0]
+	assert.Equal(t, "final extension output", final.Result.Metadata.(tooltypes.ExtensionToolMetadata).Output)
+	assert.NotContains(t, result.AssistantFacing(), "extension output")
+	assert.Empty(t, peer.updates, "non-bash tools also stream only through the parent")
+}
+
+func TestRunnerCodeChildBashPolicyUpdates(t *testing.T) {
+	for _, redact := range []bool{false, true} {
+		name := "effective input"
+		if redact {
+			name = "redacted input and output"
+		}
+		t.Run(name, func(t *testing.T) {
+			service, peer := newSessionTestService(t, llmtypes.Config{
+				CodeMode: "only", AllowedTools: []string{"code_execute", "bash"},
+			})
+			require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1, CodeExecution: true}))
+			peer.registration.Subscriptions = []extensions.Subscription{
+				{Event: extensions.EventToolCall}, {Event: extensions.EventToolUpdate}, {Event: extensions.EventToolResult},
+			}
+			effectiveInput := json.RawMessage(`{"command":"printf 'raw output'; sleep 0.2","description":"Effective bash description","timeout":10}`)
+			peer.handleEvent = func(payload json.RawMessage) any {
+				var event struct {
+					Event string `json:"event"`
+				}
+				assert.NoError(t, json.Unmarshal(payload, &event))
+				if event.Event == extensions.EventToolCall {
+					return extensions.EventResult{Input: effectiveInput}
+				}
+				if redact {
+					return extensions.EventResult{Output: mustJSON(t, tooltypes.StructuredToolResult{
+						ToolName: "bash", Success: true, Metadata: tooltypes.BashMetadata{Output: "policy output"},
+					})}
+				}
+				return extensions.EventResult{}
+			}
+			open := sessionTestOpen("policy")
+			open.CodeExecution = true
+			manifest, err := service.openRun(t.Context(), open)
+			require.NoError(t, err)
+			authority, err := service.codeExecutionContext(t.Context(), service.runs[open.RunID], runnerpayload.ToolExecuteParams{
+				RunID: open.RunID, ToolCallID: "parent", Name: "code_execute",
+				ManifestDigest: manifest.Digest, CallableTools: new([]string{"bash"}),
+			})
+			require.NoError(t, err)
+			var snapshots []tools.CodeToolReply
+			reply, err := authority.Call(t.Context(), "bash", `{"command":"echo original","description":"Original description","timeout":10}`, "child", func(snapshot tools.CodeToolReply) {
+				snapshots = append(snapshots, snapshot)
+			})
+			require.NoError(t, err)
+			require.NotEmpty(t, snapshots)
+			for _, snapshot := range snapshots {
+				require.NotNil(t, snapshot.Result)
+				assert.Nil(t, snapshot.Result.Data)
+				assert.Empty(t, snapshot.Result.Attachments)
+				if redact {
+					assert.Empty(t, snapshot.Input, "updates cannot bypass output-hook redaction via effective arguments")
+					assert.Equal(t, "policy output", snapshot.Result.Metadata.(tooltypes.BashMetadata).Output)
+					assert.Empty(t, snapshot.Result.Metadata.(tooltypes.BashMetadata).Command)
+				} else {
+					assert.JSONEq(t, string(effectiveInput), string(snapshot.Input))
+				}
+			}
+			if redact {
+				assert.Nil(t, reply.Input)
+				assert.Equal(t, "policy output", reply.Text)
+			} else {
+				assert.Equal(t, "raw output", reply.Text)
+			}
+			assert.Empty(t, peer.updates, "children publish only through the parent's callback, never as top-level updates")
+		})
+	}
+}
+
 func TestRunnerMachineDataStaysRunnerLocal(t *testing.T) {
 	machineData := map[string]any{"rows": []any{"machine-row"}}
 	environment := &codeTestEnvironment{execute: func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
@@ -134,7 +254,7 @@ func TestRunnerMachineDataStaysRunnerLocal(t *testing.T) {
 	service, run, _, params := newCodeService(t, environment)
 	authority, err := service.codeExecutionContext(t.Context(), run, params)
 	require.NoError(t, err)
-	reply, err := authority.Call(t.Context(), "test_tool", `{}`, "child")
+	reply, err := authority.Call(t.Context(), "test_tool", `{}`, "child", nil)
 	require.NoError(t, err)
 	assert.Equal(t, machineData, reply.Data, "code-mode children keep machine data")
 
@@ -143,7 +263,7 @@ func TestRunnerMachineDataStaysRunnerLocal(t *testing.T) {
 		ToolCallID: "direct",
 		Name:       "test_tool",
 		Input:      json.RawMessage(`{}`),
-	}, false)
+	}, false, nil)
 	require.NoError(t, err)
 	assert.Nil(t, direct.Result.Structured.Data)
 	encoded, err := json.Marshal(direct)
@@ -196,7 +316,7 @@ func TestRunnerCodeAuthorization(t *testing.T) {
 			if name == "empty" || name == "agent restriction" || name == "command restriction" {
 				require.NoError(t, err)
 				assert.Empty(t, authority.Definitions)
-				_, err = authority.Call(t.Context(), "test_tool", `{}`, "child")
+				_, err = authority.Call(t.Context(), "test_tool", `{}`, "child", nil)
 				var denied *tools.CodeToolError
 				require.ErrorAs(t, err, &denied)
 				assert.Equal(t, "not_started", denied.Outcome)
@@ -224,7 +344,7 @@ func TestRunnerCodeRegistrationFailureDoesNotExecute(t *testing.T) {
 	service.peer = &modelHelperPeer{call: func(context.Context, string, any, any) error { return errors.New("lost acknowledgement") }}
 	authority, err := service.codeExecutionContext(t.Context(), run, params)
 	require.NoError(t, err)
-	_, err = authority.Call(t.Context(), "test_tool", `{}`, "child")
+	_, err = authority.Call(t.Context(), "test_tool", `{}`, "child", nil)
 	var failure *tools.CodeToolError
 	require.ErrorAs(t, err, &failure)
 	assert.Equal(t, "not_started", failure.Outcome)
@@ -244,7 +364,7 @@ func TestRunnerCodeChildCancellation(t *testing.T) {
 	require.NoError(t, err)
 	done := make(chan error, 1)
 	go func() {
-		_, err := authority.Call(t.Context(), "test_tool", `{}`, "child")
+		_, err := authority.Call(t.Context(), "test_tool", `{}`, "child", nil)
 		done <- err
 	}()
 	select {
@@ -578,7 +698,7 @@ func TestRunnerCodeFailureProvenanceSurvivesHooks(t *testing.T) {
 			}})
 			authority, err := service.codeExecutionContext(t.Context(), run, params)
 			require.NoError(t, err)
-			_, err = authority.Call(t.Context(), "test_tool", `{}`, "child")
+			_, err = authority.Call(t.Context(), "test_tool", `{}`, "child", nil)
 			var childError *tools.CodeToolError
 			require.ErrorAs(t, err, &childError)
 			assert.Equal(t, failure.kind, childError.Kind)

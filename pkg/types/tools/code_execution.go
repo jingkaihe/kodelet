@@ -24,7 +24,7 @@ type CodeExecutionOutput struct {
 // ToolType identifies the code execution result renderer.
 func (CodeExecutionMetadata) ToolType() string { return "code_execute" }
 
-// CodeExecutionCall describes one child, with bounded final details for the UI.
+// CodeExecutionCall describes one child, with bounded live or final details for the UI.
 type CodeExecutionCall struct {
 	CallID         string                `json:"callId"`
 	ToolName       string                `json:"toolName"`

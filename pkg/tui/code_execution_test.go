@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +42,7 @@ func TestCodeExecutionParentCard(t *testing.T) {
 	result.Metadata.(tooltypes.CodeExecutionMetadata).Calls[0].DetailsOmitted = true
 	assert.Contains(t, m.toolRenderGroups(block)[3].body, "exceeded the storage limit")
 	block.tools[1].done = false
+	result.Metadata.(tooltypes.CodeExecutionMetadata).Calls[0].DetailsOmitted = false
 	groups = m.toolRenderGroups(block)
 	assert.True(t, groups[1].active)
 	assert.NotContains(t, groups[2].body, "Selected output")
@@ -71,8 +74,8 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	result := tooltypes.StructuredToolResult{ToolName: "code_execute", Success: true, Metadata: tooltypes.CodeExecutionMetadata{
 		Status: "completed", Items: []tooltypes.CodeExecutionOutput{{Type: "json", Value: json.RawMessage(`"script output"`)}},
 		Calls: []tooltypes.CodeExecutionCall{
-			{CallID: "one", ToolName: "bash", Status: "completed", Result: &bash},
-			{CallID: "two", ToolName: "bash", Status: "unknown", Result: &bash},
+			{CallID: "one", ToolName: "bash", Status: "completed", Input: json.RawMessage(`{"description":"Run first command"}`), Result: &bash},
+			{CallID: "two", ToolName: "bash", Status: "unknown", Input: json.RawMessage(`{"description":"Run second command"}`), Result: &bash},
 			{CallID: "patch", ToolName: "apply_patch", Status: "completed", Result: &patch},
 			{CallID: "three", ToolName: "bash", Status: "completed", Result: &bash},
 		},
@@ -100,11 +103,12 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 		}
 		t.Fatalf("missing fold %q", key)
 	}
-	assert.NotContains(t, render(), "Ran 2 commands")
+	assert.NotContains(t, render(), "Run first command")
 	toggle("")
 	content := render()
 	assert.Contains(t, content, "  ✓ Code ▸")
-	assert.Contains(t, content, "  ✗ Ran 2 commands ▸", "host failure status wins over the child result")
+	assert.Contains(t, content, "  ✓ bash · Run first command ▸")
+	assert.Contains(t, content, "  ✗ bash · Run second command ▸", "host failure status wins over the child result")
 	assert.Contains(t, content, "first.go")
 	assert.Contains(t, content, "second.go")
 	assert.NotContains(t, content, "Applied patch")
@@ -114,7 +118,7 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	assert.Contains(t, render(), "const value = 42;")
 	assert.Contains(t, render(), "script output")
 	toggle("one:0:-1")
-	assert.Equal(t, 2, strings.Count(render(), "nested command output"))
+	assert.Equal(t, 1, strings.Count(render(), "nested command output"), "commands expand independently")
 	toggle("patch:2:0")
 	assert.Contains(t, render(), "new-first")
 	assert.NotContains(t, render(), "new-second")
@@ -127,5 +131,152 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	toggle("patch:2:1")
 	assert.NotContains(t, render(), "new-second", "individual folds work after expand-all")
 	m.toggleAllDetails()
-	assert.NotContains(t, render(), "Ran 2 commands")
+	assert.NotContains(t, render(), "Run first command")
+}
+
+func TestCodeExecutionLiveBashFolds(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 100, 100
+	m.resize()
+	m.running = true
+	m.applyChatEvent(chat.ChatEvent{
+		Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute",
+		Input: `{"code":"await Promise.all([tools.bash({}), tools.bash({})]);"}`,
+	})
+	observedAt := time.Now().Add(time.Hour)
+	first := tooltypes.CodeExecutionCall{
+		CallID: "first", ToolName: "bash", Status: "running",
+		Input: json.RawMessage(`{"command":"mise run test","description":"Run focused tests"}`),
+	}
+	second := tooltypes.CodeExecutionCall{
+		CallID: "second", ToolName: "bash", Status: "running",
+		Input: json.RawMessage(`{"command":"mise run lint","description":"Check lint"}`),
+		Result: &tooltypes.StructuredToolResult{
+			ToolName: "bash", Success: true, Timestamp: observedAt,
+			Metadata: tooltypes.BashMetadata{Command: "mise run lint", Output: "lint in progress", ExecutionTime: time.Second},
+		},
+	}
+	update := func(kind string) {
+		m.applyChatEvent(chat.ChatEvent{
+			Kind: kind, ToolCallID: "parent",
+			ToolResult: &tooltypes.StructuredToolResult{
+				ToolName: "code_execute", Success: true,
+				Metadata: tooltypes.CodeExecutionMetadata{Calls: []tooltypes.CodeExecutionCall{first, second}},
+			},
+		})
+	}
+	render := func() string {
+		m.refreshViewport(false)
+		return xansi.Strip(m.View().Content)
+	}
+	toggle := func(key string) {
+		t.Helper()
+		render()
+		for _, region := range m.detailRegions {
+			if region.codeKey == key {
+				m.viewport.SetYOffset(max(0, region.line-2))
+				require.True(t, m.toggleDetailAt(region.line-m.viewport.YOffset()))
+				return
+			}
+		}
+		t.Fatalf("missing fold %q", key)
+	}
+	update("tool-update")
+	content := render()
+	assert.Contains(t, content, "bash · Run focused tests… ▸", "description is available before output")
+	assert.Contains(t, content, "bash · Check lint… ▸")
+	assert.NotContains(t, content, "$ mise run test")
+	assert.NotContains(t, content, "lint in progress")
+	toggle("first:0:-1")
+	assert.Contains(t, render(), "$ mise run test")
+	first.Result = &tooltypes.StructuredToolResult{
+		ToolName: "bash", Success: true, Timestamp: observedAt,
+		Metadata: tooltypes.BashMetadata{Command: "mise run test", Output: "first test passed", ExecutionTime: 7 * time.Second},
+	}
+	update("tool-update")
+	content = render()
+	assert.Contains(t, content, "first test passed")
+	assert.NotContains(t, content, "lint in progress", "parallel siblings remain folded")
+	assert.Contains(t, content, "$ mise run test  ·  7s")
+	assert.NotContains(t, content, transcriptElapsedPlaceholderSuffix)
+	first.Result.Timestamp = time.Now().Add(-2 * time.Second)
+	assert.Contains(t, xansi.Strip(m.View().Content), "$ mise run test  ·  9s", "nested elapsed time updates without rebuilding the transcript")
+	first.Result.Timestamp = observedAt
+	first.Result.Metadata = tooltypes.BashMetadata{Command: "mise run test", Output: "all tests passed", ExecutionTime: 8 * time.Second}
+	first.Status = "completed"
+	update("tool-update")
+	content = render()
+	assert.Contains(t, content, "✓ bash · Run focused tests ▾")
+	assert.Contains(t, content, "all tests passed", "completed child details are available before the parent finishes")
+	assert.NotContains(t, content, "first test passed", "snapshots replace rather than append output")
+	toggle("first:0:-1")
+	assert.NotContains(t, render(), "all tests passed")
+	toggle("second:1:-1")
+	assert.Contains(t, render(), "lint in progress")
+	toggle("")
+	assert.NotContains(t, render(), "lint in progress", "collapsing the parent hides all streaming output")
+	toggle("")
+	assert.Contains(t, render(), "lint in progress")
+	second.Status = "completed"
+	update("tool-result")
+	assert.Contains(t, render(), "✓ bash · Check lint ▾", "final results preserve child fold choices")
+	assert.NotContains(t, render(), "all tests passed")
+}
+
+func TestCodeExecutionLiveExtensionFolds(t *testing.T) {
+	for _, presentation := range []bool{false, true} {
+		name := "plain output"
+		if presentation {
+			name = "custom presentation"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width, m.height = 100, 100
+			m.resize()
+			m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute"})
+			update := func(output, status string) {
+				metadata := tooltypes.ExtensionToolMetadata{ToolName: "stream_tool", Output: output}
+				if presentation {
+					metadata.Data = map[string]any{
+						"presentation": map[string]any{
+							"summary": "Streaming extension", "body": output, "format": "markdown",
+						},
+					}
+				}
+				m.applyChatEvent(chat.ChatEvent{
+					Kind: "tool-update", ToolCallID: "parent",
+					ToolResult: &tooltypes.StructuredToolResult{
+						ToolName: "code_execute", Success: true,
+						Metadata: tooltypes.CodeExecutionMetadata{Calls: []tooltypes.CodeExecutionCall{{
+							CallID: "child", ToolName: "stream_tool", Status: status,
+							Result: &tooltypes.StructuredToolResult{ToolName: "stream_tool", Success: true, Metadata: metadata},
+						}}},
+					},
+				})
+			}
+			render := func() string {
+				m.refreshViewport(false)
+				return xansi.Strip(m.View().Content)
+			}
+			update("first partial output", "running")
+			assert.NotContains(t, render(), "first partial output")
+			require.Len(t, m.detailRegions, 3)
+			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
+			assert.Contains(t, render(), "first partial output")
+			update("second partial output", "running")
+			content := render()
+			assert.Contains(t, content, "second partial output")
+			assert.NotContains(t, content, "first partial output")
+			if presentation {
+				assert.Contains(t, content, "Streaming extension… ▾")
+			}
+			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
+			update("final extension output", "completed")
+			assert.NotContains(t, render(), "final extension output", "completion does not reopen a collapsed child")
+			require.True(t, m.toggleDetailAt(m.detailRegions[2].line))
+			assert.Contains(t, render(), "final extension output", "a finished extension is readable before the script finishes")
+		})
+	}
 }

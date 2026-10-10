@@ -71,21 +71,6 @@ export default function CodeExecutionRenderer({
   const meta = toolResult.metadata as CodeExecutionMetadata | undefined;
   const items = meta?.items ?? meta?.outputs?.map((value) => ({ type: 'json' as const, value }));
   const hasMedia = items?.some((item) => item.type === 'image' || item.type === 'artifact');
-  const groups: CodeExecutionMetadata['calls'][] = [];
-  for (const call of meta?.calls ?? []) {
-    const previous = groups[groups.length - 1];
-    if (
-      !isPartial &&
-      call.result &&
-      previous?.[0].result &&
-      call.toolName === 'bash' &&
-      previous[0].toolName === 'bash'
-    ) {
-      previous.push(call);
-    } else {
-      groups.push([call]);
-    }
-  }
   return (
     <div className="activity-stack">
       <Section title="Code" open={hasMedia || undefined}>
@@ -151,20 +136,24 @@ export default function CodeExecutionRenderer({
           </div>
         ) : null}
       </Section>
-      {groups.map((group) => {
-        const call = group[0];
-        return call.result && !isPartial ? (
+      {meta?.calls?.map((call) => {
+        const running = call.status === 'running' || call.status === 'queued';
+        return call.result || (running && !call.detailsOmitted) ? (
           <ChatToolActivity
             key={call.callId}
-            tools={group.map((child) => ({
-              callId: child.callId,
-              name: child.toolName,
-              input: JSON.stringify(child.input ?? {}),
-              result: child.result && {
-                ...child.result,
-                success: child.result.success && child.status === 'completed',
+            nested
+            tools={[
+              {
+                callId: call.callId,
+                name: call.toolName,
+                input: JSON.stringify(call.input ?? {}),
+                inProgress: running,
+                result: call.result && {
+                  ...call.result,
+                  success: call.result.success && (running || call.status === 'completed'),
+                },
               },
-            }))}
+            ]}
           />
         ) : (
           <Section
@@ -174,11 +163,9 @@ export default function CodeExecutionRenderer({
           >
             <ReferenceToolNote
               text={
-                isPartial
-                  ? 'Child tool details are available when code execution finishes.'
-                  : call.detailsOmitted
-                    ? 'Child tool details exceeded the storage limit.'
-                    : 'Child tool details were not saved for this invocation.'
+                call.detailsOmitted
+                  ? 'Child tool details exceeded the storage limit.'
+                  : 'Child tool details were not saved for this invocation.'
               }
             />
           </Section>

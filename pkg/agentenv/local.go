@@ -470,7 +470,16 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 				return
 			}
 			if outputDecision.Accepted {
-				updates(ToolUpdate{Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified})
+				input := effectiveInput
+				if outputDecision.Modified {
+					input = ""
+				}
+				updates(ToolUpdate{
+					Input:            input,
+					Result:           result,
+					StructuredResult: outputDecision.StructuredResult,
+					Modified:         outputDecision.Modified,
+				})
 			}
 		}
 	}

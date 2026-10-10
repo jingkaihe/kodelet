@@ -1343,12 +1343,12 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 		return runnerpayload.ToolExecuteResult{}, err
 	}
 	defer finish()
-	return s.executeRunTool(operationCtx, run, params, false)
+	return s.executeRunTool(operationCtx, run, params, false, nil)
 }
 
 // executeRunTool is shared by top-level RPCs and runner-local children.
 // Callers own run-operation accounting and the invocation's cancellation context.
-func (s *Service) executeRunTool(operationCtx context.Context, run *activeRun, params runnerpayload.ToolExecuteParams, nested bool) (runnerpayload.ToolExecuteResult, error) {
+func (s *Service) executeRunTool(operationCtx context.Context, run *activeRun, params runnerpayload.ToolExecuteParams, nested bool, childUpdates agentenv.ToolUpdateSink) (runnerpayload.ToolExecuteResult, error) {
 	peer := s.currentPeer()
 	if nested || params.Name == "code_execute" {
 		operationCtx = extensions.ContextWithStrictToolPolicy(operationCtx)
@@ -1379,7 +1379,9 @@ func (s *Service) executeRunTool(operationCtx context.Context, run *activeRun, p
 		})
 	}
 	var updateSink agentenv.ToolUpdateSink
-	if params.WantUpdates {
+	if nested {
+		updateSink = childUpdates
+	} else if params.WantUpdates {
 		requestID := protocol.RequestIDFromContext(operationCtx)
 		if requestID == "" {
 			return runnerpayload.ToolExecuteResult{}, errors.New("tool.execute request id is unavailable")

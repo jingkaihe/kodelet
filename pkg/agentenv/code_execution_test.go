@@ -130,7 +130,7 @@ func TestCodeExecutionArtifactSelectionSurvivesHooksSaveAndRestart(t *testing.T)
 	ctx := tools.ContextWithCodeExecution(t.Context(), tools.CodeExecutionContext{
 		Definitions:   []codemode.Definition{{Name: "images"}, {Name: "view_image"}},
 		ValidateImage: func(string) error { return nil },
-		Call: func(ctx context.Context, _, _, callID string) (tools.CodeToolReply, error) {
+		Call: func(ctx context.Context, _, _, callID string, _ func(tools.CodeToolReply)) (tools.CodeToolReply, error) {
 			var reply tools.CodeToolReply
 			for range 3 {
 				attachment, err := images.Put(ctx, "conversation", callID, tooltypes.ToolAttachment{Type: "image"}, bytes.NewReader(content.Bytes()))

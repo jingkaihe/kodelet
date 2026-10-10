@@ -25,7 +25,7 @@ func TestCodeExecuteToolDiscoveryAndCalls(t *testing.T) {
 	tool := &CodeExecuteTool{}
 	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 		Definitions: []codemode.Definition{{Name: "lookup", Description: "Find issue details", Group: "extension/test"}},
-		Call: func(_ context.Context, name, input, callID string) (CodeToolReply, error) {
+		Call: func(_ context.Context, name, input, callID string, _ func(CodeToolReply)) (CodeToolReply, error) {
 			assert.Equal(t, "lookup", name)
 			assert.JSONEq(t, `{"id":42}`, input)
 			assert.NotEmpty(t, callID)
@@ -55,9 +55,12 @@ return {id: result.data.id};
 		updates++
 		assert.Equal(t, "code_execute", snapshot.StructuredData().ToolName)
 		for _, call := range snapshot.(CodeExecuteResult).Metadata.Calls {
-			assert.Nil(t, call.Input)
-			assert.Nil(t, call.Result, "progress must not stream child bodies")
+			if call.Result != nil {
+				assert.Nil(t, call.Result.Data)
+				assert.Empty(t, call.Result.Attachments)
+			}
 		}
+		assert.NotContains(t, snapshot.AssistantFacing(), "UI-only detail")
 	})
 	require.False(t, result.IsError(), result.GetError())
 	assert.Positive(t, updates)
@@ -84,7 +87,7 @@ return {id: result.data.id};
 func TestCodeExecuteToolBoundsChildDetails(t *testing.T) {
 	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 		Definitions: []codemode.Definition{{Name: "lookup"}},
-		Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+		Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 			return CodeToolReply{Result: &tooltypes.StructuredToolResult{
 				ToolName: "lookup", Success: true,
 				Metadata: tooltypes.ExtensionToolMetadata{Output: strings.Repeat("x", 300*1024)},
@@ -104,7 +107,7 @@ func TestCodeExecuteToolBoundsChildDetails(t *testing.T) {
 func TestCodeExecuteToolCaughtFailure(t *testing.T) {
 	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 		Definitions: []codemode.Definition{},
-		Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+		Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 			t.Fatal("a forbidden tool must not be dispatched")
 			return CodeToolReply{}, nil
 		},
@@ -172,7 +175,7 @@ func TestCodeExecuteToolRetainsArtifactsFromEffectiveErrorReply(t *testing.T) {
 	attachment := tooltypes.ToolAttachment{Type: "image", ArtifactID: "partial-image"}
 	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 		Definitions: []codemode.Definition{{Name: "images"}},
-		Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
+		Call: func(_ context.Context, name, _, callID string, _ func(CodeToolReply)) (CodeToolReply, error) {
 			return CodeToolReply{Attachments: []tooltypes.ToolAttachment{{Type: "image", ArtifactID: "raw-image"}}}, &CodeToolError{
 				Kind: "tool_error", Tool: name, CallID: callID, Outcome: "completed", Message: "partial failure",
 				Result: &CodeToolReply{
@@ -256,7 +259,7 @@ func TestCodeExecuteResultSendsSelectedStringsAsPlainText(t *testing.T) {
 
 func TestCodeExecuteToolConsoleLogReachesModelAsText(t *testing.T) {
 	ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
-		Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+		Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 			return CodeToolReply{}, nil
 		},
 	})
@@ -299,7 +302,7 @@ emit.artifact(r.attachments[1]);`,
 					assert.Equal(t, "original", detail)
 					return nil
 				},
-				Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+				Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 					return CodeToolReply{Attachments: []tooltypes.ToolAttachment{
 						{Type: "image", ArtifactID: "image-1", MimeType: "image/png"},
 						{Type: "image", ArtifactID: "image-2", MimeType: "image/png"},
@@ -351,7 +354,7 @@ func TestCodeExecuteToolRejectedReplyPreservesFailureSummaryAndOutcome(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: map[string]any{"type": "invalid"}}},
-				Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+				Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 					reply := CodeToolReply{Data: test.data}
 					if test.outcome != "" {
 						return reply, &CodeToolError{Kind: "tool_error", Outcome: test.outcome, Result: &reply}
@@ -424,7 +427,7 @@ func TestCodeExecuteToolOutputSchemaValidation(t *testing.T) {
 			calls := 0
 			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: schema}},
-				Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
+				Call: func(_ context.Context, name, _, callID string, _ func(CodeToolReply)) (CodeToolReply, error) {
 					calls++
 					reply := CodeToolReply{Data: json.RawMessage(test.data)}
 					if test.outcome != "" {
@@ -477,7 +480,7 @@ func TestCodeExecuteToolMismatchedPartialDataKeepsFailure(t *testing.T) {
 			Name:         "lookup",
 			OutputSchema: map[string]any{"type": "object", "required": []any{"items"}},
 		}},
-		Call: func(_ context.Context, name, _, callID string) (CodeToolReply, error) {
+		Call: func(_ context.Context, name, _, callID string, _ func(CodeToolReply)) (CodeToolReply, error) {
 			calls++
 			partial := CodeToolReply{
 				Data:        map[string]any{"error": "rate_limited"},
@@ -539,7 +542,7 @@ func TestCodeExecuteToolOutputSchemaCannotLoadExternalResources(t *testing.T) {
 	} {
 		ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 			Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: schema}},
-			Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+			Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 				return CodeToolReply{Data: map[string]any{}}, nil
 			},
 		})
@@ -571,7 +574,7 @@ func TestCodeExecuteToolValidatesAndReturnsSameSnapshot(t *testing.T) {
 			data := &changingCodeToolData{}
 			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
 				Definitions: []codemode.Definition{{Name: "lookup", OutputSchema: map[string]any{"type": "integer"}}},
-				Call: func(context.Context, string, string, string) (CodeToolReply, error) {
+				Call: func(context.Context, string, string, string, func(CodeToolReply)) (CodeToolReply, error) {
 					reply := CodeToolReply{Data: data}
 					if failure {
 						return reply, &CodeToolError{Kind: "tool_error", Message: "failed", Outcome: "completed", Result: &reply}
@@ -602,7 +605,7 @@ func TestCodeExecuteToolCancellationDoesNotWaitForProgressHook(t *testing.T) {
 	defer cancel()
 	ctx = ContextWithCodeExecution(ctx, CodeExecutionContext{
 		Definitions: []codemode.Definition{{Name: "lookup"}},
-		Call: func(ctx context.Context, _, _, _ string) (CodeToolReply, error) {
+		Call: func(ctx context.Context, _, _, _ string, _ func(CodeToolReply)) (CodeToolReply, error) {
 			return CodeToolReply{}, ctx.Err()
 		},
 	})
@@ -634,5 +637,259 @@ func TestCodeExecuteToolCancellationDoesNotWaitForProgressHook(t *testing.T) {
 			t.Fatal("execution did not finish even after progress hook was released")
 		}
 		t.Error("cancelled execution waited for a progress callback instead of respecting parent cancellation")
+	}
+}
+
+func TestCodeExecuteToolFinalDetailsReplaceLiveSnapshot(t *testing.T) {
+	for _, transportFailure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("transport failure=%t", transportFailure), func(t *testing.T) {
+			ctx := ContextWithCodeExecution(t.Context(), CodeExecutionContext{
+				Definitions: []codemode.Definition{{Name: "bash"}},
+				Call: func(_ context.Context, _, _, _ string, update func(CodeToolReply)) (CodeToolReply, error) {
+					update(CodeToolReply{
+						Input: json.RawMessage(`{"description":"private input"}`),
+						Result: &tooltypes.StructuredToolResult{
+							ToolName: "bash", Success: true, Metadata: tooltypes.BashMetadata{Output: "private output"},
+						},
+					})
+					if transportFailure {
+						return CodeToolReply{}, &CodeToolError{Kind: "transport", Outcome: "unknown", Message: "lost connection"}
+					}
+					return CodeToolReply{Result: &tooltypes.StructuredToolResult{
+						ToolName: "bash", Success: true, Metadata: tooltypes.BashMetadata{Output: "redacted"},
+					}}, nil
+				},
+			})
+			result := (&CodeExecuteTool{}).ExecuteStreaming(ctx, nil, `{"code":"await tools.bash({});"}`, func(tooltypes.ToolResult) {})
+			call := result.(CodeExecuteResult).Metadata.Calls[0]
+			assert.Nil(t, call.Input)
+			if transportFailure {
+				assert.Equal(t, "unknown", call.Status)
+				assert.Nil(t, call.Result)
+			} else {
+				assert.Equal(t, "completed", call.Status)
+				require.NotNil(t, call.Result)
+				assert.Equal(t, "redacted", call.Result.Metadata.(tooltypes.BashMetadata).Output)
+			}
+			encoded, err := json.Marshal(result.StructuredData())
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "private")
+		})
+	}
+}
+
+func TestCodeExecuteToolCoalescesWhileProgressHookIsBlocked(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	childUpdate := make(chan func(CodeToolReply), 1)
+	ctx = ContextWithCodeExecution(ctx, CodeExecutionContext{
+		Definitions: []codemode.Definition{{Name: "bash"}},
+		Call: func(ctx context.Context, _, _, _ string, update func(CodeToolReply)) (CodeToolReply, error) {
+			childUpdate <- update
+			<-ctx.Done()
+			return CodeToolReply{}, ctx.Err()
+		},
+	})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var count atomic.Int32
+	snapshots := make(chan CodeExecuteResult, 8)
+	finished := make(chan tooltypes.ToolResult, 1)
+	go func() {
+		finished <- (&CodeExecuteTool{}).ExecuteStreaming(ctx, nil, `{"code":"await tools.bash({});"}`, func(result tooltypes.ToolResult) {
+			if count.Add(1) == 2 {
+				close(entered)
+				<-release
+			} else if count.Load() > 2 {
+				snapshots <- result.(CodeExecuteResult)
+			}
+		})
+	}()
+	var update func(CodeToolReply)
+	select {
+	case update = <-childUpdate:
+	case <-time.After(5 * time.Second):
+		t.Fatal("child did not start")
+	}
+	reply := CodeToolReply{Result: &tooltypes.StructuredToolResult{
+		ToolName: "bash", Success: true, Metadata: tooltypes.BashMetadata{Output: "first"},
+	}}
+	update(reply)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("progress hook did not start")
+	}
+	for i := range 4 {
+		reply.Result.Metadata = tooltypes.BashMetadata{Output: fmt.Sprintf("update %d", i)}
+		update(reply)
+		time.Sleep(110 * time.Millisecond)
+	}
+	assert.EqualValues(t, 2, count.Load(), "only one publication may be in flight")
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case snapshot := <-snapshots:
+		assert.Equal(t, "update 3", snapshot.Metadata.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output, "flush the latest snapshot, not a queue of stale snapshots")
+	case <-time.After(5 * time.Second):
+		t.Fatal("coalesced update did not arrive")
+	}
+	// Schedule a trailing update, then cancel before the throttle window closes.
+	update(reply)
+	cancel()
+	select {
+	case result := <-finished:
+		assert.True(t, result.IsError())
+	case <-time.After(time.Second):
+		t.Fatal("cancelled execution did not finish")
+	}
+	update(reply)
+	select {
+	case <-snapshots:
+		t.Fatal("received progress after cancellation")
+	case <-time.After(150 * time.Millisecond):
+	}
+	assert.EqualValues(t, 3, count.Load())
+}
+
+func TestCodeExecuteToolLiveChildDetails(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type child struct {
+		update func(CodeToolReply)
+		finish chan CodeToolReply
+	}
+	children := make(chan child, 2)
+	ctx = ContextWithCodeExecution(ctx, CodeExecutionContext{
+		Definitions: []codemode.Definition{{Name: "bash"}},
+		Call: func(ctx context.Context, _, _, _ string, update func(CodeToolReply)) (CodeToolReply, error) {
+			call := child{update: update, finish: make(chan CodeToolReply, 1)}
+			children <- call
+			select {
+			case reply := <-call.finish:
+				return reply, nil
+			case <-ctx.Done():
+				return CodeToolReply{}, ctx.Err()
+			}
+		},
+	})
+	updates := make(chan CodeExecuteResult, 32)
+	finished := make(chan tooltypes.ToolResult, 1)
+	go func() {
+		finished <- (&CodeExecuteTool{}).ExecuteStreaming(ctx, nil, `{"code":"await tools.bash({}); await tools.bash({}); return 'selected';"}`, func(result tooltypes.ToolResult) {
+			updates <- result.(CodeExecuteResult)
+		})
+	}()
+	nextChild := func() child {
+		t.Helper()
+		select {
+		case call := <-children:
+			return call
+		case <-time.After(5 * time.Second):
+			t.Fatal("child did not start")
+			return child{}
+		}
+	}
+	var snapshots []CodeExecuteResult
+	nextSnapshot := func(matches func(tooltypes.CodeExecutionMetadata) bool) CodeExecuteResult {
+		t.Helper()
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case snapshot := <-updates:
+				snapshots = append(snapshots, snapshot)
+				if matches(snapshot.Metadata) {
+					return snapshot
+				}
+			case <-timer.C:
+				t.Fatal("live child snapshot did not arrive")
+				return CodeExecuteResult{}
+			}
+		}
+	}
+	first := nextChild()
+	input := json.RawMessage(`{"description":"Run tests quietly","command":"sleep 1"}`)
+	metadata := &tooltypes.BashMetadata{Command: "sleep 1"}
+	reply := CodeToolReply{
+		Input: input,
+		Result: &tooltypes.StructuredToolResult{
+			ToolName: "bash", Success: true, Metadata: metadata,
+			Data: "machine secret", Attachments: []tooltypes.ToolAttachment{{Type: "image", Data: "image secret"}},
+		},
+	}
+	first.update(reply)
+	initial := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 1 && meta.Calls[0].Result != nil
+	})
+	assert.JSONEq(t, string(input), string(initial.Metadata.Calls[0].Input), "a silent command must publish its description without another update")
+	assert.Equal(t, "running", initial.Metadata.Calls[0].Status)
+	for range 3 {
+		metadata.Output = strings.Repeat("x", 300*1024)
+		first.update(reply)
+	}
+	// Callers can reuse buffers without changing an already accepted snapshot.
+	metadata.Output = "mutated after callback"
+	input[2] = 'X'
+	live := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return meta.Calls[0].Result != nil && meta.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output != ""
+	})
+	assert.Len(t, live.Metadata.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output, 300*1024)
+	assert.Contains(t, string(live.Metadata.Calls[0].Input), "description")
+	assert.Empty(t, initial.Metadata.Calls[0].Result.Metadata.(tooltypes.BashMetadata).Output)
+	assert.False(t, live.Metadata.Calls[0].DetailsOmitted, "replacement snapshots do not consume a cumulative budget")
+	reply.Input = json.RawMessage(`{"description":"Final description"}`)
+	metadata.Output = strings.Repeat("x", 300*1024)
+	first.finish <- reply
+	second := nextChild()
+	// No further updates are necessary to publish a completed child's result.
+	completed := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 2 && meta.Calls[0].Status == "completed"
+	})
+	assert.NotNil(t, completed.Metadata.Calls[0].Result)
+	secondReply := CodeToolReply{Result: &tooltypes.StructuredToolResult{
+		ToolName: "bash", Success: true, Metadata: tooltypes.BashMetadata{Output: strings.Repeat("y", 300*1024)},
+	}}
+	second.update(secondReply)
+	bounded := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 2 && meta.Calls[1].DetailsOmitted
+	})
+	assert.NotNil(t, bounded.Metadata.Calls[0].Result)
+	assert.Nil(t, bounded.Metadata.Calls[1].Result, "live and final details share the aggregate budget")
+	// A small replacement fits again; a late update cannot overwrite a completed child.
+	secondReply.Result.Metadata = tooltypes.BashMetadata{Output: "redacted UI detail"}
+	second.update(secondReply)
+	first.update(CodeToolReply{})
+	redacted := nextSnapshot(func(meta tooltypes.CodeExecutionMetadata) bool {
+		return len(meta.Calls) == 2 && meta.Calls[1].Result != nil
+	})
+	assert.Nil(t, redacted.Metadata.Calls[1].Input)
+	assert.False(t, redacted.Metadata.Calls[1].DetailsOmitted)
+	assert.NotNil(t, redacted.Metadata.Calls[0].Result)
+	second.finish <- secondReply
+	select {
+	case result := <-finished:
+		require.False(t, result.IsError(), result.GetError())
+		assert.Contains(t, result.AssistantFacing(), "selected")
+		snapshots = append(snapshots, result.(CodeExecuteResult))
+	case <-time.After(5 * time.Second):
+		t.Fatal("script did not finish")
+	}
+	for _, snapshot := range snapshots {
+		assert.NotContains(t, snapshot.AssistantFacing(), "UI detail")
+		assert.NotContains(t, snapshot.AssistantFacing(), "description")
+		assert.NotContains(t, snapshot.AssistantFacing(), strings.Repeat("x", 100))
+		encoded, err := json.Marshal(snapshot.StructuredData())
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), "machine secret")
+		assert.NotContains(t, string(encoded), "image secret")
+		assert.Less(t, len(encoded), 513*1024)
+	}
+	// The pending final progress timer and callbacks cannot publish after completion.
+	second.update(CodeToolReply{})
+	select {
+	case <-updates:
+		t.Fatal("received progress after completion")
+	case <-time.After(150 * time.Millisecond):
 	}
 }

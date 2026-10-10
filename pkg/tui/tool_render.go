@@ -145,55 +145,50 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []to
 		toolStart: idx, toolEnd: idx, changeIndex: -1, codeKey: "code",
 		label: "Code", body: body, markdownBody: true, expanded: expanded("code"),
 	})
-	// Reuse normal command aggregation and per-file rendering at the nested width.
+	// Reuse normal tool bodies and per-file rendering at the nested width. Keep
+	// commands separate so parallel output is only shown for expanded children.
 	nested := *m
 	nested.width = max(1, m.width-2)
 	nested.viewport.SetWidth(max(1, m.viewport.Width()-2))
-	for start := 0; start < len(meta.Calls); {
-		call := meta.Calls[start]
+	for callIndex, call := range meta.Calls {
 		var children []toolRenderGroup
-		end := start
-		childBlock := assistantBlock{}
-		for tool.done && end < len(meta.Calls) && meta.Calls[end].Result != nil {
-			child := meta.Calls[end]
-			childBlock.tools = append(childBlock.tools, toolCall{
-				id: child.CallID, name: child.ToolName, input: string(child.Input), done: true,
-				failed:     child.Status != "completed" || !child.Result.Success,
-				structured: child.Result, result: structuredToolResultText(child.Result),
-			})
-			end++
-			if !isBashTool(childBlock.tools[0]) || (end < len(meta.Calls) && meta.Calls[end].ToolName != "bash") {
-				break
-			}
-		}
-		if end > start {
+		active := call.Status == "running" || call.Status == "queued"
+		failed := !active && (call.Status != "completed" || (call.Result != nil && !call.Result.Success))
+		if call.Result != nil || (call.ToolName == "bash" && len(call.Input) > 0) {
+			childBlock := assistantBlock{tools: []toolCall{{
+				id: call.CallID, name: call.ToolName, input: string(call.Input),
+				done: !active, failed: failed,
+				structured: call.Result, result: structuredToolResultText(call.Result),
+			}}}
 			children = nested.toolRenderGroups(childBlock)
 		} else {
 			note := "Child tool details were not saved for this invocation."
-			if !tool.done {
-				note = "Child tool details are available when code execution finishes."
-			} else if call.DetailsOmitted {
+			if call.DetailsOmitted {
 				note = "Child tool details exceeded the storage limit."
+			} else if !tool.done {
+				note = "Child tool details are available when code execution finishes."
 			}
 			label := sanitizeExtensionUIText(call.ToolName + " · " + call.Status)
 			children = []toolRenderGroup{{
 				label: label, runningLabel: label, body: note, wrapBody: true, changeIndex: -1,
-				active: call.Status == "running" || call.Status == "queued",
-				failed: call.Status != "completed" && call.Status != "running" && call.Status != "queued",
+				active: active,
 			}}
-			end++
 		}
 		for _, child := range children {
-			if len(childBlock.tools) > 0 {
-				child.failed = anyFailedTool(childBlock.tools[child.toolStart : child.toolEnd+1])
+			child.failed = failed
+			if call.ToolName == "bash" {
+				if description := stringField(toolInputFields(string(call.Input)), "description"); description != "" {
+					child.label = sanitizeExtensionUIText("bash · " + description)
+					child.runningLabel = child.label
+				}
 			}
-			child.codeKey = fmt.Sprintf("%s:%d:%d", meta.Calls[start+child.toolStart].CallID, start+child.toolStart, child.changeIndex)
+			child.codeKey = fmt.Sprintf("%s:%d:%d", call.CallID, callIndex, child.changeIndex)
 			child.toolStart, child.toolEnd, child.changeIndex = idx, idx, -1
 			child.expanded = expanded(child.codeKey)
 			groups = append(groups, child)
 		}
-		start = end
 	}
+	m.transcriptElapsedClocks = nested.transcriptElapsedClocks
 	return groups
 }
 
