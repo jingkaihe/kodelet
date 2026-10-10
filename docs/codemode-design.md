@@ -280,7 +280,7 @@ Host-enforced limits:
 
 | Resource | Initial bound |
 | --- | --- |
-| Script wall time, including awaited tools | 120 seconds, also bounded by parent cancellation |
+| Script wall time, including awaited tools | 15 minutes, also bounded by parent cancellation |
 | VM memory | 256 MiB of linear memory; the QuickJS heap is limited to 192 MiB (3/4), leaving headroom for marshalling and the WASM stack |
 | Submitted async function body | 128 KiB |
 | Child calls per invocation, including queued calls | 128 |

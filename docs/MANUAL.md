@@ -1828,6 +1828,8 @@ To choose a mode for a single run, pass `--code-mode off|on|only` to `kodelet ru
 
 Each script appears as one expandable card in the TUI and Web UI, showing the code, its output, and the tool calls it made.
 
+Each code-mode invocation has a 15-minute total wall-clock limit, including time spent awaiting tools. Individual tools retain their own timeouts, and earlier parent deadlines or cancellation still stop the script and its child calls.
+
 ## Agentic Skills
 
 Agentic Skills are model-invoked capabilities that package domain expertise into discoverable units. Unlike fragments/recipes (which require explicit user invocation), skills are automatically invoked by Kodelet when it determines they are relevant to your task.

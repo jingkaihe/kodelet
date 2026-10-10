@@ -137,6 +137,7 @@ func TestCodeExecuteToolRequiresHostAuthority(t *testing.T) {
 
 func TestCodeExecuteToolDescriptionMatchesLimits(t *testing.T) {
 	description := (&CodeExecuteTool{}).Description()
+	assert.Contains(t, description, "Limits: 15 minutes,")
 	assert.Contains(t, description, fmt.Sprintf("up to %d tool calls run at once", codemode.MaxConcurrentToolCalls))
 	assert.Contains(t, description, fmt.Sprintf("Tool replies and individual return/emit values are limited to %d MiB", codemode.MaxHostResponseBytes>>20))
 	assert.Contains(t, description, "Total selected output above ~40 KB is truncated")

@@ -416,6 +416,30 @@ return await Promise.all([first, tools.second({})]);
 	assert.JSONEq(t, `[{"value":"original"},"second"]`, string(result.Outputs[0].Value))
 }
 
+func TestRuntimeDeadline(t *testing.T) {
+	assert.Equal(t, 15*time.Minute, defaultRuntimeLimits().timeout)
+	for _, parentTimeout := range []time.Duration{0, 5 * time.Minute} {
+		t.Run(parentTimeout.String(), func(t *testing.T) {
+			ctx := t.Context()
+			want := time.Now().Add(15 * time.Minute)
+			if parentTimeout != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, parentTimeout)
+				defer cancel()
+				want, _ = ctx.Deadline()
+			}
+			deadlines := make(chan time.Time, 1)
+			_, err := Execute(ctx, `return await tools.lookup({});`, func(ctx context.Context, _ Request) (any, error) {
+				deadline, _ := ctx.Deadline()
+				deadlines <- deadline
+				return "done", nil
+			})
+			require.NoError(t, err)
+			assert.WithinDuration(t, want, <-deadlines, time.Second, "child tools inherit the earlier of the code-mode and parent deadlines")
+		})
+	}
+}
+
 func TestRuntimeCancellation(t *testing.T) {
 	// Warm the immutable compilation cache so these deadlines exercise the VM,
 	// not its first compilation on a slow CI machine.

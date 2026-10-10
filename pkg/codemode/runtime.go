@@ -112,7 +112,7 @@ type runtimeLimits struct {
 
 func defaultRuntimeLimits() runtimeLimits {
 	return runtimeLimits{
-		timeout:         120 * time.Second,
+		timeout:         15 * time.Minute,
 		memoryBytes:     256 << 20,
 		scriptBytes:     MaxScriptBytes,
 		requestBytes:    2 << 20,
