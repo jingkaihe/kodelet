@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.1-beta
+
+Added code-mode validation of successful structured tool replies against their declared `outputSchema`. Mismatches raise `invalid_output` without retrying the tool, with mismatch locations logged for tool authors; failed-tool diagnostics remain intact.
+
+Streamlined code-mode tool signatures and shared runtime declarations, preserving input field names in abbreviated signatures. Added reply-field guidance for built-in tools only when code mode is active.
+
+Simplified code-mode reply fields: `bash` output is in `reply.text`, with `exitCode` (null when unknown) and optional `fullOutputPath` in `reply.data`. Both `bash` and `file_read` use `reply.truncated` rather than duplicating it in structured data.
+
 ## 0.8.0-beta
 
 Added opt-in code mode, letting the model call tools from sandboxed JavaScript scripts via `code_execute`. Enable it with `code_mode: on|only` or per run with `--code-mode`, the SDK `codeMode` option, or a profile's `code_mode`. Existing tool permissions and hooks still apply, and scripts appear as expandable cards in the TUI and Web UI. Extension tools can return `structuredContent` with an optional `outputSchema`, `group`, and `short` summary; MCP tools provide these automatically.
