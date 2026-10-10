@@ -504,7 +504,9 @@ func TestResponsesToolFailureTakesPrecedenceOverStreamFailure(t *testing.T) {
 			_, _, _, err := thread.processMessageExchangeWithStreamRetries(
 				ctx, &captureStreamHandler{}, "model", responses.ResponseNewParams{Model: "model"}, nil,
 				newStream,
-				thread.readStream, llmtypes.MessageOpt{DisableUsageLog: true}, func() {}, "https",
+				func(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], handler llmtypes.MessageHandler, model string, opt llmtypes.MessageOpt) (processStreamResult, error) {
+					return thread.readStream(ctx, stream, handler, model, opt, new(false))
+				}, llmtypes.MessageOpt{DisableUsageLog: true}, func() {}, "https",
 			)
 			if tc.toolErr != nil {
 				assert.ErrorIs(t, err, tc.toolErr)
@@ -550,6 +552,16 @@ func (h *captureStreamHandler) HandleThinkingBlockEnd() {
 
 func (h *captureStreamHandler) HandleContentBlockEnd() {
 	h.events = append(h.events, "content_block_end")
+}
+
+type searchTextHandler struct {
+	captureStreamHandler
+	blocks []webSearchTextBlock
+}
+
+func (h *searchTextHandler) HandleStructuredText(text string, data any) {
+	h.events = append(h.events, "structured_text:"+text)
+	h.blocks = append(h.blocks, data.(webSearchTextBlock))
 }
 
 type parallelToolCaptureHandler struct {
@@ -1713,6 +1725,179 @@ func TestProcessStreamResponseFailedErrorRetryability(t *testing.T) {
 			require.ErrorAs(t, err, &eventErr)
 			assert.Equal(t, tt.code, eventErr.code)
 			assert.Equal(t, tt.retryable, retry.IsRecoverable(err))
+		})
+	}
+}
+
+func TestProcessStreamWebSearchCitations(t *testing.T) {
+	for _, searchEvent := range []string{"response.output_item.added", "response.output_item.done"} {
+		t.Run(searchEvent, func(t *testing.T) {
+			stream := responseStreamFromMaps(t, []map[string]any{
+				{"type": "response.output_text.delta", "delta": "Looking it up."},
+				{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type":    "message",
+						"role":    "assistant",
+						"id":      "commentary",
+						"content": []map[string]any{{"type": "output_text", "text": "Looking it up."}},
+					},
+				},
+				{
+					"type": searchEvent,
+					"item": map[string]any{
+						"type":   "web_search_call",
+						"id":     "search",
+						"status": "completed",
+						"action": map[string]any{"type": "search", "query": "release"},
+					},
+				},
+				{"type": "response.output_text.delta", "delta": "Café shipped."},
+				{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type": "message",
+						"role": "assistant",
+						"id":   "answer",
+						"content": []map[string]any{{
+							"type": "output_text",
+							"text": "Café shipped.",
+							"annotations": []map[string]any{{
+								"type":        "url_citation",
+								"url":         "https://example.com/release",
+								"title":       "Release notes",
+								"start_index": 0,
+								"end_index":   13,
+							}},
+						}},
+					},
+				},
+				{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type":    "message",
+						"role":    "assistant",
+						"id":      "caveat",
+						"content": []map[string]any{{"type": "output_text", "text": "No further evidence."}},
+					},
+				},
+				{"type": "response.completed", "response": map[string]any{"id": "resp", "status": "completed"}},
+			})
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai"}, "test")}
+			handler := &searchTextHandler{}
+			result, err := thread.processStream(t.Context(), stream, handler, "gpt-6-luna", llmtypes.MessageOpt{})
+			require.NoError(t, err)
+			assert.True(t, result.responseCompleted)
+			assert.False(t, result.toolsUsed, "native search must not trigger a follow-up turn")
+			assert.Equal(t, []string{
+				"text_delta:Looking it up.",
+				"content_block_end",
+				"structured_text:Café shipped. [source](<https://example.com/release>)",
+				"content_block_end",
+				"structured_text:No further evidence.",
+				"content_block_end",
+			}, handler.events, "answers must be emitted once, including when text deltas are absent")
+			data, err := json.Marshal(handler.blocks)
+			require.NoError(t, err)
+			assert.JSONEq(t, `[
+				{"text":"Café shipped.","citations":[{"url":"https://example.com/release","title":"Release notes"}]},
+				{"text":"No further evidence.","citations":[]}
+			]`, string(data))
+			answer := thread.storedItems[len(thread.storedItems)-2]
+			assert.Equal(t, "Café shipped.", answer.Content)
+			assert.Contains(t, string(answer.RawItem), `"url_citation"`, "native annotations remain in replay state")
+		})
+	}
+}
+
+func TestWebSearchTextSurvivesRetryButDoesNotAffectNextExchange(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-6-luna",
+		Retry:    llmtypes.RetryConfig{Attempts: 2, InitialDelay: 1, MaxDelay: 1},
+	}, "test")}
+	requests := 0
+	thread.newStreamingFunc = func(_ context.Context, params responses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion] {
+		requests++
+		if requests == 1 {
+			return responseStreamFromMaps(t, []map[string]any{
+				{"type": "response.output_item.done", "item": map[string]any{
+					"type":   "web_search_call",
+					"id":     "search",
+					"status": "completed",
+					"action": map[string]any{"type": "search", "query": "release"},
+				}},
+				{"type": "error", "code": "server_error", "message": "retry me"},
+			})
+		}
+		if requests == 2 {
+			require.Len(t, params.Input.OfInputItemList, 1)
+			require.NotNil(t, params.Input.OfInputItemList[0].OfWebSearchCall)
+		}
+		return responseStreamFromMaps(t, []map[string]any{
+			{"type": "response.output_text.delta", "delta": "Answer"},
+			{"type": "response.output_item.done", "item": map[string]any{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "Answer",
+					"annotations": []map[string]any{{
+						"type": "url_citation",
+						"url":  "https://example.com",
+					}},
+				}},
+			}},
+			{"type": "response.completed", "response": map[string]any{"id": "resp", "status": "completed"}},
+		})
+	}
+	handler := &searchTextHandler{}
+	for range 2 {
+		_, _, complete, err := thread.processMessageExchange(t.Context(), handler, "gpt-6-luna", 4096, "system", llmtypes.MessageOpt{})
+		require.NoError(t, err)
+		assert.True(t, complete)
+	}
+	assert.Equal(t, 3, requests)
+	require.Len(t, handler.blocks, 1, "search delivery state must reset for the next exchange")
+	assert.Equal(t, []webSearchCitation{{URL: "https://example.com"}}, handler.blocks[0].Citations)
+	assert.Equal(t, []string{
+		"structured_text:Answer [source](<https://example.com>)",
+		"content_block_end",
+		"text_delta:Answer",
+		"content_block_end",
+	}, handler.events)
+}
+
+func TestProcessStreamFlushesInterruptedWebSearchText(t *testing.T) {
+	for _, termination := range []string{"response.incomplete", "error", "EOF", "cancellation"} {
+		t.Run(termination, func(t *testing.T) {
+			events := []map[string]any{
+				{"type": "response.output_item.added", "item": map[string]any{"type": "web_search_call"}},
+				{"type": "response.output_text.delta", "delta": "Partial"},
+			}
+			switch termination {
+			case "response.incomplete":
+				events = append(events, map[string]any{
+					"type": "response.incomplete",
+					"response": map[string]any{
+						"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+					},
+				})
+			case "error":
+				events = append(events, map[string]any{"type": "error", "code": "server_error", "message": "interrupted"})
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if termination == "cancellation" {
+				cancel()
+			}
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai"}, "test")}
+			handler := &searchTextHandler{}
+			result, err := thread.processStream(ctx, responseStreamFromMaps(t, events), handler, "gpt-6-luna", llmtypes.MessageOpt{})
+			assert.Error(t, err)
+			assert.False(t, result.responseCompleted)
+			assert.Empty(t, handler.blocks, "partial answers must not masquerade as complete cited blocks")
+			assert.Equal(t, []string{"text_delta:Partial", "content_block_end"}, handler.events)
 		})
 	}
 }

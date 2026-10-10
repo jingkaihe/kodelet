@@ -754,7 +754,12 @@ func (t *Thread) processMessageExchange(
 	processStream := t.processStreamFunc
 	processStreamHandlesNilStream := processStream != nil
 	if processStream == nil {
-		processStream = t.readStream
+		// A retry may answer from a completed search in replay history without
+		// searching again. Keep citation delivery state for this exchange only.
+		bufferSearchText := false
+		processStream = func(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], handler llmtypes.MessageHandler, model string, opt llmtypes.MessageOpt) (processStreamResult, error) {
+			return t.readStream(ctx, stream, handler, model, opt, &bufferSearchText)
+		}
 	}
 
 	var newResponsesStream responsesStreamFactory

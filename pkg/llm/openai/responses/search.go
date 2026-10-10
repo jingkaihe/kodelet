@@ -3,16 +3,63 @@ package responses
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/openai/openai-go/v3/responses"
 )
 
 const openAISearchToolName = "openai_web_search"
+
+type webSearchCitation struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
+}
+
+type webSearchTextBlock struct {
+	Text      string              `json:"text"`
+	Citations []webSearchCitation `json:"citations"`
+}
+
+// Native URL annotations identify sources, not quoted excerpts. Keep them separate
+// from the rendered answer instead of trying to reconstruct citations from text.
+func handleWebSearchText(handler llmtypes.MessageHandler, text responses.ResponseOutputText) {
+	block := webSearchTextBlock{Text: text.Text, Citations: []webSearchCitation{}}
+	var links strings.Builder
+	seen := make(map[string]bool)
+	for _, annotation := range text.Annotations {
+		if annotation.Type != "url_citation" {
+			continue
+		}
+		block.Citations = append(block.Citations, webSearchCitation{
+			URL:   annotation.URL,
+			Title: annotation.Title,
+		})
+		u, err := url.Parse(annotation.URL)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || seen[annotation.URL] {
+			continue
+		}
+		seen[annotation.URL] = true
+		safeURL := strings.NewReplacer(
+			"<", "%3C",
+			">", "%3E",
+			" ", "%20",
+			"\\", "%5C",
+		).Replace(u.String())
+		links.WriteString(" [source](<" + safeURL + ">)")
+	}
+	rendered := text.Text + links.String()
+	if structured, ok := handler.(llmtypes.StructuredTextMessageHandler); ok {
+		structured.HandleStructuredText(rendered, block)
+	} else {
+		handler.HandleText(rendered)
+	}
+}
 
 func shouldEnableNativeOpenAISearch(config llmtypesConfig) bool {
 	platform := normalizeSearchPlatformName(config.platform)

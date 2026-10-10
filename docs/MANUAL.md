@@ -1282,12 +1282,12 @@ profiles:
 
 ## OpenAI Native Web Search
 
-When you use the OpenAI Responses API against the real OpenAI platform,
-Kodelet can expose OpenAI's native `web_search` tool in addition to the existing
-`web_fetch` tool.
+When you use the OpenAI Responses API with the OpenAI platform or Codex subscription authentication, Kodelet can expose OpenAI's native `web_search` tool in addition to the existing `web_fetch` tool.
 
 - `web_search` is for open-ended discovery and current information.
 - `web_fetch` is still available for deterministic fetching/extraction from a known URL.
+
+After a native OpenAI search starts, answer text is delivered in complete blocks so its URL citations can accompany it without duplicate text. ACP clients receive the original block text and native citations in `_meta["kodelet/textData"]` as `{ text, citations: [{ url, title? }] }`, separate from the display text with rendered source links. OpenAI URL annotations do not contain source excerpts, so these citations omit `cited_text`; Anthropic search citations may include it. Responses that do not use native search retain ordinary text streaming.
 
 Native OpenAI search is enabled by default and can be controlled with:
 
@@ -1311,9 +1311,9 @@ Kodelet only enables this built-in tool when all of the following are true:
 
 - provider is `openai`
 - API mode resolves to `responses`
-- platform resolves to the real OpenAI platform
+- platform resolves to `openai` or `codex`
 - GitHub Copilot mode is not being used
-- no custom non-OpenAI base URL is configured
+- for the `openai` platform, no custom non-OpenAI base URL is configured
 
 ## Anthropic Multi-Account Authentication
 

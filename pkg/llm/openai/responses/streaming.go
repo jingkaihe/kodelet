@@ -32,6 +32,7 @@ func (t *Thread) readStream(
 	handler llmtypes.MessageHandler,
 	model string,
 	opt llmtypes.MessageOpt,
+	bufferSearchText *bool,
 ) (processStreamResult, error) {
 	telemetry.AddEvent(ctx, "stream_processing_started")
 	log := logger.G(ctx)
@@ -96,6 +97,12 @@ func (t *Thread) readStream(
 			thinkingStarted = false
 		}
 
+		// A stream may end before a buffered search answer's citations arrive.
+		// Preserve its partial display text, but do not manufacture structured data.
+		if isStreaming && *bufferSearchText && !contentBlockEnded && currentText.Len() > 0 {
+			streamHandler.HandleTextDelta(currentText.String())
+		}
+
 		// Signal end of text content block for streaming handlers (if not already done)
 		if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
 			streamHandler.HandleContentBlockEnd()
@@ -109,6 +116,11 @@ func (t *Thread) readStream(
 
 		contentFinalized = true
 	}
+	defer func() {
+		if *bufferSearchText {
+			finalizeContentBlocks()
+		}
+	}()
 
 	// Process stream events
 	log.Debug("waiting for stream events")
@@ -135,7 +147,7 @@ streamLoop:
 					contentBlockEnded = false
 				}
 				currentText.WriteString(event.Delta)
-				if isStreaming {
+				if isStreaming && !*bufferSearchText {
 					streamHandler.HandleTextDelta(event.Delta)
 				}
 			}
@@ -184,6 +196,8 @@ streamLoop:
 			// New output item added - check if it's a function call
 			if item := event.Item; item.Type == "function_call" {
 				toolsUsed = true
+			} else if item.Type == "web_search_call" {
+				*bufferSearchText = true
 			}
 
 		case "response.output_item.done":
@@ -201,6 +215,7 @@ streamLoop:
 					streamHandler.HandleContentBlockEnd()
 					contentBlockEnded = true
 				}
+				*bufferSearchText = true
 
 				webSearch := item.AsWebSearchCall()
 				callID := webSearch.ID
@@ -288,13 +303,16 @@ streamLoop:
 						if content.Type == "output_text" {
 							textPart := content.AsOutputText()
 							textContent += textPart.Text
+							if *bufferSearchText && textPart.Text != "" {
+								handleWebSearchText(handler, textPart)
+							}
 						}
 					}
 					if textContent != "" {
-						if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+						if isStreaming && !contentBlockEnded && (currentText.Len() > 0 || *bufferSearchText) {
 							streamHandler.HandleContentBlockEnd()
 							contentBlockEnded = true
-						} else if !isStreaming {
+						} else if !isStreaming && !*bufferSearchText {
 							handler.HandleText(textContent)
 						}
 

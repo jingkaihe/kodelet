@@ -7,11 +7,46 @@ import (
 	"sort"
 	"testing"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	openairesponses "github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandleWebSearchText(t *testing.T) {
+	var text openairesponses.ResponseOutputText
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"type": "output_text",
+		"text": "An answer, not a source excerpt.",
+		"annotations": [
+			{"type":"url_citation","url":"https://example.com/a?q=<value>","title":"Source","start_index":0,"end_index":9},
+			{"type":"url_citation","url":"https://example.com/a?q=<value>","title":"Repeated source","start_index":10,"end_index":15},
+			{"type":"url_citation","url":"javascript:alert(1)"},
+			{"type":"url_citation","url":"https:///missing-host"},
+			{"type":"url_citation","url":"%invalid"},
+			{"type":"file_citation","file_id":"file-1","filename":"private.txt","index":0}
+		]
+	}`), &text))
+	want := "An answer, not a source excerpt. [source](<https://example.com/a?q=%3Cvalue%3E>)"
+	handler := &searchTextHandler{}
+	handleWebSearchText(handler, text)
+	assert.Equal(t, []string{"structured_text:" + want}, handler.events)
+	require.Len(t, handler.blocks, 1)
+	assert.Equal(t, text.Text, handler.blocks[0].Text)
+	require.Len(t, handler.blocks[0].Citations, 5, "retain native URL annotations separately from safe display links")
+	assert.Equal(t, webSearchCitation{
+		URL:   "https://example.com/a?q=<value>",
+		Title: "Source",
+	}, handler.blocks[0].Citations[0])
+	data, err := json.Marshal(handler.blocks[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "cited_text", "OpenAI does not supply source excerpts")
+
+	plain := &llmtypes.StringCollectorHandler{Silent: true}
+	handleWebSearchText(plain, text)
+	assert.Equal(t, want+"\n", plain.CollectedText())
+}
 
 func TestNativeOpenAISearchConfigHelpers(t *testing.T) {
 	enabled := true

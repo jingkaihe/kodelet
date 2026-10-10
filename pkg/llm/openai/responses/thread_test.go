@@ -34,7 +34,7 @@ func (t *Thread) processStream(
 	model string,
 	opt llmtypes.MessageOpt,
 ) (processStreamResult, error) {
-	result, err := t.readStream(ctx, stream, handler, model, opt)
+	result, err := t.readStream(ctx, stream, handler, model, opt, new(false))
 	if result.complete != nil {
 		var completionErr error
 		result, completionErr = result.complete(ctx)
