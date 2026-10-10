@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.2-beta
+
+Added Claude Haiku 5.5 (`claude-haiku-5-5`) with adaptive thinking, `xhigh`/`max` reasoning effort, a 1M-token context window, and pricing including the long-context tier above 100K prompt tokens. Setting reasoning effort to `none` explicitly disables thinking. Added the `haiku-55` alias to the sample configuration and made Haiku 5.5 the weak model in setup-generated Anthropic profiles.
+
+Updated the Anthropic Go SDK to v1.80.0, retaining support for Sonnet 4.5 model IDs.
+
+Changed code-mode `bash` calls to return normal replies for nonzero exits and command timeouts rather than throwing. Scripts must check `reply.data.exitCode` and the new `reply.data.timedOut` flag; command timeouts return `exitCode: null` and `timedOut: true`, preserving partial output and a timeout notice in `reply.text` and saved full output. Cancellation, signal termination, and start failures still throw, and direct bash calls retain their existing error behavior.
+
 ## 0.8.1-beta
 
 Added code-mode validation of successful structured tool replies against their declared `outputSchema`. Mismatches raise `invalid_output` without retrying the tool, with mismatch locations logged for tool authors; failed-tool diagnostics remain intact.
