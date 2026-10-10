@@ -28,15 +28,19 @@ interface ChatToolActivityProps {
   nested?: boolean;
 }
 
-// Nested streaming rows and their parent retain the user's fold choice when
-// progress becomes a final result, rather than reopening or remounting.
-const PersistentDetails: React.FC<React.ComponentProps<'details'>> = ({ open, ...props }) => {
+// Ordinary cards reset when their execution phase changes; nested streaming
+// rows and their parent keep the user's fold choice through completion.
+const ActivityDetails: React.FC<
+  React.ComponentProps<'details'> & { status: string; preserveOpen?: boolean }
+> = ({ open, status, preserveOpen = false, ...props }) => {
   const [expanded, setExpanded] = React.useState(!!open);
+  const phase = status === 'running' || status === 'failed' ? status : 'settled';
   return (
     <details
       {...props}
-      open={expanded}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      key={preserveOpen ? 'persistent' : phase}
+      open={preserveOpen ? expanded : open}
+      onToggle={preserveOpen ? (event) => setExpanded(event.currentTarget.open) : undefined}
     />
   );
 };
@@ -458,7 +462,6 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }>
   tool,
   nested,
 }) => {
-  const Details = nested ? PersistentDetails : 'details';
   const name = normalizeToolName(tool.name);
   const input = parseToolInput(tool.input);
   const metadata = getMetadataRecord(tool.result);
@@ -494,14 +497,16 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }>
           : getToolSummary(tool);
         const showCounts = name !== 'file_read' && change?.unifiedDiff !== undefined;
         return (
-          <Details
+          <ActivityDetails
             className={cn(
               'activity-card',
               'activity-file',
               running && 'activity-card-live',
               failed && 'activity-card-error'
             )}
-            key={`${change?.path || ''}-${index}-${nested ? 'nested' : running ? 'running' : failed ? 'failed' : 'settled'}`}
+            key={`${change?.path || ''}-${index}`}
+            status={status}
+            preserveOpen={nested}
             open={!nested && running ? true : undefined}
           >
             <summary className="tool-summary activity-summary" title={summaryText}>
@@ -550,7 +555,7 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }>
                 <p className="tool-awaiting">Awaiting file result…</p>
               )}
             </div>
-          </Details>
+          </ActivityDetails>
         );
       })}
       {tool.result && !tool.inProgress ? <ToolImageAttachments toolResult={tool.result} /> : null}
@@ -562,21 +567,21 @@ const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }
   tool,
   nested,
 }) => {
-  const Details = nested ? PersistentDetails : 'details';
   const status = getToolActivityStatus(tool);
   const running = status === 'running';
   const failed = status === 'failed';
   const summary = getToolSummary(tool);
 
   return (
-    <Details
+    <ActivityDetails
       className={cn(
         'activity-card',
         'activity-image',
         running && 'activity-card-live',
         failed && 'activity-card-error'
       )}
-      key={nested ? 'nested' : status}
+      status={status}
+      preserveOpen={nested}
       open={!nested && (running || failed) ? true : undefined}
     >
       <summary className="tool-summary activity-summary" title={getViewImagePath(tool) || summary}>
@@ -601,7 +606,7 @@ const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }
         ) : null}
         {tool.result && !running ? <ToolImageAttachments toolResult={tool.result} /> : null}
       </div>
-    </Details>
+    </ActivityDetails>
   );
 };
 
@@ -680,7 +685,6 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
         const codeExecution =
           normalizeToolName(toolCall.name) === 'code_execute' ||
           toolCall.result?.metadataType === 'code_execute';
-        const Details = nested || codeExecution ? PersistentDetails : 'details';
         // Code media stays inline with selected text, not in an outside gallery.
         // Open these cards initially so previews remain visible on completion.
         const codeMedia =
@@ -708,10 +712,10 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
             : getToolActivityStatus(toolCall);
 
         return (
-          <React.Fragment
-            key={`${toolCall.callId || `${toolCall.name}-${groupIndex}`}-${nested || codeExecution ? 'persistent' : running ? 'running' : failedCount ? 'failed' : 'settled'}`}
-          >
-            <Details
+          <React.Fragment key={toolCall.callId || `${toolCall.name}-${groupIndex}`}>
+            <ActivityDetails
+              status={activityStatus}
+              preserveOpen={nested || codeExecution}
               className={cn(
                 'activity-card',
                 commands && 'activity-command-group',
@@ -821,7 +825,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
                   );
                 })}
               </div>
-            </Details>
+            </ActivityDetails>
             {group.map((tool, toolIndex) =>
               !browser && tool.result && !tool.inProgress ? (
                 <ToolImageAttachments key={tool.callId || toolIndex} toolResult={tool.result} />

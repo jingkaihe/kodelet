@@ -146,15 +146,14 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			var childUpdates agentenv.ToolUpdateSink
 			if update != nil {
 				childUpdates = func(snapshot agentenv.ToolUpdate) {
-					// Only post-policy display fields enter the parent's snapshot.
-					// Never consult the raw ToolResult or restore redacted arguments.
+					// Input is already post-policy and cleared after output redaction.
+					// Never consult the raw ToolResult or restore original arguments.
 					structured := snapshot.StructuredResult
 					structured.Data, structured.Attachments = nil, nil
-					reply := tools.CodeToolReply{Result: &structured}
-					if !snapshot.Modified {
-						reply.Input = json.RawMessage(snapshot.Input)
-					}
-					update(reply)
+					update(tools.CodeToolReply{
+						Input:  json.RawMessage(snapshot.Input),
+						Result: &structured,
+					})
 				}
 			}
 			execution, err := s.executeRunTool(operationCtx, run, runnerpayload.ToolExecuteParams{
