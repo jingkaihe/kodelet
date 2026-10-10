@@ -51,6 +51,14 @@ const meta = {
     const canvas = within(canvasElement);
     await waitFor(() => {
       const editor = canvas.getByTestId('composer-textarea');
+      const rootFontSize = Number.parseFloat(
+        getComputedStyle(canvasElement.ownerDocument.documentElement).fontSize
+      );
+      const editorFontScale = window.matchMedia('(pointer: coarse)').matches ? 1 : 0.86;
+      expect(Number.parseFloat(getComputedStyle(editor).fontSize)).toBeCloseTo(
+        rootFontSize * editorFontScale,
+        2
+      );
       const workspace = canvas.queryByTestId('chat-workspace-header');
       if (workspace) {
         const location = workspace.querySelector('.chat-workspace-location');
@@ -67,6 +75,13 @@ const meta = {
         .getBoundingClientRect();
       expect(Math.abs(leading.y - submit.y)).toBeLessThan(1);
       expect(Math.abs(leading.height - submit.height)).toBeLessThan(1);
+
+      const divider = canvasElement.querySelector('.composer-footer-divider') as HTMLElement;
+      if (getComputedStyle(divider).display !== 'none') {
+        const dividerTop = divider.getBoundingClientRect().top;
+        expect(dividerTop - submit.bottom).toBeGreaterThanOrEqual(rootFontSize * 0.5 - 1);
+        expect(dividerTop - leading.bottom).toBeGreaterThanOrEqual(rootFontSize * 0.5 - 1);
+      }
 
       const grid = (editor.parentElement as HTMLDivElement).getBoundingClientRect();
       const context = canvas.getByTitle(args.contextText).getBoundingClientRect();
