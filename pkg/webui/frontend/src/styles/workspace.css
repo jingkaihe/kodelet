@@ -417,6 +417,8 @@
 }
 
 .workspace-terminal-tab-header {
+  /* Tabs and their icon buttons share one height so their edges line up. */
+  --terminal-tab-height: 2rem;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -427,6 +429,11 @@
 .workspace-terminal-tab-header .workspace-terminal-toolbar {
   flex: 0 0 auto;
   padding: 0 0.4rem 0 0;
+}
+
+.workspace-terminal-tab-header .workspace-terminal-icon-button {
+  width: var(--terminal-tab-height);
+  height: var(--terminal-tab-height);
 }
 
 .workspace-terminal-tab-bar {
@@ -453,6 +460,7 @@
   flex: 0 0 auto;
   min-width: 12rem;
   max-width: 20rem;
+  height: var(--terminal-tab-height);
   border-radius: 0.25rem;
   color: var(--kodelet-muted);
   border: 1px solid transparent;
@@ -470,7 +478,7 @@
   align-items: center;
   justify-content: center;
   min-width: 0;
-  min-height: 1.9rem;
+  height: 100%;
   padding: 0.25rem 0.5rem;
   font-size: 0.72rem;
   background: transparent;
@@ -527,9 +535,12 @@
 }
 
 @media (pointer: coarse) {
-  .workspace-terminal-tab-bar button {
+  .workspace-terminal-tab-header {
+    --terminal-tab-height: 2.75rem;
+  }
+
+  .workspace-terminal-tab-close {
     min-width: 2.75rem;
-    min-height: 2.75rem;
   }
 }
 
@@ -921,6 +932,10 @@
   .workspace-diff-icon-button {
     width: 2.75rem;
     height: 2.75rem;
+  }
+
+  .workspace-terminal-tab-header {
+    --terminal-tab-height: 2.75rem;
   }
 
   .workspace-terminal-popout-focus {
