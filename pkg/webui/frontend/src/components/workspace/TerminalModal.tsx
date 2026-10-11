@@ -279,6 +279,7 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
   onTitleChange,
   onSessionReady,
   connectingEnabled,
+  onPopOutChange,
 }) => {
   const resolvedTheme = useSyncExternalStore(
     subscribeTheme,
@@ -330,6 +331,11 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
       (getActiveTerminalPopOutWindow(target) !== null ||
         readTerminalPopOutRecordForTarget(target) !== null)
   );
+  // Tab controls live in TerminalTabs; report pop-out ownership after commit.
+  useEffect(() => {
+    onPopOutChange(popOutActive);
+    return () => onPopOutChange(false);
+  }, [onPopOutChange, popOutActive]);
 
   const fitTerminalToPanel = useCallback(() => {
     const terminal = terminalRef.current;

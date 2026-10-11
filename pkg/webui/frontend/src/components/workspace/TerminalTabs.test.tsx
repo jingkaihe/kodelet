@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
 import type { WorkspaceTarget } from '../../types';
@@ -12,6 +13,17 @@ const target: WorkspaceTarget = {
   cwd: '/workspace/project',
 };
 const unknownDirectory: WorkspaceTarget = { kind: 'local' };
+
+const PopOutReporter = ({
+  active,
+  onChange,
+}: {
+  active: boolean;
+  onChange: (active: boolean) => void;
+}) => {
+  useEffect(() => onChange(active), [active, onChange]);
+  return null;
+};
 
 const Tabs = ({
   popOutActive = false,
@@ -33,12 +45,14 @@ const Tabs = ({
       terminalId,
       connectingEnabled,
       tabBar,
+      onPopOutChange,
       onDirectoryChange,
       onTitleChange,
       onSessionReady,
     }) => (
       <>
         {tabBar(popOutActive)}
+        <PopOutReporter active={popOutActive} onChange={onPopOutChange} />
         <div
           data-connecting-enabled={String(connectingEnabled)}
           data-terminal-id={terminalId}

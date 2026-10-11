@@ -30,6 +30,7 @@ export interface TerminalTabSessionProps {
   terminalId: string;
   connectingEnabled: boolean;
   tabBar: (disabled: boolean) => ReactNode;
+  onPopOutChange: (active: boolean) => void;
   onDirectoryChange: (cwd: string, homeDir?: string) => void;
   onTitleChange: (title: string, homeDir?: string) => void;
   onSessionReady: (event: TerminalReadyEvent) => void;
@@ -136,7 +137,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const disabledRef = useRef(false);
+  const [popOutActive, setPopOutActive] = useState(false);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const nameInputRef = useRef<HTMLInputElement>(null);
   const panelId = useId();
@@ -203,7 +204,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   };
 
   const addTab = () => {
-    if (disabledRef.current || closing || state.tabs.length >= MAX_TABS) return;
+    if (popOutActive || closing || state.tabs.length >= MAX_TABS) return;
     const id = createTerminalPopOutId();
     updateState((current) => ({
       tabs: [...current.tabs, { id, number: current.nextNumber, title: '', customTitle: '' }],
@@ -266,7 +267,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   };
 
   const handleShortcut = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (disabledRef.current || closing || pendingClose || renamingId !== null) return;
+    if (popOutActive || closing || pendingClose || renamingId !== null) return;
     // Do not intercept desktop shortcuts or AltGr input on international layouts.
     if (
       !event.altKey ||
@@ -287,7 +288,6 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   };
 
   const tabBar = (disabled: boolean) => {
-    disabledRef.current = disabled;
     const locked = disabled || closing;
     return (
       <div className="workspace-terminal-tab-bar">
@@ -439,6 +439,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
             terminalId: activeTab.id,
             connectingEnabled: !(closing && pendingClose?.id === activeTab.id),
             tabBar,
+            onPopOutChange: setPopOutActive,
             onDirectoryChange: (cwd, homeDir) => updateAutomaticTitle(directoryLabel(cwd, homeDir)),
             onTitleChange: (title, homeDir) => {
               // Shell prompt titles often use user@host:path. Keep the path,
