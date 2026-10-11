@@ -1,5 +1,13 @@
 import { Pencil, Plus, X } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import apiService from '../../services/api';
 import type { TerminalReadyEvent, WorkspaceTarget } from '../../types';
 import UIInputDialog from '../chat/UIInputDialog';
@@ -10,12 +18,14 @@ import { createTerminalPopOutId } from './terminalPopOut';
 const MAX_TABS = 8;
 const MAX_TITLE_LENGTH = 100;
 const STORAGE_PREFIX = 'kodelet.terminal.tabs.v1:';
+export const TERMINAL_TAB_TITLES_CHANNEL = 'kodelet.terminal.tabs.titles';
 
 interface TerminalTab {
   id: string;
   number: number;
-  title: string;
   customTitle: string;
+  // Only directory labels are saved; program titles may contain secrets.
+  directory?: string;
   sessionId?: string;
   cwd?: string;
 }
@@ -47,7 +57,7 @@ export const getTerminalTabsKey = (target: WorkspaceTarget): string =>
 
 const initialState = (): TabState => ({
   // The first tab reattaches to pre-tabs versions' default shell.
-  tabs: [{ id: '', number: 1, title: '', customTitle: '' }],
+  tabs: [{ id: '', number: 1, customTitle: '' }],
   activeId: '',
   nextNumber: 2,
 });
@@ -71,10 +81,10 @@ const parseState = (raw: string | null): TabState | null => {
           Number.isSafeInteger(tab.number) &&
           tab.number > 0 &&
           tab.number < state.nextNumber &&
-          typeof tab.title === 'string' &&
-          tab.title.length <= MAX_TITLE_LENGTH &&
           typeof tab.customTitle === 'string' &&
           tab.customTitle.length <= MAX_TITLE_LENGTH &&
+          (tab.directory === undefined ||
+            (typeof tab.directory === 'string' && tab.directory.length <= MAX_TITLE_LENGTH)) &&
           (tab.sessionId === undefined ||
             (typeof tab.sessionId === 'string' && tab.sessionId.length <= 128)) &&
           (tab.cwd === undefined || (typeof tab.cwd === 'string' && tab.cwd.startsWith('/')))
@@ -84,7 +94,19 @@ const parseState = (raw: string | null): TabState | null => {
     ) {
       return null;
     }
-    return state;
+    // Rebuild tabs to drop legacy saved titles and unknown fields.
+    return {
+      tabs: state.tabs.map(({ id, number, customTitle, directory, sessionId, cwd }) => ({
+        id,
+        number,
+        customTitle,
+        directory,
+        sessionId,
+        cwd,
+      })),
+      activeId: state.activeId,
+      nextNumber: state.nextNumber,
+    };
   } catch {
     return null;
   }
@@ -138,13 +160,17 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   const [closeError, setCloseError] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [popOutActive, setPopOutActive] = useState(false);
+  const [liveTitles, setLiveTitles] = useState<Record<string, string>>({});
+  const liveTitlesRef = useRef(liveTitles);
+  const titleChannelRef = useRef<BroadcastChannel | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const nameInputRef = useRef<HTMLInputElement>(null);
   const panelId = useId();
   const activeTab = state.tabs.find((tab) => tab.id === state.activeId);
   const tabLabel = (tab: TerminalTab): string =>
     tab.customTitle ||
-    tab.title ||
+    liveTitles[tab.id] ||
+    tab.directory ||
     (target.cwd ? directoryLabel(target.cwd) : `Shell ${tab.number}`);
 
   // Persist synchronously before opening a pop-out, and do not echo storage events
@@ -161,19 +187,64 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
     }
   };
 
-  const updateAutomaticTitle = (title: string) => {
+  // Program titles stay in memory and are shared with other windows, never saved.
+  const setLiveTitle = useCallback((id: string, title: string, broadcast = true) => {
     const normalized = title.trim().slice(0, MAX_TITLE_LENGTH);
+    if ((liveTitlesRef.current[id] ?? '') === normalized) return;
+    liveTitlesRef.current = { ...liveTitlesRef.current, [id]: normalized };
+    setLiveTitles(liveTitlesRef.current);
+    if (broadcast) {
+      titleChannelRef.current?.postMessage({ key: storageKeyRef.current, id, title: normalized });
+    }
+  }, []);
+
+  const showDirectory = (label: string) => {
+    const id = activeTab?.id;
+    if (id === undefined) return;
+    setLiveTitle(id, '');
+    const directory = label.trim().slice(0, MAX_TITLE_LENGTH);
     updateState((current) => {
-      if (current.tabs.find((tab) => tab.id === activeTab?.id)?.title === normalized)
-        return current;
+      if (current.tabs.find((tab) => tab.id === id)?.directory === directory) return current;
       return {
         ...current,
-        tabs: current.tabs.map((tab) =>
-          tab.id === activeTab?.id ? { ...tab, title: normalized } : tab
-        ),
+        tabs: current.tabs.map((tab) => (tab.id === id ? { ...tab, directory } : tab)),
       };
     });
   };
+
+  useEffect(() => {
+    let channel: BroadcastChannel;
+    try {
+      channel = new BroadcastChannel(TERMINAL_TAB_TITLES_CHANNEL);
+    } catch {
+      return undefined;
+    }
+    titleChannelRef.current = channel;
+    channel.onmessage = ({ data }: MessageEvent) => {
+      if (
+        data?.key === storageKeyRef.current &&
+        typeof data.id === 'string' &&
+        typeof data.title === 'string'
+      ) {
+        setLiveTitle(data.id, data.title, false);
+      }
+    };
+    return () => {
+      channel.close();
+      titleChannelRef.current = null;
+    };
+  }, [setLiveTitle]);
+
+  // Earlier versions saved program titles; rewrite the entry without them.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(storageKeyRef.current)?.includes('"title"')) {
+        window.localStorage.setItem(storageKeyRef.current, JSON.stringify(stateRef.current));
+      }
+    } catch {
+      // Storage may be unavailable.
+    }
+  }, []);
 
   useEffect(() => {
     if (renamingId !== null) {
@@ -207,14 +278,14 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
     if (popOutActive || closing || state.tabs.length >= MAX_TABS) return;
     const id = createTerminalPopOutId();
     updateState((current) => ({
-      tabs: [...current.tabs, { id, number: current.nextNumber, title: '', customTitle: '' }],
+      tabs: [...current.tabs, { id, number: current.nextNumber, customTitle: '' }],
       activeId: id,
       nextNumber: current.nextNumber + 1,
     }));
   };
 
   const rename = (tab: TerminalTab) => {
-    setName(tab.customTitle || tab.title);
+    setName(tab.customTitle || liveTitles[tab.id] || tab.directory || '');
     setRenamingId(tab.id);
   };
 
@@ -440,13 +511,18 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
             connectingEnabled: !(closing && pendingClose?.id === activeTab.id),
             tabBar,
             onPopOutChange: setPopOutActive,
-            onDirectoryChange: (cwd, homeDir) => updateAutomaticTitle(directoryLabel(cwd, homeDir)),
+            onDirectoryChange: (cwd, homeDir) => showDirectory(directoryLabel(cwd, homeDir)),
             onTitleChange: (title, homeDir) => {
-              // Shell prompt titles often use user@host:path. Keep the path,
-              // including ~/..., without altering other program-set titles.
-              const normalized = terminalShellDirectory(title) ?? title.trim();
-              updateAutomaticTitle(
-                normalized.startsWith('/') ? directoryLabel(normalized, homeDir) : normalized
+              // Shell prompt titles (user@host:path) report a directory.
+              const directory = terminalShellDirectory(title);
+              if (directory !== null) {
+                showDirectory(directoryLabel(directory, homeDir));
+                return;
+              }
+              const trimmed = title.trim();
+              setLiveTitle(
+                activeTab.id,
+                trimmed.startsWith('/') ? directoryLabel(trimmed, homeDir) : trimmed
               );
             },
             onSessionReady: (event) => {

@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
 import type { WorkspaceTarget } from '../../types';
-import TerminalTabs, { getTerminalTabsKey } from './TerminalTabs';
+import TerminalTabs, { getTerminalTabsKey, TERMINAL_TAB_TITLES_CHANNEL } from './TerminalTabs';
 
 const target: WorkspaceTarget = {
   kind: 'runner',
@@ -88,6 +88,11 @@ const Tabs = ({
 const activeId = () => screen.getByTestId('session').getAttribute('data-terminal-id');
 const tabNames = () => screen.getAllByRole('tab').map((tab) => tab.textContent);
 const addTab = () => fireEvent.click(screen.getByRole('button', { name: 'New terminal tab' }));
+const savedText = () =>
+  Array.from({ length: window.localStorage.length }, (_, index) => {
+    const key = window.localStorage.key(index) ?? '';
+    return `${key}=${window.localStorage.getItem(key)}`;
+  }).join('\n');
 
 const renameTab = (name: string, key = 'Enter') => {
   fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
@@ -264,7 +269,7 @@ describe('TerminalTabs', () => {
     });
     expect(JSON.parse(window.localStorage.getItem(canonicalKey) || 'null')).toMatchObject({
       activeId: secondId,
-      tabs: [{ id: '' }, { id: secondId, title: '/canonical/project', customTitle: 'Build' }],
+      tabs: [{ id: '' }, { id: secondId, directory: '/canonical/project', customTitle: 'Build' }],
     });
     unmount();
 
@@ -329,8 +334,8 @@ describe('TerminalTabs', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     const nextState = {
       tabs: [
-        { id: '', number: 1, title: '/workspace/project', customTitle: '' },
-        { id: 'popout-tab', number: 2, title: 'build', customTitle: 'Remote build' },
+        { id: '', number: 1, directory: '/workspace/project', customTitle: '' },
+        { id: 'popout-tab', number: 2, customTitle: 'Remote build' },
       ],
       activeId: 'popout-tab',
       nextNumber: 3,
@@ -349,6 +354,63 @@ describe('TerminalTabs', () => {
     expect(setItem).not.toHaveBeenCalled();
     receive(storageKey, '{invalid json');
     expect(activeId()).toBe('popout-tab');
+  });
+
+  it('shows program titles without saving them, and saves directories', () => {
+    render(<Tabs title="mysql -uroot -pS3cret app" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+    expect(tabNames()).toEqual(['mysql -uroot -pS3cret app']);
+    addTab();
+    renameTab('Build');
+    expect(savedText()).not.toContain('S3cret');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'mysql -uroot -pS3cret app' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(tabNames()).toEqual(['/workspace/build', 'Build']);
+    expect(savedText()).toContain('"directory":"/workspace/build"');
+  });
+
+  it('removes program titles saved by earlier versions', () => {
+    window.localStorage.setItem(
+      getTerminalTabsKey(target),
+      JSON.stringify({
+        tabs: [{ id: '', number: 1, title: 'mysql -pS3cret', customTitle: 'Database' }],
+        activeId: '',
+        nextNumber: 2,
+      })
+    );
+    render(<Tabs />);
+    expect(tabNames()).toEqual(['Database']);
+    expect(savedText()).not.toContain('S3cret');
+    expect(savedText()).toContain('"customTitle":"Database"');
+  });
+
+  it('shares program titles with other windows for the same tabs only', async () => {
+    const otherWindow = new BroadcastChannel(TERMINAL_TAB_TITLES_CHANNEL);
+    const received: unknown[] = [];
+    otherWindow.onmessage = (event) => received.push(event.data);
+    try {
+      render(<Tabs />);
+      fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+      await waitFor(() =>
+        expect(received).toContainEqual({
+          key: getTerminalTabsKey(target),
+          id: '',
+          title: 'nvim main.go',
+        })
+      );
+
+      otherWindow.postMessage({
+        key: getTerminalTabsKey({ ...target, cwd: '/elsewhere' }),
+        id: '',
+        title: 'ignored',
+      });
+      otherWindow.postMessage({ key: getTerminalTabsKey(target), id: '', title: 'cargo build' });
+      await waitFor(() => expect(tabNames()).toEqual(['cargo build']));
+      expect(savedText()).not.toContain('cargo build');
+    } finally {
+      otherWindow.close();
+    }
   });
 
   it.each([
