@@ -62,7 +62,6 @@
   width: 0;
   min-width: 0;
   flex-direction: column;
-  gap: 0.45rem;
   overflow: hidden;
   background: transparent;
   padding: 0.42rem 0.62rem 0.6rem 0.72rem;
@@ -73,54 +72,14 @@
   justify-content: flex-start;
 }
 
-.workspace-tools-tabs {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 0.35rem;
-  border-bottom: 1px solid var(--sidebar-stroke-strong);
-  padding: 0 0.15rem;
-}
-
-.workspace-tools-tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.8rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 2px 2px 0 0;
-  background: transparent;
-  color: var(--kodelet-muted);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 400;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
-  flex: 1 1 0;
-  gap: 0.42rem;
-  padding: 0 0.7rem;
-}
-
-.workspace-tools-tab:hover {
-  background: color-mix(in srgb, var(--kodelet-dark) 4%, transparent);
-  color: var(--kodelet-dark);
-}
-
-.workspace-tools-shell .workspace-tools-toggle:focus-visible,
-.workspace-tools-tab:focus-visible {
+.workspace-tools-rail .sidebar-toggle-button:focus-visible {
   outline: 2px solid var(--kodelet-link);
   outline-offset: -2px;
 }
 
-.workspace-tools-tab.is-active {
-  border-bottom-color: var(--kodelet-muted);
-  background: transparent;
-  color: var(--kodelet-dark);
-  font-weight: 500;
-  box-shadow: none;
+.workspace-tools-rail .sidebar-toggle-button.is-active {
+  background: color-mix(in srgb, var(--kodelet-link) 6%, transparent);
+  color: var(--kodelet-link);
 }
 
 .workspace-tools-content {
@@ -922,9 +881,7 @@
   }
 
   .workspace-tools-dock {
-    width: 100%;
     padding-top: calc(0.42rem + env(safe-area-inset-top));
-    padding-right: calc(0.62rem + env(safe-area-inset-right));
     padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
     padding-left: calc(0.72rem + env(safe-area-inset-left));
   }
@@ -946,30 +903,15 @@
   }
 
   .workspace-tools-shell.is-open .workspace-tools-rail {
-    position: absolute;
-    top: calc(0.45rem + env(safe-area-inset-top));
-    right: calc(0.35rem + env(safe-area-inset-right));
-    z-index: 3;
+    flex-basis: calc(2.75rem + env(safe-area-inset-right));
+    padding-top: calc(0.45rem + env(safe-area-inset-top));
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .workspace-tools-shell.is-open .workspace-tools-rail .sidebar-toggle-button {
     width: 2.75rem;
     height: 2.75rem;
-    padding: 0;
-  }
-
-  .workspace-tools-shell.is-open .workspace-tools-toggle {
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 0.25rem;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .workspace-tools-tabs {
-    min-height: 2.75rem;
-    padding-right: 3.15rem;
-  }
-
-  .workspace-tools-tab {
-    min-height: 2.5rem;
+    flex-shrink: 0;
   }
 
   .workspace-terminal-icon-button,
@@ -1008,8 +950,7 @@
   }
 
   .workspace-tools-dock {
-    gap: 0.35rem;
-    padding-right: calc(0.5rem + env(safe-area-inset-right));
+    padding-right: 0.5rem;
     padding-left: calc(0.5rem + env(safe-area-inset-left));
   }
 

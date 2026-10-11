@@ -69,7 +69,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-    fireEvent.click(screen.getByRole('tab', { name: `Show ${view}` }));
+    fireEvent.click(screen.getByRole('button', { name: `Show ${view}` }));
     const draftPanel = await screen.findByTestId(`${view}-panel`);
     const draftId = draftPanel.dataset.conversationId;
     expect(draftId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
@@ -100,7 +100,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     rerender(<ChatPage />);
     expect(screen.getByTestId(`${view}-panel`)).toBe(draftPanel);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Show terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show terminal' }));
     const terminal = await screen.findByTestId('terminal-panel');
     expect(terminal).toHaveAttribute('data-conversation-id', draftId);
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
@@ -115,7 +115,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
 
-    fireEvent.click(screen.getByRole('tab', { name: `Show ${view}` }));
+    fireEvent.click(screen.getByRole('button', { name: `Show ${view}` }));
     const pendingPanel = await screen.findByTestId(`${view}-panel`);
     expect(pendingPanel).toHaveAttribute('data-conversation-id', draftId);
     await act(async () => finishStream());

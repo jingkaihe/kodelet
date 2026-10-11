@@ -176,6 +176,14 @@ export const useChatLayout = (higherPriorityDialogOpen: boolean) => {
       if (event.key !== 'Tab') {
         return;
       }
+      // Terminal Tab/Shift+Tab are shell input; F6 moves focus back to the rail.
+      if (
+        workspaceOverlayOpen &&
+        document.activeElement instanceof Element &&
+        document.activeElement.closest('.workspace-terminal-host')
+      ) {
+        return;
+      }
 
       const focusableElements = Array.from(
         overlay.querySelectorAll<HTMLElement>(OVERLAY_FOCUSABLE_SELECTOR)

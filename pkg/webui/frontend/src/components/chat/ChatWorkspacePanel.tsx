@@ -98,24 +98,17 @@ const ChatWorkspacePanel = ({
   ].map(({ view, label, Icon, available, onClick }) =>
     available ? (
       <button
-        {...(workspacePanelOpen
-          ? {
-              role: 'tab',
-              'aria-selected': workspacePanelView === view,
-              'data-testid': `workspace-tools-${view}-tab`,
-            }
-          : { 'aria-controls': 'workspace-tools', title: label })}
+        aria-controls="workspace-tools"
         aria-label={`Show ${label.toLowerCase()}`}
-        className={cn(
-          workspacePanelOpen ? 'workspace-tools-tab' : 'sidebar-toggle-button',
-          workspacePanelView === view && 'is-active'
-        )}
+        aria-pressed={workspacePanelView === view}
+        className={cn('sidebar-toggle-button', workspacePanelView === view && 'is-active')}
+        data-testid={`workspace-tools-${view}-tab`}
         key={view}
         onClick={onClick}
+        title={label}
         type="button"
       >
         <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-        {workspacePanelOpen ? <span>{label}</span> : null}
       </button>
     ) : null
   );
@@ -162,10 +155,6 @@ const ChatWorkspacePanel = ({
       ) : null}
       {workspacePanelOpen ? (
         <div className="workspace-tools-dock" data-testid="workspace-tools-dock">
-          <div className="workspace-tools-tabs" role="tablist" aria-label="Workspace views">
-            {workspaceViewButtons}
-          </div>
-
           <div className="workspace-tools-content">
             <Suspense
               fallback={
@@ -207,7 +196,7 @@ const ChatWorkspacePanel = ({
         >
           <PanelRight aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
         </button>
-        {!workspacePanelOpen && !workspaceOverlayLayout ? workspaceViewButtons : null}
+        {workspacePanelOpen || !workspaceOverlayLayout ? workspaceViewButtons : null}
       </div>
     </aside>
   );

@@ -150,7 +150,7 @@ describe('ChatPage layout and accessibility', () => {
   it('toggles the terminal before input reaches the shell and preserves other terminal keys', async () => {
     await renderChatWithRunner();
     fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
-    expect(screen.getByTestId('workspace-tools-diff-tab')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('workspace-tools-diff-tab')).toHaveAttribute('aria-pressed', 'true');
     expect(fireEvent.keyDown(window, { key: '`', ctrlKey: true })).toBe(false);
     const terminal = await screen.findByTestId('terminal-host');
     terminal.focus();
@@ -404,6 +404,7 @@ describe('ChatPage layout and accessibility', () => {
   });
 
   it('isolates the mobile workspace sheet without stealing terminal keys', async () => {
+    const user = userEvent.setup();
     vi.stubGlobal(
       'matchMedia',
       vi.fn().mockImplementation((query: string) => ({
@@ -439,14 +440,23 @@ describe('ChatPage layout and accessibility', () => {
     expect(workspaceShell).toHaveAttribute('aria-modal', 'true');
     expect(chatMain).toHaveAttribute('inert');
     expect(chatMain).toHaveAttribute('aria-hidden', 'true');
+    expect(within(screen.getByTestId('workspace-tools-rail')).getAllByRole('button')).toEqual([
+      workspaceToggle,
+      terminalTab,
+      diffTab,
+    ]);
+    expect(screen.queryByRole('tablist', { name: 'Workspace views' })).not.toBeInTheDocument();
 
     workspaceToggle.focus();
-    fireEvent.keyDown(window, { key: 'Tab' });
+    await user.tab();
     expect(terminalTab).toHaveFocus();
 
-    terminalTab.focus();
-    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    await user.tab({ shift: true });
     expect(workspaceToggle).toHaveFocus();
+
+    diffTab.focus();
+    await user.tab();
+    expect(terminalHost).toHaveFocus();
 
     terminalHost.focus();
     expect(fireEvent.keyDown(terminalHost, { key: 'Tab' })).toBe(true);

@@ -37,7 +37,7 @@ describe('ChatPage workspace tools and browsers', () => {
       available: false,
     },
     { name: 'principal lacks access', capability: true, roles: ['user'], available: false },
-  ])('gates the browser tab when $name', async ({ capability, roles, available }) => {
+  ])('gates the browser button when $name', async ({ capability, roles, available }) => {
     mockGetAuthPrincipal.mockResolvedValue({ id: 'user', roles });
     mockGetRunners.mockResolvedValue({
       runners: [makeRunner({ workspaceGitDiff: true, workspaceBrowser: capability })],
@@ -50,17 +50,17 @@ describe('ChatPage workspace tools and browsers', () => {
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await flushAsyncUpdates();
     if (!available) {
-      expect(screen.queryByRole('tab', { name: 'Show browser' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Show browser' })).not.toBeInTheDocument();
       return;
     }
-    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show browser' }));
     expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
       'data-runner-id',
       'runner-1'
     );
     expect(screen.queryByTestId('terminal-panel')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Show browser' })).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getByRole('button', { name: 'Show browser' })).toHaveAttribute(
+      'aria-pressed',
       'true'
     );
   });
@@ -73,8 +73,8 @@ describe('ChatPage workspace tools and browsers', () => {
     const firstBrowser = await screen.findByTestId('browser-panel');
     const firstId = firstBrowser.dataset.conversationId;
     expect(firstId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
-    expect(screen.queryByRole('tab', { name: 'Show terminal' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Show changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show changes' })).not.toBeInTheDocument();
     let expireHeartbeat = () => {};
     mockHeartbeatDraftWorkspace.mockImplementationOnce(
       () =>
@@ -220,7 +220,7 @@ describe('ChatPage workspace tools and browsers', () => {
     await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await screen.findByTestId('terminal-panel');
-    expect(screen.queryByRole('tab', { name: 'Show browser' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show browser' })).not.toBeInTheDocument();
   });
 
   it('uses conversation identity rather than cwd when switching between saved browsers', async () => {
@@ -290,7 +290,7 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(terminal).toHaveAttribute('data-cwd', '/runner/other-project');
     expect(terminal.dataset.conversationId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
     await waitFor(() =>
       expect(mockGetGitDiff).toHaveBeenCalledWith({
         kind: 'runner',
@@ -299,7 +299,7 @@ describe('ChatPage workspace tools and browsers', () => {
       })
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show browser' }));
     const browser = await screen.findByTestId('browser-panel');
     expect(browser).toHaveAttribute('data-runner-id', 'runner-1');
     expect(browser).toHaveAttribute('data-cwd', '/runner/other-project');
@@ -433,7 +433,8 @@ describe('ChatPage workspace tools and browsers', () => {
       await flushAsyncUpdates();
       await flushAsyncUpdates();
       fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
-      if (panel === 'browser') fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+      if (panel === 'browser')
+        fireEvent.click(screen.getByRole('button', { name: 'Show browser' }));
       const firstPanel = screen.getByTestId(`${panel}-panel`);
       expect(firstPanel).toHaveAttribute('data-runner-id', 'runner-1');
       expect(firstPanel).toHaveAttribute('data-conversation-id', 'conv-remote');
@@ -473,7 +474,7 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
   });
 
-  it('opens each workspace view directly from the folded rail', async () => {
+  it('keeps icon controls in the rail when opening and folding each workspace view', async () => {
     const user = userEvent.setup();
     mockGetRunners.mockResolvedValue({
       runners: [
@@ -483,20 +484,29 @@ describe('ChatPage workspace tools and browsers', () => {
     await renderChatWithRunner();
 
     const rail = within(screen.getByTestId('workspace-tools-rail'));
-    for (const [name, panel] of [
+    const buttons = rail.getAllByRole('button');
+    const views = [
       ['terminal', 'terminal-panel'],
       ['changes', 'git-diff-panel'],
       ['browser', 'browser-panel'],
-    ]) {
-      rail.getByRole('button', { name: `Show ${name}` }).focus();
+    ];
+    expect(buttons).toHaveLength(4);
+    expect(rail.getAllByRole('button', { pressed: false })).toHaveLength(4);
+    for (const [name, panel] of views) {
+      const button = rail.getByRole('button', { name: `Show ${name}` });
+      button.focus();
       await user.keyboard('{Enter}');
       expect(await screen.findByTestId(panel)).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: `Show ${name}` })).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
-      expect(rail.getAllByRole('button')).toHaveLength(1);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button).toHaveClass('is-active');
+      expect(button).toHaveAttribute('title', `${name[0].toUpperCase()}${name.slice(1)}`);
+      expect(button.textContent).toBe('');
+      expect(rail.getAllByRole('button')).toEqual(buttons);
+      expect(rail.getAllByRole('button', { pressed: true })).toHaveLength(2);
+      expect(screen.queryByRole('tablist', { name: 'Workspace views' })).not.toBeInTheDocument();
       await user.click(rail.getByRole('button', { name: 'Hide workspace panel' }));
+      expect(screen.queryByTestId('workspace-tools-dock')).not.toBeInTheDocument();
+      expect(rail.getAllByRole('button', { pressed: false })).toHaveLength(4);
     }
     expect(rail.getAllByRole('button')).toHaveLength(4);
   });
@@ -648,7 +658,7 @@ describe('ChatPage workspace tools and browsers', () => {
         cwd: '/runner/different-directory',
       })
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Show browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show browser' }));
     expect(await screen.findByTestId('browser-panel')).toHaveAttribute(
       'data-conversation-id',
       'conv-selected-directory'
