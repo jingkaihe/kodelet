@@ -413,6 +413,68 @@ describe('TerminalTabs', () => {
     }
   });
 
+  describe('saved state cleanup', () => {
+    const day = 24 * 60 * 60 * 1000;
+    const keyFor = (cwd: string) => getTerminalTabsKey({ ...target, cwd });
+    const save = (key: string, updatedAt?: number) =>
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          tabs: [{ id: '', number: 1, customTitle: '' }],
+          activeId: '',
+          nextNumber: 2,
+          ...(updatedAt === undefined ? {} : { updatedAt }),
+        })
+      );
+    const savedAt = (key: string) =>
+      JSON.parse(window.localStorage.getItem(key) || 'null')?.updatedAt;
+
+    it('removes unused, broken and orphaned entries but keeps current and recent tabs', () => {
+      const now = Date.now();
+      save(getTerminalTabsKey(target), now - 40 * day);
+      save(keyFor('/expired'), now - 31 * day);
+      window.localStorage.setItem(
+        keyFor('/expired-alias'),
+        JSON.stringify({ canonicalKey: keyFor('/expired') })
+      );
+      save(keyFor('/recent'), now - day);
+      window.localStorage.setItem(
+        keyFor('/recent-alias'),
+        JSON.stringify({ canonicalKey: keyFor('/recent') })
+      );
+      save(keyFor('/legacy'));
+      window.localStorage.setItem(keyFor('/broken'), '{broken');
+      window.localStorage.setItem('unrelated', 'kept');
+
+      render(<Tabs />);
+
+      for (const cwd of ['/expired', '/expired-alias', '/broken']) {
+        expect(window.localStorage.getItem(keyFor(cwd))).toBeNull();
+      }
+      expect(window.localStorage.getItem(keyFor('/recent-alias'))).not.toBeNull();
+      expect(savedAt(keyFor('/recent'))).toBe(now - day);
+      expect(savedAt(keyFor('/legacy'))).toBeGreaterThanOrEqual(now);
+      expect(savedAt(getTerminalTabsKey(target))).toBeGreaterThanOrEqual(now);
+      expect(window.localStorage.getItem('unrelated')).toBe('kept');
+    });
+
+    it('keeps only the 50 most recently used entries', () => {
+      const now = Date.now();
+      for (let index = 0; index < 52; index++) save(keyFor(`/project-${index}`), now - index);
+      render(<Tabs />);
+      expect(window.localStorage.getItem(keyFor('/project-49'))).not.toBeNull();
+      expect(window.localStorage.getItem(keyFor('/project-50'))).toBeNull();
+      expect(window.localStorage.getItem(keyFor('/project-51'))).toBeNull();
+    });
+
+    it('stamps every save with its time', () => {
+      const now = Date.now();
+      render(<Tabs />);
+      addTab();
+      expect(savedAt(getTerminalTabsKey(target))).toBeGreaterThanOrEqual(now);
+    });
+  });
+
   it.each([
     '{broken',
     'null',

@@ -18,6 +18,8 @@ import { createTerminalPopOutId } from './terminalPopOut';
 const MAX_TABS = 8;
 const MAX_TITLE_LENGTH = 100;
 const STORAGE_PREFIX = 'kodelet.terminal.tabs.v1:';
+const SAVED_STATE_LIMIT = 50;
+const SAVED_STATE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 export const TERMINAL_TAB_TITLES_CHANNEL = 'kodelet.terminal.tabs.titles';
 
 interface TerminalTab {
@@ -132,6 +134,63 @@ const resolveStorageKey = (key: string): string => {
   }
 };
 
+const saveState = (key: string, state: TabState): void =>
+  window.localStorage.setItem(key, JSON.stringify({ ...state, updatedAt: Date.now() }));
+
+// Removes saved tabs unused for 30 days, keeping at most the 50 most recent.
+// Also stamps and rewrites entries from earlier versions, dropping saved titles.
+const pruneSavedStates = (keep: Set<string>): void => {
+  try {
+    const now = Date.now();
+    const states: { key: string; updatedAt: number }[] = [];
+    const aliases: { key: string; canonicalKey: string }[] = [];
+    const keys = Array.from({ length: window.localStorage.length }, (_, index) =>
+      window.localStorage.key(index)
+    );
+    for (const key of keys) {
+      if (!key?.startsWith(STORAGE_PREFIX)) continue;
+      const raw = window.localStorage.getItem(key) ?? '';
+      let stored: { canonicalKey?: unknown; updatedAt?: unknown } | null = null;
+      try {
+        stored = JSON.parse(raw);
+      } catch {
+        // Removed below as an invalid state.
+      }
+      if (typeof stored?.canonicalKey === 'string') {
+        aliases.push({ key, canonicalKey: stored.canonicalKey });
+        continue;
+      }
+      const state = parseState(raw);
+      if (!state) {
+        if (!keep.has(key)) window.localStorage.removeItem(key);
+        continue;
+      }
+      const updatedAt = stored?.updatedAt;
+      if (keep.has(key) || typeof updatedAt !== 'number' || raw.includes('"title"')) {
+        saveState(key, state);
+        states.push({ key, updatedAt: now });
+      } else {
+        states.push({ key, updatedAt });
+      }
+    }
+    const retained = new Set(
+      states
+        .filter(({ key, updatedAt }) => keep.has(key) || now - updatedAt <= SAVED_STATE_MAX_AGE)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .filter(({ key }, index) => keep.has(key) || index < SAVED_STATE_LIMIT)
+        .map(({ key }) => key)
+    );
+    for (const { key } of states) {
+      if (!retained.has(key)) window.localStorage.removeItem(key);
+    }
+    for (const { key, canonicalKey } of aliases) {
+      if (!keep.has(key) && !retained.has(canonicalKey)) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage may be unavailable.
+  }
+};
+
 const directoryLabel = (cwd: string, homeDir?: string): string => {
   const path = cwd.replace(/[/]+$/, '') || '/';
   const home = homeDir?.replace(/[/]+$/, '');
@@ -148,7 +207,8 @@ interface TerminalTabsProps {
 }
 
 const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
-  const [storageKey, setStorageKey] = useState(() => resolveStorageKey(getTerminalTabsKey(target)));
+  const [targetKey] = useState(() => getTerminalTabsKey(target));
+  const [storageKey, setStorageKey] = useState(() => resolveStorageKey(targetKey));
   const storageKeyRef = useRef(storageKey);
   const closeTargetRef = useRef(target);
   const [state, setState] = useState(() => readState(storageKey));
@@ -181,7 +241,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
     stateRef.current = next;
     setState(next);
     try {
-      window.localStorage.setItem(storageKeyRef.current, JSON.stringify(next));
+      saveState(storageKeyRef.current, next);
     } catch {
       // The terminal remains usable when browser storage is unavailable.
     }
@@ -235,16 +295,9 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
     };
   }, [setLiveTitle]);
 
-  // Earlier versions saved program titles; rewrite the entry without them.
   useEffect(() => {
-    try {
-      if (window.localStorage.getItem(storageKeyRef.current)?.includes('"title"')) {
-        window.localStorage.setItem(storageKeyRef.current, JSON.stringify(stateRef.current));
-      }
-    } catch {
-      // Storage may be unavailable.
-    }
-  }, []);
+    pruneSavedStates(new Set([targetKey, storageKeyRef.current]));
+  }, [targetKey]);
 
   useEffect(() => {
     if (renamingId !== null) {
@@ -532,7 +585,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
                 let next = stateRef.current;
                 try {
                   next = parseState(window.localStorage.getItem(canonicalKey)) || next;
-                  window.localStorage.setItem(canonicalKey, JSON.stringify(next));
+                  saveState(canonicalKey, next);
                   window.localStorage.setItem(
                     getTerminalTabsKey(target),
                     JSON.stringify({ canonicalKey })
