@@ -131,7 +131,7 @@ const meta = {
     contextText: 'flair/claude-sonnet-4-6 · medium',
     dragActive: false,
     draft: 'Extract the reusable component and add a story.',
-    placeholder: 'Ask kodelet anything...',
+    placeholder: 'Ask kodelet...',
     showStop: false,
     slashCommandIndex: -1,
     slashCommandSuggestions: [],
@@ -232,7 +232,7 @@ export const RepeatedPunctuation: Story = {
     ...SteeringActiveConversation.args,
     contextText: 'deep/gpt-6-astra · xhigh',
     draft: '',
-    placeholder: 'Steer the active conversation…',
+    placeholder: 'Ask kodelet...',
   },
   play: async (context) => {
     await meta.play(context);
@@ -273,7 +273,7 @@ export const InWorkspace: Story = {
   args: {
     ...SteeringActiveConversation.args,
     draft: '',
-    placeholder: 'Steer the active conversation…',
+    placeholder: 'Ask kodelet...',
     submitDisabled: true,
   },
   render: (args) => (

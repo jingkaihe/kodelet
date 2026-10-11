@@ -81,7 +81,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
         })
     );
     window.dispatchEvent(new Event('pageshow'));
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello remotely' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -122,7 +122,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(draftId));
     expect(screen.getByTestId(`${view}-panel`)).toBe(pendingPanel);
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'second turn' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -170,7 +170,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'retry' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -268,7 +268,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     );
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(conversationId));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'retry established conversation' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -315,7 +315,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     selectWorkspaceRunner();
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'first message' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -332,7 +332,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     expect(terminal).toHaveAttribute('data-conversation-id', conversationId);
     expect(terminal).toHaveAttribute('data-show-pop-out', 'true');
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'second message' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -358,7 +358,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -417,7 +417,7 @@ describe('ChatPage optimistic conversations and route handoff', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

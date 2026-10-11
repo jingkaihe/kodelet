@@ -114,7 +114,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
     });
 
-    fireEvent.change(screen.getByPlaceholderText('Steer the active conversation…'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'Focus on the failing tests' },
     });
     const steerButton = screen.getByRole('button', { name: 'Steer' });
@@ -161,7 +161,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -182,7 +182,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       });
     });
 
-    fireEvent.change(screen.getByPlaceholderText('Steer the active conversation…'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'Focus on tests' },
     });
 
@@ -259,7 +259,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -310,7 +310,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -391,7 +391,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'start running task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -551,7 +551,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'start first task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -568,7 +568,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
     setRouteParams({ id: 'conv-456' });
     rerender(<ChatPage />);
 
-    const secondComposer = await screen.findByPlaceholderText('Ask kodelet anything...');
+    const secondComposer = await screen.findByPlaceholderText('Ask kodelet...');
     expect(secondComposer).toBeEnabled();
 
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
@@ -612,7 +612,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -622,7 +622,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
     const steerButton = await screen.findByRole('button', { name: 'Steer' });
     expect(steerButton).toBeDisabled();
 
-    const textarea = screen.getByPlaceholderText('Steer the active conversation…');
+    const textarea = screen.getByPlaceholderText('Ask kodelet...');
     fireEvent.change(textarea, { target: { value: 'Focus on tests' } });
     await waitFor(() => expect(steerButton).toBeEnabled());
     fireEvent.click(steerButton);
@@ -668,7 +668,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

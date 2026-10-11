@@ -14,7 +14,7 @@ const renderComposer = (overrides: Partial<React.ComponentProps<typeof ChatCompo
     contextText: 'gpt-5 · medium',
     dragActive: false,
     draft: 'hello',
-    placeholder: 'Ask kodelet anything...',
+    placeholder: 'Ask kodelet...',
     showStop: false,
     slashCommandIndex: -1,
     slashCommandSuggestions: [],
@@ -213,7 +213,7 @@ describe('ChatComposer', () => {
   });
 
   it('fits a wrapped empty placeholder and shrinks when it fits on one line again', () => {
-    const composer = renderComposer({ draft: '', placeholder: 'Steer the active conversation…' });
+    const composer = renderComposer({ draft: '', placeholder: 'A long placeholder that wraps…' });
     const textarea = screen.getByTestId('composer-textarea');
     let scrollHeight = 68;
     Object.defineProperties(textarea, {

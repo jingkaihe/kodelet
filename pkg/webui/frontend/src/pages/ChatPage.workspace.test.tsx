@@ -160,7 +160,7 @@ describe('ChatPage workspace tools and browsers', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
       fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
       const draftId = (await screen.findByTestId('browser-panel')).dataset.conversationId;
-      fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
         target: { value: 'Keep my unsent message' },
       });
       fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
@@ -179,9 +179,7 @@ describe('ChatPage workspace tools and browsers', () => {
       const recovered = await screen.findByTestId('browser-panel');
       expect(recovered.dataset.conversationId).not.toBe(draftId);
       expect(recovered).toHaveAttribute('data-cwd', '/runner/custom');
-      expect(screen.getByPlaceholderText('Ask kodelet anything...')).toHaveValue(
-        'Keep my unsent message'
-      );
+      expect(screen.getByPlaceholderText('Ask kodelet...')).toHaveValue('Keep my unsent message');
       expect(mockDiscardDraftWorkspace).toHaveBeenCalledExactlyOnceWith({
         runnerId: 'runner-1',
         conversationId: draftId,

@@ -37,7 +37,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-    const textarea = screen.getByPlaceholderText('Ask kodelet anything...');
+    const textarea = screen.getByPlaceholderText('Ask kodelet...');
     fireEvent.change(textarea, { target: { value: 'describe this image' } });
 
     const file = new File(['hello'], 'clipboard.png', { type: 'image/png' });
@@ -223,7 +223,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     fireEvent.change(textarea, { target: { value: '/' } });
     await screen.findByTestId('slash-command-suggestions');
 
-    expect(textarea).toHaveAttribute('placeholder', 'Ask kodelet anything...');
+    expect(textarea).toHaveAttribute('placeholder', 'Ask kodelet...');
 
     fireEvent.keyDown(textarea, { key: 'ArrowDown' });
 
@@ -292,7 +292,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -307,7 +307,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
       });
     });
 
-    const textarea = screen.getByPlaceholderText('Steer the active conversation…');
+    const textarea = screen.getByPlaceholderText('Ask kodelet...');
     fireEvent.change(textarea, { target: { value: 'Use this screenshot' } });
 
     const file = new File(['hello'], 'steer.png', { type: 'image/png' });

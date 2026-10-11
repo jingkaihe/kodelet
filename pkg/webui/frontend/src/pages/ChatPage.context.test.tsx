@@ -241,7 +241,7 @@ describe('ChatPage working directories and runner selection', () => {
     });
     await flushAsyncUpdates();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -274,7 +274,7 @@ describe('ChatPage working directories and runner selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello remotely' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -474,7 +474,7 @@ describe('ChatPage working directories and runner selection', () => {
       await act(async () => resolveRunners({ runners: [makeRunner(), embeddedRunner] }));
       expect(screen.getByTestId('composer-textarea')).toBeEnabled();
       expect(screen.queryByTestId('new-chat-dialog')).not.toBeInTheDocument();
-      fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
         target: { value: 'hello immediately' },
       });
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));

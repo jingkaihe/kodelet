@@ -241,7 +241,7 @@ export const startOptimisticRemoteConversation = async ({
   });
   await flushAsyncUpdates();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-  fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+  fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
     target: { value: message },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));

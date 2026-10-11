@@ -347,7 +347,7 @@ describe('ChatPage sidebar polling and conversation management', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'Brand new task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -401,7 +401,7 @@ describe('ChatPage sidebar polling and conversation management', () => {
 
     await screen.findByTestId('conversation-row-conv-existing');
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'Brand new task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -671,7 +671,7 @@ describe('ChatPage sidebar polling and conversation management', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    fireEvent.change(await screen.findByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(await screen.findByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

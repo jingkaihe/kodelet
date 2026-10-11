@@ -227,7 +227,7 @@ describe('ChatPage extension widgets and UI requests', () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
-    fireEvent.change(await screen.findByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(await screen.findByPlaceholderText('Ask kodelet...'), {
       target: { value: 'delegate this task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -633,7 +633,7 @@ describe('ChatPage extension widgets and UI requests', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'start running task' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

@@ -159,7 +159,7 @@ describe('ChatPage model and reasoning settings', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -221,7 +221,7 @@ describe('ChatPage model and reasoning settings', () => {
     expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^work\/gpt-5-mini · medium$/
     );
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -239,7 +239,7 @@ describe('ChatPage model and reasoning settings', () => {
       /^work\/gpt-5-mini · medium$/
     );
     expect(screen.queryByTestId('composer-context-button')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -323,7 +323,7 @@ describe('ChatPage model and reasoning settings', () => {
     expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('high');
     fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -376,7 +376,7 @@ describe('ChatPage model and reasoning settings', () => {
     expect(screen.getByTestId('composer-quick-pick')).toHaveTextContent(
       /^anthropic\/custom-claude · max$/
     );
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -653,7 +653,7 @@ describe('ChatPage model and reasoning settings', () => {
       expect(screen.getByLabelText('Reasoning effort')).toHaveTextContent('medium');
       expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
       fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-      fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
         target: { value: 'hello' },
       });
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -779,7 +779,7 @@ describe('ChatPage model and reasoning settings', () => {
       })
     );
 
-    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet...'), {
       target: { value: 'continue' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

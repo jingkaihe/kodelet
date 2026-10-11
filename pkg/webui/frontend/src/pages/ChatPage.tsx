@@ -1714,8 +1714,8 @@ const ChatPage: React.FC = () => {
       ? 'This local conversation is read-only'
       : 'Select a workspace runner to start'
     : currentConversationIsStreaming
-      ? 'Steer the active conversation…'
-      : slashCommands.placeholder || 'Ask kodelet anything...';
+      ? 'Ask kodelet...'
+      : slashCommands.placeholder || 'Ask kodelet...';
   const workspaceExecutionMessage = !isRemoteConversation
     ? conversationId
       ? 'This conversation uses the disabled control-plane workspace and is read-only.'
