@@ -514,7 +514,7 @@
 
 .workspace-terminal-tab-select {
   flex: 1 1 auto;
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .workspace-terminal-tab-select span {

@@ -35,7 +35,10 @@ describe('Terminal tab sizing', () => {
       'overflow-x': 'auto',
       'min-width': '0',
     });
-    expect(rules['.workspace-terminal-tab-select']).toMatchObject({ flex: '1 1 auto' });
+    expect(rules['.workspace-terminal-tab-select']).toMatchObject({
+      flex: '1 1 auto',
+      'justify-content': 'center',
+    });
   });
 });
 
