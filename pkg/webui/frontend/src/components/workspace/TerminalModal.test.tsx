@@ -1372,6 +1372,58 @@ describe('TerminalModal', () => {
     );
   });
 
+  it.each([
+    ['before', 'jingkaihe'],
+    ['after', 'jingkaihe'],
+    ['before', ''], // Fedora still emits @host:path when a service has no USER.
+  ])('does not let Fedora prompt titles mask foreground programs (prompt %s status, user %j)', async (order, user) => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+    const output = (title: string) => {
+      const bytes = new TextEncoder().encode(`\x1b]0;${title}\x07`);
+      const data = new ArrayBuffer(bytes.length);
+      new Uint8Array(data).set(bytes);
+      act(() => socket.emit('message', { data }));
+    };
+    const status = (foregroundCommand = '', cwd = '/home/jingkaihe/workspace/kodelet') => {
+      act(() =>
+        socket.emit('message', {
+          data: JSON.stringify({
+            type: 'status',
+            cwd,
+            homeDir: '/home/jingkaihe',
+            foregroundCommand,
+          }),
+        })
+      );
+    };
+    const prompt = `${user}@fedora:~/workspace/kodelet`;
+    if (order === 'before') output(prompt);
+    status();
+    if (order === 'after') output(prompt);
+    expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
+
+    // btop need not emit an OSC title: the process status must win over the prompt.
+    status('btop');
+    expect(screen.getByRole('tab', { name: 'btop' })).toBeInTheDocument();
+    output(prompt); // A late/replayed prompt must not mask a known foreground job either.
+    expect(screen.getByRole('tab', { name: 'btop' })).toBeInTheDocument();
+    status();
+    expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
+
+    // A genuine application title can arrive before the next process poll.
+    output('nvim main.go');
+    status('nvim main.go');
+    expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
+    output(`${user}@fedora:~`);
+    status('', '/home/jingkaihe');
+    expect(screen.getByRole('tab', { name: '~' })).toBeInTheDocument();
+    status('sleep 30', '/home/jingkaihe');
+    expect(screen.getByRole('tab', { name: 'sleep 30' })).toBeInTheDocument();
+  });
+
   it('follows shell directories and program OSC titles without overriding custom tab names', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);

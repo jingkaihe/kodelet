@@ -4,6 +4,7 @@ import apiService from '../../services/api';
 import type { TerminalReadyEvent, WorkspaceTarget } from '../../types';
 import UIInputDialog from '../chat/UIInputDialog';
 import TerminalModalFrame from './TerminalModalFrame';
+import { terminalShellDirectory } from './terminalDirectory';
 import { createTerminalPopOutId } from './terminalPopOut';
 
 const MAX_TABS = 8;
@@ -442,7 +443,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
             onTitleChange: (title, homeDir) => {
               // Shell prompt titles often use user@host:path. Keep the path,
               // including ~/..., without altering other program-set titles.
-              const normalized = title.trim().replace(/^[^@\s/:]+@[^@\s/:]+:(?=~(?:\/|$)|\/)/u, '');
+              const normalized = terminalShellDirectory(title) ?? title.trim();
               updateAutomaticTitle(
                 normalized.startsWith('/') ? directoryLabel(normalized, homeDir) : normalized
               );

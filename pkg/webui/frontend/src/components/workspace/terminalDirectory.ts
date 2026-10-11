@@ -1,5 +1,9 @@
 const MAX_OSC_PAYLOAD = 8192;
 
+/** Shell prompt titles report a directory, not an application-owned title. */
+export const terminalShellDirectory = (title: string): string | null =>
+  /^[^@\s/:]*@[^@\s/:]+:(~(?:\/.*)?|\/.*)$/u.exec(title.trim())?.[1] ?? null;
+
 const directoryFromOSC = (payload: string | null): string | null => {
   if (payload === null || /\p{Cc}/u.test(payload)) return null;
   const match = /^7;file:\/\/[^/?#\\]*(\/[^?#\\]*)$/i.exec(payload);

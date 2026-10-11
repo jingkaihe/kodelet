@@ -17,7 +17,7 @@ import TerminalModalFrame, {
   type TerminalStatusVariant,
 } from './TerminalModalFrame';
 import TerminalTabs, { getTerminalTabsKey, type TerminalTabSessionProps } from './TerminalTabs';
-import { createTerminalDirectoryTracker } from './terminalDirectory';
+import { createTerminalDirectoryTracker, terminalShellDirectory } from './terminalDirectory';
 import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
@@ -630,7 +630,15 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
         updateTabTitle();
       },
       (title) => {
-        explicitTitle = title.trim();
+        const directory = terminalShellDirectory(title);
+        if (directory !== null) {
+          // Fedora Bash reports its prompt directory through OSC 0. Treat it
+          // like OSC 7 so the last prompt cannot mask a foreground program.
+          observedDirectory = directory;
+          explicitTitle = '';
+        } else {
+          explicitTitle = title.trim();
+        }
         updateTabTitle();
       }
     );
