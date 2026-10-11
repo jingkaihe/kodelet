@@ -160,10 +160,28 @@ func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
 			code: websocket.ClosePolicyViolation,
 		},
 		{
+			name: "invalid directory",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "invalid working directory"},
+			info: "invalid working directory",
+			code: websocket.CloseTryAgainLater,
+		},
+		{
 			name: "transport",
 			err:  errors.New("connection unavailable"),
 			info: "Failed to open runner terminal.",
-			code: websocket.CloseTryAgainLater,
+			code: websocket.CloseAbnormalClosure,
+		},
+		{
+			name: "control plane timeout",
+			err:  context.DeadlineExceeded,
+			info: "Failed to open runner terminal.",
+			code: websocket.CloseAbnormalClosure,
+		},
+		{
+			name: "runner unavailable",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "runner service is closed"},
+			info: "runner service is closed",
+			code: websocket.CloseAbnormalClosure,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

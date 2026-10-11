@@ -209,9 +209,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 			message = rpcErr.Message
 		}
 		_ = writer.writeJSON(terminalMessage{Type: "info", Text: message})
-		// Capacity and shell-start failures need an explicit retry, not an
-		// automatic reconnect loop. Only stale workspace sessions use 1008.
-		if rpcErr == nil || (rpcErr.Reason() != protocol.ErrorReasonWorkspaceSessionDiscarded && rpcErr.Reason() != protocol.ErrorReasonWorkspaceSessionClosed) {
+		if terminalOpenNeedsExplicitRetry(err) {
 			_ = writer.Write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Failed to open runner terminal"))
 		}
 		return
@@ -479,6 +477,20 @@ func (s *Server) callRemoteTerminal(ctx context.Context, runnerID string, genera
 		return err
 	}
 	return nil
+}
+
+// terminalOpenNeedsExplicitRetry reports whether the runner rejected the open
+// (e.g. session limit). Transient and stale-session failures return false.
+func terminalOpenNeedsExplicitRetry(err error) bool {
+	var rpcErr *protocol.RPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	switch rpcErr.Reason() {
+	case protocol.ErrorReasonWorkspaceSessionDiscarded, protocol.ErrorReasonWorkspaceSessionClosed:
+		return false
+	}
+	return rpcErr.Code != protocol.ErrorCodeUnavailable
 }
 
 func terminalExitCode(code int) *int {
