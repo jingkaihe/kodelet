@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.8.4-beta
+
+Added persistent Web UI terminal tabs scoped to the runner, conversation, and directory, with custom names, drag-to-reorder, pop-out synchronization, `Alt/⌥+1–8` tab selection, and `F2` renaming. Closing a tab confirms before stopping its shell and running processes, releases its session slot, and leaves other terminals and browsers untouched. Session-aware cleanup remains safe when a directory is removed, renamed, or replaced.
+
+Added live terminal tab titles from the current directory, foreground command, and application-set titles, including shell prompt title handling for Fedora and Debian. Automatic program titles stay in memory rather than browser storage; saved tab state is pruned after 30 days of inactivity or beyond the 50 most recent workspaces.
+
+Improved workspace terminal compatibility with bundled Ghostty terminfo, truecolor settings, and terminal metadata independent of the runner's launching terminal, falling back to `xterm-256color` when terminfo installation is unavailable.
+
+Improved terminal-open error reporting and recovery: transient connection failures reconnect automatically, while session-limit and shell-start failures preserve the error and offer an explicit retry instead of reconnecting continuously.
+
+Simplified Web UI workspace navigation into a persistent icon rail for terminals, changes, and browsers. Fixed `Tab` and `Shift+Tab` being intercepted by the workspace overlay instead of reaching terminal applications.
+
+Made completed Web UI code-mode execution cards fold by default while preserving explicit user fold choices through streaming and completion.
+
+**Upgrade:** Upgrade runners alongside the daemon and Web UI to support terminal tab scoping and cleanup.
+
 ## 0.8.3-beta
 
 Added shared skill discovery from repository-local `.agents/skills/` and user-global `~/.agents/skills/`, with repository-local skills taking precedence and `.kodelet/skills/` overriding shared skills within each scope.
