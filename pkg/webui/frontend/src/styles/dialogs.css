@@ -16,7 +16,7 @@
   overflow-y: auto;
   border-radius: 1.5rem;
   padding: 1.35rem;
-  box-shadow: 0 28px 70px rgba(20, 20, 19, 0.18);
+  box-shadow: none;
 }
 
 .new-chat-dialog-header {
