@@ -1331,12 +1331,12 @@ describe('TerminalModal', () => {
     };
     message(ready);
     message({ type: 'replay-complete' });
-    message({ type: 'status', cwd: '/home/jingkaihe', homeDir: '/home/jingkaihe' });
+    message({ type: 'status', cwd: '/home/user', homeDir: '/home/user' });
     expect(screen.getByRole('tab', { name: '~' })).toBeInTheDocument();
     message({
       type: 'status',
-      cwd: '/home/jingkaihe/workspace/kodelet',
-      homeDir: '/home/jingkaihe',
+      cwd: '/home/user/workspace/kodelet',
+      homeDir: '/home/user',
     });
     expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
     message({ type: 'status', cwd: '/tmp/project/frontend' });
@@ -1373,10 +1373,12 @@ describe('TerminalModal', () => {
   });
 
   it.each([
-    ['before', 'jingkaihe'],
-    ['after', 'jingkaihe'],
-    ['before', ''], // Fedora still emits @host:path when a service has no USER.
-  ])('does not let Fedora prompt titles mask foreground programs (prompt %s status, user %j)', async (order, user) => {
+    ['before', 'user', ':'],
+    ['after', 'user', ':'],
+    ['before', '', ':'], // Fedora still emits @host:path when a service has no USER.
+    ['before', 'user', ': '], // Debian and Ubuntu add a space after the colon.
+    ['after', 'user', ': '],
+  ])('does not let shell prompt titles mask foreground programs (prompt %s status, user %j, separator %j)', async (order, user, separator) => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
@@ -1387,19 +1389,19 @@ describe('TerminalModal', () => {
       new Uint8Array(data).set(bytes);
       act(() => socket.emit('message', { data }));
     };
-    const status = (foregroundCommand = '', cwd = '/home/jingkaihe/workspace/kodelet') => {
+    const status = (foregroundCommand = '', cwd = '/home/user/workspace/kodelet') => {
       act(() =>
         socket.emit('message', {
           data: JSON.stringify({
             type: 'status',
             cwd,
-            homeDir: '/home/jingkaihe',
+            homeDir: '/home/user',
             foregroundCommand,
           }),
         })
       );
     };
-    const prompt = `${user}@fedora:~/workspace/kodelet`;
+    const prompt = `${user}@runner${separator}~/workspace/kodelet`;
     if (order === 'before') output(prompt);
     status();
     if (order === 'after') output(prompt);
@@ -1417,10 +1419,10 @@ describe('TerminalModal', () => {
     output('nvim main.go');
     status('nvim main.go');
     expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
-    output(`${user}@fedora:~`);
-    status('', '/home/jingkaihe');
+    output(`${user}@runner${separator}~`);
+    status('', '/home/user');
     expect(screen.getByRole('tab', { name: '~' })).toBeInTheDocument();
-    status('sleep 30', '/home/jingkaihe');
+    status('sleep 30', '/home/user');
     expect(screen.getByRole('tab', { name: 'sleep 30' })).toBeInTheDocument();
   });
 

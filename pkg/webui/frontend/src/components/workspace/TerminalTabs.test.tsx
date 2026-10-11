@@ -178,14 +178,14 @@ describe('TerminalTabs', () => {
   });
 
   it.each([
-    ['/home/jingkaihe', '/home/jingkaihe', '~'],
-    ['/home/jingkaihe/workspace/kodelet', '/home/jingkaihe', '~/workspace/kodelet'],
-    ['/Users/jingkaihe/Workspace/kodelet/', '/Users/jingkaihe/', '~/Workspace/kodelet'],
-    ['/home/jingkaihe-other/project', '/home/jingkaihe', '/home/jingkaihe-other/project'],
-    ['/srv/project', '/home/jingkaihe', '/srv/project'],
-    ['/', '/home/jingkaihe', '/'],
-    ['/home/jingkaihe/project', undefined, '/home/jingkaihe/project'],
-    ['/home/jingkaihe/my project/café', '/home/jingkaihe', '~/my project/café'],
+    ['/home/user', '/home/user', '~'],
+    ['/home/user/workspace/kodelet', '/home/user', '~/workspace/kodelet'],
+    ['/Users/user/Workspace/kodelet/', '/Users/user/', '~/Workspace/kodelet'],
+    ['/home/user-other/project', '/home/user', '/home/user-other/project'],
+    ['/srv/project', '/home/user', '/srv/project'],
+    ['/', '/home/user', '/'],
+    ['/home/user/project', undefined, '/home/user/project'],
+    ['/home/user/my project/café', '/home/user', '~/my project/café'],
   ])('displays directory %s relative only to the runner home %s', (directory, homeDir, expected) => {
     render(<Tabs directory={directory} homeDir={homeDir} />);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
@@ -199,13 +199,13 @@ describe('TerminalTabs', () => {
 
   it('abbreviates absolute shell title paths but leaves command arguments unchanged', () => {
     const { rerender } = render(
-      <Tabs title="user@runner:/home/jingkaihe/workspace/kodelet" homeDir="/home/jingkaihe" />
+      <Tabs title="user@runner:/home/user/workspace/kodelet" homeDir="/home/user" />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
     expect(tabNames()).toEqual(['~/workspace/kodelet']);
-    rerender(<Tabs title="nvim /home/jingkaihe/file.txt" homeDir="/home/jingkaihe" />);
+    rerender(<Tabs title="nvim /home/user/file.txt" homeDir="/home/user" />);
     fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
-    expect(tabNames()).toEqual(['nvim /home/jingkaihe/file.txt']);
+    expect(tabNames()).toEqual(['nvim /home/user/file.txt']);
   });
 
   it.each([
@@ -214,6 +214,8 @@ describe('TerminalTabs', () => {
     ['user@runner:/tmp/project', '/tmp/project'],
     ['user@runner:~/my project/café:logs', '~/my project/café:logs'],
     ['  user@runner:~/workspace  ', '~/workspace'],
+    ['user@ubuntu: ~/workspace', '~/workspace'],
+    ['(chroot)user@debian: /srv', '/srv'],
     ['nvim main.go', 'nvim main.go'],
     ['ssh user@runner:/tmp', 'ssh user@runner:/tmp'],
     ['user@runner:pytest', 'user@runner:pytest'],
