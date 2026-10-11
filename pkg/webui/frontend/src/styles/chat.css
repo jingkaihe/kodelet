@@ -64,7 +64,7 @@
 
 @media (min-width: 1024px) {
   .chat-workspace-header {
-    min-height: 2.5rem;
+    min-height: var(--workspace-header-height);
     padding: 0 1rem;
   }
 

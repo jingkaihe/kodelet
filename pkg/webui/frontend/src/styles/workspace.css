@@ -420,12 +420,13 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  min-height: var(--workspace-header-height);
   border-bottom: 1px solid color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
 }
 
 .workspace-terminal-tab-header .workspace-terminal-toolbar {
   flex: 0 0 auto;
-  padding: 0.3rem 0.4rem 0.3rem 0;
+  padding: 0 0.4rem 0 0;
 }
 
 .workspace-terminal-tab-bar {
@@ -434,7 +435,7 @@
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
-  padding: 0.3rem 0.4rem;
+  padding: 0 0.4rem;
 }
 
 .workspace-terminal-tabs {

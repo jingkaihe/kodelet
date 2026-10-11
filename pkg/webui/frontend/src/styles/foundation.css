@@ -66,6 +66,8 @@
   --sidebar-surface-ink: var(--kodelet-dark);
   --sidebar-surface-muted: var(--kodelet-muted);
   --sidebar-stroke-strong: color-mix(in srgb, var(--kodelet-muted) 16%, transparent);
+  /* Desktop chat and terminal headers share a height so their borders line up. */
+  --workspace-header-height: 2.5rem;
 
   /* Shared by the Ghostty canvas, terminal chrome, and Storybook previews. */
   --terminal-background: var(--kodelet-light);
