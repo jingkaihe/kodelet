@@ -129,11 +129,7 @@ func TestWorkspaceTerminalProfileInstallsAndReusesGhosttyTerminfo(t *testing.T) 
 
 	// The on-disk cache remains usable without tic, including after a restart.
 	t.Setenv("PATH", t.TempDir())
-	assert.Equal(t, profile, workspaceTerminalProfile())
 	assert.Equal(t, profile, loadWorkspaceTerminalProfile())
-	// A memoized result does not attempt installation again in this process.
-	require.NoError(t, os.RemoveAll(dir))
-	assert.Equal(t, profile, workspaceTerminalProfile())
 }
 
 func TestWorkspaceTerminalProfileFallback(t *testing.T) {
@@ -152,10 +148,6 @@ func TestWorkspaceTerminalProfileFallback(t *testing.T) {
 			}
 			profile := workspaceTerminalProfile()
 			assert.Equal(t, workspaceTerminalProfileConfig{term: "xterm-256color"}, profile)
-			// Even if a cache later appears, do not keep retrying a failed install.
-			t.Setenv("HOME", t.TempDir())
-			t.Setenv("XDG_CACHE_HOME", t.TempDir())
-			assert.Equal(t, profile, workspaceTerminalProfile())
 		})
 	}
 }

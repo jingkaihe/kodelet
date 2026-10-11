@@ -1207,40 +1207,6 @@ describe('ApiService', () => {
   });
 
   describe('createTerminalWebSocket', () => {
-    it.each([
-      'terminal-tab_2',
-      '',
-      undefined,
-    ])('includes a nonempty terminal ID and preserves the default session for %s', (terminalId) => {
-      const websocketSpy = vi.fn();
-      vi.stubGlobal('WebSocket', websocketSpy);
-      try {
-        apiService.createTerminalWebSocket({
-          target: {
-            kind: 'runner',
-            runnerId: 'runner-1',
-            conversationId: 'conversation-1',
-            cwd: '/workspace/project',
-          },
-          rows: 24,
-          cols: 80,
-          terminalId,
-        });
-
-        expect(websocketSpy).toHaveBeenCalledTimes(1);
-        const url = new URL(websocketSpy.mock.calls[0][0]);
-        expect(url.pathname).toBe('/api/terminal/ws');
-        expect(url.searchParams.get('runnerId')).toBe('runner-1');
-        expect(url.searchParams.get('conversationId')).toBe('conversation-1');
-        expect(url.searchParams.get('cwd')).toBe('/workspace/project');
-        expect(url.searchParams.get('rows')).toBe('24');
-        expect(url.searchParams.get('cols')).toBe('80');
-        expect(url.searchParams.get('terminalId')).toBe(terminalId || null);
-      } finally {
-        vi.unstubAllGlobals();
-      }
-    });
-
     it('creates a websocket using the current host and query params', () => {
       const originalLocation = window.location;
       const websocketSpy = vi.fn();
@@ -1275,22 +1241,30 @@ describe('ApiService', () => {
       {
         name: 'startup directory',
         cwd: undefined,
+        terminalId: undefined,
         conversationId: 'draft-id',
         query: '&conversationId=draft-id',
       },
       {
         name: 'draft directory',
         cwd: '../project',
+        terminalId: '',
         conversationId: 'draft-id',
         query: '&conversationId=draft-id&cwd=..%2Fproject',
       },
       {
         name: 'saved conversation',
         cwd: '/runner/project',
+        terminalId: 'terminal-tab_2',
         conversationId: 'conv-123',
         query: '&conversationId=conv-123&cwd=%2Frunner%2Fproject',
       },
-    ])('creates a runner terminal websocket for $name', ({ cwd, conversationId, query }) => {
+    ])('creates a runner terminal websocket for $name', ({
+      cwd,
+      conversationId,
+      terminalId,
+      query,
+    }) => {
       const originalLocation = window.location;
       const websocketSpy = vi.fn();
 
@@ -1306,12 +1280,13 @@ describe('ApiService', () => {
 
       apiService.createTerminalWebSocket({
         target: { kind: 'runner', runnerId: 'runner-1', cwd, conversationId },
+        terminalId,
         rows: 30,
         cols: 120,
       });
 
       expect(websocketSpy).toHaveBeenCalledWith(
-        `wss://kodelet.example/api/terminal/ws?runnerId=runner-1${query}&rows=30&cols=120`
+        `wss://kodelet.example/api/terminal/ws?runnerId=runner-1${query}&rows=30&cols=120${terminalId ? `&terminalId=${terminalId}` : ''}`
       );
 
       Object.defineProperty(window, 'location', {
@@ -1338,25 +1313,18 @@ describe('ApiService', () => {
   });
 
   describe('closeTerminal', () => {
-    it('forwards the exact session identity when available', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
-      await apiService.closeTerminal(
-        {
-          kind: 'runner',
-          runnerId: 'runner-1',
-          conversationId: 'conversation-1',
-          cwd: '/workspace',
-        },
-        'tab-1',
-        'terminal-session-1'
-      );
-      const url = new URL(mockFetch.mock.calls[0][0], 'https://kodelet.example');
-      expect(url.searchParams.get('sessionId')).toBe('terminal-session-1');
-    });
     it.each([
-      'terminal-tab_2',
-      '',
-    ])('deletes exactly the requested scoped terminal, including the legacy ID %s', async (terminalId) => {
+      {
+        terminalId: 'terminal-tab_2',
+        cwd: '/workspace/project with spaces',
+        sessionId: 'terminal-session-1',
+      },
+      { terminalId: '', cwd: undefined, sessionId: undefined },
+    ])('deletes the scoped terminal with ID $terminalId', async ({
+      terminalId,
+      cwd,
+      sessionId,
+    }) => {
       setTestCookie('kodelet_csrf=terminal-csrf');
       const json = vi.fn();
       mockFetch.mockResolvedValueOnce({ ok: true, status: 204, json });
@@ -1367,9 +1335,10 @@ describe('ApiService', () => {
             kind: 'runner',
             runnerId: 'runner/1',
             conversationId: 'conversation/1',
-            cwd: '/workspace/project with spaces',
+            cwd,
           },
-          terminalId
+          terminalId,
+          sessionId
         )
       ).resolves.toBeUndefined();
 
@@ -1380,7 +1349,8 @@ describe('ApiService', () => {
       expect(Object.fromEntries(url.searchParams)).toEqual({
         runnerId: 'runner/1',
         conversationId: 'conversation/1',
-        cwd: '/workspace/project with spaces',
+        ...(cwd ? { cwd } : {}),
+        ...(sessionId ? { sessionId } : {}),
         terminalId,
       });
       expect(options).toMatchObject({
@@ -1388,17 +1358,6 @@ describe('ApiService', () => {
         headers: { 'X-CSRF-Token': 'terminal-csrf' },
       });
       expect(json).not.toHaveBeenCalled();
-    });
-
-    it('omits an unspecified working directory', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
-      await apiService.closeTerminal(
-        { kind: 'runner', runnerId: 'runner-1', conversationId: 'conversation-1' },
-        'terminal-tab'
-      );
-      const url = new URL(mockFetch.mock.calls[0][0], 'https://kodelet.example');
-      expect(url.searchParams.has('cwd')).toBe(false);
-      expect(url.searchParams.get('terminalId')).toBe('terminal-tab');
     });
 
     it('rejects local or incomplete runner targets without sending a request', async () => {

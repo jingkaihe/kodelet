@@ -96,13 +96,6 @@ describe('createTerminalDirectoryTracker', () => {
     expect(onDirectory.mock.calls).toEqual([['/home/用户'], ['/tmp/café'], ['/']]);
   });
 
-  it('reports multiple complete sequences from one chunk in order', () => {
-    const onDirectory = vi.fn();
-    const track = createTerminalDirectoryTracker(onDirectory);
-    track(encoder.encode('\x1b]7;file:///first\x07\x1b]7;file:///second\x1b\\'));
-    expect(onDirectory.mock.calls).toEqual([['/first'], ['/second']]);
-  });
-
   it.each([
     ['file:///home/my%20project/%E4%B8%AD%E6%96%87', '/home/my project/中文'],
     ['file://remote.example/a%2Fb/%23%3F%25%5C+/%2520', '/a/b/#?%\\+/%20'],

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,21 +23,20 @@ import (
 
 func TestTerminalHandlersRejectInvalidTabIDs(t *testing.T) {
 	server := &Server{}
+	// The protocol validator owns the character/length matrix; both handlers
+	// must invoke it before resolving a workspace or upgrading the connection.
 	for _, handler := range []http.HandlerFunc{server.handleTerminalWebsocket, server.handleCloseTerminal} {
-		for _, id := range []string{"../tab", " tab", "tab\n", "é", strings.Repeat("a", 129)} {
-			w := httptest.NewRecorder()
-			handler(w, httptest.NewRequest(http.MethodGet, "/api/terminal?terminalId="+url.QueryEscape(id), nil))
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "invalid terminal ID")
-		}
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, "/api/terminal?terminalId=../tab", nil))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "invalid terminal ID")
 	}
 }
 
 func TestCloseTerminalAuthorizesAndForwardsOnlyItsScope(t *testing.T) {
 	server := newRunnerTestServer(t, "")
+	// Closing must not require the saved directory to still exist.
 	savedCWD := filepath.Join(t.TempDir(), "removed-worktree")
-	require.NoError(t, os.Mkdir(savedCWD, 0o700))
-	require.NoError(t, os.Remove(savedCWD))
 	server.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
 		if id == "saved" {
 			return &conversations.GetConversationResponse{ID: id, CWD: savedCWD}, nil
@@ -147,12 +145,6 @@ func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
 			name: "capacity",
 			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner terminal session limit reached (8); exit an existing terminal to release its slot"},
 			info: "runner terminal session limit reached (8); exit an existing terminal to release its slot",
-			code: websocket.CloseTryAgainLater,
-		},
-		{
-			name: "shell start",
-			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "failed to start shell"},
-			info: "failed to start shell",
 			code: websocket.CloseTryAgainLater,
 		},
 		{

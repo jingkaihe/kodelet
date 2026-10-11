@@ -12,26 +12,28 @@ import (
 
 func TestWorkspaceTerminalTabWireContract(t *testing.T) {
 	assert.Equal(t, "workspace.terminal.close", MethodWorkspaceTerminalClose)
-	for _, terminalID := range []string{"", "tab-A_123"} {
-		open := WorkspaceTerminalOpenParams{ConversationID: "conversation", CWD: "/workspace", TerminalID: terminalID}
-		wire, err := json.Marshal(open)
-		require.NoError(t, err)
-		var closeParams WorkspaceTerminalCloseParams
-		require.NoError(t, json.Unmarshal(wire, &closeParams))
-		assert.Equal(t, WorkspaceTerminalCloseParams{ConversationID: open.ConversationID, CWD: open.CWD, TerminalID: terminalID}, closeParams)
-		if terminalID == "" {
-			assert.NotContains(t, string(wire), "terminalId", "legacy clients retain the default shell")
-		} else {
-			assert.Contains(t, string(wire), `"terminalId":"tab-A_123"`)
-		}
-		closeParams.SessionID = "session-123"
-		wire, err = json.Marshal(closeParams)
-		require.NoError(t, err)
-		assert.Contains(t, string(wire), `"sessionId":"session-123"`)
-		var decoded WorkspaceTerminalCloseParams
-		require.NoError(t, json.Unmarshal(wire, &decoded))
-		assert.Equal(t, closeParams, decoded)
+	open := WorkspaceTerminalOpenParams{
+		ConversationID: "conversation",
+		CWD:            "/workspace",
+		TerminalID:     "tab-A_123",
 	}
+	wire, err := json.Marshal(open)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"conversationId":"conversation","cwd":"/workspace","terminalId":"tab-A_123"}`, string(wire))
+
+	open.TerminalID = ""
+	wire, err = json.Marshal(open)
+	require.NoError(t, err)
+	assert.NotContains(t, string(wire), "terminalId", "legacy clients retain the default shell")
+
+	wire, err = json.Marshal(WorkspaceTerminalCloseParams{
+		ConversationID: "conversation",
+		CWD:            "/workspace",
+		TerminalID:     "tab-A_123",
+		SessionID:      "session-123",
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"conversationId":"conversation","cwd":"/workspace","terminalId":"tab-A_123","sessionId":"session-123"}`, string(wire))
 }
 
 func TestValidateWorkspaceTerminalID(t *testing.T) {

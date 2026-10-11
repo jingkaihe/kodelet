@@ -363,19 +363,15 @@ class ApiService {
     cols?: number;
   }): WebSocket {
     const params = new URLSearchParams();
-    if (options.target.kind === 'local') {
-      if (options.target.cwd) {
-        params.append('cwd', options.target.cwd);
-      }
-    } else {
+    if (options.target.kind === 'runner') {
       if (!options.target.runnerId.trim() || !options.target.conversationId?.trim()) {
         throw new Error('A runner and conversation are required to open a terminal');
       }
       params.append('runnerId', options.target.runnerId);
       params.append('conversationId', options.target.conversationId);
-      if (options.target.cwd) {
-        params.append('cwd', options.target.cwd);
-      }
+    }
+    if (options.target.cwd) {
+      params.append('cwd', options.target.cwd);
     }
     if (options.rows) {
       params.append('rows', String(options.rows));

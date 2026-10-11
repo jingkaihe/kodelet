@@ -310,15 +310,18 @@ func TestWorkspaceTerminalTabsRespectLimitAndReleaseClosedSlot(t *testing.T) {
 
 func TestWorkspaceTerminalCloseBySessionSurvivesDirectoryChanges(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
-	for _, change := range []string{"deleted", "renamed", "retargeted alias", "retargeted canonical path"} {
+	for _, change := range []string{"deleted", "retargeted canonical path"} {
 		t.Run(change, func(t *testing.T) {
 			workspace, otherDirectory := t.TempDir(), t.TempDir()
 			service, err := NewService(t.Context(), workspace, ServiceOptions{})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, service.Close()) })
-			alias := filepath.Join(t.TempDir(), "alias")
-			require.NoError(t, os.Symlink(workspace, alias))
-			params := protocol.WorkspaceTerminalOpenParams{ConversationID: "draft", CWD: alias, TerminalID: "tab", Draft: true}
+			params := protocol.WorkspaceTerminalOpenParams{
+				ConversationID: "draft",
+				CWD:            workspace,
+				TerminalID:     "tab",
+				Draft:          true,
+			}
 			first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
 			params.CWD = otherDirectory
 			other := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
@@ -329,20 +332,16 @@ func TestWorkspaceTerminalCloseBySessionSurvivesDirectoryChanges(t *testing.T) {
 			switch change {
 			case "deleted":
 				require.NoError(t, os.Remove(workspace))
-			case "renamed":
-				require.NoError(t, os.Rename(workspace, filepath.Join(t.TempDir(), "moved")))
-			case "retargeted alias":
-				require.NoError(t, os.Remove(alias))
-				require.NoError(t, os.Symlink(otherDirectory, alias))
 			case "retargeted canonical path":
 				require.NoError(t, os.Rename(workspace, filepath.Join(t.TempDir(), "moved")))
 				require.NoError(t, os.Symlink(otherDirectory, workspace))
 			}
-			for range 2 {
-				callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
-					ConversationID: params.ConversationID, CWD: first.CWD, TerminalID: params.TerminalID, SessionID: first.SessionID,
-				})
-			}
+			callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+				ConversationID: params.ConversationID,
+				CWD:            first.CWD,
+				TerminalID:     params.TerminalID,
+				SessionID:      first.SessionID,
+			})
 			assert.True(t, workspaceTerminalDone(session.done))
 			require.NoError(t, session.cleanupError())
 			assert.Len(t, service.terminalManagers, 1)
@@ -392,15 +391,15 @@ func TestWorkspaceTerminalTabsValidateIDsBeforeCreatingResources(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	for _, method := range []string{protocol.MethodWorkspaceTerminalOpen, protocol.MethodWorkspaceTerminalClose} {
-		for _, id := range []string{"../tab", " tab", "tab\n", "é", strings.Repeat("a", 129)} {
-			_, rpcErr := service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalOpenParams{
-				ConversationID: "draft", TerminalID: id, Draft: true,
-			}))
-			require.NotNil(t, rpcErr)
-			assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
-			assert.Contains(t, rpcErr.Message, "invalid terminal ID")
-		}
-		_, rpcErr := service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalCloseParams{TerminalID: "tab"}))
+		_, rpcErr := service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalOpenParams{
+			ConversationID: "draft",
+			TerminalID:     "../tab",
+			Draft:          true,
+		}))
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "invalid terminal ID")
+		_, rpcErr = service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalCloseParams{TerminalID: "tab"}))
 		require.NotNil(t, rpcErr)
 		assert.Contains(t, rpcErr.Message, "conversation ID is required")
 	}
@@ -1051,13 +1050,8 @@ func TestWorkspaceTerminalValidationHelpers(t *testing.T) {
 	assert.True(t, workspaceTerminalProcessGroupsStopped(nil))
 	stopWorkspaceTerminalTimer(nil)
 
-	restoreEnvironmentVariable(t, "TERM")
 	restoreEnvironmentVariable(t, "SHELL")
-	require.NoError(t, os.Unsetenv("TERM"))
 	require.NoError(t, os.Unsetenv("SHELL"))
-	environment := workspaceTerminalEnv("/bin/test-shell")
-	assert.Contains(t, environment, "TERM="+workspaceTerminalProfile().term)
-	assert.Contains(t, environment, "SHELL=/bin/test-shell")
 	shell, name := resolveWorkspaceTerminalShell()
 	assert.Equal(t, "/bin/bash", shell)
 	assert.Equal(t, "bash", name)

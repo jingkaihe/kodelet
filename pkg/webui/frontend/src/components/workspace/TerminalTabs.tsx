@@ -236,11 +236,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
       const closeTarget = pendingClose.cwd
         ? { ...closeTargetRef.current, cwd: pendingClose.cwd }
         : closeTargetRef.current;
-      if (pendingClose.sessionId) {
-        await apiService.closeTerminal(closeTarget, id, pendingClose.sessionId);
-      } else {
-        await apiService.closeTerminal(closeTarget, id);
-      }
+      await apiService.closeTerminal(closeTarget, id, pendingClose.sessionId);
       updateState((current) => {
         const index = current.tabs.findIndex((tab) => tab.id === id);
         const tabs = current.tabs.filter((tab) => tab.id !== id);

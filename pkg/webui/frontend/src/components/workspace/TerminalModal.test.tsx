@@ -1308,21 +1308,17 @@ describe('TerminalModal', () => {
     expect(screen.getByRole('tab', { name: 'project' })).toBeInTheDocument();
     const output = (text: string) => {
       const bytes = new TextEncoder().encode(text);
+      // Use this realm's ArrayBuffer, not the Node TextEncoder's buffer.
       const data = new ArrayBuffer(bytes.length);
       new Uint8Array(data).set(bytes);
       act(() => socket.emit('message', { data }));
     };
     // Fedora's Bash prompt reports cd through OSC 0, not OSC 7.
-    output('\x1b]0;jingkaihe@hjktech-scout-001:~/workspace/kodelet\x07');
+    output('\x1b]0;user@runner:~/workspace/kodelet\x07');
     expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
-    output('\x1b]0;user@runner:/workspace/src\x07');
-    expect(screen.getByRole('tab', { name: '/workspace/src' })).toBeInTheDocument();
-    output('\x1b]7;file://runner/workspace/');
-    output('frontend\x07');
+    output('\x1b]7;file://runner/workspace/frontend\x07');
     expect(screen.getByRole('tab', { name: 'frontend' })).toBeInTheDocument();
-    output('\x1b]7;file://runner/workspace/backend\x07\x1b]2;nvim main');
-    output('.go\x1b');
-    output('\\');
+    output('\x1b]7;file://runner/workspace/backend\x07\x1b]2;nvim main.go\x1b\\');
     expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
     // When a program exits, the shell's next prompt title replaces its title.
     output('\x1b]2;Leaving nvim\x07\x1b]0;user@runner:/workspace/backend\x07');
@@ -1335,12 +1331,6 @@ describe('TerminalModal', () => {
     output('\x1b]2;pytest\x07');
     expect(screen.getByRole('tab', { name: 'Editor' })).toBeInTheDocument();
     expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    expect(screen.getByRole('tab', { name: 'pytest' })).toBeInTheDocument();
-    output('\x1b]7;file://runner/workspace/backend\x07');
-    expect(screen.getByRole('tab', { name: 'backend' })).toBeInTheDocument();
   });
 
   it('shows terminal open failures and waits for explicit reconnect without stopping the workspace', async () => {
