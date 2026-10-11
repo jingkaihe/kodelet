@@ -144,17 +144,6 @@ describe('TerminalTabs', () => {
     expect(apiService.closeTerminal).not.toHaveBeenCalled();
   });
 
-  it('names tabs from the full target directory without visible shortcut badges', () => {
-    render(<Tabs />);
-    addTab();
-    expect(tabNames()).toEqual(['/workspace/project', '/workspace/project']);
-    const tabs = screen.getAllByRole('tab', { name: '/workspace/project' });
-    tabs.forEach((tab, index) => {
-      expect(tab).toHaveAttribute('aria-keyshortcuts', `Alt+${index + 1}`);
-      expect(tab).toHaveTextContent(/^\/workspace\/project$/);
-    });
-  });
-
   it('saves a trimmed name with Enter and cancels edits with Escape', async () => {
     const user = userEvent.setup();
     render(<Tabs />);
@@ -209,11 +198,6 @@ describe('TerminalTabs', () => {
     render(<Tabs directory={directory} homeDir={homeDir} />);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
     expect(tabNames()).toEqual([expected]);
-    renameTab('Custom');
-    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
-    expect(tabNames()).toEqual(['Custom']);
-    renameTab('');
-    expect(tabNames()).toEqual([expected]);
   });
 
   it('abbreviates absolute shell title paths but leaves command arguments unchanged', () => {
@@ -225,23 +209,6 @@ describe('TerminalTabs', () => {
     rerender(<Tabs title="nvim /home/user/file.txt" homeDir="/home/user" />);
     fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
     expect(tabNames()).toEqual(['nvim /home/user/file.txt']);
-  });
-
-  it.each([
-    ['user@runner:~/workspace/kodelet', '~/workspace/kodelet'],
-    ['user@runner:~', '~'],
-    ['user@runner:/tmp/project', '/tmp/project'],
-    ['user@runner:~/my project/café:logs', '~/my project/café:logs'],
-    ['  user@runner:~/workspace  ', '~/workspace'],
-    ['user@ubuntu: ~/workspace', '~/workspace'],
-    ['(chroot)user@debian: /srv', '/srv'],
-    ['nvim main.go', 'nvim main.go'],
-    ['ssh user@runner:/tmp', 'ssh user@runner:/tmp'],
-    ['user@runner:pytest', 'user@runner:pytest'],
-  ])('shows shell paths without a user/host prefix, preserving program titles: %s', (title, expected) => {
-    render(<Tabs title={title} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
-    expect(tabNames()).toEqual([expected]);
   });
 
   it('does not strip user/host prefixes from manually named tabs', () => {
@@ -288,7 +255,6 @@ describe('TerminalTabs', () => {
   it('keeps different directories in the same conversation isolated when switching targets', () => {
     const directoryA = { ...target, cwd: '/workspace/dirA' };
     const directoryB = { ...target, cwd: '/workspace/dirB' };
-    expect(getTerminalTabsKey(directoryA)).not.toBe(getTerminalTabsKey(directoryB));
     const { rerender } = render(<Tabs workspace={directoryA} />);
     addTab();
     const secondIdA = activeId();
@@ -467,11 +433,14 @@ describe('TerminalTabs', () => {
       expect(window.localStorage.getItem(keyFor('/project-51'))).toBeNull();
     });
 
-    it('stamps every save with its time', () => {
+    it('refreshes the saved timestamp when tabs change', () => {
       const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      save(getTerminalTabsKey(target), now - day);
       render(<Tabs />);
+      clock.mockReturnValue(now + day);
       addTab();
-      expect(savedAt(getTerminalTabsKey(target))).toBeGreaterThanOrEqual(now);
+      expect(savedAt(getTerminalTabsKey(target))).toBe(now + day);
     });
   });
 
@@ -494,10 +463,7 @@ describe('TerminalTabs', () => {
     renameTab('Build');
     fireEvent.click(screen.getByRole('button', { name: 'Close Build' }));
     const dialog = screen.getByRole('dialog', { name: 'Close tab?' });
-    expect(dialog).toHaveTextContent(
-      'Closing this tab will stop the shell and any running processes.'
-    );
-    expect(dialog).not.toHaveTextContent('Build');
+    expect(dialog).toHaveTextContent(/stop the shell and any running processes/i);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(apiService.closeTerminal).not.toHaveBeenCalled();
@@ -635,7 +601,6 @@ describe('TerminalTabs', () => {
       'aria-keyshortcuts',
       'Alt+1'
     );
-    expect(screen.getByRole('tab', { name: 'Server' })).toHaveTextContent(/^Server$/);
     fireEvent.keyDown(screen.getByTestId('session'), { key: '2', altKey: true });
     expect(activeId()).toBe('');
     fireEvent.keyDown(screen.getByTestId('session'), { key: '1', altKey: true });

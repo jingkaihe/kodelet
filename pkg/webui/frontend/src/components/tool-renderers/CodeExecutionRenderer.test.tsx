@@ -405,6 +405,37 @@ describe('CodeExecutionRenderer', () => {
     expect(screen.getByText('tests finished')).not.toBeVisible();
   });
 
+  it.each([
+    false,
+    true,
+  ])('preserves a user-selected parent fold (open: %s) through completion', async (open) => {
+    const user = userEvent.setup();
+    const view = (inProgress: boolean) => (
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'parent',
+            name: 'code_execute',
+            input: '{}',
+            inProgress,
+            result: inProgress ? undefined : result,
+          },
+        ]}
+      />
+    );
+    const { rerender } = render(view(true));
+    const summary = screen.getByText(/^Code execution/);
+    const parent = summary.closest('details') as HTMLDetailsElement;
+    expect(parent.open).toBe(true);
+    await user.click(summary);
+    if (open) await user.click(summary);
+    rerender(view(true));
+    expect(parent.open).toBe(open);
+    rerender(view(false));
+    expect(screen.getByText(/^Code execution/).closest('details')).toBe(parent);
+    expect(parent.open).toBe(open);
+  });
+
   it('preserves a nested file row when its live result completes', async () => {
     const user = userEvent.setup();
     const call: CodeExecutionMetadata['calls'][number] = {

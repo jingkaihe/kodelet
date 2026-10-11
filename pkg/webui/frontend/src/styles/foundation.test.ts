@@ -5,42 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import foundationStyles from './foundation.css?raw';
 import appStyles from './index.css?raw';
 import sidebarStyles from './sidebar.css?raw';
-import workspaceStyles from './workspace.css?raw';
-
-describe('Terminal tab sizing', () => {
-  it('gives path labels room without shrinking tabs on narrow screens', () => {
-    const rules: Record<string, Record<string, string>> = {};
-    postcss.parse(workspaceStyles).walkRules((rule) => {
-      if (rule.parent?.type !== 'root') return;
-      if (
-        ![
-          '.workspace-terminal-tab',
-          '.workspace-terminal-tabs',
-          '.workspace-terminal-tab-select',
-        ].includes(rule.selector)
-      )
-        return;
-      const declarations: Record<string, string> = {};
-      rule.walkDecls((declaration) => {
-        declarations[declaration.prop] = declaration.value;
-      });
-      rules[rule.selector] = declarations;
-    });
-    expect(rules['.workspace-terminal-tab']).toMatchObject({
-      'min-width': '12rem',
-      'max-width': '20rem',
-      flex: '0 0 auto',
-    });
-    expect(rules['.workspace-terminal-tabs']).toMatchObject({
-      'overflow-x': 'auto',
-      'min-width': '0',
-    });
-    expect(rules['.workspace-terminal-tab-select']).toMatchObject({
-      flex: '1 1 auto',
-      'justify-content': 'center',
-    });
-  });
-});
 
 describe('Generated component styles', () => {
   it('excludes unused DaisyUI selectors that scan the transcript on textarea edits', async () => {

@@ -135,6 +135,7 @@ func TestCloseTerminalRouteRequiresTerminalRole(t *testing.T) {
 }
 
 func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
+	server := newRunnerTestServer(t, "")
 	for _, test := range []struct {
 		name string
 		err  error
@@ -185,7 +186,6 @@ func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := newRunnerTestServer(t, "")
 			link := newRunnerAPITestLink()
 			link.call = func(_ context.Context, method string, _, _ any) error {
 				assert.Equal(t, protocol.MethodWorkspaceTerminalOpen, method)
@@ -194,7 +194,7 @@ func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
 			registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 				ProtocolVersions: []int{protocol.Version},
 				Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true},
-				Host:             protocol.Host{InstanceID: "terminal-failure", Hostname: "worker", OS: "linux", Arch: "amd64"},
+				Host:             protocol.Host{InstanceID: "terminal-failure-" + test.name, Hostname: "worker", OS: "linux", Arch: "amd64"},
 				Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
 			}, link)
 			require.NoError(t, err)

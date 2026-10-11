@@ -194,7 +194,7 @@ func TestWorkspaceTerminalsAreScopedByConversationAndCanonicalDirectory(t *testi
 	assert.Contains(t, rpcErr.Message, "closed")
 }
 
-func TestWorkspaceTerminalsReclaimExitedSessions(t *testing.T) {
+func TestWorkspaceTerminalsRespectLimitAndReclaimExitedOrClosedSessions(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
@@ -205,9 +205,11 @@ func TestWorkspaceTerminalsReclaimExitedSessions(t *testing.T) {
 	session, err := manager.session(first.SessionID)
 	require.NoError(t, err)
 	for i := range workspaceTerminalSessionLimit - 1 {
-		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation-" + strconv.Itoa(i)})
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
+		})
 	}
-	nextScope := protocol.WorkspaceTerminalOpenParams{ConversationID: "next"}
+	nextScope := protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", TerminalID: "next"}
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, nextScope))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "session limit reached")
@@ -217,6 +219,16 @@ func TestWorkspaceTerminalsReclaimExitedSessions(t *testing.T) {
 	next := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, nextScope)
 	assert.NotEqual(t, first.SessionID, next.SessionID)
 	assert.True(t, workspaceTerminalDone(manager.closedCh), "reclaim also releases the manager's context watcher")
+	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
+
+	// Reuse the full runner to check explicit close also frees a tab's slot.
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+		ConversationID: "conversation", TerminalID: "0",
+	})
+	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit-1)
+	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+		ConversationID: "conversation", TerminalID: "after-close",
+	})
 	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
 }
 
@@ -284,28 +296,6 @@ func TestWorkspaceTerminalTabsPersistAndCloseIndependently(t *testing.T) {
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{ConversationID: "absent"})
 	assert.Empty(t, service.terminalManagers)
 	assert.Empty(t, service.workspaceSessionLeases, "closing an absent scope creates no lease")
-}
-
-func TestWorkspaceTerminalTabsRespectLimitAndReleaseClosedSlot(t *testing.T) {
-	t.Setenv("SHELL", "/bin/sh")
-	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	for i := range workspaceTerminalSessionLimit {
-		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
-			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
-		})
-	}
-	next := protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", TerminalID: "next"}
-	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, next))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "session limit reached")
-	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
-		ConversationID: "conversation", TerminalID: "0",
-	})
-	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit-1)
-	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, next)
-	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
 }
 
 func TestWorkspaceTerminalCloseBySessionSurvivesDirectoryChanges(t *testing.T) {

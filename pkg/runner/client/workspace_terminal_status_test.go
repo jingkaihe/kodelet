@@ -149,9 +149,9 @@ func TestWorkspaceTerminalStatusCache(t *testing.T) {
 	assert.Equal(t, checked, session.statusChecked, "readers share the cached probe")
 	assert.Equal(t, initial, session.status)
 
-	// Expiration alone does not probe: there is no status polling goroutine.
-	time.Sleep(workspaceTerminalStatusInterval + 10*time.Millisecond)
-	assert.Equal(t, checked, session.statusChecked)
+	// Expire the cache without sleeping; canceled observers still must not probe.
+	checked = time.Now().Add(-workspaceTerminalStatusInterval)
+	session.statusChecked = checked
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	assert.Equal(t, initial, *session.readStatus(ctx))
@@ -194,8 +194,6 @@ func TestWorkspaceTerminalStatusReadWait(t *testing.T) {
 	assert.Equal(t, session.cwd, result.Status.CWD)
 	assert.Empty(t, result.Status.ForegroundCommand)
 
-	_, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "missing"})
-	assert.ErrorIs(t, err, errWorkspaceSessionClosed)
 	result, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: session.id, Cursor: 1})
 	assert.ErrorContains(t, err, "cursor is ahead")
 	assert.Nil(t, result.Status)

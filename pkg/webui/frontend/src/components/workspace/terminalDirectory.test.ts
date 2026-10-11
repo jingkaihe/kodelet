@@ -1,8 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTerminalDirectoryTracker } from './terminalDirectory';
+import { createTerminalDirectoryTracker, terminalShellDirectory } from './terminalDirectory';
 
 const encoder = new TextEncoder();
 const osc = (payload: string, end = '\x07') => encoder.encode(`\x1b]${payload}${end}`);
+
+describe('terminalShellDirectory', () => {
+  it.each([
+    ['user@fedora:~/workspace/kodelet', '~/workspace/kodelet'],
+    ['@fedora:/srv/project', '/srv/project'],
+    ['user@debian: ~/workspace', '~/workspace'],
+    ['user@runner:~', '~'],
+    ['user@runner:/tmp/project', '/tmp/project'],
+    ['user@runner:~/my project/café:logs', '~/my project/café:logs'],
+    ['  user@runner:~/workspace  ', '~/workspace'],
+    ['(chroot)user@debian: /srv', '/srv'],
+    ['nvim main.go', null],
+    ['ssh user@runner:/tmp', null],
+    ['user@runner:pytest', null],
+  ])('extracts only shell prompt directories from %j', (title, expected) => {
+    expect(terminalShellDirectory(title)).toBe(expected);
+  });
+});
 
 describe('createTerminalDirectoryTracker', () => {
   it.each([

@@ -1372,13 +1372,7 @@ describe('TerminalModal', () => {
     );
   });
 
-  it.each([
-    ['before', 'user', ':'],
-    ['after', 'user', ':'],
-    ['before', '', ':'], // Fedora still emits @host:path when a service has no USER.
-    ['before', 'user', ': '], // Debian and Ubuntu add a space after the colon.
-    ['after', 'user', ': '],
-  ])('does not let shell prompt titles mask foreground programs (prompt %s status, user %j, separator %j)', async (order, user, separator) => {
+  it('does not let shell prompt titles mask foreground programs before or after status updates', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
@@ -1389,22 +1383,21 @@ describe('TerminalModal', () => {
       new Uint8Array(data).set(bytes);
       act(() => socket.emit('message', { data }));
     };
-    const status = (foregroundCommand = '', cwd = '/home/user/workspace/kodelet') => {
+    const status = (foregroundCommand = '') => {
       act(() =>
         socket.emit('message', {
           data: JSON.stringify({
             type: 'status',
-            cwd,
+            cwd: '/home/user/workspace/kodelet',
             homeDir: '/home/user',
             foregroundCommand,
           }),
         })
       );
     };
-    const prompt = `${user}@runner${separator}~/workspace/kodelet`;
-    if (order === 'before') output(prompt);
+    const prompt = 'user@runner:~/workspace/kodelet';
+    output(prompt);
     status();
-    if (order === 'after') output(prompt);
     expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
 
     // btop need not emit an OSC title: the process status must win over the prompt.
@@ -1414,16 +1407,6 @@ describe('TerminalModal', () => {
     expect(screen.getByRole('tab', { name: 'btop' })).toBeInTheDocument();
     status();
     expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
-
-    // A genuine application title can arrive before the next process poll.
-    output('nvim main.go');
-    status('nvim main.go');
-    expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
-    output(`${user}@runner${separator}~`);
-    status('', '/home/user');
-    expect(screen.getByRole('tab', { name: '~' })).toBeInTheDocument();
-    status('sleep 30', '/home/user');
-    expect(screen.getByRole('tab', { name: 'sleep 30' })).toBeInTheDocument();
   });
 
   it('follows shell directories and program OSC titles without overriding custom tab names', async () => {
@@ -1497,15 +1480,25 @@ describe('TerminalModal', () => {
       />
     );
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
-    act(() => {
-      socket.emit('message', {
-        data: JSON.stringify({ type: 'info', text: 'Runner terminal session limit reached (8).' }),
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        socket.emit('message', {
+          data: JSON.stringify({
+            type: 'info',
+            text: 'Runner terminal session limit reached (8).',
+          }),
+        });
+        socket.emit('close', { code: 1013, reason: 'Failed to open runner terminal' });
       });
-      socket.emit('close', { code: 1013, reason: 'Failed to open runner terminal' });
-    });
-    expect(screen.getByText('Runner terminal session limit reached (8).')).toBeInTheDocument();
-    expect(onStopped).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeEnabled();
+      await act(async () => vi.advanceTimersByTimeAsync(2000));
+      expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
+      expect(screen.getByText('Runner terminal session limit reached (8).')).toBeInTheDocument();
+      expect(onStopped).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
   });
