@@ -310,7 +310,7 @@ describe('CodeExecutionRenderer', () => {
     expect(container.querySelector('.diff-block')).toBeVisible();
   });
 
-  it('streams bash and extension rows independently and preserves folds through completion', async () => {
+  it('streams bash and extension rows independently and preserves nested folds through completion', async () => {
     const user = userEvent.setup();
     const calls: CodeExecutionMetadata['calls'] = [
       {
@@ -396,9 +396,11 @@ describe('CodeExecutionRenderer', () => {
     calls[1] = { ...calls[1], status: 'completed' };
     rerender(view(false));
     expect(container.querySelector('details')).toBe(parent);
-    expect(parent).toHaveAttribute('open');
+    expect(parent).not.toHaveAttribute('open');
     expect(tests).not.toHaveAttribute('open');
     expect(extension).toHaveAttribute('open');
+    await user.click(screen.getByText(/^Code execution ·/));
+    expect(parent).toHaveAttribute('open');
     expect(screen.getByText('partial extension')).toBeVisible();
     expect(screen.getByText('tests finished')).not.toBeVisible();
   });

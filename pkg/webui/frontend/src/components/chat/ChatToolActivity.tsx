@@ -29,18 +29,29 @@ interface ChatToolActivityProps {
 }
 
 // Ordinary cards reset when their execution phase changes; nested streaming
-// rows and their parent keep the user's fold choice through completion.
+// rows and their parent keep the user's fold choice through completion, and
+// otherwise follow the default (e.g. folding once code execution completes).
 const ActivityDetails: React.FC<
   React.ComponentProps<'details'> & { status: string; preserveOpen?: boolean }
 > = ({ open, status, preserveOpen = false, ...props }) => {
-  const [expanded, setExpanded] = React.useState(!!open);
+  const [userExpanded, setUserExpanded] = React.useState<boolean>();
+  const expanded = userExpanded ?? !!open;
   const phase = status === 'running' || status === 'failed' ? status : 'settled';
   return (
     <details
       {...props}
       key={preserveOpen ? 'persistent' : phase}
       open={preserveOpen ? expanded : open}
-      onToggle={preserveOpen ? (event) => setExpanded(event.currentTarget.open) : undefined}
+      onToggle={
+        preserveOpen
+          ? (event) => {
+              // Programmatic updates already match `expanded`; only a mismatch is a user toggle.
+              if (event.currentTarget.open !== expanded) {
+                setUserExpanded(event.currentTarget.open);
+              }
+            }
+          : undefined
+      }
     />
   );
 };
