@@ -604,7 +604,7 @@ describe('TerminalTabs', () => {
     expect(activeId()).not.toBe('');
   });
 
-  it('supports accessible arrow, Home, End and F2 navigation', async () => {
+  it('supports accessible arrow, Home and End navigation', async () => {
     render(<Tabs workspace={unknownDirectory} />);
     addTab();
     addTab();
@@ -618,8 +618,6 @@ describe('TerminalTabs', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Shell 1' })).toHaveFocus());
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 1' }), { key: 'End' });
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Shell 3' })).toHaveFocus());
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 3' }), { key: 'F2' });
-    expect(screen.getByRole('textbox', { name: 'Terminal tab name' })).toHaveFocus();
   });
 
   it('persists dragged tab order and identity while keeping Alt shortcuts positional and invisible', () => {

@@ -474,11 +474,6 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
                   }}
                   onKeyDown={(event) => {
                     if (event.ctrlKey || event.altKey || event.metaKey) return;
-                    if (event.key === 'F2') {
-                      event.preventDefault();
-                      rename(tab);
-                      return;
-                    }
                     const next =
                       event.key === 'ArrowRight'
                         ? (index + 1) % state.tabs.length
@@ -501,7 +496,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
                   }}
                   role="tab"
                   tabIndex={tab.id === state.activeId ? 0 : -1}
-                  title={`${tabLabel(tab)} — double-click or press F2 to rename`}
+                  title={`${tabLabel(tab)} — double-click to rename`}
                   type="button"
                 >
                   <span>{tabLabel(tab)}</span>

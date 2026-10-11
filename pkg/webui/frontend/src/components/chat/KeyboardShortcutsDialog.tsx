@@ -27,10 +27,7 @@ const shortcutGroups = [
   },
   {
     title: 'Terminal',
-    shortcuts: [
-      { label: 'Select terminal tab', keys: 'Alt/⌥+1–8' },
-      { label: 'Rename focused tab', keys: 'F2' },
-    ],
+    shortcuts: [{ label: 'Select terminal tab', keys: 'Alt/⌥+1–8' }],
   },
 ];
 
