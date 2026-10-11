@@ -26,6 +26,15 @@ const shortcutGroups = [
     ],
   },
   {
+    title: 'Transcript',
+    shortcuts: [
+      { label: 'Scroll down / up', keys: 'j / k' },
+      { label: 'Half page down / up', keys: 'd / u' },
+      { label: 'Jump to top', keys: 'gg' },
+      { label: 'Jump to bottom', keys: 'Shift+G' },
+    ],
+  },
+  {
     title: 'Terminal',
     shortcuts: [{ label: 'Select terminal tab', keys: 'Alt/⌥+1–8' }],
   },

@@ -495,4 +495,45 @@ describe('ChatPage transcript statistics and scrolling', () => {
     await emitText(' after the key scrolls');
     expect(transcriptScroll.scrollTop).toBe(1100);
   });
+
+  it('scrolls with vim keys outside text entry and settles following', async () => {
+    const { transcriptScroll, dimensions, emitText } = await renderScrollingTranscript();
+    const press = (key: string, target: Element = document.body, init: object = {}) =>
+      fireEvent.keyDown(target, { key, ...init });
+
+    // Moving up from the bottom stops following, even within the near-bottom threshold.
+    press('k');
+    expect(transcriptScroll.scrollTop).toBe(940);
+    dimensions.height = 2000;
+    await emitText(' after k');
+    expect(transcriptScroll.scrollTop).toBe(940);
+
+    press('u');
+    expect(transcriptScroll.scrollTop).toBe(690);
+    press('d');
+    expect(transcriptScroll.scrollTop).toBe(940);
+    press('j');
+    expect(transcriptScroll.scrollTop).toBe(1000);
+
+    // A lone g waits for the second; another key in between cancels it.
+    press('g');
+    press('j');
+    press('g');
+    expect(transcriptScroll.scrollTop).toBe(1060);
+    press('g');
+    expect(transcriptScroll.scrollTop).toBe(0);
+
+    press('G', document.body, { shiftKey: true });
+    expect(transcriptScroll.scrollTop).toBe(1500);
+    dimensions.height = 2500;
+    await emitText(' after G');
+    expect(transcriptScroll.scrollTop).toBe(2000);
+
+    // Text entry and modified keys keep their usual meaning.
+    const composer = document.querySelector('textarea') as HTMLTextAreaElement;
+    press('k', composer);
+    press('k', document.body, { ctrlKey: true });
+    press('u', document.body, { metaKey: true });
+    expect(transcriptScroll.scrollTop).toBe(2000);
+  });
 });

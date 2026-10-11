@@ -7,6 +7,11 @@ const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const SCROLL_INTENT_GRACE_MS = 200;
 const KEY_SCROLL_EXCLUDED_TARGETS =
   'input, textarea, select, button, summary, [contenteditable]:not([contenteditable="false"])';
+// Vim-style reader keys type text in fields, but buttons cannot consume letters.
+const VIM_KEY_EXCLUDED_TARGETS =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+const VIM_LINE_SCROLL_PX = 60;
+const VIM_SEQUENCE_TIMEOUT_MS = 800;
 const UPWARD_SCROLL_KEYS = new Set(['ArrowUp', 'PageUp', 'Home']);
 const DOWNWARD_SCROLL_KEYS = new Set(['ArrowDown', 'PageDown', 'End']);
 const SCROLLABLE_OVERFLOW = new Set(['auto', 'scroll', 'overlay']);
@@ -66,6 +71,8 @@ const createTranscriptAutoScroll = () => {
   let intentTimer: ReturnType<typeof setTimeout> | undefined;
   let touch: { x: number; y: number } | null = null;
   let releasePointer: ((resume?: boolean) => void) | null = null;
+  // When the first `g` of `gg` was pressed.
+  let pendingTopSince: number | null = null;
 
   const clearIntent = () => {
     clearTimeout(intentTimer);
@@ -148,6 +155,64 @@ const createTranscriptAutoScroll = () => {
     releasePointer = release;
   };
 
+  // Moves the transcript to a known destination, so following is settled here
+  // rather than inferred from the scroll event that follows.
+  const scrollTranscript = (element: HTMLElement, top: number) => {
+    const bottom = Math.max(0, element.scrollHeight - element.clientHeight);
+    const next = Math.min(bottom, Math.max(0, top));
+    const direction = Math.sign(next - element.scrollTop);
+    if (!direction) return;
+    clearIntent();
+    element.scrollTop = next;
+    position = getScrollPosition(element);
+    // Like other reader input, moving up always stops following.
+    following = direction > 0 && isNearBottom(position);
+  };
+
+  // j/k scroll a few lines, d/u half a page, gg to the top and G to the bottom.
+  const handleVimKey = (event: KeyboardEvent, element: HTMLElement): boolean => {
+    const awaitingTop =
+      pendingTopSince !== null && Date.now() - pendingTopSince <= VIM_SEQUENCE_TIMEOUT_MS;
+    pendingTopSince = null;
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.isComposing ||
+      (event.target instanceof Element && event.target.closest(VIM_KEY_EXCLUDED_TARGETS)) ||
+      document.querySelector("[aria-modal='true']")
+    ) {
+      return false;
+    }
+    const halfPage = Math.max(VIM_LINE_SCROLL_PX, Math.floor(element.clientHeight / 2));
+    switch (event.key) {
+      case 'j':
+        scrollTranscript(element, element.scrollTop + VIM_LINE_SCROLL_PX);
+        break;
+      case 'k':
+        scrollTranscript(element, element.scrollTop - VIM_LINE_SCROLL_PX);
+        break;
+      case 'd':
+        scrollTranscript(element, element.scrollTop + halfPage);
+        break;
+      case 'u':
+        scrollTranscript(element, element.scrollTop - halfPage);
+        break;
+      case 'G':
+        scrollTranscript(element, element.scrollHeight);
+        break;
+      case 'g':
+        if (awaitingTop) scrollTranscript(element, 0);
+        else pendingTopSince = Date.now();
+        break;
+      default:
+        return false;
+    }
+    event.preventDefault();
+    return true;
+  };
+
   const connect = () => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const element = scrollRef.current;
@@ -160,6 +225,7 @@ const createTranscriptAutoScroll = () => {
           target === document.body ||
           target === document.documentElement)
       ) {
+        if (handleVimKey(event, element)) return;
         recordIntent(getKeyScrollDirection(event), target);
       }
     };
@@ -177,6 +243,7 @@ const createTranscriptAutoScroll = () => {
     following = true;
     position = null;
     touch = null;
+    pendingTopSince = null;
   };
 
   const transcriptScrollProps = {
