@@ -484,7 +484,8 @@
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  max-width: 14rem;
+  min-width: 12rem;
+  max-width: 20rem;
   border-radius: 0.25rem;
   color: var(--kodelet-muted);
   border: 1px solid transparent;
@@ -509,6 +510,11 @@
   border: 0;
   border-radius: 0.2rem;
   color: inherit;
+}
+
+.workspace-terminal-tab-select {
+  flex: 1 1 auto;
+  justify-content: flex-start;
 }
 
 .workspace-terminal-tab-select span {

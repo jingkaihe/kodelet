@@ -1478,7 +1478,7 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	link := newRunnerAPITestLink()
 	var readCount atomic.Int32
 	inputReceived := make(chan struct{})
-	link.call = func(_ context.Context, method string, params any, result any) error {
+	link.call = func(ctx context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceTerminalOpen:
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
@@ -1499,11 +1499,28 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 		case protocol.MethodWorkspaceTerminalRead:
 			currentRead := readCount.Add(1)
 			output := result.(*protocol.WorkspaceTerminalReadResult)
-			if currentRead == 1 {
-				*output = protocol.WorkspaceTerminalReadResult{Data: []byte("hellolive"), NextCursor: 9}
-			} else {
-				<-inputReceived
-				*output = protocol.WorkspaceTerminalReadResult{NextCursor: 9, Exited: true, ExitCode: 7}
+			*output = protocol.WorkspaceTerminalReadResult{
+				NextCursor: 9,
+				Status: &protocol.WorkspaceTerminalStatus{
+					CWD: "/runner/live", HomeDir: "/runner", ForegroundCommand: "btop",
+				},
+			}
+			switch currentRead {
+			case 1:
+				output.Data = []byte("hellolive")
+			case 2:
+				// An unchanged status must not generate another WebSocket event.
+			case 3:
+				output.Status.ForegroundCommand = ""
+			default:
+				select {
+				case <-inputReceived:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				output.Status.ForegroundCommand = ""
+				output.Exited = true
+				output.ExitCode = 7
 			}
 		case protocol.MethodWorkspaceTerminalInput:
 			input := params.(protocol.WorkspaceTerminalInputParams)
@@ -1558,6 +1575,15 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, websocket.BinaryMessage, messageType)
 	assert.Equal(t, []byte("live"), payload)
+	// Process metadata follows replay and also flows without terminal output.
+	for _, command := range []string{"btop", ""} {
+		var status terminalMessage
+		require.NoError(t, conn.ReadJSON(&status))
+		assert.Equal(t, "status", status.Type)
+		assert.Equal(t, "/runner/live", status.CWD)
+		assert.Equal(t, "/runner", status.HomeDir)
+		assert.Equal(t, command, status.ForegroundCommand)
+	}
 	require.NoError(t, conn.WriteJSON(terminalMessage{Type: "input", Data: "exit 7\n"}))
 
 	messageType, payload, err = conn.ReadMessage()

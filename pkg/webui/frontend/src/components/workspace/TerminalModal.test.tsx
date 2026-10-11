@@ -127,9 +127,12 @@ const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock
   }
 );
 
+const closeTerminalMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
 vi.mock('../../services/api', () => ({
   default: {
     createTerminalWebSocket: createTerminalWebSocketMock,
+    closeTerminal: closeTerminalMock,
   },
 }));
 
@@ -171,6 +174,7 @@ describe('TerminalModal', () => {
     MockTerminal.instances = [];
     MockGhosttyLoad.mockClear();
     createTerminalWebSocketMock.mockReset();
+    closeTerminalMock.mockClear();
     window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
     for (const key of Object.keys(window.localStorage)) {
       if (key.startsWith('kodelet.terminal.tabs.v1:')) window.localStorage.removeItem(key);
@@ -1300,12 +1304,80 @@ describe('TerminalModal', () => {
     expect(sockets[2].close).toHaveBeenCalledOnce();
   });
 
+  it('follows live directories and foreground programs even without OSC output', async () => {
+    const socket = new MockWebSocket();
+    const onReady = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(
+      <TerminalModal
+        cwdLabel="/tmp/project"
+        onClose={vi.fn()}
+        onReady={onReady}
+        open
+        target={localTarget}
+      />
+    );
+    await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+    const message = (payload: object) => {
+      act(() => socket.emit('message', { data: JSON.stringify(payload) }));
+    };
+    const ready = {
+      type: 'ready',
+      sessionId: 'session-1',
+      cwd: '/tmp/project',
+      name: 'sh',
+      git: false,
+      pid: 123,
+    };
+    message(ready);
+    message({ type: 'replay-complete' });
+    message({ type: 'status', cwd: '/home/jingkaihe', homeDir: '/home/jingkaihe' });
+    expect(screen.getByRole('tab', { name: '~' })).toBeInTheDocument();
+    message({
+      type: 'status',
+      cwd: '/home/jingkaihe/workspace/kodelet',
+      homeDir: '/home/jingkaihe',
+    });
+    expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
+    message({ type: 'status', cwd: '/tmp/project/frontend' });
+    expect(screen.getByRole('tab', { name: '/tmp/project/frontend' })).toBeInTheDocument();
+    message({ type: 'status', cwd: '/tmp/project/frontend', foregroundCommand: 'btop' });
+    expect(screen.getByRole('tab', { name: 'btop' })).toBeInTheDocument();
+    message({ type: 'status', cwd: '/tmp/project/frontend', foregroundCommand: '' });
+    expect(screen.getByRole('tab', { name: '/tmp/project/frontend' })).toBeInTheDocument();
+
+    // Malformed metadata must neither rename a tab nor be written as terminal output.
+    const writes = MockTerminal.instances[0].write.mock.calls.length;
+    message({ type: 'status', cwd: 12, foregroundCommand: 'bad' });
+    message({ type: 'status', cwd: 'relative/path' });
+    message({ type: 'status', cwd: '/tmp', foregroundCommand: {} });
+    message({ type: 'status', cwd: '/tmp', homeDir: {} });
+    expect(screen.getByRole('tab', { name: '/tmp/project/frontend' })).toBeInTheDocument();
+    expect(MockTerminal.instances[0].write).toHaveBeenCalledTimes(writes);
+    expect(onReady).toHaveBeenCalledExactlyOnceWith(ready);
+    expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
+    const input = screen.getByRole('textbox', { name: 'Terminal tab name' });
+    fireEvent.change(input, { target: { value: 'Monitor' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    message({ type: 'status', cwd: '/tmp/project/backend', foregroundCommand: 'btop' });
+    expect(screen.getByRole('tab', { name: 'Monitor' })).toBeInTheDocument();
+
+    // Live CWD changes must not change the identity used to close this shell.
+    fireEvent.click(screen.getByRole('button', { name: 'Close Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() =>
+      expect(closeTerminalMock).toHaveBeenCalledExactlyOnceWith(localTarget, '', 'session-1')
+    );
+  });
+
   it('follows shell directories and program OSC titles without overriding custom tab names', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
     await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
-    expect(screen.getByRole('tab', { name: 'project' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '/tmp/project' })).toBeInTheDocument();
     const output = (text: string) => {
       const bytes = new TextEncoder().encode(text);
       // Use this realm's ArrayBuffer, not the Node TextEncoder's buffer.
@@ -1316,10 +1388,34 @@ describe('TerminalModal', () => {
     // Fedora's Bash prompt reports cd through OSC 0, not OSC 7.
     output('\x1b]0;user@runner:~/workspace/kodelet\x07');
     expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
+    act(() =>
+      socket.emit('message', {
+        data: JSON.stringify({ type: 'status', cwd: '/workspace/kodelet', homeDir: '/workspace' }),
+      })
+    );
     output('\x1b]7;file://runner/workspace/frontend\x07');
-    expect(screen.getByRole('tab', { name: 'frontend' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '~/frontend' })).toBeInTheDocument();
     output('\x1b]7;file://runner/workspace/backend\x07\x1b]2;nvim main.go\x1b\\');
     expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
+    act(() =>
+      socket.emit('message', {
+        data: JSON.stringify({
+          type: 'status',
+          cwd: '/workspace/backend',
+          foregroundCommand: 'nvim foo.go',
+        }),
+      })
+    );
+    expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
+    // Clearing an explicit title restores the latest process fallback.
+    output('\x1b]2;\x07');
+    expect(screen.getByRole('tab', { name: 'nvim foo.go' })).toBeInTheDocument();
+    act(() =>
+      socket.emit('message', {
+        data: JSON.stringify({ type: 'status', cwd: '/workspace/backend' }),
+      })
+    );
+    expect(screen.getByRole('tab', { name: '/workspace/backend' })).toBeInTheDocument();
     // When a program exits, the shell's next prompt title replaces its title.
     output('\x1b]2;Leaving nvim\x07\x1b]0;user@runner:/workspace/backend\x07');
     expect(screen.getByRole('tab', { name: '/workspace/backend' })).toBeInTheDocument();
@@ -1369,7 +1465,7 @@ describe('TerminalModal', () => {
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
 
     expect(screen.queryByRole('heading', { name: 'Terminal' })).not.toBeInTheDocument();
-    expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
+    expect(screen.getByText('/tmp/project').closest('[role="tab"]')).not.toBeNull();
     expect(screen.getByTestId('terminal-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
     expect(screen.queryByText('Workspace')).not.toBeInTheDocument();

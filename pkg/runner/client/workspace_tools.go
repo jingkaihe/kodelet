@@ -18,7 +18,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/pkg/errors"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -197,6 +196,10 @@ type workspaceTerminalSession struct {
 	cmd    *exec.Cmd
 	ptmx   *os.File
 
+	statusMu      sync.Mutex
+	status        protocol.WorkspaceTerminalStatus
+	statusChecked time.Time
+
 	mu          sync.Mutex
 	ptyMu       sync.Mutex
 	buffer      []byte
@@ -316,7 +319,13 @@ func (m *workspaceTerminalManager) Read(ctx context.Context, params protocol.Wor
 	if err != nil {
 		return protocol.WorkspaceTerminalReadResult{}, err
 	}
-	return session.read(ctx, params.Cursor, params.MaxBytes, params.WaitMS)
+	// Return status even when a foreground program produces no terminal output.
+	wait := min(boundedWorkspaceTerminalReadWait(params.WaitMS), workspaceTerminalStatusInterval)
+	result, err := session.read(ctx, params.Cursor, params.MaxBytes, int(wait.Milliseconds()))
+	if err == nil {
+		result.Status = session.readStatus(ctx)
+	}
+	return result, err
 }
 
 func (m *workspaceTerminalManager) Write(ctx context.Context, params protocol.WorkspaceTerminalInputParams) error {
@@ -402,9 +411,14 @@ func newWorkspaceTerminalSession(ctx context.Context, id, cwd, shell, shellName 
 		cancel()
 		return nil, err
 	}
+	home, _ := os.UserHomeDir()
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
 	return &workspaceTerminalSession{
 		id:          id,
 		cwd:         cwd,
+		status:      protocol.WorkspaceTerminalStatus{CWD: cwd, HomeDir: home},
 		shellName:   shellName,
 		gitRepo:     gitRepo,
 		ctx:         sessionCtx,
@@ -653,13 +667,9 @@ func (s *workspaceTerminalSession) processGroups() []int {
 		return nil
 	}
 	groups := make([]int, 0, 2)
-	s.ptyMu.Lock()
-	if s.ptmx != nil {
-		if foregroundGroup, err := unix.IoctlGetInt(int(s.ptmx.Fd()), unix.TIOCGPGRP); err == nil && foregroundGroup > 0 {
-			groups = append(groups, foregroundGroup)
-		}
+	if foregroundGroup, err := s.foregroundProcessGroup(); err == nil && foregroundGroup > 0 {
+		groups = append(groups, foregroundGroup)
 	}
-	s.ptyMu.Unlock()
 	if processGroup := s.cmd.Process.Pid; processGroup > 0 && (len(groups) == 0 || groups[0] != processGroup) {
 		groups = append(groups, processGroup)
 	}

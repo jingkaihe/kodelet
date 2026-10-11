@@ -29,8 +29,8 @@ export interface TerminalTabSessionProps {
   terminalId: string;
   connectingEnabled: boolean;
   tabBar: (disabled: boolean) => ReactNode;
-  onDirectoryChange: (cwd: string) => void;
-  onTitleChange: (title: string) => void;
+  onDirectoryChange: (cwd: string, homeDir?: string) => void;
+  onTitleChange: (title: string, homeDir?: string) => void;
   onSessionReady: (event: TerminalReadyEvent) => void;
 }
 
@@ -108,7 +108,14 @@ const resolveStorageKey = (key: string): string => {
   }
 };
 
-const directoryName = (cwd: string): string => cwd.replace(/[/]+$/, '').split('/').pop() || '/';
+const directoryLabel = (cwd: string, homeDir?: string): string => {
+  const path = cwd.replace(/[/]+$/, '') || '/';
+  const home = homeDir?.replace(/[/]+$/, '');
+  if (home && (path === home || path.startsWith(`${home}/`))) {
+    return `~${path.slice(home.length)}`;
+  }
+  return path;
+};
 
 interface TerminalTabsProps {
   target: WorkspaceTarget;
@@ -136,7 +143,7 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
   const tabLabel = (tab: TerminalTab): string =>
     tab.customTitle ||
     tab.title ||
-    (target.cwd ? directoryName(target.cwd) : `Shell ${tab.number}`);
+    (target.cwd ? directoryLabel(target.cwd) : `Shell ${tab.number}`);
 
   // Persist synchronously before opening a pop-out, and do not echo storage events
   // back to their sender (which can otherwise overwrite a newer tab selection).
@@ -431,12 +438,13 @@ const TerminalTabs = ({ target, open, children }: TerminalTabsProps) => {
             terminalId: activeTab.id,
             connectingEnabled: !(closing && pendingClose?.id === activeTab.id),
             tabBar,
-            onDirectoryChange: (cwd) => updateAutomaticTitle(directoryName(cwd)),
-            onTitleChange: (title) => {
+            onDirectoryChange: (cwd, homeDir) => updateAutomaticTitle(directoryLabel(cwd, homeDir)),
+            onTitleChange: (title, homeDir) => {
               // Shell prompt titles often use user@host:path. Keep the path,
               // including ~/..., without altering other program-set titles.
+              const normalized = title.trim().replace(/^[^@\s/:]+@[^@\s/:]+:(?=~(?:\/|$)|\/)/u, '');
               updateAutomaticTitle(
-                title.trim().replace(/^[^@\s/:]+@[^@\s/:]+:(?=~(?:\/|$)|\/)/u, '')
+                normalized.startsWith('/') ? directoryLabel(normalized, homeDir) : normalized
               );
             },
             onSessionReady: (event) => {

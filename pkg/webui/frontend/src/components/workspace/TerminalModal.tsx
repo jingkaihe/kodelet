@@ -9,6 +9,7 @@ import type {
   TerminalExitEvent,
   TerminalReadyEvent,
   TerminalServerEvent,
+  TerminalStatusEvent,
   WorkspaceTarget,
 } from '../../types';
 import TerminalModalFrame, {
@@ -189,6 +190,15 @@ const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => 
   }
 
   const type = (value as { type?: unknown }).type;
+  if (type === 'status') {
+    const status = value as Partial<TerminalStatusEvent>;
+    return (
+      typeof status.cwd === 'string' &&
+      status.cwd.startsWith('/') &&
+      (status.homeDir === undefined || typeof status.homeDir === 'string') &&
+      (status.foregroundCommand === undefined || typeof status.foregroundCommand === 'string')
+    );
+  }
   return type === 'ready' || type === 'exit' || type === 'info' || type === 'replay-complete';
 };
 
@@ -602,9 +612,27 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
     terminalHost.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
     terminalHost.addEventListener('touchcancel', handleTouchEnd, { capture: true });
 
+    let observedDirectory = targetRef.current.cwd || '';
+    let homeDirectory: string | undefined;
+    let foregroundCommand = '';
+    let explicitTitle = '';
+    const updateTabTitle = () => {
+      // Like Comet, prefer application-set titles over process metadata. A
+      // quiet shell/program still gets a live directory/command fallback.
+      const title = explicitTitle || foregroundCommand;
+      if (title) onTitleChangeRef.current(title, homeDirectory);
+      else if (observedDirectory) onDirectoryChangeRef.current(observedDirectory, homeDirectory);
+    };
     const trackMetadata = createTerminalDirectoryTracker(
-      (cwd) => onDirectoryChangeRef.current(cwd),
-      (title) => onTitleChangeRef.current(title)
+      (cwd) => {
+        observedDirectory = cwd;
+        explicitTitle = '';
+        updateTabTitle();
+      },
+      (title) => {
+        explicitTitle = title.trim();
+        updateTabTitle();
+      }
     );
     const writeTerminalOutput = (
       targetTerminal: Terminal,
@@ -718,11 +746,22 @@ const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = 
 
               if (payload.type === 'ready') {
                 onSessionReadyRef.current(payload);
-                onDirectoryChangeRef.current(payload.cwd);
+                observedDirectory = payload.cwd;
+                updateTabTitle();
                 setResolvedDirectory({ connectionKey: terminalConnectionKey, cwd: payload.cwd });
                 onReadyRef.current?.(payload);
                 setStatusText('Restoring session…');
                 scheduleSettledResize();
+                return;
+              }
+
+              if (payload.type === 'status') {
+                // This is the shell's live CWD, not the canonical session scope
+                // used to reconnect, pop out, or close the existing terminal.
+                observedDirectory = payload.cwd;
+                homeDirectory = payload.homeDir;
+                foregroundCommand = payload.foregroundCommand?.trim() || '';
+                updateTabTitle();
                 return;
               }
 

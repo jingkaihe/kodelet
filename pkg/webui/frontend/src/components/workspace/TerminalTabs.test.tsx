@@ -19,12 +19,14 @@ const Tabs = ({
   title = 'nvim main.go',
   workspace = target,
   sessionId,
+  homeDir,
 }: {
   popOutActive?: boolean;
   directory?: string;
   title?: string;
   workspace?: WorkspaceTarget;
   sessionId?: string;
+  homeDir?: string;
 }) => (
   <TerminalTabs key={getTerminalTabsKey(workspace)} open target={workspace}>
     {({
@@ -42,10 +44,10 @@ const Tabs = ({
           data-terminal-id={terminalId}
           data-testid="session"
         />
-        <button onClick={() => onDirectoryChange(directory)} type="button">
+        <button onClick={() => onDirectoryChange(directory, homeDir)} type="button">
           Update directory
         </button>
-        <button onClick={() => onTitleChange(title)} type="button">
+        <button onClick={() => onTitleChange(title, homeDir)} type="button">
           Update title
         </button>
         <button
@@ -58,7 +60,7 @@ const Tabs = ({
               pid: 123,
               sessionId,
             });
-            onDirectoryChange(directory);
+            onDirectoryChange(directory, homeDir);
           }}
           type="button"
         >
@@ -123,21 +125,21 @@ describe('TerminalTabs', () => {
     expect(apiService.closeTerminal).not.toHaveBeenCalled();
   });
 
-  it('names tabs from the target directory basename without visible shortcut badges', () => {
+  it('names tabs from the full target directory without visible shortcut badges', () => {
     render(<Tabs />);
     addTab();
-    expect(tabNames()).toEqual(['project', 'project']);
-    const tabs = screen.getAllByRole('tab', { name: 'project' });
+    expect(tabNames()).toEqual(['/workspace/project', '/workspace/project']);
+    const tabs = screen.getAllByRole('tab', { name: '/workspace/project' });
     tabs.forEach((tab, index) => {
       expect(tab).toHaveAttribute('aria-keyshortcuts', `Alt+${index + 1}`);
-      expect(tab).toHaveTextContent(/^project$/);
+      expect(tab).toHaveTextContent(/^\/workspace\/project$/);
     });
   });
 
   it('saves a trimmed name with Enter and cancels edits with Escape', async () => {
     const user = userEvent.setup();
     render(<Tabs />);
-    await user.dblClick(screen.getByRole('tab', { name: 'project' }));
+    await user.dblClick(screen.getByRole('tab', { name: '/workspace/project' }));
     const input = screen.getByRole('textbox', { name: 'Terminal tab name' });
     expect(input).toHaveFocus();
     await user.clear(input);
@@ -153,17 +155,17 @@ describe('TerminalTabs', () => {
     expect(activeId()).toBe('');
   });
 
-  it('uses the full directory callback basename without replacing custom names and restores it on empty rename', () => {
+  it('uses the full directory without replacing custom names and restores it on empty rename', () => {
     const { rerender } = render(<Tabs />);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
-    expect(screen.getByRole('tab', { name: 'build' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '/workspace/build' })).toBeInTheDocument();
     renameTab('Server');
     rerender(<Tabs directory="/workspace/server logs/" />);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
     expect(screen.getByRole('tab', { name: 'Server' })).toBeInTheDocument();
 
     renameTab('  ');
-    expect(screen.getByRole('tab', { name: 'server logs' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '/workspace/server logs' })).toBeInTheDocument();
     expect(activeId()).toBe('');
   });
 
@@ -172,7 +174,38 @@ describe('TerminalTabs', () => {
     addTab();
     expect(tabNames()).toEqual(['Shell 1', 'Shell 2']);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
-    expect(tabNames()).toEqual(['Shell 1', 'project']);
+    expect(tabNames()).toEqual(['Shell 1', '/resolved/workspace/project']);
+  });
+
+  it.each([
+    ['/home/jingkaihe', '/home/jingkaihe', '~'],
+    ['/home/jingkaihe/workspace/kodelet', '/home/jingkaihe', '~/workspace/kodelet'],
+    ['/Users/jingkaihe/Workspace/kodelet/', '/Users/jingkaihe/', '~/Workspace/kodelet'],
+    ['/home/jingkaihe-other/project', '/home/jingkaihe', '/home/jingkaihe-other/project'],
+    ['/srv/project', '/home/jingkaihe', '/srv/project'],
+    ['/', '/home/jingkaihe', '/'],
+    ['/home/jingkaihe/project', undefined, '/home/jingkaihe/project'],
+    ['/home/jingkaihe/my project/café', '/home/jingkaihe', '~/my project/café'],
+  ])('displays directory %s relative only to the runner home %s', (directory, homeDir, expected) => {
+    render(<Tabs directory={directory} homeDir={homeDir} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(tabNames()).toEqual([expected]);
+    renameTab('Custom');
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(tabNames()).toEqual(['Custom']);
+    renameTab('');
+    expect(tabNames()).toEqual([expected]);
+  });
+
+  it('abbreviates absolute shell title paths but leaves command arguments unchanged', () => {
+    const { rerender } = render(
+      <Tabs title="user@runner:/home/jingkaihe/workspace/kodelet" homeDir="/home/jingkaihe" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+    expect(tabNames()).toEqual(['~/workspace/kodelet']);
+    rerender(<Tabs title="nvim /home/jingkaihe/file.txt" homeDir="/home/jingkaihe" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+    expect(tabNames()).toEqual(['nvim /home/jingkaihe/file.txt']);
   });
 
   it.each([
@@ -215,16 +248,16 @@ describe('TerminalTabs', () => {
     });
     expect(JSON.parse(window.localStorage.getItem(canonicalKey) || 'null')).toMatchObject({
       activeId: secondId,
-      tabs: [{ id: '' }, { id: secondId, title: 'project', customTitle: 'Build' }],
+      tabs: [{ id: '' }, { id: secondId, title: '/canonical/project', customTitle: 'Build' }],
     });
     unmount();
 
     render(<Tabs workspace={{ ...target, cwd }} />);
-    expect(tabNames()).toEqual(['project', 'Build']);
+    expect(tabNames()).toEqual([cwd, 'Build']);
     expect(screen.getByRole('tab', { name: 'Build' })).toHaveAttribute('aria-selected', 'true');
     expect(activeId()).toBe(secondId);
     addTab();
-    expect(tabNames()).toEqual(['project', 'Build', 'project']);
+    expect(tabNames()).toEqual([cwd, 'Build', cwd]);
     expect(screen.getAllByRole('tab')[2]).toHaveAttribute('aria-selected', 'true');
     expect(JSON.parse(window.localStorage.getItem(getTerminalTabsKey(target)) || 'null')).toEqual({
       canonicalKey,
@@ -241,7 +274,7 @@ describe('TerminalTabs', () => {
     renameTab('Build A');
 
     rerender(<Tabs workspace={directoryB} />);
-    expect(tabNames()).toEqual(['dirB']);
+    expect(tabNames()).toEqual(['/workspace/dirB']);
     expect(activeId()).toBe('');
     addTab();
     const secondIdB = activeId();
@@ -249,10 +282,10 @@ describe('TerminalTabs', () => {
     expect(secondIdB).not.toBe(secondIdA);
 
     rerender(<Tabs workspace={directoryA} />);
-    expect(tabNames()).toEqual(['dirA', 'Build A']);
+    expect(tabNames()).toEqual(['/workspace/dirA', 'Build A']);
     expect(activeId()).toBe(secondIdA);
     rerender(<Tabs workspace={directoryB} />);
-    expect(tabNames()).toEqual(['dirB', 'Build B']);
+    expect(tabNames()).toEqual(['/workspace/dirB', 'Build B']);
     expect(activeId()).toBe(secondIdB);
     expect(apiService.closeTerminal).not.toHaveBeenCalled();
   });
@@ -260,7 +293,7 @@ describe('TerminalTabs', () => {
   it('uses the canonical directory when closing a session after readiness', async () => {
     render(<Tabs directory="/canonical/project" />);
     fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
-    await confirmClose('project');
+    await confirmClose('/canonical/project');
     expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(
       { ...target, cwd: '/canonical/project' },
       '',
@@ -280,7 +313,7 @@ describe('TerminalTabs', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     const nextState = {
       tabs: [
-        { id: '', number: 1, title: 'project', customTitle: '' },
+        { id: '', number: 1, title: '/workspace/project', customTitle: '' },
         { id: 'popout-tab', number: 2, title: 'build', customTitle: 'Remote build' },
       ],
       activeId: 'popout-tab',
@@ -293,9 +326,9 @@ describe('TerminalTabs', () => {
     };
 
     receive(getTerminalTabsKey({ ...target, cwd: '/another/project' }), JSON.stringify(nextState));
-    expect(tabNames()).toEqual(['project']);
+    expect(tabNames()).toEqual([ready ? '/canonical/project' : '/workspace/project']);
     receive(storageKey, JSON.stringify(nextState));
-    expect(tabNames()).toEqual(['project', 'Remote build']);
+    expect(tabNames()).toEqual(['/workspace/project', 'Remote build']);
     expect(activeId()).toBe('popout-tab');
     expect(setItem).not.toHaveBeenCalled();
     receive(storageKey, '{invalid json');
@@ -309,9 +342,9 @@ describe('TerminalTabs', () => {
   ])('recovers safely from invalid persisted state: %s', (stored) => {
     window.localStorage.setItem(getTerminalTabsKey(target), stored);
     render(<Tabs />);
-    expect(tabNames()).toEqual(['project']);
+    expect(tabNames()).toEqual(['/workspace/project']);
     addTab();
-    expect(tabNames()).toEqual(['project', 'project']);
+    expect(tabNames()).toEqual(['/workspace/project', '/workspace/project']);
   });
 
   it('cancels tab close without terminating or changing the active shell', () => {
@@ -329,7 +362,7 @@ describe('TerminalTabs', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(apiService.closeTerminal).not.toHaveBeenCalled();
     expect(activeId()).toBe(secondId);
-    expect(tabNames()).toEqual(['project', 'Build']);
+    expect(tabNames()).toEqual(['/workspace/project', 'Build']);
   });
 
   it('closes the selected session, selects a neighbor and never reuses a fallback number', async () => {
@@ -364,7 +397,7 @@ describe('TerminalTabs', () => {
     addTab();
     const secondId = activeId();
     renameTab('Build');
-    await confirmClose('project');
+    await confirmClose('/workspace/project');
     expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(target, '', undefined);
     expect(activeId()).toBe(secondId);
     expect(tabNames()).toEqual(['Build']);
@@ -377,10 +410,10 @@ describe('TerminalTabs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
     rerender(<Tabs directory="/other/path" sessionId="terminal-original" />);
     fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
-    expect(tabNames()).toEqual(['path']);
+    expect(tabNames()).toEqual(['/other/path']);
     unmount();
     render(<Tabs />);
-    await confirmClose('path');
+    await confirmClose('/other/path');
     expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(
       { ...target, cwd: '/canonical/project' },
       '',
@@ -397,7 +430,7 @@ describe('TerminalTabs', () => {
         })
     );
     render(<Tabs />);
-    fireEvent.click(screen.getByRole('button', { name: 'Close project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close /workspace/project' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.getByTestId('session')).toHaveAttribute('data-connecting-enabled', 'false');
     expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeDisabled();
@@ -407,7 +440,7 @@ describe('TerminalTabs', () => {
       rejectClose(new Error('Runner is offline'));
     });
     expect(screen.getByRole('dialog')).toHaveTextContent('Runner is offline');
-    expect(tabNames()).toEqual(['project']);
+    expect(tabNames()).toEqual(['/workspace/project']);
     expect(activeId()).toBe('');
     expect(screen.getByTestId('session')).toHaveAttribute('data-connecting-enabled', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -417,7 +450,7 @@ describe('TerminalTabs', () => {
 
   it('persists an empty state after closing the last tab and starts a fresh identity on add', async () => {
     const { unmount } = render(<Tabs />);
-    await confirmClose('project');
+    await confirmClose('/workspace/project');
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByTestId('session')).not.toBeInTheDocument();
     expect(screen.getByText(/No terminal tabs/)).toBeInTheDocument();
@@ -427,7 +460,7 @@ describe('TerminalTabs', () => {
     render(<Tabs />);
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     addTab();
-    expect(tabNames()).toEqual(['project']);
+    expect(tabNames()).toEqual(['/workspace/project']);
     expect(activeId()).not.toBe('');
   });
 
@@ -459,7 +492,7 @@ describe('TerminalTabs', () => {
       dataTransfer: { setData: vi.fn() },
     });
     fireEvent.drop(screen.getAllByRole('tab')[0]);
-    expect(tabNames()).toEqual(['Server', 'project', 'project']);
+    expect(tabNames()).toEqual(['Server', '/workspace/project', '/workspace/project']);
     expect(screen.getByRole('tab', { name: 'Server' })).toHaveAttribute(
       'aria-keyshortcuts',
       'Alt+1'
@@ -471,7 +504,7 @@ describe('TerminalTabs', () => {
     expect(activeId()).toBe(thirdId);
     unmount();
     render(<Tabs />);
-    expect(tabNames()).toEqual(['Server', 'project', 'project']);
+    expect(tabNames()).toEqual(['Server', '/workspace/project', '/workspace/project']);
     expect(activeId()).toBe(thirdId);
   });
 
@@ -537,12 +570,12 @@ describe('TerminalTabs', () => {
     renameTab('Build');
     rerender(<Tabs popOutActive />);
     for (const tab of screen.getAllByRole('tab')) expect(tab).toBeDisabled();
-    for (const name of ['New terminal tab', 'Rename terminal tab', 'Close project']) {
+    for (const name of ['New terminal tab', 'Rename terminal tab', 'Close /workspace/project']) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
-    fireEvent.click(screen.getByRole('tab', { name: 'project' }));
+    fireEvent.click(screen.getByRole('tab', { name: '/workspace/project' }));
     addTab();
-    fireEvent.click(screen.getByRole('button', { name: 'Close project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close /workspace/project' }));
     fireEvent.keyDown(screen.getByTestId('session'), { key: '1', altKey: true });
     expect(tabNames()).toHaveLength(2);
     expect(activeId()).toBe(secondId);

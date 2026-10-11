@@ -709,13 +709,21 @@ type WorkspaceTerminalReadParams struct {
 	WaitMS    int    `json:"waitMs,omitempty"`
 }
 
+// WorkspaceTerminalStatus observes a terminal without changing its session scope.
+type WorkspaceTerminalStatus struct {
+	CWD               string `json:"cwd"`
+	HomeDir           string `json:"homeDir,omitempty"`
+	ForegroundCommand string `json:"foregroundCommand"`
+}
+
 // WorkspaceTerminalReadResult returns the next bounded terminal output chunk.
 type WorkspaceTerminalReadResult struct {
-	Data       []byte `json:"data,omitempty"`
-	NextCursor uint64 `json:"nextCursor"`
-	Truncated  bool   `json:"truncated,omitempty"`
-	Exited     bool   `json:"exited,omitempty"`
-	ExitCode   int    `json:"exitCode,omitempty"`
+	Data       []byte                   `json:"data,omitempty"`
+	NextCursor uint64                   `json:"nextCursor"`
+	Truncated  bool                     `json:"truncated,omitempty"`
+	Exited     bool                     `json:"exited,omitempty"`
+	ExitCode   int                      `json:"exitCode,omitempty"`
+	Status     *WorkspaceTerminalStatus `json:"status,omitempty"`
 }
 
 // WorkspaceTerminalInputParams writes bytes to a runner terminal session.

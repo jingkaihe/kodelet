@@ -454,6 +454,13 @@ export interface TerminalExitEvent {
   code: number;
 }
 
+export interface TerminalStatusEvent {
+  type: 'status';
+  cwd: string;
+  homeDir?: string;
+  foregroundCommand?: string;
+}
+
 export interface TerminalInfoEvent {
   type: 'info';
   text: string;
@@ -481,6 +488,7 @@ export interface TerminalSignalMessage {
 
 export type TerminalServerEvent =
   | TerminalReadyEvent
+  | TerminalStatusEvent
   | TerminalExitEvent
   | TerminalInfoEvent
   | TerminalReplayCompleteEvent;

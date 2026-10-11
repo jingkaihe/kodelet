@@ -47,17 +47,19 @@ func (s *Server) terminalUpgrader() websocket.Upgrader {
 }
 
 type terminalMessage struct {
-	Type      string `json:"type"`
-	Data      string `json:"data,omitempty"`
-	Rows      int    `json:"rows,omitempty"`
-	Cols      int    `json:"cols,omitempty"`
-	Code      *int   `json:"code,omitempty"`
-	CWD       string `json:"cwd,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Git       bool   `json:"git,omitempty"`
-	PID       int    `json:"pid,omitempty"`
-	Text      string `json:"text,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	Type              string `json:"type"`
+	Data              string `json:"data,omitempty"`
+	Rows              int    `json:"rows,omitempty"`
+	Cols              int    `json:"cols,omitempty"`
+	Code              *int   `json:"code,omitempty"`
+	CWD               string `json:"cwd,omitempty"`
+	HomeDir           string `json:"homeDir,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Git               bool   `json:"git,omitempty"`
+	PID               int    `json:"pid,omitempty"`
+	Text              string `json:"text,omitempty"`
+	SessionID         string `json:"sessionId,omitempty"`
+	ForegroundCommand string `json:"foregroundCommand,omitempty"`
 }
 
 type terminalSocketRead struct {
@@ -273,6 +275,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	remoteReads := make(chan remoteTerminalRead, 1)
 	go s.readRemoteTerminal(ctx, runnerID, generation, opened.SessionID, opened.ReplayCursor, remoteReads)
 
+	var lastStatus *protocol.WorkspaceTerminalStatus
 	for {
 		select {
 		case <-ctx.Done():
@@ -323,6 +326,20 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 				if err := writer.Write(websocket.BinaryMessage, result.Data); err != nil {
 					return
 				}
+			}
+			// Status describes the live process, not the historical output. Send it
+			// after replay so old directory sequences cannot leave a stale fallback.
+			if status := result.Status; status != nil && replayComplete &&
+				(lastStatus == nil || *lastStatus != *status) {
+				if err := writer.writeJSON(terminalMessage{
+					Type:              "status",
+					CWD:               status.CWD,
+					HomeDir:           status.HomeDir,
+					ForegroundCommand: status.ForegroundCommand,
+				}); err != nil {
+					return
+				}
+				lastStatus = status
 			}
 			if result.Exited {
 				_ = writer.writeJSON(terminalMessage{Type: "exit", Code: terminalExitCode(result.ExitCode)})
@@ -379,7 +396,7 @@ func (s *Server) readRemoteTerminal(ctx context.Context, runnerID string, genera
 		if err == nil {
 			cursor = result.NextCursor
 		}
-		if err != nil || len(result.Data) > 0 || result.Truncated || result.Exited {
+		if err != nil || len(result.Data) > 0 || result.Truncated || result.Exited || result.Status != nil {
 			select {
 			case reads <- remoteTerminalRead{Result: result, Err: err}:
 			case <-ctx.Done():
