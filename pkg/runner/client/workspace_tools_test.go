@@ -220,6 +220,256 @@ func TestWorkspaceTerminalsReclaimExitedSessions(t *testing.T) {
 	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
 }
 
+func TestWorkspaceTerminalTabsPersistAndCloseIndependently(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	workspace, otherDirectory := t.TempDir(), t.TempDir()
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	scopes := []protocol.WorkspaceTerminalOpenParams{
+		{ConversationID: "draft", Draft: true},
+		{ConversationID: "draft", TerminalID: "tab-1", Draft: true},
+		{ConversationID: "draft", TerminalID: "tab-2", Draft: true},
+		{ConversationID: "draft", CWD: otherDirectory, TerminalID: "tab-1", Draft: true},
+		{ConversationID: "other", TerminalID: "tab-1", Draft: true},
+	}
+	opened := make([]protocol.WorkspaceTerminalOpenResult, len(scopes))
+	for i, scope := range scopes {
+		opened[i] = callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, scope)
+		for _, previous := range opened[:i] {
+			assert.NotEqual(t, previous.SessionID, opened[i].SessionID)
+			assert.NotEqual(t, previous.PID, opened[i].PID)
+		}
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(workspace, alias))
+	scopes[1].CWD = alias
+	for i, scope := range scopes {
+		reattached := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, scope)
+		assert.Equal(t, opened[i].SessionID, reattached.SessionID)
+		assert.Equal(t, opened[i].PID, reattached.PID)
+	}
+	manager, err := service.terminalManagerForSession(opened[1].SessionID)
+	require.NoError(t, err)
+	session, err := manager.session(opened[1].SessionID)
+	require.NoError(t, err)
+	for range 2 {
+		callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+			ConversationID: "draft", CWD: alias, TerminalID: "tab-1",
+		})
+	}
+	assert.Len(t, service.terminalManagers, len(scopes)-1)
+	assert.True(t, workspaceTerminalDone(session.done))
+	require.NoError(t, session.cleanupError())
+	_, err = service.terminalManagerForSession(opened[1].SessionID)
+	require.ErrorIs(t, err, errWorkspaceSessionClosed)
+	assert.Empty(t, service.discardedWorkspaceSessions, "closing a tab must not discard its conversation")
+	assert.False(t, service.workspaceSessionLeases["draft"].IsZero(), "closing does not promote the draft lease")
+	for i, scope := range scopes {
+		if i == 1 {
+			continue
+		}
+		reattached := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, scope)
+		assert.Equal(t, opened[i].SessionID, reattached.SessionID, "other scopes are untouched")
+	}
+	reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, scopes[1])
+	assert.NotEqual(t, opened[1].SessionID, reopened.SessionID)
+	for _, scope := range scopes {
+		callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+			ConversationID: scope.ConversationID, CWD: scope.CWD, TerminalID: scope.TerminalID,
+		})
+	}
+	assert.Empty(t, service.terminalManagers)
+	assert.Empty(t, service.workspaceSessionLeases, "closing the final tab prunes its lease")
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{ConversationID: "absent"})
+	assert.Empty(t, service.terminalManagers)
+	assert.Empty(t, service.workspaceSessionLeases, "closing an absent scope creates no lease")
+}
+
+func TestWorkspaceTerminalTabsRespectLimitAndReleaseClosedSlot(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	for i := range workspaceTerminalSessionLimit {
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
+		})
+	}
+	next := protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", TerminalID: "next"}
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalOpen, mustJSON(t, next))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "session limit reached")
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+		ConversationID: "conversation", TerminalID: "0",
+	})
+	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit-1)
+	callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, next)
+	assert.Len(t, service.terminalManagers, workspaceTerminalSessionLimit)
+}
+
+func TestWorkspaceTerminalCloseBySessionSurvivesDirectoryChanges(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	for _, change := range []string{"deleted", "renamed", "retargeted alias", "retargeted canonical path"} {
+		t.Run(change, func(t *testing.T) {
+			workspace, otherDirectory := t.TempDir(), t.TempDir()
+			service, err := NewService(t.Context(), workspace, ServiceOptions{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, service.Close()) })
+			alias := filepath.Join(t.TempDir(), "alias")
+			require.NoError(t, os.Symlink(workspace, alias))
+			params := protocol.WorkspaceTerminalOpenParams{ConversationID: "draft", CWD: alias, TerminalID: "tab", Draft: true}
+			first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
+			params.CWD = otherDirectory
+			other := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
+			manager, err := service.terminalManagerForSession(first.SessionID)
+			require.NoError(t, err)
+			session, err := manager.session(first.SessionID)
+			require.NoError(t, err)
+			switch change {
+			case "deleted":
+				require.NoError(t, os.Remove(workspace))
+			case "renamed":
+				require.NoError(t, os.Rename(workspace, filepath.Join(t.TempDir(), "moved")))
+			case "retargeted alias":
+				require.NoError(t, os.Remove(alias))
+				require.NoError(t, os.Symlink(otherDirectory, alias))
+			case "retargeted canonical path":
+				require.NoError(t, os.Rename(workspace, filepath.Join(t.TempDir(), "moved")))
+				require.NoError(t, os.Symlink(otherDirectory, workspace))
+			}
+			for range 2 {
+				callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+					ConversationID: params.ConversationID, CWD: first.CWD, TerminalID: params.TerminalID, SessionID: first.SessionID,
+				})
+			}
+			assert.True(t, workspaceTerminalDone(session.done))
+			require.NoError(t, session.cleanupError())
+			assert.Len(t, service.terminalManagers, 1)
+			reattached := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, params)
+			assert.Equal(t, other.SessionID, reattached.SessionID, "never close the new symlink target's terminal")
+		})
+	}
+}
+
+func TestWorkspaceTerminalCloseBySessionChecksScopeAndIgnoresStaleIDs(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	workspace := t.TempDir()
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	openParams := protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", TerminalID: "tab"}
+	first := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, openParams)
+	for _, params := range []protocol.WorkspaceTerminalCloseParams{
+		{ConversationID: "other", TerminalID: "tab", SessionID: first.SessionID},
+		{ConversationID: "conversation", TerminalID: "other", SessionID: first.SessionID},
+		{ConversationID: "conversation", SessionID: first.SessionID},
+		{ConversationID: "conversation", CWD: filepath.Join(workspace, "missing"), TerminalID: "tab", SessionID: first.SessionID},
+	} {
+		_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodWorkspaceTerminalClose, mustJSON(t, params))
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+		assert.Equal(t, "invalid terminal session scope", rpcErr.Message)
+	}
+	reattached := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, openParams)
+	assert.Equal(t, first.SessionID, reattached.SessionID)
+	closeParams := protocol.WorkspaceTerminalCloseParams{ConversationID: "conversation", TerminalID: "tab", SessionID: first.SessionID}
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, closeParams)
+	replacement := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, openParams)
+	assert.NotEqual(t, first.SessionID, replacement.SessionID)
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, closeParams)
+	reattached = callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, openParams)
+	assert.Equal(t, replacement.SessionID, reattached.SessionID, "a stale close must not kill the replacement shell")
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+		ConversationID: "absent", CWD: filepath.Join(workspace, "missing"), SessionID: "absent",
+	})
+	assert.Len(t, service.terminalManagers, 1)
+	assert.NotContains(t, service.workspaceSessionLeases, "absent")
+}
+
+func TestWorkspaceTerminalTabsValidateIDsBeforeCreatingResources(t *testing.T) {
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	for _, method := range []string{protocol.MethodWorkspaceTerminalOpen, protocol.MethodWorkspaceTerminalClose} {
+		for _, id := range []string{"../tab", " tab", "tab\n", "é", strings.Repeat("a", 129)} {
+			_, rpcErr := service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalOpenParams{
+				ConversationID: "draft", TerminalID: id, Draft: true,
+			}))
+			require.NotNil(t, rpcErr)
+			assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+			assert.Contains(t, rpcErr.Message, "invalid terminal ID")
+		}
+		_, rpcErr := service.HandleRequest(t.Context(), method, mustJSON(t, protocol.WorkspaceTerminalCloseParams{TerminalID: "tab"}))
+		require.NotNil(t, rpcErr)
+		assert.Contains(t, rpcErr.Message, "conversation ID is required")
+	}
+	assert.Empty(t, service.terminalManagers)
+	assert.Empty(t, service.workspaceSessionLeases)
+}
+
+func TestWorkspaceTerminalTabCloseRetainsFailedCleanupSlot(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	workspace := t.TempDir()
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	cleanupErr := errors.New("cleanup failed")
+	t.Cleanup(func() { require.ErrorIs(t, service.Close(), cleanupErr) })
+	manager := newWorkspaceTerminalManager(t.Context(), workspace)
+	done := make(chan struct{})
+	close(done)
+	manager.current = &workspaceTerminalSession{id: "failed", done: done, cleanupErr: cleanupErr}
+	scope := workspaceTerminalScope{ConversationID: "conversation", CWD: workspace, TerminalID: "failed"}
+	service.terminalManagers[scope] = manager
+	for range 2 {
+		require.ErrorIs(t, service.closeWorkspaceTerminal(t.Context(), protocol.WorkspaceTerminalCloseParams{
+			ConversationID: scope.ConversationID, CWD: scope.CWD, TerminalID: scope.TerminalID,
+		}), cleanupErr)
+		assert.Same(t, manager, service.terminalManagers[scope])
+	}
+	for i := range workspaceTerminalSessionLimit - 1 {
+		callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
+			ConversationID: "conversation", TerminalID: strconv.Itoa(i),
+		})
+	}
+	_, err = service.openWorkspaceTerminal(t.Context(), protocol.WorkspaceTerminalOpenParams{ConversationID: "conversation", TerminalID: "overflow"})
+	require.ErrorContains(t, err, "session limit reached")
+	assert.Same(t, manager, service.terminalManagers[scope], "failed cleanup cannot be reclaimed as an idle terminal")
+}
+
+func TestWorkspaceTerminalTabCloseSerializesWithOpen(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	provider := &blockingWorkspaceSessionProvider{
+		ExecutionInstanceProvider: service.instanceProvider,
+		started:                   make(chan struct{}),
+		release:                   make(chan struct{}),
+	}
+	service.instanceProvider = provider
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	opened, closed := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, err := service.openWorkspaceTerminal(ctx, protocol.WorkspaceTerminalOpenParams{ConversationID: "draft", TerminalID: "tab", Draft: true})
+		opened <- err
+	}()
+	select {
+	case <-provider.started:
+	case <-ctx.Done():
+		t.Fatal("open did not reach directory resolution")
+	}
+	go func() {
+		closed <- service.closeWorkspaceTerminal(ctx, protocol.WorkspaceTerminalCloseParams{ConversationID: "draft", TerminalID: "tab"})
+	}()
+	close(provider.release)
+	require.NoError(t, <-opened)
+	require.NoError(t, <-closed)
+	assert.Empty(t, service.terminalManagers, "close cannot miss an in-flight open")
+	assert.Empty(t, service.workspaceSessionLeases)
+}
+
 func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
@@ -335,6 +585,7 @@ func TestServiceWorkspaceTerminalRejectsUnavailableManager(t *testing.T) {
 		params any
 	}{
 		{name: "open", method: protocol.MethodWorkspaceTerminalOpen, params: protocol.WorkspaceTerminalOpenParams{}},
+		{name: "close", method: protocol.MethodWorkspaceTerminalClose, params: protocol.WorkspaceTerminalCloseParams{}},
 		{name: "read", method: protocol.MethodWorkspaceTerminalRead, params: protocol.WorkspaceTerminalReadParams{SessionID: "terminal-1"}},
 		{name: "input", method: protocol.MethodWorkspaceTerminalInput, params: protocol.WorkspaceTerminalInputParams{SessionID: "terminal-1", Data: []byte("x")}},
 		{name: "resize", method: protocol.MethodWorkspaceTerminalResize, params: protocol.WorkspaceTerminalResizeParams{SessionID: "terminal-1", Rows: 24, Cols: 80}},
@@ -805,7 +1056,7 @@ func TestWorkspaceTerminalValidationHelpers(t *testing.T) {
 	require.NoError(t, os.Unsetenv("TERM"))
 	require.NoError(t, os.Unsetenv("SHELL"))
 	environment := workspaceTerminalEnv("/bin/test-shell")
-	assert.Contains(t, environment, "TERM=xterm-256color")
+	assert.Contains(t, environment, "TERM="+workspaceTerminalProfile().term)
 	assert.Contains(t, environment, "SHELL=/bin/test-shell")
 	shell, name := resolveWorkspaceTerminalShell()
 	assert.Equal(t, "/bin/bash", shell)

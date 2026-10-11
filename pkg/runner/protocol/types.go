@@ -57,6 +57,7 @@ const (
 	MethodWorkspaceMessageHistory    = "workspace.messageHistory"
 	MethodWorkspaceCWDHints          = "workspace.cwdHints"
 	MethodWorkspaceTerminalOpen      = "workspace.terminal.open"
+	MethodWorkspaceTerminalClose     = "workspace.terminal.close"
 	MethodWorkspaceTerminalRead      = "workspace.terminal.read"
 	MethodWorkspaceTerminalInput     = "workspace.terminal.input"
 	MethodWorkspaceTerminalResize    = "workspace.terminal.resize"
@@ -659,9 +660,34 @@ type WorkspaceSessionsHeartbeatParams struct {
 type WorkspaceTerminalOpenParams struct {
 	ConversationID string `json:"conversationId"`
 	CWD            string `json:"cwd,omitempty"`
+	TerminalID     string `json:"terminalId,omitempty"`
 	Rows           int    `json:"rows,omitempty"`
 	Cols           int    `json:"cols,omitempty"`
 	Draft          bool   `json:"draft,omitempty"`
+}
+
+// WorkspaceTerminalCloseParams closes one terminal tab without creating a session.
+// With SessionID, CWD is the canonical directory returned by open, not a path to resolve.
+type WorkspaceTerminalCloseParams struct {
+	ConversationID string `json:"conversationId"`
+	CWD            string `json:"cwd,omitempty"`
+	TerminalID     string `json:"terminalId,omitempty"`
+	SessionID      string `json:"sessionId,omitempty"`
+}
+
+// ValidateWorkspaceTerminalID bounds tab identities; empty selects the legacy default terminal.
+func ValidateWorkspaceTerminalID(id string) error {
+	if len(id) > 128 {
+		return errors.New("invalid terminal ID: must be at most 128 ASCII letters, digits, dashes or underscores")
+	}
+	for _, char := range id {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return errors.New("invalid terminal ID: must contain only ASCII letters, digits, dashes or underscores")
+	}
+	return nil
 }
 
 // WorkspaceTerminalOpenResult describes one persistent runner terminal session.

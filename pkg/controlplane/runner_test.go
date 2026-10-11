@@ -1098,6 +1098,7 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 			}
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
 			assert.Equal(t, "draft-terminal", terminal.ConversationID)
+			assert.Equal(t, "draft-tab", terminal.TerminalID)
 			assert.True(t, terminal.Draft)
 			assert.Equal(t, cwd, terminal.CWD)
 			*result.(*protocol.WorkspaceTerminalOpenResult) = protocol.WorkspaceTerminalOpenResult{
@@ -1137,7 +1138,7 @@ func TestRunnerDraftWorkspaceToolsUseSelectedDirectory(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
 	for attempt := range 2 {
-		conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query+"&conversationId=draft-terminal", nil)
+		conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?"+query+"&conversationId=draft-terminal&terminalId=draft-tab", nil)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = conn.Close() })
 		if attempt == 0 {
@@ -1482,6 +1483,7 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 		case protocol.MethodWorkspaceTerminalOpen:
 			terminal := params.(protocol.WorkspaceTerminalOpenParams)
 			assert.Equal(t, "conversation-terminal", terminal.ConversationID)
+			assert.Equal(t, "tab-A_1", terminal.TerminalID)
 			assert.Equal(t, "/runner/selected", terminal.CWD)
 			assert.False(t, terminal.Draft)
 			output := result.(*protocol.WorkspaceTerminalOpenResult)
@@ -1532,12 +1534,13 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?conversationId=conversation-terminal", nil)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?conversationId=conversation-terminal&terminalId=tab-A_1", nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
 	ready := readTerminalReady(t, conn)
 	assert.Equal(t, "/runner/selected", ready.CWD)
+	assert.Equal(t, "terminal-1", ready.SessionID)
 	assert.Equal(t, "bash", ready.Name)
 	messageType, payload, err := conn.ReadMessage()
 	require.NoError(t, err)

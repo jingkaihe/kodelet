@@ -47,16 +47,17 @@ func (s *Server) terminalUpgrader() websocket.Upgrader {
 }
 
 type terminalMessage struct {
-	Type string `json:"type"`
-	Data string `json:"data,omitempty"`
-	Rows int    `json:"rows,omitempty"`
-	Cols int    `json:"cols,omitempty"`
-	Code *int   `json:"code,omitempty"`
-	CWD  string `json:"cwd,omitempty"`
-	Name string `json:"name,omitempty"`
-	Git  bool   `json:"git,omitempty"`
-	PID  int    `json:"pid,omitempty"`
-	Text string `json:"text,omitempty"`
+	Type      string `json:"type"`
+	Data      string `json:"data,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
+	Cols      int    `json:"cols,omitempty"`
+	Code      *int   `json:"code,omitempty"`
+	CWD       string `json:"cwd,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Git       bool   `json:"git,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	Text      string `json:"text,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 type terminalSocketRead struct {
@@ -100,6 +101,10 @@ func (w *websocketWriter) writeJSON(message terminalMessage) error {
 }
 
 func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request) {
+	if err := protocol.ValidateWorkspaceTerminalID(r.URL.Query().Get("terminalId")); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
 	target, saved, targetErr := s.resolveConversationWorkspaceTarget(r)
 	if targetErr != nil {
 		s.writeWorkspaceRunnerTargetError(w, targetErr)
@@ -114,6 +119,41 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.handleRemoteTerminalWebsocket(w, r, target, saved)
+}
+
+func (s *Server) handleCloseTerminal(w http.ResponseWriter, r *http.Request) {
+	terminalID := r.URL.Query().Get("terminalId")
+	if err := protocol.ValidateWorkspaceTerminalID(terminalID); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+	target, _, targetErr := s.resolveConversationWorkspaceTarget(r)
+	if targetErr != nil {
+		s.writeWorkspaceRunnerTargetError(w, targetErr)
+		return
+	}
+	if err := s.runnerRegistry.ValidateRunnerCall(target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalClose); err != nil {
+		if errors.Is(err, runnerregistry.ErrRunnerCapabilityUnsupported) {
+			s.writeErrorResponse(w, http.StatusNotImplemented, "runner does not support workspace terminal", nil)
+		} else {
+			s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner terminal is unavailable", err)
+		}
+		return
+	}
+	// Once accepted, closing a tab must finish even if its HTTP observer leaves.
+	ctx, cancel := context.WithTimeout(s.chatExecutionContext(r.Context()), remoteTerminalOperationTimeout)
+	defer cancel()
+	err := s.runnerRegistry.CallRunner(ctx, target.Runner.ID, target.Runner.Generation, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{
+		ConversationID: r.URL.Query().Get("conversationId"),
+		CWD:            target.CWD,
+		TerminalID:     terminalID,
+		SessionID:      r.URL.Query().Get("sessionId"),
+	}, nil)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadGateway, "could not close runner terminal", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Request, target *workspaceRunnerTarget, saved bool) {
@@ -151,6 +191,7 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	openCtx, cancelOpen := context.WithTimeout(ctx, remoteTerminalOpenTimeout)
 	err = s.runnerRegistry.CallRunner(openCtx, runnerID, generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{
 		ConversationID: r.URL.Query().Get("conversationId"),
+		TerminalID:     r.URL.Query().Get("terminalId"),
 		Draft:          !saved,
 		CWD:            target.CWD,
 		Rows:           rows,
@@ -160,7 +201,17 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		operationErr = err
 		logger.G(r.Context()).WithError(err).Warn("failed to open runner terminal")
-		_ = writer.writeJSON(terminalMessage{Type: "info", Text: "Failed to open runner terminal."})
+		message := "Failed to open runner terminal."
+		var rpcErr *protocol.RPCError
+		if errors.As(err, &rpcErr) && strings.TrimSpace(rpcErr.Message) != "" {
+			message = rpcErr.Message
+		}
+		_ = writer.writeJSON(terminalMessage{Type: "info", Text: message})
+		// Capacity and shell-start failures need an explicit retry, not an
+		// automatic reconnect loop. Only stale workspace sessions use 1008.
+		if rpcErr == nil || (rpcErr.Reason() != protocol.ErrorReasonWorkspaceSessionDiscarded && rpcErr.Reason() != protocol.ErrorReasonWorkspaceSessionClosed) {
+			_ = writer.Write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Failed to open runner terminal"))
+		}
 		return
 	}
 	if strings.TrimSpace(opened.SessionID) == "" {
@@ -185,11 +236,12 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 	})
 
 	if err := writer.writeJSON(terminalMessage{
-		Type: "ready",
-		CWD:  opened.CWD,
-		Name: opened.Name,
-		Git:  opened.Git,
-		PID:  opened.PID,
+		Type:      "ready",
+		SessionID: opened.SessionID,
+		CWD:       opened.CWD,
+		Name:      opened.Name,
+		Git:       opened.Git,
+		PID:       opened.PID,
 	}); err != nil {
 		return
 	}

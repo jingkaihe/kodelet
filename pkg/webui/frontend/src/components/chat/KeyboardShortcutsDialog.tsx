@@ -25,6 +25,13 @@ const shortcutGroups = [
       { label: 'New line', keys: 'Enter' },
     ],
   },
+  {
+    title: 'Terminal',
+    shortcuts: [
+      { label: 'Select terminal tab', keys: 'Alt/⌥+1–8' },
+      { label: 'Rename focused tab', keys: 'F2' },
+    ],
+  },
 ];
 
 const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = ({ onClose }) => {

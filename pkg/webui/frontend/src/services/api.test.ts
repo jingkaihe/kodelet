@@ -1207,6 +1207,40 @@ describe('ApiService', () => {
   });
 
   describe('createTerminalWebSocket', () => {
+    it.each([
+      'terminal-tab_2',
+      '',
+      undefined,
+    ])('includes a nonempty terminal ID and preserves the default session for %s', (terminalId) => {
+      const websocketSpy = vi.fn();
+      vi.stubGlobal('WebSocket', websocketSpy);
+      try {
+        apiService.createTerminalWebSocket({
+          target: {
+            kind: 'runner',
+            runnerId: 'runner-1',
+            conversationId: 'conversation-1',
+            cwd: '/workspace/project',
+          },
+          rows: 24,
+          cols: 80,
+          terminalId,
+        });
+
+        expect(websocketSpy).toHaveBeenCalledTimes(1);
+        const url = new URL(websocketSpy.mock.calls[0][0]);
+        expect(url.pathname).toBe('/api/terminal/ws');
+        expect(url.searchParams.get('runnerId')).toBe('runner-1');
+        expect(url.searchParams.get('conversationId')).toBe('conversation-1');
+        expect(url.searchParams.get('cwd')).toBe('/workspace/project');
+        expect(url.searchParams.get('rows')).toBe('24');
+        expect(url.searchParams.get('cols')).toBe('80');
+        expect(url.searchParams.get('terminalId')).toBe(terminalId || null);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('creates a websocket using the current host and query params', () => {
       const originalLocation = window.location;
       const websocketSpy = vi.fn();
@@ -1300,6 +1334,99 @@ describe('ApiService', () => {
         );
       }
       expect(websocketSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('closeTerminal', () => {
+    it('forwards the exact session identity when available', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+      await apiService.closeTerminal(
+        {
+          kind: 'runner',
+          runnerId: 'runner-1',
+          conversationId: 'conversation-1',
+          cwd: '/workspace',
+        },
+        'tab-1',
+        'terminal-session-1'
+      );
+      const url = new URL(mockFetch.mock.calls[0][0], 'https://kodelet.example');
+      expect(url.searchParams.get('sessionId')).toBe('terminal-session-1');
+    });
+    it.each([
+      'terminal-tab_2',
+      '',
+    ])('deletes exactly the requested scoped terminal, including the legacy ID %s', async (terminalId) => {
+      setTestCookie('kodelet_csrf=terminal-csrf');
+      const json = vi.fn();
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204, json });
+
+      await expect(
+        apiService.closeTerminal(
+          {
+            kind: 'runner',
+            runnerId: 'runner/1',
+            conversationId: 'conversation/1',
+            cwd: '/workspace/project with spaces',
+          },
+          terminalId
+        )
+      ).resolves.toBeUndefined();
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [endpoint, options] = mockFetch.mock.calls[0];
+      const url = new URL(endpoint, 'https://kodelet.example');
+      expect(url.pathname).toBe('/api/terminal');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        runnerId: 'runner/1',
+        conversationId: 'conversation/1',
+        cwd: '/workspace/project with spaces',
+        terminalId,
+      });
+      expect(options).toMatchObject({
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': 'terminal-csrf' },
+      });
+      expect(json).not.toHaveBeenCalled();
+    });
+
+    it('omits an unspecified working directory', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+      await apiService.closeTerminal(
+        { kind: 'runner', runnerId: 'runner-1', conversationId: 'conversation-1' },
+        'terminal-tab'
+      );
+      const url = new URL(mockFetch.mock.calls[0][0], 'https://kodelet.example');
+      expect(url.searchParams.has('cwd')).toBe(false);
+      expect(url.searchParams.get('terminalId')).toBe('terminal-tab');
+    });
+
+    it('rejects local or incomplete runner targets without sending a request', async () => {
+      for (const target of [
+        { kind: 'local', cwd: '/workspace/project' },
+        { kind: 'runner', runnerId: 'runner-1' },
+        { kind: 'runner', runnerId: 'runner-1', conversationId: ' ' },
+        { kind: 'runner', runnerId: ' ', conversationId: 'conversation-1' },
+      ] as const) {
+        await expect(apiService.closeTerminal(target, 'terminal-tab')).rejects.toThrow(
+          'A runner and conversation are required to close a terminal'
+        );
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('propagates close failures so the tab can be retained for retry', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: 'Runner is offline' }),
+      });
+      await expect(
+        apiService.closeTerminal(
+          { kind: 'runner', runnerId: 'runner-1', conversationId: 'conversation-1' },
+          'terminal-tab'
+        )
+      ).rejects.toMatchObject({ message: 'Runner is offline', status: 503 });
     });
   });
 

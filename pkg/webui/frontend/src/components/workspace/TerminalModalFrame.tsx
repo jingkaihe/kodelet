@@ -36,6 +36,7 @@ const MORE_TERMINAL_KEYS: TerminalKey[] = [
 
 interface TerminalModalFrameProps {
   children?: React.ReactNode;
+  tabBar?: React.ReactNode;
   cwdLabel?: string;
   currentStatus?: string;
   popOutActive?: boolean;
@@ -45,20 +46,37 @@ interface TerminalModalFrameProps {
   onPopOut?: () => void;
   onTerminalInput?: (data: string) => void;
   onTerminalArrow?: (direction: TerminalArrowDirection) => void;
+  onReconnect?: () => void;
 }
 
 const TerminalModalFrame: React.FC<TerminalModalFrameProps> = ({
   children,
+  tabBar,
   currentStatus,
   onPopOut,
   onTerminalInput,
   onTerminalArrow,
+  onReconnect,
   popOutActive = false,
   statusVariant = 'live',
   terminalHostRef,
 }) => {
   const moreKeysId = useId();
   const [moreKeysOpen, setMoreKeysOpen] = useState(false);
+  const popOutButton =
+    onPopOut && !popOutActive ? (
+      <fieldset className="workspace-terminal-toolbar" aria-label="Terminal actions">
+        <button
+          aria-label="Open terminal in new window"
+          className="workspace-terminal-icon-button"
+          onClick={onPopOut}
+          title="Open terminal in new window"
+          type="button"
+        >
+          <ExternalLink aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+        </button>
+      </fieldset>
+    ) : null;
   const renderKey = (key: TerminalKey) => (
     <button
       aria-label={key.name ?? key.label}
@@ -86,6 +104,12 @@ const TerminalModalFrame: React.FC<TerminalModalFrameProps> = ({
       className="workspace-side-panel workspace-terminal-panel surface-panel"
       data-testid="terminal-panel"
     >
+      {tabBar ? (
+        <div className="workspace-terminal-tab-header">
+          {tabBar}
+          {popOutButton}
+        </div>
+      ) : null}
       {currentStatus && !popOutActive && statusVariant !== 'connecting' ? (
         <div className="workspace-terminal-status-bar">
           <span
@@ -99,23 +123,16 @@ const TerminalModalFrame: React.FC<TerminalModalFrameProps> = ({
             )}
           />
           <span className="workspace-terminal-status-text">{currentStatus}</span>
+          {onReconnect && (statusVariant === 'error' || statusVariant === 'idle') ? (
+            <button className="workspace-terminal-key-button" onClick={onReconnect} type="button">
+              Reconnect
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       <div className="workspace-terminal-shell">
-        {onPopOut && !popOutActive ? (
-          <fieldset className="workspace-terminal-toolbar" aria-label="Terminal actions">
-            <button
-              aria-label="Open terminal in new window"
-              className="workspace-terminal-icon-button"
-              onClick={onPopOut}
-              title="Open terminal in new window"
-              type="button"
-            >
-              <ExternalLink aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-          </fieldset>
-        ) : null}
+        {!tabBar ? popOutButton : null}
         <div
           aria-busy={(statusVariant === 'connecting' && !popOutActive) || undefined}
           aria-disabled={popOutActive || undefined}

@@ -442,6 +442,7 @@ export interface BrowserTarget {
 
 export interface TerminalReadyEvent {
   type: 'ready';
+  sessionId?: string;
   cwd: string;
   name: string;
   git: boolean;

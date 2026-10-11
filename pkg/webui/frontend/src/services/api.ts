@@ -358,6 +358,7 @@ class ApiService {
 
   createTerminalWebSocket(options: {
     target: WorkspaceTarget;
+    terminalId?: string;
     rows?: number;
     cols?: number;
   }): WebSocket {
@@ -382,12 +383,33 @@ class ApiService {
     if (options.cols) {
       params.append('cols', String(options.cols));
     }
+    if (options.terminalId) {
+      params.append('terminalId', options.terminalId);
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const suffix = params.toString();
     return new WebSocket(
       `${protocol}//${window.location.host}/api/terminal/ws${suffix ? `?${suffix}` : ''}`
     );
+  }
+
+  async closeTerminal(
+    target: WorkspaceTarget,
+    terminalId: string,
+    sessionId?: string
+  ): Promise<void> {
+    if (target.kind !== 'runner' || !target.runnerId.trim() || !target.conversationId?.trim()) {
+      throw new Error('A runner and conversation are required to close a terminal');
+    }
+    const params = new URLSearchParams({
+      runnerId: target.runnerId,
+      conversationId: target.conversationId,
+      terminalId,
+    });
+    if (target.cwd) params.set('cwd', target.cwd);
+    if (sessionId) params.set('sessionId', sessionId);
+    await this.request<void>(`/api/terminal?${params}`, { method: 'DELETE' });
   }
 
   async openBrowserSession(target: BrowserTarget, signal?: AbortSignal): Promise<BrowserSession> {

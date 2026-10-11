@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
 import TerminalModalFrame from './TerminalModalFrame';
+import TerminalTabs from './TerminalTabs';
 
 const terminalPreview = (
   <pre className="m-0 whitespace-pre-wrap font-mono text-[0.78rem] leading-5 text-[var(--terminal-foreground)]">
@@ -39,6 +40,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Connected: Story = {};
+
+export const Tabs: Story = {
+  render: (args) => (
+    <TerminalTabs open target={{ kind: 'local', cwd: '/storybook/terminal-tabs' }}>
+      {({ tabBar }) => <TerminalModalFrame {...args} tabBar={tabBar(false)} />}
+    </TerminalTabs>
+  ),
+};
 
 export const Mobile: Story = {
   render: (args) => (

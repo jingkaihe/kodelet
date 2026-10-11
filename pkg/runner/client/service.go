@@ -460,6 +460,12 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		}
 		result, err := s.readWorkspaceTerminal(ctx, value)
 		return rpcResult(result, err)
+	case protocol.MethodWorkspaceTerminalClose:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalCloseParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.closeWorkspaceTerminal(ctx, value))
 	case protocol.MethodWorkspaceTerminalInput:
 		value, rpcErr := decodeParams[protocol.WorkspaceTerminalInputParams](params)
 		if rpcErr != nil {

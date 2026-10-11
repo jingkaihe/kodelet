@@ -441,6 +441,125 @@
   padding: 0.5rem;
 }
 
+.workspace-terminal-workspace,
+.workspace-terminal-tab-panel {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-terminal-tab-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
+}
+
+.workspace-terminal-tab-header .workspace-terminal-toolbar {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.4rem 0.3rem 0;
+}
+
+.workspace-terminal-tab-bar {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+}
+
+.workspace-terminal-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 0.2rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.workspace-terminal-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 14rem;
+  border-radius: 0.25rem;
+  color: var(--kodelet-muted);
+  border: 1px solid transparent;
+}
+
+.workspace-terminal-tab.is-active {
+  color: var(--terminal-foreground);
+  background: color-mix(in srgb, var(--terminal-foreground) 8%, transparent);
+  border-color: color-mix(in srgb, var(--terminal-foreground) 16%, transparent);
+}
+
+.workspace-terminal-tab-select,
+.workspace-terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 1.9rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.2rem;
+  color: inherit;
+}
+
+.workspace-terminal-tab-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-terminal-tab-close {
+  flex: 0 0 auto;
+  padding: 0.25rem;
+}
+
+.workspace-terminal-tab-select:focus-visible,
+.workspace-terminal-tab-close:focus-visible {
+  outline: 2px solid var(--kodelet-link);
+  outline-offset: -2px;
+}
+
+.workspace-terminal-tab-close:hover {
+  background: color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
+  color: var(--terminal-foreground);
+}
+
+.workspace-terminal-tab-name {
+  width: 10rem;
+  margin: 0.15rem;
+  padding: 0.15rem 0.3rem;
+  color: var(--terminal-foreground);
+  background: var(--terminal-background);
+  border: 1px solid var(--kodelet-link);
+  border-radius: 0.2rem;
+  font: inherit;
+}
+
+.workspace-terminal-tab-bar > button {
+  flex: 0 0 auto;
+}
+
+.workspace-terminal-tab-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .workspace-terminal-tab-bar button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
 .workspace-terminal-panel {
   display: flex;
   flex-direction: column;

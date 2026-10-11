@@ -5,15 +5,210 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTerminalHandlersRejectInvalidTabIDs(t *testing.T) {
+	server := &Server{}
+	for _, handler := range []http.HandlerFunc{server.handleTerminalWebsocket, server.handleCloseTerminal} {
+		for _, id := range []string{"../tab", " tab", "tab\n", "é", strings.Repeat("a", 129)} {
+			w := httptest.NewRecorder()
+			handler(w, httptest.NewRequest(http.MethodGet, "/api/terminal?terminalId="+url.QueryEscape(id), nil))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "invalid terminal ID")
+		}
+	}
+}
+
+func TestCloseTerminalAuthorizesAndForwardsOnlyItsScope(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	savedCWD := filepath.Join(t.TempDir(), "removed-worktree")
+	require.NoError(t, os.Mkdir(savedCWD, 0o700))
+	require.NoError(t, os.Remove(savedCWD))
+	server.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+		if id == "saved" {
+			return &conversations.GetConversationResponse{ID: id, CWD: savedCWD}, nil
+		}
+		return nil, convtypes.ErrConversationNotFound
+	}}
+	link := newRunnerAPITestLink()
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities: protocol.RunnerCapabilities{
+			WorkspaceTerminal: true, WorkspaceCWD: true,
+		},
+		Host:      protocol.Host{InstanceID: "terminal-close", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle,
+	}))
+	for _, id := range []string{"saved", "reserved"} {
+		require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), id, registration.RunnerID))
+	}
+	for _, test := range []struct {
+		name, conversationID, runnerID, cwd, terminalID string
+		status                                          int
+		wantCWD                                         string
+	}{
+		{"saved", "saved", "", savedCWD, "tab-A_1", http.StatusNoContent, savedCWD},
+		{"default tab", "saved", "", "", "", http.StatusNoContent, savedCWD},
+		{"draft", "draft", registration.RunnerID, "../selected", "tab-2", http.StatusNoContent, "../selected"},
+		{"reserved", "reserved", "", "", "tab-2", http.StatusNoContent, "/runner/project"},
+		{"missing conversation", "", registration.RunnerID, "", "tab-1", http.StatusBadRequest, ""},
+		{"wrong saved directory", "saved", "", "/other", "tab-1", http.StatusBadRequest, ""},
+		{"wrong saved runner", "saved", "other-runner", "", "tab-1", http.StatusBadRequest, ""},
+		{"wrong reserved runner", "reserved", "other-runner", "", "tab-1", http.StatusBadRequest, ""},
+		{"cleanup error", "saved", "", "", "failed", http.StatusBadGateway, savedCWD},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			sessionID := ""
+			if test.name != "default tab" {
+				sessionID = "terminal-session-123"
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			link.call = func(callCtx context.Context, method string, params, _ any) error {
+				called = true
+				assert.Equal(t, protocol.MethodWorkspaceTerminalClose, method)
+				assert.Equal(t, protocol.WorkspaceTerminalCloseParams{
+					ConversationID: test.conversationID, CWD: test.wantCWD, TerminalID: test.terminalID,
+					SessionID: sessionID,
+				}, params)
+				cancel()
+				assert.NoError(t, callCtx.Err(), "cleanup outlives the HTTP observer")
+				if test.terminalID == "failed" {
+					return errors.New("cleanup failed")
+				}
+				return nil
+			}
+			query := url.Values{
+				"conversationId": {test.conversationID}, "runnerId": {test.runnerID},
+				"cwd": {test.cwd}, "terminalId": {test.terminalID},
+				"sessionId": {sessionID},
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodDelete, "/api/terminal?"+query.Encode(), nil).WithContext(ctx)
+			server.handleCloseTerminal(w, r)
+			assert.Equal(t, test.status, w.Code, w.Body.String())
+			assert.Equal(t, test.wantCWD != "", called)
+		})
+	}
+}
+
+func TestCloseTerminalRouteRequiresTerminalRole(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	server := newRunnerTestServer(t, "")
+	server.router = mux.NewRouter()
+	server.config.WebAuthMode = WebAuthModeOIDC
+	server.authStore = store
+	server.setupRoutes()
+	for _, role := range []Role{RoleUser, RoleTerminal} {
+		token, csrfToken, err := store.CreateWebSession(t.Context(), "issuer", string(role), "User", "user@example.com", []string{string(role)}, time.Hour)
+		require.NoError(t, err)
+		r := httptest.NewRequest(http.MethodDelete, "/api/terminal", nil)
+		r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: token})
+		r.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: csrfToken})
+		r.Header.Set(webCSRFHeaderName, csrfToken)
+		w := httptest.NewRecorder()
+		server.router.ServeHTTP(w, r)
+		if role == RoleUser {
+			assert.Equal(t, http.StatusForbidden, w.Code)
+		} else {
+			assert.Equal(t, http.StatusBadRequest, w.Code, "terminal role reaches workspace validation")
+		}
+	}
+}
+
+func TestTerminalOpenFailureSignalsExplicitRetry(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		info string
+		code int
+	}{
+		{
+			name: "capacity",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "runner terminal session limit reached (8); exit an existing terminal to release its slot"},
+			info: "runner terminal session limit reached (8); exit an existing terminal to release its slot",
+			code: websocket.CloseTryAgainLater,
+		},
+		{
+			name: "shell start",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: "failed to start shell"},
+			info: "failed to start shell",
+			code: websocket.CloseTryAgainLater,
+		},
+		{
+			name: "discarded",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeStale, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionDiscarded}},
+			info: "Failed to open runner terminal.",
+			code: websocket.ClosePolicyViolation,
+		},
+		{
+			name: "closed",
+			err:  &protocol.RPCError{Code: protocol.ErrorCodeStale, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonWorkspaceSessionClosed}},
+			info: "Failed to open runner terminal.",
+			code: websocket.ClosePolicyViolation,
+		},
+		{
+			name: "transport",
+			err:  errors.New("connection unavailable"),
+			info: "Failed to open runner terminal.",
+			code: websocket.CloseTryAgainLater,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newRunnerTestServer(t, "")
+			link := newRunnerAPITestLink()
+			link.call = func(_ context.Context, method string, _, _ any) error {
+				assert.Equal(t, protocol.MethodWorkspaceTerminalOpen, method)
+				return test.err
+			}
+			registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version},
+				Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true},
+				Host:             protocol.Host{InstanceID: "terminal-failure", Hostname: "worker", OS: "linux", Arch: "amd64"},
+				Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
+			}, link)
+			require.NoError(t, err)
+			require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+				RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle,
+			}))
+			runner, found := server.runnerRegistry.Runner(registration.RunnerID)
+			require.True(t, found)
+			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				server.handleRemoteTerminalWebsocket(w, r, &workspaceRunnerTarget{Runner: runner, CWD: "/workspace"}, false)
+			}))
+			defer httpServer.Close()
+			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+			require.NoError(t, err)
+			defer conn.Close()
+			require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+			var info terminalMessage
+			require.NoError(t, conn.ReadJSON(&info))
+			assert.Equal(t, terminalMessage{Type: "info", Text: test.info}, info)
+			_, _, err = conn.ReadMessage()
+			assert.True(t, websocket.IsCloseError(err, test.code), "unexpected close: %v", err)
+		})
+	}
+}
 
 func TestWebsocketWriterWritesMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

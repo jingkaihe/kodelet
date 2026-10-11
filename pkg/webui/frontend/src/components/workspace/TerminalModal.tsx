@@ -15,6 +15,8 @@ import TerminalModalFrame, {
   type TerminalArrowDirection,
   type TerminalStatusVariant,
 } from './TerminalModalFrame';
+import TerminalTabs, { getTerminalTabsKey, type TerminalTabSessionProps } from './TerminalTabs';
+import { createTerminalDirectoryTracker } from './terminalDirectory';
 import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
@@ -253,7 +255,7 @@ const drainTerminalResponses = (terminal: Terminal, onResponse: (data: string) =
   }
 };
 
-const TerminalModal: React.FC<TerminalModalProps> = ({
+const TerminalSession: React.FC<TerminalModalProps & TerminalTabSessionProps> = ({
   cwdLabel,
   target,
   open,
@@ -261,6 +263,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   allowPopOut = true,
   onReady,
   onStopped,
+  terminalId,
+  tabBar,
+  onDirectoryChange,
+  onTitleChange,
+  onSessionReady,
+  connectingEnabled,
 }) => {
   const resolvedTheme = useSyncExternalStore(
     subscribeTheme,
@@ -289,6 +297,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   onReadyRef.current = onReady;
   const onStoppedRef = useRef(onStopped);
   onStoppedRef.current = onStopped;
+  const onDirectoryChangeRef = useRef(onDirectoryChange);
+  onDirectoryChangeRef.current = onDirectoryChange;
+  const onTitleChangeRef = useRef(onTitleChange);
+  onTitleChangeRef.current = onTitleChange;
+  const onSessionReadyRef = useRef(onSessionReady);
+  onSessionReadyRef.current = onSessionReady;
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -386,7 +400,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies(reconnectAttempt): Retry events must restart the connection lifecycle.
   // biome-ignore lint/correctness/useExhaustiveDependencies(resolvedTheme): Ghostty cannot update live palettes; rebuild the view and replay the persistent PTY, as Comet does.
   useEffect(() => {
-    if (!open || popOutActive || !terminalHostRef.current) {
+    if (!open || !connectingEnabled || popOutActive || !terminalHostRef.current) {
       return undefined;
     }
 
@@ -399,6 +413,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     let handleWindowResize: (() => void) | null = null;
     let reconnectTimeout: number | null = null;
     let processExited = false;
+    let openErrorMessage: string | null = null;
     const terminalHost = terminalHostRef.current;
     let touchGesture: {
       identifier: number;
@@ -587,11 +602,16 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     terminalHost.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
     terminalHost.addEventListener('touchcancel', handleTouchEnd, { capture: true });
 
+    const trackMetadata = createTerminalDirectoryTracker(
+      (cwd) => onDirectoryChangeRef.current(cwd),
+      (title) => onTitleChangeRef.current(title)
+    );
     const writeTerminalOutput = (
       targetTerminal: Terminal,
       data: Uint8Array,
       callback?: () => void
     ) => {
+      trackMetadata(data);
       targetTerminal.write(data, callback);
       drainTerminalResponses(targetTerminal, sendTerminalInput);
     };
@@ -659,13 +679,16 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
         fitTerminalToPanel();
-        terminal.focus();
+        if (!document.activeElement?.closest('.workspace-terminal-tab-bar')) {
+          terminal.focus();
+        }
         replayPendingWritesRef.current = 0;
         replayCompleteReceivedRef.current = false;
         suppressTerminalInputRef.current = true;
 
         socket = apiService.createTerminalWebSocket({
           target: targetRef.current,
+          ...(terminalId ? { terminalId } : {}),
           rows: terminal.rows,
           cols: terminal.cols,
         });
@@ -694,6 +717,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
               }
 
               if (payload.type === 'ready') {
+                onSessionReadyRef.current(payload);
+                onDirectoryChangeRef.current(payload.cwd);
                 setResolvedDirectory({ connectionKey: terminalConnectionKey, cwd: payload.cwd });
                 onReadyRef.current?.(payload);
                 setStatusText('Restoring session…');
@@ -717,6 +742,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
               }
 
               if (payload.type === 'info') {
+                if (!replayCompleteReceivedRef.current) openErrorMessage = payload.text;
                 currentTerminal.writeln(`\r\n${payload.text}`);
               }
             } catch {
@@ -744,6 +770,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
         socket.addEventListener('close', (event) => {
           if (!getCurrentConnection()) {
+            return;
+          }
+          if (event.code === 1013) {
+            processExited = true;
+            setConnectionError(openErrorMessage || event.reason || 'Unable to open terminal.');
             return;
           }
           if (event.code === 1008) {
@@ -889,6 +920,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     reconnectAttempt,
     terminalConnectionKey,
     resolvedTheme,
+    terminalId,
+    connectingEnabled,
   ]);
 
   useEffect(() => {
@@ -1045,6 +1078,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
   return (
     <TerminalModalFrame
+      tabBar={tabBar(popOutActive)}
       currentStatus={popOutActive ? '' : currentStatus}
       cwdLabel={cwdLabel}
       popOutActive={popOutActive}
@@ -1054,8 +1088,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       onPopOut={popOutEligible || popOutActive ? handlePopOut : undefined}
       onTerminalInput={handleTerminalInput}
       onTerminalArrow={handleTerminalArrow}
+      onReconnect={() => setReconnectAttempt((current) => current + 1)}
     />
   );
 };
+
+const TerminalModal: React.FC<TerminalModalProps> = (props) => (
+  <TerminalTabs key={getTerminalTabsKey(props.target)} target={props.target} open={props.open}>
+    {(session) => <TerminalSession {...props} {...session} key={session.terminalId} />}
+  </TerminalTabs>
+);
 
 export default TerminalModal;

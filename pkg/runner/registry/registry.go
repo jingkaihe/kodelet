@@ -1308,6 +1308,7 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		protocol.MethodWorkspaceBrowserStop, protocol.MethodWorkspaceBrowserAsset:
 		return entry.WorkspaceBrowser
 	case protocol.MethodWorkspaceTerminalOpen,
+		protocol.MethodWorkspaceTerminalClose,
 		protocol.MethodWorkspaceTerminalRead,
 		protocol.MethodWorkspaceTerminalInput,
 		protocol.MethodWorkspaceTerminalResize:

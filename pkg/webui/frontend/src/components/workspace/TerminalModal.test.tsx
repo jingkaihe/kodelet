@@ -172,6 +172,9 @@ describe('TerminalModal', () => {
     MockGhosttyLoad.mockClear();
     createTerminalWebSocketMock.mockReset();
     window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith('kodelet.terminal.tabs.v1:')) window.localStorage.removeItem(key);
+    }
     window.sessionStorage.clear();
   });
 
@@ -1267,6 +1270,104 @@ describe('TerminalModal', () => {
     terminal.wasmTerm.isAlternateScreen.mockReturnValue(false);
 
     expect(terminal.handleWheel(new WheelEvent('wheel', { deltaY: 10 }))).toBe(false);
+  });
+
+  it('detaches views when switching tabs and reattaches to the same shell identity', async () => {
+    const sockets: MockWebSocket[] = [];
+    createTerminalWebSocketMock.mockImplementation(() => {
+      const socket = new MockWebSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'New terminal tab' }));
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    expect(sockets[0].close).toHaveBeenCalledOnce();
+    const secondId = createTerminalWebSocketMock.mock.calls[1][0].terminalId;
+    expect(secondId).toBeTruthy();
+
+    fireEvent.keyDown(screen.getAllByRole('tab')[1], { key: 'ArrowLeft' });
+    await waitFor(() => expect(sockets).toHaveLength(3));
+    expect(createTerminalWebSocketMock.mock.calls[2][0]).not.toHaveProperty('terminalId');
+    await waitFor(() => expect(screen.getAllByRole('tab')[0]).toHaveFocus());
+    expect(MockTerminal.instances[2].focus).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole('tab')[1]);
+    await waitFor(() => expect(sockets).toHaveLength(4));
+    expect(createTerminalWebSocketMock.mock.calls[3][0].terminalId).toBe(secondId);
+    expect(sockets[1].close).toHaveBeenCalledOnce();
+    expect(sockets[2].close).toHaveBeenCalledOnce();
+  });
+
+  it('follows shell directories and program OSC titles without overriding custom tab names', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
+    await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+    expect(screen.getByRole('tab', { name: 'project' })).toBeInTheDocument();
+    const output = (text: string) => {
+      const bytes = new TextEncoder().encode(text);
+      const data = new ArrayBuffer(bytes.length);
+      new Uint8Array(data).set(bytes);
+      act(() => socket.emit('message', { data }));
+    };
+    // Fedora's Bash prompt reports cd through OSC 0, not OSC 7.
+    output('\x1b]0;jingkaihe@hjktech-scout-001:~/workspace/kodelet\x07');
+    expect(screen.getByRole('tab', { name: '~/workspace/kodelet' })).toBeInTheDocument();
+    output('\x1b]0;user@runner:/workspace/src\x07');
+    expect(screen.getByRole('tab', { name: '/workspace/src' })).toBeInTheDocument();
+    output('\x1b]7;file://runner/workspace/');
+    output('frontend\x07');
+    expect(screen.getByRole('tab', { name: 'frontend' })).toBeInTheDocument();
+    output('\x1b]7;file://runner/workspace/backend\x07\x1b]2;nvim main');
+    output('.go\x1b');
+    output('\\');
+    expect(screen.getByRole('tab', { name: 'nvim main.go' })).toBeInTheDocument();
+    // When a program exits, the shell's next prompt title replaces its title.
+    output('\x1b]2;Leaving nvim\x07\x1b]0;user@runner:/workspace/backend\x07');
+    expect(screen.getByRole('tab', { name: '/workspace/backend' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
+    const input = screen.getByRole('textbox', { name: 'Terminal tab name' });
+    fireEvent.change(input, { target: { value: 'Editor' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    output('\x1b]7;file://runner/workspace/backend\x07');
+    output('\x1b]2;pytest\x07');
+    expect(screen.getByRole('tab', { name: 'Editor' })).toBeInTheDocument();
+    expect(createTerminalWebSocketMock).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(screen.getByRole('tab', { name: 'pytest' })).toBeInTheDocument();
+    output('\x1b]7;file://runner/workspace/backend\x07');
+    expect(screen.getByRole('tab', { name: 'backend' })).toBeInTheDocument();
+  });
+
+  it('shows terminal open failures and waits for explicit reconnect without stopping the workspace', async () => {
+    const socket = new MockWebSocket();
+    const onStopped = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    render(
+      <TerminalModal
+        cwdLabel="/tmp/project"
+        onClose={vi.fn()}
+        onStopped={onStopped}
+        open
+        target={localTarget}
+      />
+    );
+    await waitFor(() => expect(MockTerminal.instances).toHaveLength(1));
+    act(() => {
+      socket.emit('message', {
+        data: JSON.stringify({ type: 'info', text: 'Runner terminal session limit reached (8).' }),
+      });
+      socket.emit('close', { code: 1013, reason: 'Failed to open runner terminal' });
+    });
+    expect(screen.getByText('Runner terminal session limit reached (8).')).toBeInTheDocument();
+    expect(onStopped).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
   });
 
   it('renders a simplified header', async () => {

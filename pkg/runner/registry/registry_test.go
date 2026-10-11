@@ -262,6 +262,13 @@ func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
 	assert.True(t, runner.WorkspaceSessionCleanup)
 	require.NoError(t, registry.ValidateRunnerCall(registration.RunnerID, registration.Generation, protocol.MethodWorkspaceSessionsDiscard))
 	require.NoError(t, registry.ValidateRunnerCall(registration.RunnerID, registration.Generation, protocol.MethodWorkspaceSessionsHeartbeat))
+	link.call = func(_ context.Context, method string, params, _ any) error {
+		assert.Equal(t, protocol.MethodWorkspaceTerminalClose, method)
+		assert.Equal(t, protocol.WorkspaceTerminalCloseParams{ConversationID: "conversation", TerminalID: "tab-1"}, params)
+		return nil
+	}
+	require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceTerminalClose,
+		protocol.WorkspaceTerminalCloseParams{ConversationID: "conversation", TerminalID: "tab-1"}, nil))
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -315,6 +322,8 @@ func TestCallRunnerRejectsUnsupportedWorkspaceCapabilityBeforeRPC(t *testing.T) 
 	}))
 
 	err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{}, nil)
+	require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
+	err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceTerminalClose, protocol.WorkspaceTerminalCloseParams{ConversationID: "conversation"}, nil)
 	require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
 	assert.False(t, called)
 

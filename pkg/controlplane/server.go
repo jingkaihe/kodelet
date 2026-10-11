@@ -443,6 +443,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/workspace/draft", s.requireRole(RoleTerminal, s.handleDiscardDraftWorkspace)).Methods("DELETE")
 	api.HandleFunc("/workspace/draft/heartbeat", s.requireRole(RoleTerminal, s.handleDraftWorkspaceHeartbeat)).Methods("POST")
 	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
+	api.HandleFunc("/terminal", s.requireRole(RoleTerminal, s.handleCloseTerminal)).Methods("DELETE")
 	api.HandleFunc("/browser/session", s.requireBrowser(s.handleBrowserOpen)).Methods("POST")
 	api.HandleFunc("/browser/relay", s.handleBrowserRelay).Methods("GET")
 	api.HandleFunc("/browser/{id}/ws", s.requireBrowser(s.handleBrowserWebsocket)).Methods("GET")

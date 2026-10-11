@@ -10,6 +10,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWorkspaceTerminalTabWireContract(t *testing.T) {
+	assert.Equal(t, "workspace.terminal.close", MethodWorkspaceTerminalClose)
+	for _, terminalID := range []string{"", "tab-A_123"} {
+		open := WorkspaceTerminalOpenParams{ConversationID: "conversation", CWD: "/workspace", TerminalID: terminalID}
+		wire, err := json.Marshal(open)
+		require.NoError(t, err)
+		var closeParams WorkspaceTerminalCloseParams
+		require.NoError(t, json.Unmarshal(wire, &closeParams))
+		assert.Equal(t, WorkspaceTerminalCloseParams{ConversationID: open.ConversationID, CWD: open.CWD, TerminalID: terminalID}, closeParams)
+		if terminalID == "" {
+			assert.NotContains(t, string(wire), "terminalId", "legacy clients retain the default shell")
+		} else {
+			assert.Contains(t, string(wire), `"terminalId":"tab-A_123"`)
+		}
+		closeParams.SessionID = "session-123"
+		wire, err = json.Marshal(closeParams)
+		require.NoError(t, err)
+		assert.Contains(t, string(wire), `"sessionId":"session-123"`)
+		var decoded WorkspaceTerminalCloseParams
+		require.NoError(t, json.Unmarshal(wire, &decoded))
+		assert.Equal(t, closeParams, decoded)
+	}
+}
+
+func TestValidateWorkspaceTerminalID(t *testing.T) {
+	for _, id := range []string{"", "aZ_09-", strings.Repeat("a", 128)} {
+		require.NoError(t, ValidateWorkspaceTerminalID(id))
+	}
+	for _, id := range []string{" ", " tab", "tab ", "../tab", "tab/name", "tab:name", "tab\n", "tab\x00", "é", strings.Repeat("a", 129)} {
+		require.ErrorContains(t, ValidateWorkspaceTerminalID(id), "invalid terminal ID", id)
+	}
+}
+
 func TestRegisterResultRemoteProfilesCompatibility(t *testing.T) {
 	for _, test := range []struct {
 		name      string

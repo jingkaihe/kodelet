@@ -172,6 +172,7 @@ func readWorkspaceGitDiff(ctx context.Context, cwd string) (string, int, bool, e
 type workspaceTerminalScope struct {
 	ConversationID string
 	CWD            string
+	TerminalID     string
 }
 
 type workspaceTerminalManager struct {
@@ -787,6 +788,9 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 	if s == nil || s.terminalManagers == nil {
 		return protocol.WorkspaceTerminalOpenResult{}, errors.New("workspace terminal is unavailable")
 	}
+	if err := protocol.ValidateWorkspaceTerminalID(params.TerminalID); err != nil {
+		return protocol.WorkspaceTerminalOpenResult{}, err
+	}
 	s.workspaceSessionsMu.RLock()
 	defer s.finishWorkspaceSessionOpen()
 	conversationID := strings.TrimSpace(params.ConversationID)
@@ -805,14 +809,15 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 		s.mu.Unlock()
 		return protocol.WorkspaceTerminalOpenResult{}, errors.New("runner service is closed")
 	}
-	scope := workspaceTerminalScope{ConversationID: conversationID, CWD: cwd}
+	scope := workspaceTerminalScope{ConversationID: conversationID, CWD: cwd, TerminalID: params.TerminalID}
 	manager := s.terminalManagers[scope]
 	if manager == nil {
 		if len(s.terminalManagers) >= workspaceTerminalSessionLimit {
 			for candidateScope, candidate := range s.terminalManagers {
 				candidate.mu.Lock()
-				idle := candidate.current == nil || (workspaceTerminalDone(candidate.current.done) && candidate.current.cleanupError() == nil)
-				if idle && !candidate.closed {
+				// Closed managers remain registered only when cleanup failed.
+				idle := !candidate.closed && (candidate.current == nil || (workspaceTerminalDone(candidate.current.done) && candidate.current.cleanupError() == nil))
+				if idle {
 					candidate.closed = true
 					if candidate.closedCh != nil {
 						close(candidate.closedCh)
@@ -834,6 +839,70 @@ func (s *Service) openWorkspaceTerminal(ctx context.Context, params protocol.Wor
 	}
 	s.mu.Unlock()
 	return manager.Open(ctx, params.Rows, params.Cols)
+}
+
+func (s *Service) closeWorkspaceTerminal(ctx context.Context, params protocol.WorkspaceTerminalCloseParams) error {
+	if s == nil || s.terminalManagers == nil {
+		return errors.New("workspace terminal is unavailable")
+	}
+	if err := protocol.ValidateWorkspaceTerminalID(params.TerminalID); err != nil {
+		return err
+	}
+	conversationID := strings.TrimSpace(params.ConversationID)
+	if conversationID == "" {
+		return errors.New("terminal conversation ID is required")
+	}
+	// Serialize with opens and draft disposal. Keep the manager visible to
+	// service shutdown until cleanup completes, without holding mu through it.
+	s.workspaceSessionsMu.Lock()
+	defer s.workspaceSessionsMu.Unlock()
+	cwd := params.CWD
+	if params.SessionID == "" {
+		var err error
+		cwd, err = s.instanceProvider.ResolveWorkingDirectory(ctx, cwd)
+		if err != nil {
+			return err
+		}
+	}
+	scope := workspaceTerminalScope{ConversationID: conversationID, CWD: cwd, TerminalID: params.TerminalID}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("runner service is closed")
+	}
+	manager := s.terminalManagers[scope]
+	if params.SessionID != "" {
+		// Session identity survives deleted directories and retargeted symlinks.
+		// Never fall back to a replacement shell when the requested ID is gone.
+		manager = nil
+		for candidateScope, candidate := range s.terminalManagers {
+			candidate.mu.Lock()
+			matches := candidate.current != nil && candidate.current.id == params.SessionID
+			candidate.mu.Unlock()
+			if !matches {
+				continue
+			}
+			if candidateScope.ConversationID != conversationID || candidateScope.TerminalID != params.TerminalID ||
+				(cwd != "" && candidateScope.CWD != cwd) {
+				s.mu.Unlock()
+				return errors.New("invalid terminal session scope")
+			}
+			scope, manager = candidateScope, candidate
+			break
+		}
+	}
+	s.mu.Unlock()
+	if manager == nil {
+		return nil
+	}
+	if err := manager.Close(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.terminalManagers, scope)
+	s.pruneWorkspaceSessionLeasesLocked()
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Service) readWorkspaceTerminal(ctx context.Context, params protocol.WorkspaceTerminalReadParams) (protocol.WorkspaceTerminalReadResult, error) {
@@ -1140,18 +1209,30 @@ func resolveWorkspaceTerminalShell() (string, string) {
 }
 
 func workspaceTerminalEnv(shell string) []string {
-	environment := os.Environ()
-	hasTerm := false
-	hasShell := false
-	for _, entry := range environment {
-		hasTerm = hasTerm || strings.HasPrefix(entry, "TERM=")
-		hasShell = hasShell || strings.HasPrefix(entry, "SHELL=")
+	profile := workspaceTerminalProfile()
+	base := os.Environ()
+	environment := make([]string, 0, len(base)+5)
+	var inheritedTerminfo, inheritedTerminfoDirs string
+	for _, entry := range base {
+		key, value, _ := strings.Cut(entry, "=")
+		switch key {
+		case "TERMINFO":
+			inheritedTerminfo = value
+		case "TERMINFO_DIRS":
+			inheritedTerminfoDirs = value
+		}
+		if !isWorkspaceTerminalMetadata(key) {
+			environment = append(environment, entry)
+		}
 	}
-	if !hasTerm {
-		environment = append(environment, "TERM=xterm-256color")
-	}
-	if !hasShell {
-		environment = append(environment, "SHELL="+shell)
+	environment = append(environment,
+		"TERM="+profile.term,
+		"TERM_PROGRAM=ghostty-web",
+		"COLORTERM=truecolor",
+		"SHELL="+shell,
+	)
+	if dirs := workspaceTerminalTerminfoDirs(profile.terminfoDir, inheritedTerminfo, inheritedTerminfoDirs); dirs != "" {
+		environment = append(environment, "TERMINFO_DIRS="+dirs)
 	}
 	return environment
 }

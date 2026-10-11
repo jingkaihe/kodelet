@@ -1,0 +1,582 @@
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import apiService from '../../services/api';
+import type { WorkspaceTarget } from '../../types';
+import TerminalTabs, { getTerminalTabsKey } from './TerminalTabs';
+
+const target: WorkspaceTarget = {
+  kind: 'runner',
+  runnerId: 'runner-1',
+  conversationId: 'conversation-1',
+  cwd: '/workspace/project',
+};
+const unknownDirectory: WorkspaceTarget = { kind: 'local' };
+
+const Tabs = ({
+  popOutActive = false,
+  directory = '/workspace/build',
+  title = 'nvim main.go',
+  workspace = target,
+  sessionId,
+}: {
+  popOutActive?: boolean;
+  directory?: string;
+  title?: string;
+  workspace?: WorkspaceTarget;
+  sessionId?: string;
+}) => (
+  <TerminalTabs key={getTerminalTabsKey(workspace)} open target={workspace}>
+    {({
+      terminalId,
+      connectingEnabled,
+      tabBar,
+      onDirectoryChange,
+      onTitleChange,
+      onSessionReady,
+    }) => (
+      <>
+        {tabBar(popOutActive)}
+        <div
+          data-connecting-enabled={String(connectingEnabled)}
+          data-terminal-id={terminalId}
+          data-testid="session"
+        />
+        <button onClick={() => onDirectoryChange(directory)} type="button">
+          Update directory
+        </button>
+        <button onClick={() => onTitleChange(title)} type="button">
+          Update title
+        </button>
+        <button
+          onClick={() => {
+            onSessionReady({
+              type: 'ready',
+              cwd: directory,
+              name: 'bash',
+              git: true,
+              pid: 123,
+              sessionId,
+            });
+            onDirectoryChange(directory);
+          }}
+          type="button"
+        >
+          Session ready
+        </button>
+      </>
+    )}
+  </TerminalTabs>
+);
+
+const activeId = () => screen.getByTestId('session').getAttribute('data-terminal-id');
+const tabNames = () => screen.getAllByRole('tab').map((tab) => tab.textContent);
+const addTab = () => fireEvent.click(screen.getByRole('button', { name: 'New terminal tab' }));
+
+const renameTab = (name: string, key = 'Enter') => {
+  fireEvent.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
+  const input = screen.getByRole('textbox', { name: 'Terminal tab name' });
+  fireEvent.change(input, { target: { value: name } });
+  fireEvent.keyDown(input, { key });
+};
+
+const confirmClose = async (name: string) => {
+  fireEvent.click(screen.getByRole('button', { name: `Close ${name}` }));
+  fireEvent.click(
+    within(screen.getByRole('dialog', { name: 'Close tab?' })).getByRole('button', {
+      name: 'Close',
+    })
+  );
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+};
+
+describe('TerminalTabs', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(apiService, 'closeTerminal').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses sequential Shell names while the directory is unknown and preserves tab identity', () => {
+    render(<Tabs workspace={unknownDirectory} />);
+    expect(activeId()).toBe('');
+    expect(screen.getByRole('tab', { name: 'Shell 1' })).toHaveAttribute('aria-selected', 'true');
+
+    addTab();
+    const secondId = activeId();
+    expect(secondId).toMatch(/^[a-zA-Z0-9_-]+$/);
+    addTab();
+    const thirdId = activeId();
+    expect(thirdId).not.toBe(secondId);
+    expect(tabNames()).toEqual(['Shell 1', 'Shell 2', 'Shell 3']);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Shell 2' }));
+    expect(activeId()).toBe(secondId);
+    expect(screen.getByRole('tab', { name: 'Shell 3' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(screen.getByRole('tab', { name: 'Shell 1' }));
+    expect(activeId()).toBe('');
+    fireEvent.click(screen.getByRole('tab', { name: 'Shell 3' }));
+    expect(activeId()).toBe(thirdId);
+    expect(apiService.closeTerminal).not.toHaveBeenCalled();
+  });
+
+  it('names tabs from the target directory basename without visible shortcut badges', () => {
+    render(<Tabs />);
+    addTab();
+    const secondId = activeId();
+    expect(tabNames()).toEqual(['project', 'project']);
+    const tabs = screen.getAllByRole('tab', { name: 'project' });
+    tabs.forEach((tab, index) => {
+      expect(tab).toHaveAttribute('aria-keyshortcuts', `Alt+${index + 1}`);
+      expect(tab).toHaveTextContent(/^project$/);
+    });
+    fireEvent.click(tabs[0]);
+    expect(activeId()).toBe('');
+    fireEvent.click(tabs[1]);
+    expect(activeId()).toBe(secondId);
+  });
+
+  it('saves a trimmed name with Enter and cancels edits with Escape', async () => {
+    const user = userEvent.setup();
+    render(<Tabs />);
+    await user.dblClick(screen.getByRole('tab', { name: 'project' }));
+    const input = screen.getByRole('textbox', { name: 'Terminal tab name' });
+    expect(input).toHaveFocus();
+    await user.clear(input);
+    await user.type(input, '  Build logs  {Enter}');
+    expect(screen.getByRole('tab', { name: 'Build logs' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Rename terminal tab' }));
+    await user.clear(screen.getByRole('textbox'));
+    await user.type(screen.getByRole('textbox'), 'Discard this{Escape}');
+    expect(screen.getByRole('tab', { name: 'Build logs' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Discard this' })).not.toBeInTheDocument();
+    expect(activeId()).toBe('');
+  });
+
+  it('uses the full directory callback basename without replacing custom names and restores it on empty rename', () => {
+    const { rerender } = render(<Tabs />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(screen.getByRole('tab', { name: 'build' })).toBeInTheDocument();
+    renameTab('Server');
+    rerender(<Tabs directory="/workspace/server logs/" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(screen.getByRole('tab', { name: 'Server' })).toBeInTheDocument();
+
+    renameTab('  ');
+    expect(screen.getByRole('tab', { name: 'server logs' })).toBeInTheDocument();
+    expect(activeId()).toBe('');
+  });
+
+  it('replaces the fallback name when the directory becomes available, only for that tab', () => {
+    render(<Tabs workspace={unknownDirectory} directory="/resolved/workspace/project" />);
+    addTab();
+    expect(tabNames()).toEqual(['Shell 1', 'Shell 2']);
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(tabNames()).toEqual(['Shell 1', 'project']);
+  });
+
+  it.each([
+    ['jingkaihe@hjktech-scout-001:~/workspace/kodelet', '~/workspace/kodelet'],
+    ['user@runner:~', '~'],
+    ['user@runner:/tmp/project', '/tmp/project'],
+    ['user@runner:/', '/'],
+    ['user@runner:~/my project/café:logs', '~/my project/café:logs'],
+    ['  user@runner:~/workspace  ', '~/workspace'],
+    ['nvim main.go', 'nvim main.go'],
+    ['ssh user@runner:/tmp', 'ssh user@runner:/tmp'],
+    ['user@runner:pytest', 'user@runner:pytest'],
+    ['https://user@runner/path', 'https://user@runner/path'],
+  ])('shows shell paths without a user/host prefix, preserving program titles: %s', (title, expected) => {
+    const { unmount } = render(<Tabs title={title} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+    expect(tabNames()).toEqual([expected]);
+    unmount();
+    render(<Tabs />);
+    expect(tabNames()).toEqual([expected]);
+  });
+
+  it('does not strip user/host prefixes from manually named tabs', () => {
+    render(<Tabs title="user@runner:~/workspace" />);
+    renameTab('user@runner:~/custom');
+    fireEvent.click(screen.getByRole('button', { name: 'Update title' }));
+    expect(tabNames()).toEqual(['user@runner:~/custom']);
+    renameTab('');
+    expect(tabNames()).toEqual(['~/workspace']);
+  });
+
+  it.each([
+    '/canonical/project',
+    target.cwd,
+  ])('persists names, selection and IDs after readiness canonicalizes the directory, reopening %s', (cwd) => {
+    const { unmount } = render(<Tabs directory="/canonical/project" />);
+    addTab();
+    const secondId = activeId();
+    renameTab('Build');
+    fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
+
+    const canonicalKey = getTerminalTabsKey({ ...target, cwd: '/canonical/project' });
+    expect(JSON.parse(window.localStorage.getItem(getTerminalTabsKey(target)) || 'null')).toEqual({
+      canonicalKey,
+    });
+    expect(JSON.parse(window.localStorage.getItem(canonicalKey) || 'null')).toMatchObject({
+      activeId: secondId,
+      tabs: [{ id: '' }, { id: secondId, title: 'project', customTitle: 'Build' }],
+    });
+    unmount();
+
+    render(<Tabs workspace={{ ...target, cwd }} />);
+    expect(tabNames()).toEqual(['project', 'Build']);
+    expect(screen.getByRole('tab', { name: 'Build' })).toHaveAttribute('aria-selected', 'true');
+    expect(activeId()).toBe(secondId);
+    addTab();
+    expect(tabNames()).toEqual(['project', 'Build', 'project']);
+    expect(screen.getAllByRole('tab')[2]).toHaveAttribute('aria-selected', 'true');
+    expect(JSON.parse(window.localStorage.getItem(getTerminalTabsKey(target)) || 'null')).toEqual({
+      canonicalKey,
+    });
+  });
+
+  it('keeps different directories in the same conversation isolated when switching targets', () => {
+    const directoryA = { ...target, cwd: '/workspace/dirA' };
+    const directoryB = { ...target, cwd: '/workspace/dirB' };
+    expect(getTerminalTabsKey(directoryA)).not.toBe(getTerminalTabsKey(directoryB));
+    const { rerender } = render(<Tabs workspace={directoryA} />);
+    addTab();
+    const secondIdA = activeId();
+    renameTab('Build A');
+
+    rerender(<Tabs workspace={directoryB} />);
+    expect(tabNames()).toEqual(['dirB']);
+    expect(activeId()).toBe('');
+    addTab();
+    const secondIdB = activeId();
+    renameTab('Build B');
+    expect(secondIdB).not.toBe(secondIdA);
+
+    rerender(<Tabs workspace={directoryA} />);
+    expect(tabNames()).toEqual(['dirA', 'Build A']);
+    expect(activeId()).toBe(secondIdA);
+    rerender(<Tabs workspace={directoryB} />);
+    expect(tabNames()).toEqual(['dirB', 'Build B']);
+    expect(activeId()).toBe(secondIdB);
+    expect(apiService.closeTerminal).not.toHaveBeenCalled();
+  });
+
+  it('uses the canonical directory when closing a session after readiness', async () => {
+    render(<Tabs directory="/canonical/project" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
+    await confirmClose('project');
+    expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(
+      { ...target, cwd: '/canonical/project' },
+      ''
+    );
+  });
+
+  it.each([
+    false,
+    true,
+  ])('synchronizes pop-out storage without echoing after canonicalization=%s', (ready) => {
+    render(<Tabs directory="/canonical/project" />);
+    if (ready) fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
+    const storageKey = getTerminalTabsKey(
+      ready ? { ...target, cwd: '/canonical/project' } : target
+    );
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const nextState = {
+      tabs: [
+        { id: '', number: 1, title: 'project', customTitle: '' },
+        { id: 'popout-tab', number: 2, title: 'build', customTitle: 'Remote build' },
+      ],
+      activeId: 'popout-tab',
+      nextNumber: 3,
+    };
+    const receive = (key: string, newValue: string) => {
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key, newValue }));
+      });
+    };
+
+    receive(getTerminalTabsKey({ ...target, cwd: '/another/project' }), JSON.stringify(nextState));
+    expect(tabNames()).toEqual(['project']);
+    receive(storageKey, JSON.stringify(nextState));
+    expect(tabNames()).toEqual(['project', 'Remote build']);
+    expect(activeId()).toBe('popout-tab');
+    expect(setItem).not.toHaveBeenCalled();
+    receive(storageKey, '{invalid json');
+    expect(activeId()).toBe('popout-tab');
+  });
+
+  it.each([
+    '{broken',
+    'null',
+    '{"tabs":[]}',
+  ])('recovers safely from invalid persisted state: %s', (stored) => {
+    window.localStorage.setItem(getTerminalTabsKey(target), stored);
+    render(<Tabs />);
+    expect(tabNames()).toEqual(['project']);
+    addTab();
+    expect(tabNames()).toEqual(['project', 'project']);
+  });
+
+  it('cancels tab close without terminating or changing the active shell', () => {
+    render(<Tabs />);
+    addTab();
+    const secondId = activeId();
+    renameTab('Build');
+    fireEvent.click(screen.getByRole('button', { name: 'Close Build' }));
+    const dialog = screen.getByRole('dialog', { name: 'Close tab?' });
+    expect(dialog).toHaveTextContent(
+      'Closing this tab will stop the shell and any running processes.'
+    );
+    expect(dialog).not.toHaveTextContent('Build');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiService.closeTerminal).not.toHaveBeenCalled();
+    expect(activeId()).toBe(secondId);
+    expect(tabNames()).toEqual(['project', 'Build']);
+  });
+
+  it('closes the selected session, selects a neighbor and never reuses a fallback number', async () => {
+    render(<Tabs workspace={unknownDirectory} />);
+    addTab();
+    const secondId = activeId();
+    addTab();
+    const thirdId = activeId();
+    fireEvent.click(screen.getByRole('tab', { name: 'Shell 2' }));
+    await confirmClose('Shell 2');
+    expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(unknownDirectory, secondId);
+    expect(tabNames()).toEqual(['Shell 1', 'Shell 3']);
+    expect(screen.getByRole('tab', { name: 'Shell 3' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+2'
+    );
+    expect(activeId()).toBe(thirdId);
+    addTab();
+    expect(tabNames()).toEqual(['Shell 1', 'Shell 3', 'Shell 4']);
+    expect(screen.getByRole('tab', { name: 'Shell 4' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+3'
+    );
+  });
+
+  it('closes an inactive tab without replacing the active session', async () => {
+    render(<Tabs />);
+    addTab();
+    const secondId = activeId();
+    renameTab('Build');
+    await confirmClose('project');
+    expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(target, '');
+    expect(activeId()).toBe(secondId);
+    expect(tabNames()).toEqual(['Build']);
+  });
+
+  it('retains exact session identity and canonical scope for close after reload and directory changes', async () => {
+    const { rerender, unmount } = render(
+      <Tabs directory="/canonical/project" sessionId="terminal-original" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Session ready' }));
+    rerender(<Tabs directory="/other/path" sessionId="terminal-original" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update directory' }));
+    expect(tabNames()).toEqual(['path']);
+    unmount();
+    render(<Tabs />);
+    await confirmClose('path');
+    expect(apiService.closeTerminal).toHaveBeenCalledExactlyOnceWith(
+      { ...target, cwd: '/canonical/project' },
+      '',
+      'terminal-original'
+    );
+  });
+
+  it('disables reconnection while closing and preserves the tab on failure for retry', async () => {
+    let rejectClose: (reason: Error) => void = () => {};
+    vi.mocked(apiService.closeTerminal).mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectClose = reject;
+        })
+    );
+    render(<Tabs />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByTestId('session')).toHaveAttribute('data-connecting-enabled', 'false');
+    expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+
+    await act(async () => {
+      rejectClose(new Error('Runner is offline'));
+    });
+    expect(screen.getByRole('dialog')).toHaveTextContent('Runner is offline');
+    expect(tabNames()).toEqual(['project']);
+    expect(activeId()).toBe('');
+    expect(screen.getByTestId('session')).toHaveAttribute('data-connecting-enabled', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(apiService.closeTerminal).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists an empty state after closing the last tab and starts a fresh identity on add', async () => {
+    const { unmount } = render(<Tabs />);
+    await confirmClose('project');
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session')).not.toBeInTheDocument();
+    expect(screen.getByText(/No terminal tabs/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rename terminal tab' })).toBeDisabled();
+    unmount();
+
+    render(<Tabs />);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    addTab();
+    expect(tabNames()).toEqual(['project']);
+    expect(activeId()).not.toBe('');
+  });
+
+  it('supports accessible arrow, Home, End and F2 navigation', async () => {
+    render(<Tabs workspace={unknownDirectory} />);
+    addTab();
+    addTab();
+    const thirdId = activeId();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 3' }), { key: 'ArrowRight' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Shell 1' })).toHaveFocus());
+    expect(activeId()).toBe('');
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 1' }), { key: 'ArrowLeft' });
+    expect(activeId()).toBe(thirdId);
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 3' }), { key: 'Home' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Shell 1' })).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 1' }), { key: 'End' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Shell 3' })).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Shell 3' }), { key: 'F2' });
+    expect(screen.getByRole('textbox', { name: 'Terminal tab name' })).toHaveFocus();
+  });
+
+  it('persists dragged tab order and identity while keeping Alt shortcuts positional and invisible', () => {
+    const { unmount } = render(<Tabs />);
+    addTab();
+    addTab();
+    const thirdId = activeId();
+    renameTab('Server');
+    fireEvent.dragStart(screen.getByRole('tab', { name: 'Server' }), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent.drop(screen.getAllByRole('tab')[0]);
+    expect(tabNames()).toEqual(['Server', 'project', 'project']);
+    expect(screen.getByRole('tab', { name: 'Server' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+1'
+    );
+    expect(screen.getByRole('tab', { name: 'Server' })).toHaveTextContent(/^Server$/);
+    fireEvent.keyDown(screen.getByTestId('session'), { key: '2', altKey: true });
+    expect(activeId()).toBe('');
+    fireEvent.keyDown(screen.getByTestId('session'), { key: '1', altKey: true });
+    expect(activeId()).toBe(thirdId);
+    unmount();
+    render(<Tabs />);
+    expect(tabNames()).toEqual(['Server', 'project', 'project']);
+    expect(activeId()).toBe(thirdId);
+  });
+
+  it('handles tab shortcuts without consuming ordinary terminal input', () => {
+    render(<Tabs />);
+    addTab();
+    const shortcut = (key: string) =>
+      fireEvent.keyDown(screen.getByTestId('session'), { key, altKey: true });
+    expect(tabNames()).toEqual(['project', 'project']);
+    const secondId = activeId();
+    expect(shortcut('1')).toBe(false);
+    expect(activeId()).toBe('');
+    expect(shortcut('2')).toBe(false);
+    expect(activeId()).toBe(secondId);
+    expect(
+      fireEvent.keyDown(screen.getByTestId('session'), {
+        key: 'ArrowLeft',
+        ctrlKey: true,
+        altKey: true,
+      })
+    ).toBe(true);
+    expect(
+      fireEvent.keyDown(screen.getByTestId('session'), { key: '1', ctrlKey: true, altKey: true })
+    ).toBe(true);
+    for (const key of ['t', 'w']) {
+      expect(
+        fireEvent.keyDown(screen.getByTestId('session'), { key, ctrlKey: true, altKey: true })
+      ).toBe(true);
+    }
+    expect(shortcut('8')).toBe(true);
+    expect(shortcut('w')).toBe(true);
+    expect(shortcut('t')).toBe(true);
+    expect(activeId()).toBe(secondId);
+    expect(tabNames()).toHaveLength(2);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('handles macOS Option-transformed digit keys without showing shortcut labels', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    render(<Tabs />);
+    addTab();
+    const secondId = activeId();
+    expect(screen.getAllByRole('tab')[1]).toHaveAttribute('aria-keyshortcuts', 'Alt+2');
+    expect(tabNames()).toEqual(['project', 'project']);
+    expect(
+      fireEvent.keyDown(screen.getByTestId('session'), { key: '¡', code: 'Digit1', altKey: true })
+    ).toBe(false);
+    expect(activeId()).toBe('');
+    fireEvent.keyDown(screen.getByTestId('session'), { key: '™', code: 'Digit2', altKey: true });
+    expect(activeId()).toBe(secondId);
+  });
+
+  it('selects all eight positions with Alt+1 through Alt+8', () => {
+    render(<Tabs />);
+    const ids = [activeId()];
+    for (let index = 1; index < 8; index++) {
+      addTab();
+      ids.push(activeId());
+    }
+    ids.forEach((id, index) => {
+      const key = String(index + 1);
+      expect(fireEvent.keyDown(screen.getByTestId('session'), { key, altKey: true })).toBe(false);
+      expect(activeId()).toBe(id);
+      expect(screen.getAllByRole('tab')[index]).toHaveAttribute('aria-keyshortcuts', `Alt+${key}`);
+      expect(screen.getAllByRole('tab')[index]).toHaveAttribute('aria-selected', 'true');
+    });
+  });
+
+  it('enforces the eight-tab limit', () => {
+    render(<Tabs />);
+    for (let index = 1; index < 8; index++) addTab();
+    expect(tabNames()).toHaveLength(8);
+    expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeDisabled();
+    addTab();
+    expect(tabNames()).toHaveLength(8);
+  });
+
+  it('disables tab mutations and shortcuts while a pop-out owns the terminal', () => {
+    const { rerender } = render(<Tabs />);
+    addTab();
+    const secondId = activeId();
+    renameTab('Build');
+    rerender(<Tabs popOutActive />);
+    for (const tab of screen.getAllByRole('tab')) expect(tab).toBeDisabled();
+    for (const name of ['New terminal tab', 'Rename terminal tab', 'Close project']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole('tab', { name: 'project' }));
+    addTab();
+    for (const key of ['t', 'w', '1', 'ArrowLeft']) {
+      fireEvent.keyDown(screen.getByTestId('session'), { key, altKey: true });
+    }
+    expect(tabNames()).toHaveLength(2);
+    expect(activeId()).toBe(secondId);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiService.closeTerminal).not.toHaveBeenCalled();
+
+    rerender(<Tabs />);
+    expect(screen.getByRole('button', { name: 'New terminal tab' })).toBeEnabled();
+    addTab();
+    expect(tabNames()).toHaveLength(3);
+  });
+});
