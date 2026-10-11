@@ -154,7 +154,10 @@ const ChatWorkspacePanel = ({
         <div aria-hidden="true" className="workspace-resize-shield" />
       ) : null}
       {workspacePanelOpen ? (
-        <div className="workspace-tools-dock" data-testid="workspace-tools-dock">
+        <div
+          className={cn('workspace-tools-dock', workspacePanelView === 'terminal' && 'is-terminal')}
+          data-testid="workspace-tools-dock"
+        >
           <div className="workspace-tools-content">
             <Suspense
               fallback={

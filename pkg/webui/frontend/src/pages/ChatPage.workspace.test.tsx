@@ -466,7 +466,7 @@ describe('ChatPage workspace tools and browsers', () => {
 
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
 
-    expect(screen.getByTestId('workspace-tools-dock')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tools-dock')).toHaveClass('is-terminal');
     expect(await screen.findByTestId('terminal-panel')).toBeInTheDocument();
     expect(screen.getByTestId('composer-textarea')).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
@@ -527,7 +527,7 @@ describe('ChatPage workspace tools and browsers', () => {
         cwd: '/runner/kodelet',
       })
     );
-    expect(screen.getByTestId('workspace-tools-dock')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tools-dock')).not.toHaveClass('is-terminal');
     await waitFor(() => expect(screen.getByTestId('git-diff-panel')).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Changes' })).not.toBeInTheDocument();
     expect(screen.getByTestId('composer-textarea')).toBeInTheDocument();

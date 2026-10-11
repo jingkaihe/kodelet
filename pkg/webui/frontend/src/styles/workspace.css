@@ -67,6 +67,13 @@
   padding: 0.42rem 0.62rem 0.6rem 0.72rem;
 }
 
+/* The terminal fills the dock edge to edge instead of nesting a bordered box in it. */
+.workspace-tools-dock.is-terminal {
+  border-right: 1px solid var(--sidebar-stroke-strong);
+  background: var(--terminal-background);
+  padding: 0;
+}
+
 .workspace-tools-rail {
   flex: 0 0 calc(2.75rem - 1px);
   justify-content: flex-start;
@@ -533,10 +540,6 @@
 
 .workspace-terminal-panel.workspace-side-panel {
   background: var(--terminal-background);
-  border: 1px solid color-mix(in srgb, var(--terminal-foreground) 16%, transparent);
-  border-radius: 0.25rem;
-  overflow: hidden;
-  box-shadow: none;
 }
 
 .workspace-terminal-status-bar {
@@ -822,11 +825,6 @@
   background: var(--terminal-background);
 }
 
-.terminal-popout-page .workspace-terminal-panel.workspace-side-panel {
-  border: 0;
-  border-radius: 0;
-}
-
 .terminal-popout-page .workspace-terminal-host {
   /* The key bar below the terminal owns the bottom safe area. */
   padding: calc(1.15rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right)) 1rem
@@ -884,6 +882,10 @@
     padding-top: calc(0.42rem + env(safe-area-inset-top));
     padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
     padding-left: calc(0.72rem + env(safe-area-inset-left));
+  }
+
+  .workspace-tools-dock.is-terminal {
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   .workspace-tools-shell:not(.is-open) .workspace-tools-rail {
