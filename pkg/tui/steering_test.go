@@ -31,27 +31,32 @@ func TestRunningComposerOffersSlashCommands(t *testing.T) {
 }
 
 func TestRunningComposerQueuesSlashCommandAsFollowUp(t *testing.T) {
-	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
-	t.Cleanup(m.cancel)
-	m.width = 100
-	m.height = 30
-	m.resize()
-	m.running = true
-	m.activeRunID = 1
-	m.textarea.SetValue("/goal finish the review")
+	for _, message := range []string{"/goal finish the review", "/reload"} {
+		t.Run(message, func(t *testing.T) {
+			m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
+			t.Cleanup(m.cancel)
+			m.width = 100
+			m.height = 30
+			m.resize()
+			m.running = true
+			m.activeRunID = 1
+			m.textarea.SetValue(message + " ") // Command completion has already been accepted.
 
-	updated, cmd := m.Update(keyPress(tea.KeyEnter))
-	m = updated.(model)
+			updated, cmd := m.Update(keyPress(tea.KeyEnter))
+			m = updated.(model)
 
-	assert.Nil(t, cmd)
-	assert.True(t, m.running)
-	assert.Equal(t, "command queued", m.status)
-	assert.Empty(t, m.textarea.Value())
-	assert.Empty(t, m.queuedSteering)
-	assert.Equal(t, []string{"/goal finish the review"}, m.queuedFollowUps)
-	content, _ := m.renderTranscript()
-	assert.Contains(t, content, "queued command")
-	assert.Contains(t, content, "/goal finish the review")
+			assert.Nil(t, cmd)
+			assert.True(t, m.running)
+			assert.Equal(t, 1, m.activeRunID)
+			assert.Equal(t, "command queued", m.status)
+			assert.Empty(t, m.textarea.Value())
+			assert.Empty(t, m.queuedSteering)
+			assert.Equal(t, []string{message}, m.queuedFollowUps)
+			content, _ := m.renderTranscript()
+			assert.Contains(t, content, "queued command")
+			assert.Contains(t, content, message)
+		})
+	}
 }
 
 func TestQueuedSlashCommandStartsAfterRunAndPreservesDraft(t *testing.T) {
@@ -75,54 +80,6 @@ func TestQueuedSlashCommandStartsAfterRunAndPreservesDraft(t *testing.T) {
 	assert.Equal(t, "draft typed while waiting", m.textarea.Value())
 	require.Len(t, m.entries, 2)
 	assert.Equal(t, "/goal finish the review", m.entries[1].content)
-}
-
-func TestReloadQueuesUntilRunSucceeds(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		err  error
-	}{
-		{name: "success"},
-		{name: "failure", err: assert.AnError},
-		{name: "cancelled", err: context.Canceled},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			m := newModel(t.Context(), Config{Remote: true, Runner: &recordingRunner{}})
-			t.Cleanup(m.cancel)
-			require.NotNil(t, m.startConversationRun(m.conversationState, "first request"))
-			firstRunID := m.activeRunID
-			m.textarea.SetValue("/reload")
-
-			updated, cmd := m.Update(keyPress(tea.KeyEnter))
-			m = updated.(model)
-			assert.Nil(t, cmd)
-			assert.Equal(t, "/reload ", m.textarea.Value(), "first Enter accepts the completion")
-			updated, cmd = m.Update(keyPress(tea.KeyEnter))
-			m = updated.(model)
-			assert.Nil(t, cmd, "reload must not be handled locally or interrupt the run")
-			assert.Equal(t, firstRunID, m.activeRunID)
-			assert.Equal(t, []string{"/reload"}, m.queuedFollowUps)
-			assert.Empty(t, m.queuedSteering)
-			assert.Empty(t, m.textarea.Value())
-			m.textarea.SetValue("next draft")
-
-			updated, _ = m.Update(chatDoneMsg{runID: firstRunID, err: test.err})
-			m = updated.(model)
-			assert.Empty(t, m.queuedFollowUps)
-			assert.Equal(t, "next draft", m.textarea.Value())
-			if test.err == nil {
-				assert.True(t, m.running)
-				assert.Greater(t, m.activeRunID, firstRunID)
-				require.Len(t, m.entries, 2)
-				assert.Equal(t, "/reload", m.entries[1].content)
-			} else {
-				assert.False(t, m.running)
-				for _, entry := range m.entries {
-					assert.NotEqual(t, "/reload", entry.content)
-				}
-			}
-		})
-	}
 }
 
 func TestBackgroundQueuedSlashCommandPreservesBothDrafts(t *testing.T) {

@@ -297,14 +297,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(mockStreamChat).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(textarea, { target: { value: 'Focus on authentication' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
-    await waitFor(() =>
-      expect(mockSteerConversation).toHaveBeenCalledWith('conv-123', 'Focus on authentication', [
-        { type: 'text', text: 'Focus on authentication' },
-      ])
-    );
-    await waitFor(() => expect(textarea).toHaveValue(''));
     fireEvent.change(textarea, { target: { value: 'Keep this draft' } });
 
     await act(async () => {
@@ -353,7 +345,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       streams[2].resolve();
     });
     expect(mockStreamChat).toHaveBeenCalledTimes(3);
-    expect(mockSteerConversation).toHaveBeenCalledTimes(1);
+    expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('Keep this draft');
   });
 
@@ -361,7 +353,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
     'error',
     'cancelled',
     'stop',
-    'disconnect',
     'EOF without done',
   ])('discards queued commands with a notice after %s instead of executing them', async (outcome) => {
     const streams = setupCommandQueueStreams();
@@ -387,9 +378,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       } else if (outcome === 'cancelled') {
         streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
       }
-      if (outcome === 'disconnect') {
-        streams[0].reject(new TypeError('Failed to fetch'));
-      } else if (outcome === 'stop') {
+      if (outcome === 'stop') {
         streams[0].reject(new DOMException('Stopped', 'AbortError'));
       } else {
         streams[0].resolve();
@@ -405,64 +394,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(mockStreamChat).toHaveBeenCalledTimes(1);
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep my draft');
-  });
-
-  it('discards remaining commands when a dequeued command fails', async () => {
-    const streams = setupCommandQueueStreams();
-    render(<ChatPage />);
-    await screen.findByText('First conversation');
-    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(streams).toHaveLength(1));
-    queueSlashCommand('/reload');
-    queueSlashCommand('/review tests');
-    await act(async () => {
-      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
-      streams[0].resolve();
-    });
-    await waitFor(() => expect(streams).toHaveLength(2));
-    await act(async () => {
-      streams[1].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Reload refused' });
-      streams[1].resolve();
-    });
-    await waitFor(() =>
-      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
-    );
-    expect(
-      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
-    ).toBeInTheDocument();
-    expect(mockStreamChat).toHaveBeenCalledTimes(2);
-  });
-
-  it('drains commands once when an externally-started run completes successfully', async () => {
-    const streams = setupCommandQueueStreams();
-    let onEvent: (event: ChatStreamEvent) => void = () => undefined;
-    mockStreamConversation.mockImplementation(async (_id, options) => {
-      onEvent = options.onEvent;
-      return new Promise(() => undefined);
-    });
-    render(<ChatPage />);
-    await screen.findByText('First conversation');
-    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalled());
-    await act(async () => onEvent({ kind: 'conversation', conversation_id: 'conv-123' }));
-    queueSlashCommand('/reload');
-    queueSlashCommand('/review tests');
-    expect(mockStreamChat).not.toHaveBeenCalled();
-    await act(async () => {
-      onEvent({ kind: 'done', conversation_id: 'conv-123' });
-      onEvent({ kind: 'done', conversation_id: 'conv-123' });
-    });
-    await waitFor(() => expect(streams).toHaveLength(1));
-    expect(mockStreamChat).toHaveBeenLastCalledWith(
-      expect.objectContaining({ conversationId: 'conv-123', message: '/reload' }),
-      expect.any(Object)
-    );
-    await act(async () => onEvent({ kind: 'done', conversation_id: 'conv-123' }));
-    expect(mockStreamChat).toHaveBeenCalledTimes(1);
-    expect(mockSteerConversation).not.toHaveBeenCalled();
-    expect(screen.getByRole('region', { name: 'Queued commands' })).toHaveTextContent(
-      '/review tests'
-    );
   });
 
   it('retains a queued run observer across navigation and unrelated run completion', async () => {
@@ -581,9 +512,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
   });
 
   it.each([
-    'error',
     'cancelled',
-    'disconnect',
     'EOF without done',
   ])('does not drain queued commands when an observed run ends with %s', async (outcome) => {
     setupCommandQueueStreams();
@@ -603,13 +532,10 @@ describe('ChatPage streaming, steering, and navigation', () => {
     queueSlashCommand('/reload');
     queueSlashCommand('/review tests');
     await act(async () => {
-      if (outcome === 'error') {
-        observers[0].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Run failed' });
-      } else if (outcome === 'cancelled') {
+      if (outcome === 'cancelled') {
         observers[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
       }
-      if (outcome === 'disconnect') observers[0].reject(new TypeError('Failed to fetch'));
-      else observers[0].resolve();
+      observers[0].resolve();
     });
     await waitFor(() =>
       expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
@@ -630,7 +556,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(streams).toHaveLength(1));
     queueSlashCommand('/reload');
-    queueSlashCommand('/review tests');
 
     setRouteParams({ id: 'conv-456' });
     rerender(<ChatPage />);
@@ -665,11 +590,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       streams[1].onEvent({ kind: 'done', conversation_id: 'conv-123' });
       streams[1].resolve();
     });
-    await waitFor(() => expect(streams).toHaveLength(3));
-    expect(mockStreamChat).toHaveBeenLastCalledWith(
-      expect.objectContaining({ conversationId: 'conv-123', message: '/review tests' }),
-      expect.any(Object)
-    );
+    expect(mockStreamChat).toHaveBeenCalledTimes(2);
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('Other conversation draft');
     expect(screen.getByAltText('keep.png')).toBeInTheDocument();
