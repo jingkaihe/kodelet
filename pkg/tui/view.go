@@ -1203,6 +1203,9 @@ func (m model) inputBottomLeftLabel() string {
 		return "Startup failed"
 	}
 	if m.running {
+		if m.resourceReload {
+			return m.spinnerGlyph() + " Reloading extensions…"
+		}
 		return m.flowingWaterFrame() + " " + m.workingStatusText()
 	}
 	if m.err != nil {
@@ -1220,10 +1223,13 @@ func (m model) inputBottomLeftLabel() string {
 	if m.slashCommandErr != nil {
 		return "Could not load commands"
 	}
-	if m.conversationID != "" {
+	if m.conversationID != "" && !m.resourceReload {
 		return ""
 	}
 	if m.resourcesLoading {
+		if m.resourceReload {
+			return m.spinnerGlyph() + " Reloading extensions…"
+		}
 		return m.spinnerGlyph() + " Loading extensions…"
 	}
 	if m.readyDuration > 0 {

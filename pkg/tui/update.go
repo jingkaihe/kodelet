@@ -570,7 +570,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.extensionCount = nil
 			if msg.err == nil {
 				m.extensionCount = msg.extensionCount
-				if m.conversationID == "" {
+				if m.conversationID == "" || m.resourceReload {
 					m.readyDuration = msg.readyDuration
 				}
 			}
@@ -1062,6 +1062,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.conversationState = currentState
 		if m.remote && msg.event.Kind == "resources-reloaded" {
+			state.resourceReload = true
 			// Invalidate stale completions and shortcuts while runner discovery
 			// replaces them. Queued commands are resolved by the runner, not this list.
 			state.slashCommands = withTUIBuiltInSlashCommands(nil)
@@ -1198,6 +1199,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unread = true
 		}
 		runSucceeded := msg.err == nil && !wasCancelled
+		if !runSucceeded && m.resourceReload {
+			m.resourceReload = false
+			m.resourcesLoading = false
+			m.readinessStartedAt = time.Time{}
+			m.readyDuration = 0
+		}
 		queuedFollowUp := ""
 		if runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
 			queuedFollowUp = m.queuedFollowUps[0]
@@ -1593,6 +1600,7 @@ func (m *model) beginObservedConversationRun(state *conversationState, runID int
 	state.streamConnectedActive = true
 	state.streamTurnUncertain = false
 	state.resourcesLoading = false
+	state.resourceReload = false
 	state.readinessStartedAt = time.Time{}
 	state.readyDuration = 0
 	if state.running {
@@ -1656,6 +1664,12 @@ func (m *model) finishObservedConversationRun(state *conversationState, runID in
 	}
 	turn := m.streamTurn
 	runSucceeded := event.Kind == "done" && !wasCancelled
+	if !runSucceeded && m.resourceReload {
+		m.resourceReload = false
+		m.resourcesLoading = false
+		m.readinessStartedAt = time.Time{}
+		m.readyDuration = 0
+	}
 	queuedFollowUp := ""
 	if wasRunning && runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
 		queuedFollowUp = m.queuedFollowUps[0]
@@ -1798,11 +1812,15 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	if conversationID == "" {
 		return nil
 	}
-	// Readiness ends at the first run, even if discovery is still pending.
-	// Later refreshes must not count model response time or restore its label.
-	state.resourcesLoading = false
+	// Ordinary runs clear readiness; explicit reloads reuse it for progress and timing.
+	state.resourceReload = message == "/"+slashcommands.ReloadCommandName
+	state.resourcesLoading = state.resourceReload
 	state.readinessStartedAt = time.Time{}
 	state.readyDuration = 0
+	if state.resourceReload {
+		state.readinessStartedAt = time.Now()
+		state.discoveryID++ // Ignore discovery started before this reload.
+	}
 	m.stopConversationStream(state)
 	conversationKey := state.key
 	if strings.TrimSpace(state.title) == "" {

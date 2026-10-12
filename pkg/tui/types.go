@@ -175,6 +175,7 @@ type conversationState struct {
 	shortcutDigest       string
 	extensionCount       *int
 	resourcesLoading     bool
+	resourceReload       bool
 	discoveryID          uint64
 	readinessStartedAt   time.Time
 	readyDuration        time.Duration

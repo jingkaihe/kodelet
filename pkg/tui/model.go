@@ -308,13 +308,13 @@ func (m model) loadRemoteSlashCommands(state *conversationState) tea.Cmd {
 	}
 	if !ok {
 		state.resourcesLoading = false
-		if state.conversationID == "" && !state.readinessStartedAt.IsZero() {
+		if (state.conversationID == "" || state.resourceReload) && !state.readinessStartedAt.IsZero() {
 			state.readyDuration = time.Since(state.readinessStartedAt)
 			state.readinessStartedAt = time.Time{}
 		}
 		return nil
 	}
-	state.resourcesLoading = state.conversationID == ""
+	state.resourcesLoading = state.conversationID == "" || state.resourceReload
 	state.discoveryID++
 	discoveryID := state.discoveryID
 	if state.resourcesLoading && state.readinessStartedAt.IsZero() {

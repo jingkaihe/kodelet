@@ -2100,6 +2100,8 @@ func TestFailedAndCancelledRunsDiscardQueuedSlashFollowUps(t *testing.T) {
 			state.running = true
 			state.runCancelling = test.cancelling
 			state.activeRunID = 9
+			state.resourceReload = true
+			state.resourcesLoading = true
 			state.queuedFollowUps = []string{"/goal should not run"}
 			m.runs[9] = &conversationRun{conversationKey: state.key}
 			m.runByState[state.key] = 9
@@ -2108,6 +2110,8 @@ func TestFailedAndCancelledRunsDiscardQueuedSlashFollowUps(t *testing.T) {
 			m = updated.(model)
 
 			assert.False(t, state.running)
+			assert.False(t, state.resourceReload)
+			assert.False(t, state.resourcesLoading)
 			assert.Empty(t, state.queuedFollowUps)
 			assert.Empty(t, m.runs)
 		})

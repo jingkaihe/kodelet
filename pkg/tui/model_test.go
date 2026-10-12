@@ -325,27 +325,30 @@ func TestResourcesReloadedRefreshesConversationCommandsAndShortcuts(t *testing.T
 			})
 			t.Cleanup(m.cancel)
 			state := m.conversationState
+			state.initialHistoryPending = false
 			stale := m.loadRemoteSlashCommands(state)().(slashCommandsMsg)
 			updated, _ := m.Update(stale)
 			m = updated.(model)
 			require.Contains(t, slashCommandNames(state.slashCommands), "removed-command")
 			require.Len(t, state.extensionShortcuts, 1)
 			require.NotNil(t, m.startConversationRun(state, "/reload"))
+			assert.Equal(t, m.spinnerGlyph()+" Reloading extensions…", m.inputBottomLeftLabel())
 			runID := state.activeRunID
-			state.queuedFollowUps = []string{"/fresh-command"}
 			if background {
 				other := newConversationState("other", "other", true, m.conversationDefaults)
 				other.slashCommands = []slashcommands.Command{{Name: "other-command"}}
 				other.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", ExtensionID: "other"}}
 				m.conversations[other.key] = other
 				requireConversationActivation(t, &m, other.key)
+				assert.NotContains(t, m.inputBottomLeftLabel(), "Reloading extensions")
 			}
 			active := m.conversationState
 			m.textarea.SetValue("keep my draft")
 			runner.discovery = protocol.WorkspaceDiscoverResult{
-				Commands:  []slashcommands.Command{{Name: "fresh-command"}},
-				Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+k", ExtensionID: "fresh", Generation: 2}},
-				Digest:    "fresh-digest",
+				Commands:       []slashcommands.Command{{Name: "fresh-command"}},
+				Shortcuts:      []protocol.ShortcutDescriptor{{Key: "ctrl+k", ExtensionID: "fresh", Generation: 2}},
+				Digest:         "fresh-digest",
+				ExtensionCount: new(3),
 			}
 
 			updated, cmd := m.Update(chatEventMsg{runID: runID, event: chat.ChatEvent{
@@ -366,13 +369,15 @@ func TestResourcesReloadedRefreshesConversationCommandsAndShortcuts(t *testing.T
 			assert.NotContains(t, slashCommandNames(state.slashCommands), "removed-command")
 			assert.Empty(t, state.extensionShortcuts)
 
-			// The next command can start before client discovery finishes: the
-			// runner resolves it using the already-reloaded resources.
 			updated, _ = m.Update(chatDoneMsg{runID: runID})
 			m = updated.(model)
-			assert.True(t, state.running)
-			assert.Equal(t, "/fresh-command", state.entries[len(state.entries)-1].content)
+			assert.False(t, state.running)
+			if !background {
+				assert.Equal(t, m.spinnerGlyph()+" Reloading extensions…", m.inputBottomLeftLabel())
+			}
 			refreshed := batch[1]().(slashCommandsMsg)
+			assert.Positive(t, refreshed.readyDuration)
+			refreshed.readyDuration = 627 * time.Millisecond
 			assert.Equal(t, chat.WorkspaceTarget{ConversationID: state.conversationID}, runner.target)
 			updated, _ = m.Update(refreshed)
 			m = updated.(model)
@@ -387,7 +392,12 @@ func TestResourcesReloadedRefreshesConversationCommandsAndShortcuts(t *testing.T
 				assert.Equal(t, []string{"other-command"}, slashCommandNames(m.slashCommands))
 				require.Len(t, m.extensionShortcuts, 1)
 				assert.Equal(t, "other", m.extensionShortcuts[0].ExtensionID)
+				requireConversationActivation(t, &m, state.key)
 			}
+			assert.Equal(t, "3 extensions · 627 ms", m.inputBottomLeftLabel())
+			require.NotNil(t, m.startConversationRun(state, "/fresh-command"))
+			assert.False(t, state.resourceReload)
+			assert.Contains(t, m.inputBottomLeftLabel(), "Following the thread…")
 		})
 	}
 }

@@ -611,15 +611,16 @@ func TestReadinessLabelPreservesActivityPriority(t *testing.T) {
 	assert.Contains(t, m.inputBottomLeftLabel(), "Following the thread…")
 }
 
-func TestStartupLabelsUseExistingSpinner(t *testing.T) {
-	for _, label := range []string{"Starting…", "Loading extensions…"} {
+func TestStartupAndReloadLabelsUseExistingSpinner(t *testing.T) {
+	for _, label := range []string{"Starting…", "Loading extensions…", "Reloading extensions…"} {
 		t.Run(label, func(t *testing.T) {
 			m := newModel(t.Context(), Config{})
 			t.Cleanup(m.cancel)
 			m.width, m.height = 80, 12
 			m.resize()
 			m.startupPending = label == "Starting…"
-			m.resourcesLoading = label == "Loading extensions…"
+			m.resourceReload = label == "Reloading extensions…"
+			m.resourcesLoading = label == "Loading extensions…" || m.resourceReload
 			firstGlyph := m.spinnerGlyph()
 			assert.Equal(t, firstGlyph+" "+label, m.inputBottomLeftLabel())
 			assert.Contains(t, xansi.Strip(m.View().Content), firstGlyph+" "+label)
