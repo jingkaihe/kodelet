@@ -1007,8 +1007,12 @@ func TestServer_GetAvailableCommands(t *testing.T) {
 	for _, cmd := range commands {
 		assert.NotEmpty(t, cmd.Name)
 		assert.NotEmpty(t, cmd.Description)
-		assert.NotNil(t, cmd.Input)
-		assert.NotEmpty(t, cmd.Input.Hint)
+		if cmd.Name == "reload" {
+			assert.Nil(t, cmd.Input, "reload takes no arguments")
+		} else {
+			require.NotNil(t, cmd.Input)
+			assert.NotEmpty(t, cmd.Input.Hint)
+		}
 	}
 }
 
@@ -1167,6 +1171,37 @@ func TestServer_RenameCommandPersistsWithoutCallingAgent(t *testing.T) {
 	record, err := service.GetConversation(context.Background(), string(sess.ID))
 	require.NoError(t, err)
 	assert.Equal(t, "Authentication cleanup", record.Summary)
+}
+
+func TestServer_LocalReloadRejectsBeforeCommandOrModelDispatch(t *testing.T) {
+	workspace := newACPTestExtensionWorkspace(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(t.Context()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+	)
+	t.Cleanup(server.Shutdown)
+	server.initialized.Store(true)
+	sess, err := server.sessionManager.NewSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace})
+	require.NoError(t, err)
+	for _, message := range []string{"/reload", "/reload unexpected"} {
+		prompt := acptypes.PromptRequest{
+			SessionID: sess.ID,
+			Prompt:    []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: message}},
+		}
+		require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage("9"), Params: mustJSONRawMessage(t, prompt)}))
+		messages := readJSONRPCMessages(t, output)
+		require.Len(t, messages, 1)
+		response := messages[0]["error"].(map[string]any)
+		assert.Equal(t, float64(acptypes.ErrCodeInvalidParams), response["code"])
+		assert.Equal(t, "/reload requires a runner-backed ACP session", response["message"])
+	}
+	messages, err := sess.Thread.GetMessages()
+	require.NoError(t, err)
+	assert.Empty(t, messages, "unsupported reload must not reach the model")
 }
 
 func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {

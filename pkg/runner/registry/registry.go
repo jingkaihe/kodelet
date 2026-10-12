@@ -124,6 +124,7 @@ type Runner struct {
 	WorkspaceCWD            bool               `json:"workspaceCwd"`
 	RunCheckpoint           bool               `json:"runCheckpoint"`
 	SessionExtensions       bool               `json:"sessionExtensions"`
+	Reload                  bool               `json:"reload"`
 	ActiveRunID             string             `json:"activeRunId,omitempty"`
 	ActiveRunIDs            []string           `json:"activeRunIds,omitempty"`
 	ConnectionID            string             `json:"connectionId,omitempty"`
@@ -638,6 +639,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.SessionExtensions = params.Capabilities.SessionExtensions
+	entry.Reload = params.Capabilities.Reload
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
@@ -775,6 +777,7 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.WorkspaceCWD = params.Capabilities.WorkspaceCWD
 	entry.RunCheckpoint = params.Capabilities.RunCheckpoint
 	entry.SessionExtensions = params.Capabilities.SessionExtensions
+	entry.Reload = params.Capabilities.Reload
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -1058,6 +1061,10 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	if params.SessionExtensions != nil && !entry.SessionExtensions {
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("this runner does not support session extensions; update the runner")
+	}
+	if params.Reload && !entry.Reload {
+		r.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("this runner does not support reload; update the runner")
 	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	reservedAffinity := false

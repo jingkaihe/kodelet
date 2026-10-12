@@ -77,6 +77,54 @@ func TestQueuedSlashCommandStartsAfterRunAndPreservesDraft(t *testing.T) {
 	assert.Equal(t, "/goal finish the review", m.entries[1].content)
 }
 
+func TestReloadQueuesUntilRunSucceeds(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "failure", err: assert.AnError},
+		{name: "cancelled", err: context.Canceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{Remote: true, Runner: &recordingRunner{}})
+			t.Cleanup(m.cancel)
+			require.NotNil(t, m.startConversationRun(m.conversationState, "first request"))
+			firstRunID := m.activeRunID
+			m.textarea.SetValue("/reload")
+
+			updated, cmd := m.Update(keyPress(tea.KeyEnter))
+			m = updated.(model)
+			assert.Nil(t, cmd)
+			assert.Equal(t, "/reload ", m.textarea.Value(), "first Enter accepts the completion")
+			updated, cmd = m.Update(keyPress(tea.KeyEnter))
+			m = updated.(model)
+			assert.Nil(t, cmd, "reload must not be handled locally or interrupt the run")
+			assert.Equal(t, firstRunID, m.activeRunID)
+			assert.Equal(t, []string{"/reload"}, m.queuedFollowUps)
+			assert.Empty(t, m.queuedSteering)
+			assert.Empty(t, m.textarea.Value())
+			m.textarea.SetValue("next draft")
+
+			updated, _ = m.Update(chatDoneMsg{runID: firstRunID, err: test.err})
+			m = updated.(model)
+			assert.Empty(t, m.queuedFollowUps)
+			assert.Equal(t, "next draft", m.textarea.Value())
+			if test.err == nil {
+				assert.True(t, m.running)
+				assert.Greater(t, m.activeRunID, firstRunID)
+				require.Len(t, m.entries, 2)
+				assert.Equal(t, "/reload", m.entries[1].content)
+			} else {
+				assert.False(t, m.running)
+				for _, entry := range m.entries {
+					assert.NotEqual(t, "/reload", entry.content)
+				}
+			}
+		})
+	}
+}
+
 func TestBackgroundQueuedSlashCommandPreservesBothDrafts(t *testing.T) {
 	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
 	t.Cleanup(m.cancel)

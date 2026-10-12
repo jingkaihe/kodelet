@@ -79,6 +79,53 @@ func checkpointTestModelPolicy(t *testing.T) {
 	viper.Set("anthropic_api_access", "api-key")
 }
 
+func TestReloadPreservesConversationWithoutModelCalls(t *testing.T) {
+	checkpointTestModelPolicy(t)
+	config := embeddedRunnerTestConfig(t)
+	t.Setenv("OPENAI_API_KEY", "reload-local-test-key")
+	var calls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "reload must not call the model", http.StatusBadRequest)
+	}))
+	defer provider.Close()
+	viper.Set("profiles.work", map[string]any{
+		"provider": "openai", "model": "gpt-4o", "weak_model": "gpt-4o",
+		"openai": map[string]any{"base_url": provider.URL, "api_mode": "chat_completions", "api_key_env_var": "OPENAI_API_KEY"},
+	})
+	server, endpoint, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	runnerID := server.EmbeddedRunnerStatus().RunnerID
+	client, err := chat.NewClient(endpoint, "web-secret", runnerID)
+	require.NoError(t, err)
+	for i := range 2 {
+		sink := &recordingChatSink{}
+		id, err := client.Run(t.Context(), chat.ChatRequest{
+			ConversationID: "reload-conversation", TurnID: fmt.Sprintf("reload-%d", i),
+			RunnerID: runnerID, CWD: config.EmbeddedRunner.Workspace, Message: "/reload",
+		}, sink)
+		require.NoError(t, err)
+		assert.Equal(t, "reload-conversation", id)
+		var refreshed bool
+		for _, event := range sink.Events() {
+			if event.Kind == "resources-reloaded" {
+				refreshed = true
+				assert.Equal(t, id, event.ConversationID)
+				assert.Equal(t, config.EmbeddedRunner.Workspace, event.CWD)
+			}
+		}
+		assert.True(t, refreshed)
+		history, err := client.LoadConversation(t.Context(), id)
+		require.NoError(t, err)
+		assert.Equal(t, runnerID, history.RunnerID)
+		assert.Equal(t, config.EmbeddedRunner.Workspace, history.CWD)
+		require.Len(t, history.Messages, (i+1)*2, "checkpointed reload input must be saved exactly once")
+		assert.Equal(t, "user", history.Messages[i*2].Role)
+		assert.Equal(t, "assistant", history.Messages[i*2+1].Role)
+	}
+	assert.Zero(t, calls.Load())
+}
+
 func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing.T) {
 	for _, placement := range []string{"embedded", "standalone"} {
 		t.Run(placement, func(t *testing.T) {

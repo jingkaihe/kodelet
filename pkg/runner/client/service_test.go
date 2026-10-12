@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -386,6 +387,55 @@ func newRegisteredTestService(t *testing.T, workspace string, options ServiceOpt
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 	return service
+}
+
+func TestServiceReloadRejectsSessionExtensionsBeforeOpening(t *testing.T) {
+	configLoads := 0
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			configLoads++
+			return llmtypes.Config{}, nil
+		},
+	})
+	_, err := service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "reload", ConversationID: "conversation", Reload: true,
+		SessionExtensions: &protocol.SessionExtensions{ID: "attachment", ExtensionIDs: []string{"inline-1"}},
+	})
+	require.ErrorContains(t, err, "cannot reload SDK-attached session extensions")
+	assert.Zero(t, configLoads)
+	assert.Empty(t, service.runs)
+	assert.Empty(t, service.backgrounds)
+}
+
+func TestServiceReloadRequiresIsolatedRuntimeOnlyWhenExtensionsEnabled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	for _, enabled := range []bool{true, false} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			provider := &recordingRuntimeProvider{}
+			service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+				RuntimeProvider: provider,
+				ConfigLoader: func(string) (llmtypes.Config, error) {
+					return llmtypes.Config{
+						Skills:            &llmtypes.SkillsConfig{Enabled: false},
+						ExtensionSettings: map[string]any{"enabled": enabled},
+					}, nil
+				},
+			})
+			_, err := service.openRun(t.Context(), protocol.RunOpenParams{
+				RunID: "reload", ConversationID: "conversation", Reload: true,
+			})
+			if enabled {
+				require.ErrorContains(t, err, "does not support fresh isolated extensions for reload")
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, service.closeRun(t.Context(), "reload"))
+			}
+			assert.Zero(t, provider.activeCalls, "reload must never use the cached runtime fallback")
+			assert.Empty(t, service.runs)
+			assert.Empty(t, service.backgrounds)
+		})
+	}
 }
 
 func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {

@@ -1061,6 +1061,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unread = true
 		}
 		m.conversationState = currentState
+		if m.remote && msg.event.Kind == "resources-reloaded" {
+			// Invalidate stale completions and shortcuts while runner discovery
+			// replaces them. Queued commands are resolved by the runner, not this list.
+			state.slashCommands = withTUIBuiltInSlashCommands(nil)
+			state.extensionShortcuts = nil
+			state.shortcutDigest = ""
+			state.slashCommandErr = nil
+			state.slashCommandIndex = -1
+			refresh := m.loadRemoteSlashCommands(state)
+			if active {
+				m.resize()
+				m.refreshViewport(false)
+			}
+			return m, tea.Batch(waitForMsg(m.runCh), refresh)
+		}
 		if observed && terminal {
 			nextCmd, quit := m.finishObservedConversationRun(state, msg.runID, msg.event)
 			if quit {

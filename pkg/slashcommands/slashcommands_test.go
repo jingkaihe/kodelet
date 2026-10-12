@@ -86,13 +86,32 @@ func TestBuildCommandPlaceholder(t *testing.T) {
 func TestBuiltIns(t *testing.T) {
 	commands := BuiltIns()
 
-	require.Len(t, commands, 1)
+	require.Len(t, commands, 2)
 	assert.Equal(t, Command{
 		Name:        "rename",
 		Description: "Rename the current conversation",
 		Hint:        "name",
 		Placeholder: "/rename <name>",
 	}, commands[0])
+	assert.Equal(t, Command{
+		Name:        "reload",
+		Description: "Reload extensions and workspace resources",
+		Placeholder: "/reload",
+	}, commands[1])
+}
+
+func TestParseReloadCommand(t *testing.T) {
+	for _, args := range []string{"", " \t\n"} {
+		handled, err := ParseReloadCommand("reload", args)
+		require.NoError(t, err)
+		assert.True(t, handled)
+	}
+	handled, err := ParseReloadCommand("reload", "extensions")
+	assert.True(t, handled)
+	require.ErrorContains(t, err, "usage: /reload")
+	handled, err = ParseReloadCommand("review", "")
+	require.NoError(t, err)
+	assert.False(t, handled)
 }
 
 func TestParseRenameCommand(t *testing.T) {

@@ -376,6 +376,7 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	entry, found := registry.Runner(registration.RunnerID)
 	require.True(t, found)
 	assert.True(t, entry.WorkspaceSessionCleanup, "the runner must advertise discarded draft cleanup")
+	assert.True(t, entry.Reload, "the runner must advertise reload support")
 
 	t.Run("composer-history", func(t *testing.T) {
 		entry, found := registry.Runner(registration.RunnerID)

@@ -219,6 +219,7 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
+	Reload                  bool `json:"reload,omitempty"`
 	SessionExtensions       bool `json:"sessionExtensions,omitempty"`
 	RunCheckpoint           bool `json:"runCheckpoint,omitempty"`
 	WorkspaceGitDiff        bool `json:"workspaceGitDiff,omitempty"`
@@ -393,6 +394,8 @@ type ClientCapabilities struct {
 
 // RunOpenParams asks a runner to pin one environment snapshot.
 type RunOpenParams struct {
+	// Reload requires a fresh environment and rejects retained extension resources.
+	Reload bool `json:"reload,omitempty"`
 	// CodeExecution advertises support for runner-owned nested tool capabilities.
 	CodeExecution bool `json:"codeExecution,omitempty"`
 	// BrowserEnabled is a server-authorized grant, never a workspace setting.

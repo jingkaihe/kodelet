@@ -853,6 +853,46 @@ func TestHeartbeatReleasesRunAfterConsecutiveOmissions(t *testing.T) {
 	require.NoError(t, registry.CloseRun(t.Context(), "run-replacement", RunStatusSucceeded, nil))
 }
 
+func TestOpenRunReloadRequiresRunnerCapability(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(fmt.Sprint(supported), func(t *testing.T) {
+			registry := newTestRegistry(t)
+			link := newFakeLink()
+			registrationParams := testRegisterParams("host", "/work/project")
+			registrationParams.Capabilities.Reload = supported
+			registration, err := registry.Register(registrationParams, link)
+			require.NoError(t, err)
+			markRunnerReady(t, registry, registration)
+			configureManifestLink(t, link, registration)
+			openCalls := 0
+			call := link.call
+			link.call = func(ctx context.Context, method string, value, result any) error {
+				if method == protocol.MethodRunOpen {
+					openCalls++
+					assert.Equal(t, supported, value.(protocol.RunOpenParams).Reload)
+				}
+				return call(ctx, method, value, result)
+			}
+			params := testRunOpenParams("run", "conversation")
+			params.Reload = true
+			_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
+			if !supported {
+				require.ErrorContains(t, err, "does not support reload; update the runner")
+				assert.Zero(t, openCalls)
+				_, exists := registry.Run("run")
+				assert.False(t, exists)
+				_, exists = registry.affinities.get("conversation")
+				assert.False(t, exists, "rejection must not reserve conversation ownership")
+				params.Reload = false
+				_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, openCalls)
+			require.NoError(t, registry.CloseRun(t.Context(), "run", RunStatusSucceeded, nil))
+		})
+	}
+}
+
 func TestOpenRunReservationFailureRollsBackPendingAffinityAndCapacity(t *testing.T) {
 	persistence := &testPersistence{}
 	registry, err := New(t.Context(), Options{

@@ -70,13 +70,17 @@ type remoteSession struct {
 
 type remoteOutcomeSink struct {
 	chat.ChatEventSink
-	done      bool
-	cancelled bool
+	done              bool
+	cancelled         bool
+	resourcesReloaded bool
 }
 
 func (s *remoteOutcomeSink) Send(event chat.ChatEvent) error {
 	if event.Kind == "done" {
 		s.done, s.cancelled = true, event.Cancelled
+	}
+	if event.Kind == "resources-reloaded" {
+		s.resourcesReloaded = true
 	}
 	return s.ChatEventSink.Send(event)
 }

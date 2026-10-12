@@ -135,6 +135,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		profile = *e.modelProfile
 	}
 	params := protocol.RunOpenParams{
+		Reload:         spec.Reload,
 		CodeExecution:  true,
 		RunID:          runID,
 		ConversationID: spec.ConversationID,

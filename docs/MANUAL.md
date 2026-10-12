@@ -213,6 +213,14 @@ Use `/sessions` or `Ctrl+L` to search and switch conversations, or `/new [PATH]`
 
 Use `/about` to show the TUI's version, build commit, and build date alongside the connected server's address, version, and build details.
 
+#### Reloading resources
+
+Use `/reload` (no arguments) to refresh runner-owned extensions, workspace resources, and tool schemas without calling the LLM or starting a new conversation. It is supported in normal runner-backed CLI, terminal chat, and ACP sessions; for example, `kodelet run --resume CONVERSATION_ID "/reload"`. The reload request and response are saved in the conversation. After success, the TUI and ACP refresh their available commands, and the TUI also refreshes its shortcuts, removing registrations that no longer exist.
+
+In the TUI, entering `/reload` during a run queues it until that run succeeds; it does not reload midway through a tool call or model turn. As with other queued slash commands, it is discarded if the active run fails or is cancelled. Reload refuses to proceed while background workers retain the environment or while SDK session callbacks are attached; it does not silently stop ongoing work or restart client-owned callback code. The legacy in-process Executor does not support reload.
+
+Reload is explicit: there is no file watching or built-in self-reload tool. It does not rebuild compiled extensions, restart Kodelet, or reload daemon-owned model settings. Tool schemas are recalculated normally, without provider-specific cache preservation; changes to schemas or prompt resources can reduce prompt-cache reuse.
+
 #### Custom TUI themes
 
 Place YAML theme files in `~/.kodelet/themes` with a `.theme` extension. The filename stem becomes the theme name, so `~/.kodelet/themes/forest.theme` is selected with `kodelet chat --theme forest`. Custom themes inherit from a bundled theme and only need to declare the colors they want to change; `base` defaults to `catppuccin-mocha`. Bundled theme names take precedence over files with the same name.

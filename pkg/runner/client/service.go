@@ -510,6 +510,9 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	if err := params.Validate(); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
+	if params.Reload && params.SessionExtensions != nil {
+		return runnerpayload.Manifest{}, errors.New("cannot reload SDK-attached session extensions; reload them through the SDK client")
+	}
 	variant := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	logCtx := s.decorateRunLogContext(ctx, params.RunID, params.ConversationID)
 	startedAt := time.Now()
@@ -564,6 +567,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		}
 	}
 	resources := s.backgrounds[params.ConversationID]
+	if params.Reload && resources != nil {
+		s.mu.Unlock()
+		return runnerpayload.Manifest{}, errors.New("cannot reload while background workers are retained; release background leases first")
+	}
 	var movedResources *runnerBackgroundResources
 	if resources != nil {
 		if resources.attachedRunID != "" {
@@ -733,6 +740,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.New("session extensions are disabled by runner extension policy")
 	}
+	if params.Reload && extensionConfig.Enabled {
+		if _, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); !ok {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support fresh isolated extensions for reload")
+		}
+	}
 	if params.RequireCheckpoint {
 		peer := s.currentPeer()
 		if peer == nil {
@@ -806,6 +819,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		resources.runtime = runtime
 		resources.runtimeConfig = extensionConfig
 		resources.runtimeRelease = runtimeRelease
+	}
+	if params.Reload && runtime != nil {
+		if err := runtime.InitializationError(); err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to reload runner extensions")
+		}
 	}
 	config.Extensions = runtime
 	environment := s.environmentFactory(workingDirectory, runtime)

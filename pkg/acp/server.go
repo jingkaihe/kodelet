@@ -757,6 +757,9 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 
 	prompt := params.Prompt
 	if command, args, found := parseSlashCommand(params.Prompt); found {
+		if command == slashcommands.ReloadCommandName {
+			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "/reload requires a runner-backed ACP session", nil)
+		}
 		commandResult, handled, err := s.tryExtensionCommand(promptCtx, sess, params.Prompt, command, args)
 		if err != nil {
 			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
@@ -888,6 +891,13 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *ac
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, fmt.Sprintf("the request failed or the connection was interrupted; before sending it again, check 'kodelet conversation turn %s %s': %v", params.SessionID, turnID, err), nil)
 	}
 	succeeded = true
+	if sink.resourcesReloaded {
+		// Discover only after the stream succeeds, outside session and prompt
+		// locks. A failed or cancelled reload must not refresh the command list.
+		if err := s.sendRemoteAvailableCommands(params.SessionID); err != nil {
+			return err
+		}
+	}
 	return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
 }
 
@@ -1316,9 +1326,11 @@ func (s *Server) availableCommandsFromSlashCommands(availableCommands []slashcom
 		cmd := acptypes.AvailableCommand{
 			Name:        availableCommand.Name,
 			Description: availableCommand.Description,
-			Input: &acptypes.AvailableCommandInput{
+		}
+		if availableCommand.Hint != "" {
+			cmd.Input = &acptypes.AvailableCommandInput{
 				Hint: availableCommand.Hint,
-			},
+			}
 		}
 		commands = append(commands, cmd)
 	}

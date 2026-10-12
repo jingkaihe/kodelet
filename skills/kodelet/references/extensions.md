@@ -99,6 +99,8 @@ exec kodelet-extension-node ./dist/index.js
 
 During local development, a wrapper can run `tsx` against `src/index.ts`, as shown in `examples/extensions/workspace/kodelet-extension-workspace`.
 
+After changing an installed extension, use `/reload` in a runner-backed conversation to refresh extensions and tool schemas without an LLM call. If the wrapper runs compiled output, rebuild it first; reload does not compile source or watch files. See [reloading resources](conversations.md#reloading-resources) for queue behavior and restrictions on background workers and SDK callbacks.
+
 ### Tools, commands, events, and UI helpers
 
 - Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, structuredContent?, error? }`. `data` carries presentation metadata; `structuredContent` is a machine-readable result that code-mode scripts read as `reply.data`, optionally described by a raw JSON Schema `outputSchema` on the registration. An optional `group` sets the code-mode catalog group (default `extension/<extension-id>`), and an optional `short` sets the one-line summary in code mode's tool listing (default: the description's first sentence). Structured content over 1 MiB is omitted with a notice.

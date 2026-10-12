@@ -348,6 +348,7 @@ func (r *Runner) runConnection(ctx context.Context) (bool, error) {
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
+			Reload:                  true,
 			SessionExtensions:       true,
 			WorkspaceGitDiff:        true,
 			WorkspaceGitCommit:      true,

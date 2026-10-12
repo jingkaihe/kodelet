@@ -17,6 +17,8 @@ const additionalInstructionsHeader = "\n\n---\n\nAdditional instructions:\n"
 
 const RenameCommandName = "rename"
 
+const ReloadCommandName = "reload"
+
 // Command describes an available slash command backed by a recipe.
 type Command struct {
 	Name        string `json:"name"`
@@ -171,7 +173,23 @@ func BuiltIns() []Command {
 			Hint:        "name",
 			Placeholder: "/rename <name>",
 		},
+		{
+			Name:        ReloadCommandName,
+			Description: "Reload extensions and workspace resources",
+			Placeholder: "/reload",
+		},
 	}
+}
+
+// ParseReloadCommand parses the built-in reload command without invoking the model.
+func ParseReloadCommand(command, args string) (handled bool, err error) {
+	if strings.TrimSpace(command) != ReloadCommandName {
+		return false, nil
+	}
+	if strings.TrimSpace(args) != "" {
+		return true, errors.New("usage: /reload")
+	}
+	return true, nil
 }
 
 // ParseRenameCommand parses the built-in rename command without invoking the model.

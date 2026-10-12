@@ -312,6 +312,86 @@ func TestRemoteSlashDiscoveryUsesRunnerTargetAndDiscardsStaleDirectory(t *testin
 	assert.Equal(t, chat.WorkspaceTarget{ConversationID: "persisted-conversation"}, runner.target, "stored affinity must replace CLI directory/profile defaults on resume")
 }
 
+func TestResourcesReloadedRefreshesConversationCommandsAndShortcuts(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(map[bool]string{false: "active", true: "background"}[background], func(t *testing.T) {
+			runner := &remoteShortcutRunner{discovery: protocol.WorkspaceDiscoverResult{
+				Commands:  []slashcommands.Command{{Name: "removed-command"}},
+				Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+r", ExtensionID: "removed", Generation: 1}},
+				Digest:    "old-digest",
+			}}
+			m := newModel(t.Context(), Config{
+				Remote: true, Runner: runner, ConversationID: "reloaded-conversation", CWD: "/runner/workspace",
+			})
+			t.Cleanup(m.cancel)
+			state := m.conversationState
+			stale := m.loadRemoteSlashCommands(state)().(slashCommandsMsg)
+			updated, _ := m.Update(stale)
+			m = updated.(model)
+			require.Contains(t, slashCommandNames(state.slashCommands), "removed-command")
+			require.Len(t, state.extensionShortcuts, 1)
+			require.NotNil(t, m.startConversationRun(state, "/reload"))
+			runID := state.activeRunID
+			state.queuedFollowUps = []string{"/fresh-command"}
+			if background {
+				other := newConversationState("other", "other", true, m.conversationDefaults)
+				other.slashCommands = []slashcommands.Command{{Name: "other-command"}}
+				other.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", ExtensionID: "other"}}
+				m.conversations[other.key] = other
+				requireConversationActivation(t, &m, other.key)
+			}
+			active := m.conversationState
+			m.textarea.SetValue("keep my draft")
+			runner.discovery = protocol.WorkspaceDiscoverResult{
+				Commands:  []slashcommands.Command{{Name: "fresh-command"}},
+				Shortcuts: []protocol.ShortcutDescriptor{{Key: "ctrl+k", ExtensionID: "fresh", Generation: 2}},
+				Digest:    "fresh-digest",
+			}
+
+			updated, cmd := m.Update(chatEventMsg{runID: runID, event: chat.ChatEvent{
+				Kind: "resources-reloaded", ConversationID: state.conversationID, CWD: "/runner/workspace",
+			}})
+			m = updated.(model)
+			require.NotNil(t, cmd)
+			batch, ok := cmd().(tea.BatchMsg)
+			require.True(t, ok)
+			require.Len(t, batch, 2)
+			assert.Equal(t, withTUIBuiltInSlashCommands(nil), state.slashCommands)
+			assert.Empty(t, state.extensionShortcuts, "stale shortcuts must not be usable during refresh")
+			assert.Empty(t, state.shortcutDigest)
+			assert.Equal(t, "/runner/workspace", state.requestedCWD)
+
+			updated, _ = m.Update(stale)
+			m = updated.(model)
+			assert.NotContains(t, slashCommandNames(state.slashCommands), "removed-command")
+			assert.Empty(t, state.extensionShortcuts)
+
+			// The next command can start before client discovery finishes: the
+			// runner resolves it using the already-reloaded resources.
+			updated, _ = m.Update(chatDoneMsg{runID: runID})
+			m = updated.(model)
+			assert.True(t, state.running)
+			assert.Equal(t, "/fresh-command", state.entries[len(state.entries)-1].content)
+			refreshed := batch[1]().(slashCommandsMsg)
+			assert.Equal(t, chat.WorkspaceTarget{ConversationID: state.conversationID}, runner.target)
+			updated, _ = m.Update(refreshed)
+			m = updated.(model)
+			assert.Contains(t, slashCommandNames(state.slashCommands), "fresh-command")
+			assert.NotContains(t, slashCommandNames(state.slashCommands), "removed-command")
+			require.Len(t, state.extensionShortcuts, 1)
+			assert.Equal(t, "fresh", state.extensionShortcuts[0].ExtensionID)
+			assert.Equal(t, "fresh-digest", state.shortcutDigest)
+			assert.Same(t, active, m.conversationState)
+			assert.Equal(t, "keep my draft", m.textarea.Value())
+			if background {
+				assert.Equal(t, []string{"other-command"}, slashCommandNames(m.slashCommands))
+				require.Len(t, m.extensionShortcuts, 1)
+				assert.Equal(t, "other", m.extensionShortcuts[0].ExtensionID)
+			}
+		})
+	}
+}
+
 func TestRemoteDiscoveryReadinessIgnoresStaleResults(t *testing.T) {
 	runner := &remoteDiscoveryRunner{}
 	m := newModel(t.Context(), Config{Remote: true, Runner: runner, CWD: "/runner/workspace", Profile: "work"})
@@ -539,10 +619,10 @@ func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing
 	assert.Empty(t, m.messageHistoryScopeCWD)
 	assert.True(t, m.extensionDiscoveryBlocked)
 	assert.Equal(t, "~/runner/kodelet", displayCWD(m.cwd))
-	assert.ElementsMatch(t, []string{"about", "model", "new", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
+	assert.ElementsMatch(t, []string{"about", "model", "new", "reload", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
 
 	m.createNewConversation()
-	assert.ElementsMatch(t, []string{"about", "model", "new", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
+	assert.ElementsMatch(t, []string{"about", "model", "new", "reload", "rename", "sessions", "stop", "theme"}, slashCommandNames(m.slashCommands))
 }
 
 func TestNewModelRemoteModeKeepsExplicitRequestedCWD(t *testing.T) {

@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"sort"
@@ -42,6 +43,7 @@ type Runtime struct {
 	lifecycleCtx        context.Context
 	lifecycleCallCtx    ExtensionCallContext
 	sessionExtensions   bool
+	initializationError error
 }
 
 // Command is an extension command registration bound to its process.
@@ -131,6 +133,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 	initialized := make([]struct {
 		process *Process
 		result  *InitializeResult
+		err     error
 	}, len(extensions))
 	var group errgroup.Group
 	group.SetLimit(maxConcurrentExtensionInitializations)
@@ -145,6 +148,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 					return ctxErr
 				}
 				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
+				initialized[i].err = errors.Wrapf(err, "failed to start extension %s", ext.ID)
 				return nil
 			}
 			initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
@@ -156,6 +160,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 					return ctxErr
 				}
 				logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
+				initialized[i].err = errors.Wrapf(err, "failed to initialize extension %s", ext.ID)
 				return nil
 			}
 			initialized[i].process = proc
@@ -167,6 +172,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 	// Own every initialized process before registration, so Close also cleans up
 	// later results if cancellation or a registration conflict aborts startup.
 	for _, init := range initialized {
+		r.initializationError = stderrors.Join(r.initializationError, init.err)
 		if init.process != nil {
 			r.processes = append(r.processes, init.process)
 		}
@@ -186,6 +192,15 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		}
 	}
 	return nil
+}
+
+// InitializationError reports extensions skipped during best-effort startup.
+// Explicit reloads use this to avoid reporting a partial reload as successful.
+func (r *Runtime) InitializationError() error {
+	if r == nil {
+		return nil
+	}
+	return r.initializationError
 }
 
 // attach runs only during isolated runtime construction, before lifecycle events.

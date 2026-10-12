@@ -228,6 +228,135 @@ func (e *directCommandEnvironment) ExecuteCommand(ctx context.Context, request a
 	return e.result, nil
 }
 
+type reloadEnvironment struct {
+	directCommandEnvironment
+	spec       agentenv.RunSpec
+	openErr    error
+	closeErr   error
+	opened     bool
+	closeCalls int
+}
+
+func (e *reloadEnvironment) Open(_ context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
+	e.spec = spec
+	e.opened = e.openErr == nil
+	return e.manifest, e.openErr
+}
+
+func (e *reloadEnvironment) IsOpen() bool { return e.opened }
+
+func (e *reloadEnvironment) Close(context.Context) error {
+	e.closeCalls++
+	e.opened = false
+	return e.closeErr
+}
+
+func TestExecutorReloadsWithoutCallingModelOrExtensionCommands(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles.work", map[string]any{"provider": "openai", "model": "gpt-4.1"})
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+
+	for _, test := range []struct {
+		name     string
+		openErr  error
+		closeErr error
+	}{
+		{name: "success"},
+		{name: "startup failure", openErr: errors.New("extension initialization failed")},
+		{name: "cleanup failure", closeErr: errors.New("extension shutdown failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			conversationID := "conversation-reload"
+			config, err := ResolveRemoteConfigWithReasoning(t.Context(), conversationID, "", "")
+			require.NoError(t, err)
+			config.WorkingDirectory = workspace
+			fingerprint, err := chatThreadConfigFingerprint(config)
+			require.NoError(t, err)
+			thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
+			environment := &reloadEnvironment{
+				directCommandEnvironment: directCommandEnvironment{manifest: agentenv.Manifest{WorkingDirectory: workspace}},
+				openErr:                  test.openErr, closeErr: test.closeErr,
+			}
+			runner := NewExecutor(workspace)
+			runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
+			runner.sessions[conversationID] = &defaultChatSession{
+				thread: thread, configFingerprint: fingerprint, lastUsed: time.Now(),
+			}
+			t.Cleanup(func() { require.NoError(t, runner.Close()) })
+			sink := &recordingChatSink{}
+			gotID, err := runner.Run(t.Context(), ChatRequest{
+				ConversationID: conversationID, RunnerID: "runner-one", CWD: workspace, Message: "/reload",
+			}, sink)
+			assert.Equal(t, conversationID, gotID)
+			assert.True(t, environment.spec.Reload)
+			assert.Equal(t, conversationID, environment.spec.ConversationID)
+			assert.Empty(t, environment.request.Message, "host reload must bypass extension command dispatch")
+			assert.Zero(t, thread.sendCalls, "reload must not call the model")
+			assert.False(t, environment.IsOpen())
+			if test.openErr != nil || test.closeErr != nil {
+				require.Error(t, err)
+				if test.openErr != nil {
+					assert.ErrorIs(t, err, test.openErr)
+					assert.Zero(t, environment.closeCalls)
+				} else {
+					assert.ErrorIs(t, err, test.closeErr)
+					assert.Equal(t, 1, environment.closeCalls)
+				}
+				assert.Empty(t, sink.events, "failed reload must not emit success or refresh events")
+				assert.Empty(t, thread.assistantMsgs)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, environment.closeCalls)
+			assert.Equal(t, []string{"/reload"}, thread.userMessages)
+			require.Len(t, thread.assistantMsgs, 1)
+			assert.Contains(t, thread.assistantMsgs[0], "Reloaded workspace resources")
+			assert.Equal(t, 1, thread.saveCalls)
+			assert.Equal(t, "runner-one", thread.metadata[RunnerIDMetadataKey])
+			require.Len(t, sink.events, 4)
+			assert.Equal(t, "conversation", sink.events[0].Kind)
+			assert.Equal(t, "text", sink.events[1].Kind)
+			assert.Equal(t, "resources-reloaded", sink.events[2].Kind)
+			assert.Equal(t, conversationID, sink.events[2].ConversationID)
+			assert.Equal(t, workspace, sink.events[2].CWD)
+			assert.Equal(t, "result", sink.events[3].Kind)
+		})
+	}
+}
+
+func TestExecutorRejectsInvalidOrLocalReload(t *testing.T) {
+	for _, test := range []struct {
+		message  string
+		runnerID string
+		wantErr  string
+	}{
+		{message: "/reload extra", runnerID: "runner-one", wantErr: "/reload"},
+		{message: "/reload", wantErr: "requires a runner-backed conversation"},
+	} {
+		t.Run(test.message+test.runnerID, func(t *testing.T) {
+			provider := &fakeExtensionRuntimeProvider{}
+			runner := NewExecutor("", provider)
+			sink := &recordingChatSink{}
+			_, err := runner.Run(t.Context(), ChatRequest{
+				Message: test.message, RunnerID: test.runnerID,
+			}, sink)
+			require.ErrorContains(t, err, test.wantErr)
+			assert.Zero(t, provider.calls)
+			assert.Empty(t, sink.events)
+		})
+	}
+}
+
 func TestExecutorStoresEnvironmentResolver(t *testing.T) {
 	runner := NewExecutor("")
 	resolver := staticEnvironmentResolver{}

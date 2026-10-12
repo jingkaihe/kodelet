@@ -155,6 +155,8 @@ func (m Manifest) ToolNames() []string {
 
 // RunSpec describes the central run opening this environment.
 type RunSpec struct {
+	// Reload requires fresh runner resources rather than a retained extension runtime.
+	Reload                   bool
 	ConversationID           string
 	EnvironmentProfile       string
 	ExpectedWorkingDirectory string

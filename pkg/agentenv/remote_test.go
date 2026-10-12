@@ -191,6 +191,23 @@ func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
 	}
 }
 
+func TestRemoteEnvironmentRequestsReload(t *testing.T) {
+	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
+		ProtocolVersion: protocol.Version,
+		RunnerID:        "runner", RunID: "reload-run", Generation: 1,
+		WorkingDirectory: "/runner/workspace",
+	}}
+	environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) {
+		return "reload-run", nil
+	}))
+	_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation", Reload: true})
+	require.NoError(t, err)
+	assert.True(t, controller.openParams.Reload)
+	assert.Equal(t, "conversation", controller.openParams.ConversationID)
+	require.NoError(t, environment.Close(t.Context()))
+	assert.Equal(t, "reload-run", controller.closedRunID)
+}
+
 func TestRemoteEnvironmentSendsResolvedProfile(t *testing.T) {
 	for _, test := range []struct {
 		name     string

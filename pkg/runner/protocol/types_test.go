@@ -10,6 +10,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestReloadWireContract(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		params := RunOpenParams{RunID: "run", ConversationID: "conversation", Reload: enabled}
+		wire, err := json.Marshal(params)
+		require.NoError(t, err)
+		assert.Equal(t, enabled, strings.Contains(string(wire), "reload"))
+		var decoded RunOpenParams
+		require.NoError(t, json.Unmarshal(wire, &decoded))
+		assert.Equal(t, params, decoded)
+		wire, err = json.Marshal(RunnerCapabilities{Reload: enabled})
+		require.NoError(t, err)
+		if enabled {
+			assert.JSONEq(t, `{"reload":true}`, string(wire))
+		} else {
+			assert.JSONEq(t, `{}`, string(wire))
+		}
+		var capabilities RunnerCapabilities
+		require.NoError(t, json.Unmarshal(wire, &capabilities))
+		assert.Equal(t, enabled, capabilities.Reload)
+	}
+}
+
 func TestWorkspaceTerminalTabWireContract(t *testing.T) {
 	assert.Equal(t, "workspace.terminal.close", MethodWorkspaceTerminalClose)
 	open := WorkspaceTerminalOpenParams{

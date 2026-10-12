@@ -393,6 +393,21 @@ func runDefaultChat(
 	if message == "" && len(imageInputs) == 0 {
 		return "", errors.New("message cannot be empty")
 	}
+	reload := false
+	if command, args, found := slashcommands.Parse(message); found {
+		reload, err = slashcommands.ParseReloadCommand(command, args)
+		if err != nil {
+			return req.ConversationID, err
+		}
+	}
+	if reload {
+		if len(imageInputs) > 0 {
+			return req.ConversationID, errors.New("/reload does not accept images")
+		}
+		if strings.TrimSpace(req.RunnerID) == "" {
+			return req.ConversationID, errors.New("/reload requires a runner-backed conversation")
+		}
+	}
 
 	sessionID := strings.TrimSpace(req.ConversationID)
 	if sessionID == "" {
@@ -501,6 +516,7 @@ func runDefaultChat(
 		_ = environment.Close(closeCtx)
 	}()
 	runSpec := agentenv.RunSpec{
+		Reload:                   reload,
 		ConversationID:           sessionID,
 		EnvironmentProfile:       environmentProfile,
 		ExpectedWorkingDirectory: expectedCWD,
@@ -566,7 +582,28 @@ func runDefaultChat(
 			return nil
 		})
 	}
-	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
+	var commandResult agentenv.CommandResult
+	if reload {
+		// The runner opens a fresh resource snapshot and rejects retained workers
+		// and session callbacks. Never dispatch this host command to an extension
+		// or the model, and finish cleanup before reporting success.
+		manifest, openErr := environment.Open(ctx, runSpec)
+		if openErr != nil {
+			return sessionID, errors.Wrap(openErr, "failed to reload workspace resources")
+		}
+		llmConfig.WorkingDirectory = manifest.WorkingDirectory
+		if err := environment.Close(ctx); err != nil {
+			return sessionID, errors.Wrap(err, "failed to close reloaded workspace resources")
+		}
+		commandResult = agentenv.CommandResult{
+			Matched:     true,
+			Action:      agentenv.CommandActionRespond,
+			CommandName: slashcommands.ReloadCommandName,
+			Response:    "Reloaded workspace resources. Subsequent runs will use freshly discovered tools, schemas, recipes, skills, and context files.",
+		}
+	} else {
+		commandResult, err = environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
+	}
 	if err != nil {
 		return sessionID, err
 	}
@@ -589,6 +626,11 @@ func runDefaultChat(
 			}
 			if strings.TrimSpace(commandResult.Response) != "" {
 				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
+					return sessionID, err
+				}
+			}
+			if reload {
+				if err := sink.Send(ChatEvent{Kind: "resources-reloaded", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory}); err != nil {
 					return sessionID, err
 				}
 			}

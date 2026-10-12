@@ -436,6 +436,88 @@ func TestBackgroundRetainedSettingsRequireExplicitRelease(t *testing.T) {
 	assertBackgroundProcessStopped(t, state.PID)
 }
 
+func TestReloadRejectsActiveRunsAndPreservesRetainedWorkers(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "lease")
+	_, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "one", ConversationID: "conversation"})
+	require.NoError(t, err)
+	state := backgroundState(t, workspace, "conversation")
+	resources := service.backgrounds["conversation"]
+	require.NotNil(t, resources)
+	params := protocol.RunOpenParams{RunID: "reload", ConversationID: "conversation", Reload: true}
+	_, err = service.openRun(t.Context(), params)
+	require.ErrorContains(t, err, "already has active run one")
+	assert.Same(t, resources, service.runs["one"].resources)
+	require.NoError(t, service.closeRun(t.Context(), "one"))
+	for _, cwd := range []string{"", t.TempDir()} {
+		params.CWD, params.ExpectedCWD = cwd, cwd
+		_, err = service.openRun(t.Context(), params)
+		require.ErrorContains(t, err, "cannot reload while background workers are retained")
+		assert.Same(t, resources, service.backgrounds["conversation"])
+		assert.Same(t, resources, service.backgroundLeases[state.LeaseID])
+		assert.Empty(t, resources.attachedRunID)
+		assert.Empty(t, service.runs)
+		require.NoError(t, syscall.Kill(state.PID, 0), "reload rejection must not kill the worker, even when moving CWD")
+	}
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{RunID: "two", ConversationID: "conversation"})
+	require.NoError(t, err, "a rejected reload must leave workers available for ordinary reattachment")
+	assert.Same(t, resources, service.runs["two"].resources)
+	require.NoError(t, service.closeRun(t.Context(), "two"))
+}
+
+func TestReloadRefreshesSchemaWithoutLauncherChangesAndRejectsInitializationFailure(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "schema")
+	launcher := filepath.Join(workspace, ".kodelet", "extensions", "kodelet-extension-lifetime")
+	before, err := os.Stat(launcher)
+	require.NoError(t, err)
+	schemaPath := filepath.Join(workspace, "tool-schema.json")
+	var previousPID int
+	var previousDigest string
+	for _, property := range []string{"old", "new"} {
+		schema := map[string]any{
+			"type":       "object",
+			"properties": map[string]any{property: map[string]any{"type": "string"}},
+		}
+		data, err := json.Marshal(schema)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(schemaPath, data, 0o600))
+		manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
+			RunID: property, ConversationID: "conversation", Reload: property == "new",
+		})
+		require.NoError(t, err)
+		require.Contains(t, manifestToolNames(manifest), "lifetime")
+		for _, tool := range manifest.Tools {
+			if tool.Name == "lifetime" {
+				assert.Equal(t, schema, tool.InputSchema)
+			}
+		}
+		state := backgroundState(t, workspace, "conversation")
+		assert.NotEqual(t, previousPID, state.PID)
+		assert.NotEqual(t, previousDigest, manifest.Digest)
+		previousPID, previousDigest = state.PID, manifest.Digest
+		require.NoError(t, service.closeRun(t.Context(), property))
+		assertBackgroundProcessStopped(t, state.PID)
+	}
+	after, err := os.Stat(launcher)
+	require.NoError(t, err)
+	assert.Equal(t, before.ModTime(), after.ModTime(), "changes outside the executable must still refresh registrations")
+	assert.Equal(t, before.Size(), after.Size())
+	require.NoError(t, os.Remove(schemaPath))
+	_, err = service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "failed", ConversationID: "conversation", Reload: true,
+	})
+	require.ErrorContains(t, err, "failed to reload runner extensions")
+	assert.Empty(t, service.runs)
+	assert.Empty(t, service.backgrounds)
+	assert.Empty(t, service.backgroundLeases)
+	initializations, err := os.ReadFile(filepath.Join(workspace, "initializations.log"))
+	require.NoError(t, err)
+	for _, value := range strings.Fields(string(initializations)) {
+		pid, err := strconv.Atoi(value)
+		require.NoError(t, err)
+		assertBackgroundProcessStopped(t, pid)
+	}
+}
+
 func TestBackgroundReloadAndRemovalAfterRelease(t *testing.T) {
 	service, workspace := newBackgroundTestService(t, "plain")
 	_, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "one", ConversationID: "conversation"})
@@ -677,10 +759,17 @@ func runBackgroundExtensionHelper() {
 			if mode == "profiles" {
 				profiles = []extensions.ProfileRegistration{{Name: "code-search", Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-4o"}}}
 			}
+			schema := map[string]any{"type": "object"}
+			if mode == "schema" {
+				data, err := os.ReadFile(filepath.Join(cwd, "tool-schema.json"))
+				if err != nil || json.Unmarshal(data, &schema) != nil {
+					return
+				}
+			}
 			result = extensions.InitializeResult{
 				Name: "lifetime", Version: "1",
 				Profiles:      profiles,
-				Tools:         []extensions.ToolRegistration{{Name: "lifetime", Description: "Inspect and release extension lifetime", InputSchema: map[string]any{"type": "object"}}},
+				Tools:         []extensions.ToolRegistration{{Name: "lifetime", Description: "Inspect and release extension lifetime", InputSchema: schema}},
 				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart, TimeoutInSec: &noTimeout}, {Event: extensions.EventSessionEnd, TimeoutInSec: &noTimeout}, {Event: extensions.EventAgentEnd}},
 			}
 		case "extension.event.handle":

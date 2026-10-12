@@ -465,6 +465,98 @@ func TestOrderedRemoteCancelCannotRacePromptRegistration(t *testing.T) {
 	assert.Equal(t, string(acptypes.StopReasonCancelled), messages[0]["result"].(map[string]any)["stopReason"])
 }
 
+func TestRemoteACPReloadRefreshesCommandsAfterSuccessfulStream(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(map[bool]string{false: "first prompt", true: "existing conversation"}[started], func(t *testing.T) {
+			workspace := t.TempDir()
+			output := bytes.NewBuffer(nil)
+			client := &fakeRemoteChatClient{}
+			server := newRemoteACPTestServer(t, workspace, client, output)
+			sessionID := createRemoteACPSession(t, server, output, workspace)
+			server.remoteSessions.sessions[sessionID].started = started
+			discoveries := len(client.targets)
+			streamFinished := false
+			client.run = func(_ context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
+				assert.Equal(t, "/reload", request.Message)
+				for range 2 {
+					require.NoError(t, sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ConversationID: request.ConversationID, CWD: workspace}))
+				}
+				assert.Len(t, client.targets, discoveries, "discovery must wait until Run completes")
+				require.NoError(t, sink.Send(chat.ChatEvent{Kind: "done", ConversationID: request.ConversationID}))
+				streamFinished = true
+				return request.ConversationID, nil
+			}
+			client.discover = func(target chat.WorkspaceTarget) (protocol.WorkspaceDiscoverResult, error) {
+				assert.True(t, streamFinished)
+				require.True(t, server.remoteSessions.mu.TryLock(), "discovery must not hold the session lock")
+				server.remoteSessions.mu.Unlock()
+				require.True(t, server.activePromptsMu.TryLock(), "discovery must not hold the prompt lock")
+				server.activePromptsMu.Unlock()
+				if started {
+					assert.Equal(t, string(sessionID), target.ConversationID)
+				} else {
+					assert.Equal(t, "runner-1", target.RunnerID)
+					assert.Equal(t, workspace, target.CWD)
+				}
+				return protocol.WorkspaceDiscoverResult{Commands: []slashcommands.Command{{Name: "new-command", Description: "New extension command"}}}, nil
+			}
+			prompt := acptypes.PromptRequest{
+				SessionID: sessionID,
+				Prompt:    []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "/reload"}},
+			}
+			require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage("2"), Params: mustJSONRawMessage(t, prompt)}))
+			assert.Len(t, client.targets, discoveries+1, "one replacement list per successful reload")
+			messages := readJSONRPCMessages(t, output)
+			require.Len(t, messages, 2)
+			params := messages[0]["params"].(map[string]any)
+			assert.Equal(t, string(sessionID), params["sessionId"])
+			update := params["update"].(map[string]any)
+			assert.Equal(t, acptypes.UpdateAvailableCommands, update["sessionUpdate"])
+			var names []string
+			for _, command := range update["availableCommands"].([]any) {
+				names = append(names, command.(map[string]any)["name"].(string))
+			}
+			assert.Equal(t, []string{"rename", "reload", "new-command"}, names)
+			assert.Equal(t, string(acptypes.StopReasonEndTurn), messages[1]["result"].(map[string]any)["stopReason"])
+		})
+	}
+}
+
+func TestRemoteACPReloadDoesNotRefreshCommandsOnFailure(t *testing.T) {
+	for _, outcome := range []string{"reload error", "stream error", "cancelled", "no reload event"} {
+		t.Run(outcome, func(t *testing.T) {
+			output := bytes.NewBuffer(nil)
+			client := &fakeRemoteChatClient{}
+			server := newRemoteACPTestServer(t, "", client, output)
+			sessionID := createRemoteACPSession(t, server, output, t.TempDir())
+			discoveries := len(client.targets)
+			client.run = func(_ context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
+				if outcome == "stream error" || outcome == "cancelled" {
+					require.NoError(t, sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ConversationID: request.ConversationID}))
+				}
+				require.NoError(t, sink.Send(chat.ChatEvent{Kind: "done", Cancelled: outcome == "cancelled"}))
+				if outcome == "reload error" || outcome == "stream error" {
+					return request.ConversationID, errors.New(outcome)
+				}
+				return request.ConversationID, nil
+			}
+			prompt := acptypes.PromptRequest{
+				SessionID: sessionID,
+				Prompt:    []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "/reload"}},
+			}
+			require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage("2"), Params: mustJSONRawMessage(t, prompt)}))
+			assert.Len(t, client.targets, discoveries)
+			messages := readJSONRPCMessages(t, output)
+			require.Len(t, messages, 1, "no command-list notification")
+			if outcome == "reload error" || outcome == "stream error" {
+				assert.Contains(t, messages[0]["error"].(map[string]any)["message"], outcome)
+			} else {
+				assert.NotNil(t, messages[0]["result"])
+			}
+		})
+	}
+}
+
 func TestRemoteACPLoadReplaysControlPlaneHistory(t *testing.T) {
 	workspace := t.TempDir()
 	output := bytes.NewBuffer(nil)
@@ -583,7 +675,7 @@ func TestRemoteACPCommandsIncludeBuiltInsAndWorkspaceCommands(t *testing.T) {
 	for _, command := range commands {
 		names = append(names, command.Name)
 	}
-	assert.Equal(t, []string{"rename", "review"}, names)
+	assert.Equal(t, []string{"rename", "reload", "review"}, names)
 }
 
 func TestRemoteACPSessionsCanRunConcurrently(t *testing.T) {

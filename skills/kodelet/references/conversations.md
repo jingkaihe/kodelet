@@ -50,6 +50,14 @@ Output formats for `conversation show`:
 | `json` | Structured JSON with id, provider, summary, usage, and messages. |
 | `raw` | Full `ConversationRecord` dump including raw messages, tool results, and metadata. |
 
+## Reloading resources
+
+Use `/reload` with no arguments in runner-backed terminal chat or ACP, or run `kodelet run --resume <id> "/reload"`. It refreshes runner-owned extensions, workspace resources, and tool schemas without an LLM call, preserves the conversation, and saves the command and response in its history. The TUI refreshes command completions and shortcuts after success, including removal of obsolete registrations.
+
+During an active TUI run, `/reload` queues until the run succeeds rather than interrupting it; failure or cancellation discards queued slash commands. Reload refuses retained background workers and attached SDK session callbacks. The legacy in-process Executor rejects reload because it cannot safely manage the scoped environment lifecycle.
+
+There is no automatic file watching or built-in self-reload tool. Schemas are recalculated without provider-specific cache tricks, so schema or prompt changes can reduce prompt-cache reuse.
+
 ## Steering autonomous work
 
 ```bash

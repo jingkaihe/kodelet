@@ -617,7 +617,7 @@ func workspaceCommands(ctx context.Context, workingDirectory string, runtime *ex
 	commands := slashcommands.List(ctx, processor)
 	filtered := commands[:0]
 	for _, command := range commands {
-		if command.Name != slashcommands.RenameCommandName {
+		if command.Name != slashcommands.RenameCommandName && command.Name != slashcommands.ReloadCommandName {
 			filtered = append(filtered, command)
 		}
 	}
