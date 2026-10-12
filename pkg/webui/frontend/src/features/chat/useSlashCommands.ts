@@ -16,6 +16,7 @@ interface SlashCommandsOptions {
   discoveryAvailable: boolean;
   runnerId: string;
   generation?: number;
+  refreshVersion?: number;
   conversationId?: string;
   cwd: string;
   environmentProfile: string;
@@ -43,6 +44,7 @@ export const useSlashCommands = ({
   discoveryAvailable,
   runnerId,
   generation,
+  refreshVersion = 0,
   conversationId,
   cwd,
   environmentProfile,
@@ -54,6 +56,7 @@ export const useSlashCommands = ({
   const [dismissedDraft, setDismissedDraft] = useState<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(generation): Reconnected runners must rediscover commands even when their workspace is unchanged.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(refreshVersion): Reloaded resources must replace command discovery even when the target is unchanged.
   useEffect(() => {
     setCommands([]);
     if (!discoveryAvailable) return;
@@ -74,7 +77,16 @@ export const useSlashCommands = ({
     return () => {
       cancelled = true;
     };
-  }, [discoveryAvailable, runnerId, generation, conversationId, cwd, environmentProfile, profile]);
+  }, [
+    discoveryAvailable,
+    runnerId,
+    generation,
+    refreshVersion,
+    conversationId,
+    cwd,
+    environmentProfile,
+    profile,
+  ]);
 
   const suggestions = useMemo(() => filterCommands(commands, draft), [commands, draft]);
   const open = !disabled && dismissedDraft !== draft && suggestions.length > 0;

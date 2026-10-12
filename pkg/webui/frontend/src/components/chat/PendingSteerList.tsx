@@ -2,6 +2,7 @@ import type { ContentBlock, Message } from '../../types';
 
 interface PendingSteerListProps {
   messages: Message[];
+  kind?: 'steering' | 'commands';
 }
 
 const imageCountForContent = (content: string | ContentBlock[]): number => {
@@ -36,21 +37,29 @@ const summaryForContent = (content: string | ContentBlock[]): string => {
   return text || imageSuffix;
 };
 
-const PendingSteerList = ({ messages }: PendingSteerListProps) => {
+const PendingSteerList = ({ messages, kind = 'steering' }: PendingSteerListProps) => {
   if (messages.length === 0) {
     return null;
   }
 
-  const label = messages.length === 1 ? 'Queued message' : 'Queued messages';
+  const label =
+    kind === 'commands'
+      ? 'Queued commands'
+      : messages.length === 1
+        ? 'Queued message'
+        : 'Queued messages';
 
   return (
     <section
       aria-label={label}
       className="pending-steer-shell mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8"
-      data-testid="pending-steer-list"
+      data-testid={kind === 'commands' ? 'pending-command-list' : 'pending-steer-list'}
     >
       <div className="pending-steer-content">
-        <p className="pending-steer-copy">{label}</p>
+        <p className="pending-steer-copy">
+          {label}
+          {kind === 'commands' ? ' · after the current run succeeds' : ''}
+        </p>
         <ul className="pending-steer-lines">
           {messages.map((message, index) => (
             <li key={`${index}-${summaryForContent(message.content)}`}>

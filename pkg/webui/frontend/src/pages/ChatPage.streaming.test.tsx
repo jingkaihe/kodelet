@@ -15,7 +15,47 @@ import {
   renderChatWithRunner,
   setRouteParams,
   setupChatPageTests,
+  stubImageFileReader,
 } from './ChatPage.testSupport';
+
+interface ControlledChatStream {
+  onEvent: (event: ChatStreamEvent) => void;
+  signal: AbortSignal;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+const setupCommandQueueStreams = () => {
+  setRouteParams({ id: 'conv-123' });
+  mockGetConversation.mockImplementation(async (id: string) => ({
+    id,
+    runnerId: 'runner-1',
+    cwd: '/runner/kodelet',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    messageCount: 1,
+    messages: [
+      { role: 'user', content: id === 'conv-123' ? 'First conversation' : 'Other conversation' },
+    ],
+    toolResults: {},
+  }));
+  const streams: ControlledChatStream[] = [];
+  mockStreamChat.mockImplementation(
+    async (_request, options) =>
+      new Promise<void>((resolve, reject) => {
+        streams.push({ ...options, resolve, reject });
+      })
+  );
+  // Keep observers open unless a test explicitly completes them. Closing an
+  // observer must not masquerade as a successfully completed submitted run.
+  mockStreamConversation.mockImplementation(async () => new Promise(() => undefined));
+  return streams;
+};
+
+const queueSlashCommand = (message: string) => {
+  fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: message } });
+  fireEvent.click(screen.getByRole('button', { name: 'Queue command' }));
+};
 
 describe('ChatPage streaming, steering, and navigation', () => {
   setupChatPageTests();
@@ -224,6 +264,417 @@ describe('ChatPage streaming, steering, and navigation', () => {
     });
 
     await waitFor(() => expect(screen.queryByTestId('pending-steer-list')).not.toBeInTheDocument());
+  });
+
+  it('queues slash commands FIFO separately from steering and waits for successful stream cleanup', async () => {
+    const streams = setupCommandQueueStreams();
+    stubImageFileReader('data:image/png;base64,aGVsbG8=');
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+
+    const textarea = screen.getByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: 'continue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+
+    queueSlashCommand('/reload');
+    const screenshot = new File(['hello'], 'review.png', { type: 'image/png' });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => screenshot }],
+      },
+    });
+    await screen.findByAltText('review.png');
+    queueSlashCommand('/review focus=tests');
+    const queued = screen.getByRole('region', { name: 'Queued commands' });
+    expect(
+      within(queued)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['/reload', '/review focus=tests · with a screenshot']);
+    expect(screen.queryByAltText('review.png')).not.toBeInTheDocument();
+    expect(textarea).toHaveValue('');
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(textarea, { target: { value: 'Focus on authentication' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith('conv-123', 'Focus on authentication', [
+        { type: 'text', text: 'Focus on authentication' },
+      ])
+    );
+    await waitFor(() => expect(textarea).toHaveValue(''));
+    fireEvent.change(textarea, { target: { value: 'Keep this draft' } });
+
+    await act(async () => {
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+
+    await act(async () => streams[0].resolve());
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        conversationId: 'conv-123',
+        message: '/reload',
+        content: [{ type: 'text', text: '/reload' }],
+      }),
+      expect.any(Object)
+    );
+    expect(
+      within(screen.getByRole('region', { name: 'Queued commands' })).getAllByRole('listitem')
+    ).toHaveLength(1);
+    expect(textarea).toHaveValue('Keep this draft');
+
+    await act(async () => {
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[1].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    expect(mockStreamChat).toHaveBeenCalledTimes(2);
+    await act(async () => streams[1].resolve());
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(3));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        conversationId: 'conv-123',
+        message: '/review focus=tests',
+        content: [
+          { type: 'text', text: '/review focus=tests' },
+          { type: 'image', source: { data: 'aGVsbG8=', media_type: 'image/png' } },
+        ],
+      }),
+      expect.any(Object)
+    );
+    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      streams[2].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[2].resolve();
+    });
+    expect(mockStreamChat).toHaveBeenCalledTimes(3);
+    expect(mockSteerConversation).toHaveBeenCalledTimes(1);
+    expect(textarea).toHaveValue('Keep this draft');
+  });
+
+  it.each([
+    'error',
+    'cancelled',
+    'stop',
+    'disconnect',
+    'EOF without done',
+  ])('discards queued commands with a notice after %s instead of executing them', async (outcome) => {
+    const streams = setupCommandQueueStreams();
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+    queueSlashCommand('/reload');
+    queueSlashCommand('/review tests');
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Keep my draft' },
+    });
+
+    if (outcome === 'stop') {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(mockStopConversation).toHaveBeenCalledWith('conv-123');
+      expect(streams[0].signal.aborted).toBe(true);
+    }
+    await act(async () => {
+      if (outcome === 'error') {
+        streams[0].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Run failed' });
+      } else if (outcome === 'cancelled') {
+        streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
+      }
+      if (outcome === 'disconnect') {
+        streams[0].reject(new TypeError('Failed to fetch'));
+      } else if (outcome === 'stop') {
+        streams[0].reject(new DOMException('Stopped', 'AbortError'));
+      } else {
+        streams[0].resolve();
+      }
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
+    ).toBeInTheDocument();
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep my draft');
+  });
+
+  it('discards remaining commands when a dequeued command fails', async () => {
+    const streams = setupCommandQueueStreams();
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+    queueSlashCommand('/reload');
+    queueSlashCommand('/review tests');
+    await act(async () => {
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[0].resolve();
+    });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    await act(async () => {
+      streams[1].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Reload refused' });
+      streams[1].resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
+    ).toBeInTheDocument();
+    expect(mockStreamChat).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains commands once when an externally-started run completes successfully', async () => {
+    const streams = setupCommandQueueStreams();
+    let onEvent: (event: ChatStreamEvent) => void = () => undefined;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      onEvent = options.onEvent;
+      return new Promise(() => undefined);
+    });
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalled());
+    await act(async () => onEvent({ kind: 'conversation', conversation_id: 'conv-123' }));
+    queueSlashCommand('/reload');
+    queueSlashCommand('/review tests');
+    expect(mockStreamChat).not.toHaveBeenCalled();
+    await act(async () => {
+      onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationId: 'conv-123', message: '/reload' }),
+      expect.any(Object)
+    );
+    await act(async () => onEvent({ kind: 'done', conversation_id: 'conv-123' }));
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Queued commands' })).toHaveTextContent(
+      '/review tests'
+    );
+  });
+
+  it('retains a queued run observer across navigation and unrelated run completion', async () => {
+    const streams = setupCommandQueueStreams();
+    const observers: Array<ControlledChatStream & { conversationId: string }> = [];
+    mockStreamConversation.mockImplementation(
+      async (conversationId, options) =>
+        new Promise<void>((resolve, reject) => {
+          observers.push({ ...options, conversationId, resolve, reject });
+        })
+    );
+    const { rerender } = render(<ChatPage />);
+    await screen.findByText('First conversation');
+    await waitFor(() => expect(observers).toHaveLength(1));
+    const foreground = observers[0];
+    await act(async () =>
+      foreground.onEvent({ kind: 'conversation', conversation_id: 'conv-123' })
+    );
+    queueSlashCommand('/reload');
+
+    setRouteParams({ id: 'conv-456' });
+    rerender(<ChatPage />);
+    await screen.findByText('Other conversation');
+    expect(foreground.signal.aborted).toBe(false);
+    expect(observers.filter((observer) => observer.conversationId === 'conv-123')).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
+    const textarea = screen.getByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: 'Unrelated request' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationId: 'conv-456', message: 'Unrelated request' }),
+      expect.any(Object)
+    );
+    await act(async () => {
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-456' });
+      streams[0].resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    );
+    expect(foreground.signal.aborted).toBe(false);
+    expect(observers.filter((observer) => observer.conversationId === 'conv-123')).toHaveLength(1);
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    fireEvent.change(textarea, { target: { value: 'Other draft' } });
+    mockNavigate.mockClear();
+
+    // Completion is not replayed by the server: the original subscription
+    // must remain authoritative after it becomes a background conversation.
+    await act(async () => {
+      foreground.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      foreground.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationId: 'conv-123', message: '/reload' }),
+      expect.any(Object)
+    );
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Other draft');
+    expect(screen.getByText('Other conversation')).toBeInTheDocument();
+  });
+
+  it('keeps the current observer active when the retained command observer disconnects', async () => {
+    setupCommandQueueStreams();
+    const observers: Array<ControlledChatStream & { conversationId: string }> = [];
+    mockStreamConversation.mockImplementation(
+      async (conversationId, options) =>
+        new Promise<void>((resolve, reject) => {
+          observers.push({ ...options, conversationId, resolve, reject });
+        })
+    );
+    const { rerender } = render(<ChatPage />);
+    await screen.findByText('First conversation');
+    await waitFor(() => expect(observers).toHaveLength(1));
+    const retained = observers[0];
+    await act(async () => retained.onEvent({ kind: 'conversation', conversation_id: 'conv-123' }));
+    queueSlashCommand('/reload');
+
+    setRouteParams({ id: 'conv-456' });
+    rerender(<ChatPage />);
+    await screen.findByText('Other conversation');
+    expect(retained.signal.aborted).toBe(false);
+    setRouteParams({ id: 'conv-123' });
+    rerender(<ChatPage />);
+    await screen.findByText('First conversation');
+    await waitFor(() =>
+      expect(observers.filter((observer) => observer.conversationId === 'conv-123')).toHaveLength(2)
+    );
+    const current = observers.filter((observer) => observer.conversationId === 'conv-123')[1];
+    await act(async () => current.onEvent({ kind: 'conversation', conversation_id: 'conv-123' }));
+    expect(screen.getByRole('region', { name: 'Queued commands' })).toHaveTextContent('/reload');
+
+    await act(async () => retained.reject(new TypeError('Failed to fetch')));
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
+    ).toBeInTheDocument();
+    expect(current.signal.aborted).toBe(false);
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Continue with the failing tests' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith(
+        'conv-123',
+        'Continue with the failing tests',
+        [{ type: 'text', text: 'Continue with the failing tests' }]
+      )
+    );
+    expect(mockStreamChat).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'error',
+    'cancelled',
+    'disconnect',
+    'EOF without done',
+  ])('does not drain queued commands when an observed run ends with %s', async (outcome) => {
+    setupCommandQueueStreams();
+    const observers: ControlledChatStream[] = [];
+    mockStreamConversation.mockImplementation(
+      async (_id, options) =>
+        new Promise<void>((resolve, reject) => {
+          observers.push({ ...options, resolve, reject });
+        })
+    );
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    await waitFor(() => expect(observers).toHaveLength(1));
+    await act(async () =>
+      observers[0].onEvent({ kind: 'conversation', conversation_id: 'conv-123' })
+    );
+    queueSlashCommand('/reload');
+    queueSlashCommand('/review tests');
+    await act(async () => {
+      if (outcome === 'error') {
+        observers[0].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Run failed' });
+      } else if (outcome === 'cancelled') {
+        observers[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
+      }
+      if (outcome === 'disconnect') observers[0].reject(new TypeError('Failed to fetch'));
+      else observers[0].resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
+    ).toBeInTheDocument();
+    expect(mockStreamChat).not.toHaveBeenCalled();
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+  });
+
+  it('keeps commands scoped to the original conversation without disturbing another composer', async () => {
+    const streams = setupCommandQueueStreams();
+    stubImageFileReader('data:image/png;base64,aGVsbG8=');
+    const { rerender } = render(<ChatPage />);
+    await screen.findByText('First conversation');
+    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+    queueSlashCommand('/reload');
+    queueSlashCommand('/review tests');
+
+    setRouteParams({ id: 'conv-456' });
+    rerender(<ChatPage />);
+    await screen.findByText('Other conversation');
+    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
+    const textarea = screen.getByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: 'Other conversation draft' } });
+    const file = new File(['hello'], 'keep.png', { type: 'image/png' });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+      },
+    });
+    await screen.findByAltText('keep.png');
+    mockNavigate.mockClear();
+    await act(async () => {
+      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[0].resolve();
+    });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        conversationId: 'conv-123',
+        message: '/reload',
+        content: [{ type: 'text', text: '/reload' }],
+      }),
+      expect.any(Object)
+    );
+    await act(async () => {
+      streams[1].onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+      streams[1].onEvent({ kind: 'text', conversation_id: 'conv-123', content: 'Reload complete' });
+      streams[1].onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      streams[1].resolve();
+    });
+    await waitFor(() => expect(streams).toHaveLength(3));
+    expect(mockStreamChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationId: 'conv-123', message: '/review tests' }),
+      expect.any(Object)
+    );
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('Other conversation draft');
+    expect(screen.getByAltText('keep.png')).toBeInTheDocument();
+    expect(screen.queryByText('Reload complete')).not.toBeInTheDocument();
+    expect(screen.getByText('Other conversation')).toBeInTheDocument();
   });
 
   it('allows sidebar navigation while a conversation is streaming', async () => {

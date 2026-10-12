@@ -522,6 +522,7 @@ export interface ChatStreamEvent {
     | 'thinking-end'
     | 'thinking'
     | 'context-compacted'
+    | 'resources-reloaded'
     | 'text-delta'
     | 'content-end'
     | 'text'

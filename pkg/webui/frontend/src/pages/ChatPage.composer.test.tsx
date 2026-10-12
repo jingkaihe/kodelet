@@ -13,12 +13,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatStreamEvent } from '../types';
 import {
   ChatPage,
+  flushAsyncUpdates,
   mockGetChatSettings,
   mockGetConversation,
   mockGetConversations,
   mockGetSlashCommands,
   mockSteerConversation,
   mockStreamChat,
+  mockStreamConversation,
   renderChatWithRunner,
   setRouteParams,
   setupChatPageTests,
@@ -212,6 +214,174 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
     expect(await screen.findByTestId('slash-command-suggestions')).toBeInTheDocument();
     expect(screen.getByText('/review')).toBeInTheDocument();
+  });
+
+  it.each([
+    'submitted',
+    'observed',
+  ] as const)('replaces obsolete command suggestions after a %s reload', async (source) => {
+    setRouteParams({ id: 'conv-123' });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      runnerId: 'runner-1',
+      cwd: '/runner/kodelet',
+      messages: [],
+      toolResults: {},
+    });
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'obsolete', description: 'Old extension command' }],
+    });
+    let observedListener: ((event: ChatStreamEvent) => void) | undefined;
+    let submittedListener: ((event: ChatStreamEvent) => void) | undefined;
+    let finishSubmission: (() => void) | undefined;
+    mockStreamConversation.mockImplementation((_id, options) => {
+      observedListener = options.onEvent;
+      return new Promise(() => undefined);
+    });
+    mockStreamChat.mockImplementation((_request, options) => {
+      submittedListener = options.onEvent;
+      return new Promise<void>((resolve) => {
+        finishSubmission = resolve;
+      });
+    });
+
+    render(<ChatPage />);
+    const textarea = await screen.findByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: '/' } });
+    expect(await screen.findByText('/obsolete')).toBeInTheDocument();
+    await waitFor(() => expect(observedListener).toBeDefined());
+    await flushAsyncUpdates();
+    const discoveryCount = mockGetSlashCommands.mock.calls.length;
+
+    if (source === 'submitted') {
+      fireEvent.change(textarea, { target: { value: '/reload' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(submittedListener).toBeDefined());
+      fireEvent.change(textarea, { target: { value: '/' } });
+    } else {
+      // Ordinary turns must not invalidate resource discovery.
+      await act(async () => {
+        observedListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+        observedListener?.({ kind: 'done', conversation_id: 'conv-123' });
+      });
+      expect(mockGetSlashCommands).toHaveBeenCalledTimes(discoveryCount);
+    }
+
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'fresh', description: 'New extension command' }],
+    });
+    await act(async () => {
+      const listener = source === 'submitted' ? submittedListener : observedListener;
+      if (source === 'observed') {
+        listener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+      }
+      listener?.({ kind: 'resources-reloaded', conversation_id: 'conv-123' });
+      listener?.({ kind: 'done', conversation_id: 'conv-123' });
+      if (source === 'submitted') finishSubmission?.();
+    });
+
+    expect(await screen.findByText('/fresh')).toBeInTheDocument();
+    expect(screen.queryByText('/obsolete')).not.toBeInTheDocument();
+    expect(textarea).toHaveValue('/');
+    expect(mockGetSlashCommands).toHaveBeenCalledTimes(discoveryCount + 1);
+    expect(mockGetSlashCommands).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ conversationId: 'conv-123', runnerId: 'runner-1' })
+    );
+  });
+
+  it('ignores stale command discovery responses after another resource reload', async () => {
+    setRouteParams({ id: 'conv-123' });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      runnerId: 'runner-1',
+      cwd: '/runner/kodelet',
+      messages: [],
+      toolResults: {},
+    });
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'obsolete', description: 'Old extension command' }],
+    });
+    let listener: ((event: ChatStreamEvent) => void) | undefined;
+    mockStreamConversation.mockImplementation((_id, options) => {
+      listener = options.onEvent;
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+    fireEvent.change(await screen.findByTestId('composer-textarea'), { target: { value: '/' } });
+    expect(await screen.findByText('/obsolete')).toBeInTheDocument();
+    await waitFor(() => expect(listener).toBeDefined());
+    await flushAsyncUpdates();
+    const discoveryCount = mockGetSlashCommands.mock.calls.length;
+
+    let resolveStale:
+      | ((value: { commands: { name: string; description: string }[] }) => void)
+      | undefined;
+    mockGetSlashCommands.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        })
+    );
+    await act(async () => {
+      listener?.({ kind: 'resources-reloaded', conversation_id: 'conv-123' });
+    });
+    await waitFor(() => expect(resolveStale).toBeDefined());
+    expect(screen.queryByText('/obsolete')).not.toBeInTheDocument();
+
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'fresh', description: 'Latest extension command' }],
+    });
+    await act(async () => {
+      listener?.({ kind: 'resources-reloaded', conversation_id: 'conv-123' });
+    });
+    expect(await screen.findByText('/fresh')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveStale?.({ commands: [{ name: 'stale', description: 'Stale extension command' }] });
+    });
+    expect(screen.getByText('/fresh')).toBeInTheDocument();
+    expect(screen.queryByText('/stale')).not.toBeInTheDocument();
+    expect(screen.queryByText('/obsolete')).not.toBeInTheDocument();
+    expect(mockGetSlashCommands).toHaveBeenCalledTimes(discoveryCount + 2);
+  });
+
+  it('does not rediscover active commands when a background conversation reloads', async () => {
+    setRouteParams({ id: 'conv-123' });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      runnerId: 'runner-1',
+      cwd: '/runner/kodelet',
+      messages: [],
+      toolResults: {},
+    });
+    mockGetConversations.mockResolvedValue({
+      conversations: [{ id: 'background', isRunning: true, summary: 'Background work' }],
+      hasMore: false,
+      total: 1,
+    });
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'active', description: 'Active conversation command' }],
+    });
+    const listeners = new Map<string, (event: ChatStreamEvent) => void>();
+    mockStreamConversation.mockImplementation((id: string, options) => {
+      listeners.set(id, options.onEvent);
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+    fireEvent.change(await screen.findByTestId('composer-textarea'), { target: { value: '/' } });
+    expect(await screen.findByText('/active')).toBeInTheDocument();
+    await waitFor(() => expect(listeners.has('background')).toBe(true));
+    await flushAsyncUpdates();
+    const discoveryCount = mockGetSlashCommands.mock.calls.length;
+
+    await act(async () => {
+      listeners.get('background')?.({ kind: 'resources-reloaded', conversation_id: 'background' });
+    });
+    expect(mockGetSlashCommands).toHaveBeenCalledTimes(discoveryCount);
+    expect(screen.getByText('/active')).toBeInTheDocument();
   });
 
   it('uses the selected slash command placeholder for argument hints', async () => {
