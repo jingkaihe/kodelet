@@ -446,6 +446,38 @@ func TestCodeExecutionSnapshotsEffectiveCallableSet(t *testing.T) {
 	}
 }
 
+func TestReloadResourcesHonorsHostAndTurnToolPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		host    []string
+		turn    []string
+		blocked bool
+	}{
+		{name: "allowed"},
+		{name: "host restriction", host: []string{"bash"}, blocked: true},
+		{name: "agent init restriction", turn: []string{}, blocked: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dispatched := false
+			thread := &environmentThreadStub{
+				threadStub: &threadStub{config: llmtypes.Config{AllowedTools: test.host}},
+				environment: &recordingAgentEnvironment{
+					open: true,
+					executeTool: func(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+						dispatched = true
+						return agentenv.ToolExecution{Result: tooltypes.BaseToolResult{Result: "requested"}}, nil
+					},
+				},
+			}
+			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, test.turn)
+			result := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "reload_resources", `{}`, "reload")
+			require.NoError(t, result.Err)
+			assert.Equal(t, test.blocked, result.Result.IsError())
+			assert.Equal(t, !test.blocked, dispatched)
+		})
+	}
+}
+
 func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T) {
 	var lateUpdate agentenv.ToolUpdateSink
 	environment := &recordingAgentEnvironment{

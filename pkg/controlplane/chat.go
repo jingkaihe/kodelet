@@ -208,12 +208,29 @@ type browserPolicyController struct {
 func (c browserPolicyController) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
 	params.BrowserEnabled = c.allowed
 	manifest, err := c.RemoteController.OpenRun(ctx, runnerID, params)
-	if err != nil || c.allowed {
+	if err != nil {
 		return manifest, err
+	}
+	return c.filterManifest(manifest)
+}
+
+func (c browserPolicyController) ReloadRun(ctx context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	result, err := c.RemoteController.ReloadRun(ctx, params)
+	if err != nil || result.Refusal != "" {
+		return result, err
+	}
+	result.Manifest, err = c.filterManifest(result.Manifest)
+	return result, err
+}
+
+func (c browserPolicyController) filterManifest(manifest runnerpayload.Manifest) (runnerpayload.Manifest, error) {
+	if c.allowed {
+		return manifest, nil
 	}
 	manifest.Tools = slices.DeleteFunc(slices.Clone(manifest.Tools), func(tool runnerpayload.ToolDefinition) bool {
 		return tool.Name == "browser"
 	})
+	var err error
 	manifest.Digest, err = runnerpayload.ComputeManifestDigest(manifest)
 	return manifest, err
 }

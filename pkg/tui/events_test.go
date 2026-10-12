@@ -108,6 +108,39 @@ func TestApplyCompactionBeforeCurrentUserMatchesReplay(t *testing.T) {
 	assert.Equal(t, expected, m.entries)
 }
 
+func TestApplyResourceReloadMarkerMatchesHistory(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	for _, event := range []chat.ChatEvent{
+		{Kind: "text-delta", Delta: "before"},
+		{Kind: "resources-reloaded"}, // Legacy discovery-only event.
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "text-delta", Delta: "between"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "text-delta", Delta: " continued"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "text-delta", Delta: "after"},
+	} {
+		m.applyChatEvent(event)
+	}
+
+	expected := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "text", Role: "assistant", Content: "before"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "text", Role: "assistant", Content: "between continued"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "text", Role: "assistant", Content: "after"},
+	})
+	require.Len(t, m.entries, 5)
+	assert.Equal(t, expected, m.entries)
+
+	// History followed by live replay must not move or duplicate the marker.
+	m.entries = expected
+	m.clearActiveAssistantEntry()
+	m.applyChatEvent(chat.ChatEvent{Kind: "resources-reloaded", ResourceReloadID: "reload-1"})
+	assert.Equal(t, expected, m.entries)
+}
+
 func TestApplyCompactionPreservesActiveAssistantWhenInsertedBeforeUser(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)

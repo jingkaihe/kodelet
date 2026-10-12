@@ -438,6 +438,172 @@ func TestServiceReloadRequiresIsolatedRuntimeOnlyWhenExtensionsEnabled(t *testin
 	}
 }
 
+func TestServiceReloadRunKeepsIdentityAndRefreshesOnlyItsEnvironment(t *testing.T) {
+	workspace := t.TempDir()
+	provider := &recordingExecutionInstanceProvider{workspace: workspace}
+	config := llmtypes.Config{
+		Skills:            &llmtypes.SkillsConfig{Enabled: false},
+		ExtensionSettings: map[string]any{"enabled": false},
+		SyspromptArgs:     map[string]string{"version": "old"},
+	}
+	service := newRegisteredTestService(t, workspace, ServiceOptions{
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return config, nil },
+		ExecutionInstanceProvider: provider,
+	})
+	first := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "one", ConversationID: "first", EnvironmentReload: true,
+		Options: &llmtypes.ExecutionOptions{AllowedTools: new([]string{"file_read", "bash"})},
+	})
+	other := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "two", ConversationID: "second", EnvironmentReload: true,
+	})
+	run, untouched := service.runs["one"], service.runs["two"].environment
+	// A recipe can narrow the environment after run.open; retain those patches.
+	run.config.RecipeName = "read-only"
+	run.commandAllowedTools = []string{"file_read"}
+	run.commandAllowedCommands = []string{"help"}
+	config.SyspromptArgs = map[string]string{"version": "new"}
+	result := callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
+		RunID: "one", ExpectedEnvironmentRevision: first.EnvironmentRevision,
+	})
+	require.Empty(t, result.Refusal)
+	assert.Same(t, run, service.runs["one"])
+	assert.Equal(t, "one", result.Manifest.RunID)
+	assert.Equal(t, first.Generation, result.Manifest.Generation)
+	assert.Equal(t, int64(2), result.Manifest.EnvironmentRevision)
+	assert.Equal(t, "new", result.Manifest.Config.SystemPromptArgs["version"])
+	assert.ElementsMatch(t, []string{"file_read"}, manifestToolNames(result.Manifest))
+	assert.Equal(t, []string{"help"}, result.Manifest.Config.AllowedCommands)
+	assert.Equal(t, "read-only", run.config.RecipeName)
+	assert.Same(t, untouched, service.runs["two"].environment)
+	assert.Equal(t, other, service.runs["two"].manifest)
+	require.Len(t, provider.instances, 2, "reload must not recreate the execution instance")
+	assert.Same(t, provider.instances[0], run.instance)
+	assert.False(t, provider.instances[0].closed)
+	for _, revision := range []int64{0, 1} {
+		_, _, _, err := service.beginRunOperation(t.Context(), "one", revision, false)
+		require.ErrorContains(t, err, "revision is stale")
+	}
+	_, err := service.executeShortcut(t.Context(), runnerpayload.ShortcutExecuteParams{RunID: "one", EnvironmentRevision: 1})
+	require.ErrorContains(t, err, "revision is stale")
+	again := callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
+		RunID: "one", ExpectedEnvironmentRevision: 2,
+	})
+	assert.Equal(t, result.Manifest.Digest, again.Manifest.Digest)
+	assert.Equal(t, int64(3), again.Manifest.EnvironmentRevision)
+}
+
+func TestServiceReloadRunRefusalsPreserveEnvironment(t *testing.T) {
+	for _, reason := range []string{"background workers", "SDK-attached", "configuration", "isolated extensions"} {
+		t.Run(reason, func(t *testing.T) {
+			var loadErr error
+			service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+				RuntimeProvider: staticRuntimeProvider{},
+				ConfigLoader: func(string) (llmtypes.Config, error) {
+					return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}}, loadErr
+				},
+			})
+			callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+				RunID: "run", ConversationID: "conversation", EnvironmentReload: true,
+			})
+			run := service.runs["run"]
+			previous := run.environment
+			switch reason {
+			case "background workers":
+				run.resources.leases["worker"] = runnerBackgroundLease{openingRunID: run.id}
+			case "SDK-attached":
+				run.openParams.SessionExtensions = &protocol.SessionExtensions{ID: "client"}
+			case "configuration":
+				loadErr = errors.New("configuration is invalid")
+			}
+			result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+			require.NoError(t, err)
+			assert.Contains(t, result.Refusal, reason)
+			assert.Same(t, previous, run.environment)
+			assert.True(t, previous.IsOpen())
+			assert.Equal(t, int64(1), run.manifest.EnvironmentRevision)
+			assert.NoError(t, run.ctx.Err())
+			_, _, finish, err := service.beginRunOperation(t.Context(), "run", 1, false)
+			require.NoError(t, err)
+			finish()
+		})
+	}
+}
+
+func TestServiceReloadRunDrainsChildrenAndCancellationWins(t *testing.T) {
+	for _, cancel := range []bool{false, true} {
+		t.Run(strconv.FormatBool(cancel), func(t *testing.T) {
+			blocked := &blockingOpenEnvironment{started: make(chan struct{})}
+			service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+				ConfigLoader: func(string) (llmtypes.Config, error) {
+					return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}, ExtensionSettings: map[string]any{"enabled": false}}, nil
+				},
+			})
+			callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+				RunID: "run", ConversationID: "conversation", EnvironmentReload: true,
+			})
+			run := service.runs["run"]
+			old := run.environment
+			if cancel {
+				service.environmentFactory = func(string, *extensions.Runtime) agentenv.Environment { return blocked }
+			}
+			_, _, finishParent, err := service.beginRunOperation(t.Context(), "run", 1, false)
+			require.NoError(t, err)
+			done := make(chan error, 1)
+			go func() {
+				_, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+				done <- err
+			}()
+			require.Eventually(t, func() bool {
+				service.mu.Lock()
+				defer service.mu.Unlock()
+				return run.reloading
+			}, time.Second, time.Millisecond)
+			_, _, _, err = service.beginRunOperation(t.Context(), "run", 1, false)
+			require.ErrorContains(t, err, "reloading")
+			_, _, finishChild, err := service.beginRunOperation(t.Context(), "run", 1, true)
+			require.NoError(t, err)
+			finishParent()
+			assert.True(t, old.IsOpen(), "the admitted child still owns the old environment")
+			finishChild()
+			if cancel {
+				select {
+				case <-blocked.started:
+				case <-time.After(time.Second):
+					t.Fatal("reload did not reach staged open")
+				}
+				service.mu.Lock()
+				staged := run.reloadResources
+				service.mu.Unlock()
+				leaseCtx := context.WithValue(service.decorateRunContext(t.Context(), run.id, run.conversationID), reloadResourcesContextKey{}, staged)
+				lease, err := service.AcquireBackgroundTask(leaseCtx, &recordingUIExtensionSource{
+					owner: extensions.UIExtensionOwner{ExtensionID: "staged", Generation: 2},
+				}, extensions.BackgroundTaskAcquireRequest{})
+				require.NoError(t, err)
+				require.NoError(t, service.cancelRun(t.Context(), "run"))
+				assert.ErrorIs(t, staged.runtimeLeaseCtx.Err(), context.Canceled)
+				service.mu.Lock()
+				assert.NotContains(t, service.backgroundLeases, lease.LeaseID)
+				service.mu.Unlock()
+			}
+			select {
+			case err := <-done:
+				if cancel {
+					require.Error(t, err)
+					assert.Equal(t, int64(1), run.manifest.EnvironmentRevision)
+					assert.Equal(t, int32(1), blocked.closeCalls.Load())
+					assert.True(t, run.stopping)
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, int64(2), run.manifest.EnvironmentRevision)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("reload did not finish")
+			}
+		})
+	}
+}
+
 func TestServiceExplicitToolSelectionFromPatchDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	readTools := []string{"file_read", "grep_tool", "glob_tool"}

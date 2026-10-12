@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	ConversationNameMetadataKey     = "conversation_name"
-	ConversationAutoNameMetadataKey = "conversation_auto_name"
-	MessageDisplayMetadataKey       = "message_display"
-	legacyMessageDisplayMetadataKey = "message_display_overrides"
-	MessageDisplayVersion           = "v1"
-	MessageDisplayKindSlashCommand  = "slash-command"
+	ConversationNameMetadataKey      = "conversation_name"
+	ConversationAutoNameMetadataKey  = "conversation_auto_name"
+	MessageDisplayMetadataKey        = "message_display"
+	legacyMessageDisplayMetadataKey  = "message_display_overrides"
+	MessageDisplayVersion            = "v1"
+	MessageDisplayKindSlashCommand   = "slash-command"
+	MessageDisplayKindResourceReload = "resources-reloaded"
 )
 
 type (
@@ -206,7 +207,7 @@ func LookupMessageDisplay(metadata map[string]any, modelText string) (MessageDis
 	return display, true
 }
 
-// ApplyDisplayToStreamableMessages returns a copy of messages with display metadata applied to user text messages.
+// ApplyDisplayToStreamableMessages projects user display overrides and host markers without changing model history.
 func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map[string]any) []StreamableMessage {
 	if len(messages) == 0 {
 		return messages
@@ -216,19 +217,27 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 
 	result := make([]StreamableMessage, 0, len(messages))
 	for _, message := range messages {
-		if message.Kind != "text" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
+		if message.Kind != "text" || strings.TrimSpace(message.Content) == "" {
 			result = append(result, message)
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			message.Content = display.Text
+			if display.Kind == MessageDisplayKindResourceReload {
+				message.ResourceReloadID = MessageDisplayKey(message.Content)
+				message.Kind = MessageDisplayKindResourceReload
+				message.Role = "assistant"
+				message.Content = display.Text
+				message.RawItem = nil
+			} else if message.Role == "user" {
+				message.Content = display.Text
+			}
 		}
 		result = append(result, message)
 	}
 	return result
 }
 
-// ApplyDisplayToLLMMessages returns a copy of messages with display metadata applied to user messages.
+// ApplyDisplayToLLMMessages projects display text and host markers for plain-text conversation readers.
 func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]any) []llmtypes.Message {
 	if len(messages) == 0 {
 		return messages
@@ -238,12 +247,17 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 
 	result := make([]llmtypes.Message, 0, len(messages))
 	for _, message := range messages {
-		if message.Role != "user" || strings.TrimSpace(message.Content) == "" {
+		if strings.TrimSpace(message.Content) == "" {
 			result = append(result, message)
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			message.Content = display.Text
+			if display.Kind == MessageDisplayKindResourceReload {
+				message.Role = "assistant"
+				message.Content = display.Text
+			} else if message.Role == "user" {
+				message.Content = display.Text
+			}
 		}
 		result = append(result, message)
 	}

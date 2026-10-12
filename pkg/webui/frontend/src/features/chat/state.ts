@@ -85,6 +85,21 @@ const insertCompactionMarker = (
   }
 };
 
+const insertResourceReloadMarker = (messages: ChatRenderMessage[], id: string | undefined) => {
+  if (
+    !id?.trim() ||
+    messages.some((message) =>
+      message.blocks?.some((block) => block.type === 'resources-reloaded' && block.id === id)
+    )
+  ) {
+    return;
+  }
+  ensureAssistantBlocks(ensureCurrentAssistantMessage(messages)).push({
+    type: 'resources-reloaded',
+    id,
+  });
+};
+
 const appendAssistantBlocks = (target: ChatRenderMessage, blocks: ChatAssistantBlock[]) => {
   const targetBlocks = ensureAssistantBlocks(target);
 
@@ -117,7 +132,7 @@ const findMatchingBlock = (
 
   for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
     const block = message.blocks[i];
-    if (block.type === 'compaction') {
+    if (block.type === 'compaction' || block.type === 'resources-reloaded') {
       break;
     }
     if (block.type !== type || typeof block.content !== 'string') {
@@ -246,6 +261,10 @@ export const conversationToChatMessages = (
   }
 
   return conversation.messages.reduce<ChatRenderMessage[]>((chatMessages, message: Message) => {
+    if (message.kind === 'resources-reloaded') {
+      insertResourceReloadMarker(chatMessages, message.resourceReloadId);
+      return chatMessages;
+    }
     if (message.kind === 'context-compacted') {
       if (message.compaction) {
         insertCompactionMarker(chatMessages, message.compaction);
@@ -331,6 +350,10 @@ export const applyChatStreamEvent = (
       if (event.compaction) {
         insertCompactionMarker(nextMessages, event.compaction, event.before_current_user);
       }
+      return nextMessages;
+
+    case 'resources-reloaded':
+      insertResourceReloadMarker(nextMessages, event.resource_reload_id);
       return nextMessages;
 
     case 'thinking-start': {

@@ -57,6 +57,23 @@ func TestEntriesFromHistoryPreservesRepeatedCompaction(t *testing.T) {
 	assert.Equal(t, "Context compacted", entries[5].content)
 }
 
+func TestEntriesFromHistoryPreservesResourceReloadMarkers(t *testing.T) {
+	entries := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "resources-reloaded"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "text", Role: "assistant", Content: "continued answer"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "text", Role: "user", Content: "Resources reloaded"},
+	})
+
+	require.Len(t, entries, 4)
+	assert.Equal(t, resourceReloadEntry("reload-1"), entries[0])
+	assert.Equal(t, "continued answer", entries[1].content)
+	assert.Equal(t, resourceReloadEntry("reload-2"), entries[2])
+	assert.Equal(t, entryUser, entries[3].kind, "ordinary text is not a marker")
+}
+
 func (r *remoteMessageHistoryRunner) LoadMessageHistory(ctx context.Context, target chat.WorkspaceTarget) (protocol.WorkspaceMessageHistoryResult, error) {
 	_, bounded := ctx.Deadline()
 	if !bounded {

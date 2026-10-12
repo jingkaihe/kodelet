@@ -630,6 +630,12 @@ func TestStartupAndReloadLabelsUseExistingSpinner(t *testing.T) {
 			assert.NotEqual(t, firstGlyph, m.spinnerGlyph())
 			assert.Equal(t, m.spinnerGlyph()+" "+label, m.inputBottomLeftLabel())
 			assert.Contains(t, xansi.Strip(m.View().Content), m.spinnerGlyph()+" "+label)
+			if m.resourceReload {
+				m.running = true
+				assert.Contains(t, m.inputBottomLeftLabel(), "Reloading extensions")
+				m.resourcesLoading = false
+				assert.NotContains(t, m.inputBottomLeftLabel(), "Reloading extensions", "agent continues after discovery refresh")
+			}
 		})
 	}
 }

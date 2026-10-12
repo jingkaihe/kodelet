@@ -488,10 +488,12 @@ func TestRemoteRunSinkStreamingAndEmptyResult(t *testing.T) {
 		{Kind: "tool-use", ToolName: "file_read", Input: `{}`},
 		{Kind: "tool-result", ToolOutput: "contents"},
 		{Kind: "text", Content: "non-streaming answer"},
+		{Kind: "resources-reloaded"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
 	} {
 		require.NoError(t, sink.Send(event))
 	}
-	assert.Equal(t, "answer\nnon-streaming answer\n", output.String())
+	assert.Equal(t, "answer\nnon-streaming answer\n\nResources reloaded\n", output.String())
 	assert.Contains(t, diagnostics.String(), "file_read")
 	assert.Contains(t, diagnostics.String(), "contents")
 	output.Reset()

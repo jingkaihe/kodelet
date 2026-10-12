@@ -359,6 +359,9 @@ OUTER:
 			logger.G(ctx).Info("stopping kodelet.llm.openai")
 			break OUTER
 		default:
+			if err := base.HandlePendingEnvironmentReload(ctx, t, handler, opt.NoSaveConversation); err != nil {
+				return "", err
+			}
 			// Check turn limit (0 means no limit)
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
@@ -374,7 +377,7 @@ OUTER:
 				return "", errors.Wrap(err, "failed to dispatch turn start")
 			}
 
-			// Regenerate the system prompt from the context snapshot pinned when this run opened.
+			// Regenerate the system prompt from the current environment snapshot.
 			contexts := base.EnvironmentContexts(t)
 			systemPrompt, err := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
 			if err != nil {

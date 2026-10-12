@@ -150,32 +150,39 @@ type Service struct {
 }
 
 type activeRun struct {
-	attachments          map[string]*sessionExtensionTransport
-	id                   string
-	conversationID       string
-	invokedBy            string
-	clientCaps           protocol.ClientCapabilities
-	codeExecution        bool
-	codeAllowedTools     *[]string
-	browserEnabled       bool
-	config               llmtypes.Config
-	runtime              *extensions.Runtime
-	instance             ExecutionInstance
-	resources            *runnerBackgroundResources
-	environment          agentenv.Environment
-	environmentCloseOnce sync.Once
-	environmentCloseErr  error
-	manifest             runnerpayload.Manifest
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	updates              atomic.Uint64
-	ops                  sync.WaitGroup
-	opening              bool
-	checkpointed         bool
-	closing              bool
-	stopping             bool
-	cleanupOnce          sync.Once
-	cleanupErr           error
+	openParams             protocol.RunOpenParams
+	attachments            map[string]*sessionExtensionTransport
+	id                     string
+	conversationID         string
+	invokedBy              string
+	clientCaps             protocol.ClientCapabilities
+	codeExecution          bool
+	codeAllowedTools       *[]string
+	commandAllowedTools    []string
+	commandAllowedCommands []string
+	browserEnabled         bool
+	config                 llmtypes.Config
+	runtime                *extensions.Runtime
+	instance               ExecutionInstance
+	resources              *runnerBackgroundResources
+	reloadResources        *runnerBackgroundResources
+	environment            agentenv.Environment
+	environmentCloseMu     sync.Mutex
+	environmentCloseOnce   sync.Once
+	environmentCloseErr    error
+	manifest               runnerpayload.Manifest
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	updates                atomic.Uint64
+	ops                    sync.WaitGroup
+	environmentOps         sync.WaitGroup
+	reloading              bool
+	opening                bool
+	checkpointed           bool
+	closing                bool
+	stopping               bool
+	cleanupOnce            sync.Once
+	cleanupErr             error
 }
 
 // NewService creates a runner-side request handler bound to one canonical workspace.
@@ -321,6 +328,13 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		result, err := s.openRun(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodRunReload:
+		value, rpcErr := decodeParams[protocol.RunReloadParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.reloadRun(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodRunClose:
 		value, rpcErr := decodeParams[protocol.RunCloseParams](params)
@@ -613,6 +627,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	runCtx, cancel := context.WithCancel(s.ctx)
 	run := &activeRun{
+		openParams:     params,
 		id:             params.RunID,
 		conversationID: params.ConversationID,
 		invokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
@@ -708,43 +723,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	workingDirectory := resources.workingDirectory
 
-	config, err := s.loadConfig(workingDirectory, params.Agent.Profile, params.Agent.EnvironmentProfile)
+	config, extensionConfig, err := s.loadRunConfig(workingDirectory, params)
 	if err != nil {
 		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
-	}
-	config, err = llmtypes.ApplyEnvironmentOptions(config, params.Options)
-	if err != nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "invalid runner execution options")
-	}
-	config.WorkingDirectory = workingDirectory
-	config.Provider = params.Agent.Provider
-	config.Model = params.Agent.Model
-	config.Profile = params.Agent.Profile
-	config.RecipeName = params.Agent.RecipeName
-	settleCodeMode(&config)
-	if !params.CodeExecution {
-		if config.CodeMode == "only" {
-			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off")
-		}
-		config.CodeMode = ""
-	}
-	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
-	if err != nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
-	}
-	if params.SessionExtensions != nil && !extensionConfig.Enabled {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("session extensions are disabled by runner extension policy")
-	}
-	if params.Reload && extensionConfig.Enabled {
-		if _, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); !ok {
-			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support fresh isolated extensions for reload")
-		}
+		return runnerpayload.Manifest{}, err
 	}
 	if params.RequireCheckpoint {
 		peer := s.currentPeer()
@@ -768,86 +750,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		}
 	}
 
-	callContext := extensions.ExtensionCallContext{
-		ConversationID: params.ConversationID,
-		UIScopeID:      params.ConversationID,
-		CWD:            workingDirectory,
-		Provider:       config.Provider,
-		Model:          config.Model,
-		Profile:        config.Profile,
-		RecipeName:     config.RecipeName,
-		InvokedBy:      run.invokedBy,
-	}
-	runtime := resources.runtime
-	if runtime != nil && !extensionConfig.Enabled {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("cannot disable extensions while conversation background resources are retained; release background leases first")
-	}
-	if runtime != nil && !reflect.DeepEqual(resources.runtimeConfig, extensionConfig) {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("cannot change extension settings while conversation background resources are retained; release background leases first")
-	}
-	if runtime == nil && extensionConfig.Enabled {
-		var runtimeRelease func() error
-		runtimeLeaseCtx := resources.runtimeLeaseCtx
-		if runtimeLeaseCtx == nil {
-			runtimeLeaseCtx = s.ctx
-		}
-		if params.SessionExtensions != nil {
-			provider, ok := s.runtimeProvider.(attachedRuntimeLeaseProvider)
-			if !ok {
-				s.failOpen(run)
-				return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support isolated session extensions")
-			}
-			attachments, attachErr := s.attachSessionExtensions(run, *params.SessionExtensions)
-			if attachErr != nil {
-				s.failOpen(run)
-				return runnerpayload.Manifest{}, attachErr
-			}
-			runtime, runtimeRelease, err = provider.RuntimeWithAttachmentsForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, extensionConfig, callContext, attachments)
-		} else if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
-			runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
-		} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
-			runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
-		} else {
-			runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(operationCtx, workingDirectory, variant, extensionConfig, callContext)
-		}
-		if err != nil {
-			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
-		}
-		resources.runtime = runtime
-		resources.runtimeConfig = extensionConfig
-		resources.runtimeRelease = runtimeRelease
-	}
-	if params.Reload && runtime != nil {
-		if err := runtime.InitializationError(); err != nil {
-			s.failOpen(run)
-			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to reload runner extensions")
-		}
-	}
-	config.Extensions = runtime
-	environment := s.environmentFactory(workingDirectory, runtime)
-	if environment == nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("runner environment factory returned nil")
-	}
-	run.environment = environment
-	spec := agentenv.RunSpec{
-		ConversationID: params.ConversationID,
-		Config:         config,
-		InvokedBy:      callContext.InvokedBy,
-	}
-	localManifest, err := environment.Open(operationCtx, spec)
-	if err != nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
-	}
-	wireManifest, err := buildWireManifest(localManifest, config, runtime, runnerID, params.RunID, generation, params.ReservedToolNames)
-	if err == nil && params.SessionExtensions != nil {
-		wireManifest.SessionExtensionIDs = append([]string(nil), params.SessionExtensions.ExtensionIDs...)
-		wireManifest.Digest, err = runnerpayload.ComputeManifestDigest(wireManifest)
-	}
+	wireManifest, err := s.initializeRunEnvironment(operationCtx, run, params, config, extensionConfig, runnerID, generation)
 	if err == nil {
 		err = operationCtx.Err()
 	}
@@ -862,9 +765,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
 	}
-	run.config = config
-	run.runtime = runtime
-	run.environment = environment
 	run.manifest = wireManifest
 	s.mu.Unlock()
 	if err := s.syncRunUICapabilities(operationCtx, run.id); err != nil {
@@ -887,6 +787,299 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	s.mu.Unlock()
 	return wireManifest, nil
+}
+
+// reloadRun keeps the execution instance and run lifetime, replacing only the
+// environment after its admitted operations (including code children) settle.
+func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams) (result runnerpayload.RunReloadResult, reloadErr error) {
+	s.mu.Lock()
+	run, err := s.activeRunLocked(params.RunID)
+	if err != nil {
+		s.mu.Unlock()
+		return result, err
+	}
+	if run.opening || run.closing || run.stopping || run.reloading || run.ctx.Err() != nil {
+		s.mu.Unlock()
+		return result, errors.New("runner environment is not ready for reload")
+	}
+	if !run.manifest.Capabilities.EnvironmentReload || params.ExpectedEnvironmentRevision != run.manifest.EnvironmentRevision {
+		s.mu.Unlock()
+		return result, errors.New("runner environment reload requires the current negotiated revision")
+	}
+	if run.openParams.SessionExtensions != nil || run.runtime.HasSessionExtensions() {
+		s.mu.Unlock()
+		return runnerpayload.RunReloadResult{Refusal: "cannot reload SDK-attached session extensions; reload them through the SDK client"}, nil
+	}
+	if len(run.resources.leases) > 0 {
+		s.mu.Unlock()
+		return runnerpayload.RunReloadResult{Refusal: "cannot reload while background workers are retained; release background leases first"}, nil
+	}
+	if run.runtime != nil && run.resources.runtimeRelease == nil {
+		s.mu.Unlock()
+		return runnerpayload.RunReloadResult{Refusal: "runner runtime provider does not support fresh isolated extensions for reload"}, nil
+	}
+	run.reloading = true
+	run.ops.Add(1)
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if reloadErr != nil {
+			run.stopping = true
+			run.cancel()
+		}
+		run.reloading = false
+		run.reloadResources = nil
+		s.mu.Unlock()
+		run.ops.Done()
+	}()
+	operationCtx, finish := runOperationContext(ctx, run)
+	defer finish()
+	operationCtx = s.decorateRunContext(operationCtx, run.id, run.conversationID)
+	drained := make(chan struct{})
+	go func() {
+		run.environmentOps.Wait()
+		close(drained)
+	}()
+	select {
+	case <-operationCtx.Done():
+		return result, operationCtx.Err()
+	case <-drained:
+	}
+	if err := s.lockSnapshot(operationCtx); err != nil {
+		return result, err
+	}
+	defer s.unlockSnapshot()
+
+	s.mu.Lock()
+	openParams := run.openParams
+	openParams.Reload = true
+	openParams.Agent.RecipeName = run.config.RecipeName
+	resources := run.resources
+	runnerID, generation := s.runnerID, s.generation
+	s.mu.Unlock()
+	config, extensionConfig, err := s.loadRunConfig(resources.workingDirectory, openParams)
+	if err != nil {
+		return runnerpayload.RunReloadResult{Refusal: err.Error()}, nil
+	}
+	if run.commandAllowedTools != nil {
+		config.AllowedTools = slices.Clone(run.commandAllowedTools)
+	}
+	if run.commandAllowedCommands != nil {
+		config.AllowedCommands = slices.Clone(run.commandAllowedCommands)
+	}
+	if err := operationCtx.Err(); err != nil {
+		return result, err
+	}
+	// Nothing below this point is reversible. Any failure fences the run rather
+	// than admitting work against the already-closed previous environment.
+	if err := s.closeRunEnvironment(operationCtx, run); err != nil {
+		return result, errors.Wrap(err, "failed to close environment for reload")
+	}
+	if err := s.closeBackgroundRuntime(operationCtx, resources); err != nil {
+		return result, errors.Wrap(err, "failed to close extensions for reload")
+	}
+	s.mu.Lock()
+	s.clearRunSurfacesLocked(run.id)
+	s.mu.Unlock()
+	leaseCtx, leaseCancel := context.WithCancel(s.ctx)
+	candidate := &activeRun{
+		id: run.id, conversationID: run.conversationID, invokedBy: run.invokedBy,
+		resources: &runnerBackgroundResources{
+			conversationID: run.conversationID, variant: resources.variant, workingDirectory: resources.workingDirectory,
+			runtimeLeaseCtx: leaseCtx, runtimeLeaseCancel: leaseCancel, clientCaps: run.clientCaps,
+			attachedRunID: run.id, lastRunID: run.id, runIDs: map[string]struct{}{run.id: {}},
+			leases: make(map[string]runnerBackgroundLease), cleanupDone: make(chan struct{}),
+		},
+	}
+	// The old resources retain ownership of the instance until commit. A canceled
+	// or failed staged open can therefore only clean up its own new resources.
+	committed := false
+	defer func() {
+		if !committed {
+			s.mu.Lock()
+			run.stopping = true
+			run.cancel()
+			s.revokeBackgroundTasksLocked(run, true)
+			s.mu.Unlock()
+			reloadErr = combineCleanupErrors(reloadErr, s.closeRunEnvironment(operationCtx, candidate))
+			reloadErr = combineCleanupErrors(reloadErr, s.closeBackgroundResources(operationCtx, candidate.resources))
+		}
+	}()
+	s.mu.Lock()
+	run.reloadResources = candidate.resources
+	s.mu.Unlock()
+	operationCtx = context.WithValue(operationCtx, reloadResourcesContextKey{}, candidate.resources)
+	manifest, err := s.initializeRunEnvironment(operationCtx, candidate, openParams, config, extensionConfig, runnerID, generation)
+	if err != nil {
+		return result, err
+	}
+	if err := candidate.runtime.UpdateUICapabilities(operationCtx, extensions.ExtensionUIHostCapabilities{
+		Widgets: run.clientCaps.PersistentWidgets, Surfaces: run.clientCaps.PersistentSurfaces, Transcript: run.clientCaps.PersistentSurfaces,
+	}); err != nil {
+		return result, errors.Wrap(err, "failed to update reloaded extension UI capabilities")
+	}
+	manifest.EnvironmentRevision = params.ExpectedEnvironmentRevision + 1
+	run.environmentCloseMu.Lock()
+	defer run.environmentCloseMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[run.id] != run || run.closing || run.stopping || run.ctx.Err() != nil || operationCtx.Err() != nil {
+		return result, errors.New("runner run was canceled while reloading")
+	}
+	candidate.resources.instance = resources.instance
+	resources.instance = nil
+	// Released leases can leave idle routing entries while their run is attached.
+	if s.backgrounds[run.conversationID] == resources {
+		delete(s.backgrounds, run.conversationID)
+	}
+	for runID := range resources.runIDs {
+		if s.backgroundRunIDs[runID] == resources {
+			delete(s.backgroundRunIDs, runID)
+		}
+	}
+	run.resources = candidate.resources
+	run.environment = candidate.environment
+	run.environmentCloseOnce = sync.Once{}
+	run.environmentCloseErr = nil
+	run.runtime = candidate.runtime
+	run.config = candidate.config
+	run.manifest = manifest
+	run.codeAllowedTools = nil
+	s.activateBackgroundTasksLocked(run)
+	if resources.workingDirectory == s.workspace && openParams.Agent.Profile == "" && resources.variant == "" && openParams.Options == nil {
+		s.lastManifestDigest = manifest.Digest
+	}
+	committed = true
+	return runnerpayload.RunReloadResult{Manifest: manifest}, nil
+}
+
+func (s *Service) loadRunConfig(workingDirectory string, params protocol.RunOpenParams) (llmtypes.Config, extensions.Config, error) {
+	config, err := s.loadConfig(workingDirectory, params.Agent.Profile, params.Agent.EnvironmentProfile)
+	if err != nil {
+		return config, extensions.Config{}, errors.Wrap(err, "failed to load runner configuration")
+	}
+	config, err = llmtypes.ApplyEnvironmentOptions(config, params.Options)
+	if err != nil {
+		return config, extensions.Config{}, errors.Wrap(err, "invalid runner execution options")
+	}
+	config.WorkingDirectory = workingDirectory
+	config.Provider = params.Agent.Provider
+	config.Model = params.Agent.Model
+	config.Profile = params.Agent.Profile
+	config.RecipeName = params.Agent.RecipeName
+	settleCodeMode(&config)
+	if !params.CodeExecution {
+		if config.CodeMode == "only" {
+			return config, extensions.Config{}, errors.New("code_mode only requires code execution support from the daemon; upgrade the daemon or use code_mode on/off")
+		}
+		config.CodeMode = ""
+	}
+	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	if err != nil {
+		return config, extensionConfig, errors.Wrap(err, "failed to load runner extension configuration")
+	}
+	if params.SessionExtensions != nil && !extensionConfig.Enabled {
+		return config, extensionConfig, errors.New("session extensions are disabled by runner extension policy")
+	}
+	if params.Reload && extensionConfig.Enabled {
+		if _, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); !ok {
+			return config, extensionConfig, errors.New("runner runtime provider does not support fresh isolated extensions for reload")
+		}
+	}
+	return config, extensionConfig, nil
+}
+
+// initializeRunEnvironment is shared by run.open and a staged run.reload. The
+// caller owns cleanup of everything attached to run, including partial opens.
+func (s *Service) initializeRunEnvironment(ctx context.Context, run *activeRun, params protocol.RunOpenParams, config llmtypes.Config, extensionConfig extensions.Config, runnerID string, generation int64) (runnerpayload.Manifest, error) {
+	resources := run.resources
+	workingDirectory := resources.workingDirectory
+	callContext := extensions.ExtensionCallContext{
+		ConversationID: run.conversationID,
+		UIScopeID:      run.conversationID,
+		CWD:            workingDirectory,
+		Provider:       config.Provider,
+		Model:          config.Model,
+		Profile:        config.Profile,
+		RecipeName:     config.RecipeName,
+		InvokedBy:      run.invokedBy,
+	}
+	runtime := resources.runtime
+	if runtime != nil && !extensionConfig.Enabled {
+		return runnerpayload.Manifest{}, errors.New("cannot disable extensions while conversation background resources are retained; release background leases first")
+	}
+	if runtime != nil && !reflect.DeepEqual(resources.runtimeConfig, extensionConfig) {
+		return runnerpayload.Manifest{}, errors.New("cannot change extension settings while conversation background resources are retained; release background leases first")
+	}
+	if runtime == nil && extensionConfig.Enabled {
+		var runtimeRelease func() error
+		var err error
+		runtimeLeaseCtx := resources.runtimeLeaseCtx
+		if runtimeLeaseCtx == nil {
+			runtimeLeaseCtx = s.ctx
+		}
+		if params.SessionExtensions != nil {
+			provider, ok := s.runtimeProvider.(attachedRuntimeLeaseProvider)
+			if !ok {
+				return runnerpayload.Manifest{}, errors.New("runner runtime provider does not support isolated session extensions")
+			}
+			attachments, attachErr := s.attachSessionExtensions(run, *params.SessionExtensions)
+			if attachErr != nil {
+				return runnerpayload.Manifest{}, attachErr
+			}
+			runtime, runtimeRelease, err = provider.RuntimeWithAttachmentsForIsolatedLease(ctx, runtimeLeaseCtx, workingDirectory, extensionConfig, callContext, attachments)
+		} else if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
+			runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(ctx, runtimeLeaseCtx, workingDirectory, resources.variant, extensionConfig, callContext)
+		} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
+			runtime, err = provider.RuntimeWithConfigAndCallContextForLease(ctx, runtimeLeaseCtx, workingDirectory, resources.variant, extensionConfig, callContext)
+		} else {
+			runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(ctx, workingDirectory, resources.variant, extensionConfig, callContext)
+		}
+		resources.runtime = runtime
+		resources.runtimeConfig = extensionConfig
+		resources.runtimeRelease = runtimeRelease
+		if err != nil {
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
+		}
+	}
+	if params.Reload && runtime != nil {
+		if err := runtime.InitializationError(); err != nil {
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to reload runner extensions")
+		}
+	}
+	config.Extensions = runtime
+	s.mu.Lock()
+	run.config = config
+	run.runtime = runtime
+	s.mu.Unlock()
+	environment := s.environmentFactory(workingDirectory, runtime)
+	if environment == nil {
+		return runnerpayload.Manifest{}, errors.New("runner environment factory returned nil")
+	}
+	run.environmentCloseMu.Lock()
+	run.environment = environment
+	run.environmentCloseMu.Unlock()
+	localManifest, err := environment.Open(ctx, agentenv.RunSpec{
+		ConversationID: run.conversationID,
+		Config:         config,
+		InvokedBy:      run.invokedBy,
+	})
+	if err != nil {
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
+	}
+	manifest, err := buildWireManifest(localManifest, config, runtime, runnerID, run.id, generation, params.ReservedToolNames)
+	if err != nil {
+		return runnerpayload.Manifest{}, err
+	}
+	if params.SessionExtensions != nil {
+		manifest.SessionExtensionIDs = append([]string(nil), params.SessionExtensions.ExtensionIDs...)
+	}
+	if params.EnvironmentReload {
+		manifest.Capabilities.EnvironmentReload = true
+		manifest.EnvironmentRevision = 1
+	}
+	manifest.Digest, err = runnerpayload.ComputeManifestDigest(manifest)
+	return manifest, err
 }
 
 func (s *Service) closeProbeResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance, cause error) error {
@@ -937,7 +1130,12 @@ func (s *Service) failOpen(run *activeRun) {
 }
 
 func (s *Service) closeRunEnvironment(ctx context.Context, run *activeRun) error {
-	if run == nil || run.environment == nil {
+	if run == nil {
+		return nil
+	}
+	run.environmentCloseMu.Lock()
+	defer run.environmentCloseMu.Unlock()
+	if run.environment == nil {
 		return nil
 	}
 	run.environmentCloseOnce.Do(func() {
@@ -1233,7 +1431,7 @@ func activeRunIDs(runs map[string]*activeRun) []string {
 }
 
 func (s *Service) executeCommand(ctx context.Context, params runnerpayload.CommandExecuteParams) (runnerpayload.CommandExecuteResult, error) {
-	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
+	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID, params.EnvironmentRevision, false)
 	if err != nil {
 		return runnerpayload.CommandExecuteResult{}, err
 	}
@@ -1262,9 +1460,11 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 	}
 	if len(result.AllowedTools) > 0 {
 		run.config.AllowedTools = append([]string(nil), result.AllowedTools...)
+		run.commandAllowedTools = slices.Clone(result.AllowedTools)
 	}
 	if len(result.AllowedCommands) > 0 {
 		run.config.AllowedCommands = append([]string(nil), result.AllowedCommands...)
+		run.commandAllowedCommands = slices.Clone(result.AllowedCommands)
 	}
 	s.mu.Unlock()
 	return runnerpayload.CommandExecuteResult{
@@ -1282,7 +1482,7 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 }
 
 func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.LifecycleDispatchParams) (runnerpayload.LifecycleDispatchResult, error) {
-	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
+	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID, params.EnvironmentRevision, false)
 	if err != nil {
 		return runnerpayload.LifecycleDispatchResult{}, err
 	}
@@ -1363,7 +1563,7 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	if strings.TrimSpace(params.ToolCallID) == "" || strings.TrimSpace(params.Name) == "" {
 		return runnerpayload.ToolExecuteResult{}, errors.New("toolCallId and name are required")
 	}
-	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
+	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID, params.EnvironmentRevision, false)
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
@@ -1582,24 +1782,39 @@ func serializeToolDisplayOutput(result tooltypes.ToolResult, toolName string) st
 	return output[:limit] + toolDisplayOutputTruncationMarker
 }
 
-func (s *Service) beginRunOperation(ctx context.Context, runID string) (*activeRun, context.Context, func(), error) {
+func (s *Service) beginRunOperation(ctx context.Context, runID string, revision int64, nested bool) (*activeRun, context.Context, func(), error) {
+	if ctx != nil && ctx.Err() != nil {
+		return nil, nil, nil, ctx.Err()
+	}
 	s.mu.Lock()
 	run, err := s.activeRunLocked(runID)
 	if err != nil {
 		s.mu.Unlock()
 		return nil, nil, nil, err
 	}
-	if run.opening || run.closing || run.environment == nil {
+	if run.opening || run.closing || run.stopping || run.ctx.Err() != nil || run.environment == nil {
 		s.mu.Unlock()
 		return nil, nil, nil, errors.New("runner environment is not ready")
 	}
+	if run.manifest.EnvironmentRevision != revision {
+		s.mu.Unlock()
+		return nil, nil, nil, errors.New("runner environment revision is stale")
+	}
+	// Already-admitted code parents own their children until they settle. Blocking
+	// those children behind a reload would deadlock the drain.
+	if run.reloading && !nested {
+		s.mu.Unlock()
+		return nil, nil, nil, errors.New("runner environment is reloading")
+	}
 	run.ops.Add(1)
+	run.environmentOps.Add(1)
 	s.mu.Unlock()
 
 	operationCtx, cancel := runOperationContext(ctx, run)
 	operationCtx = s.decorateRunContext(operationCtx, run.id, run.conversationID)
 	finish := func() {
 		cancel()
+		run.environmentOps.Done()
 		run.ops.Done()
 	}
 	return run, operationCtx, finish, nil

@@ -46,6 +46,10 @@ type runnerBackgroundLease struct {
 	openingRunID string
 }
 
+// Only initialization callbacks belonging to the staged runtime may acquire
+// provisional background leases while the old environment is being replaced.
+type reloadResourcesContextKey struct{}
+
 func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.UIExtensionSource, request extensions.BackgroundTaskAcquireRequest) (extensions.BackgroundTaskAcquireResponse, error) {
 	if !extensions.RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
 		return extensions.BackgroundTaskAcquireResponse{}, errors.New("background tasks are not available during runner discovery")
@@ -73,6 +77,15 @@ func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.U
 		s.mu.Unlock()
 		return extensions.BackgroundTaskAcquireResponse{}, errors.New("background task lease requires an opening or ready runner run")
 	}
+	resources := run.resources
+	if run.reloading {
+		staged, _ := ctx.Value(reloadResourcesContextKey{}).(*runnerBackgroundResources)
+		if staged == nil || staged != run.reloadResources {
+			s.mu.Unlock()
+			return extensions.BackgroundTaskAcquireResponse{}, errors.New("background task lease cannot start while the environment is reloading")
+		}
+		resources = staged
+	}
 	if len(s.backgroundLeases) >= maxRunnerBackgroundTasks {
 		s.mu.Unlock()
 		return extensions.BackgroundTaskAcquireResponse{}, errors.Errorf("runner supports at most %d background tasks", maxRunnerBackgroundTasks)
@@ -82,17 +95,16 @@ func (s *Service) AcquireBackgroundTask(ctx context.Context, source extensions.U
 		s.mu.Unlock()
 		return extensions.BackgroundTaskAcquireResponse{}, err
 	}
-	resources := run.resources
 	if resources.leases == nil {
 		resources.leases = make(map[string]runnerBackgroundLease)
 	}
 	lease := runnerBackgroundLease{owner: owner, description: description}
-	if run.opening {
+	if run.opening || run.reloading {
 		lease.openingRunID = run.id
 	}
 	resources.leases[leaseID] = lease
 	s.backgroundLeases[leaseID] = resources
-	if !run.opening {
+	if !run.opening && !run.reloading {
 		s.activateBackgroundTasksLocked(run)
 	}
 	s.mu.Unlock()
@@ -123,14 +135,21 @@ func (s *Service) activateBackgroundTasksLocked(run *activeRun) {
 // A failed reattachment only revokes that open's provisional leases; explicitly
 // canceling a conversation revokes all its workers, including retained leases.
 func (s *Service) revokeBackgroundTasksLocked(run *activeRun, provisionalOnly bool) {
-	if run.resources == nil {
-		return
-	}
-	for id, lease := range run.resources.leases {
-		if provisionalOnly && lease.openingRunID != run.id {
+	for _, resources := range []*runnerBackgroundResources{run.resources, run.reloadResources} {
+		if resources == nil {
 			continue
 		}
-		s.removeBackgroundLeaseLocked(run.resources, id)
+		for id, lease := range resources.leases {
+			if provisionalOnly && lease.openingRunID != run.id {
+				continue
+			}
+			s.removeBackgroundLeaseLocked(resources, id)
+		}
+	}
+	// A replacement has not committed ownership yet. Cancel its independent
+	// runtime lease even if initialization has not returned a release function.
+	if run.reloadResources != nil {
+		run.reloadResources.runtimeLeaseCancel()
 	}
 }
 
@@ -241,24 +260,30 @@ func (s *Service) closeBackgroundResources(ctx context.Context, resources *runne
 		if resources.instance != nil {
 			resources.cleanupErr = runBoundedCleanup(ctx, s.cleanupTimeout, "runner execution instance", resources.instance.Close)
 		}
-		if resources.runtimeRelease != nil {
-			runtimeErr := runBoundedCleanup(ctx, s.cleanupTimeout, "runner extension runtime", func(context.Context) error {
-				resources.runtimeReleaseOnce.Do(func() {
-					resources.runtimeReleaseErr = resources.runtimeRelease()
-				})
-				return resources.runtimeReleaseErr
-			})
-			resources.cleanupErr = combineCleanupErrors(resources.cleanupErr, runtimeErr)
-		}
-		if resources.runtimeLeaseCancel != nil {
-			resources.runtimeLeaseCancel()
-		}
+		resources.cleanupErr = combineCleanupErrors(resources.cleanupErr, s.closeBackgroundRuntime(ctx, resources))
 	})
 	<-resources.cleanupDone
 	s.mu.Lock()
 	delete(s.backgroundCleanup, resources)
 	s.mu.Unlock()
 	return resources.cleanupErr
+}
+
+// Reload releases extensions without destroying the run's execution instance.
+func (s *Service) closeBackgroundRuntime(ctx context.Context, resources *runnerBackgroundResources) error {
+	var err error
+	if resources.runtimeRelease != nil {
+		err = runBoundedCleanup(ctx, s.cleanupTimeout, "runner extension runtime", func(context.Context) error {
+			resources.runtimeReleaseOnce.Do(func() {
+				resources.runtimeReleaseErr = resources.runtimeRelease()
+			})
+			return resources.runtimeReleaseErr
+		})
+	}
+	if resources.runtimeLeaseCancel != nil {
+		resources.runtimeLeaseCancel()
+	}
+	return err
 }
 
 func (s *Service) closeAllBackgroundResources(ctx context.Context) error {

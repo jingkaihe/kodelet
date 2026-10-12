@@ -67,7 +67,8 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 
 	ensureAssistant := func() int {
 		if len(entries) == 0 || entries[len(entries)-1].kind != entryAssistant ||
-			(len(entries[len(entries)-1].blocks) > 0 && entries[len(entries)-1].blocks[0].kind == blockCompaction) {
+			(len(entries[len(entries)-1].blocks) > 0 &&
+				(entries[len(entries)-1].blocks[0].kind == blockCompaction || entries[len(entries)-1].blocks[0].kind == blockResourcesReloaded)) {
 			entries = append(entries, chatEntry{kind: entryAssistant})
 		}
 		return len(entries) - 1
@@ -75,6 +76,10 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 
 	for _, msg := range messages {
 		switch msg.Kind {
+		case "resources-reloaded":
+			if msg.ResourceReloadID != "" && !hasResourceReloadMarker(entries, msg.ResourceReloadID) {
+				entries = append(entries, resourceReloadEntry(msg.ResourceReloadID))
+			}
 		case "context-compacted":
 			if msg.Compaction != nil && !hasCompactionMarker(entries, msg.Compaction.ID) {
 				entries = append(entries, compactionEntry(*msg.Compaction))
@@ -143,6 +148,27 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 		trimEntryBlocks(&entries[i])
 	}
 	return entries
+}
+
+func resourceReloadEntry(id string) chatEntry {
+	return chatEntry{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:             blockResourcesReloaded,
+			resourceReloadID: id,
+		}},
+	}
+}
+
+func hasResourceReloadMarker(entries []chatEntry, id string) bool {
+	for _, entry := range entries {
+		for _, block := range entry.blocks {
+			if block.kind == blockResourcesReloaded && block.resourceReloadID == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func compactionEntry(marker llmtypes.CompactionMarker) chatEntry {

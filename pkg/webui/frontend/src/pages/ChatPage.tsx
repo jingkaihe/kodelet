@@ -85,6 +85,7 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
     content: message.content || '',
     kind: message.kind,
     compaction: message.compaction,
+    resourceReloadId: message.resourceReloadId,
     toolCalls: message.toolCalls || message.tool_calls || [],
     thinkingText: message.thinkingText,
     thinkingTexts: message.thinkingTexts || [],

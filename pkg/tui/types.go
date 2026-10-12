@@ -92,6 +92,7 @@ const (
 	blockThoughts
 	blockTools
 	blockCompaction
+	blockResourcesReloaded
 )
 
 type markdownKind int
@@ -102,12 +103,13 @@ const (
 )
 
 type assistantBlock struct {
-	kind       assistantBlockKind
-	text       string
-	thoughts   []thoughtBlock
-	tools      []toolCall
-	expanded   bool
-	compaction *llmtypes.CompactionMarker
+	kind             assistantBlockKind
+	text             string
+	thoughts         []thoughtBlock
+	tools            []toolCall
+	expanded         bool
+	compaction       *llmtypes.CompactionMarker
+	resourceReloadID string
 }
 
 type chatEntry struct {

@@ -3625,6 +3625,30 @@ func TestServer_convertToWebMessagesPreservesRepeatedCommands(t *testing.T) {
 	}
 }
 
+func TestServer_convertToWebMessagesResourceReloadMarker(t *testing.T) {
+	const feedback = "Reload finished. Use fresh tools. [reload-id]"
+	metadata := conversations.AddMessageDisplay(nil, feedback, "Resources reloaded", conversations.MessageDisplayKindResourceReload, "")
+	for _, provider := range []string{"anthropic", "openai", "openai-responses"} {
+		for _, role := range []string{"user", "assistant"} {
+			t.Run(provider+"/"+role, func(t *testing.T) {
+				content := any(feedback)
+				if provider == "anthropic" {
+					content = []map[string]string{{"type": "text", "text": feedback}}
+				}
+				raw, err := json.Marshal([]map[string]any{{"type": "message", "role": role, "content": content}})
+				require.NoError(t, err)
+				messages, err := (&Server{}).convertToWebMessages(raw, provider, metadata, nil)
+				require.NoError(t, err)
+				require.Len(t, messages, 1)
+				assert.Equal(t, WebMessage{
+					Kind: "resources-reloaded", Role: "assistant", Content: "Resources reloaded",
+					ResourceReloadID: conversations.MessageDisplayKey(feedback),
+				}, messages[0])
+			})
+		}
+	}
+}
+
 func TestServer_Close(t *testing.T) {
 	closeCalled := false
 	mockService := &mockConversationService{

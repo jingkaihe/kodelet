@@ -116,7 +116,7 @@ func (s *Service) codeExecutionContext(ctx context.Context, run *activeRun, para
 			if ctx.Err() != nil {
 				cancel()
 			}
-			childRun, operationCtx, finish, err := s.beginRunOperation(childCtx, run.id)
+			childRun, operationCtx, finish, err := s.beginRunOperation(childCtx, run.id, params.EnvironmentRevision, true)
 			if err != nil {
 				return childError("cancelled", "not_started", err.Error())
 			}

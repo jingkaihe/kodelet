@@ -239,15 +239,20 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
-	codeExecution     bool
-	codeStopping      bool
-	codeChildIDs      map[string]string
-	sessionExtensions *protocol.SessionExtensions
-	checkpoint        *runCheckpoint
-	connectionID      string
-	generation        int64
-	leaseCancel       context.CancelFunc
-	missingHeartbeats int
+	environmentRevision int64
+	environmentReload   bool
+	environmentOps      int
+	reloading           bool
+	reservedToolNames   []string
+	codeExecution       bool
+	codeStopping        bool
+	codeChildIDs        map[string]string
+	sessionExtensions   *protocol.SessionExtensions
+	checkpoint          *runCheckpoint
+	connectionID        string
+	generation          int64
+	leaseCancel         context.CancelFunc
+	missingHeartbeats   int
 }
 
 type runFence struct {
@@ -1128,11 +1133,12 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
-		connectionID:  connectionID,
-		generation:    generation,
-		leaseCancel:   leaseCancel,
-		codeExecution: params.CodeExecution,
-		checkpoint:    checkpoint,
+		connectionID:      connectionID,
+		generation:        generation,
+		leaseCancel:       leaseCancel,
+		codeExecution:     params.CodeExecution,
+		checkpoint:        checkpoint,
+		reservedToolNames: slices.Clone(params.ReservedToolNames),
 	}
 	if params.SessionExtensions != nil {
 		run.sessionExtensions = &protocol.SessionExtensions{
@@ -1173,6 +1179,9 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
 	}
+	if manifest.Capabilities.EnvironmentReload && manifest.EnvironmentRevision != 1 {
+		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, errors.New("runner must begin at environment revision 1"), false)
+	}
 	manifestPayload, err := json.Marshal(manifest)
 	if err != nil {
 		wrapped := errors.Wrap(err, "failed to encode runner manifest snapshot")
@@ -1200,6 +1209,8 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	runCandidate.Status = RunStatusRunning
 	runCandidate.ManifestDigest = manifest.Digest
 	runCandidate.ManifestJSON = string(manifestPayload)
+	runCandidate.environmentRevision = manifest.EnvironmentRevision
+	runCandidate.environmentReload = manifest.Capabilities.EnvironmentReload
 	now = r.now().UTC()
 	runCandidate.UpdatedAt = now
 	runnerCandidate = cloneRunnerEntry(current)
@@ -1218,12 +1229,183 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	return manifest, nil
 }
 
+// ReloadRun replaces one conversation's environment without releasing its run lease.
+// A refusal leaves the old snapshot intact; an uncertain handoff stops the run.
+func (r *Registry) ReloadRun(ctx context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	params.RunID = strings.TrimSpace(params.RunID)
+	if err := ctx.Err(); err != nil {
+		return runnerpayload.RunReloadResult{}, err
+	}
+	r.mu.Lock()
+	link, err := r.activeRunLinkLocked(params.RunID, false)
+	if err != nil {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, err
+	}
+	run := r.runs[params.RunID]
+	if run.Status != RunStatusRunning || !run.environmentReload {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, errors.New("run does not support environment reload")
+	}
+	if params.ExpectedEnvironmentRevision != run.environmentRevision {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, errors.New("environment revision is stale")
+	}
+	if run.environmentOps != 0 {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{Refusal: "cannot reload while environment operations are active"}, nil
+	}
+	var previous runnerpayload.Manifest
+	if err := json.Unmarshal([]byte(run.ManifestJSON), &previous); err != nil {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, errors.Wrap(err, "invalid pinned environment manifest")
+	}
+	fence := runFence{run.RunnerID, run.ID, run.connectionID, run.generation, link}
+	validation := protocol.RunOpenParams{
+		RunID: run.ID, ExpectedCWD: previous.WorkingDirectory,
+		EnvironmentReload: true, SessionExtensions: run.sessionExtensions,
+		ReservedToolNames: run.reservedToolNames,
+	}
+	run.reloading = true
+	r.mu.Unlock()
+
+	var result runnerpayload.RunReloadResult
+	if err := link.Call(ctx, protocol.MethodRunReload, params, &result); err != nil {
+		return runnerpayload.RunReloadResult{}, r.failReload(fence, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return runnerpayload.RunReloadResult{}, r.failReload(fence, err)
+	}
+	var snapshot []byte
+	if result.Refusal == "" {
+		err = validateManifest(result.Manifest, fence.runnerID, validation, fence.generation)
+		if err == nil && (!result.Manifest.Capabilities.EnvironmentReload || result.Manifest.EnvironmentRevision != params.ExpectedEnvironmentRevision+1) {
+			err = errors.New("reloaded manifest must advance the environment revision by one")
+		}
+		if err == nil {
+			snapshot, err = json.Marshal(result.Manifest)
+		}
+		if err != nil {
+			return runnerpayload.RunReloadResult{}, r.failReload(fence, err)
+		}
+	}
+	r.mu.Lock()
+	run = r.runs[params.RunID]
+	runner := r.runners[fence.runnerID]
+	if !runMatchesFence(run, fence) || !runnerMatchesFence(runner, fence) ||
+		!runnerHasActiveRun(runner, params.RunID) || run.Status != RunStatusRunning || run.codeStopping || ctx.Err() != nil {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, r.failReload(fence, errors.New("run stopped or connection changed during environment reload"))
+	}
+	if result.Refusal != "" {
+		run.reloading = false
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{Refusal: result.Refusal}, nil
+	}
+	candidate := *run
+	candidate.ManifestDigest = result.Manifest.Digest
+	candidate.ManifestJSON = string(snapshot)
+	candidate.environmentRevision = result.Manifest.EnvironmentRevision
+	candidate.UpdatedAt = r.now().UTC()
+	candidate.reloading = false
+	if err := r.persistRunnerAndRunLocked(runner, &candidate); err != nil {
+		r.mu.Unlock()
+		return runnerpayload.RunReloadResult{}, r.failReload(fence, err)
+	}
+	r.runs[params.RunID] = &candidate
+	r.mu.Unlock()
+	return result, nil
+}
+
+func (r *Registry) failReload(fence runFence, cause error) error {
+	r.mu.Lock()
+	run := r.runs[fence.runID]
+	status := RunStatusFailed
+	if runMatchesFence(run, fence) {
+		switch run.Status {
+		case RunStatusCanceled:
+			status = RunStatusCanceled
+		case RunStatusRunning:
+			run.Status = RunStatusFailed
+		}
+		run.codeStopping = true
+	}
+	r.mu.Unlock()
+	// A replacement may already have committed and retained new workers even
+	// when its reply or persistence failed. Normal close preserves those leases;
+	// cancel them first on the original connection, never a replacement link.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), openingCleanupTimeout)
+	cancelErr := fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{
+		RunID: fence.runID, Reason: "environment reload failed",
+	}, nil)
+	cancel()
+	if cancelErr != nil {
+		status = RunStatusLost
+		cause = errors.Wrapf(cause, "environment reload outcome is uncertain; background worker cancellation was not confirmed: %v", cancelErr)
+	}
+	// Give close its own bounded context so cancellation timing out cannot skip
+	// the attempt to release the run's remaining resources.
+	confirmed, cleanupErr := closeRemoteOpeningRun(fence.link, fence.runID)
+	if !confirmed {
+		status = RunStatusLost
+		cause = errors.Wrapf(cause, "environment reload outcome is uncertain; cleanup failed: %v", cleanupErr)
+	}
+	r.finishRunForFence(fence, status, cause.Error())
+	return cause
+}
+
+// beginEnvironmentOperation atomically admits work against one snapshot. Reload
+// never overlaps admitted work, including the cleanup of code-mode children.
+func (r *Registry) beginEnvironmentOperation(runID string, revision int64) (Link, func(), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	link, err := r.activeRunLinkLocked(runID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	run := r.runs[strings.TrimSpace(runID)]
+	if run.environmentRevision != revision {
+		return nil, nil, errors.New("environment revision is stale")
+	}
+	run.environmentOps++
+	return link, func() {
+		r.mu.Lock()
+		// Opening completion and connection reconciliation may publish a copied
+		// entry while a UI operation is admitted. Release the current fenced entry.
+		if current := r.runs[run.ID]; current != nil && current.connectionID == run.connectionID && current.generation == run.generation {
+			current.environmentOps--
+		}
+		r.mu.Unlock()
+	}, nil
+}
+
 // CallRun invokes a run-scoped runner method after generation and active-run validation.
 func (r *Registry) CallRun(ctx context.Context, runID, method string, params any, result any) error {
-	link, err := r.activeRunLink(runID)
+	var revision int64
+	switch value := params.(type) {
+	case runnerpayload.CommandExecuteParams:
+		revision = value.EnvironmentRevision
+	case runnerpayload.LifecycleDispatchParams:
+		revision = value.EnvironmentRevision
+	case runnerpayload.ShortcutExecuteParams:
+		revision = value.EnvironmentRevision
+	case runnerpayload.UISurfaceInputParams, runnerpayload.UISurfaceResizeParams, runnerpayload.UISurfaceInvalidateParams:
+		// Persistent UI messages carry their own surface lifecycle identity.
+		// Gate them against reload without changing the existing UI wire format.
+		r.mu.RLock()
+		if run := r.runs[strings.TrimSpace(runID)]; run != nil {
+			revision = run.environmentRevision
+		}
+		r.mu.RUnlock()
+	}
+	if method == protocol.MethodRunReload {
+		return errors.New("use ReloadRun to replace an environment")
+	}
+	link, finish, err := r.beginEnvironmentOperation(runID, revision)
 	if err != nil {
 		return err
 	}
+	defer finish()
 	return link.Call(ctx, method, params, result)
 }
 
@@ -1327,6 +1509,11 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 
 // ExecuteTool invokes tool.execute and routes replaceable transient updates to the supplied sink.
 func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
+	link, finish, err := r.beginEnvironmentOperation(params.RunID, params.EnvironmentRevision)
+	if err != nil {
+		return runnerpayload.ToolExecuteResult{}, err
+	}
+	defer finish()
 	cleanupArtifacts, err := r.registerArtifactTool(ctx, params)
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
@@ -1350,10 +1537,6 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	}
 	defer cleanup()
 
-	link, err := r.activeRunLink(params.RunID)
-	if err != nil {
-		return runnerpayload.ToolExecuteResult{}, err
-	}
 	cleanupHelper, err := r.registerToolModelHelper(ctx, params)
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
@@ -1460,21 +1643,19 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 	r.clearRunCodeParentsLocked(runID)
 	r.clearRunModelHelpersLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
+	// Fence publication before the RPC: a late reload response must not revive
+	// a run whose cancellation is already in progress.
+	var persistenceErr error
+	if run := r.runs[runID]; run != nil && (run.Status == RunStatusOpening || run.Status == RunStatusRunning) {
+		run.Status = RunStatusCanceled
+		run.UpdatedAt = r.now().UTC()
+		persistenceErr = r.persistRunLocked(run)
+	}
 	r.mu.Unlock()
 	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
 		return err
 	}
-	r.mu.Lock()
-	if run := r.runs[runID]; run != nil && (run.Status == RunStatusOpening || run.Status == RunStatusRunning) {
-		run.Status = RunStatusCanceled
-		run.UpdatedAt = r.now().UTC()
-		if err := r.persistRunLocked(run); err != nil {
-			r.mu.Unlock()
-			return err
-		}
-	}
-	r.mu.Unlock()
-	return nil
+	return persistenceErr
 }
 
 // CloseRun releases one runner lease and records its terminal status.
@@ -1979,12 +2160,6 @@ func (r *Registry) logPersistenceError(message string, err error) {
 	}
 }
 
-func (r *Registry) activeRunLink(runID string) (Link, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.activeRunLinkLocked(runID, false)
-}
-
 func (r *Registry) activeRunLinkAllowCanceled(runID string) (Link, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1998,6 +2173,9 @@ func (r *Registry) activeRunLinkLocked(runID string, allowCanceled bool) (Link, 
 	}
 	if run.Status != RunStatusRunning && run.Status != RunStatusOpening && (!allowCanceled || (run.Status != RunStatusCanceled && run.Status != RunStatusFailed)) {
 		return nil, errors.Errorf("run is not active: %s", run.Status)
+	}
+	if !allowCanceled && (run.reloading || run.codeStopping) {
+		return nil, errors.New("run environment is reloading or stopping")
 	}
 	runner := r.runners[run.RunnerID]
 	if runner == nil || !runner.Connected || runner.link == nil || !runnerHasActiveRun(runner, run.ID) {
@@ -2064,6 +2242,13 @@ func (r *Registry) expireStaleConnections() {
 }
 
 func validateManifest(manifest runnerpayload.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
+	if manifest.Capabilities.EnvironmentReload {
+		if !params.EnvironmentReload || manifest.EnvironmentRevision <= 0 {
+			return errors.New("runner environment reload was not negotiated with a valid revision")
+		}
+	} else if manifest.EnvironmentRevision != 0 {
+		return errors.New("runner environment revision requires reload support")
+	}
 	var sessionExtensionIDs []string
 	if params.SessionExtensions != nil {
 		sessionExtensionIDs = params.SessionExtensions.ExtensionIDs

@@ -15,19 +15,21 @@ const contextCompactedMetadataKey = "kodelet/contextCompacted"
 
 // ACPChatEventSink translates streamed chat events into ACP session updates.
 type ACPChatEventSink struct {
-	handler     *ACPMessageHandler
-	sender      UpdateSender
-	sessionID   acptypes.SessionID
-	compactions map[string]struct{}
+	handler         *ACPMessageHandler
+	sender          UpdateSender
+	sessionID       acptypes.SessionID
+	compactions     map[string]struct{}
+	resourceReloads map[string]struct{}
 }
 
 // NewACPChatEventSink creates a chat event sink for one ACP session.
 func NewACPChatEventSink(sender UpdateSender, sessionID acptypes.SessionID) *ACPChatEventSink {
 	return &ACPChatEventSink{
-		handler:     NewACPMessageHandler(sender, sessionID),
-		sender:      sender,
-		sessionID:   sessionID,
-		compactions: make(map[string]struct{}),
+		handler:         NewACPMessageHandler(sender, sessionID),
+		sender:          sender,
+		sessionID:       sessionID,
+		compactions:     make(map[string]struct{}),
+		resourceReloads: make(map[string]struct{}),
 	}
 }
 
@@ -37,6 +39,20 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		return nil
 	}
 	switch event.Kind {
+	case "resources-reloaded":
+		if event.ResourceReloadID == "" || s.sender == nil {
+			return nil
+		}
+		if _, seen := s.resourceReloads[event.ResourceReloadID]; seen {
+			return nil
+		}
+		if err := s.sender.SendUpdate(s.sessionID, map[string]any{
+			"sessionUpdate": acptypes.UpdateAgentMessageChunk,
+			"content":       acptypes.ContentBlock{Type: acptypes.ContentTypeText, Text: "\n\nResources reloaded\n\n"},
+		}); err != nil {
+			return err
+		}
+		s.resourceReloads[event.ResourceReloadID] = struct{}{}
 	case "context-compacted":
 		if event.Compaction == nil || s.sender == nil {
 			return nil
@@ -109,6 +125,10 @@ func ReplayConversationHistory(sender UpdateSender, sessionID acptypes.SessionID
 	sink := NewACPChatEventSink(sender, sessionID)
 	for _, message := range messages {
 		switch message.Kind {
+		case "resources-reloaded":
+			if err := sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ResourceReloadID: message.ResourceReloadID}); err != nil {
+				return err
+			}
 		case "context-compacted":
 			if err := sink.Send(chat.ChatEvent{Kind: "context-compacted", Compaction: message.Compaction}); err != nil {
 				return err

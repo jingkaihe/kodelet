@@ -22,8 +22,11 @@ import (
 )
 
 // RemoteController is the control-plane runner API used by RemoteEnvironment.
+// ReloadRun belongs to this interface so controller decorators preserve it;
+// runner support is negotiated separately through the manifest capability.
 type RemoteController interface {
 	OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error)
+	ReloadRun(ctx context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error)
 	CallRun(ctx context.Context, runID, method string, params any, result any) error
 	ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error)
 	CancelRun(ctx context.Context, runID, reason string) error
@@ -85,6 +88,10 @@ type RemoteEnvironment struct {
 	opened             bool
 	opening            bool
 	closing            bool
+	reloading          bool
+	reloadPending      bool
+	reloadFailed       bool
+	hostConfig         llmtypes.Config
 }
 
 // NewRemoteEnvironment creates an unopened environment bound to one stable runner ID.
@@ -116,7 +123,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 	}
 
 	e.mu.Lock()
-	if e.opened || e.opening || e.closing {
+	if e.opened || e.opening || e.closing || e.reloading {
 		e.mu.Unlock()
 		return Manifest{}, errors.New("remote environment is already active")
 	}
@@ -152,6 +159,8 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		ClientCapabilities: e.clientCapabilities,
 		SessionExtensions:  e.sessionExtensions,
 		Options:            spec.Config.RunnerOptions(),
+		EnvironmentReload:  true,
+		ReservedToolNames:  []string{ReloadResourcesToolName},
 	}
 	wireManifest, err := e.controller.OpenRun(ctx, e.runnerID, params)
 	if err != nil {
@@ -170,6 +179,9 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 	e.runID = runID
 	e.manifest = manifest
 	e.wireManifest = wireManifest
+	e.hostConfig = spec.Config.Clone()
+	e.reloadPending = false
+	e.reloadFailed = false
 	e.opened = true
 	e.opening = false
 	e.mu.Unlock()
@@ -219,16 +231,24 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 			return CommandResult{}, err
 		}
 	}
-	runID, err := e.activeRunID()
+	runID, revision, err := e.activeRunSnapshot()
 	if err != nil {
 		return CommandResult{}, err
 	}
 	var result runnerpayload.CommandExecuteResult
 	if err := e.controller.CallRun(ctx, runID, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{
-		RunID:   runID,
-		Message: request.Message,
+		EnvironmentRevision: revision,
+		RunID:               runID,
+		Message:             request.Message,
 	}, &result); err != nil {
 		return CommandResult{}, err
+	}
+	if result.Matched && result.Action == string(CommandActionRunAgent) {
+		e.mu.Lock()
+		e.hostConfig.RecipeName = result.RecipeName
+		e.hostConfig.AllowedTools = slices.Clone(result.AllowedTools)
+		e.hostConfig.AllowedCommands = slices.Clone(result.AllowedCommands)
+		e.mu.Unlock()
 	}
 	return CommandResult{
 		Matched:         result.Matched,
@@ -377,7 +397,7 @@ func (e *RemoteEnvironment) CanStreamToolUpdates() bool {
 
 // ExecuteTool performs one complete runner-side tool lifecycle.
 func (e *RemoteEnvironment) ExecuteTool(ctx context.Context, request ToolRequest, updates ToolUpdateSink) (ToolExecution, error) {
-	runID, err := e.activeRunID()
+	runID, revision, err := e.activeRunSnapshot()
 	if err != nil {
 		return ToolExecution{}, err
 	}
@@ -385,12 +405,17 @@ func (e *RemoteEnvironment) ExecuteTool(ctx context.Context, request ToolRequest
 	if err != nil {
 		return ToolExecution{}, err
 	}
+	if request.Name == ReloadResourcesToolName {
+		request.Input = string(input)
+		return e.requestReload(ctx, request)
+	}
 	params := runnerpayload.ToolExecuteParams{
-		RunID:         runID,
-		ToolCallID:    request.ToolCallID,
-		Name:          request.Name,
-		Input:         input,
-		CallableTools: request.CallableTools,
+		EnvironmentRevision: revision,
+		RunID:               runID,
+		ToolCallID:          request.ToolCallID,
+		Name:                request.Name,
+		Input:               input,
+		CallableTools:       request.CallableTools,
 	}
 	if request.Name == "code_execute" {
 		e.mu.RLock()
@@ -455,8 +480,12 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	}
 	e.closing = true
 	runID := e.runID
+	reloadFailed := e.reloadFailed
 	e.mu.Unlock()
 
+	if reloadFailed && runErr == nil {
+		runErr = errors.New("resource reload failed")
+	}
 	status := protocol.RunStatusSucceeded
 	if runErr != nil {
 		status = protocol.RunStatusFailed
@@ -464,6 +493,8 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	var cancelErr error
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 		status = protocol.RunStatusCanceled
+	}
+	if status == protocol.RunStatusCanceled || reloadFailed {
 		cancelErr = e.controller.CancelRun(ctx, runID, runErr.Error())
 	}
 	closeErr := e.controller.CloseRun(ctx, runID, status, runErr)
@@ -474,6 +505,7 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	e.wireManifest = runnerpayload.Manifest{}
 	e.opened = false
 	e.closing = false
+	e.reloadPending = false
 	e.mu.Unlock()
 	if closeErr != nil {
 		return closeErr
@@ -481,24 +513,28 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	return cancelErr
 }
 
-func (e *RemoteEnvironment) activeRunID() (string, error) {
+func (e *RemoteEnvironment) activeRunSnapshot() (string, int64, error) {
 	if e == nil {
-		return "", errors.New("remote environment is required")
+		return "", 0, errors.New("remote environment is required")
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if !e.opened || e.closing || e.runID == "" {
-		return "", errors.New("remote environment is not open")
+		return "", 0, errors.New("remote environment is not open")
 	}
-	return e.runID, nil
+	if e.reloading || e.reloadFailed {
+		return "", 0, errors.New("remote environment is reloading or reload failed")
+	}
+	return e.runID, e.wireManifest.EnvironmentRevision, nil
 }
 
 func (e *RemoteEnvironment) dispatchLifecycle(ctx context.Context, params runnerpayload.LifecycleDispatchParams) (runnerpayload.LifecycleDispatchResult, error) {
-	runID, err := e.activeRunID()
+	runID, revision, err := e.activeRunSnapshot()
 	if err != nil {
 		return runnerpayload.LifecycleDispatchResult{}, err
 	}
 	params.RunID = runID
+	params.EnvironmentRevision = revision
 	var result runnerpayload.LifecycleDispatchResult
 	if err := e.controller.CallRun(ctx, runID, protocol.MethodLifecycleDispatch, params, &result); err != nil {
 		return runnerpayload.LifecycleDispatchResult{}, err
@@ -547,12 +583,16 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 			Tool:         proxy,
 		})
 	}
+	if wire.Capabilities.EnvironmentReload && config.EnvironmentOptions().ToolAllowed(ReloadResourcesToolName) && wire.Config.Options.ToolAllowed(ReloadResourcesToolName) {
+		definitions = append(definitions, reloadResourcesDefinition())
+	}
 
 	return Manifest{
-		WorkingDirectory: wire.WorkingDirectory,
-		Contexts:         contexts,
-		Tools:            definitions,
-		Commands:         slices.Clone(wire.Commands),
+		EnvironmentRevision: wire.EnvironmentRevision,
+		WorkingDirectory:    wire.WorkingDirectory,
+		Contexts:            contexts,
+		Tools:               definitions,
+		Commands:            slices.Clone(wire.Commands),
 		Config: (&EnvironmentConfig{
 			Options:             wire.Config.Options.Clone(),
 			AllowedCommands:     slices.Clone(wire.Config.AllowedCommands),

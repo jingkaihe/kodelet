@@ -2,6 +2,7 @@ package conversations
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -141,6 +142,28 @@ func TestApplyDisplayToLLMMessages(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, "/init focus", got[0].Content)
 	assert.Equal(t, "full recipe prompt", got[1].Content)
+}
+
+func TestResourceReloadDisplaySurvivesPersistence(t *testing.T) {
+	const modelText = "Workspace resources reloaded. Use refreshed tools. [reload-id]"
+	metadata := AddMessageDisplay(nil, modelText, "Resources reloaded", MessageDisplayKindResourceReload, "")
+	encoded, err := json.Marshal(metadata)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(encoded, &metadata))
+	for _, role := range []string{"user", "assistant"} {
+		messages := []StreamableMessage{{Kind: "text", Role: role, Content: modelText, RawItem: json.RawMessage(`{"content":"hidden feedback"}`)}}
+		got := ApplyDisplayToStreamableMessages(messages, metadata)
+		require.Len(t, got, 1)
+		assert.Equal(t, MessageDisplayKindResourceReload, got[0].Kind)
+		assert.Equal(t, MessageDisplayKey(modelText), got[0].ResourceReloadID)
+		assert.Equal(t, "assistant", got[0].Role)
+		assert.Nil(t, got[0].RawItem, "hidden model feedback must not leak into rich history rendering")
+		assert.Equal(t, "Resources reloaded", got[0].Content)
+		assert.Equal(t, modelText, messages[0].Content, "model history is unchanged")
+		assert.Contains(t, RenderMarkdown(got, nil, MarkdownOptions{}), "### Resources reloaded")
+		assert.NotContains(t, RenderMarkdown(got, nil, MarkdownOptions{}), "Use refreshed tools")
+		assert.Equal(t, []llmtypes.Message{{Role: "assistant", Content: "Resources reloaded"}}, ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: role, Content: modelText}}, metadata))
+	}
 }
 
 func TestApplyDisplayPreservesMessagesWithoutOverrides(t *testing.T) {

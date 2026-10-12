@@ -1363,13 +1363,14 @@ const (
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Kind          string                     `json:"kind,omitempty"`
-	Compaction    *llmtypes.CompactionMarker `json:"compaction,omitempty"`
-	Role          string                     `json:"role"`
-	Content       any                        `json:"content"`
-	ToolCalls     []WebToolCall              `json:"toolCalls,omitempty"`
-	ThinkingText  string                     `json:"thinkingText,omitempty"`
-	ThinkingTexts []string                   `json:"thinkingTexts,omitempty"`
+	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`
+	Kind             string                     `json:"kind,omitempty"`
+	Compaction       *llmtypes.CompactionMarker `json:"compaction,omitempty"`
+	Role             string                     `json:"role"`
+	Content          any                        `json:"content"`
+	ToolCalls        []WebToolCall              `json:"toolCalls,omitempty"`
+	ThinkingText     string                     `json:"thinkingText,omitempty"`
+	ThinkingTexts    []string                   `json:"thinkingTexts,omitempty"`
 }
 
 // WebContentBlock represents a typed content block rendered by the web UI.
@@ -1828,9 +1829,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 			}
 		}
 
-		if role == "user" {
-			webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
-		}
+		webMsg = applyWebMessageDisplay(webMsg, metadata)
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
 		// pretty much neglecting the user tool call feedback as it is covered by the toolresult block at
@@ -1871,9 +1870,7 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 			} else {
 				webMsg.Content = msg.Content
 			}
-			if webMsg.Role == "user" {
-				webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
-			}
+			webMsg = applyWebMessageDisplay(webMsg, metadata)
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
 			webMsg.ThinkingTexts = []string{msg.Content}
@@ -2609,6 +2606,28 @@ func webImageSource(source *chat.ChatImageSource) *WebImageSource {
 		Data:      source.Data,
 		MediaType: source.MediaType,
 	}
+}
+
+func applyWebMessageDisplay(message WebMessage, metadata map[string]any) WebMessage {
+	var text string
+	switch content := message.Content.(type) {
+	case string:
+		text = content
+	case []WebContentBlock:
+		if len(content) == 1 && content[0].Type == "text" {
+			text = content[0].Text
+		}
+	}
+	if display, ok := conversations.LookupMessageDisplay(metadata, text); ok && display.Kind == conversations.MessageDisplayKindResourceReload {
+		return WebMessage{
+			Kind: display.Kind, Role: "assistant", Content: display.Text,
+			ResourceReloadID: conversations.MessageDisplayKey(text),
+		}
+	}
+	if message.Role == "user" {
+		message.Content = applyWebContentDisplay(message.Content, metadata)
+	}
+	return message
 }
 
 func applyWebContentDisplay(content any, metadata map[string]any) any {

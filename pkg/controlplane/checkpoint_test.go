@@ -126,6 +126,84 @@ func TestReloadPreservesConversationWithoutModelCalls(t *testing.T) {
 	assert.Zero(t, calls.Load())
 }
 
+func TestEmbeddedChatAdvertisesAndExecutesReloadResources(t *testing.T) {
+	checkpointTestModelPolicy(t)
+	config := embeddedRunnerTestConfig(t)
+	config.EmbeddedRunner.Settings["code_mode"] = "only"
+	t.Setenv("OPENAI_API_KEY", "reload-local-test-key")
+	contextPath := filepath.Join(config.EmbeddedRunner.Workspace, "AGENTS.md")
+	require.NoError(t, os.WriteFile(contextPath, []byte("Before resource reload."), 0o600))
+	var calls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []struct {
+				Function struct{ Name string }
+			}
+			Messages json.RawMessage
+		}
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&request)) {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		var names []string
+		for _, tool := range request.Tools {
+			names = append(names, tool.Function.Name)
+		}
+		assert.ElementsMatch(t, []string{"code_execute", "reload_resources"}, names)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls.Add(1) == 1 {
+			assert.Contains(t, string(request.Messages), "Before resource reload.")
+			assert.NoError(t, os.WriteFile(contextPath, []byte("After resource reload."), 0o600))
+			_, _ = fmt.Fprint(w, `data: {"id":"reply-1","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"reload-call","type":"function","function":{"name":"reload_resources","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`)
+			return
+		}
+		assert.Contains(t, string(request.Messages), "After resource reload.")
+		assert.Contains(t, string(request.Messages), "Workspace resources reloaded.")
+		_, _ = fmt.Fprint(w, `data: {"id":"reply-2","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Continued after reload."},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`)
+	}))
+	defer provider.Close()
+	viper.Set("profiles.work", map[string]any{
+		"provider": "openai", "model": "gpt-4o", "weak_model": "gpt-4o",
+		"openai": map[string]any{"base_url": provider.URL, "api_mode": "chat_completions", "api_key_env_var": "OPENAI_API_KEY"},
+	})
+	server, endpoint, _ := startEmbeddedRunnerTestServer(t, config, "127.0.0.1:0")
+	require.Eventually(t, func() bool { return server.EmbeddedRunnerStatus().Ready }, 5*time.Second, 10*time.Millisecond)
+	client, err := chat.NewClient(endpoint, "web-secret", server.EmbeddedRunnerStatus().RunnerID)
+	require.NoError(t, err)
+	sink := &recordingChatSink{}
+	id, err := client.Run(t.Context(), chat.ChatRequest{
+		ConversationID: "self-reload", TurnID: "reload-turn", Message: "Reload resources and continue.",
+		CWD: config.EmbeddedRunner.Workspace,
+	}, sink)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, calls.Load())
+	var markers int
+	for _, event := range sink.Events() {
+		if event.Kind == "resources-reloaded" {
+			markers++
+			assert.NotEmpty(t, event.ResourceReloadID)
+		}
+	}
+	assert.Equal(t, 1, markers)
+	history, err := client.LoadConversation(t.Context(), id)
+	require.NoError(t, err)
+	var savedMarkers int
+	for _, message := range history.Messages {
+		if message.Kind == "resources-reloaded" {
+			savedMarkers++
+		}
+	}
+	assert.Equal(t, 1, savedMarkers)
+}
+
 func TestFirstTurnCheckpointVisibleBeforeSessionStartAcrossPlacements(t *testing.T) {
 	for _, placement := range []string{"embedded", "standalone"} {
 		t.Run(placement, func(t *testing.T) {

@@ -77,6 +77,21 @@ func TestRenderCompactionDetails(t *testing.T) {
 	assert.False(t, m.entries[0].blocks[0].expanded)
 }
 
+func TestRenderResourceReloadMarker(t *testing.T) {
+	m := newModel(t.Context(), Config{})
+	t.Cleanup(m.cancel)
+	m.width, m.height = 80, 24
+	m.resize()
+	m.entries = []chatEntry{resourceReloadEntry("reload-1")}
+
+	content, regions := m.renderTranscript()
+	assert.Contains(t, content, thoughtHeaderStyle.Render("✓ Resources reloaded"))
+	assert.Equal(t, "✓ Resources reloaded\n", xansi.Strip(content))
+	assert.Empty(t, regions, "reload markers have no expandable details")
+	m.toggleAllDetails()
+	assert.False(t, m.entries[0].blocks[0].expanded)
+}
+
 func TestRenderTranscriptImageAttachments(t *testing.T) {
 	m := newModel(context.Background(), Config{ServerURL: "https://connected.example/kodelet"})
 	t.Cleanup(m.cancel)

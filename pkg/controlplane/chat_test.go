@@ -30,6 +30,10 @@ func (c *browserPolicyTestController) ExecuteTool(_ context.Context, params runn
 	return runnerpayload.ToolExecuteResult{}, nil
 }
 
+func (c *browserPolicyTestController) ReloadRun(context.Context, protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	return runnerpayload.RunReloadResult{Manifest: c.manifest}, nil
+}
+
 func TestBrowserPolicyControllerFiltersAndEnforces(t *testing.T) {
 	for _, allowed := range []bool{false, true} {
 		inner := &browserPolicyTestController{manifest: runnerpayload.Manifest{
@@ -49,6 +53,9 @@ func TestBrowserPolicyControllerFiltersAndEnforces(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, digest, manifest.Digest)
 		}
+		reloaded, err := controller.ReloadRun(t.Context(), protocol.RunReloadParams{})
+		require.NoError(t, err)
+		assert.Equal(t, manifest, reloaded.Manifest, "reload must preserve the server's browser policy")
 		_, err = controller.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{Name: "browser"}, nil)
 		if allowed {
 			require.NoError(t, err)

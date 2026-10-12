@@ -91,6 +91,7 @@ type ChatImageURLSource struct {
 
 // ChatEvent is a single streaming chat event.
 type ChatEvent struct {
+	ResourceReloadID  string                          `json:"resource_reload_id,omitempty"`
 	Kind              string                          `json:"kind"`
 	ConversationID    string                          `json:"conversation_id,omitempty"`
 	ConversationName  string                          `json:"conversation_name,omitempty"`
@@ -618,19 +619,27 @@ func runDefaultChat(
 			if err := prepareThread(ctx); err != nil {
 				return sessionID, err
 			}
-			if err := saveDirectCommandResponse(ctx, thread, message, commandResult.Response, imageInputs); err != nil {
+			response := commandResult.Response
+			var reloadMarkerID string
+			if reload {
+				response += "\n\n[Resource reload ID: " + convtypes.GenerateID() + "]"
+				metadata := conversationservice.AddMessageDisplay(thread.GetMetadata(), response, "Resources reloaded", conversationservice.MessageDisplayKindResourceReload, "")
+				thread.SetMetadataValue(conversationservice.MessageDisplayMetadataKey, metadata[conversationservice.MessageDisplayMetadataKey])
+				reloadMarkerID = conversationservice.MessageDisplayKey(response)
+			}
+			if err := saveDirectCommandResponse(ctx, thread, message, response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
 				logger.G(ctx).WithError(err).Debug("failed to send extension command conversation event")
 			}
-			if strings.TrimSpace(commandResult.Response) != "" {
+			if !reload && strings.TrimSpace(commandResult.Response) != "" {
 				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
 					return sessionID, err
 				}
 			}
 			if reload {
-				if err := sink.Send(ChatEvent{Kind: "resources-reloaded", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory}); err != nil {
+				if err := sink.Send(ChatEvent{Kind: "resources-reloaded", ResourceReloadID: reloadMarkerID, ConversationID: sessionID, CWD: llmConfig.WorkingDirectory}); err != nil {
 					return sessionID, err
 				}
 			}
@@ -1559,6 +1568,10 @@ func (h *chatMessageHandler) HandleCompaction(marker llmtypes.CompactionMarker, 
 		Compaction:        &marker,
 		BeforeCurrentUser: beforeCurrentUser,
 	})
+}
+
+func (h *chatMessageHandler) HandleResourcesReloaded(markerID string) {
+	h.sendEvent(ChatEvent{Kind: "resources-reloaded", ResourceReloadID: markerID, ConversationID: h.conversationID})
 }
 
 func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {

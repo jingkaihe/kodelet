@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -20,6 +22,61 @@ type environmentThread interface {
 
 type environmentConfigThread interface {
 	ApplyEnvironmentConfig(agentenv.EnvironmentConfig)
+}
+
+// HandlePendingEnvironmentReload runs only between complete model/tool rounds.
+// A refusal is feedback for the model; an uncertain handoff must stop the run.
+func HandlePendingEnvironmentReload(ctx context.Context, thread llmtypes.Thread, handler llmtypes.MessageHandler, noSave bool) error {
+	environment := EnvironmentForThread(thread)
+	reloader, ok := environment.(interface {
+		HasPendingReload() bool
+		ReloadPendingResources(context.Context) (bool, string, error)
+	})
+	if !ok || !environment.IsOpen() || !reloader.HasPendingReload() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	reloaded, message, err := reloader.ReloadPendingResources(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to reload environment")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if reloaded {
+		// OpenEnvironment reapplies the already-open environment's new snapshot
+		// without replacing the thread, model client, or run identity.
+		if _, err := OpenEnvironment(ctx, thread); err != nil {
+			return err
+		}
+		clearAllowedToolsMetadata(thread)
+		// Keep completion in model context, but project it as a host marker in
+		// transcripts. A unique message prevents repeated reloads sharing an ID.
+		message += "\n\n[Resource reload ID: " + convtypes.GenerateID() + "]"
+		metadata := conversations.AddMessageDisplay(thread.GetMetadata(), message, "Resources reloaded", conversations.MessageDisplayKindResourceReload, "")
+		thread.SetMetadataValue(conversations.MessageDisplayMetadataKey, metadata[conversations.MessageDisplayMetadataKey])
+		thread.AddUserMessage(ctx, message)
+		if thread.IsPersisted() && !noSave {
+			// As with compaction markers, save before announcing completion so a
+			// later turn hook failure does not erase the marker on history refresh.
+			if err := thread.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+				logger.G(ctx).WithError(err).Warn("failed to save resource reload marker")
+			}
+		}
+		if reloadHandler, ok := handler.(llmtypes.ResourcesReloadedMessageHandler); ok {
+			reloadHandler.HandleResourcesReloaded(conversations.MessageDisplayKey(message))
+		}
+		return nil
+	}
+	if message != "" {
+		thread.AddUserMessage(ctx, message)
+		if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+			userHandler.HandleUserMessage(message, nil)
+		}
+	}
+	return nil
 }
 
 // OpenEnvironment opens and pins the environment used by one top-level SendMessage call.

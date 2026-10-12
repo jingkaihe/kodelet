@@ -924,6 +924,126 @@ func TestOpenRunReservationFailureRollsBackPendingAffinityAndCapacity(t *testing
 	assert.Empty(t, runner.ActiveRunID)
 }
 
+func TestReloadRunFencesAndPersistsReplacement(t *testing.T) {
+	for _, outcome := range []string{"success", "refusal", "invalid revision", "transport error", "persistence error", "canceled", "cancel error", "close error"} {
+		t.Run(outcome, func(t *testing.T) {
+			registry := newTestRegistry(t)
+			persistence := &testPersistence{}
+			registry.persistence = persistence
+			link := newFakeLink()
+			registration, err := registry.Register(testRegisterParams("reload-host", "/work/project"), link)
+			require.NoError(t, err)
+			configureManifestLink(t, link, registration)
+			markRunnerReady(t, registry, registration)
+			params := testRunOpenParams("reload-run", "reload-conversation")
+			params.EnvironmentReload = true
+			manifest, err := registry.OpenRun(t.Context(), registration.RunnerID, params)
+			require.NoError(t, err)
+			_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("other-run", "other-conversation"))
+			require.NoError(t, err)
+			before, _ := registry.Run(params.RunID)
+			request := protocol.RunReloadParams{RunID: params.RunID, ExpectedEnvironmentRevision: 1}
+			_, finish, err := registry.beginEnvironmentOperation(params.RunID, 1)
+			require.NoError(t, err)
+			busy, err := registry.ReloadRun(t.Context(), request)
+			require.NoError(t, err)
+			assert.Contains(t, busy.Refusal, "operations are active")
+			finish()
+			var cleanupCalls []string
+			link.call = func(ctx context.Context, method string, callParams any, result any) error {
+				switch method {
+				case protocol.MethodRunReload:
+					_, err := registry.ReloadRun(ctx, request)
+					assert.ErrorContains(t, err, "reloading")
+					_, err = registry.ExecuteTool(ctx, runnerpayload.ToolExecuteParams{RunID: params.RunID, EnvironmentRevision: 1}, nil)
+					assert.ErrorContains(t, err, "reloading")
+					err = registry.CallRun(ctx, params.RunID, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{RunID: params.RunID, EnvironmentRevision: 1}, nil)
+					assert.ErrorContains(t, err, "reloading")
+					require.NoError(t, registry.CallRun(ctx, "other-run", protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{RunID: "other-run"}, nil))
+					err = registry.CallRun(ctx, params.RunID, protocol.MethodUISurfaceInput, runnerpayload.UISurfaceInputParams{RunID: params.RunID}, nil)
+					assert.ErrorContains(t, err, "reloading")
+					replacement := manifest
+					replacement.EnvironmentRevision++
+					*result.(*runnerpayload.RunReloadResult) = runnerpayload.RunReloadResult{Manifest: replacement}
+					switch outcome {
+					case "refusal":
+						result.(*runnerpayload.RunReloadResult).Refusal = "background workers retained"
+					case "invalid revision":
+						result.(*runnerpayload.RunReloadResult).Manifest.EnvironmentRevision = 1
+					case "transport error", "cancel error", "close error":
+						return errors.New("lost reply")
+					case "persistence error":
+						persistence.saveRunnerAndRunErr = errors.New("disk full")
+					case "canceled":
+						require.NoError(t, registry.CancelRun(ctx, params.RunID, "user stopped"))
+					}
+				case protocol.MethodRunCancel:
+					cleanupCalls = append(cleanupCalls, method)
+					assert.Equal(t, params.RunID, callParams.(protocol.RunCancelParams).RunID)
+					if outcome != "canceled" {
+						_, bounded := ctx.Deadline()
+						assert.True(t, bounded)
+					}
+					if outcome == "cancel error" {
+						return context.DeadlineExceeded
+					}
+				case protocol.MethodRunClose:
+					cleanupCalls = append(cleanupCalls, method)
+					assert.Equal(t, params.RunID, callParams.(protocol.RunCloseParams).RunID)
+					_, bounded := ctx.Deadline()
+					assert.True(t, bounded)
+					assert.NoError(t, ctx.Err(), "close gets a fresh cleanup deadline")
+					if outcome == "close error" {
+						return errors.New("close failed")
+					}
+				}
+				return nil
+			}
+			result, err := registry.ReloadRun(t.Context(), request)
+			persistence.saveRunnerAndRunErr = nil
+			after, _ := registry.Run(params.RunID)
+			switch outcome {
+			case "success":
+				require.NoError(t, err)
+				assert.Equal(t, manifest.Digest, result.Manifest.Digest, "revision is independent of schema digest")
+				var persisted runnerpayload.Manifest
+				require.NoError(t, json.Unmarshal([]byte(after.ManifestJSON), &persisted))
+				assert.Equal(t, int64(2), persisted.EnvironmentRevision)
+				assert.Equal(t, RunStatusRunning, after.Status)
+				_, err = registry.ReloadRun(t.Context(), request)
+				assert.ErrorContains(t, err, "revision is stale")
+				err = registry.CallRun(t.Context(), params.RunID, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{EnvironmentRevision: 1}, nil)
+				assert.ErrorContains(t, err, "revision is stale")
+				require.NoError(t, registry.CallRun(t.Context(), params.RunID, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{EnvironmentRevision: 2}, nil))
+				require.NoError(t, registry.CallRun(t.Context(), params.RunID, protocol.MethodUISurfaceInput, runnerpayload.UISurfaceInputParams{RunID: params.RunID}, nil))
+			case "refusal":
+				require.NoError(t, err)
+				assert.NotEmpty(t, result.Refusal)
+				assert.Equal(t, before, after)
+			default:
+				require.Error(t, err)
+				assert.Equal(t, before.ManifestJSON, after.ManifestJSON, "never publish an uncertain replacement")
+				expectedCleanup := []string{protocol.MethodRunCancel, protocol.MethodRunClose}
+				switch outcome {
+				case "canceled":
+					expectedCleanup = append([]string{protocol.MethodRunCancel}, expectedCleanup...)
+					assert.Equal(t, RunStatusCanceled, after.Status)
+				case "cancel error", "close error":
+					assert.Equal(t, RunStatusLost, after.Status)
+					assert.ErrorContains(t, err, "uncertain")
+					assert.ErrorContains(t, err, "lost reply")
+				default:
+					assert.Equal(t, RunStatusFailed, after.Status)
+				}
+				assert.Equal(t, expectedCleanup, cleanupCalls, "cancel retained workers before closing, even if cancellation fails")
+			}
+			other, _ := registry.Run("other-run")
+			assert.Equal(t, RunStatusRunning, other.Status)
+			assert.False(t, link.isClosed(), "reload failure must not disconnect other conversations")
+		})
+	}
+}
+
 func TestOpenRunSupportsRunnerConcurrencyAndEnforcesConversationAffinity(t *testing.T) {
 	registry := newTestRegistry(t)
 	firstLink := newFakeLink()
@@ -2668,6 +2788,10 @@ func configureManifestLink(t *testing.T, link *fakeLink, registration protocol.R
 					InputSchema: map[string]any{"type": "object"},
 					Placement:   "environment",
 				}},
+			}
+			if request.EnvironmentReload {
+				manifest.EnvironmentRevision = 1
+				manifest.Capabilities.EnvironmentReload = true
 			}
 			digest, err := runnerpayload.ComputeManifestDigest(manifest)
 			require.NoError(t, err)

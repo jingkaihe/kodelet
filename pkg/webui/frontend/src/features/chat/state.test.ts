@@ -815,6 +815,52 @@ describe('applyChatStreamEvent', () => {
   });
 });
 
+describe('resource reload history and streaming', () => {
+  it('preserves markers and subsequent text while deduplicating history replay', () => {
+    let live = applyChatStreamEvent([], { kind: 'text', content: 'Continuing.' });
+    expect(applyChatStreamEvent(live, { kind: 'resources-reloaded' })).toEqual(live);
+    const persisted: Message[] = [{ role: 'assistant', content: 'Continuing.' }];
+
+    for (const id of ['reload-1', 'reload-2']) {
+      const event = { kind: 'resources-reloaded' as const, resource_reload_id: id };
+      live = applyChatStreamEvent(live, event);
+      expect(applyChatStreamEvent(live, event)).toEqual(live);
+      live = applyChatStreamEvent(live, { kind: 'text', content: 'Continuing.' });
+      persisted.push(
+        {
+          role: 'assistant',
+          kind: 'resources-reloaded',
+          resourceReloadId: id,
+          content: 'Hidden feedback',
+        },
+        { role: 'assistant', content: 'Continuing.' }
+      );
+    }
+
+    const replayed = conversationToChatMessages({
+      id: 'reloaded',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: persisted.length,
+      messages: persisted,
+    });
+    expect(replayed).toEqual(live);
+    expect(live[0].blocks).toEqual([
+      { type: 'message', content: 'Continuing.', inProgress: false },
+      { type: 'resources-reloaded', id: 'reload-1' },
+      { type: 'message', content: 'Continuing.', inProgress: false },
+      { type: 'resources-reloaded', id: 'reload-2' },
+      { type: 'message', content: 'Continuing.', inProgress: false },
+    ]);
+    expect(
+      applyChatStreamEvent(replayed, {
+        kind: 'resources-reloaded',
+        resource_reload_id: 'reload-1',
+      })
+    ).toEqual(replayed);
+  });
+});
+
 describe('compaction history and streaming', () => {
   const apiCompaction: CompactionMarker = {
     id: 'compact-1',

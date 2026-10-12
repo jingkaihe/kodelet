@@ -12,7 +12,7 @@ import (
 func (s *Service) executeShortcut(ctx context.Context, params runnerpayload.ShortcutExecuteParams) (runnerpayload.ShortcutExecuteResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
+	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID, params.EnvironmentRevision, false)
 	if err != nil {
 		return runnerpayload.ShortcutExecuteResult{}, err
 	}

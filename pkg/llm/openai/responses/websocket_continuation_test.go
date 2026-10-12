@@ -100,6 +100,22 @@ func TestResponsesWebSocketContinuationFallsBackToFullInput(t *testing.T) {
 		assert.Equal(t, changed.Input.OfInputItemList, prepared.Input.OfInputItemList)
 	})
 
+	for _, property := range []string{"instructions", "tools"} {
+		t.Run("reloaded "+property, func(t *testing.T) {
+			changed := fullParams
+			if property == "instructions" {
+				changed.Instructions = param.NewOpt("reloaded context")
+			} else {
+				changed.Tools = []openairesponses.ToolUnionParam{{OfFunction: &openairesponses.FunctionToolParam{
+					Name: "new_tool", Parameters: map[string]any{"type": "object"},
+				}}}
+			}
+			prepared := continuation.prepare(changed, 3)
+			assert.False(t, prepared.PreviousResponseID.Valid())
+			assert.Equal(t, changed.Input.OfInputItemList, prepared.Input.OfInputItemList)
+		})
+	}
+
 	t.Run("local history is incompatible", func(t *testing.T) {
 		incompatible := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{nextUser})
 		prepared := continuation.prepare(incompatible, 3)

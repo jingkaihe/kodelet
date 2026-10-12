@@ -8,13 +8,174 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/ssestream"
+	openairesponses "github.com/openai/openai-go/v3/responses"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type reloadCheckpointEnvironment struct {
+	agentenv.UtilityEnvironment
+	manifest agentenv.Manifest
+	pending  bool
+	opened   int
+	turnEnd  int
+	reload   func() (bool, string, error)
+}
+
+func (e *reloadCheckpointEnvironment) Open(ctx context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
+	e.opened++
+	_, err := e.UtilityEnvironment.Open(ctx, spec)
+	return e.Manifest(), err
+}
+
+func (e *reloadCheckpointEnvironment) Manifest() agentenv.Manifest { return e.manifest.Clone() }
+func (e *reloadCheckpointEnvironment) HasPendingReload() bool      { return e.pending }
+func (e *reloadCheckpointEnvironment) ReloadPendingResources(context.Context) (bool, string, error) {
+	e.pending = false
+	return e.reload()
+}
+
+func (*reloadCheckpointEnvironment) ProcessAgentInit(_ context.Context, prompt string, _ []string) (agentenv.AgentInitDecision, error) {
+	return agentenv.AgentInitDecision{SystemPrompt: prompt}, nil
+}
+
+func (e *reloadCheckpointEnvironment) DispatchTurnEnd(_ context.Context, _ string, turn int) error {
+	e.turnEnd = turn
+	return nil
+}
+
+type reloadCheckpointHandler struct {
+	compactionCaptureHandler
+	reloads      int
+	reloadID     string
+	userMessages []string
+}
+
+func (h *reloadCheckpointHandler) HandleResourcesReloaded(markerID string) {
+	h.reloads++
+	h.reloadID = markerID
+}
+
+func (h *reloadCheckpointHandler) HandleUserMessage(content string, _ []string) {
+	h.userMessages = append(h.userMessages, content)
+}
+
+func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		maxTurns int
+		refused  bool
+		failed   bool
+	}{
+		{name: "next round uses fresh environment", maxTurns: 2},
+		{name: "refusal continues with old environment", maxTurns: 2, refused: true},
+		{name: "uncertain handoff stops the run", maxTurns: 2, failed: true},
+		{name: "reload does not add model turns", maxTurns: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "openai", Model: "gpt-4.1", AllowedTools: []string{"bash", "file_read"},
+				Retry: llmtypes.RetryConfig{Attempts: 1},
+			}
+			thread := &Thread{Thread: base.NewThread(config, "same-conversation")}
+			store := &mockResponsesConversationStore{}
+			thread.Store, thread.Persisted = store, true
+			environment := &reloadCheckpointEnvironment{manifest: agentenv.Manifest{
+				Config: &agentenv.EnvironmentConfig{SystemPromptContent: "old prompt"},
+				Tools:  []agentenv.ToolDefinition{{Name: "bash", Tool: &tools.BashTool{}}},
+			}}
+			thread.SetEnvironment(environment)
+			handler := &reloadCheckpointHandler{}
+			var requests []openairesponses.ResponseNewParams
+			batchComplete := false
+			environment.reload = func() (bool, string, error) {
+				assert.True(t, batchComplete)
+				assert.Equal(t, 1, environment.turnEnd)
+				assert.False(t, handler.done, "reload must not end the visible run")
+				if test.failed {
+					return false, "", errors.New("uncertain reload")
+				}
+				if test.refused {
+					return false, "Reload refused: background workers retained", nil
+				}
+				environment.manifest.Config.SystemPromptContent = "new prompt"
+				environment.manifest.Tools = []agentenv.ToolDefinition{{Name: "file_read", Tool: &tools.FileReadTool{}}}
+				return true, "Resources reloaded", nil
+			}
+			thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+				if len(requests) == 1 && !test.refused {
+					require.NotEmpty(t, store.savedRecords)
+					saved := store.savedRecords[len(store.savedRecords)-1]
+					assert.Contains(t, string(saved.RawMessages), "[Resource reload ID:")
+					assert.Contains(t, saved.Metadata, conversations.MessageDisplayMetadataKey, "marker must be durable before the next model turn")
+				}
+				requests = append(requests, params)
+				return nil
+			}
+			thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+				if len(requests) == 1 {
+					environment.pending = true
+					thread.SetMetadataValue("allowed_tools", []string{"bash"})
+					thread.AddAssistantMessage(t.Context(), "requesting reload")
+					return processStreamResult{complete: func(context.Context) (processStreamResult, error) {
+						batchComplete = true
+						return processStreamResult{responseCompleted: true, toolsUsed: true}, nil
+					}, responseCompleted: true}, nil
+				}
+				assert.False(t, handler.done)
+				return processStreamResult{responseCompleted: true}, nil
+			}
+			_, err := thread.SendMessage(t.Context(), "reload and continue", handler, llmtypes.MessageOpt{MaxTurns: test.maxTurns})
+			assert.Equal(t, 1, environment.opened, "reload must not reopen the run")
+			assert.Equal(t, config.AllowedTools, thread.GetConfig().AllowedTools)
+			assert.Equal(t, config.Model, thread.GetConfig().Model)
+			assert.Equal(t, "same-conversation", thread.GetConversationID())
+			if test.refused || test.failed {
+				assert.Zero(t, handler.reloads)
+			} else {
+				assert.Equal(t, 1, handler.reloads)
+				assert.NotEmpty(t, handler.reloadID)
+				assert.Empty(t, handler.userMessages, "completion is a marker, not a visible user message")
+				assert.NotContains(t, thread.GetMetadata(), "allowed_tools")
+			}
+			if test.failed {
+				require.ErrorContains(t, err, "uncertain reload")
+				assert.Len(t, requests, 1)
+				assert.False(t, handler.done)
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, handler.done)
+			require.Len(t, requests, test.maxTurns)
+			assert.Equal(t, "old prompt", requests[0].Instructions.Value)
+			if test.maxTurns == 2 {
+				wantPrompt, wantTool, feedback := "new prompt", "file_read", "Resources reloaded"
+				if test.refused {
+					wantPrompt, wantTool, feedback = "old prompt", "bash", "Reload refused: background workers retained"
+				}
+				assert.Equal(t, wantPrompt, requests[1].Instructions.Value)
+				require.Len(t, requests[1].Tools, 1)
+				assert.Equal(t, wantTool, requests[1].Tools[0].OfFunction.Name)
+				modelFeedback := extractInputItemText(requests[1].Input.OfInputItemList[len(requests[1].Input.OfInputItemList)-1])
+				assert.Contains(t, modelFeedback, feedback)
+				if !test.refused {
+					display := conversations.ApplyDisplayToStreamableMessages([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: modelFeedback}}, thread.GetMetadata())
+					require.Len(t, display, 1)
+					assert.Equal(t, "resources-reloaded", display[0].Kind)
+					assert.Equal(t, handler.reloadID, display[0].ResourceReloadID)
+					assert.Equal(t, "Resources reloaded", display[0].Content)
+				}
+			}
+		})
+	}
+}
 
 type cancelCheckpointEnvironment struct {
 	agentenv.UtilityEnvironment

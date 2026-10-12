@@ -10,8 +10,9 @@ export interface CompactionMarker {
 export interface Message {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
-  kind?: 'context-compacted';
+  kind?: 'context-compacted' | 'resources-reloaded';
   compaction?: CompactionMarker;
+  resourceReloadId?: string;
   toolCalls?: ToolCall[];
   tool_calls?: ToolCall[]; // Alternative format
   thinkingText?: string; // For Claude thinking blocks
@@ -539,6 +540,7 @@ export interface ChatStreamEvent {
   delta?: string;
   content?: string | ContentBlock[];
   compaction?: CompactionMarker;
+  resource_reload_id?: string;
   before_current_user?: boolean;
   usage?: Usage;
   tool_name?: string;
@@ -635,6 +637,10 @@ export interface ChatRenderMessage {
 }
 
 export type ChatAssistantBlock =
+  | {
+      type: 'resources-reloaded';
+      id: string;
+    }
   | {
       type: 'compaction';
       compaction: CompactionMarker;

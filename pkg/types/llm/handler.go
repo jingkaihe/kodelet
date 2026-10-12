@@ -86,6 +86,11 @@ type CompactionMessageHandler interface {
 	HandleCompaction(marker CompactionMarker, beforeCurrentUser bool)
 }
 
+// ResourcesReloadedMessageHandler announces completion with a stable transcript marker ID and refreshes discovery.
+type ResourcesReloadedMessageHandler interface {
+	HandleResourcesReloaded(markerID string)
+}
+
 // MessageEvent represents an event from processing a message
 type MessageEvent struct {
 	Type    string

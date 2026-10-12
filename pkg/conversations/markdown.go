@@ -15,15 +15,16 @@ import (
 
 // StreamableMessage represents a normalized entry from a persisted conversation.
 type StreamableMessage struct {
-	Compaction *llmtypes.CompactionMarker `json:"compaction,omitempty"`
-	Kind       string                     `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"
-	Role       string                     `json:"role"`                 // "user", "assistant", "system"
-	Content    string                     `json:"content,omitempty"`    // Text content
-	RawItem    json.RawMessage            `json:"rawItem,omitempty"`    // Original provider item when needed for rich content
-	ToolName   string                     `json:"toolName,omitempty"`   // For tool use/result
-	ToolCallID string                     `json:"toolCallId,omitempty"` // For matching tool results
-	Input      string                     `json:"input,omitempty"`      // For tool use (JSON string)
-	ToolOutput string                     `json:"toolOutput,omitempty"` // Display output retained alongside structured results
+	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`
+	Compaction       *llmtypes.CompactionMarker `json:"compaction,omitempty"`
+	Kind             string                     `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"
+	Role             string                     `json:"role"`                 // "user", "assistant", "system"
+	Content          string                     `json:"content,omitempty"`    // Text content
+	RawItem          json.RawMessage            `json:"rawItem,omitempty"`    // Original provider item when needed for rich content
+	ToolName         string                     `json:"toolName,omitempty"`   // For tool use/result
+	ToolCallID       string                     `json:"toolCallId,omitempty"` // For matching tool results
+	Input            string                     `json:"input,omitempty"`      // For tool use (JSON string)
+	ToolOutput       string                     `json:"toolOutput,omitempty"` // Display output retained alongside structured results
 }
 
 const (
@@ -151,6 +152,12 @@ func RenderMarkdown(
 
 		if renderedMessages > 0 {
 			output.WriteString("\n")
+		}
+
+		if msg.Kind == MessageDisplayKindResourceReload {
+			output.WriteString("### Resources reloaded\n")
+			renderedMessages++
+			continue
 		}
 
 		if msg.Kind == "context-compacted" && msg.Compaction != nil {

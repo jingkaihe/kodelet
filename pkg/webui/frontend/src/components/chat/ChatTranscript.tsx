@@ -321,6 +321,28 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const block = blocks[blockIndex];
 
+      if (block.type === 'resources-reloaded') {
+        renderedBlocks.push(
+          <div
+            key={`resources-reloaded-${block.id}`}
+            className="activity-stack"
+            data-resource-reload-id={block.id}
+          >
+            <div className="activity-card activity-card-thinking">
+              <div className="tool-summary activity-summary">
+                <span className="activity-marker" aria-hidden="true">
+                  <Check size={14} />
+                </span>
+                <span className="tool-summary-text">
+                  <span className="tool-summary-label">Resources reloaded</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+        continue;
+      }
+
       if (block.type === 'compaction') {
         const { compaction } = block;
         renderedBlocks.push(

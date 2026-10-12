@@ -52,6 +52,20 @@ func (c profileRegisteringController) OpenRun(ctx context.Context, runnerID stri
 	return manifest, nil
 }
 
+func (c profileRegisteringController) ReloadRun(ctx context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	result, err := c.RemoteController.ReloadRun(ctx, params)
+	if err != nil || result.Refusal != "" {
+		return result, err
+	}
+	if err := c.server.registerExtensionProfiles(ctx, result.Manifest); err != nil {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = c.CloseRun(closeCtx, params.RunID, protocol.RunStatusFailed, err)
+		return runnerpayload.RunReloadResult{}, errors.Wrap(err, "failed to register reloaded extension profiles")
+	}
+	return result, nil
+}
+
 func (s *Server) registerExtensionProfiles(ctx context.Context, manifest runnerpayload.Manifest) error {
 	if len(manifest.Profiles) == 0 {
 		return nil

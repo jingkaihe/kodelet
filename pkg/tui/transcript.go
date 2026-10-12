@@ -40,6 +40,11 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 			renderedAssistantBlock := false
 			for blockIdx, block := range entry.blocks {
 				switch block.kind {
+				case blockResourcesReloaded:
+					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
+					b.WriteString(thoughtHeaderStyle.Render("✓ Resources reloaded"))
+					b.WriteString("\n")
+					line++
 				case blockCompaction:
 					if block.compaction == nil {
 						continue

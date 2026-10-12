@@ -39,6 +39,10 @@ func (c *fakeRemoteController) OpenRun(_ context.Context, runnerID string, param
 	return c.manifest, c.openErr
 }
 
+func (*fakeRemoteController) ReloadRun(context.Context, protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	return runnerpayload.RunReloadResult{}, errors.New("reload not supported")
+}
+
 func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method string, params any, result any) error {
 	c.calls = append(c.calls, method)
 	if c.callErr != nil {
@@ -133,6 +137,119 @@ func assignRemoteResult(target any, value any) error {
 		return err
 	}
 	return json.Unmarshal(payload, target)
+}
+
+type reloadRemoteController struct {
+	fakeRemoteController
+	reload  func(context.Context, protocol.RunReloadParams) (runnerpayload.RunReloadResult, error)
+	blocked bool
+}
+
+func (c *reloadRemoteController) ReloadRun(ctx context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	return c.reload(ctx, params)
+}
+
+func (c *reloadRemoteController) CallRun(ctx context.Context, runID, method string, params any, result any) error {
+	if value, ok := params.(runnerpayload.LifecycleDispatchParams); ok && value.Event == runnerpayload.LifecycleToolCall {
+		return assignRemoteResult(result, runnerpayload.LifecycleDispatchResult{
+			ToolInput: value.ToolInput, Blocked: c.blocked, Reason: "blocked by policy",
+		})
+	}
+	return c.fakeRemoteController.CallRun(ctx, runID, method, params, result)
+}
+
+func TestRemoteEnvironmentDeferredReload(t *testing.T) {
+	for _, outcome := range []string{"success", "refused", "failed", "canceled", "invalid manifest"} {
+		t.Run(outcome, func(t *testing.T) {
+			controller := &reloadRemoteController{fakeRemoteController: fakeRemoteController{manifest: runnerpayload.Manifest{
+				RunID: "run", EnvironmentRevision: 1, WorkingDirectory: "/workspace",
+				Capabilities: runnerpayload.EnvironmentCapabilities{EnvironmentReload: true},
+				Tools:        []runnerpayload.ToolDefinition{{Name: "old_tool"}},
+			}}}
+			environment := NewRemoteEnvironment(controller, "runner", WithRemoteRunIDGenerator(func() (string, error) { return "run", nil }))
+			manifest, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation"})
+			require.NoError(t, err)
+			require.True(t, controller.openParams.EnvironmentReload)
+			assert.Equal(t, []string{ReloadResourcesToolName}, controller.openParams.ReservedToolNames)
+			definition, ok := manifest.ToolDefinition(ReloadResourcesToolName)
+			require.True(t, ok)
+			assert.True(t, definition.ModelOnly)
+			assert.True(t, tooltypes.IsModelOnly(definition.Tool))
+			assert.Equal(t, ToolPlacementControlPlane, definition.Placement)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			called := false
+			controller.reload = func(_ context.Context, params protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+				called = true
+				assert.Equal(t, protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1}, params)
+				_, _, err := environment.activeRunSnapshot()
+				assert.ErrorContains(t, err, "reloading")
+				switch outcome {
+				case "refused":
+					return runnerpayload.RunReloadResult{Refusal: "background workers retained"}, nil
+				case "failed":
+					return runnerpayload.RunReloadResult{}, errors.New("connection lost")
+				case "canceled":
+					cancel()
+				}
+				fresh := controller.manifest
+				fresh.EnvironmentRevision = 2
+				fresh.Tools = []runnerpayload.ToolDefinition{{Name: "new_tool"}}
+				fresh.Config.SystemPromptContent = "fresh instructions"
+				if outcome == "invalid manifest" {
+					fresh.ContextFiles = []runnerpayload.ContextFile{{Path: ""}}
+				}
+				return runnerpayload.RunReloadResult{Manifest: fresh}, nil
+			}
+			request := ToolRequest{Name: ReloadResourcesToolName, Input: "{}", ToolCallID: "reload-call"}
+			controller.blocked = true
+			execution, err := environment.ExecuteTool(ctx, request, nil)
+			require.NoError(t, err)
+			assert.True(t, execution.Result.IsError())
+			assert.False(t, environment.HasPendingReload())
+			controller.blocked = false
+			execution, err = environment.ExecuteTool(ctx, request, nil)
+			require.NoError(t, err)
+			assert.Contains(t, execution.Result.GetResult(), "Reload requested")
+			assert.False(t, called, "tool only queues; reload must not run inside its own batch")
+			require.True(t, environment.HasPendingReload())
+			reloaded, message, err := environment.ReloadPendingResources(ctx)
+			require.True(t, called)
+			assert.False(t, environment.HasPendingReload())
+			assert.Equal(t, "run", environment.RunID())
+			assert.Equal(t, int64(1), manifest.EnvironmentRevision, "old snapshots remain immutable")
+			switch outcome {
+			case "success":
+				require.NoError(t, err)
+				assert.True(t, reloaded)
+				assert.Contains(t, message, "reloaded")
+				assert.Equal(t, int64(2), environment.Manifest().EnvironmentRevision)
+				assert.Contains(t, environment.Manifest().ToolNames(), "new_tool")
+				assert.NotContains(t, environment.Manifest().ToolNames(), "old_tool")
+				assert.Equal(t, "fresh instructions", environment.Manifest().Config.SystemPromptContent)
+				_, err = environment.ExecuteTool(ctx, ToolRequest{Name: "new_tool", Input: "{}", ToolCallID: "next"}, nil)
+				require.NoError(t, err)
+				assert.Equal(t, int64(2), controller.toolParams.EnvironmentRevision)
+			case "refused":
+				require.NoError(t, err)
+				assert.False(t, reloaded)
+				assert.Contains(t, message, "background workers")
+				assert.Equal(t, manifest, environment.Manifest())
+				_, _, err = environment.activeRunSnapshot()
+				require.NoError(t, err)
+			default:
+				require.Error(t, err)
+				reloadErr := err
+				assert.False(t, reloaded)
+				assert.Equal(t, manifest, environment.Manifest())
+				_, _, err = environment.activeRunSnapshot()
+				require.Error(t, err, "uncertain reload must fence subsequent execution")
+				require.NoError(t, environment.CloseWithError(context.WithoutCancel(ctx), reloadErr))
+				assert.Equal(t, "run", controller.canceledRunID, "failed handoff must revoke replacement workers before close")
+				assert.NotEqual(t, protocol.RunStatusSucceeded, controller.closedStatus)
+			}
+		})
+	}
 }
 
 func TestRemoteCodeExecutionCapabilityAndHostAuthorization(t *testing.T) {
@@ -336,7 +453,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, "workspace", controller.openParams.Agent.Profile)
 	assert.Equal(t, "runner-workspace", controller.openParams.Agent.EnvironmentProfile)
 	assert.Equal(t, "subagent", controller.openParams.Agent.InvokedBy)
-	assert.Empty(t, controller.openParams.ReservedToolNames)
+	assert.True(t, controller.openParams.EnvironmentReload)
+	assert.Equal(t, []string{ReloadResourcesToolName}, controller.openParams.ReservedToolNames)
 	assert.Len(t, manifest.Tools, len(controller.manifest.Tools))
 	assert.Equal(t, contextContent, manifest.Contexts["/runner/workspace/AGENTS.md"])
 	require.NotNil(t, manifest.Config)
@@ -509,7 +627,7 @@ func TestRemoteEnvironmentValidationAndFailurePaths(t *testing.T) {
 	assert.Empty(t, nilEnvironment.RunID())
 	assert.False(t, nilEnvironment.CanStreamToolUpdates())
 	require.NoError(t, nilEnvironment.Close(t.Context()))
-	_, err := nilEnvironment.activeRunID()
+	_, _, err := nilEnvironment.activeRunSnapshot()
 	require.ErrorContains(t, err, "required")
 
 	_, err = NewRemoteEnvironment(nil, "runner-1").Open(t.Context(), RunSpec{ConversationID: "conversation-1"})

@@ -195,6 +195,9 @@ func (s *Service) clearRunSurfacesLocked(runID string) {
 func (s *Service) invalidateUISurface(params runnerpayload.UISurfaceInvalidateParams) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if run := s.runs[params.RunID]; run != nil && run.reloading {
+		return
+	}
 	key := runnerSurfaceKey{owner: extensions.UIExtensionOwner{ExtensionID: params.Owner.ExtensionID, Generation: params.Owner.Generation}, scopeID: params.ScopeID, id: params.ID}
 	if surface, ok := s.uiSurfaces[key]; ok && surface.runID == params.RunID && surface.lifecycle == params.Lifecycle {
 		delete(s.uiSurfaces, key)
@@ -381,10 +384,18 @@ func (s *Service) notifySurfaceEvent(ctx context.Context, runID string, owner ru
 	run := s.runs[runID]
 	key := runnerSurfaceKey{owner: extensions.UIExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, scopeID: scopeID, id: id}
 	surface, ok := s.uiSurfaces[key]
-	valid := run != nil && !run.closing && !run.stopping && run.ctx.Err() == nil && ok && surface.runID == runID && lifecycle != 0 && surface.lifecycle == lifecycle
+	valid := run != nil && !run.closing && !run.stopping && !run.reloading && run.ctx.Err() == nil && ok && surface.runID == runID && lifecycle != 0 && surface.lifecycle == lifecycle
+	if valid {
+		run.ops.Add(1)
+		run.environmentOps.Add(1)
+	}
 	s.mu.Unlock()
 	if !valid {
 		return errors.New("this interactive view has closed or its client disconnected")
 	}
-	return extensions.NotifyUISurfaceEvent(ctx, surface.source, lifecycle, method, request)
+	defer run.ops.Done()
+	defer run.environmentOps.Done()
+	operationCtx, finish := runOperationContext(ctx, run)
+	defer finish()
+	return extensions.NotifyUISurfaceEvent(operationCtx, surface.source, lifecycle, method, request)
 }

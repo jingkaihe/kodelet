@@ -63,6 +63,7 @@ type EnvironmentConfig struct {
 
 // EnvironmentCapabilities advertises optional runner behavior.
 type EnvironmentCapabilities struct {
+	EnvironmentReload  bool `json:"environmentReload,omitempty"`
 	CodeExecution      bool `json:"codeExecution,omitempty"`
 	ToolUpdates        bool `json:"toolUpdates"`
 	InteractiveUI      bool `json:"interactiveUI"`
@@ -80,6 +81,7 @@ type Manifest struct {
 	RunnerID            string                        `json:"runnerId"`
 	RunID               string                        `json:"runId"`
 	Generation          int64                         `json:"generation"`
+	EnvironmentRevision int64                         `json:"environmentRevision,omitempty"`
 	Digest              string                        `json:"digest"`
 	WorkingDirectory    string                        `json:"workingDirectory"`
 	ContextFiles        []ContextFile                 `json:"contextFiles"`
@@ -90,6 +92,12 @@ type Manifest struct {
 	ExtensionGeneration int64                         `json:"extensionGeneration"`
 	ExtensionCount      *int                          `json:"extensionCount,omitempty"` // Advisory; nil means unknown.
 	Capabilities        EnvironmentCapabilities       `json:"capabilities"`
+}
+
+// RunReloadResult returns a new snapshot or a non-destructive refusal.
+type RunReloadResult struct {
+	Manifest Manifest `json:"manifest"`
+	Refusal  string   `json:"refusal,omitempty"`
 }
 
 // WorkspaceDiscoverResult carries runner-owned profile definitions to the daemon.
@@ -104,6 +112,7 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.RunnerID = ""
 	manifest.RunID = ""
 	manifest.Generation = 0
+	manifest.EnvironmentRevision = 0
 	manifest.Digest = ""
 	manifest.ExtensionGeneration = 0
 	// Display-only metadata must not change execution or discovery identity.
@@ -129,14 +138,17 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 // Actual tool and shortcut calls still use the pinned run's full manifest digest.
 func ComputeDiscoveryDigest(manifest Manifest) (string, error) {
 	manifest.Tools = nil
+	// Reload is negotiated per run, not part of workspace discovery identity.
+	manifest.Capabilities.EnvironmentReload = false
 	return ComputeManifestDigest(manifest)
 }
 
 // ShortcutExecuteParams fences a shortcut to a pinned run and registration.
 type ShortcutExecuteParams struct {
-	RunID    string                      `json:"runId"`
-	Digest   string                      `json:"digest"`
-	Shortcut protocol.ShortcutDescriptor `json:"shortcut"`
+	EnvironmentRevision int64                       `json:"environmentRevision,omitempty"`
+	RunID               string                      `json:"runId"`
+	Digest              string                      `json:"digest"`
+	Shortcut            protocol.ShortcutDescriptor `json:"shortcut"`
 }
 
 // ShortcutExecuteResult returns a host action, never starts a model turn.
@@ -147,8 +159,9 @@ type ShortcutExecuteResult struct {
 
 // CommandExecuteParams routes a workspace or extension slash command.
 type CommandExecuteParams struct {
-	RunID   string `json:"runId"`
-	Message string `json:"message"`
+	EnvironmentRevision int64  `json:"environmentRevision,omitempty"`
+	RunID               string `json:"runId"`
+	Message             string `json:"message"`
 }
 
 // CommandExecuteResult is the normalized command routing result.
@@ -182,19 +195,20 @@ const (
 
 // LifecycleDispatchParams carries the typed union required by proxied lifecycle events.
 type LifecycleDispatchParams struct {
-	RunID            string                          `json:"runId"`
-	Event            LifecycleEvent                  `json:"event"`
-	Message          string                          `json:"message,omitempty"`
-	SystemPrompt     string                          `json:"systemPrompt,omitempty"`
-	AllowedTools     []string                        `json:"allowedTools,omitempty"`
-	TurnNumber       int                             `json:"turnNumber,omitempty"`
-	FinalOutput      string                          `json:"finalOutput,omitempty"`
-	TurnCount        int                             `json:"turnCount,omitempty"`
-	Messages         []llmtypes.Message              `json:"messages,omitempty"`
-	ToolName         string                          `json:"toolName,omitempty"`
-	ToolInput        json.RawMessage                 `json:"toolInput,omitempty"`
-	ToolCallID       string                          `json:"toolCallId,omitempty"`
-	StructuredResult *tooltypes.StructuredToolResult `json:"structuredResult,omitempty"`
+	EnvironmentRevision int64                           `json:"environmentRevision,omitempty"`
+	RunID               string                          `json:"runId"`
+	Event               LifecycleEvent                  `json:"event"`
+	Message             string                          `json:"message,omitempty"`
+	SystemPrompt        string                          `json:"systemPrompt,omitempty"`
+	AllowedTools        []string                        `json:"allowedTools,omitempty"`
+	TurnNumber          int                             `json:"turnNumber,omitempty"`
+	FinalOutput         string                          `json:"finalOutput,omitempty"`
+	TurnCount           int                             `json:"turnCount,omitempty"`
+	Messages            []llmtypes.Message              `json:"messages,omitempty"`
+	ToolName            string                          `json:"toolName,omitempty"`
+	ToolInput           json.RawMessage                 `json:"toolInput,omitempty"`
+	ToolCallID          string                          `json:"toolCallId,omitempty"`
+	StructuredResult    *tooltypes.StructuredToolResult `json:"structuredResult,omitempty"`
 }
 
 // LifecycleDispatchResult is the aggregate effective extension decision.
@@ -214,11 +228,12 @@ type LifecycleDispatchResult struct {
 
 // ToolExecuteParams asks the runner to perform the complete local tool lifecycle.
 type ToolExecuteParams struct {
-	RunID       string          `json:"runId"`
-	ToolCallID  string          `json:"toolCallId"`
-	Name        string          `json:"name"`
-	Input       json.RawMessage `json:"input"`
-	WantUpdates bool            `json:"wantUpdates,omitempty"`
+	EnvironmentRevision int64           `json:"environmentRevision,omitempty"`
+	RunID               string          `json:"runId"`
+	ToolCallID          string          `json:"toolCallId"`
+	Name                string          `json:"name"`
+	Input               json.RawMessage `json:"input"`
+	WantUpdates         bool            `json:"wantUpdates,omitempty"`
 	// CallableTools and ManifestDigest are host-owned, not model input.
 	CallableTools  *[]string `json:"callableTools,omitempty"`
 	ManifestDigest string    `json:"manifestDigest,omitempty"`

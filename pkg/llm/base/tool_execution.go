@@ -113,11 +113,13 @@ func executeEnvironmentTool(
 		Input:      toolInput,
 		ToolCallID: toolCallID,
 	}
-	if toolName == "code_execute" {
+	if toolName == "code_execute" || toolName == "reload_resources" {
 		if !ToolAllowedForThread(thread, toolName) {
-			result := tooltypes.NewBlockedToolResult(toolName, "code execution is not allowed for this turn")
+			result := tooltypes.NewBlockedToolResult(toolName, toolName+" is not allowed for this turn")
 			return ToolExecution{Input: toolInput, Result: result, StructuredResult: result.StructuredData()}
 		}
+	}
+	if toolName == "code_execute" {
 		callable := []string{}
 		for _, definition := range codeCallableDefinitions(thread, manifest) {
 			callable = append(callable, definition.Name)

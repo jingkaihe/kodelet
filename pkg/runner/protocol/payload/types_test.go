@@ -109,6 +109,7 @@ func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
 	manifest.RunnerID = "runner-two"
 	manifest.RunID = "run-two"
 	manifest.Generation = 2
+	manifest.EnvironmentRevision = 2
 	manifest.ExtensionGeneration = 99
 	second, err := ComputeManifestDigest(manifest)
 	require.NoError(t, err)
@@ -249,6 +250,8 @@ func TestDiscoveryDigestIgnoresToolAvailabilityButPinsPolicyAndRegistrations(t *
 	fullDigest, err := ComputeManifestDigest(manifest)
 	require.NoError(t, err)
 	execution := manifest
+	execution.EnvironmentRevision = 1
+	execution.Capabilities.EnvironmentReload = true
 	execution.Tools = []ToolDefinition{{Name: "view_image", Description: "Original detail supported"}, {Name: "spawn_agent"}}
 	execution.Shortcuts = []protocol.ShortcutDescriptor{{Key: "ctrl+alt+r", ExtensionID: "dictate", Description: "Start dictation", Generation: 2}}
 	executionDigest, err := ComputeDiscoveryDigest(execution)

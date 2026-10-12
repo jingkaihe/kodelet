@@ -37,6 +37,7 @@ const (
 	MethodRunnerManifestChanged      = "runner.manifestChanged"
 	MethodRunnerGoodbye              = "runner.goodbye"
 	MethodRunOpen                    = "run.open"
+	MethodRunReload                  = "run.reload"
 	MethodRunCheckpoint              = "run.checkpoint"
 	MethodRunClose                   = "run.close"
 	MethodRunCancel                  = "run.cancel"
@@ -396,6 +397,8 @@ type ClientCapabilities struct {
 type RunOpenParams struct {
 	// Reload requires a fresh environment and rejects retained extension resources.
 	Reload bool `json:"reload,omitempty"`
+	// EnvironmentReload opts into revision-fenced, same-run environment replacement.
+	EnvironmentReload bool `json:"environmentReload,omitempty"`
 	// CodeExecution advertises support for runner-owned nested tool capabilities.
 	CodeExecution bool `json:"codeExecution,omitempty"`
 	// BrowserEnabled is a server-authorized grant, never a workspace setting.
@@ -493,6 +496,12 @@ func (f ExtensionFrame) Validate() error {
 type RunCheckpointParams struct {
 	RunID string `json:"runId"`
 	CWD   string `json:"cwd"`
+}
+
+// RunReloadParams replaces an idle environment without ending its run.
+type RunReloadParams struct {
+	RunID                       string `json:"runId"`
+	ExpectedEnvironmentRevision int64  `json:"expectedEnvironmentRevision"`
 }
 
 // RunCloseParams releases a pinned run environment.

@@ -14,7 +14,7 @@ This document defines Kodelet's workspace-bound runner architecture. A central `
 
 The runner initiates one persistent WebSocket connection to the control plane. Messages use JSON-RPC 2.0 encoded as one JSON object per WebSocket text frame. The connection carries runner registration, heartbeats, run manifests, extension lifecycle proxy calls, tool execution and progress, cancellation, extension UI requests, and workspace-scoped Web UI operations such as Git diff and terminal sessions.
 
-At the start of each top-level run, the runner returns a versioned environment manifest. The manifest contains a snapshot of workspace context such as `AGENTS.md`, runner-scoped skill and tool definitions, extension-provided resources, and relevant workspace configuration. The control plane pins that manifest for the complete run. Changes discovered by later manifest beats apply to subsequent runs rather than mutating an active run's prompt or tool catalog.
+At the start of each top-level run, the runner returns a versioned environment manifest. The manifest contains a snapshot of workspace context such as `AGENTS.md`, runner-scoped skill and tool definitions, extension-provided resources, and relevant workspace configuration. The control plane pins that snapshot until the run ends or explicitly reloads its resources. Changes discovered by later manifest beats apply to subsequent runs rather than silently mutating an active run's prompt or tool catalog.
 
 The implementation executes runner-side tools directly in the conversation's selected host directory and permits multiple active runs per runner while retaining one active top-level run per conversation. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces, so concurrent runs can observe and modify shared host files and can contend for host-level resources.
 
@@ -54,8 +54,8 @@ Kodelet will use the following model:
 7. The runner discovers and hosts workspace context, runner-scoped skills, runner tools, workspace plugins, extension processes, extension commands, and extension lifecycle handlers.
 8. The runner keeps the existing extension subprocess protocol local: extensions continue using stdio JSON-RPC, while the runner proxies aggregate lifecycle and tool behavior to the control plane.
 9. The control plane and runner communicate over one runner-initiated WebSocket using JSON-RPC 2.0 messages.
-10. Each run begins with a full environment manifest that is pinned for the duration of that run.
-11. Host-executed model tools execute in the runner environment and are governed by runner environment policy. Placement remains explicit in tool manifests, while provider-native capabilities remain provider-owned. There are no built-in control-plane-only tools.
+10. Each run begins with a full environment manifest, replaced only through an explicit revision-fenced reload between model/tool rounds.
+11. Workspace tools execute in the runner environment and are governed by runner environment policy. Placement remains explicit in tool manifests, while provider-native capabilities remain provider-owned. The built-in `reload_resources` control-plane tool queues a reload rather than running inside the environment it replaces.
 12. Runner-owned extensions retain visibility over lifecycle events for runner-executed tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
 13. The runner executes directly in its workspace and accepts multiple concurrent run leases; one active run per conversation is still enforced.
 14. A future runner implementation creates one fresh ephemeral execution instance per top-level run without changing control-plane ownership of the agent loop.
@@ -183,9 +183,11 @@ The runner is authoritative for the workspace resources exposed to an agent:
 - workspace-local configuration relevant to the environment;
 - future ephemeral execution-instance creation.
 
-### The manifest is pinned for one run
+### The manifest is pinned until an explicit reload
 
-The full environment manifest returned by `run.open` is immutable from the control plane's perspective for the lifetime of that run. In particular, `AGENTS.md` and the model-facing tool catalog do not silently change between provider turns.
+Each full environment manifest is immutable. In particular, `AGENTS.md` and the model-facing tool catalog do not silently change between provider turns. The model-only `reload_resources` tool requests a replacement after the complete current tool batch and turn-end hooks, before the next turn's hooks, prompt, and schemas; it is not callable from code-mode scripts.
+
+Negotiated `run.reload` keeps the run ID and execution instance, checks `expectedEnvironmentRevision`, gates environment operations, and replaces only that conversation's resources. The registry validates and persists the new manifest before the host applies it. Revisions advance even when schemas and their digest are unchanged, and stale operations are rejected. Retained background leases and SDK-attached extensions cause a non-destructive refusal; uncertain or post-teardown failures stop the run. Cancellation remains available throughout. Schema and prompt changes use normal provider request rebuilding without special cache preservation.
 
 If the workspace, skills, extension registrations, or configuration change, the runner advertises a new manifest digest. The live connection generation continues to fence stale sockets; the new manifest applies to the next run. If a required capability disappears during an active run, the runner reports an environment error instead of silently changing the pinned contract.
 
@@ -387,9 +389,9 @@ For remote runs, model-facing workspace and system context comes from the pinned
 
 The runner loads configured context files, including workspace and runner-home `AGENTS.md`, when opening a run. It returns their full model-facing content, paths suitable for display, and content digests.
 
-The control plane persists the context snapshot or the complete relevant manifest with the run and uses it for every provider turn in that run. This produces deterministic run instructions and a stable prompt prefix that is friendlier to provider prompt caching than re-reading context before every turn.
+The control plane persists the context snapshot or the complete relevant manifest with the run and uses it until an explicit reload. This produces deterministic instructions within each revision and a stable prompt prefix that is friendlier to provider prompt caching than re-reading context before every turn.
 
-An agent may edit `AGENTS.md` during a run, but those edits do not change the active run's instructions. They are reflected in a later manifest and therefore affect the next run.
+An agent may edit `AGENTS.md` during a run, but those edits affect instructions only after an explicit resource reload or in the next run.
 
 ### Manifest beats
 
@@ -491,7 +493,7 @@ The control plane routes interactive requests to the client attached to the run 
 
 ## Tool Placement
 
-The control plane builds the executable model-facing tool catalog from the pinned runner manifest. Provider integrations may also offer provider-native capabilities. There is no additional built-in host tool registry in the control plane.
+The control plane builds the executable model-facing tool catalog from the pinned runner manifest and adds `reload_resources` when reload is supported and permitted. Provider integrations may also offer provider-native capabilities.
 
 ### Conversation reader extension
 
@@ -519,7 +521,7 @@ Tools that operate on the workspace or runner environment execute on the runner:
 
 Every tool definition carries placement internally, but placement is not exposed to the model.
 
-Tool names must be unique across the runner catalog. The protocol retains caller-supplied `reservedToolNames` collision checks, including for session extensions, but the current daemon does not reserve any built-in control-plane tool names. A collision with an explicitly reserved name fails `run.open` rather than silently selecting one implementation.
+Tool names must be unique across the runner catalog. The daemon reserves `reload_resources` through the protocol's `reservedToolNames` collision checks, including for session extensions. A collision fails environment initialization rather than silently selecting one implementation.
 
 ## Configuration Ownership
 

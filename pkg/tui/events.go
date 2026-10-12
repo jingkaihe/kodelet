@@ -26,6 +26,12 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 	switch event.Kind {
 	case "conversation":
 		return
+	case "resources-reloaded":
+		if event.ResourceReloadID == "" || hasResourceReloadMarker(m.entries, event.ResourceReloadID) {
+			return
+		}
+		m.entries = append(m.entries, resourceReloadEntry(event.ResourceReloadID))
+		m.clearActiveAssistantEntry()
 	case "context-compacted":
 		if event.Compaction == nil || hasCompactionMarker(m.entries, event.Compaction.ID) {
 			return

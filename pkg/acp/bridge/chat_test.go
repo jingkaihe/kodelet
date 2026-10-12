@@ -211,6 +211,22 @@ func TestACPCompactionSendFailureCanBeRetried(t *testing.T) {
 	}), assert.AnError)
 }
 
+func TestACPResourceReloadMarker(t *testing.T) {
+	sender := &mockSender{}
+	sink := NewACPChatEventSink(sender, "session")
+	for _, id := range []string{"", "reload-1", "reload-1", "reload-2"} {
+		require.NoError(t, sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ResourceReloadID: id}))
+	}
+	require.Len(t, sender.updates, 2)
+	assert.Contains(t, sender.updates[0].(map[string]any)["content"].(acptypes.ContentBlock).Text, "Resources reloaded")
+	replay := &mockSender{}
+	require.NoError(t, ReplayConversationHistory(replay, "session", []conversations.StreamableMessage{
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+	}))
+	assert.Equal(t, sender.updates, replay.updates)
+}
+
 func TestImageBlocksFromRawItemPreservesRemoteURI(t *testing.T) {
 	blocks := imageBlocksFromRawItem([]byte(`{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}`))
 

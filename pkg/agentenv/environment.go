@@ -37,13 +37,14 @@ type ToolDefinition struct {
 	Tool      tooltypes.Tool `json:"-"`
 }
 
-// Manifest is the immutable environment snapshot pinned to one top-level run.
+// Manifest is an immutable snapshot of a run's current environment revision.
 type Manifest struct {
-	WorkingDirectory string                  `json:"workingDirectory"`
-	Contexts         map[string]string       `json:"contexts"`
-	Tools            []ToolDefinition        `json:"tools"`
-	Commands         []slashcommands.Command `json:"commands"`
-	Config           *EnvironmentConfig      `json:"config,omitempty"`
+	EnvironmentRevision int64                   `json:"environmentRevision,omitempty"`
+	WorkingDirectory    string                  `json:"workingDirectory"`
+	Contexts            map[string]string       `json:"contexts"`
+	Tools               []ToolDefinition        `json:"tools"`
+	Commands            []slashcommands.Command `json:"commands"`
+	Config              *EnvironmentConfig      `json:"config,omitempty"`
 }
 
 // EnvironmentConfig is the runner-owned configuration projection pinned with a manifest.
@@ -81,11 +82,12 @@ func (m Manifest) Clone() Manifest {
 		toolDefinitions[i].OutputSchema = cloneJSONMap(definition.OutputSchema)
 	}
 	return Manifest{
-		WorkingDirectory: m.WorkingDirectory,
-		Contexts:         maps.Clone(m.Contexts),
-		Tools:            toolDefinitions,
-		Commands:         slices.Clone(m.Commands),
-		Config:           m.Config.Clone(),
+		EnvironmentRevision: m.EnvironmentRevision,
+		WorkingDirectory:    m.WorkingDirectory,
+		Contexts:            maps.Clone(m.Contexts),
+		Tools:               toolDefinitions,
+		Commands:            slices.Clone(m.Commands),
+		Config:              m.Config.Clone(),
 	}
 }
 

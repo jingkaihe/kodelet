@@ -554,15 +554,33 @@ func TestBackgroundConcurrentConversationsUseIsolatedProcesses(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, conversation := range []string{"first", "second"} {
 		wg.Go(func() {
-			_, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: conversation, ConversationID: conversation})
+			_, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: conversation, ConversationID: conversation, EnvironmentReload: true})
 			assert.NoError(t, err)
 		})
 	}
 	wg.Wait()
 	first, second := backgroundState(t, workspace, "first"), backgroundState(t, workspace, "second")
 	assert.NotEqual(t, first.PID, second.PID)
-	require.NoError(t, service.closeRun(t.Context(), "first"))
+	// A replacement can acquire new provisional workers, but must not restart
+	// another conversation's process or retain the old one.
+	t.Setenv("KODELET_BACKGROUND_HELPER_MODE", "lease")
+	result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "first", ExpectedEnvironmentRevision: 1})
+	require.NoError(t, err)
+	require.Empty(t, result.Refusal)
+	reloaded := backgroundState(t, workspace, "first")
+	assert.NotEqual(t, first.PID, reloaded.PID)
 	assertBackgroundProcessStopped(t, first.PID)
+	require.NotEmpty(t, reloaded.LeaseID)
+	assert.Empty(t, service.backgrounds["first"].leases[reloaded.LeaseID].openingRunID)
+	assert.Equal(t, second, backgroundState(t, workspace, "second"))
+	_, err = service.executeTool(t.Context(), runnerpayload.ToolExecuteParams{
+		RunID: "first", EnvironmentRevision: 2, ToolCallID: "state", Name: "lifetime", Input: json.RawMessage(`{"operation":"state"}`),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.cancelRun(t.Context(), "first"))
+	assert.Empty(t, service.backgroundLeases)
+	require.NoError(t, service.closeRun(t.Context(), "first"))
+	assertBackgroundProcessStopped(t, reloaded.PID)
 	require.NoError(t, syscall.Kill(second.PID, 0), "closing one conversation must not kill another")
 	require.NoError(t, service.closeRun(t.Context(), "second"))
 	assertBackgroundProcessStopped(t, second.PID)

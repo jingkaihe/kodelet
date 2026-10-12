@@ -329,6 +329,25 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
   });
 
+  it('renders resource reloads as non-expandable completion markers', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [{ type: 'resources-reloaded', id: 'reload-1' }],
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText('Resources reloaded')).toBeVisible();
+    expect(
+      container.querySelector('[data-resource-reload-id="reload-1"] .lucide-check')
+    ).toBeInTheDocument();
+    expect(container.querySelector('details')).not.toBeInTheDocument();
+  });
+
   it.each([
     undefined,
     'Not a readable API summary',

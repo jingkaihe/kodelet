@@ -1203,7 +1203,7 @@ func (m model) inputBottomLeftLabel() string {
 		return "Startup failed"
 	}
 	if m.running {
-		if m.resourceReload {
+		if m.resourceReload && m.resourcesLoading {
 			return m.spinnerGlyph() + " Reloading extensions…"
 		}
 		return m.flowingWaterFrame() + " " + m.workingStatusText()

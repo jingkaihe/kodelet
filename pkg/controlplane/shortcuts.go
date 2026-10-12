@@ -176,6 +176,7 @@ func (s *Server) handleWorkspaceShortcut(w http.ResponseWriter, r *http.Request)
 	}
 	err = s.runnerRegistry.CallRun(ctx, request.RunID, protocol.MethodShortcutExecute, runnerpayload.ShortcutExecuteParams{
 		RunID: request.RunID, Digest: manifest.Digest, Shortcut: request.Shortcut,
+		EnvironmentRevision: manifest.EnvironmentRevision,
 	}, &result)
 	if err == nil {
 		err = ctx.Err()
