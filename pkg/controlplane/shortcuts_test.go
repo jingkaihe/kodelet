@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -268,6 +269,7 @@ func TestWorkspaceShortcutActiveUsesPinnedDiscoveryAndCurrentOwner(t *testing.T)
 	var discovery protocol.WorkspaceDiscoverResult
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &discovery))
 	assert.Equal(t, manifest.RunID, discovery.RunID)
+	assert.Equal(t, slashcommands.BuiltIns(), discovery.Commands)
 	assert.Equal(t, f.request.Digest, discovery.Digest)
 	assert.Equal(t, manifest.Shortcuts, discovery.Shortcuts)
 	assert.Equal(t, new(2), discovery.ExtensionCount)

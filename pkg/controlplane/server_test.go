@@ -26,6 +26,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1449,6 +1450,9 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	assert.Equal(t, runner.Workspace.Path, discovery.CWD)
 	assert.NotEmpty(t, discovery.Digest)
 	assert.Contains(t, commands.Body.String(), "runner-only")
+	for _, command := range slashcommands.BuiltIns() {
+		assert.Contains(t, discovery.Commands, command)
+	}
 
 	hints := httptest.NewRecorder()
 	server.handleGetCWDHints(hints, httptest.NewRequest(http.MethodGet, "/api/chat/cwd-suggestions?q=runner-child", nil))

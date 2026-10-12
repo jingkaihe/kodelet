@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -346,7 +347,15 @@ func (s *Server) handleRunnerDiscovery(w http.ResponseWriter, r *http.Request, m
 				s.writeErrorResponse(w, http.StatusInternalServerError, "could not load the conversation's available commands and tools", err)
 				return
 			}
-			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{RunID: run.ID, CWD: manifest.WorkingDirectory, EnvironmentProfile: target.EnvironmentProfile, Digest: digest, Commands: manifest.Commands, Shortcuts: manifest.Shortcuts, ExtensionCount: manifest.ExtensionCount})
+			s.writeJSONResponse(w, protocol.WorkspaceDiscoverResult{
+				RunID:              run.ID,
+				CWD:                manifest.WorkingDirectory,
+				EnvironmentProfile: target.EnvironmentProfile,
+				Digest:             digest,
+				Commands:           withBuiltInSlashCommands(manifest.Commands),
+				Shortcuts:          manifest.Shortcuts,
+				ExtensionCount:     manifest.ExtensionCount,
+			})
 			return
 		}
 	}
@@ -397,7 +406,24 @@ func (s *Server) discoverWorkspace(ctx context.Context, runner runnerregistry.Ru
 	}); err != nil {
 		return protocol.WorkspaceDiscoverResult{}, err
 	}
+	result.Commands = withBuiltInSlashCommands(result.Commands)
 	return result.WorkspaceDiscoverResult, nil
+}
+
+// Host commands are not part of the runner manifest or its discovery digest.
+func withBuiltInSlashCommands(commands []slashcommands.Command) []slashcommands.Command {
+	merged := slashcommands.BuiltIns()
+	seen := make(map[string]bool, len(merged)+len(commands))
+	for _, command := range merged {
+		seen[command.Name] = true
+	}
+	for _, command := range commands {
+		if !seen[command.Name] {
+			merged = append(merged, command)
+			seen[command.Name] = true
+		}
+	}
+	return merged
 }
 
 func (s *Server) writeWorkspaceRunnerTargetError(w http.ResponseWriter, targetErr *workspaceRunnerTargetError) {
