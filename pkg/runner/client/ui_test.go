@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,4 +140,92 @@ func TestServiceNativeSurfaceRetainedProcessReceivesInputAndClosure(t *testing.T
 	initializations, err := os.ReadFile(filepath.Join(workspace, "initializations.log"))
 	require.NoError(t, err)
 	assert.Len(t, strings.Fields(string(initializations)), 1, "UI capability refresh must not restart a retained process")
+}
+
+// blockingSurfaceSource holds the first surface input until released.
+type blockingSurfaceSource struct {
+	owner   extensions.UIExtensionOwner
+	inputs  atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingSurfaceSource) ExtensionUIOwner() extensions.UIExtensionOwner { return s.owner }
+
+func (s *blockingSurfaceSource) NotifyExtensionUI(_ context.Context, method string, _ any) error {
+	if method == extensions.UISurfaceInputMethod && s.inputs.Add(1) == 1 {
+		close(s.entered)
+		<-s.release
+	}
+	return nil
+}
+
+func TestServiceReloadDrainsAdmittedSurfaceEventsAndFencesNewOnes(t *testing.T) {
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}, ExtensionSettings: map[string]any{"enabled": false}}, nil
+		},
+	})
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run", ConversationID: "conversation", EnvironmentReload: true,
+	})
+	source := &blockingSurfaceSource{
+		owner:   extensions.UIExtensionOwner{ExtensionID: "native", Generation: 1},
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	key := runnerSurfaceKey{owner: source.owner, scopeID: "conversation", id: "canvas"}
+	service.mu.Lock()
+	run := service.runs["run"]
+	old := run.environment
+	service.uiSurfaces = map[runnerSurfaceKey]runnerSurfaceSource{key: {source: source, runID: "run", lifecycle: 1}}
+	service.mu.Unlock()
+	input := runnerpayload.UISurfaceInputParams{
+		RunID: "run", Owner: runnerpayload.ExtensionOwner{ExtensionID: "native", Generation: 1}, Lifecycle: 1,
+		Request: extensions.UISurfaceInputNotification{ScopeID: "conversation", ID: "canvas", Sequence: 1},
+	}
+	delivered := make(chan error, 1)
+	go func() { delivered <- service.notifySurfaceInput(t.Context(), input) }()
+	select {
+	case <-source.entered:
+	case <-time.After(time.Second):
+		t.Fatal("surface input was not delivered")
+	}
+
+	reloaded := make(chan error, 1)
+	go func() {
+		_, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+		reloaded <- err
+	}()
+	require.Eventually(t, func() bool {
+		service.mu.Lock()
+		defer service.mu.Unlock()
+		return run.reloading
+	}, time.Second, time.Millisecond)
+	// Reload owns surface teardown: neither new input nor invalidation reaches
+	// the extension being replaced.
+	require.ErrorContains(t, service.notifySurfaceInput(t.Context(), input), "closed")
+	service.invalidateUISurface(runnerpayload.UISurfaceInvalidateParams{
+		RunID: "run", Owner: input.Owner, ScopeID: "conversation", ID: "canvas", Lifecycle: 1,
+	})
+	service.mu.Lock()
+	assert.Contains(t, service.uiSurfaces, key)
+	service.mu.Unlock()
+	assert.Never(t, func() bool { return !old.IsOpen() }, 50*time.Millisecond, time.Millisecond,
+		"the admitted surface event still owns the old environment")
+
+	close(source.release)
+	require.NoError(t, <-delivered)
+	select {
+	case err := <-reloaded:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("reload did not finish")
+	}
+	assert.False(t, old.IsOpen())
+	assert.Equal(t, int32(1), source.inputs.Load(), "fenced input must not reach the extension")
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	assert.Equal(t, int64(2), run.manifest.EnvironmentRevision)
+	assert.NotContains(t, service.uiSurfaces, key, "reload closes surfaces owned by replaced extensions")
 }

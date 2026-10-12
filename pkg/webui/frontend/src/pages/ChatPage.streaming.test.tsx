@@ -25,6 +25,12 @@ interface ControlledChatStream {
   reject: (error: Error) => void;
 }
 
+interface ObservedChatStream extends ControlledChatStream {
+  conversationId: string;
+}
+
+type QueueRunSource = 'submitted' | 'observed';
+
 const setupCommandQueueStreams = () => {
   setRouteParams({ id: 'conv-123' });
   mockGetConversation.mockImplementation(async (id: string) => ({
@@ -48,13 +54,43 @@ const setupCommandQueueStreams = () => {
   );
   // Keep observers open unless a test explicitly completes them. Closing an
   // observer must not masquerade as a successfully completed submitted run.
-  mockStreamConversation.mockImplementation(async () => new Promise(() => undefined));
-  return streams;
+  const observers: ObservedChatStream[] = [];
+  mockStreamConversation.mockImplementation(
+    async (conversationId, options) =>
+      new Promise<void>((resolve, reject) => {
+        observers.push({ ...options, conversationId, resolve, reject });
+      })
+  );
+  // Start conv-123's run from this composer or observe one started elsewhere,
+  // returning the stream whose completion decides the queued commands.
+  const startRun = async (source: QueueRunSource): Promise<ControlledChatStream> => {
+    if (source === 'submitted') {
+      fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(streams).toHaveLength(1));
+      return streams[0];
+    }
+    await waitFor(() => expect(observers).toHaveLength(1));
+    await act(async () =>
+      observers[0].onEvent({ kind: 'conversation', conversation_id: 'conv-123' })
+    );
+    return observers[0];
+  };
+  return { streams, observers, startRun };
 };
 
 const queueSlashCommand = (message: string) => {
   fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: message } });
   fireEvent.click(screen.getByRole('button', { name: 'Queue command' }));
+};
+
+const expectQueuedCommandsDiscarded = async () => {
+  await waitFor(() =>
+    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
+  );
+  expect(
+    screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
+  ).toBeInTheDocument();
 };
 
 describe('ChatPage streaming, steering, and navigation', () => {
@@ -267,7 +303,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
   });
 
   it('queues slash commands FIFO separately from steering and waits for successful stream cleanup', async () => {
-    const streams = setupCommandQueueStreams();
+    const { streams } = setupCommandQueueStreams();
     stubImageFileReader('data:image/png;base64,aGVsbG8=');
     render(<ChatPage />);
     await screen.findByText('First conversation');
@@ -350,17 +386,17 @@ describe('ChatPage streaming, steering, and navigation', () => {
   });
 
   it.each([
-    'error',
-    'cancelled',
-    'stop',
-    'EOF without done',
-  ])('discards queued commands with a notice after %s instead of executing them', async (outcome) => {
-    const streams = setupCommandQueueStreams();
+    ['submitted', 'error'],
+    ['submitted', 'cancelled'],
+    ['submitted', 'stop'],
+    ['submitted', 'EOF without done'],
+    ['observed', 'cancelled'],
+    ['observed', 'EOF without done'],
+  ] as const)('discards queued commands with a notice when a %s run ends with %s', async (source, outcome) => {
+    const { startRun } = setupCommandQueueStreams();
     render(<ChatPage />);
     await screen.findByText('First conversation');
-    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(streams).toHaveLength(1));
+    const run = await startRun(source);
     queueSlashCommand('/reload');
     queueSlashCommand('/review tests');
     fireEvent.change(screen.getByTestId('composer-textarea'), {
@@ -370,108 +406,114 @@ describe('ChatPage streaming, steering, and navigation', () => {
     if (outcome === 'stop') {
       fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
       expect(mockStopConversation).toHaveBeenCalledWith('conv-123');
-      expect(streams[0].signal.aborted).toBe(true);
+      expect(run.signal.aborted).toBe(true);
     }
     await act(async () => {
       if (outcome === 'error') {
-        streams[0].onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Run failed' });
+        run.onEvent({ kind: 'error', conversation_id: 'conv-123', error: 'Run failed' });
       } else if (outcome === 'cancelled') {
-        streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
+        run.onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
       }
       if (outcome === 'stop') {
-        streams[0].reject(new DOMException('Stopped', 'AbortError'));
+        run.reject(new DOMException('Stopped', 'AbortError'));
       } else {
-        streams[0].resolve();
+        run.resolve();
       }
     });
 
-    await waitFor(() =>
-      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
-    );
-    expect(
-      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
-    ).toBeInTheDocument();
-    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    await expectQueuedCommandsDiscarded();
+    expect(mockStreamChat).toHaveBeenCalledTimes(source === 'submitted' ? 1 : 0);
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep my draft');
   });
 
-  it('retains a queued run observer across navigation and unrelated run completion', async () => {
-    const streams = setupCommandQueueStreams();
-    const observers: Array<ControlledChatStream & { conversationId: string }> = [];
-    mockStreamConversation.mockImplementation(
-      async (conversationId, options) =>
-        new Promise<void>((resolve, reject) => {
-          observers.push({ ...options, conversationId, resolve, reject });
-        })
-    );
+  it.each([
+    'submitted',
+    'observed',
+  ] as const)('runs commands queued during a %s run in their original conversation after navigation', async (source) => {
+    const { streams, observers, startRun } = setupCommandQueueStreams();
+    stubImageFileReader('data:image/png;base64,aGVsbG8=');
     const { rerender } = render(<ChatPage />);
     await screen.findByText('First conversation');
-    await waitFor(() => expect(observers).toHaveLength(1));
-    const foreground = observers[0];
-    await act(async () =>
-      foreground.onEvent({ kind: 'conversation', conversation_id: 'conv-123' })
-    );
+    const original = await startRun(source);
     queueSlashCommand('/reload');
+    const firstObservers = () =>
+      observers.filter((observer) => observer.conversationId === 'conv-123');
 
     setRouteParams({ id: 'conv-456' });
     rerender(<ChatPage />);
     await screen.findByText('Other conversation');
-    expect(foreground.signal.aborted).toBe(false);
-    expect(observers.filter((observer) => observer.conversationId === 'conv-123')).toHaveLength(1);
+    expect(original.signal.aborted).toBe(false);
     expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
+
+    // An unrelated run finishing in the visible conversation must not drain the queue.
     const textarea = screen.getByTestId('composer-textarea');
+    const unrelatedIndex = streams.length;
     fireEvent.change(textarea, { target: { value: 'Unrelated request' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(streams).toHaveLength(1));
+    await waitFor(() => expect(streams).toHaveLength(unrelatedIndex + 1));
     expect(mockStreamChat).toHaveBeenLastCalledWith(
       expect.objectContaining({ conversationId: 'conv-456', message: 'Unrelated request' }),
       expect.any(Object)
     );
     await act(async () => {
-      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-456' });
-      streams[0].resolve();
+      streams[unrelatedIndex].onEvent({ kind: 'done', conversation_id: 'conv-456' });
+      streams[unrelatedIndex].resolve();
     });
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
     );
-    expect(foreground.signal.aborted).toBe(false);
-    expect(observers.filter((observer) => observer.conversationId === 'conv-123')).toHaveLength(1);
-    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    expect(streams).toHaveLength(unrelatedIndex + 1);
+    expect(original.signal.aborted).toBe(false);
+    expect(firstObservers()).toHaveLength(1);
+
     fireEvent.change(textarea, { target: { value: 'Other draft' } });
+    const file = new File(['hello'], 'keep.png', { type: 'image/png' });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+      },
+    });
+    await screen.findByAltText('keep.png');
     mockNavigate.mockClear();
 
-    // Completion is not replayed by the server: the original subscription
-    // must remain authoritative after it becomes a background conversation.
+    // Completion is not replayed by the server: the original stream remains
+    // authoritative in the background, and duplicate completion drains once.
     await act(async () => {
-      foreground.onEvent({ kind: 'done', conversation_id: 'conv-123' });
-      foreground.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      original.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      original.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      original.resolve();
     });
-    await waitFor(() => expect(streams).toHaveLength(2));
+    await waitFor(() => expect(streams).toHaveLength(unrelatedIndex + 2));
     expect(mockStreamChat).toHaveBeenLastCalledWith(
-      expect.objectContaining({ conversationId: 'conv-123', message: '/reload' }),
+      expect.objectContaining({
+        conversationId: 'conv-123',
+        message: '/reload',
+        content: [{ type: 'text', text: '/reload' }],
+      }),
       expect.any(Object)
     );
+    const reload = streams[unrelatedIndex + 1];
+    await act(async () => {
+      reload.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+      reload.onEvent({ kind: 'text', conversation_id: 'conv-123', content: 'Reload complete' });
+      reload.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+      reload.resolve();
+    });
+    expect(streams).toHaveLength(unrelatedIndex + 2);
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(screen.getByTestId('composer-textarea')).toHaveValue('Other draft');
+    expect(textarea).toHaveValue('Other draft');
+    expect(screen.getByAltText('keep.png')).toBeInTheDocument();
+    expect(screen.queryByText('Reload complete')).not.toBeInTheDocument();
     expect(screen.getByText('Other conversation')).toBeInTheDocument();
   });
 
   it('keeps the current observer active when the retained command observer disconnects', async () => {
-    setupCommandQueueStreams();
-    const observers: Array<ControlledChatStream & { conversationId: string }> = [];
-    mockStreamConversation.mockImplementation(
-      async (conversationId, options) =>
-        new Promise<void>((resolve, reject) => {
-          observers.push({ ...options, conversationId, resolve, reject });
-        })
-    );
+    const { observers, startRun } = setupCommandQueueStreams();
     const { rerender } = render(<ChatPage />);
     await screen.findByText('First conversation');
-    await waitFor(() => expect(observers).toHaveLength(1));
-    const retained = observers[0];
-    await act(async () => retained.onEvent({ kind: 'conversation', conversation_id: 'conv-123' }));
+    const retained = await startRun('observed');
     queueSlashCommand('/reload');
 
     setRouteParams({ id: 'conv-456' });
@@ -489,12 +531,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(screen.getByRole('region', { name: 'Queued commands' })).toHaveTextContent('/reload');
 
     await act(async () => retained.reject(new TypeError('Failed to fetch')));
-    await waitFor(() =>
-      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
-    );
-    expect(
-      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
-    ).toBeInTheDocument();
+    await expectQueuedCommandsDiscarded();
     expect(current.signal.aborted).toBe(false);
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('composer-textarea'), {
@@ -509,93 +546,6 @@ describe('ChatPage streaming, steering, and navigation', () => {
       )
     );
     expect(mockStreamChat).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    'cancelled',
-    'EOF without done',
-  ])('does not drain queued commands when an observed run ends with %s', async (outcome) => {
-    setupCommandQueueStreams();
-    const observers: ControlledChatStream[] = [];
-    mockStreamConversation.mockImplementation(
-      async (_id, options) =>
-        new Promise<void>((resolve, reject) => {
-          observers.push({ ...options, resolve, reject });
-        })
-    );
-    render(<ChatPage />);
-    await screen.findByText('First conversation');
-    await waitFor(() => expect(observers).toHaveLength(1));
-    await act(async () =>
-      observers[0].onEvent({ kind: 'conversation', conversation_id: 'conv-123' })
-    );
-    queueSlashCommand('/reload');
-    queueSlashCommand('/review tests');
-    await act(async () => {
-      if (outcome === 'cancelled') {
-        observers[0].onEvent({ kind: 'done', conversation_id: 'conv-123', cancelled: true });
-      }
-      observers[0].resolve();
-    });
-    await waitFor(() =>
-      expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument()
-    );
-    expect(
-      screen.getByText(/queued commands.*discarded|discarded.*queued commands/i)
-    ).toBeInTheDocument();
-    expect(mockStreamChat).not.toHaveBeenCalled();
-    expect(mockSteerConversation).not.toHaveBeenCalled();
-  });
-
-  it('keeps commands scoped to the original conversation without disturbing another composer', async () => {
-    const streams = setupCommandQueueStreams();
-    stubImageFileReader('data:image/png;base64,aGVsbG8=');
-    const { rerender } = render(<ChatPage />);
-    await screen.findByText('First conversation');
-    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: 'continue' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(streams).toHaveLength(1));
-    queueSlashCommand('/reload');
-
-    setRouteParams({ id: 'conv-456' });
-    rerender(<ChatPage />);
-    await screen.findByText('Other conversation');
-    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
-    const textarea = screen.getByTestId('composer-textarea');
-    fireEvent.change(textarea, { target: { value: 'Other conversation draft' } });
-    const file = new File(['hello'], 'keep.png', { type: 'image/png' });
-    fireEvent.paste(textarea, {
-      clipboardData: {
-        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
-      },
-    });
-    await screen.findByAltText('keep.png');
-    mockNavigate.mockClear();
-    await act(async () => {
-      streams[0].onEvent({ kind: 'done', conversation_id: 'conv-123' });
-      streams[0].resolve();
-    });
-    await waitFor(() => expect(streams).toHaveLength(2));
-    expect(mockStreamChat).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        conversationId: 'conv-123',
-        message: '/reload',
-        content: [{ type: 'text', text: '/reload' }],
-      }),
-      expect.any(Object)
-    );
-    await act(async () => {
-      streams[1].onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
-      streams[1].onEvent({ kind: 'text', conversation_id: 'conv-123', content: 'Reload complete' });
-      streams[1].onEvent({ kind: 'done', conversation_id: 'conv-123' });
-      streams[1].resolve();
-    });
-    expect(mockStreamChat).toHaveBeenCalledTimes(2);
-    expect(mockNavigate).not.toHaveBeenCalled();
-    expect(textarea).toHaveValue('Other conversation draft');
-    expect(screen.getByAltText('keep.png')).toBeInTheDocument();
-    expect(screen.queryByText('Reload complete')).not.toBeInTheDocument();
-    expect(screen.getByText('Other conversation')).toBeInTheDocument();
   });
 
   it('allows sidebar navigation while a conversation is streaming', async () => {

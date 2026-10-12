@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -16,6 +17,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -300,4 +302,88 @@ func TestChatExecutionContextKeepsProfileOwner(t *testing.T) {
 	principal, ok := principalFromContext(execution)
 	require.True(t, ok)
 	assert.Equal(t, "alice", principal.ID)
+}
+
+type profileReloadTestController struct {
+	agentenv.RemoteController
+	result       runnerpayload.RunReloadResult
+	err          error
+	closedRunID  string
+	closedStatus protocol.RunStatus
+}
+
+func (c *profileReloadTestController) ReloadRun(context.Context, protocol.RunReloadParams) (runnerpayload.RunReloadResult, error) {
+	return c.result, c.err
+}
+
+func (c *profileReloadTestController) CloseRun(_ context.Context, runID string, status protocol.RunStatus, _ error) error {
+	c.closedRunID, c.closedStatus = runID, status
+	return nil
+}
+
+func TestProfileRegisteringControllerReloadRegistersProfilesOrStopsRun(t *testing.T) {
+	previous := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset(); require.NoError(t, viper.MergeConfigMap(previous)) })
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4o")
+	alice := contextWithPrincipal(t.Context(), administrativePrincipal("alice"))
+	for _, test := range []struct {
+		name       string
+		ctx        context.Context
+		refusal    string
+		reloadErr  error
+		wantErr    string
+		registered bool
+	}{
+		{name: "success", ctx: alice, registered: true},
+		{name: "refusal", ctx: alice, refusal: "background workers retained"},
+		{name: "reload error", ctx: alice, reloadErr: errors.New("lost reply"), wantErr: "lost reply"},
+		// Registration requires a principal, so an anonymous caller exercises the failure path.
+		{name: "registration failure", ctx: t.Context(), wantErr: "failed to register reloaded extension profiles"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newRunnerTestServer(t, "")
+			runner, err := server.runnerRegistry.Register(protocol.RegisterParams{
+				ProtocolVersions: []int{protocol.Version},
+				Host:             protocol.Host{InstanceID: "one", Hostname: "one", OS: "linux", Arch: "amd64"},
+				Workspace:        protocol.Workspace{Path: "/workspace", Name: "workspace"},
+			}, newRunnerAPITestLink())
+			require.NoError(t, err)
+			inner := &profileReloadTestController{err: test.reloadErr, result: runnerpayload.RunReloadResult{
+				Refusal: test.refusal,
+				Manifest: runnerpayload.Manifest{
+					RunnerID: runner.RunnerID, Generation: runner.Generation, EnvironmentRevision: 2,
+					Profiles: []extensions.Profile{{
+						Name: "code-search", ExtensionID: "skills/code-search",
+						Options: llmtypes.ProfileConfig{"provider": "openai", "model": "gpt-4o", "reasoning_effort": "high"},
+					}},
+				},
+			}}
+			controller := profileRegisteringController{RemoteController: inner, server: server}
+
+			result, err := controller.ReloadRun(test.ctx, protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, inner.result, result)
+			}
+			if test.name == "registration failure" {
+				assert.Equal(t, runnerpayload.RunReloadResult{}, result, "never publish a replacement whose profiles were rejected")
+				assert.Equal(t, "run", inner.closedRunID)
+				assert.Equal(t, protocol.RunStatusFailed, inner.closedStatus)
+			} else {
+				assert.Empty(t, inner.closedRunID, "only a rejected replacement stops the run here")
+			}
+			config, err := server.resolveModelProfile(alice, runner.RunnerID, "code-search", "")
+			if test.registered {
+				require.NoError(t, err)
+				assert.Equal(t, "high", config.ReasoningEffort)
+			} else {
+				require.ErrorContains(t, err, "not registered")
+			}
+		})
+	}
 }
