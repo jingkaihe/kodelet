@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.8.5-beta
+
+Added `/reload` to runner-backed CLI, TUI, Web UI, and ACP conversations, refreshing installed extensions, tools, schemas, recipes, skills, context files, and workspace configuration without restarting Kodelet or starting a new conversation. Global configuration and model settings are not reloaded; compiled extensions must be rebuilt first.
+
+Added the built-in `reload_resources` tool so agents can refresh resources after the current tool batch and continue the same run with updated tools and instructions. In-run reloads affect only the current conversation, with environment revision checks rejecting stale operations and extension events. The tool is not callable from code-mode scripts.
+
+Blocked reloads while background workers are retained or SDK-attached extensions are present. In-run reload refusals preserve the previous resources and let the agent continue. Extensions that fail to start are skipped with a warning during `reload_resources`, allowing the agent to fix them and reload again; `/reload` reports startup failures as errors.
+
+Added per-conversation Web UI queues for discovered slash commands submitted during an active run. Commands execute in order only after the preceding run succeeds, remain associated with their conversation when switching chats, and are discarded if the run fails, is cancelled, or completion cannot be confirmed. Other slash-prefixed text, including file paths, remains ordinary steering.
+
+**Upgrade:** Upgrade runners alongside the daemon and clients to enable resource reloading.
+
 ## 0.8.4-beta
 
 Added persistent Web UI terminal tabs scoped to the runner, conversation, and directory, with custom names, drag-to-reorder, pop-out synchronization, `Alt/⌥+1–8` tab selection, and `F2` renaming. Closing a tab confirms before stopping its shell and running processes, releases its session slot, and leaves other terminals and browsers untouched. Session-aware cleanup remains safe when a directory is removed, renamed, or replaced.
