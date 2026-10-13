@@ -98,6 +98,8 @@ type Manifest struct {
 type RunReloadResult struct {
 	Manifest Manifest `json:"manifest"`
 	Refusal  string   `json:"refusal,omitempty"`
+	// Warning reports extensions that failed to start and are absent from Manifest.
+	Warning string `json:"warning,omitempty"`
 }
 
 // WorkspaceDiscoverResult carries runner-owned profile definitions to the daemon.

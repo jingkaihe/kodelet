@@ -215,7 +215,7 @@ Use `/about` to show the TUI's version, build commit, and build date alongside t
 
 #### Reloading extensions
 
-Use `/reload` to reload runner-owned extensions and refresh their tools and commands without restarting Kodelet or starting a new conversation. It is supported in runner-backed CLI, TUI, Web UI, and ACP sessions. Agents can use the built-in `reload_resources` tool to refresh the current conversation's resources between tool batches and continue the same run; retained background workers and SDK-attached extensions prevent reload.
+Use `/reload` to reload runner-owned extensions and refresh their tools and commands without restarting Kodelet or starting a new conversation. It is supported in runner-backed CLI, TUI, Web UI, and ACP sessions. Agents can use the built-in `reload_resources` tool to refresh the current conversation's resources between tool batches and continue the same run; retained background workers and SDK-attached extensions prevent reload. If an extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without that extension and reports the error to the agent.
 
 #### Custom TUI themes
 

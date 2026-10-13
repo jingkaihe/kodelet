@@ -964,7 +964,7 @@ func TestReloadRunFencesAndPersistsReplacement(t *testing.T) {
 					assert.ErrorContains(t, err, "reloading")
 					replacement := manifest
 					replacement.EnvironmentRevision++
-					*result.(*runnerpayload.RunReloadResult) = runnerpayload.RunReloadResult{Manifest: replacement}
+					*result.(*runnerpayload.RunReloadResult) = runnerpayload.RunReloadResult{Manifest: replacement, Warning: "failed to start extension broken"}
 					switch outcome {
 					case "refusal":
 						result.(*runnerpayload.RunReloadResult).Refusal = "background workers retained"
@@ -1006,6 +1006,7 @@ func TestReloadRunFencesAndPersistsReplacement(t *testing.T) {
 			case "success":
 				require.NoError(t, err)
 				assert.Equal(t, manifest.Digest, result.Manifest.Digest, "revision is independent of schema digest")
+				assert.Equal(t, "failed to start extension broken", result.Warning, "skipped extensions are reported with the committed snapshot")
 				var persisted runnerpayload.Manifest
 				require.NoError(t, json.Unmarshal([]byte(after.ManifestJSON), &persisted))
 				assert.Equal(t, int64(2), persisted.EnvironmentRevision)

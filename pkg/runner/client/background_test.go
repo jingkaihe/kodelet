@@ -518,6 +518,49 @@ func TestReloadRefreshesSchemaWithoutLauncherChangesAndRejectsInitializationFail
 	}
 }
 
+func TestReloadRunContinuesWithoutExtensionsThatFailToStart(t *testing.T) {
+	service, workspace := newBackgroundTestService(t, "schema")
+	schemaPath := filepath.Join(workspace, "tool-schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o600))
+	manifest, err := service.openRun(t.Context(), protocol.RunOpenParams{
+		RunID: "run", ConversationID: "conversation", EnvironmentReload: true,
+	})
+	require.NoError(t, err)
+	require.Contains(t, manifestToolNames(manifest), "lifetime")
+	state := backgroundState(t, workspace, "conversation")
+
+	// The old extensions are already closed when the new ones start, so a broken
+	// extension is reported instead of stopping the run that reloaded it.
+	require.NoError(t, os.Remove(schemaPath))
+	result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+	require.NoError(t, err)
+	assert.Empty(t, result.Refusal)
+	assert.Contains(t, result.Warning, "failed to initialize extension")
+	assert.Equal(t, int64(2), result.Manifest.EnvironmentRevision)
+	assert.NotContains(t, manifestToolNames(result.Manifest), "lifetime")
+	assertBackgroundProcessStopped(t, state.PID)
+	run := service.runs["run"]
+	require.NotNil(t, run)
+	require.NoError(t, run.ctx.Err())
+	_, _, finish, err := service.beginRunOperation(t.Context(), "run", 2, false)
+	require.NoError(t, err)
+	finish()
+
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o600))
+	result, err = service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 2})
+	require.NoError(t, err)
+	assert.Empty(t, result.Warning)
+	assert.Contains(t, manifestToolNames(result.Manifest), "lifetime", "a fixed extension loads on the next reload")
+	require.NoError(t, service.closeRun(t.Context(), "run"))
+	initializations, err := os.ReadFile(filepath.Join(workspace, "initializations.log"))
+	require.NoError(t, err)
+	for _, value := range strings.Fields(string(initializations)) {
+		pid, err := strconv.Atoi(value)
+		require.NoError(t, err)
+		assertBackgroundProcessStopped(t, pid)
+	}
+}
+
 func TestBackgroundReloadAndRemovalAfterRelease(t *testing.T) {
 	service, workspace := newBackgroundTestService(t, "plain")
 	_, err := service.openRun(t.Context(), protocol.RunOpenParams{RunID: "one", ConversationID: "conversation"})

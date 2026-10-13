@@ -3,6 +3,7 @@ package agentenv
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -152,9 +153,15 @@ func (e *RemoteEnvironment) ReloadPendingResources(ctx context.Context) (outcome
 	}
 	e.manifest = manifest
 	e.wireManifest = result.Manifest
-	return ReloadOutcome{
+	outcome = ReloadOutcome{
 		Reloaded: true,
 		Message:  "Workspace resources reloaded. Use the refreshed tools, schemas and context for the rest of this run.",
 		Display:  ResourcesReloadedDisplay,
-	}, nil
+	}
+	if warning := strings.TrimSpace(result.Warning); warning != "" {
+		outcome.Message = "Workspace resources reloaded, but some extensions failed to start and are unavailable:\n" + warning +
+			"\nFix them and call reload_resources again to load them. Use the refreshed tools, schemas and context for the rest of this run."
+		outcome.Display = "Resources reloaded; some extensions failed to start"
+	}
+	return outcome, nil
 }

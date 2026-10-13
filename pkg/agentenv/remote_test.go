@@ -159,7 +159,7 @@ func (c *reloadRemoteController) CallRun(ctx context.Context, runID, method stri
 }
 
 func TestRemoteEnvironmentDeferredReload(t *testing.T) {
-	for _, outcome := range []string{"success", "refused", "failed", "canceled", "invalid manifest"} {
+	for _, outcome := range []string{"success", "extension failed", "refused", "failed", "canceled", "invalid manifest"} {
 		t.Run(outcome, func(t *testing.T) {
 			controller := &reloadRemoteController{fakeRemoteController: fakeRemoteController{manifest: runnerpayload.Manifest{
 				RunID: "run", EnvironmentRevision: 1, WorkingDirectory: "/workspace",
@@ -199,7 +199,11 @@ func TestRemoteEnvironmentDeferredReload(t *testing.T) {
 				if outcome == "invalid manifest" {
 					fresh.ContextFiles = []runnerpayload.ContextFile{{Path: ""}}
 				}
-				return runnerpayload.RunReloadResult{Manifest: fresh}, nil
+				result := runnerpayload.RunReloadResult{Manifest: fresh}
+				if outcome == "extension failed" {
+					result.Warning = "failed to initialize extension broken: exit status 1"
+				}
+				return result, nil
 			}
 			request := ToolRequest{Name: ReloadResourcesToolName, Input: "{}", ToolCallID: "reload-call"}
 			controller.blocked = true
@@ -220,11 +224,17 @@ func TestRemoteEnvironmentDeferredReload(t *testing.T) {
 			assert.Equal(t, "run", environment.RunID())
 			assert.Equal(t, int64(1), manifest.EnvironmentRevision, "old snapshots remain immutable")
 			switch outcome {
-			case "success":
+			case "success", "extension failed":
 				require.NoError(t, err)
 				assert.True(t, reloaded)
 				assert.Contains(t, message, "reloaded")
-				assert.Equal(t, ResourcesReloadedDisplay, reloadOutcome.Display)
+				if outcome == "extension failed" {
+					assert.Contains(t, message, "failed to initialize extension broken: exit status 1")
+					assert.Contains(t, message, "call reload_resources again")
+					assert.Equal(t, "Resources reloaded; some extensions failed to start", reloadOutcome.Display)
+				} else {
+					assert.Equal(t, ResourcesReloadedDisplay, reloadOutcome.Display)
+				}
 				assert.Equal(t, int64(2), environment.Manifest().EnvironmentRevision)
 				assert.Contains(t, environment.Manifest().ToolNames(), "new_tool")
 				assert.NotContains(t, environment.Manifest().ToolNames(), "old_tool")

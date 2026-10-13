@@ -99,7 +99,7 @@ exec kodelet-extension-node ./dist/index.js
 
 During local development, a wrapper can run `tsx` against `src/index.ts`, as shown in `examples/extensions/workspace/kodelet-extension-workspace`.
 
-After changing an installed extension, users can use `/reload` in a runner-backed conversation, or agents can call `reload_resources` to refresh resources between tool batches and continue the same run. Rebuild compiled output first; reload does not compile source or watch files. Retained background workers and SDK-attached extensions prevent reload.
+After changing an installed extension, users can use `/reload` in a runner-backed conversation, or agents can call `reload_resources` to refresh resources between tool batches and continue the same run. Rebuild compiled output first; reload does not compile source or watch files. Retained background workers and SDK-attached extensions prevent reload. If the extension fails to start, `/reload` reports the error, while `reload_resources` continues the run without it and reports the error to the agent, which can fix it and reload again.
 
 ### Tools, commands, events, and UI helpers
 

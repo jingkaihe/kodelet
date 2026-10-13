@@ -751,6 +751,16 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 
 	wireManifest, err := s.initializeRunEnvironment(operationCtx, run, params, config, extensionConfig, runnerID, generation)
+	if err == nil && params.Reload {
+		// An explicit /reload reports extensions skipped by best-effort startup
+		// rather than presenting a partial reload as successful.
+		s.mu.Lock()
+		runtime := run.runtime
+		s.mu.Unlock()
+		if initErr := runtime.InitializationError(); initErr != nil {
+			err = errors.Wrap(initErr, "failed to reload runner extensions")
+		}
+	}
 	if err == nil {
 		err = operationCtx.Err()
 	}
@@ -913,6 +923,12 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	if err != nil {
 		return result, err
 	}
+	// As at ordinary startup, extensions that fail to start are skipped. The old
+	// ones are already closed, so report the failures instead of stopping the run.
+	var warning string
+	if initErr := candidate.runtime.InitializationError(); initErr != nil {
+		warning = initErr.Error()
+	}
 	if err := candidate.runtime.UpdateUICapabilities(operationCtx, extensions.ExtensionUIHostCapabilities{
 		Widgets: run.clientCaps.PersistentWidgets, Surfaces: run.clientCaps.PersistentSurfaces, Transcript: run.clientCaps.PersistentSurfaces,
 	}); err != nil {
@@ -950,7 +966,7 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 		s.lastManifestDigest = manifest.Digest
 	}
 	committed = true
-	return runnerpayload.RunReloadResult{Manifest: manifest}, nil
+	return runnerpayload.RunReloadResult{Manifest: manifest, Warning: warning}, nil
 }
 
 func (s *Service) loadRunConfig(workingDirectory string, params protocol.RunOpenParams) (llmtypes.Config, extensions.Config, error) {
@@ -1040,11 +1056,6 @@ func (s *Service) initializeRunEnvironment(ctx context.Context, run *activeRun, 
 		resources.runtimeRelease = runtimeRelease
 		if err != nil {
 			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
-		}
-	}
-	if params.Reload && runtime != nil {
-		if err := runtime.InitializationError(); err != nil {
-			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to reload runner extensions")
 		}
 	}
 	config.Extensions = runtime
