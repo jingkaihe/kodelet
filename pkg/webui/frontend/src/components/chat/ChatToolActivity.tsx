@@ -386,6 +386,12 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
         getStringField(metadata, 'toolName') || toolCall.name
       );
 
+    case 'reload_resources': {
+      const status = getToolActivityStatus(toolCall);
+      if (status === 'running') return 'Requesting reload';
+      return status === 'failed' ? 'Reload not requested' : 'Reload requested';
+    }
+
     case 'skill': {
       const status = getToolActivityStatus(toolCall);
       if (status === 'running') return 'Loading skill';

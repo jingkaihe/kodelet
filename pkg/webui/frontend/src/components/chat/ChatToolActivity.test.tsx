@@ -446,6 +446,44 @@ describe('ChatToolActivity', () => {
     expect(screen.getByRole('img', { name: 'live.png' })).not.toBeVisible();
   });
 
+  it('labels resource reload requests like the TUI', async () => {
+    const user = userEvent.setup();
+    const tool: ChatRenderToolCall = { callId: 'reload', name: 'reload_resources', input: '{}' };
+    const { rerender } = render(<ChatToolActivity tools={[tool]} />);
+    expect(screen.getByText('Requesting reload')).toBeVisible();
+
+    rerender(
+      <ChatToolActivity
+        tools={[{ ...tool, result: { toolName: 'reload_resources', success: true } }]}
+      />
+    );
+    expect(screen.getByText('Reload requested')).toBeVisible();
+    expect(screen.queryByText('Reload Resources')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Reload requested'));
+    expect(screen.getByText('Resources reload after the current tool batch.')).toBeVisible();
+    expect(screen.queryByText('completed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
+
+    rerender(
+      <ChatToolActivity
+        tools={[
+          {
+            ...tool,
+            result: {
+              toolName: 'reload_resources',
+              success: false,
+              error: 'reload_resources is not allowed for this turn',
+            },
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText('Reload not requested')).toBeVisible();
+    expect(screen.getByRole('alert', { hidden: true })).toHaveTextContent(
+      'reload_resources is not allowed for this turn'
+    );
+  });
+
   it('keeps inspection errors visible without the generic tool wrapper', () => {
     const { container } = render(
       <ChatToolActivity

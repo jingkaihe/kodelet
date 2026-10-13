@@ -12,6 +12,7 @@ import GlobRenderer from './GlobRenderer';
 import GrepRenderer from './GrepRenderer';
 import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import ReadConversationRenderer from './ReadConversationRenderer';
+import ReloadResourcesRenderer from './ReloadResourcesRenderer';
 import { normalizeToolName } from './reference';
 import SkillRenderer from './SkillRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
@@ -37,6 +38,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
+  reload_resources: { component: ReloadResourcesRenderer },
   extension_tool: { component: ExtensionToolRenderer, supportsFailureRendering: true },
 };
 

@@ -866,9 +866,9 @@ func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {
 		return skillToolLabel(tool), "Loading skill"
 	case reloadResourcesToolName:
 		if tool.failed {
-			return "Resource reload not requested", "Requesting resource reload"
+			return "Reload not requested", "Requesting reload"
 		}
-		return "Requested resource reload", "Requesting resource reload"
+		return "Reload requested", "Requesting reload"
 	default:
 		name := normalizedToolName(tool)
 		if name == "" {

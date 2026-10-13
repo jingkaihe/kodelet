@@ -1354,14 +1354,14 @@ func TestRenderTranscriptReloadResourcesHasDedicatedRow(t *testing.T) {
 		{
 			name:   "running",
 			tool:   toolCall{name: "reload_resources", input: "{}"},
-			header: "Requesting resource reload…",
+			header: "Requesting reload…",
 		},
 		{
 			name: "requested",
 			tool: toolCall{name: "reload_resources", input: "{}", done: true, structured: &tooltypes.StructuredToolResult{
 				ToolName: "reload_resources", Success: true,
 			}},
-			header: "✓ Requested resource reload ▸",
+			header: "✓ Reload requested ▸",
 			body:   "Resources reload after the current tool batch.",
 		},
 		{
@@ -1369,7 +1369,7 @@ func TestRenderTranscriptReloadResourcesHasDedicatedRow(t *testing.T) {
 			tool: toolCall{name: "reload_resources", input: "{}", done: true, failed: true, structured: &tooltypes.StructuredToolResult{
 				ToolName: "reload_resources", Error: "reload_resources is not allowed for this turn",
 			}},
-			header: "✗ Resource reload not requested ▸",
+			header: "✗ Reload not requested ▸",
 			body:   "reload_resources is not allowed for this turn",
 		},
 	} {
