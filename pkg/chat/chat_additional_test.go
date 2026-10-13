@@ -327,6 +327,7 @@ func TestExecutorReloadsWithoutCallingModelOrExtensionCommands(t *testing.T) {
 			assert.Equal(t, "conversation", sink.events[0].Kind)
 			assert.Equal(t, "resources-reloaded", sink.events[1].Kind)
 			assert.NotEmpty(t, sink.events[1].ResourceReloadID)
+			assert.Equal(t, "Resources reloaded", sink.events[1].Content)
 			assert.Equal(t, conversationID, sink.events[1].ConversationID)
 			assert.Equal(t, workspace, sink.events[1].CWD)
 			assert.Equal(t, "result", sink.events[2].Kind)

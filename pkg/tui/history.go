@@ -76,9 +76,9 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 
 	for _, msg := range messages {
 		switch msg.Kind {
-		case "resources-reloaded":
+		case "resources-reloaded", "resource-reload-refused":
 			if msg.ResourceReloadID != "" && !hasResourceReloadMarker(entries, msg.ResourceReloadID) {
-				entries = append(entries, resourceReloadEntry(msg.ResourceReloadID))
+				entries = append(entries, resourceReloadEntry(msg.ResourceReloadID, msg.Content, msg.Kind == "resource-reload-refused"))
 			}
 		case "context-compacted":
 			if msg.Compaction != nil && !hasCompactionMarker(entries, msg.Compaction.ID) {
@@ -150,12 +150,16 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 	return entries
 }
 
-func resourceReloadEntry(id string) chatEntry {
+// resourceReloadEntry renders a host reload outcome marker. Text is optional
+// for markers recorded before outcomes carried their own label.
+func resourceReloadEntry(id, text string, refused bool) chatEntry {
 	return chatEntry{
 		kind: entryAssistant,
 		blocks: []assistantBlock{{
-			kind:             blockResourcesReloaded,
-			resourceReloadID: id,
+			kind:                  blockResourcesReloaded,
+			text:                  strings.TrimSpace(text),
+			resourceReloadID:      id,
+			resourceReloadRefused: refused,
 		}},
 	}
 }

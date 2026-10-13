@@ -30,7 +30,7 @@ func HandlePendingEnvironmentReload(ctx context.Context, thread llmtypes.Thread,
 	environment := EnvironmentForThread(thread)
 	reloader, ok := environment.(interface {
 		HasPendingReload() bool
-		ReloadPendingResources(context.Context) (bool, string, error)
+		ReloadPendingResources(context.Context) (agentenv.ReloadOutcome, error)
 	})
 	if !ok || !environment.IsOpen() || !reloader.HasPendingReload() {
 		return nil
@@ -38,43 +38,46 @@ func HandlePendingEnvironmentReload(ctx context.Context, thread llmtypes.Thread,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	reloaded, message, err := reloader.ReloadPendingResources(ctx)
+	outcome, err := reloader.ReloadPendingResources(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to reload environment")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if reloaded {
+	kind := conversations.MessageDisplayKindResourceReloadRefused
+	if outcome.Reloaded {
 		// OpenEnvironment reapplies the already-open environment's new snapshot
 		// without replacing the thread, model client, or run identity.
 		if _, err := OpenEnvironment(ctx, thread); err != nil {
 			return err
 		}
 		clearAllowedToolsMetadata(thread)
-		// Keep completion in model context, but project it as a host marker in
-		// transcripts. A unique message prevents repeated reloads sharing an ID.
-		message += "\n\n[Resource reload ID: " + convtypes.GenerateID() + "]"
-		metadata := conversations.AddMessageDisplay(thread.GetMetadata(), message, "Resources reloaded", conversations.MessageDisplayKindResourceReload, "")
-		thread.SetMetadataValue(conversations.MessageDisplayMetadataKey, metadata[conversations.MessageDisplayMetadataKey])
-		thread.AddUserMessage(ctx, message)
-		if thread.IsPersisted() && !noSave {
-			// As with compaction markers, save before announcing completion so a
-			// later turn hook failure does not erase the marker on history refresh.
-			if err := thread.SaveConversation(context.WithoutCancel(ctx)); err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to save resource reload marker")
-			}
-		}
-		if reloadHandler, ok := handler.(llmtypes.ResourcesReloadedMessageHandler); ok {
-			reloadHandler.HandleResourcesReloaded(conversations.MessageDisplayKey(message))
-		}
+		kind = conversations.MessageDisplayKindResourceReload
+	}
+	if strings.TrimSpace(outcome.Message) == "" {
 		return nil
 	}
-	if message != "" {
-		thread.AddUserMessage(ctx, message)
-		if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
-			userHandler.HandleUserMessage(message, nil)
+	display := strings.TrimSpace(outcome.Display)
+	if display == "" {
+		display = agentenv.ResourcesReloadedDisplay
+	}
+	// Keep the outcome in model context, but project it as a host marker in
+	// transcripts rather than as user input. A unique message keeps repeated
+	// outcomes from sharing a marker ID.
+	message := outcome.Message + "\n\n[Resource reload ID: " + convtypes.GenerateID() + "]"
+	metadata := conversations.AddMessageDisplay(thread.GetMetadata(), message, display, kind, "")
+	thread.SetMetadataValue(conversations.MessageDisplayMetadataKey, metadata[conversations.MessageDisplayMetadataKey])
+	thread.AddUserMessage(ctx, message)
+	if thread.IsPersisted() && !noSave {
+		// As with compaction markers, save before announcing the outcome so a
+		// later turn hook failure does not erase the marker on history refresh.
+		if err := thread.SaveConversation(context.WithoutCancel(ctx)); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to save resource reload marker")
 		}
+	}
+	if reloadHandler, ok := handler.(llmtypes.ResourceReloadMessageHandler); ok {
+		reloadHandler.HandleResourceReload(kind, conversations.MessageDisplayKey(message), display)
 	}
 	return nil
 }

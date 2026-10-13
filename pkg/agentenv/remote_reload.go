@@ -13,6 +13,19 @@ import (
 // ReloadResourcesToolName is a host-owned, model-only control tool.
 const ReloadResourcesToolName = "reload_resources"
 
+// ResourcesReloadedDisplay labels a completed reload in user-facing transcripts.
+const ResourcesReloadedDisplay = "Resources reloaded"
+
+// ReloadOutcome reports a between-turn reload to the model and to the user.
+type ReloadOutcome struct {
+	// Reloaded is false when the previous environment was kept.
+	Reloaded bool
+	// Message is the model-facing notice.
+	Message string
+	// Display is the user-facing transcript marker text.
+	Display string
+}
+
 func reloadResourcesDefinition() ToolDefinition {
 	wire := runnerpayload.ToolDefinition{
 		Name:        ReloadResourcesToolName,
@@ -90,15 +103,15 @@ func (e *RemoteEnvironment) HasPendingReload() bool {
 // ReloadPendingResources replaces only this run's snapshot. A refusal leaves
 // the old environment usable; every uncertain/destructive failure is fatal.
 // The provider calls this only after all tool results and turn.end hooks finish.
-func (e *RemoteEnvironment) ReloadPendingResources(ctx context.Context) (reloaded bool, message string, err error) {
+func (e *RemoteEnvironment) ReloadPendingResources(ctx context.Context) (outcome ReloadOutcome, err error) {
 	e.mu.Lock()
 	if !e.reloadPending {
 		e.mu.Unlock()
-		return false, "", nil
+		return ReloadOutcome{}, nil
 	}
 	if !e.opened || e.closing || e.reloading || e.reloadFailed {
 		e.mu.Unlock()
-		return false, "", errors.New("remote environment cannot reload")
+		return ReloadOutcome{}, errors.New("remote environment cannot reload")
 	}
 	e.reloadPending = false
 	e.reloading = true
@@ -112,31 +125,36 @@ func (e *RemoteEnvironment) ReloadPendingResources(ctx context.Context) (reloade
 		e.mu.Unlock()
 	}()
 	if err := ctx.Err(); err != nil {
-		return false, "", err
+		return ReloadOutcome{}, err
 	}
 	result, err := e.controller.ReloadRun(ctx, params)
 	if err != nil {
-		return false, "", errors.Wrap(err, "resource reload failed; the run cannot safely continue")
+		return ReloadOutcome{}, errors.Wrap(err, "resource reload failed; the run cannot safely continue")
 	}
 	if err := ctx.Err(); err != nil {
-		return false, "", err
+		return ReloadOutcome{}, err
 	}
 	if result.Refusal != "" {
-		return false, "Resource reload refused: " + result.Refusal, nil
+		refusal := "Resource reload refused: " + result.Refusal
+		return ReloadOutcome{Message: refusal, Display: refusal}, nil
 	}
 	manifest, err := e.convertManifest(result.Manifest, config)
 	if err != nil {
-		return false, "", errors.Wrap(err, "invalid reloaded environment")
+		return ReloadOutcome{}, errors.Wrap(err, "invalid reloaded environment")
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return false, "", err
+		return ReloadOutcome{}, err
 	}
 	if !e.opened || e.closing || e.runID != params.RunID {
-		return false, "", errors.New("run stopped while reloading resources")
+		return ReloadOutcome{}, errors.New("run stopped while reloading resources")
 	}
 	e.manifest = manifest
 	e.wireManifest = result.Manifest
-	return true, "Workspace resources reloaded. Use the refreshed tools, schemas and context for the rest of this run.", nil
+	return ReloadOutcome{
+		Reloaded: true,
+		Message:  "Workspace resources reloaded. Use the refreshed tools, schemas and context for the rest of this run.",
+		Display:  ResourcesReloadedDisplay,
+	}, nil
 }

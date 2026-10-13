@@ -82,7 +82,7 @@ func TestRenderResourceReloadMarker(t *testing.T) {
 	t.Cleanup(m.cancel)
 	m.width, m.height = 80, 24
 	m.resize()
-	m.entries = []chatEntry{resourceReloadEntry("reload-1")}
+	m.entries = []chatEntry{resourceReloadEntry("reload-1", "", false)}
 
 	content, regions := m.renderTranscript()
 	assert.Contains(t, content, thoughtHeaderStyle.Render("✓ Resources reloaded"))
@@ -90,6 +90,15 @@ func TestRenderResourceReloadMarker(t *testing.T) {
 	assert.Empty(t, regions, "reload markers have no expandable details")
 	m.toggleAllDetails()
 	assert.False(t, m.entries[0].blocks[0].expanded)
+
+	m.entries = []chatEntry{resourceReloadEntry("reload-2", "Resource reload refused: cannot reload while background workers are retained; release background leases first", true)}
+	content, _ = m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.True(t, strings.HasPrefix(plain, "✗ Resource reload refused: cannot reload"))
+	assert.Contains(t, strings.Join(strings.Fields(plain), " "), "release background leases first")
+	for _, line := range strings.Split(strings.TrimSuffix(plain, "\n"), "\n") {
+		assert.LessOrEqual(t, xansi.StringWidth(line), m.transcriptTextWidth(), "long outcomes wrap to the transcript")
+	}
 }
 
 func TestRenderTranscriptImageAttachments(t *testing.T) {

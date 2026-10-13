@@ -154,8 +154,12 @@ func RenderMarkdown(
 			output.WriteString("\n")
 		}
 
-		if msg.Kind == MessageDisplayKindResourceReload {
-			output.WriteString("### Resources reloaded\n")
+		if IsResourceReloadDisplayKind(msg.Kind) {
+			label := strings.TrimSpace(msg.Content)
+			if label == "" {
+				label = "Resources reloaded"
+			}
+			output.WriteString("### " + label + "\n")
 			renderedMessages++
 			continue
 		}

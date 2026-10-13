@@ -42,9 +42,17 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 				switch block.kind {
 				case blockResourcesReloaded:
 					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
-					b.WriteString(thoughtHeaderStyle.Render("✓ Resources reloaded"))
+					label, glyph := block.text, "✓ "
+					if label == "" {
+						label = "Resources reloaded"
+					}
+					if block.resourceReloadRefused {
+						glyph = "✗ "
+					}
+					marker := renderPersistentStyle(thoughtHeaderStyle, wrapText(glyph+label, m.transcriptTextWidth()))
+					b.WriteString(marker)
 					b.WriteString("\n")
-					line++
+					line += lineCount(marker)
 				case blockCompaction:
 					if block.compaction == nil {
 						continue

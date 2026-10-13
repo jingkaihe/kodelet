@@ -623,7 +623,7 @@ func runDefaultChat(
 			var reloadMarkerID string
 			if reload {
 				response += "\n\n[Resource reload ID: " + convtypes.GenerateID() + "]"
-				metadata := conversationservice.AddMessageDisplay(thread.GetMetadata(), response, "Resources reloaded", conversationservice.MessageDisplayKindResourceReload, "")
+				metadata := conversationservice.AddMessageDisplay(thread.GetMetadata(), response, agentenv.ResourcesReloadedDisplay, conversationservice.MessageDisplayKindResourceReload, "")
 				thread.SetMetadataValue(conversationservice.MessageDisplayMetadataKey, metadata[conversationservice.MessageDisplayMetadataKey])
 				reloadMarkerID = conversationservice.MessageDisplayKey(response)
 			}
@@ -639,7 +639,7 @@ func runDefaultChat(
 				}
 			}
 			if reload {
-				if err := sink.Send(ChatEvent{Kind: "resources-reloaded", ResourceReloadID: reloadMarkerID, ConversationID: sessionID, CWD: llmConfig.WorkingDirectory}); err != nil {
+				if err := sink.Send(ChatEvent{Kind: conversationservice.MessageDisplayKindResourceReload, ResourceReloadID: reloadMarkerID, Content: agentenv.ResourcesReloadedDisplay, ConversationID: sessionID, CWD: llmConfig.WorkingDirectory}); err != nil {
 					return sessionID, err
 				}
 			}
@@ -1570,8 +1570,8 @@ func (h *chatMessageHandler) HandleCompaction(marker llmtypes.CompactionMarker, 
 	})
 }
 
-func (h *chatMessageHandler) HandleResourcesReloaded(markerID string) {
-	h.sendEvent(ChatEvent{Kind: "resources-reloaded", ResourceReloadID: markerID, ConversationID: h.conversationID})
+func (h *chatMessageHandler) HandleResourceReload(kind, markerID, text string) {
+	h.sendEvent(ChatEvent{Kind: kind, ResourceReloadID: markerID, Content: text, ConversationID: h.conversationID})
 }
 
 func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {

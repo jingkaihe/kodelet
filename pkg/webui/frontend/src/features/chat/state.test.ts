@@ -820,19 +820,22 @@ describe('resource reload history and streaming', () => {
     let live = applyChatStreamEvent([], { kind: 'text', content: 'Continuing.' });
     expect(applyChatStreamEvent(live, { kind: 'resources-reloaded' })).toEqual(live);
     const persisted: Message[] = [{ role: 'assistant', content: 'Continuing.' }];
+    const outcomes = [
+      { id: 'reload-1', kind: 'resources-reloaded', text: 'Resources reloaded' },
+      {
+        id: 'reload-2',
+        kind: 'resource-reload-refused',
+        text: 'Resource reload refused: workers retained',
+      },
+    ] as const;
 
-    for (const id of ['reload-1', 'reload-2']) {
-      const event = { kind: 'resources-reloaded' as const, resource_reload_id: id };
+    for (const { id, kind, text } of outcomes) {
+      const event = { kind, resource_reload_id: id, content: text };
       live = applyChatStreamEvent(live, event);
       expect(applyChatStreamEvent(live, event)).toEqual(live);
       live = applyChatStreamEvent(live, { kind: 'text', content: 'Continuing.' });
       persisted.push(
-        {
-          role: 'assistant',
-          kind: 'resources-reloaded',
-          resourceReloadId: id,
-          content: 'Hidden feedback',
-        },
+        { role: 'assistant', kind, resourceReloadId: id, content: text },
         { role: 'assistant', content: 'Continuing.' }
       );
     }
@@ -847,9 +850,14 @@ describe('resource reload history and streaming', () => {
     expect(replayed).toEqual(live);
     expect(live[0].blocks).toEqual([
       { type: 'message', content: 'Continuing.', inProgress: false },
-      { type: 'resources-reloaded', id: 'reload-1' },
+      { type: 'resources-reloaded', id: 'reload-1', text: 'Resources reloaded' },
       { type: 'message', content: 'Continuing.', inProgress: false },
-      { type: 'resources-reloaded', id: 'reload-2' },
+      {
+        type: 'resources-reloaded',
+        id: 'reload-2',
+        text: 'Resource reload refused: workers retained',
+        refused: true,
+      },
       { type: 'message', content: 'Continuing.', inProgress: false },
     ]);
     expect(

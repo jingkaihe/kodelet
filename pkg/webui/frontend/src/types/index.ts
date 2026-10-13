@@ -10,7 +10,7 @@ export interface CompactionMarker {
 export interface Message {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
-  kind?: 'context-compacted' | 'resources-reloaded';
+  kind?: 'context-compacted' | 'resources-reloaded' | 'resource-reload-refused';
   compaction?: CompactionMarker;
   resourceReloadId?: string;
   toolCalls?: ToolCall[];
@@ -524,6 +524,7 @@ export interface ChatStreamEvent {
     | 'thinking'
     | 'context-compacted'
     | 'resources-reloaded'
+    | 'resource-reload-refused'
     | 'text-delta'
     | 'content-end'
     | 'text'
@@ -640,6 +641,10 @@ export type ChatAssistantBlock =
   | {
       type: 'resources-reloaded';
       id: string;
+      // Outcome label; older markers fall back to "Resources reloaded".
+      text?: string;
+      // The reload was refused and the previous environment kept.
+      refused?: boolean;
     }
   | {
       type: 'compaction';

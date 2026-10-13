@@ -86,9 +86,11 @@ type CompactionMessageHandler interface {
 	HandleCompaction(marker CompactionMarker, beforeCurrentUser bool)
 }
 
-// ResourcesReloadedMessageHandler announces completion with a stable transcript marker ID and refreshes discovery.
-type ResourcesReloadedMessageHandler interface {
-	HandleResourcesReloaded(markerID string)
+// ResourceReloadMessageHandler announces a reload outcome as a host transcript marker.
+// Kind is "resources-reloaded" after a replacement, which also refreshes discovery,
+// or "resource-reload-refused" when the previous environment was kept.
+type ResourceReloadMessageHandler interface {
+	HandleResourceReload(kind, markerID, text string)
 }
 
 // MessageEvent represents an event from processing a message

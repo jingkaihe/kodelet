@@ -19,7 +19,15 @@ const (
 	MessageDisplayVersion            = "v1"
 	MessageDisplayKindSlashCommand   = "slash-command"
 	MessageDisplayKindResourceReload = "resources-reloaded"
+	// MessageDisplayKindResourceReloadRefused marks a reload that left the
+	// previous environment in place.
+	MessageDisplayKindResourceReloadRefused = "resource-reload-refused"
 )
+
+// IsResourceReloadDisplayKind reports a host marker for a resource reload outcome.
+func IsResourceReloadDisplayKind(kind string) bool {
+	return kind == MessageDisplayKindResourceReload || kind == MessageDisplayKindResourceReloadRefused
+}
 
 type (
 	conversationNameOverrideContextKey struct{}
@@ -222,9 +230,9 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			if display.Kind == MessageDisplayKindResourceReload {
+			if IsResourceReloadDisplayKind(display.Kind) {
 				message.ResourceReloadID = MessageDisplayKey(message.Content)
-				message.Kind = MessageDisplayKindResourceReload
+				message.Kind = display.Kind
 				message.Role = "assistant"
 				message.Content = display.Text
 				message.RawItem = nil
@@ -252,7 +260,7 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 			continue
 		}
 		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			if display.Kind == MessageDisplayKindResourceReload {
+			if IsResourceReloadDisplayKind(display.Kind) {
 				message.Role = "assistant"
 				message.Content = display.Text
 			} else if message.Role == "user" {

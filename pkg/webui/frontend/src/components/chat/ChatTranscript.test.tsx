@@ -348,6 +348,32 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('details')).not.toBeInTheDocument();
   });
 
+  it('renders refused resource reloads with their reason', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'resources-reloaded',
+                id: 'reload-2',
+                text: 'Resource reload refused: workers retained',
+                refused: true,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText('Resource reload refused: workers retained')).toBeVisible();
+    expect(screen.queryByText('Resources reloaded')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('[data-resource-reload-id="reload-2"] .lucide-circle-x')
+    ).toBeInTheDocument();
+  });
+
   it.each([
     undefined,
     'Not a readable API summary',

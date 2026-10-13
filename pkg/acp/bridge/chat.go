@@ -39,16 +39,20 @@ func (s *ACPChatEventSink) Send(event chat.ChatEvent) error {
 		return nil
 	}
 	switch event.Kind {
-	case "resources-reloaded":
+	case "resources-reloaded", "resource-reload-refused":
 		if event.ResourceReloadID == "" || s.sender == nil {
 			return nil
 		}
 		if _, seen := s.resourceReloads[event.ResourceReloadID]; seen {
 			return nil
 		}
+		text, _ := event.Content.(string)
+		if strings.TrimSpace(text) == "" {
+			text = "Resources reloaded"
+		}
 		if err := s.sender.SendUpdate(s.sessionID, map[string]any{
 			"sessionUpdate": acptypes.UpdateAgentMessageChunk,
-			"content":       acptypes.ContentBlock{Type: acptypes.ContentTypeText, Text: "\n\nResources reloaded\n\n"},
+			"content":       acptypes.ContentBlock{Type: acptypes.ContentTypeText, Text: "\n\n" + strings.TrimSpace(text) + "\n\n"},
 		}); err != nil {
 			return err
 		}
@@ -125,8 +129,8 @@ func ReplayConversationHistory(sender UpdateSender, sessionID acptypes.SessionID
 	sink := NewACPChatEventSink(sender, sessionID)
 	for _, message := range messages {
 		switch message.Kind {
-		case "resources-reloaded":
-			if err := sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ResourceReloadID: message.ResourceReloadID}); err != nil {
+		case "resources-reloaded", "resource-reload-refused":
+			if err := sink.Send(chat.ChatEvent{Kind: message.Kind, ResourceReloadID: message.ResourceReloadID, Content: message.Content}); err != nil {
 				return err
 			}
 		case "context-compacted":

@@ -3626,25 +3626,29 @@ func TestServer_convertToWebMessagesPreservesRepeatedCommands(t *testing.T) {
 }
 
 func TestServer_convertToWebMessagesResourceReloadMarker(t *testing.T) {
-	const feedback = "Reload finished. Use fresh tools. [reload-id]"
-	metadata := conversations.AddMessageDisplay(nil, feedback, "Resources reloaded", conversations.MessageDisplayKindResourceReload, "")
-	for _, provider := range []string{"anthropic", "openai", "openai-responses"} {
-		for _, role := range []string{"user", "assistant"} {
-			t.Run(provider+"/"+role, func(t *testing.T) {
-				content := any(feedback)
-				if provider == "anthropic" {
-					content = []map[string]string{{"type": "text", "text": feedback}}
-				}
-				raw, err := json.Marshal([]map[string]any{{"type": "message", "role": role, "content": content}})
-				require.NoError(t, err)
-				messages, err := (&Server{}).convertToWebMessages(raw, provider, metadata, nil)
-				require.NoError(t, err)
-				require.Len(t, messages, 1)
-				assert.Equal(t, WebMessage{
-					Kind: "resources-reloaded", Role: "assistant", Content: "Resources reloaded",
-					ResourceReloadID: conversations.MessageDisplayKey(feedback),
-				}, messages[0])
-			})
+	for _, marker := range []struct{ kind, feedback, display string }{
+		{conversations.MessageDisplayKindResourceReload, "Reload finished. Use fresh tools. [reload-id]", "Resources reloaded"},
+		{conversations.MessageDisplayKindResourceReloadRefused, "Resource reload refused: workers retained [reload-id]", "Resource reload refused: workers retained"},
+	} {
+		metadata := conversations.AddMessageDisplay(nil, marker.feedback, marker.display, marker.kind, "")
+		for _, provider := range []string{"anthropic", "openai", "openai-responses"} {
+			for _, role := range []string{"user", "assistant"} {
+				t.Run(marker.kind+"/"+provider+"/"+role, func(t *testing.T) {
+					content := any(marker.feedback)
+					if provider == "anthropic" {
+						content = []map[string]string{{"type": "text", "text": marker.feedback}}
+					}
+					raw, err := json.Marshal([]map[string]any{{"type": "message", "role": role, "content": content}})
+					require.NoError(t, err)
+					messages, err := (&Server{}).convertToWebMessages(raw, provider, metadata, nil)
+					require.NoError(t, err)
+					require.Len(t, messages, 1)
+					assert.Equal(t, WebMessage{
+						Kind: marker.kind, Role: "assistant", Content: marker.display,
+						ResourceReloadID: conversations.MessageDisplayKey(marker.feedback),
+					}, messages[0])
+				})
+			}
 		}
 	}
 }

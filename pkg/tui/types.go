@@ -110,6 +110,8 @@ type assistantBlock struct {
 	expanded         bool
 	compaction       *llmtypes.CompactionMarker
 	resourceReloadID string
+	// resourceReloadRefused marks a reload that kept the previous environment.
+	resourceReloadRefused bool
 }
 
 type chatEntry struct {

@@ -362,9 +362,13 @@ func (s *remoteRunSink) Send(event chat.ChatEvent) error {
 	}
 	var err error
 	switch event.Kind {
-	case "resources-reloaded":
+	case "resources-reloaded", "resource-reload-refused":
 		if event.ResourceReloadID != "" {
-			_, err = fmt.Fprintln(s.output, "\nResources reloaded")
+			text, _ := event.Content.(string)
+			if strings.TrimSpace(text) == "" {
+				text = "Resources reloaded"
+			}
+			_, err = fmt.Fprintln(s.output, "\n"+strings.TrimSpace(text))
 		}
 	case "text-delta":
 		s.streamed = true

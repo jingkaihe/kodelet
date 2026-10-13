@@ -118,7 +118,7 @@ func TestApplyResourceReloadMarkerMatchesHistory(t *testing.T) {
 		{Kind: "text-delta", Delta: "between"},
 		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
 		{Kind: "text-delta", Delta: " continued"},
-		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "resource-reload-refused", ResourceReloadID: "reload-2", Content: "Resource reload refused: workers retained"},
 		{Kind: "text-delta", Delta: "after"},
 	} {
 		m.applyChatEvent(event)
@@ -128,7 +128,7 @@ func TestApplyResourceReloadMarkerMatchesHistory(t *testing.T) {
 		{Kind: "text", Role: "assistant", Content: "before"},
 		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
 		{Kind: "text", Role: "assistant", Content: "between continued"},
-		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "resource-reload-refused", ResourceReloadID: "reload-2", Content: "Resource reload refused: workers retained"},
 		{Kind: "text", Role: "assistant", Content: "after"},
 	})
 	require.Len(t, m.entries, 5)

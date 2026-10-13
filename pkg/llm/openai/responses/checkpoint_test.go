@@ -26,7 +26,7 @@ type reloadCheckpointEnvironment struct {
 	pending  bool
 	opened   int
 	turnEnd  int
-	reload   func() (bool, string, error)
+	reload   func() (agentenv.ReloadOutcome, error)
 }
 
 func (e *reloadCheckpointEnvironment) Open(ctx context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
@@ -37,7 +37,7 @@ func (e *reloadCheckpointEnvironment) Open(ctx context.Context, spec agentenv.Ru
 
 func (e *reloadCheckpointEnvironment) Manifest() agentenv.Manifest { return e.manifest.Clone() }
 func (e *reloadCheckpointEnvironment) HasPendingReload() bool      { return e.pending }
-func (e *reloadCheckpointEnvironment) ReloadPendingResources(context.Context) (bool, string, error) {
+func (e *reloadCheckpointEnvironment) ReloadPendingResources(context.Context) (agentenv.ReloadOutcome, error) {
 	e.pending = false
 	return e.reload()
 }
@@ -54,13 +54,15 @@ func (e *reloadCheckpointEnvironment) DispatchTurnEnd(_ context.Context, _ strin
 type reloadCheckpointHandler struct {
 	compactionCaptureHandler
 	reloads      int
+	reloadKind   string
 	reloadID     string
+	reloadText   string
 	userMessages []string
 }
 
-func (h *reloadCheckpointHandler) HandleResourcesReloaded(markerID string) {
+func (h *reloadCheckpointHandler) HandleResourceReload(kind, markerID, text string) {
 	h.reloads++
-	h.reloadID = markerID
+	h.reloadKind, h.reloadID, h.reloadText = kind, markerID, text
 }
 
 func (h *reloadCheckpointHandler) HandleUserMessage(content string, _ []string) {
@@ -95,22 +97,22 @@ func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
 			handler := &reloadCheckpointHandler{}
 			var requests []openairesponses.ResponseNewParams
 			batchComplete := false
-			environment.reload = func() (bool, string, error) {
+			environment.reload = func() (agentenv.ReloadOutcome, error) {
 				assert.True(t, batchComplete)
 				assert.Equal(t, 1, environment.turnEnd)
 				assert.False(t, handler.done, "reload must not end the visible run")
 				if test.failed {
-					return false, "", errors.New("uncertain reload")
+					return agentenv.ReloadOutcome{}, errors.New("uncertain reload")
 				}
 				if test.refused {
-					return false, "Reload refused: background workers retained", nil
+					return agentenv.ReloadOutcome{Message: "Reload refused: background workers retained", Display: "Resource reload refused: workers retained"}, nil
 				}
 				environment.manifest.Config.SystemPromptContent = "new prompt"
 				environment.manifest.Tools = []agentenv.ToolDefinition{{Name: "file_read", Tool: &tools.FileReadTool{}}}
-				return true, "Resources reloaded", nil
+				return agentenv.ReloadOutcome{Reloaded: true, Message: "Workspace resources reloaded", Display: "Resources reloaded"}, nil
 			}
 			thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
-				if len(requests) == 1 && !test.refused {
+				if len(requests) == 1 {
 					require.NotEmpty(t, store.savedRecords)
 					saved := store.savedRecords[len(store.savedRecords)-1]
 					assert.Contains(t, string(saved.RawMessages), "[Resource reload ID:")
@@ -137,12 +139,14 @@ func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
 			assert.Equal(t, config.AllowedTools, thread.GetConfig().AllowedTools)
 			assert.Equal(t, config.Model, thread.GetConfig().Model)
 			assert.Equal(t, "same-conversation", thread.GetConversationID())
-			if test.refused || test.failed {
+			if test.failed {
 				assert.Zero(t, handler.reloads)
 			} else {
 				assert.Equal(t, 1, handler.reloads)
 				assert.NotEmpty(t, handler.reloadID)
-				assert.Empty(t, handler.userMessages, "completion is a marker, not a visible user message")
+				assert.Empty(t, handler.userMessages, "outcomes are host markers, not visible user messages")
+			}
+			if !test.refused && !test.failed {
 				assert.NotContains(t, thread.GetMetadata(), "allowed_tools")
 			}
 			if test.failed {
@@ -156,22 +160,24 @@ func TestResponsesDeferredReloadCheckpoint(t *testing.T) {
 			require.Len(t, requests, test.maxTurns)
 			assert.Equal(t, "old prompt", requests[0].Instructions.Value)
 			if test.maxTurns == 2 {
-				wantPrompt, wantTool, feedback := "new prompt", "file_read", "Resources reloaded"
+				wantPrompt, wantTool, feedback := "new prompt", "file_read", "Workspace resources reloaded"
+				wantKind, wantDisplay := "resources-reloaded", "Resources reloaded"
 				if test.refused {
 					wantPrompt, wantTool, feedback = "old prompt", "bash", "Reload refused: background workers retained"
+					wantKind, wantDisplay = "resource-reload-refused", "Resource reload refused: workers retained"
 				}
 				assert.Equal(t, wantPrompt, requests[1].Instructions.Value)
 				require.Len(t, requests[1].Tools, 1)
 				assert.Equal(t, wantTool, requests[1].Tools[0].OfFunction.Name)
 				modelFeedback := extractInputItemText(requests[1].Input.OfInputItemList[len(requests[1].Input.OfInputItemList)-1])
 				assert.Contains(t, modelFeedback, feedback)
-				if !test.refused {
-					display := conversations.ApplyDisplayToStreamableMessages([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: modelFeedback}}, thread.GetMetadata())
-					require.Len(t, display, 1)
-					assert.Equal(t, "resources-reloaded", display[0].Kind)
-					assert.Equal(t, handler.reloadID, display[0].ResourceReloadID)
-					assert.Equal(t, "Resources reloaded", display[0].Content)
-				}
+				display := conversations.ApplyDisplayToStreamableMessages([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: modelFeedback}}, thread.GetMetadata())
+				require.Len(t, display, 1)
+				assert.Equal(t, wantKind, display[0].Kind)
+				assert.Equal(t, wantKind, handler.reloadKind)
+				assert.Equal(t, handler.reloadID, display[0].ResourceReloadID)
+				assert.Equal(t, wantDisplay, display[0].Content)
+				assert.Equal(t, wantDisplay, handler.reloadText)
 			}
 		})
 	}

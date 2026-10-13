@@ -1,4 +1,4 @@
-import { Check, ChevronRight, SquareSlash } from 'lucide-react';
+import { Check, ChevronRight, CircleX, SquareSlash } from 'lucide-react';
 import { Lexer, type Token } from 'marked';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-bash';
@@ -331,10 +331,10 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
             <div className="activity-card activity-card-thinking">
               <div className="tool-summary activity-summary">
                 <span className="activity-marker" aria-hidden="true">
-                  <Check size={14} />
+                  {block.refused ? <CircleX size={14} /> : <Check size={14} />}
                 </span>
                 <span className="tool-summary-text">
-                  <span className="tool-summary-label">Resources reloaded</span>
+                  <span className="tool-summary-label">{block.text || 'Resources reloaded'}</span>
                 </span>
               </div>
             </div>

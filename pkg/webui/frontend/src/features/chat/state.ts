@@ -85,7 +85,12 @@ const insertCompactionMarker = (
   }
 };
 
-const insertResourceReloadMarker = (messages: ChatRenderMessage[], id: string | undefined) => {
+const insertResourceReloadMarker = (
+  messages: ChatRenderMessage[],
+  id: string | undefined,
+  content: unknown,
+  refused: boolean
+) => {
   if (
     !id?.trim() ||
     messages.some((message) =>
@@ -94,9 +99,12 @@ const insertResourceReloadMarker = (messages: ChatRenderMessage[], id: string | 
   ) {
     return;
   }
+  const text = typeof content === 'string' ? content.trim() : '';
   ensureAssistantBlocks(ensureCurrentAssistantMessage(messages)).push({
     type: 'resources-reloaded',
     id,
+    ...(text ? { text } : {}),
+    ...(refused ? { refused } : {}),
   });
 };
 
@@ -261,8 +269,13 @@ export const conversationToChatMessages = (
   }
 
   return conversation.messages.reduce<ChatRenderMessage[]>((chatMessages, message: Message) => {
-    if (message.kind === 'resources-reloaded') {
-      insertResourceReloadMarker(chatMessages, message.resourceReloadId);
+    if (message.kind === 'resources-reloaded' || message.kind === 'resource-reload-refused') {
+      insertResourceReloadMarker(
+        chatMessages,
+        message.resourceReloadId,
+        message.content,
+        message.kind === 'resource-reload-refused'
+      );
       return chatMessages;
     }
     if (message.kind === 'context-compacted') {
@@ -353,7 +366,13 @@ export const applyChatStreamEvent = (
       return nextMessages;
 
     case 'resources-reloaded':
-      insertResourceReloadMarker(nextMessages, event.resource_reload_id);
+    case 'resource-reload-refused':
+      insertResourceReloadMarker(
+        nextMessages,
+        event.resource_reload_id,
+        event.content,
+        event.kind === 'resource-reload-refused'
+      );
       return nextMessages;
 
     case 'thinking-start': {

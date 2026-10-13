@@ -212,17 +212,24 @@ func TestACPCompactionSendFailureCanBeRetried(t *testing.T) {
 }
 
 func TestACPResourceReloadMarker(t *testing.T) {
+	const refusal = "Resource reload refused: background workers retained"
 	sender := &mockSender{}
 	sink := NewACPChatEventSink(sender, "session")
-	for _, id := range []string{"", "reload-1", "reload-1", "reload-2"} {
-		require.NoError(t, sink.Send(chat.ChatEvent{Kind: "resources-reloaded", ResourceReloadID: id}))
+	for _, event := range []chat.ChatEvent{
+		{Kind: "resources-reloaded"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
+		{Kind: "resource-reload-refused", ResourceReloadID: "reload-2", Content: refusal},
+	} {
+		require.NoError(t, sink.Send(event))
 	}
 	require.Len(t, sender.updates, 2)
-	assert.Contains(t, sender.updates[0].(map[string]any)["content"].(acptypes.ContentBlock).Text, "Resources reloaded")
+	assert.Equal(t, "\n\nResources reloaded\n\n", sender.updates[0].(map[string]any)["content"].(acptypes.ContentBlock).Text)
+	assert.Equal(t, "\n\n"+refusal+"\n\n", sender.updates[1].(map[string]any)["content"].(acptypes.ContentBlock).Text)
 	replay := &mockSender{}
 	require.NoError(t, ReplayConversationHistory(replay, "session", []conversations.StreamableMessage{
 		{Kind: "resources-reloaded", ResourceReloadID: "reload-1"},
-		{Kind: "resources-reloaded", ResourceReloadID: "reload-2"},
+		{Kind: "resource-reload-refused", ResourceReloadID: "reload-2", Content: refusal},
 	}))
 	assert.Equal(t, sender.updates, replay.updates)
 }

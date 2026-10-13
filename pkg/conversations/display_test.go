@@ -166,6 +166,20 @@ func TestResourceReloadDisplaySurvivesPersistence(t *testing.T) {
 	}
 }
 
+func TestResourceReloadRefusalDisplaysAsHostMarker(t *testing.T) {
+	const modelText = "Resource reload refused: workers retained\n\n[Resource reload ID: reload-id]"
+	const display = "Resource reload refused: workers retained"
+	metadata := AddMessageDisplay(nil, modelText, display, MessageDisplayKindResourceReloadRefused, "")
+	got := ApplyDisplayToStreamableMessages([]StreamableMessage{{Kind: "text", Role: "user", Content: modelText}}, metadata)
+	require.Len(t, got, 1)
+	assert.Equal(t, StreamableMessage{
+		Kind: MessageDisplayKindResourceReloadRefused, Role: "assistant", Content: display,
+		ResourceReloadID: MessageDisplayKey(modelText),
+	}, got[0])
+	assert.Contains(t, RenderMarkdown(got, nil, MarkdownOptions{}), "### "+display)
+	assert.Equal(t, []llmtypes.Message{{Role: "assistant", Content: display}}, ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: "user", Content: modelText}}, metadata))
+}
+
 func TestApplyDisplayPreservesMessagesWithoutOverrides(t *testing.T) {
 	content := "<context>\nInspect project dependencies.\n</context>"
 	streamable := []StreamableMessage{{Kind: "text", Role: "user", Content: content}}

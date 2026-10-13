@@ -2618,7 +2618,7 @@ func applyWebMessageDisplay(message WebMessage, metadata map[string]any) WebMess
 			text = content[0].Text
 		}
 	}
-	if display, ok := conversations.LookupMessageDisplay(metadata, text); ok && display.Kind == conversations.MessageDisplayKindResourceReload {
+	if display, ok := conversations.LookupMessageDisplay(metadata, text); ok && conversations.IsResourceReloadDisplayKind(display.Kind) {
 		return WebMessage{
 			Kind: display.Kind, Role: "assistant", Content: display.Text,
 			ResourceReloadID: conversations.MessageDisplayKey(text),
