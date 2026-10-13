@@ -191,7 +191,8 @@ interface QueuedCommand {
   attachments: PendingImageAttachment[];
 }
 
-const isSlashCommand = (message: string): boolean => /^\/[^\s]+/.test(message.trim());
+const slashCommandName = (message: string): string | undefined =>
+  message.trim().match(/^\/(\S+)/)?.[1];
 
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
@@ -1222,7 +1223,7 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      if (isSlashCommand(prompt)) {
+      if (isQueueableCommand(prompt)) {
         if (
           !sendControllersRef.current[targetConversationId] &&
           !commandObserversRef.current[targetConversationId]
@@ -1874,6 +1875,16 @@ const ChatPage: React.FC = () => {
     profile: discoveryProfile,
     onSubmit: handleSubmit,
   });
+  const slashCommandNames = useMemo(
+    () => new Set(slashCommands.commands.map((command) => command.name)),
+    [slashCommands.commands]
+  );
+  // Only discovered commands wait for the run to finish. Other slash-prefixed
+  // text, such as a file path, is ordinary steering.
+  const isQueueableCommand = (message: string): boolean => {
+    const name = slashCommandName(message);
+    return name !== undefined && slashCommandNames.has(name);
+  };
 
   useEffect(() => {
     if (
@@ -1963,7 +1974,7 @@ const ChatPage: React.FC = () => {
   const submitActionLabel = steering
     ? 'Queueing…'
     : currentConversationIsStreaming
-      ? isSlashCommand(draft)
+      ? isQueueableCommand(draft)
         ? 'Queue command'
         : 'Steer'
       : 'Send';

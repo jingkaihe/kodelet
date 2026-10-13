@@ -7,6 +7,7 @@ import {
   mockGetConversation,
   mockGetConversations,
   mockGetRunners,
+  mockGetSlashCommands,
   mockNavigate,
   mockSteerConversation,
   mockStopConversation,
@@ -33,6 +34,13 @@ type QueueRunSource = 'submitted' | 'observed';
 
 const setupCommandQueueStreams = () => {
   setRouteParams({ id: 'conv-123' });
+  // Runner discovery includes host built-ins; only discovered commands queue.
+  mockGetSlashCommands.mockResolvedValue({
+    commands: [
+      { name: 'reload', description: 'Reload extensions and workspace resources' },
+      { name: 'review', description: 'Review local git changes', hint: 'focus' },
+    ],
+  });
   mockGetConversation.mockImplementation(async (id: string) => ({
     id,
     runnerId: 'runner-1',
@@ -79,9 +87,9 @@ const setupCommandQueueStreams = () => {
   return { streams, observers, startRun };
 };
 
-const queueSlashCommand = (message: string) => {
+const queueSlashCommand = async (message: string) => {
   fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: message } });
-  fireEvent.click(screen.getByRole('button', { name: 'Queue command' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Queue command' }));
 };
 
 const expectQueuedCommandsDiscarded = async () => {
@@ -313,7 +321,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(streams).toHaveLength(1));
 
-    queueSlashCommand('/reload');
+    await queueSlashCommand('/reload');
     const screenshot = new File(['hello'], 'review.png', { type: 'image/png' });
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -321,7 +329,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       },
     });
     await screen.findByAltText('review.png');
-    queueSlashCommand('/review focus=tests');
+    await queueSlashCommand('/review focus=tests');
     const queued = screen.getByRole('region', { name: 'Queued commands' });
     expect(
       within(queued)
@@ -397,8 +405,8 @@ describe('ChatPage streaming, steering, and navigation', () => {
     render(<ChatPage />);
     await screen.findByText('First conversation');
     const run = await startRun(source);
-    queueSlashCommand('/reload');
-    queueSlashCommand('/review tests');
+    await queueSlashCommand('/reload');
+    await queueSlashCommand('/review tests');
     fireEvent.change(screen.getByTestId('composer-textarea'), {
       target: { value: 'Keep my draft' },
     });
@@ -436,7 +444,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
     const { rerender } = render(<ChatPage />);
     await screen.findByText('First conversation');
     const original = await startRun(source);
-    queueSlashCommand('/reload');
+    await queueSlashCommand('/reload');
     const firstObservers = () =>
       observers.filter((observer) => observer.conversationId === 'conv-123');
 
@@ -509,12 +517,34 @@ describe('ChatPage streaming, steering, and navigation', () => {
     expect(screen.getByText('Other conversation')).toBeInTheDocument();
   });
 
+  it('steers slash-prefixed text that is not a discovered command', async () => {
+    const { startRun } = setupCommandQueueStreams();
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    await startRun('submitted');
+    await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+    await waitFor(() => {
+      fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: '/reload' } });
+      expect(screen.getByRole('button', { name: 'Queue command' })).toBeInTheDocument();
+    });
+
+    const steer = '/tmp/out.log shows the failure';
+    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: steer } });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith('conv-123', steer, [
+        { type: 'text', text: steer },
+      ])
+    );
+    expect(screen.queryByRole('region', { name: 'Queued commands' })).not.toBeInTheDocument();
+  });
+
   it('keeps the current observer active when the retained command observer disconnects', async () => {
     const { observers, startRun } = setupCommandQueueStreams();
     const { rerender } = render(<ChatPage />);
     await screen.findByText('First conversation');
     const retained = await startRun('observed');
-    queueSlashCommand('/reload');
+    await queueSlashCommand('/reload');
 
     setRouteParams({ id: 'conv-456' });
     rerender(<ChatPage />);

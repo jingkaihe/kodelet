@@ -151,6 +151,7 @@ export const useSlashCommands = ({
   };
 
   return {
+    commands,
     placeholder,
     composerProps: {
       slashCommandIndex: index,
