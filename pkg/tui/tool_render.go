@@ -615,13 +615,17 @@ func buildFallbackToolGroup(block assistantBlock, start, end int) toolRenderGrou
 func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
 	label, runningLabel := dedicatedBuiltinToolLabels(tool)
+	body := joinTools([]toolCall{tool})
+	if normalizedToolName(tool) == reloadResourcesToolName {
+		body = reloadResourcesToolBody(tool)
+	}
 	return toolRenderGroup{
 		toolStart:    idx,
 		toolEnd:      idx,
 		changeIndex:  -1,
 		label:        label,
 		runningLabel: runningLabel,
-		body:         joinTools([]toolCall{tool}),
+		body:         body,
 		wrapBody:     true,
 		expanded:     block.expanded || tool.expanded,
 		active:       !tool.done,
@@ -860,6 +864,11 @@ func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {
 		return viewImageToolLabel(tool), "Viewing image"
 	case "skill":
 		return skillToolLabel(tool), "Loading skill"
+	case reloadResourcesToolName:
+		if tool.failed {
+			return "Resource reload not requested", "Requesting resource reload"
+		}
+		return "Requested resource reload", "Requesting resource reload"
 	default:
 		name := normalizedToolName(tool)
 		if name == "" {
@@ -986,9 +995,28 @@ func isTaskRunTool(tool toolCall) bool {
 	return ok
 }
 
+// reloadResourcesToolName is the host-owned tool that queues a resource reload.
+// Its outcome is shown separately as a transcript marker.
+const reloadResourcesToolName = "reload_resources"
+
+// reloadResourcesToolBody explains a reload request instead of showing the
+// generic structured result, which carries no output for this tool.
+func reloadResourcesToolBody(tool toolCall) string {
+	if !tool.done {
+		return ""
+	}
+	if tool.failed {
+		if tool.structured != nil && strings.TrimSpace(tool.structured.Error) != "" {
+			return strings.TrimSpace(tool.structured.Error)
+		}
+		return strings.TrimSpace(tool.result)
+	}
+	return "Resources reload after the current tool batch."
+}
+
 func isDedicatedBuiltinTool(tool toolCall) bool {
 	switch normalizedToolName(tool) {
-	case "openai_web_search", "web_search", "web_fetch", "view_image", "skill":
+	case "openai_web_search", "web_search", "web_fetch", "view_image", "skill", reloadResourcesToolName:
 		return true
 	default:
 		return false

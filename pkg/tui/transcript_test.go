@@ -1344,6 +1344,66 @@ func TestRenderTranscriptFileWriteUsesDiffStyle(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptReloadResourcesHasDedicatedRow(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		tool   toolCall
+		header string
+		body   string
+	}{
+		{
+			name:   "running",
+			tool:   toolCall{name: "reload_resources", input: "{}"},
+			header: "Requesting resource reload…",
+		},
+		{
+			name: "requested",
+			tool: toolCall{name: "reload_resources", input: "{}", done: true, structured: &tooltypes.StructuredToolResult{
+				ToolName: "reload_resources", Success: true,
+			}},
+			header: "✓ Requested resource reload ▸",
+			body:   "Resources reload after the current tool batch.",
+		},
+		{
+			name: "blocked",
+			tool: toolCall{name: "reload_resources", input: "{}", done: true, failed: true, structured: &tooltypes.StructuredToolResult{
+				ToolName: "reload_resources", Error: "reload_resources is not allowed for this turn",
+			}},
+			header: "✗ Resource reload not requested ▸",
+			body:   "reload_resources is not allowed for this turn",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width, m.height = 100, 30
+			m.resize()
+			m.entries = []chatEntry{{
+				kind:   entryAssistant,
+				blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{test.tool}}},
+			}}
+
+			m.refreshViewport(true)
+			content, regions := m.renderTranscript()
+			plain := xansi.Strip(content)
+			assert.Contains(t, plain, test.header)
+			assert.NotContains(t, plain, "Ran 1 tool")
+			assert.NotContains(t, plain, "Running 1 tool")
+			if test.body == "" {
+				return
+			}
+			assert.NotContains(t, plain, test.body, "details stay collapsed")
+			require.Len(t, regions, 1)
+			assert.True(t, m.toggleDetailAt(regions[0].line))
+			content, _ = m.renderTranscript()
+			plain = xansi.Strip(content)
+			assert.Contains(t, plain, test.body)
+			assert.NotContains(t, plain, "Tool Result (reload_resources)")
+			assert.NotContains(t, plain, "input: {}")
+		})
+	}
+}
+
 func TestRenderTranscriptRunningFileWriteHasDedicatedLabel(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)
