@@ -3,6 +3,7 @@ package acceptance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -49,7 +50,7 @@ type coreDaemon struct {
 
 // startCoreDaemon starts the installed binary, not an in-process server. Its
 // environment intentionally differs from the client and owns all provider keys.
-func startCoreDaemon(t *testing.T, providerEnv []string) coreDaemon {
+func startCoreDaemon(t *testing.T, provider, model string, providerEnv []string) coreDaemon {
 	t.Helper()
 	root := t.TempDir()
 	daemonHome := filepath.Join(root, "daemon")
@@ -58,6 +59,14 @@ func startCoreDaemon(t *testing.T, providerEnv []string) coreDaemon {
 	for _, path := range []string{daemonHome, clientDir, workspace} {
 		require.NoError(t, os.MkdirAll(path, 0o700))
 	}
+	configPath := filepath.Join(daemonHome, "config.yaml")
+	config := fmt.Sprintf(`profile: acceptance
+profiles:
+  acceptance:
+    provider: %q
+    model: %q
+`, provider, model)
+	require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
 	// Even an accidental client store initialization must fail.
 	clientState := filepath.Join(clientDir, "not-a-state-directory")
 	require.NoError(t, os.WriteFile(clientState, []byte("client must not open a store"), 0o600))
@@ -76,6 +85,7 @@ func startCoreDaemon(t *testing.T, providerEnv []string) coreDaemon {
 	process.Env = append([]string{
 		"HOME=" + daemonHome, "PATH=" + os.Getenv("PATH"),
 		"KODELET_BASE_PATH=" + filepath.Join(daemonHome, "state"),
+		"KODELET_CONFIG_FILE=" + configPath,
 	}, providerEnv...)
 	process.Stdout, process.Stderr = logFile, logFile
 	require.NoError(t, process.Start())
@@ -144,14 +154,19 @@ func startCoreDaemon(t *testing.T, providerEnv []string) coreDaemon {
 	}
 }
 
+func (d coreDaemon) command(ctx context.Context, args ...string) *exec.Cmd {
+	args = append(args, "--server="+d.serverURL, "--auth-token="+d.authToken)
+	cmd := exec.CommandContext(ctx, "kodelet", args...)
+	cmd.Dir, cmd.Env = d.clientDir, d.clientEnv
+	return cmd
+}
+
 func TestCoreDaemonThinClientSetup(t *testing.T) {
 	// Read-only readiness and usage need no live provider or usable client store.
-	daemon := startCoreDaemon(t, []string{"KODELET_PROVIDER=openai", "OPENAI_API_KEY=unused-test-key"})
+	daemon := startCoreDaemon(t, "openai", "gpt-4o", []string{"OPENAI_API_KEY=unused-test-key"})
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "kodelet", "usage", "--format=json",
-		"--server="+daemon.serverURL, "--auth-token="+daemon.authToken)
-	cmd.Dir, cmd.Env = daemon.clientDir, daemon.clientEnv
+	cmd := daemon.command(ctx, "usage", "--format=json")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "thin client setup failed: %s", output)
 	assert.True(t, json.Valid(output), "usage must return JSON: %s", output)

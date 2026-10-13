@@ -12,7 +12,6 @@ Dockerfile
 /recipes/
 /sdk/
 /skills/
-/tests/
 /*.md
 
 # Frontend build artifacts and dependencies (will be built fresh in container)

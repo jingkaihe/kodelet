@@ -1,68 +1,58 @@
 package acceptance
 
 import (
-	"os/exec"
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestConversationListCommand(t *testing.T) {
-	// Test conversation list command
-	cmd := exec.Command("kodelet", "conversation", "list")
+	daemon := startCoreDaemon(t, "openai", "gpt-4o", []string{"OPENAI_API_KEY=unused-test-key"})
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := daemon.command(ctx, "conversation", "list")
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Failed to execute conversation list command")
+	require.NoError(t, err, "Failed to execute conversation list command: %s", output)
 
 	outputStr := strings.TrimSpace(string(output))
 
-	// Should either show conversations or indicate no conversations found
-	// The command should execute successfully regardless of whether conversations exist
+	assert.Contains(t, outputStr, "ID")
+	assert.Contains(t, outputStr, "Summary")
 	assert.False(t, strings.Contains(outputStr, "[ERROR]"), "Conversation list command returned error: %s", outputStr)
 }
 
 func TestConversationListWithOptions(t *testing.T) {
-	// Test conversation list with sort options
-	cmd := exec.Command("kodelet", "conversation", "list", "--sort-by", "updated", "--sort-order", "desc")
+	daemon := startCoreDaemon(t, "openai", "gpt-4o", []string{"OPENAI_API_KEY=unused-test-key"})
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := daemon.command(ctx, "conversation", "list", "--sort-by", "updated_at", "--sort-order", "desc", "--json")
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Failed to execute conversation list with options")
-
-	outputStr := strings.TrimSpace(string(output))
-
-	// Should execute successfully
-	assert.False(t, strings.Contains(outputStr, "[ERROR]"), "Conversation list with options returned error: %s", outputStr)
+	require.NoError(t, err, "Failed to execute conversation list with options: %s", output)
+	assert.JSONEq(t, `{"conversations": []}`, string(output))
 }
 
 func TestConversationShowInvalidID(t *testing.T) {
-	// Test conversation show with invalid ID (should fail gracefully)
-	cmd := exec.Command("kodelet", "conversation", "show", "invalid-id")
+	daemon := startCoreDaemon(t, "openai", "gpt-4o", []string{"OPENAI_API_KEY=unused-test-key"})
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := daemon.command(ctx, "conversation", "show", "invalid-id")
 	output, err := cmd.CombinedOutput()
-
-	// This should fail, but gracefully
-	if err == nil {
-		t.Log("Show invalid conversation succeeded (may be expected behavior)")
-	}
-
-	outputStr := strings.TrimSpace(string(output))
-
-	// Should contain some form of error message about not finding the conversation
-	assert.True(t, strings.Contains(outputStr, "not found") || strings.Contains(outputStr, "invalid") || strings.Contains(outputStr, "error"), "Expected error message for invalid conversation ID, got: %s", outputStr)
+	require.Error(t, err, "Showing a missing conversation must fail: %s", output)
+	assert.Contains(t, string(output), "conversation not found")
+	assert.NotContains(t, string(output), "panic:")
 }
 
 func TestConversationDeleteInvalidID(t *testing.T) {
-	// Test conversation delete with invalid ID (should fail gracefully)
-	cmd := exec.Command("kodelet", "conversation", "delete", "--no-confirm", "invalid-id")
+	daemon := startCoreDaemon(t, "openai", "gpt-4o", []string{"OPENAI_API_KEY=unused-test-key"})
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := daemon.command(ctx, "conversation", "delete", "--no-confirm", "invalid-id")
 	output, err := cmd.CombinedOutput()
-
-	// This should fail, but gracefully
-	if err == nil {
-		t.Log("Delete invalid conversation succeeded (may be expected behavior)")
-	}
-
-	outputStr := strings.TrimSpace(string(output))
-
-	// Should either succeed silently or provide appropriate error message
-	// We don't want crashes or panics
-	assert.False(t, strings.Contains(outputStr, "panic") || strings.Contains(outputStr, "fatal"), "Conversation delete command crashed: %s", outputStr)
+	// Deleting a missing conversation is idempotent.
+	require.NoError(t, err, "Deleting a missing conversation must succeed: %s", output)
+	assert.Contains(t, string(output), "Conversation invalid-id deleted successfully")
 }

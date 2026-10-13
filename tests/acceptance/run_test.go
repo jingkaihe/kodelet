@@ -64,7 +64,7 @@ func TestRunCommandRejectsClientCompactRatio(t *testing.T) {
 			if ratio == "invalid" {
 				assert.Contains(t, string(output), `invalid argument "invalid" for "--compact-ratio" flag`)
 			} else {
-				assert.Contains(t, string(output), "--compact-ratio is not yet supported by daemon-backed run; configure it on the owning daemon or runner")
+				assert.Contains(t, string(output), "--compact-ratio cannot be set for an individual query; set it in the server or runner configuration")
 			}
 		})
 	}

@@ -833,6 +833,8 @@ describe('ChatPage workspace tools and browsers', () => {
   });
 
   it('keeps existing local conversations read-only without workspace discovery or tools', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     setRouteParams({ id: 'conv-123' });
     const localConversation = {
       id: 'conv-123',
@@ -872,11 +874,14 @@ describe('ChatPage workspace tools and browsers', () => {
     expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(/^Saved settings$/);
     const header = screen.getByTestId('chat-workspace-header');
     expect(header).toHaveTextContent('/workspace/project');
-    expect(within(header).getByTitle('/workspace/project')).toBeInTheDocument();
+    const copyButton = within(header).getByRole('button', { name: 'Copy conversation ID' });
+    expect(copyButton).toHaveAttribute('title', 'Copy conversation ID\n/workspace/project');
+    expect(within(header).getAllByRole('button')).toEqual([copyButton]);
+    await user.click(copyButton);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('conv-123');
     expect(
       within(header).queryByRole('button', { name: /^Change workspace:/ })
     ).not.toBeInTheDocument();
-    expect(within(header).queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('This local conversation is read-only')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();

@@ -53,7 +53,6 @@ Thumbs.db
 
 ./bin
 .kodelet/mcp
-.kodelet/skills
 kodelet-config.yaml
 
 # we do `cat REQ.md | kodelet run` a lot and we don't want to check in the REQ.md file

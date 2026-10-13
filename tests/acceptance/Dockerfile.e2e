@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y \
 # Install mise
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV MISE_DATA_DIR="/mise"
-ENV MISE_CONFIG_DIR="/app"
 ENV MISE_CACHE_DIR="/mise/cache"
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:$PATH"
@@ -25,7 +24,7 @@ COPY mise.toml ./
 COPY VERSION.txt ./
 
 # Install tools defined in mise.toml (go, node, npm, etc.)
-RUN mise install
+RUN mise trust /app/mise.toml && mise install
 
 # Copy go modules and install dependencies
 COPY go.mod go.sum ./

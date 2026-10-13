@@ -17,7 +17,8 @@ import (
 func TestCoreFunctionality(t *testing.T) {
 	// Missing credentials skip only before startup. A configured provider failure
 	// is a test failure, never evidence that the scenario should be skipped.
-	daemon := startCoreDaemon(t, coreProviderEnv(t))
+	provider, model, providerEnv := coreProviderConfig(t)
+	daemon := startCoreDaemon(t, provider, model, providerEnv)
 
 	testCases := []struct {
 		name     string
@@ -88,11 +89,8 @@ func TestCoreFunctionality(t *testing.T) {
 			query := strings.ReplaceAll(tc.query, "$TESTDIR", daemon.workspace)
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, "kodelet", "run",
-				"--server="+daemon.serverURL, "--auth-token="+daemon.authToken,
+			cmd := daemon.command(ctx, "run",
 				"--cwd="+daemon.workspace, "--no-extensions", "--no-skills", query)
-			cmd.Dir = daemon.clientDir
-			cmd.Env = daemon.clientEnv
 			output, err := cmd.CombinedOutput()
 			outputStr := strings.TrimSpace(string(output))
 			require.NoError(t, err, "daemon-backed run failed: %s", outputStr)
@@ -103,7 +101,7 @@ func TestCoreFunctionality(t *testing.T) {
 	}
 }
 
-func coreProviderEnv(t *testing.T) []string {
+func coreProviderConfig(t *testing.T) (string, string, []string) {
 	t.Helper()
 	provider := os.Getenv("KODELET_PROVIDER")
 	if provider == "" {
@@ -113,11 +111,14 @@ func coreProviderEnv(t *testing.T) []string {
 		}
 	}
 	keyName := ""
+	model := ""
 	switch provider {
 	case "anthropic":
 		keyName = "ANTHROPIC_API_KEY"
+		model = "claude-sonnet-4-6"
 	case "openai":
 		keyName = "OPENAI_API_KEY"
+		model = "gpt-4o"
 	default:
 		t.Fatalf("live core acceptance requires KODELET_PROVIDER=anthropic or openai, got %q", provider)
 	}
@@ -125,9 +126,9 @@ func coreProviderEnv(t *testing.T) []string {
 	if strings.TrimSpace(key) == "" {
 		t.Skipf("live core acceptance requires configured %s for the isolated daemon", keyName)
 	}
-	env := []string{"KODELET_PROVIDER=" + provider, keyName + "=" + key}
-	if model := os.Getenv("KODELET_MODEL"); model != "" {
-		env = append(env, "KODELET_MODEL="+model)
+	// These select the acceptance fixture, not daemon model environment settings.
+	if override := os.Getenv("KODELET_MODEL"); override != "" {
+		model = override
 	}
-	return env
+	return provider, model, []string{keyName + "=" + key}
 }
