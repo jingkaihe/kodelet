@@ -2444,7 +2444,7 @@ func TestRegistryCallRunRoutesOnlyToActiveRunAndForgetsAffinity(t *testing.T) {
 	previousCall := link.call
 	link.call = func(ctx context.Context, method string, params any, result any) error {
 		if method == "runner.custom" {
-			assert.Equal(t, map[string]string{"key": "value"}, params)
+			assert.Equal(t, runnerpayload.CommandExecuteParams{RunID: "run-one", Message: "/custom"}, params)
 			(*result.(*map[string]bool))["ok"] = true
 			return nil
 		}
@@ -2452,11 +2452,18 @@ func TestRegistryCallRunRoutesOnlyToActiveRunAndForgetsAffinity(t *testing.T) {
 	}
 	link.mu.Unlock()
 	result := map[string]bool{}
-	require.NoError(t, registry.CallRun(t.Context(), "run-one", "runner.custom", map[string]string{"key": "value"}, &result))
+	require.NoError(t, registry.CallRun(t.Context(), "run-one", "runner.custom", runnerpayload.CommandExecuteParams{RunID: "run-one", Message: "/custom"}, &result))
 	assert.True(t, result["ok"])
+	// Without a known revision a call would be rejected as stale by every
+	// reload-capable run, so unknown payload types fail with a clear error.
+	for _, params := range []any{map[string]string{"key": "value"}, &runnerpayload.CommandExecuteParams{RunID: "run-one"}, nil} {
+		err := registry.CallRun(t.Context(), "run-one", "runner.custom", params, nil)
+		require.ErrorContains(t, err, "environment-scoped payload")
+		assert.ErrorContains(t, err, fmt.Sprintf("%T", params))
+	}
 
 	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
-	require.ErrorContains(t, registry.CallRun(t.Context(), "run-one", "runner.custom", nil, nil), "not active")
+	require.ErrorContains(t, registry.CallRun(t.Context(), "run-one", "runner.custom", runnerpayload.CommandExecuteParams{RunID: "run-one"}, nil), "not active")
 
 	require.NoError(t, registry.BindConversation(t.Context(), "conversation-forget", registration.RunnerID))
 	_, found := registry.RunnerForConversation("conversation-forget")

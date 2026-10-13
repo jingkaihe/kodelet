@@ -1379,27 +1379,15 @@ func (r *Registry) beginEnvironmentOperation(runID string, revision int64) (Link
 	}, nil
 }
 
-// CallRun invokes a run-scoped runner method after generation and active-run validation.
+// CallRun invokes an environment-scoped runner method after generation,
+// active-run and environment revision validation.
 func (r *Registry) CallRun(ctx context.Context, runID, method string, params any, result any) error {
-	var revision int64
-	switch value := params.(type) {
-	case runnerpayload.CommandExecuteParams:
-		revision = value.EnvironmentRevision
-	case runnerpayload.LifecycleDispatchParams:
-		revision = value.EnvironmentRevision
-	case runnerpayload.ShortcutExecuteParams:
-		revision = value.EnvironmentRevision
-	case runnerpayload.UISurfaceInputParams, runnerpayload.UISurfaceResizeParams, runnerpayload.UISurfaceInvalidateParams:
-		// Persistent UI messages carry their own surface lifecycle identity.
-		// Gate them against reload without changing the existing UI wire format.
-		r.mu.RLock()
-		if run := r.runs[strings.TrimSpace(runID)]; run != nil {
-			revision = run.environmentRevision
-		}
-		r.mu.RUnlock()
-	}
 	if method == protocol.MethodRunReload {
 		return errors.New("use ReloadRun to replace an environment")
+	}
+	revision, err := r.callEnvironmentRevision(runID, params)
+	if err != nil {
+		return err
 	}
 	link, finish, err := r.beginEnvironmentOperation(runID, revision)
 	if err != nil {
@@ -1407,6 +1395,31 @@ func (r *Registry) CallRun(ctx context.Context, runID, method string, params any
 	}
 	defer finish()
 	return link.Call(ctx, method, params, result)
+}
+
+// callEnvironmentRevision returns the snapshot a run call was prepared for.
+// Unknown payloads, including pointers, fail loudly instead of defaulting to
+// revision 0, which is stale for every reload-capable run.
+func (r *Registry) callEnvironmentRevision(runID string, params any) (int64, error) {
+	switch value := params.(type) {
+	case runnerpayload.CommandExecuteParams:
+		return value.EnvironmentRevision, nil
+	case runnerpayload.LifecycleDispatchParams:
+		return value.EnvironmentRevision, nil
+	case runnerpayload.ShortcutExecuteParams:
+		return value.EnvironmentRevision, nil
+	case runnerpayload.UISurfaceInputParams, runnerpayload.UISurfaceResizeParams, runnerpayload.UISurfaceInvalidateParams:
+		// Persistent UI messages carry their own surface lifecycle identity.
+		// Gate them against reload without changing the existing UI wire format.
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		if run := r.runs[strings.TrimSpace(runID)]; run != nil {
+			return run.environmentRevision, nil
+		}
+		return 0, nil
+	default:
+		return 0, errors.Errorf("run calls need an environment-scoped payload with a known revision, got %T", params)
+	}
 }
 
 // ValidateRunnerCall checks that one connected runner generation can serve a workspace-scoped method.
