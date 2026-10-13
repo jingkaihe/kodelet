@@ -2310,6 +2310,7 @@ const ChatPage: React.FC = () => {
           inert={workspaceOverlayOpen || sidebarOverlayOpen || undefined}
         >
           <ChatWorkspaceHeader
+            conversationId={conversationId}
             cwd={
               conversationId
                 ? workspaceConversation?.cwd || currentRunner?.workspace.path || ''

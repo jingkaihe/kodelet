@@ -22,6 +22,58 @@ import {
 describe('ChatPage layout and accessibility', () => {
   setupChatPageTests();
 
+  it('copies the current conversation UUID by clicking the workspace icon or path', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText');
+    const conversationIds = [
+      'c519896c-5d32-47b1-9c18-0ac7d0e9a543',
+      'bfbc7a8d-a6b2-481d-b8c9-f0e432c90329',
+    ];
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '2026-09-10T00:00:00Z',
+      updatedAt: '2026-09-10T00:00:00Z',
+      messageCount: 0,
+      cwd: '/runner/kodelet',
+      messages: [],
+      toolResults: {},
+    }));
+    setRouteParams({ id: conversationIds[0] });
+    const { rerender } = render(<ChatPage />);
+
+    for (const id of conversationIds) {
+      setRouteParams({ id });
+      rerender(<ChatPage />);
+      await flushAsyncUpdates();
+
+      const header = within(screen.getByTestId('chat-workspace-header'));
+      const copyButton = header.getByRole('button', { name: 'Copy conversation ID' });
+      expect(header.getAllByRole('button')).toEqual([copyButton]);
+      expect(copyButton).toHaveAttribute('title', 'Copy conversation ID\n/runner/kodelet');
+      expect(copyButton).toHaveTextContent('/runner/kodelet');
+      expect(copyButton.querySelector('.lucide-copy')).toBeNull();
+      const folderIcon = copyButton.querySelector('svg');
+      assert(folderIcon);
+      await user.click(folderIcon);
+      expect(writeText).toHaveBeenLastCalledWith(id);
+
+      await user.click(within(copyButton).getByText('kodelet'));
+      expect(writeText).toHaveBeenLastCalledWith(id);
+
+      copyButton.focus();
+      await user.keyboard('{Enter}');
+      expect(writeText).toHaveBeenLastCalledWith(id);
+      expect(writeText).toHaveBeenCalledTimes(3);
+      writeText.mockClear();
+    }
+  });
+
+  it('does not offer to copy a conversation ID for a new chat draft', async () => {
+    await renderChatWithRunner();
+
+    expect(screen.queryByRole('button', { name: 'Copy conversation ID' })).not.toBeInTheDocument();
+  });
+
   it('toggles the sidebar shell from the panel controls', async () => {
     render(<ChatPage />);
 
