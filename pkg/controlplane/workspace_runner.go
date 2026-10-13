@@ -412,7 +412,7 @@ func (s *Server) discoverWorkspace(ctx context.Context, runner runnerregistry.Ru
 
 // Host commands are not part of the runner manifest or its discovery digest.
 func withBuiltInSlashCommands(commands []slashcommands.Command) []slashcommands.Command {
-	merged := slashcommands.BuiltIns()
+	merged := slashcommands.RunnerBuiltIns()
 	seen := make(map[string]bool, len(merged)+len(commands))
 	for _, command := range merged {
 		seen[command.Name] = true

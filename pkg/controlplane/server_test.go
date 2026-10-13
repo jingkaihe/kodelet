@@ -1450,7 +1450,7 @@ func TestDefaultRunnerWorkspaceDiscoveryAndSettings(t *testing.T) {
 	assert.Equal(t, runner.Workspace.Path, discovery.CWD)
 	assert.NotEmpty(t, discovery.Digest)
 	assert.Contains(t, commands.Body.String(), "runner-only")
-	for _, command := range slashcommands.BuiltIns() {
+	for _, command := range slashcommands.RunnerBuiltIns() {
 		assert.Contains(t, discovery.Commands, command)
 	}
 

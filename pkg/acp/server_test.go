@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -1007,13 +1008,13 @@ func TestServer_GetAvailableCommands(t *testing.T) {
 	for _, cmd := range commands {
 		assert.NotEmpty(t, cmd.Name)
 		assert.NotEmpty(t, cmd.Description)
-		if cmd.Name == "reload" {
-			assert.Nil(t, cmd.Input, "reload takes no arguments")
-		} else {
-			require.NotNil(t, cmd.Input)
-			assert.NotEmpty(t, cmd.Input.Hint)
-		}
+		assert.NotEqual(t, "reload", cmd.Name, "local sessions reject /reload")
+		require.NotNil(t, cmd.Input)
+		assert.NotEmpty(t, cmd.Input.Hint)
 	}
+	commandless := server.availableCommandsFromSlashCommands([]slashcommands.Command{{Name: "reload", Description: "Reload"}})
+	require.Len(t, commandless, 1)
+	assert.Nil(t, commandless[0].Input, "commands without arguments have no input hint")
 }
 
 func TestServer_SendAvailableCommands(t *testing.T) {

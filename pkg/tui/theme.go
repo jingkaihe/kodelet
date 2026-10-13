@@ -141,8 +141,10 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 	}
 }
 
+// withTUIBuiltInSlashCommands includes runner-only commands because Run always
+// uses a daemon-backed conversation.
 func withTUIBuiltInSlashCommands(commands []slashcommands.Command) []slashcommands.Command {
-	builtIns := mergeSlashCommands(slashcommands.BuiltIns(), tuiBuiltInSlashCommands())
+	builtIns := mergeSlashCommands(slashcommands.RunnerBuiltIns(), tuiBuiltInSlashCommands())
 	return mergeSlashCommands(builtIns, commands)
 }
 

@@ -84,20 +84,18 @@ func TestBuildCommandPlaceholder(t *testing.T) {
 }
 
 func TestBuiltIns(t *testing.T) {
-	commands := BuiltIns()
-
-	require.Len(t, commands, 2)
-	assert.Equal(t, Command{
+	rename := Command{
 		Name:        "rename",
 		Description: "Rename the current conversation",
 		Hint:        "name",
 		Placeholder: "/rename <name>",
-	}, commands[0])
-	assert.Equal(t, Command{
+	}
+	assert.Equal(t, []Command{rename}, BuiltIns(), "local surfaces cannot reload runner resources")
+	assert.Equal(t, []Command{rename, {
 		Name:        "reload",
 		Description: "Reload extensions and workspace resources",
 		Placeholder: "/reload",
-	}, commands[1])
+	}}, RunnerBuiltIns())
 }
 
 func TestParseReloadCommand(t *testing.T) {

@@ -242,7 +242,7 @@ func (m *remoteSessionManager) installSession(session *remoteSession, meta map[s
 }
 
 func (m *remoteSessionManager) commands(ctx context.Context, sessionID acptypes.SessionID) ([]slashcommands.Command, error) {
-	commands := slashcommands.BuiltIns()
+	commands := slashcommands.RunnerBuiltIns()
 	m.mu.Lock()
 	session := m.sessions[sessionID]
 	if session == nil {

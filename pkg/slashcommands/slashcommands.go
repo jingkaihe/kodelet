@@ -164,7 +164,8 @@ func List(ctx context.Context, processor *fragments.Processor) []Command {
 	return commands
 }
 
-// BuiltIns returns slash commands implemented by Kodelet rather than recipes.
+// BuiltIns returns slash commands implemented by Kodelet rather than recipes
+// and available in every chat surface.
 func BuiltIns() []Command {
 	return []Command{
 		{
@@ -173,12 +174,16 @@ func BuiltIns() []Command {
 			Hint:        "name",
 			Placeholder: "/rename <name>",
 		},
-		{
-			Name:        ReloadCommandName,
-			Description: "Reload extensions and workspace resources",
-			Placeholder: "/reload",
-		},
 	}
+}
+
+// RunnerBuiltIns adds built-in commands that need a runner-backed conversation.
+func RunnerBuiltIns() []Command {
+	return append(BuiltIns(), Command{
+		Name:        ReloadCommandName,
+		Description: "Reload extensions and workspace resources",
+		Placeholder: "/reload",
+	})
 }
 
 // ParseReloadCommand parses the built-in reload command without invoking the model.
