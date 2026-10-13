@@ -494,7 +494,7 @@ func TestServiceReloadRunKeepsIdentityAndRefreshesOnlyItsEnvironment(t *testing.
 }
 
 func TestServiceReloadRunRefusalsPreserveEnvironment(t *testing.T) {
-	for _, reason := range []string{"background workers", "SDK-attached", "configuration", "isolated extensions"} {
+	for _, reason := range []string{"background workers", "SDK-attached", "configuration", "isolated extensions", "snapshot"} {
 		t.Run(reason, func(t *testing.T) {
 			var loadErr error
 			service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
@@ -515,8 +515,15 @@ func TestServiceReloadRunRefusalsPreserveEnvironment(t *testing.T) {
 				run.openParams.SessionExtensions = &protocol.SessionExtensions{ID: "client"}
 			case "configuration":
 				loadErr = errors.New("configuration is invalid")
+			case "snapshot":
+				// Another conversation's run.open or discovery holds the snapshot.
+				service.snapshotWaitTimeout = 20 * time.Millisecond
+				require.NoError(t, service.snapshotGate.Acquire(t.Context(), 1))
 			}
 			result, err := service.reloadRun(t.Context(), protocol.RunReloadParams{RunID: "run", ExpectedEnvironmentRevision: 1})
+			if reason == "snapshot" {
+				service.unlockSnapshot()
+			}
 			require.NoError(t, err)
 			assert.Contains(t, result.Refusal, reason)
 			assert.Same(t, previous, run.environment)

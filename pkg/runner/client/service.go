@@ -831,6 +831,8 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	run.reloading = true
 	run.ops.Add(1)
 	s.mu.Unlock()
+	// Any error from here stops the run. Until the old environment is closed,
+	// only cancellation may return one; other failures must be refusals.
 	defer func() {
 		s.mu.Lock()
 		if reloadErr != nil {
@@ -856,7 +858,10 @@ func (s *Service) reloadRun(ctx context.Context, params protocol.RunReloadParams
 	case <-drained:
 	}
 	if err := s.lockSnapshot(operationCtx); err != nil {
-		return result, err
+		if operationCtx.Err() != nil {
+			return result, err
+		}
+		return runnerpayload.RunReloadResult{Refusal: err.Error()}, nil
 	}
 	defer s.unlockSnapshot()
 
