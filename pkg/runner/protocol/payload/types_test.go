@@ -110,6 +110,7 @@ func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
 	manifest.RunID = "run-two"
 	manifest.Generation = 2
 	manifest.EnvironmentRevision = 2
+	manifest.Capabilities.EnvironmentReload = true
 	manifest.ExtensionGeneration = 99
 	second, err := ComputeManifestDigest(manifest)
 	require.NoError(t, err)

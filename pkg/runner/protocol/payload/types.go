@@ -115,6 +115,9 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.RunID = ""
 	manifest.Generation = 0
 	manifest.EnvironmentRevision = 0
+	// Reload is negotiated per run, so it must not split the digest of
+	// identical resources between idle probes and reload-capable runs.
+	manifest.Capabilities.EnvironmentReload = false
 	manifest.Digest = ""
 	manifest.ExtensionGeneration = 0
 	// Display-only metadata must not change execution or discovery identity.
@@ -140,8 +143,6 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 // Actual tool and shortcut calls still use the pinned run's full manifest digest.
 func ComputeDiscoveryDigest(manifest Manifest) (string, error) {
 	manifest.Tools = nil
-	// Reload is negotiated per run, not part of workspace discovery identity.
-	manifest.Capabilities.EnvironmentReload = false
 	return ComputeManifestDigest(manifest)
 }
 
