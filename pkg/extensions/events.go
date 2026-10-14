@@ -44,6 +44,8 @@ const (
 	EventSessionEnd = "session.end"
 )
 
+const agentFinishedHandlerTimeout = 30 * time.Second
+
 // ToolCallDecision is the result of dispatching a tool.call event.
 type ToolCallDecision struct {
 	Blocked bool
@@ -394,8 +396,9 @@ func (r *Runtime) DispatchAgentEnd(ctx context.Context, callContext ExtensionCal
 
 // DispatchAgentFinished runs observational agent.finished subscriptions.
 // Handler results cannot block, mutate, or continue the finished run.
+// Each handler gets an independent, bounded timeout detached from run cancellation.
 func (r *Runtime) DispatchAgentFinished(ctx context.Context, callContext ExtensionCallContext, outcome llmtypes.AgentRunOutcome) {
-	r.dispatchObservationalEvent(ctx, EventAgentFinished, outcome, callContext)
+	r.dispatchObservationalEvent(context.WithoutCancel(ctx), EventAgentFinished, outcome, callContext)
 }
 
 // DispatchSessionEnd runs session.end subscriptions.
@@ -465,7 +468,7 @@ func applyToolListPatch(allowedTools []string, patch *ToolListPatch) []string {
 }
 
 func (r *Runtime) dispatchEventToHandler(ctx context.Context, handler eventHandler, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
-	ctx, cancel := contextWithOptionalDuration(ctx, eventTimeout(handler))
+	ctx, cancel := contextWithOptionalDuration(ctx, eventTimeout(eventName, handler))
 	defer cancel()
 	if handler.process != nil {
 		return handler.process.HandleEvent(ctx, nextEventID(), eventName, payload, callContext)
@@ -473,11 +476,15 @@ func (r *Runtime) dispatchEventToHandler(ctx context.Context, handler eventHandl
 	return &EventResult{}, nil
 }
 
-func eventTimeout(handler eventHandler) time.Duration {
+func eventTimeout(eventName string, handler eventHandler) time.Duration {
+	timeout := 30 * time.Second
 	if handler.sub.TimeoutInSec != nil {
-		return timeoutInSecDuration(handler.sub.TimeoutInSec)
+		timeout = timeoutInSecDuration(handler.sub.TimeoutInSec)
 	}
-	return 30 * time.Second
+	if eventName == EventAgentFinished && (timeout <= 0 || timeout > agentFinishedHandlerTimeout) {
+		return agentFinishedHandlerTimeout
+	}
+	return timeout
 }
 
 func (r *Runtime) eventHandlers(eventName string) []eventHandler {

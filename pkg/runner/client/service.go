@@ -1246,9 +1246,7 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun, outcome *l
 		if started {
 			// Terminal observers bypass ordinary lifecycle admission, which rejects
 			// stopping runs. Plain environment.Close remains silent for reload.
-			cleanupCtx, cancel := cleanupContext(s.decorateRunContext(ctx, run.id, run.conversationID), s.cleanupTimeout)
-			runtime.DispatchAgentFinished(cleanupCtx, callContext, terminal)
-			cancel()
+			runtime.DispatchAgentFinished(s.decorateRunContext(ctx, run.id, run.conversationID), callContext, terminal)
 		}
 		closeErr := s.closeRunEnvironment(ctx, run)
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)

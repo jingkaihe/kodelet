@@ -85,6 +85,43 @@ func TestDispatchAgentFinishedObservesOutcomeAndIgnoresResultsAndErrors(t *testi
 	}
 }
 
+func TestDispatchAgentFinishedTimeoutDoesNotStarveLaterHandlers(t *testing.T) {
+	slow, _, slowReader := newEventTraceProcess(t)
+	healthy, sdk, reader := newEventTraceProcess(t)
+	slowTimeout, healthyTimeout := 0.05, 1.0
+	runtime := EmptyRuntime()
+	runtime.eventHandlersByName[EventAgentFinished] = []eventHandler{
+		{process: slow, sub: Subscription{TimeoutInSec: &slowTimeout}},
+		{process: healthy, sub: Subscription{TimeoutInSec: &healthyTimeout}},
+	}
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	completed := make(chan struct{})
+	go func() {
+		defer close(completed)
+		runtime.DispatchAgentFinished(ctx, ExtensionCallContext{}, llmtypes.NewAgentRunOutcome(ctx.Err(), ""))
+	}()
+
+	request, err := readIncomingMessage(slowReader)
+	require.NoError(t, err)
+	assert.Equal(t, "extension.event.handle", request.Method)
+	// Leave the first handler unanswered until its own SDK timeout expires.
+	notification, err := readIncomingMessage(slowReader)
+	require.NoError(t, err)
+	assert.Equal(t, "$/cancelRequest", notification.Method)
+	request, err = readIncomingMessage(reader)
+	require.NoError(t, err)
+	assert.Equal(t, "extension.event.handle", request.Method)
+	sendEventTraceMessage(t, sdk, map[string]any{
+		"jsonrpc": "2.0", "id": request.ID, "result": EventResult{},
+	})
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("agent.finished dispatch did not complete")
+	}
+}
+
 func TestApplySystemPromptPatchVariants(t *testing.T) {
 	replacement := "replacement"
 	prepend := "pre"
@@ -161,8 +198,20 @@ func TestToolUpdateHandlersDoNotInferProviderFromCollidingToolName(t *testing.T)
 func TestEventTimeoutUsesSpecificAndDefaultTimeouts(t *testing.T) {
 	sdkTimeoutInSec := 3.0
 
-	assert.Equal(t, 3*time.Second, eventTimeout(eventHandler{sub: Subscription{TimeoutInSec: &sdkTimeoutInSec}}))
-	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{}))
+	assert.Equal(t, 3*time.Second, eventTimeout(EventToolCall, eventHandler{sub: Subscription{TimeoutInSec: &sdkTimeoutInSec}}))
+	assert.Equal(t, 30*time.Second, eventTimeout(EventToolCall, eventHandler{}))
+	assert.Equal(t, 30*time.Second, eventTimeout(EventAgentFinished, eventHandler{}))
+	for _, test := range []struct {
+		seconds float64
+		want    time.Duration
+	}{
+		{0, 30 * time.Second},
+		{3, 3 * time.Second},
+		{60, 30 * time.Second},
+	} {
+		handler := eventHandler{sub: Subscription{TimeoutInSec: &test.seconds}}
+		assert.Equal(t, test.want, eventTimeout(EventAgentFinished, handler), "timeoutInSec=%g", test.seconds)
+	}
 }
 
 func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {

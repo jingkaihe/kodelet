@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -522,9 +521,7 @@ func (e *LocalEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtype
 	e.mu.Unlock()
 	defer func() { _ = e.Close(ctx) }()
 	if started && runtime != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		runtime.DispatchAgentFinished(cleanupCtx, callContext, outcome)
+		runtime.DispatchAgentFinished(ctx, callContext, outcome)
 	}
 	return nil
 }

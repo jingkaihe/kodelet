@@ -1622,9 +1622,6 @@ func TestServiceAgentFinishedLifecycle(t *testing.T) {
 				mode = "terminal-timeout"
 			}
 			service, workspace := newBackgroundTestService(t, mode)
-			if test.stallHook {
-				service.cleanupTimeout = 100 * time.Millisecond
-			}
 			manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 				RunID: "run", ConversationID: "conversation", EnvironmentReload: test.reload,
 			})

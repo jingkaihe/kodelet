@@ -833,9 +833,10 @@ func runBackgroundExtensionHelper() {
 				{Event: extensions.EventAgentEnd},
 			}
 			if strings.HasPrefix(mode, "terminal") {
+				finishedTimeout := 0.1
 				subscriptions = append(subscriptions,
 					extensions.Subscription{Event: extensions.EventAgentStart},
-					extensions.Subscription{Event: extensions.EventAgentFinished},
+					extensions.Subscription{Event: extensions.EventAgentFinished, TimeoutInSec: &finishedTimeout},
 				)
 			}
 			result = extensions.InitializeResult{

@@ -1813,6 +1813,8 @@ Extension subprocesses inherit Kodelet's environment. Start Kodelet with any env
 
 Timeouts are controlled by SDK-declared `timeoutInSec`. Extension events use SDK `timeoutInSec` or the built-in `30s` default, extension tools use SDK `timeoutInSec` or the built-in `10m` default, and extension commands use SDK `timeoutInSec` or no timeout.
 
+Each `agent.finished` handler has its own timeout, capped at `30s` even when SDK timeouts are disabled. Handlers run sequentially, independently of run cancellation; one handler's timeout does not consume the next handler's budget.
+
 Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disable extension loading.
 
 ## Tool calls as code

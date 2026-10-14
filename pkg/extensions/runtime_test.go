@@ -301,9 +301,9 @@ func TestRuntimeTimeoutPrecedence(t *testing.T) {
 	assert.Zero(t, commandTimeout(CommandRegistration{Name: "/forever", TimeoutInSec: &sdkCommandNoTimeout}))
 	assert.Zero(t, commandTimeout(CommandRegistration{Name: "default"}))
 
-	assert.Equal(t, 2*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventTimeout}}))
-	assert.Zero(t, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventNoTimeout}}))
-	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall}}))
+	assert.Equal(t, 2*time.Second, eventTimeout(EventToolCall, eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventTimeout}}))
+	assert.Zero(t, eventTimeout(EventToolCall, eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventNoTimeout}}))
+	assert.Equal(t, 30*time.Second, eventTimeout(EventToolCall, eventHandler{sub: Subscription{Event: EventToolCall}}))
 }
 
 func TestNewRuntimeFromViperHonorsDisabledExtensions(t *testing.T) {
