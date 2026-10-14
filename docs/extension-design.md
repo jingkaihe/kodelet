@@ -243,6 +243,8 @@ Configuration semantics:
 - `tools`: per-tool enablement configuration.
 Timeouts are controlled by SDK-declared `timeoutInSec`. Events use SDK `timeoutInSec` or the built-in `30s` default, tools use SDK `timeoutInSec` or the built-in `10m` default, and commands use SDK `timeoutInSec` or no timeout.
 
+Each `agent.finished` handler has its own timeout, capped at `30s` even when SDK timeouts are disabled. Handlers run sequentially, independently of run cancellation; one handler's timeout does not consume the next handler's budget.
+
 Allow/deny path entries are normalized before comparison:
 
 - `~` is expanded to the user home directory.
@@ -393,7 +395,9 @@ Kodelet starts the extension executable, then sends:
         "tool.update",
         "tool.result",
         "turn.end",
-        "agent.end"
+        "agent.end",
+        "agent.finished",
+        "session.end"
       ]
     }
   }
@@ -697,8 +701,13 @@ Use dot-separated event names.
 | `tool.update` | While a streaming tool runs, before delivery to clients | No | Yes, accumulated result snapshot |
 | `tool.result` | After tool runs, before render/model ingestion | No | Yes, tool result |
 | `turn.end` | After one assistant turn completes | No | No initially |
-| `agent.end` | Agent has completed | No | Yes, follow-up messages |
+| `agent.end` | Agent loop completes and may continue | No | Yes, follow-up messages |
+| `agent.finished` | Started run reaches a handled terminal exit | No | No |
 | `session.end` | Kodelet shuts down extension runtime | No | No |
+
+`agent.end` can return follow-up messages to continue the loop. `agent.finished` reports the final outcome once per started run after all continuations, before environment release. Handler results and errors do not affect the run. Resource reload does not emit it; abrupt process termination may prevent delivery.
+
+The `agent.finished` payload contains `status` (`succeeded`, `failed`, or `canceled`), optional `reason` (`completed`, `error`, `canceled`, `deadline_exceeded`, or `turn_limit`), and optional `error` text. Turn limits count as success; deadline expiry counts as cancellation.
 
 The process providing an extension tool is not called back for that tool's own `tool.update` event. Providers should sanitize or shape snapshots before calling `ctx.update`; excluding the producer avoids re-entering a serial extension process while its reverse-RPC update is awaiting acknowledgement. Other subscribed extensions still receive the update in priority order.
 

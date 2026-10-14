@@ -348,7 +348,9 @@ agent.end lifecycle may return follow-up messages
     ↓
 control plane applies extension follow-up and steering continuation rules
     ↓
-control plane persists provider-native conversation and closes run environment
+control plane persists provider-native conversation and sends run.close with outcome
+    ↓
+runner dispatches agent.finished for a started run, then releases its environment
 ```
 
 A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as renaming remain control-plane operations.
@@ -441,10 +443,11 @@ tool.update
 tool.result
 turn.end
 agent.end
+agent.finished
 session.end
 ```
 
-For the initial persistent runtime, `session.start`, `resources.discover`, and `session.end` are runner-local runtime events. The remaining events are either proxied from the central agent loop or dispatched around runner-side tool execution.
+For the initial persistent runtime, `session.start`, `resources.discover`, and `session.end` are runner-local runtime events. `agent.finished` is dispatched during run cleanup. The remaining events are either proxied from the central agent loop or dispatched around runner-side tool execution.
 
 The runner hides individual extension processes and intermediate mutations from the control plane. The control plane sees the same effective decision a local extension runtime would return: modified or blocked user messages, system-prompt patches, tool-list patches, modified tool input or results, and follow-up messages.
 
@@ -909,6 +912,10 @@ created → opening → running → succeeded
 ```
 
 The runner is considered busy from successful `run.open` until the corresponding `run.close` attempt completes or the connection is lost.
+
+`run.close` accepts an optional `outcome` containing `status`, `reason`, and `error`, as described in the [extension event model](extension-design.md#event-model). After canceling and draining active operations, the runner dispatches `agent.finished` once if the agent started, before releasing the environment and extension runtime. Without an outcome, it infers success or explicit cancellation. Resource reload does not finish the run.
+
+Provider cancellation records the remote run as canceled and sends `run.cancel` even when the parent context remains live and `SendMessage` returns no error.
 
 The control plane persists provider-native conversation state directly because the provider loop is central. Runner events and tool results are inputs to that loop rather than an independent conversation checkpoint.
 
