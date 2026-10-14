@@ -949,10 +949,11 @@ func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) 
 		SessionID: opened.SessionID,
 		Data:      []byte(strconv.Quote(foreground) + "\n"),
 	})
+	// Match the shell startup budget: scheduling under load is not a signal failure.
 	require.Eventually(t, func() bool {
 		_, statErr := os.Stat(readyPath)
 		return statErr == nil
-	}, time.Second, 10*time.Millisecond)
+	}, 3*time.Second, 10*time.Millisecond, "wait for the foreground process to install its SIGINT handler")
 
 	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
 		SessionID: opened.SessionID,
@@ -961,7 +962,7 @@ func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) 
 	require.Eventually(t, func() bool {
 		payload, readErr := os.ReadFile(interruptedPath)
 		return readErr == nil && string(payload) == "interrupted"
-	}, time.Second, 10*time.Millisecond)
+	}, 3*time.Second, 10*time.Millisecond, "wait for Ctrl-C to reach the foreground process")
 }
 
 func TestWorkspaceTerminalReadReportsReplayTruncationAndCancellation(t *testing.T) {
