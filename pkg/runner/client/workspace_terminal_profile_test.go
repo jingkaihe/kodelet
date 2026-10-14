@@ -184,7 +184,11 @@ exec /bin/sleep 10
 			binDir := t.TempDir()
 			require.NoError(t, os.WriteFile(filepath.Join(binDir, "tic"), []byte(test.script), 0o700))
 			t.Setenv("PATH", binDir)
-			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			timeout := workspaceTerminfoInstallTimeout
+			if test.name == "timeout" {
+				timeout = 100 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), timeout)
 			defer cancel()
 			dir, err := installWorkspaceGhosttyTerminfo(ctx)
 			require.ErrorContains(t, err, test.wantError)
