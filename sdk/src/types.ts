@@ -415,6 +415,7 @@ export type EventName =
   | "tool.result"
   | "turn.end"
   | "agent.end"
+  | "agent.finished"
   | "session.end"
   | (string & {});
 
@@ -461,6 +462,13 @@ export interface AgentEndEventPayload {
   messages?: unknown[];
 }
 
+/** Terminal outcome, observed once per started run on a handled exit. */
+export interface AgentFinishedEventPayload {
+  status: "succeeded" | "failed" | "canceled";
+  reason?: "completed" | "error" | "canceled" | "deadline_exceeded" | "turn_limit";
+  error?: string;
+}
+
 export interface EventPayloadMap {
   "session.start": EmptyEventPayload;
   "resources.discover": EmptyEventPayload;
@@ -473,6 +481,7 @@ export interface EventPayloadMap {
   "turn.start": TurnStartEventPayload;
   "turn.end": TurnEndEventPayload;
   "agent.end": AgentEndEventPayload;
+  "agent.finished": AgentFinishedEventPayload;
   "session.end": EmptyEventPayload;
 }
 
@@ -497,6 +506,8 @@ export type ToolUpdateEvent = ExtensionEvent<"tool.update">;
 export type ToolResultEvent = ExtensionEvent<"tool.result">;
 export type TurnEndEvent = ExtensionEvent<"turn.end">;
 export type AgentEndEvent = ExtensionEvent<"agent.end">;
+/** Observational only: returned blocks, mutations, and follow-ups are ignored by the host. */
+export type AgentFinishedEvent = ExtensionEvent<"agent.finished">;
 export type SessionEndEvent = ExtensionEvent<"session.end">;
 
 export interface EventBlock {

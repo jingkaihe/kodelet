@@ -501,12 +501,18 @@ func (t *Thread) SendMessage(
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
+	finishReason := ""
+	var stoppedErr error
 	defer func() {
 		runErr := err
 		if runErr == nil {
+			runErr = stoppedErr
+		}
+		if runErr == nil {
 			runErr = ctx.Err()
 		}
-		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+		outcome := llmtypes.NewAgentRunOutcome(runErr, finishReason)
+		if closeErr := base.CloseEnvironmentWithOutcome(context.WithoutCancel(ctx), t, outcome); err == nil && closeErr != nil {
 			err = errors.Wrap(closeErr, "failed to close agent environment")
 		}
 	}()
@@ -551,6 +557,7 @@ OUTER:
 			}
 			// Check turn limit
 			if maxTurns > 0 && turnCount >= maxTurns {
+				finishReason = "turn_limit"
 				logger.G(ctx).WithField("turn_count", turnCount).
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")
@@ -601,6 +608,7 @@ OUTER:
 			exchangeOutput, toolsUsed, responseCompleted, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, exchangeOpt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
+					stoppedErr = err
 					logger.G(ctx).Info("Request cancelled, stopping kodelet.llm.openai.responses")
 					break OUTER
 				}

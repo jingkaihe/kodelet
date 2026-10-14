@@ -188,6 +188,86 @@ type cancelCheckpointEnvironment struct {
 	cancel context.CancelFunc
 }
 
+type finishedEnvironment struct {
+	agentenv.UtilityEnvironment
+	onStart   func()
+	followUps int
+	outcomes  []llmtypes.AgentRunOutcome
+	closeErr  error
+}
+
+func (e *finishedEnvironment) DispatchAgentStart(context.Context) error {
+	if e.onStart != nil {
+		e.onStart()
+	}
+	return nil
+}
+
+func (e *finishedEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+	if e.followUps > 0 {
+		e.followUps--
+		return []string{"continue"}, nil
+	}
+	return nil, nil
+}
+
+func (e *finishedEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
+	e.closeErr = ctx.Err()
+	e.outcomes = append(e.outcomes, outcome)
+	return e.Close(ctx)
+}
+
+func TestResponsesReportsTerminalOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		exchangeErr   error
+		cancelAtStart bool
+		toolsUsed     bool
+		followUps     int
+		status        string
+		reason        string
+		exchanges     int
+	}{
+		{name: "completed", status: "succeeded", reason: "completed", exchanges: 1},
+		{name: "followup then completed", followUps: 1, status: "succeeded", reason: "completed", exchanges: 2},
+		{name: "turn limit", toolsUsed: true, status: "succeeded", reason: "turn_limit", exchanges: 2},
+		{name: "error", exchangeErr: errors.New("provider failed"), status: "failed", reason: "error", exchanges: 1},
+		{name: "cancel before first turn", cancelAtStart: true, status: "canceled", reason: "canceled"},
+		{name: "provider cancellation without canceled parent", exchangeErr: context.Canceled, status: "canceled", reason: "canceled", exchanges: 1},
+		{name: "deadline", exchangeErr: context.DeadlineExceeded, status: "canceled", reason: "deadline_exceeded", exchanges: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			environment := &finishedEnvironment{followUps: test.followUps}
+			if test.cancelAtStart {
+				environment.onStart = cancel
+			}
+			config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
+			thread := &Thread{Thread: base.NewThread(config, "finished-conversation")}
+			thread.SetEnvironment(environment)
+			exchanges := 0
+			thread.processMessageExchangeFunc = func(context.Context, llmtypes.MessageHandler, string, int, string, llmtypes.MessageOpt) (string, bool, bool, error) {
+				exchanges++
+				assert.Empty(t, environment.outcomes, "follow-ups are not terminal")
+				return "done", test.toolsUsed, true, test.exchangeErr
+			}
+			_, err := thread.SendMessage(ctx, "hello", &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{MaxTurns: 2, NoSaveConversation: true})
+			if test.exchangeErr != nil && !errors.Is(test.exchangeErr, context.Canceled) {
+				require.ErrorIs(t, err, test.exchangeErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, environment.outcomes, 1)
+			assert.Equal(t, test.status, environment.outcomes[0].Status)
+			assert.Equal(t, test.reason, environment.outcomes[0].Reason)
+			assert.Equal(t, test.exchanges, exchanges)
+			assert.NoError(t, environment.closeErr, "cleanup must not inherit cancellation")
+			assert.False(t, environment.IsOpen())
+		})
+	}
+}
+
 func (e *cancelCheckpointEnvironment) DispatchAgentStart(context.Context) error {
 	e.cancel()
 	return nil

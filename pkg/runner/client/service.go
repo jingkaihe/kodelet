@@ -179,6 +179,8 @@ type activeRun struct {
 	reloading              bool
 	opening                bool
 	checkpointed           bool
+	agentStarted           bool
+	explicitlyCanceled     bool
 	closing                bool
 	stopping               bool
 	cleanupOnce            sync.Once
@@ -341,7 +343,7 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
-		return rpcResult(nil, s.closeRun(ctx, value.RunID))
+		return rpcResult(nil, s.closeRunWithOutcome(ctx, value.RunID, value.Outcome))
 	case protocol.MethodRunCancel:
 		value, rpcErr := decodeParams[protocol.RunCancelParams](params)
 		if rpcErr != nil {
@@ -1166,6 +1168,7 @@ func (s *Service) cancelRun(ctx context.Context, runID string) error {
 	conversationID := ""
 	if err == nil {
 		conversationID = run.conversationID
+		run.explicitlyCanceled = true
 		run.stopping = true
 		run.cancel()
 		s.clearRunSurfacesLocked(run.id)
@@ -1179,6 +1182,10 @@ func (s *Service) cancelRun(ctx context.Context, runID string) error {
 }
 
 func (s *Service) closeRun(ctx context.Context, runID string) error {
+	return s.closeRunWithOutcome(ctx, runID, nil)
+}
+
+func (s *Service) closeRunWithOutcome(ctx context.Context, runID string, outcome *llmtypes.AgentRunOutcome) error {
 	s.mu.Lock()
 	run, err := s.activeRunLocked(runID)
 	if err != nil {
@@ -1186,10 +1193,10 @@ func (s *Service) closeRun(ctx context.Context, runID string) error {
 		return err
 	}
 	s.mu.Unlock()
-	return s.closeActiveRun(ctx, run)
+	return s.closeActiveRun(ctx, run, outcome)
 }
 
-func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
+func (s *Service) closeActiveRun(ctx context.Context, run *activeRun, outcome *llmtypes.AgentRunOutcome) error {
 	if run == nil {
 		return nil
 	}
@@ -1212,10 +1219,37 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		s.clearRunSurfacesLocked(run.id)
 		run.closing = true
 		run.stopping = true
+		terminal := llmtypes.NewAgentRunOutcome(nil, "")
+		if outcome != nil {
+			terminal = *outcome
+		} else if run.explicitlyCanceled {
+			terminal = llmtypes.NewAgentRunOutcome(context.Canceled, "")
+		}
+		// Cancel outstanding work even on success, without changing the outcome.
 		run.cancel()
 		s.mu.Unlock()
 
 		waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
+		s.mu.Lock()
+		started, runtime := run.agentStarted, run.runtime
+		callContext := extensions.ExtensionCallContext{
+			ConversationID: run.conversationID,
+			UIScopeID:      run.conversationID,
+			CWD:            run.manifest.WorkingDirectory,
+			Provider:       run.config.Provider,
+			Model:          run.config.Model,
+			Profile:        run.config.Profile,
+			RecipeName:     run.config.RecipeName,
+			InvokedBy:      run.invokedBy,
+		}
+		s.mu.Unlock()
+		if started {
+			// Terminal observers bypass ordinary lifecycle admission, which rejects
+			// stopping runs. Plain environment.Close remains silent for reload.
+			cleanupCtx, cancel := cleanupContext(s.decorateRunContext(ctx, run.id, run.conversationID), s.cleanupTimeout)
+			runtime.DispatchAgentFinished(cleanupCtx, callContext, terminal)
+			cancel()
+		}
 		closeErr := s.closeRunEnvironment(ctx, run)
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)
 		if run.runtime.HasSessionExtensions() {
@@ -1509,6 +1543,9 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.Li
 		message, err := run.environment.ProcessUserMessage(operationCtx, params.Message)
 		return runnerpayload.LifecycleDispatchResult{Message: message}, err
 	case runnerpayload.LifecycleAgentStart:
+		s.mu.Lock()
+		run.agentStarted = true
+		s.mu.Unlock()
 		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchAgentStart(operationCtx)
 	case runnerpayload.LifecycleTurnStart:
 		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchTurnStart(operationCtx, params.TurnNumber)
@@ -1981,7 +2018,8 @@ func (s *Service) abortActiveRuns(ctx context.Context, detachPeer bool) error {
 	for _, run := range runs {
 		go func() {
 			defer cleanup.Done()
-			if err := s.closeActiveRun(ctx, run); err != nil {
+			outcome := llmtypes.NewAgentRunOutcome(context.Canceled, "")
+			if err := s.closeActiveRun(ctx, run, &outcome); err != nil {
 				errorsByRun <- err
 			}
 		}()

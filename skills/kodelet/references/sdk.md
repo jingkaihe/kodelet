@@ -333,11 +333,15 @@ Common events:
 
 - `session.start`, `resources.discover`, `session.end`.
 - `user.message`.
-- `agent.init`, `agent.start`, `agent.end`.
+- `agent.init`, `agent.start`, `agent.end`, `agent.finished`.
 - `turn.start`, `turn.end`.
 - `tool.call`, `tool.update`, `tool.result`.
 
 Mutating/blocking events run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
+
+`agent.end` preserves its continuation semantics: returning `followUpMessages` resumes the loop, so it is not a terminal notification. Subscribe to `agent.finished` for one terminal observation per started run on a handled exit, after any continuations. It covers success, failure, cancellation, deadline expiry, and turn limits, independently of session shutdown. Runs that never start do not emit it; delivery is not guaranteed after a hard crash or forced process termination.
+
+The SDK exports `AgentFinishedEvent` and `AgentFinishedEventPayload`. The payload contains required `status: "succeeded" | "failed" | "canceled"`, optional `reason: "completed" | "error" | "canceled" | "deadline_exceeded" | "turn_limit"`, and optional `error: string`. A turn limit without an error is `succeeded` with reason `turn_limit`; deadline expiry is `canceled` with reason `deadline_exceeded`. `ext.on("agent.finished", (event, ctx) => { /* observe event.status */ })` infers these fields. The host ignores returned blocks, mutations, and follow-up messages; handler failures do not change the run outcome. Support is advertised in `capabilities.events`.
 
 Legacy mapping:
 

@@ -31,6 +31,7 @@ type RemoteController interface {
 	ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error)
 	CancelRun(ctx context.Context, runID, reason string) error
 	CloseRun(ctx context.Context, runID string, status protocol.RunStatus, runErr error) error
+	CloseRunWithOutcome(ctx context.Context, runID string, outcome llmtypes.AgentRunOutcome) error
 }
 
 // RemoteEnvironmentOption configures a remote runner environment.
@@ -470,6 +471,11 @@ func (e *RemoteEnvironment) Close(ctx context.Context) error {
 
 // CloseWithError records the terminal run outcome and releases its runner lease.
 func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) error {
+	return e.CloseWithOutcome(ctx, llmtypes.NewAgentRunOutcome(runErr, ""))
+}
+
+// CloseWithOutcome reports the terminal outcome to runner-owned cleanup hooks.
+func (e *RemoteEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
 	if e == nil || e.controller == nil {
 		return nil
 	}
@@ -483,21 +489,17 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	reloadFailed := e.reloadFailed
 	e.mu.Unlock()
 
-	if reloadFailed && runErr == nil {
-		runErr = errors.New("resource reload failed")
-	}
-	status := protocol.RunStatusSucceeded
-	if runErr != nil {
-		status = protocol.RunStatusFailed
+	// The runner bounds each cleanup phase. Do not impose a competing RPC
+	// deadline that could expire while a terminal observer is still finishing.
+	ctx = context.WithoutCancel(ctx)
+	if reloadFailed && outcome.Status == "succeeded" {
+		outcome = llmtypes.NewAgentRunOutcome(errors.New("resource reload failed"), "")
 	}
 	var cancelErr error
-	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
-		status = protocol.RunStatusCanceled
+	if outcome.Status == "canceled" || reloadFailed {
+		cancelErr = e.controller.CancelRun(ctx, runID, outcome.Error)
 	}
-	if status == protocol.RunStatusCanceled || reloadFailed {
-		cancelErr = e.controller.CancelRun(ctx, runID, runErr.Error())
-	}
-	closeErr := e.controller.CloseRun(ctx, runID, status, runErr)
+	closeErr := e.controller.CloseRunWithOutcome(ctx, runID, outcome)
 
 	e.mu.Lock()
 	e.runID = ""

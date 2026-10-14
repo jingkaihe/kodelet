@@ -2085,6 +2085,47 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	assert.Contains(t, runners[0].CompatibilityError, "does not support protocol version")
 }
 
+func TestCloseRunWithOutcomeTransport(t *testing.T) {
+	for _, storedError := range []string{"", "extension failed"} {
+		t.Run("stored error="+storedError, func(t *testing.T) {
+			registry := newTestRegistry(t)
+			link := newFakeLink()
+			registration, err := registry.Register(testRegisterParams("host", "/work/project"), link)
+			require.NoError(t, err)
+			configureManifestLink(t, link, registration)
+			markRunnerReady(t, registry, registration)
+			_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run", "conversation"))
+			require.NoError(t, err)
+			outcome := llmtypes.NewAgentRunOutcome(context.DeadlineExceeded, "")
+			want := outcome
+			if storedError != "" {
+				require.NoError(t, registry.EnvironmentError(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.EnvironmentErrorParams{
+					RunID: "run", Message: storedError,
+				}))
+				want = llmtypes.AgentRunOutcome{Status: "failed", Reason: "error", Error: storedError}
+			}
+			var received *llmtypes.AgentRunOutcome
+			link.mu.Lock()
+			link.call = func(_ context.Context, method string, params, _ any) error {
+				assert.Equal(t, protocol.MethodRunClose, method)
+				var wire protocol.RunCloseParams
+				require.NoError(t, json.Unmarshal(mustRegistryJSON(t, params), &wire))
+				assert.Equal(t, "run", wire.RunID)
+				received = wire.Outcome
+				return nil
+			}
+			link.mu.Unlock()
+			require.NoError(t, registry.CloseRunWithOutcome(t.Context(), "run", outcome))
+			require.NotNil(t, received)
+			assert.Equal(t, want, *received)
+			run, ok := registry.Run("run")
+			require.True(t, ok)
+			assert.Equal(t, RunStatus(want.Status), run.Status)
+			assert.Equal(t, want.Error, run.Error)
+		})
+	}
+}
+
 func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	registry := newTestRegistry(t)
 	var failedConversation string

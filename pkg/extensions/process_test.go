@@ -282,6 +282,7 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(payload, &request))
 			assert.Equal(t, "extension.initialize", request.Method)
+			assert.Contains(t, request.Params.Capabilities["events"], EventAgentFinished)
 			runtimeCapabilities, ok := request.Params.Capabilities["runtime"].(map[string]any)
 			require.True(t, ok)
 			assert.Equal(t, test.expected, runtimeCapabilities["backgroundTasks"])

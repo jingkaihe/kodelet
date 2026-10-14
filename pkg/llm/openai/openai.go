@@ -286,12 +286,18 @@ func (t *Thread) SendMessage(
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
+	finishReason := ""
+	var stoppedErr error
 	defer func() {
 		runErr := err
 		if runErr == nil {
+			runErr = stoppedErr
+		}
+		if runErr == nil {
 			runErr = ctx.Err()
 		}
-		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+		outcome := llmtypes.NewAgentRunOutcome(runErr, finishReason)
+		if closeErr := base.CloseEnvironmentWithOutcome(context.WithoutCancel(ctx), t, outcome); err == nil && closeErr != nil {
 			err = errors.Wrap(closeErr, "failed to close agent environment")
 		}
 	}()
@@ -366,6 +372,7 @@ OUTER:
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
 			if maxTurns > 0 && turnCount >= maxTurns {
+				finishReason = "turn_limit"
 				logger.G(ctx).
 					WithField("turn_count", turnCount).
 					WithField("max_turns", maxTurns).
@@ -402,6 +409,7 @@ OUTER:
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, exchangeOpt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
+					stoppedErr = err
 					logger.G(ctx).Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
 					// Remove the last tool message from the messages if it exists
 					if len(t.messages) > 0 && isToolResultMessage(t.messages[len(t.messages)-1]) {

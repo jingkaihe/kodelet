@@ -24,6 +24,32 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// AgentRunOutcome describes a terminal run, independently of whether its environment stays alive.
+type AgentRunOutcome struct {
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// NewAgentRunOutcome classifies a run exit. A success reason may distinguish a
+// turn limit from normal completion; errors take precedence over that reason.
+func NewAgentRunOutcome(runErr error, reason string) AgentRunOutcome {
+	if runErr == nil {
+		if reason == "" {
+			reason = "completed"
+		}
+		return AgentRunOutcome{Status: "succeeded", Reason: reason}
+	}
+	outcome := AgentRunOutcome{Status: "failed", Reason: "error", Error: runErr.Error()}
+	switch {
+	case errors.Is(runErr, context.DeadlineExceeded):
+		outcome.Status, outcome.Reason = "canceled", "deadline_exceeded"
+	case errors.Is(runErr, context.Canceled):
+		outcome.Status, outcome.Reason = "canceled", "canceled"
+	}
+	return outcome
+}
+
 // CompactionMarker describes a completed context replacement for display, not inference.
 type CompactionMarker struct {
 	ID        string    `json:"id"`

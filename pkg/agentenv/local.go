@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -28,6 +29,8 @@ type LocalEnvironment struct {
 	manifest         Manifest
 	spec             RunSpec
 	opened           bool
+	agentStarted     bool
+	closing          bool
 }
 
 // NewLocalEnvironment creates an environment that builds a fresh BasicState whenever a run opens.
@@ -297,7 +300,17 @@ func (e *LocalEnvironment) ProcessUserMessage(ctx context.Context, message strin
 
 // DispatchAgentStart applies agent.start extension handlers.
 func (e *LocalEnvironment) DispatchAgentStart(ctx context.Context) error {
-	runtime, callContext := e.runContext()
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if !e.opened || e.closing {
+		e.mu.Unlock()
+		return nil
+	}
+	e.agentStarted = true
+	runtime, callContext := e.extensions, extensionCallContext(e.spec)
+	e.mu.Unlock()
 	if runtime != nil {
 		runtime.DispatchAgentStart(ctx, callContext)
 	}
@@ -492,7 +505,32 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	return finish(result, failureKind, failureOutcome)
 }
 
-// Close releases the pinned run snapshot. It does not own or close the persistent extension runtime.
+// CloseWithOutcome dispatches the terminal event once before releasing the snapshot.
+// Plain Close is deliberately separate: resource reload also releases snapshots.
+func (e *LocalEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if !e.opened || e.closing {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closing = true
+	started := e.agentStarted
+	runtime, callContext := e.extensions, extensionCallContext(e.spec)
+	e.mu.Unlock()
+	defer func() { _ = e.Close(ctx) }()
+	if started && runtime != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		runtime.DispatchAgentFinished(cleanupCtx, callContext, outcome)
+	}
+	return nil
+}
+
+// Close releases the pinned run snapshot without terminating an agent run.
+// It does not own or close the persistent extension runtime.
 func (e *LocalEnvironment) Close(_ context.Context) error {
 	if e == nil {
 		return nil
@@ -503,6 +541,8 @@ func (e *LocalEnvironment) Close(_ context.Context) error {
 	e.manifest = Manifest{}
 	e.spec = RunSpec{}
 	e.opened = false
+	e.agentStarted = false
+	e.closing = false
 	return nil
 }
 

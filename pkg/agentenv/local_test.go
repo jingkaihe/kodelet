@@ -1,11 +1,16 @@
 package agentenv
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -380,6 +385,112 @@ func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T
 	assert.False(t, environment.IsOpen())
 	assert.Empty(t, environment.Manifest().WorkingDirectory)
 	assert.Equal(t, state, environment.State())
+}
+
+func TestLocalEnvironmentCloseWithOutcome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	environment := NewLocalEnvironment(workspace, nil)
+	type lifecycleEvent struct {
+		Event   string                          `json:"event"`
+		Context extensions.ExtensionCallContext `json:"context"`
+		Payload llmtypes.AgentRunOutcome        `json:"payload"`
+	}
+	finished := make(chan lifecycleEvent, 4)
+	local, hook := net.Pipe()
+	require.NoError(t, hook.SetDeadline(time.Now().Add(5*time.Second)))
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		_ = local.Close()
+		_ = hook.Close()
+		<-done
+	})
+	go func() {
+		defer close(done)
+		defer func() { _ = hook.Close() }()
+		reader := bufio.NewReader(hook)
+		for {
+			if _, err := reader.Peek(1); err != nil {
+				return
+			}
+			var length int
+			_, err := fmt.Fscanf(reader, "Content-Length: %d\r\n\r\n", &length)
+			if !assert.NoError(t, err) {
+				return
+			}
+			body := make([]byte, length)
+			_, err = io.ReadFull(reader, body)
+			if !assert.NoError(t, err) {
+				return
+			}
+			var request struct {
+				ID     int64          `json:"id"`
+				Method string         `json:"method"`
+				Params lifecycleEvent `json:"params"`
+			}
+			if !assert.NoError(t, json.Unmarshal(body, &request)) {
+				return
+			}
+			var result any = extensions.EventResult{FollowUpMessages: []string{"continue"}}
+			if request.Method == "extension.initialize" {
+				result = extensions.InitializeResult{
+					Name: "lifecycle",
+					Subscriptions: []extensions.Subscription{
+						{Event: extensions.EventAgentEnd}, {Event: extensions.EventAgentFinished},
+					},
+				}
+			} else if request.Params.Event == extensions.EventAgentFinished {
+				assert.True(t, environment.IsOpen(), "dispatch precedes snapshot release")
+				finished <- request.Params
+			}
+			response, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+			if !assert.NoError(t, err) {
+				return
+			}
+			_, err = fmt.Fprintf(hook, "Content-Length: %d\r\n\r\n%s", len(response), response)
+			if !assert.NoError(t, err) {
+				return
+			}
+		}
+	}()
+	manager := extensions.NewRuntimeManager()
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	runtime, release, err := manager.RuntimeWithAttachmentsForIsolatedLease(
+		t.Context(), t.Context(), workspace, extensions.DefaultConfig(), extensions.ExtensionCallContext{},
+		[]extensions.Attachment{{ID: "lifecycle", Transport: local}},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, release()) })
+	environment.SetExtensions(runtime)
+	spec := RunSpec{ConversationID: "conversation"}
+	outcome := llmtypes.NewAgentRunOutcome(context.Canceled, "")
+
+	_, err = environment.Open(t.Context(), spec)
+	require.NoError(t, err)
+	require.NoError(t, environment.DispatchAgentStart(t.Context()))
+	followUps, err := environment.DispatchAgentEnd(t.Context(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"continue"}, followUps)
+	assert.Empty(t, finished, "continuation is not terminal")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.NoError(t, environment.CloseWithOutcome(ctx, outcome))
+	require.NoError(t, environment.CloseWithOutcome(ctx, outcome))
+	assert.False(t, environment.IsOpen())
+	require.Len(t, finished, 1, "canceled cleanup dispatches exactly once")
+	event := <-finished
+	assert.Equal(t, outcome, event.Payload)
+	assert.Equal(t, spec.ConversationID, event.Context.ConversationID)
+
+	// Plain Close is used to release a snapshot during reload, not to end a run.
+	_, err = environment.Open(t.Context(), spec)
+	require.NoError(t, err)
+	require.NoError(t, environment.DispatchAgentStart(t.Context()))
+	require.NoError(t, environment.Close(t.Context()))
+	_, err = environment.Open(t.Context(), spec)
+	require.NoError(t, err)
+	require.NoError(t, environment.CloseWithOutcome(t.Context(), outcome))
+	assert.Empty(t, finished, "plain close and runs without agent.start are silent")
 }
 
 func TestLocalEnvironmentHandlesClosedAndNilReceivers(t *testing.T) {

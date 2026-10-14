@@ -328,12 +328,18 @@ func (t *Thread) SendMessage(
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
+	finishReason := ""
+	var stoppedErr error
 	defer func() {
 		runErr := err
 		if runErr == nil {
+			runErr = stoppedErr
+		}
+		if runErr == nil {
 			runErr = ctx.Err()
 		}
-		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+		outcome := llmtypes.NewAgentRunOutcome(runErr, finishReason)
+		if closeErr := base.CloseEnvironmentWithOutcome(context.WithoutCancel(ctx), t, outcome); err == nil && closeErr != nil {
 			err = errors.Wrap(closeErr, "failed to close agent environment")
 		}
 	}()
@@ -380,6 +386,7 @@ OUTER:
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
 			if maxTurns > 0 && turnCount >= maxTurns {
+				finishReason = "turn_limit"
 				logger.G(ctx).
 					WithField("turn_count", turnCount).
 					WithField("max_turns", maxTurns).
@@ -413,6 +420,7 @@ OUTER:
 				logger.G(ctx).WithError(err).Error("error processing message exchange")
 				// xxx: based on the observation, the anthropic sdk swallows context cancellation, and return empty message
 				if errors.Is(err, context.Canceled) {
+					stoppedErr = err
 					logger.G(ctx).Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
 					// remove the last tool use from the messages
 					if len(t.messages) > 0 {

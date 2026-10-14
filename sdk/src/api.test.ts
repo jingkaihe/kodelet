@@ -8,6 +8,8 @@ import test from "node:test";
 import { createToolContext, runWithHostRPCClient } from "./context.js";
 
 import {
+  type AgentFinishedEvent,
+  type AgentFinishedEventPayload,
   type BackgroundTaskLease,
   type BrowserConnection,
   ConversationForkUnavailableError,
@@ -374,6 +376,35 @@ test("registers tools, commands, events and executes handlers", async () => {
     payload: { messages: [{ role: "assistant", content: "done" }] },
   });
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
+});
+
+test("agent.finished subscriptions receive typed terminal outcomes and call context", async () => {
+  const observed: AgentFinishedEvent[] = [];
+  const harness = await createTestHarness(defineExtension((ext) => {
+    ext.on("agent.finished", (event, ctx) => {
+      observed.push(event);
+      assert.equal(ctx.conversationId, "conv-finished");
+    });
+  }));
+  assert.deepEqual(harness.initialize().subscriptions, [
+    { event: "agent.finished", priority: 0 },
+  ]);
+
+  const outcomes: AgentFinishedEventPayload[] = [
+    { status: "canceled", reason: "canceled", error: "context canceled" },
+    { status: "succeeded" },
+  ];
+  for (const [index, payload] of outcomes.entries()) {
+    const id = `finished-${index}`;
+    assert.deepEqual(await harness.handleEvent({
+      id,
+      event: "agent.finished",
+      payload,
+      context: { conversationId: "conv-finished" },
+    }), {});
+    assert.deepEqual(observed[index], { ...payload, id, event: "agent.finished" });
+  }
+  assert.equal(observed.length, outcomes.length);
 });
 
 test("tool results and updates preserve presentation data", async () => {

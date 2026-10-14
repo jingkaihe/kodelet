@@ -12,6 +12,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,10 +29,60 @@ func TestObservationalEventsAndSubscriptions(t *testing.T) {
 
 	runtime.DispatchAgentStart(context.Background(), ExtensionCallContext{})
 	runtime.DispatchTurnStart(context.Background(), ExtensionCallContext{}, 2)
+	runtime.DispatchAgentFinished(t.Context(), ExtensionCallContext{}, llmtypes.AgentRunOutcome{Status: "succeeded"})
 	subs := runtime.Subscriptions()
 
 	require.Len(t, subs, 1)
 	assert.Equal(t, EventTurnStart, subs[0].Event)
+}
+
+func TestDispatchAgentFinishedObservesOutcomeAndIgnoresResultsAndErrors(t *testing.T) {
+	outcome := llmtypes.NewAgentRunOutcome(context.Canceled, "")
+	process, sdk, reader := newEventTraceProcess(t)
+	runtime := EmptyRuntime()
+	runtime.eventHandlersByName[EventAgentFinished] = []eventHandler{
+		{process: process}, {process: process}, {process: process},
+	}
+	callContext := ExtensionCallContext{ConversationID: "conv-finished", CWD: "/workspace"}
+	completed := make(chan struct{})
+	go func() {
+		defer close(completed)
+		runtime.DispatchAgentFinished(t.Context(), callContext, outcome)
+	}()
+	for index := range 3 {
+		request, err := readIncomingMessage(reader)
+		require.NoError(t, err)
+		assert.Equal(t, "extension.event.handle", request.Method)
+		var params struct {
+			Event   string               `json:"event"`
+			Payload json.RawMessage      `json:"payload"`
+			Context ExtensionCallContext `json:"context"`
+		}
+		require.NoError(t, json.Unmarshal(request.Params, &params))
+		assert.Equal(t, "agent.finished", params.Event)
+		assert.JSONEq(t, `{"status":"canceled","reason":"canceled","error":"context canceled"}`, string(params.Payload))
+		assert.Equal(t, callContext, params.Context)
+		response := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      request.ID,
+			"result": map[string]any{
+				"block":            map[string]any{"reason": "ignored"},
+				"message":          "ignored",
+				"followUpMessages": []string{"must not continue"},
+				"systemPrompt":     map[string]any{"replace": "ignored"},
+			},
+		}
+		if index == 1 {
+			delete(response, "result")
+			response["error"] = &rpcError{Code: -32000, Message: "observer failed"}
+		}
+		sendEventTraceMessage(t, sdk, response)
+	}
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("agent.finished dispatch did not complete")
+	}
 }
 
 func TestApplySystemPromptPatchVariants(t *testing.T) {
@@ -118,6 +169,7 @@ func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {
 	var runtime *Runtime
 	toolResult := tooltypes.StructuredToolResult{ToolName: "tool", Success: true}
 
+	runtime.DispatchAgentFinished(t.Context(), ExtensionCallContext{}, llmtypes.AgentRunOutcome{Status: "succeeded"})
 	assert.Equal(t, UserMessageDecision{Message: "hello"}, runtime.DispatchUserMessage(context.Background(), ExtensionCallContext{}, "hello"))
 	assert.Equal(t, AgentInitDecision{SystemPrompt: "base", AllowedTools: []string{"bash"}}, runtime.DispatchAgentInitDecision(context.Background(), ExtensionCallContext{}, "base", []string{"bash"}))
 	assert.Equal(t, ToolCallDecision{Input: `{"x":1}`}, runtime.DispatchToolCall(context.Background(), ExtensionCallContext{}, "tool", `{"x":1}`, "call"))

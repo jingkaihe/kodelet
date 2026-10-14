@@ -1673,6 +1673,25 @@ func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
 
 // CloseRun releases one runner lease and records its terminal status.
 func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus, runErr error) error {
+	outcome := llmtypes.NewAgentRunOutcome(runErr, "")
+	if outcome.Status != string(status) {
+		switch status {
+		case RunStatusSucceeded:
+			outcome.Reason = "completed"
+		case RunStatusFailed:
+			outcome.Reason = "error"
+		case RunStatusCanceled:
+			outcome.Reason = "canceled"
+		}
+	}
+	outcome.Status = string(status)
+	return r.CloseRunWithOutcome(ctx, runID, outcome)
+}
+
+// CloseRunWithOutcome releases one runner lease and reports its terminal outcome.
+func (r *Registry) CloseRunWithOutcome(ctx context.Context, runID string, outcome llmtypes.AgentRunOutcome) error {
+	status := RunStatus(outcome.Status)
+	message := outcome.Error
 	if status != RunStatusSucceeded && status != RunStatusFailed && status != RunStatusCanceled {
 		return errors.Errorf("invalid terminal run status %q", status)
 	}
@@ -1683,13 +1702,17 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 	r.mu.Lock()
 	r.clearRunCodeParentsLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
+	// Publish the same failure the durable run will retain, rather than sending
+	// a successful terminal event before applying the stored failure below.
+	if run := r.runs[runID]; run != nil && run.Status == RunStatusFailed {
+		outcome = llmtypes.AgentRunOutcome{Status: string(RunStatusFailed), Reason: "error", Error: run.Error}
+	}
 	r.mu.Unlock()
-	callErr := link.Call(ctx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID}, nil)
+	callErr := link.Call(ctx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID, Outcome: &outcome}, nil)
 	if remoteRunAlreadyClosed(callErr) {
 		callErr = nil
 	}
 	r.mu.Lock()
-	message := errorString(runErr)
 	run := r.runs[runID]
 	if run == nil {
 		r.mu.Unlock()

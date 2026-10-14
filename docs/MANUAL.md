@@ -1766,8 +1766,13 @@ Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutat
 | `tool.update` | While a streaming tool runs | No | Accumulated tool result snapshot |
 | `tool.result` | After a tool runs | No | Tool result |
 | `turn.end` | After one assistant turn completes | No | No |
-| `agent.end` | Agent loop completes | No | Follow-up messages |
+| `agent.end` | Agent loop completes and may continue | No | Follow-up messages |
+| `agent.finished` | Started run reaches a handled terminal exit | No | No |
 | `session.end` | Extension runtime shuts down | No | No |
+
+`agent.end` handlers can return `followUpMessages` to continue the loop. `agent.finished` reports the final outcome once per started run, including failure and cancellation. It is notification-only: handler results and errors do not affect the run. Abrupt process termination may prevent delivery.
+
+The payload contains `status` (`succeeded`, `failed`, or `canceled`), optional `reason` (`completed`, `error`, `canceled`, `deadline_exceeded`, or `turn_limit`), and optional `error` text. Turn limits count as success; deadline expiry counts as cancellation.
 
 Migration map from removed hooks:
 

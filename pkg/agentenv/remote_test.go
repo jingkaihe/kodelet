@@ -31,6 +31,8 @@ type fakeRemoteController struct {
 	closedRunID    string
 	closedStatus   protocol.RunStatus
 	closedError    error
+	closedOutcome  llmtypes.AgentRunOutcome
+	closeContext   context.Context
 }
 
 func (c *fakeRemoteController) OpenRun(_ context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
@@ -129,6 +131,16 @@ func (c *fakeRemoteController) CloseRun(_ context.Context, runID string, status 
 	c.closedStatus = status
 	c.closedError = runErr
 	return c.closeErr
+}
+
+func (c *fakeRemoteController) CloseRunWithOutcome(ctx context.Context, runID string, outcome llmtypes.AgentRunOutcome) error {
+	c.closedOutcome = outcome
+	c.closeContext = ctx
+	var runErr error
+	if outcome.Error != "" {
+		runErr = errors.New(outcome.Error)
+	}
+	return c.CloseRun(ctx, runID, protocol.RunStatus(outcome.Status), runErr)
 }
 
 func assignRemoteResult(target any, value any) error {
@@ -540,7 +552,29 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, "run-1", controller.canceledRunID)
 	assert.Equal(t, "run-1", controller.closedRunID)
 	assert.Equal(t, protocol.RunStatusCanceled, controller.closedStatus)
-	assert.ErrorIs(t, controller.closedError, context.Canceled)
+	assert.Equal(t, llmtypes.NewAgentRunOutcome(context.Canceled, ""), controller.closedOutcome)
+}
+
+func TestRemoteEnvironmentCloseWithOutcome(t *testing.T) {
+	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{RunID: "run-1"}}
+	environment := NewRemoteEnvironment(controller, "runner-1", WithRemoteRunIDGenerator(func() (string, error) {
+		return "run-1", nil
+	}))
+	_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation-1"})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	cancel()
+	outcome := llmtypes.AgentRunOutcome{Status: "succeeded", Reason: "turn_limit"}
+	require.NoError(t, environment.CloseWithOutcome(ctx, outcome))
+	assert.Equal(t, "run-1", controller.closedRunID)
+	assert.Equal(t, outcome, controller.closedOutcome)
+	require.NoError(t, controller.closeContext.Err(), "cleanup must outlive run cancellation")
+	_, hasDeadline := controller.closeContext.Deadline()
+	assert.False(t, hasDeadline, "runner-owned cleanup budgets must not race a caller deadline")
+	assert.Empty(t, controller.canceledRunID)
+	assert.False(t, environment.IsOpen())
+	require.NoError(t, environment.CloseWithOutcome(t.Context(), llmtypes.NewAgentRunOutcome(context.Canceled, "")))
+	assert.Equal(t, outcome, controller.closedOutcome, "repeated close must not replace the terminal outcome")
 }
 
 func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {

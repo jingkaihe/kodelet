@@ -827,11 +827,22 @@ func runBackgroundExtensionHelper() {
 					return
 				}
 			}
+			subscriptions := []extensions.Subscription{
+				{Event: extensions.EventSessionStart, TimeoutInSec: &noTimeout},
+				{Event: extensions.EventSessionEnd, TimeoutInSec: &noTimeout},
+				{Event: extensions.EventAgentEnd},
+			}
+			if strings.HasPrefix(mode, "terminal") {
+				subscriptions = append(subscriptions,
+					extensions.Subscription{Event: extensions.EventAgentStart},
+					extensions.Subscription{Event: extensions.EventAgentFinished},
+				)
+			}
 			result = extensions.InitializeResult{
 				Name: "lifetime", Version: "1",
 				Profiles:      profiles,
 				Tools:         []extensions.ToolRegistration{{Name: "lifetime", Description: "Inspect and release extension lifetime", InputSchema: schema}},
-				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart, TimeoutInSec: &noTimeout}, {Event: extensions.EventSessionEnd, TimeoutInSec: &noTimeout}, {Event: extensions.EventAgentEnd}},
+				Subscriptions: subscriptions,
 			}
 		case "extension.event.handle":
 			var params struct {
@@ -839,6 +850,16 @@ func runBackgroundExtensionHelper() {
 				Context extensions.ExtensionCallContext `json:"context"`
 			}
 			_ = json.Unmarshal(request.Params, &params)
+			if strings.HasPrefix(mode, "terminal") {
+				if file, err := os.OpenFile(filepath.Join(cwd, "terminal-events.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+					_, _ = fmt.Fprintln(file, string(request.Params))
+					_ = file.Close()
+				}
+				if params.Event == extensions.EventAgentFinished && mode == "terminal-timeout" {
+					// Leave this observer pending, but still handle cancellation and session.end.
+					continue
+				}
+			}
 			if params.Event == extensions.EventSessionEnd && mode == "hang-end" {
 				for {
 					time.Sleep(time.Hour)

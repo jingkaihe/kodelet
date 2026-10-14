@@ -1581,6 +1581,108 @@ func TestServicePinsExtensionRuntimeForRunLifetime(t *testing.T) {
 	require.Eventually(t, func() bool { return provider.leaseCtx.Err() != nil }, time.Second, time.Millisecond)
 }
 
+type terminalRunnerEvent struct {
+	Event   string                          `json:"event"`
+	Payload llmtypes.AgentRunOutcome        `json:"payload"`
+	Context extensions.ExtensionCallContext `json:"context"`
+}
+
+func readTerminalRunnerEvents(t *testing.T, workspace string) []terminalRunnerEvent {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(workspace, "terminal-events.jsonl"))
+	require.NoError(t, err)
+	var events []terminalRunnerEvent
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		var event terminalRunnerEvent
+		require.NoError(t, json.Unmarshal([]byte(line), &event))
+		events = append(events, event)
+	}
+	return events
+}
+
+func TestServiceAgentFinishedLifecycle(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		noStart    bool
+		reload     bool
+		cancel     bool
+		disconnect bool
+		stallHook  bool
+	}{
+		{name: "completed"},
+		{name: "canceled", cancel: true},
+		{name: "not started", noStart: true},
+		{name: "reload", reload: true},
+		{name: "disconnect", disconnect: true},
+		{name: "observer timeout", stallHook: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mode := "terminal"
+			if test.stallHook {
+				mode = "terminal-timeout"
+			}
+			service, workspace := newBackgroundTestService(t, mode)
+			if test.stallHook {
+				service.cleanupTimeout = 100 * time.Millisecond
+			}
+			manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+				RunID: "run", ConversationID: "conversation", EnvironmentReload: test.reload,
+			})
+			run := service.runs["run"]
+			if !test.noStart {
+				callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+					RunID: run.id, EnvironmentRevision: manifest.EnvironmentRevision, Event: runnerpayload.LifecycleAgentStart,
+				})
+				callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+					RunID: run.id, EnvironmentRevision: manifest.EnvironmentRevision, Event: runnerpayload.LifecycleAgentEnd,
+				})
+			}
+			if test.reload {
+				result := callService[runnerpayload.RunReloadResult](t, service, protocol.MethodRunReload, protocol.RunReloadParams{
+					RunID: run.id, ExpectedEnvironmentRevision: manifest.EnvironmentRevision,
+				})
+				require.Empty(t, result.Refusal)
+			}
+			for _, event := range readTerminalRunnerEvents(t, workspace) {
+				assert.NotEqual(t, extensions.EventAgentFinished, event.Event, "agent.end and reload are not terminal")
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			outcome := llmtypes.NewAgentRunOutcome(nil, "")
+			switch {
+			case test.disconnect:
+				outcome = llmtypes.NewAgentRunOutcome(context.Canceled, "")
+				require.NoError(t, service.AbortActiveRun(ctx))
+			case test.cancel:
+				outcome = llmtypes.NewAgentRunOutcome(context.Canceled, "")
+				require.NoError(t, service.cancelRun(t.Context(), run.id))
+				require.NoError(t, service.closeRun(ctx, run.id))
+			default:
+				_, rpcErr := service.HandleRequest(ctx, protocol.MethodRunClose, mustJSON(t, protocol.RunCloseParams{RunID: run.id, Outcome: &outcome}))
+				require.Nil(t, rpcErr)
+			}
+			require.NoError(t, service.closeActiveRun(ctx, run, &outcome))
+			require.Empty(t, service.runs)
+			events := readTerminalRunnerEvents(t, workspace)
+			var terminal []terminalRunnerEvent
+			for _, event := range events {
+				if event.Event == extensions.EventAgentFinished {
+					terminal = append(terminal, event)
+				}
+			}
+			if test.noStart {
+				assert.Empty(t, terminal)
+				return
+			}
+			require.Len(t, terminal, 1, "duplicate close must not dispatch again")
+			assert.Equal(t, outcome, terminal[0].Payload)
+			assert.Equal(t, "conversation", terminal[0].Context.ConversationID)
+			assert.Equal(t, extensions.EventAgentFinished, events[len(events)-2].Event)
+			assert.Equal(t, extensions.EventSessionEnd, events[len(events)-1].Event, "dispatch precedes runtime release")
+		})
+	}
+}
+
 func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	workspace := t.TempDir()
 	runtime := extensions.EmptyRuntime()

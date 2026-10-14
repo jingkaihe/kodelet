@@ -506,7 +506,8 @@ type RunReloadParams struct {
 
 // RunCloseParams releases a pinned run environment.
 type RunCloseParams struct {
-	RunID string `json:"runId"`
+	RunID   string                    `json:"runId"`
+	Outcome *llmtypes.AgentRunOutcome `json:"outcome,omitempty"`
 }
 
 // RunCancelParams cancels active runner operations for one run.

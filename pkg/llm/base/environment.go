@@ -155,13 +155,18 @@ func CloseEnvironment(ctx context.Context, thread llmtypes.Thread) error {
 
 // CloseEnvironmentWithError closes an environment and reports the run outcome when supported.
 func CloseEnvironmentWithError(ctx context.Context, thread llmtypes.Thread, runErr error) error {
+	return CloseEnvironmentWithOutcome(ctx, thread, llmtypes.NewAgentRunOutcome(runErr, ""))
+}
+
+// CloseEnvironmentWithOutcome finalizes one run, including non-error stop reasons.
+func CloseEnvironmentWithOutcome(ctx context.Context, thread llmtypes.Thread, outcome llmtypes.AgentRunOutcome) error {
 	environment := EnvironmentForThread(thread)
 	if environment == nil {
 		return nil
 	}
 	var err error
 	if closer, ok := environment.(agentenv.OutcomeCloser); ok {
-		err = closer.CloseWithError(ctx, runErr)
+		err = closer.CloseWithOutcome(ctx, outcome)
 	} else {
 		err = environment.Close(ctx)
 	}

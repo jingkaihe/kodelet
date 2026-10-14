@@ -36,8 +36,10 @@ const (
 	EventToolResult = "tool.result"
 	// EventTurnEnd is dispatched after one assistant turn completes.
 	EventTurnEnd = "turn.end"
-	// EventAgentEnd is dispatched when an agent loop has completed.
+	// EventAgentEnd is dispatched when an agent loop completes and may request continuation.
 	EventAgentEnd = "agent.end"
+	// EventAgentFinished is dispatched once per started run on a handled exit.
+	EventAgentFinished = "agent.finished"
 	// EventSessionEnd is dispatched when the extension runtime shuts down.
 	EventSessionEnd = "session.end"
 )
@@ -388,6 +390,12 @@ func (r *Runtime) DispatchAgentEnd(ctx context.Context, callContext ExtensionCal
 		followUps = append(followUps, result.FollowUpMessages...)
 	}
 	return followUps
+}
+
+// DispatchAgentFinished runs observational agent.finished subscriptions.
+// Handler results cannot block, mutate, or continue the finished run.
+func (r *Runtime) DispatchAgentFinished(ctx context.Context, callContext ExtensionCallContext, outcome llmtypes.AgentRunOutcome) {
+	r.dispatchObservationalEvent(ctx, EventAgentFinished, outcome, callContext)
 }
 
 // DispatchSessionEnd runs session.end subscriptions.

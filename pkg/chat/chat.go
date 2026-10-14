@@ -511,7 +511,7 @@ func runDefaultChat(
 		}
 		closeCtx := context.WithoutCancel(ctx)
 		if closer, ok := environment.(agentenv.OutcomeCloser); ok {
-			_ = closer.CloseWithError(closeCtx, resultErr)
+			_ = closer.CloseWithOutcome(closeCtx, llmtypes.NewAgentRunOutcome(resultErr, ""))
 			return
 		}
 		_ = environment.Close(closeCtx)

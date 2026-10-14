@@ -55,6 +55,8 @@ export type {
 } from "./task-progress.js";
 export type {
   AgentEndEvent,
+  AgentFinishedEvent,
+  AgentFinishedEventPayload,
   AgentInitEvent,
   AgentStartEvent,
   Awaitable,

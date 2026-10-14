@@ -298,7 +298,8 @@ type ExtensionSetter interface {
 	SetExtensions(runtime any)
 }
 
-// OutcomeCloser lets a remote environment record the terminal outcome of a run.
+// OutcomeCloser finishes a run before releasing its environment snapshot.
+// Unlike Close, it is not used to replace an environment during resource reload.
 type OutcomeCloser interface {
-	CloseWithError(ctx context.Context, runErr error) error
+	CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error
 }
