@@ -143,7 +143,7 @@ return {
 
 `summary` controls the compact tool label. When `body` is present, it overrides the content shown in the expanded tool UI; only an omitted body falls back to the result or update `content`. `format` may be `"text"` or `"markdown"` and defaults to text when omitted. Presentation metadata is advisory and does not replace model-facing content, tool status, errors, or provenance. Kodelet validates it as untrusted input, sanitizes Markdown, ignores malformed presentations, and may truncate bodies to the configured extension output limit.
 
-Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
+Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default. Each `agent.finished` handler is capped at 30 seconds, even when `timeoutInSec` is larger or disables timeouts.
 
 Extensions that sanitize `tool.result` should apply the same policy in `tool.update`; Kodelet suppresses streaming snapshots when a result-subscribing extension does not also subscribe to updates. If an update sanitizer errors or returns invalid output, Kodelet drops that transient snapshot rather than exposing unsanitized output.
 

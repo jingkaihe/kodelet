@@ -489,8 +489,8 @@ func (e *RemoteEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtyp
 	reloadFailed := e.reloadFailed
 	e.mu.Unlock()
 
-	// The runner bounds each cleanup phase. Do not impose a competing RPC
-	// deadline that could expire while a terminal observer is still finishing.
+	// The runner bounds each terminal handler independently; their budgets add up.
+	// Do not impose a shared RPC deadline that could expire before all handlers finish.
 	ctx = context.WithoutCancel(ctx)
 	if reloadFailed && outcome.Status == llmtypes.AgentRunStatusSucceeded {
 		outcome = llmtypes.NewAgentRunOutcome(errors.New("resource reload failed"), "")

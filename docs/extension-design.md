@@ -243,7 +243,7 @@ Configuration semantics:
 - `tools`: per-tool enablement configuration.
 Timeouts are controlled by SDK-declared `timeoutInSec`. Events use SDK `timeoutInSec` or the built-in `30s` default, tools use SDK `timeoutInSec` or the built-in `10m` default, and commands use SDK `timeoutInSec` or no timeout.
 
-Each `agent.finished` handler has its own timeout, capped at `30s` even when SDK timeouts are disabled. Handlers run sequentially, independently of run cancellation; one handler's timeout does not consume the next handler's budget.
+Each `agent.finished` handler has its own timeout, capped at `30s` even when SDK timeouts are disabled. Handlers run sequentially, independently of run cancellation; one handler's timeout does not consume the next handler's budget. There is no shared deadline, so terminal handlers can add up to `N × 30s` to run cleanup.
 
 Allow/deny path entries are normalized before comparison:
 

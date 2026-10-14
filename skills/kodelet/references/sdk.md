@@ -337,7 +337,7 @@ Common events:
 - `turn.start`, `turn.end`.
 - `tool.call`, `tool.update`, `tool.result`.
 
-Mutating/blocking events run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
+Mutating/blocking events run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default. Each `agent.finished` handler is capped at 30 seconds, even when `timeoutInSec` is larger or disables timeouts.
 
 `agent.end` preserves its continuation semantics: returning `followUpMessages` resumes the loop, so it is not a terminal notification. Subscribe to `agent.finished` for one terminal observation per started run on a handled exit, after any continuations. It covers success, failure, cancellation, deadline expiry, and turn limits, independently of session shutdown. Runs that never start do not emit it; delivery is not guaranteed after a hard crash or forced process termination.
 
