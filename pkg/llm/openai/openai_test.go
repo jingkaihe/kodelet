@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/telemetry/telemetrytest"
@@ -1625,6 +1626,80 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	assert.Equal(t, originalMessages, thread.messages)
 	assert.Empty(t, store.SavedRecords)
 	assert.False(t, thread.ConversationForkBlocked())
+}
+
+type terminalOutcomeEnvironment struct {
+	agentenv.UtilityEnvironment
+	outcomes []llm.AgentRunOutcome
+}
+
+func (*terminalOutcomeEnvironment) DispatchAgentEnd(context.Context, []llm.Message) ([]string, error) {
+	// Keep requesting follow-ups so successful exchanges reach the turn limit.
+	return []string{"continue"}, nil
+}
+
+func (e *terminalOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llm.AgentRunOutcome) error {
+	e.outcomes = append(e.outcomes, outcome)
+	return e.Close(ctx)
+}
+
+func TestOpenAIReportsTerminalOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		providerErr error
+		status      llm.AgentRunStatus
+		reason      llm.AgentRunReason
+		requests    int
+	}{
+		{
+			name:     "turn limit",
+			status:   llm.AgentRunStatusSucceeded,
+			reason:   llm.AgentRunReasonTurnLimit,
+			requests: 2,
+		},
+		{
+			name:        "provider cancellation without canceled parent",
+			providerErr: context.Canceled,
+			status:      llm.AgentRunStatusCanceled,
+			reason:      llm.AgentRunReasonCanceled,
+			requests:    1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			environment := &terminalOutcomeEnvironment{}
+			requests := 0
+			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+				requests++
+				assert.NoError(t, req.Context().Err())
+				assert.Empty(t, environment.outcomes, "follow-ups are not terminal")
+				if test.providerErr != nil {
+					return nil, test.providerErr
+				}
+				return jsonOpenAIResponse(http.StatusOK, `{
+					"id":"chatcmpl-outcome",
+					"model":"gpt-4o",
+					"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
+				}`), nil
+			}))
+			thread := newTestOpenAIExchangeThread(client, llm.Config{Provider: "openai", Model: "gpt-4o"})
+			thread.SetEnvironment(environment)
+
+			_, err := thread.SendMessage(ctx, "hello", &captureOpenAIMessageHandler{}, llm.MessageOpt{
+				MaxTurns:           2,
+				NoSaveConversation: true,
+				DisableUsageLog:    true,
+			})
+
+			require.NoError(t, err)
+			assert.NoError(t, ctx.Err(), "the parent context must remain live")
+			assert.Equal(t, test.requests, requests)
+			require.Len(t, environment.outcomes, 1)
+			assert.Equal(t, test.status, environment.outcomes[0].Status)
+			assert.Equal(t, test.reason, environment.outcomes[0].Reason)
+			assert.False(t, environment.IsOpen())
+		})
+	}
 }
 
 func TestOpenAISendMessageStopsWhenContextCancelled(t *testing.T) {

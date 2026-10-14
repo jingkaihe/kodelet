@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1233,6 +1234,95 @@ func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testin
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, results)
+}
+
+type terminalOutcomeEnvironment struct {
+	agentenv.UtilityEnvironment
+	outcomes []llmtypes.AgentRunOutcome
+}
+
+func (*terminalOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+	// Keep requesting follow-ups so successful exchanges reach the turn limit.
+	return []string{"continue"}, nil
+}
+
+func (e *terminalOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
+	e.outcomes = append(e.outcomes, outcome)
+	return e.Close(ctx)
+}
+
+func TestAnthropicReportsTerminalOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		providerErr error
+		status      llmtypes.AgentRunStatus
+		reason      llmtypes.AgentRunReason
+		requests    int
+	}{
+		{
+			name:     "turn limit",
+			status:   llmtypes.AgentRunStatusSucceeded,
+			reason:   llmtypes.AgentRunReasonTurnLimit,
+			requests: 2,
+		},
+		{
+			name:        "provider cancellation without canceled parent",
+			providerErr: context.Canceled,
+			status:      llmtypes.AgentRunStatusCanceled,
+			reason:      llmtypes.AgentRunReasonCanceled,
+			requests:    1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			environment := &terminalOutcomeEnvironment{}
+			requests := 0
+			client := anthropic.NewClient(
+				option.WithAPIKey("test-key"),
+				option.WithMiddleware(func(req *http.Request, _ option.MiddlewareNext) (*http.Response, error) {
+					requests++
+					assert.NoError(t, req.Context().Err())
+					assert.Empty(t, environment.outcomes, "follow-ups are not terminal")
+					if test.providerErr != nil {
+						return nil, test.providerErr
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": {"text/event-stream"}},
+						Body: io.NopCloser(strings.NewReader(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_outcome","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`)),
+					}, nil
+				}),
+			)
+			thread := &Thread{
+				Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "terminal-outcome"),
+				client: client,
+			}
+			thread.SetEnvironment(environment)
+
+			_, err := thread.SendMessage(ctx, "hello", &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+				MaxTurns:           2,
+				NoSaveConversation: true,
+				DisableUsageLog:    true,
+			})
+
+			require.NoError(t, err)
+			assert.NoError(t, ctx.Err(), "the parent context must remain live")
+			assert.Equal(t, test.requests, requests)
+			require.Len(t, environment.outcomes, 1)
+			assert.Equal(t, test.status, environment.outcomes[0].Status)
+			assert.Equal(t, test.reason, environment.outcomes[0].Reason)
+			assert.False(t, environment.IsOpen())
+		})
+	}
 }
 
 func TestAnthropicSendMessageNoSaveBlocksForkAndRestoresMessages(t *testing.T) {
