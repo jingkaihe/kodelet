@@ -492,11 +492,11 @@ func (e *RemoteEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtyp
 	// The runner bounds each cleanup phase. Do not impose a competing RPC
 	// deadline that could expire while a terminal observer is still finishing.
 	ctx = context.WithoutCancel(ctx)
-	if reloadFailed && outcome.Status == "succeeded" {
+	if reloadFailed && outcome.Status == llmtypes.AgentRunStatusSucceeded {
 		outcome = llmtypes.NewAgentRunOutcome(errors.New("resource reload failed"), "")
 	}
 	var cancelErr error
-	if outcome.Status == "canceled" || reloadFailed {
+	if outcome.Status == llmtypes.AgentRunStatusCanceled || reloadFailed {
 		cancelErr = e.controller.CancelRun(ctx, runID, outcome.Error)
 	}
 	closeErr := e.controller.CloseRunWithOutcome(ctx, runID, outcome)

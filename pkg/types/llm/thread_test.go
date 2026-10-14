@@ -12,7 +12,7 @@ func TestNewAgentRunOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		err    error
-		reason string
+		reason AgentRunReason
 		want   AgentRunOutcome
 	}{
 		{name: "completed", want: AgentRunOutcome{Status: "succeeded", Reason: "completed"}},

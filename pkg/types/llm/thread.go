@@ -24,28 +24,48 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// AgentRunStatus is the terminal status of an agent run.
+type AgentRunStatus string
+
+const (
+	AgentRunStatusSucceeded AgentRunStatus = "succeeded"
+	AgentRunStatusFailed    AgentRunStatus = "failed"
+	AgentRunStatusCanceled  AgentRunStatus = "canceled"
+)
+
+// AgentRunReason describes why an agent run finished.
+type AgentRunReason string
+
+const (
+	AgentRunReasonCompleted        AgentRunReason = "completed"
+	AgentRunReasonError            AgentRunReason = "error"
+	AgentRunReasonCanceled         AgentRunReason = "canceled"
+	AgentRunReasonDeadlineExceeded AgentRunReason = "deadline_exceeded"
+	AgentRunReasonTurnLimit        AgentRunReason = "turn_limit"
+)
+
 // AgentRunOutcome describes a terminal run, independently of whether its environment stays alive.
 type AgentRunOutcome struct {
-	Status string `json:"status"`
-	Reason string `json:"reason,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Status AgentRunStatus `json:"status"`
+	Reason AgentRunReason `json:"reason,omitempty"`
+	Error  string         `json:"error,omitempty"`
 }
 
 // NewAgentRunOutcome classifies a run exit. A success reason may distinguish a
 // turn limit from normal completion; errors take precedence over that reason.
-func NewAgentRunOutcome(runErr error, reason string) AgentRunOutcome {
+func NewAgentRunOutcome(runErr error, reason AgentRunReason) AgentRunOutcome {
 	if runErr == nil {
 		if reason == "" {
-			reason = "completed"
+			reason = AgentRunReasonCompleted
 		}
-		return AgentRunOutcome{Status: "succeeded", Reason: reason}
+		return AgentRunOutcome{Status: AgentRunStatusSucceeded, Reason: reason}
 	}
-	outcome := AgentRunOutcome{Status: "failed", Reason: "error", Error: runErr.Error()}
+	outcome := AgentRunOutcome{Status: AgentRunStatusFailed, Reason: AgentRunReasonError, Error: runErr.Error()}
 	switch {
 	case errors.Is(runErr, context.DeadlineExceeded):
-		outcome.Status, outcome.Reason = "canceled", "deadline_exceeded"
+		outcome.Status, outcome.Reason = AgentRunStatusCanceled, AgentRunReasonDeadlineExceeded
 	case errors.Is(runErr, context.Canceled):
-		outcome.Status, outcome.Reason = "canceled", "canceled"
+		outcome.Status, outcome.Reason = AgentRunStatusCanceled, AgentRunReasonCanceled
 	}
 	return outcome
 }

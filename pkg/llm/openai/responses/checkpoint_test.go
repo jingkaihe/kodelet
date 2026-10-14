@@ -224,8 +224,8 @@ func TestResponsesReportsTerminalOutcome(t *testing.T) {
 		cancelAtStart bool
 		toolsUsed     bool
 		followUps     int
-		status        string
-		reason        string
+		status        llmtypes.AgentRunStatus
+		reason        llmtypes.AgentRunReason
 		exchanges     int
 	}{
 		{name: "completed", status: "succeeded", reason: "completed", exchanges: 1},

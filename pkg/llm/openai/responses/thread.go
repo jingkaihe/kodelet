@@ -501,7 +501,7 @@ func (t *Thread) SendMessage(
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
-	finishReason := ""
+	var finishReason llmtypes.AgentRunReason
 	var stoppedErr error
 	defer func() {
 		runErr := err
@@ -557,7 +557,7 @@ OUTER:
 			}
 			// Check turn limit
 			if maxTurns > 0 && turnCount >= maxTurns {
-				finishReason = "turn_limit"
+				finishReason = llmtypes.AgentRunReasonTurnLimit
 				logger.G(ctx).WithField("turn_count", turnCount).
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")

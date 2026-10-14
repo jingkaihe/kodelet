@@ -301,9 +301,9 @@ type RunStatus string
 const (
 	RunStatusOpening   RunStatus = "opening"
 	RunStatusRunning   RunStatus = "running"
-	RunStatusSucceeded RunStatus = "succeeded"
-	RunStatusFailed    RunStatus = "failed"
-	RunStatusCanceled  RunStatus = "canceled"
+	RunStatusSucceeded RunStatus = RunStatus(llmtypes.AgentRunStatusSucceeded)
+	RunStatusFailed    RunStatus = RunStatus(llmtypes.AgentRunStatusFailed)
+	RunStatusCanceled  RunStatus = RunStatus(llmtypes.AgentRunStatusCanceled)
 	RunStatusLost      RunStatus = "lost"
 )
 
