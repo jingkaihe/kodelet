@@ -1678,6 +1678,7 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 		switch status {
 		case RunStatusSucceeded:
 			outcome.Reason = llmtypes.AgentRunReasonCompleted
+			outcome.Error = ""
 		case RunStatusFailed:
 			outcome.Reason = llmtypes.AgentRunReasonError
 		case RunStatusCanceled:

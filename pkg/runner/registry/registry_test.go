@@ -2085,9 +2085,17 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	assert.Contains(t, runners[0].CompatibilityError, "does not support protocol version")
 }
 
-func TestCloseRunWithOutcomeTransport(t *testing.T) {
-	for _, storedError := range []string{"", "extension failed"} {
-		t.Run("stored error="+storedError, func(t *testing.T) {
+func TestCloseRunOutcomeTransport(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		storedError      string
+		successWithError bool
+	}{
+		{name: "deadline"},
+		{name: "stored failure", storedError: "extension failed"},
+		{name: "success overrides error", successWithError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			registry := newTestRegistry(t)
 			link := newFakeLink()
 			registration, err := registry.Register(testRegisterParams("host", "/work/project"), link)
@@ -2098,11 +2106,13 @@ func TestCloseRunWithOutcomeTransport(t *testing.T) {
 			require.NoError(t, err)
 			outcome := llmtypes.NewAgentRunOutcome(context.DeadlineExceeded, "")
 			want := outcome
-			if storedError != "" {
+			if test.storedError != "" {
 				require.NoError(t, registry.EnvironmentError(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.EnvironmentErrorParams{
-					RunID: "run", Message: storedError,
+					RunID: "run", Message: test.storedError,
 				}))
-				want = llmtypes.AgentRunOutcome{Status: "failed", Reason: "error", Error: storedError}
+				want = llmtypes.AgentRunOutcome{Status: "failed", Reason: "error", Error: test.storedError}
+			} else if test.successWithError {
+				want = llmtypes.NewAgentRunOutcome(nil, "")
 			}
 			var received *llmtypes.AgentRunOutcome
 			link.mu.Lock()
@@ -2115,7 +2125,11 @@ func TestCloseRunWithOutcomeTransport(t *testing.T) {
 				return nil
 			}
 			link.mu.Unlock()
-			require.NoError(t, registry.CloseRunWithOutcome(t.Context(), "run", outcome))
+			if test.successWithError {
+				require.NoError(t, registry.CloseRun(t.Context(), "run", RunStatusSucceeded, errors.New("shortcut failed")))
+			} else {
+				require.NoError(t, registry.CloseRunWithOutcome(t.Context(), "run", outcome))
+			}
 			require.NotNil(t, received)
 			assert.Equal(t, want, *received)
 			run, ok := registry.Run("run")
