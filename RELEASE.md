@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.8.6-beta
+
+Added the `agent.finished` extension lifecycle event and typed TypeScript SDK payloads, reporting the final status, reason, and optional error once per started run on a handled exit, after all continuations. It covers success, failure, cancellation, deadline expiry, and turn limits; turn limits count as success and deadline expiry counts as cancellation. Unlike `agent.end`, it cannot continue the run, and resource reload does not emit it. Abrupt process termination may prevent delivery.
+
+Made `agent.finished` handlers independent of run cancellation, with a separate timeout capped at 30 seconds for each handler. Returned values and handler failures do not change the run outcome; sequential handlers can extend cleanup by up to 30 seconds each.
+
+Fixed provider-side cancellation to mark remote runs as canceled even when the provider loop returns no error. Kept termination notifications consistent with recorded run failures and cleared stale errors when run closure explicitly overrides the status to success.
+
+Added a conversation ID copy action to the Web UI workspace header for saved conversations.
+
+Added an isolated self-test workflow for Kodelet development and improved acceptance-test daemon isolation and conversation coverage.
+
+**Upgrade:** Upgrade runners alongside the daemon to receive `agent.finished` events with complete termination outcomes.
+
 ## 0.8.5-beta
 
 Added `/reload` to runner-backed CLI, TUI, Web UI, and ACP conversations, refreshing installed extensions, tools, schemas, recipes, skills, context files, and workspace configuration without restarting Kodelet or starting a new conversation. Global configuration and model settings are not reloaded; compiled extensions must be rebuilt first.
