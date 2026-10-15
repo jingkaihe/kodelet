@@ -1689,7 +1689,7 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 	return r.CloseRunWithOutcome(ctx, runID, outcome)
 }
 
-// CloseRunWithOutcome releases one runner lease and reports its terminal outcome.
+// CloseRunWithOutcome releases one runner lease and reports its termination outcome.
 func (r *Registry) CloseRunWithOutcome(ctx context.Context, runID string, outcome llmtypes.AgentRunOutcome) error {
 	status := RunStatus(outcome.Status)
 	message := outcome.Error
@@ -1704,7 +1704,7 @@ func (r *Registry) CloseRunWithOutcome(ctx context.Context, runID string, outcom
 	r.clearRunCodeParentsLocked(runID)
 	r.clearRunArtifactToolsLocked(runID)
 	// Publish the same failure the durable run will retain, rather than sending
-	// a successful terminal event before applying the stored failure below.
+	// a successful termination notification before applying the stored failure below.
 	if run := r.runs[runID]; run != nil && run.Status == RunStatusFailed {
 		outcome = llmtypes.AgentRunOutcome{Status: llmtypes.AgentRunStatusFailed, Reason: llmtypes.AgentRunReasonError, Error: run.Error}
 	}

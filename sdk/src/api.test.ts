@@ -378,7 +378,7 @@ test("registers tools, commands, events and executes handlers", async () => {
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
 });
 
-test("agent.finished subscriptions receive typed terminal outcomes and call context", async () => {
+test("agent.finished subscriptions receive typed termination outcomes and call context", async () => {
   const observed: AgentFinishedEvent[] = [];
   const harness = await createTestHarness(defineExtension((ext) => {
     ext.on("agent.finished", (event, ctx) => {

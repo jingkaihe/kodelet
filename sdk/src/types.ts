@@ -462,7 +462,7 @@ export interface AgentEndEventPayload {
   messages?: unknown[];
 }
 
-/** Terminal outcome, observed once per started run on a handled exit. */
+/** Termination outcome, observed once per started run on a handled exit. */
 export interface AgentFinishedEventPayload {
   status: "succeeded" | "failed" | "canceled";
   reason?: "completed" | "error" | "canceled" | "deadline_exceeded" | "turn_limit";

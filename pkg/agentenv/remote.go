@@ -474,7 +474,7 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	return e.CloseWithOutcome(ctx, llmtypes.NewAgentRunOutcome(runErr, ""))
 }
 
-// CloseWithOutcome reports the terminal outcome to runner-owned cleanup hooks.
+// CloseWithOutcome reports the termination outcome to runner-owned cleanup hooks.
 func (e *RemoteEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
 	if e == nil || e.controller == nil {
 		return nil
@@ -489,7 +489,7 @@ func (e *RemoteEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtyp
 	reloadFailed := e.reloadFailed
 	e.mu.Unlock()
 
-	// The runner bounds each terminal handler independently; their budgets add up.
+	// The runner bounds each termination notification handler independently; their budgets add up.
 	// Do not impose a shared RPC deadline that could expire before all handlers finish.
 	ctx = context.WithoutCancel(ctx)
 	if reloadFailed && outcome.Status == llmtypes.AgentRunStatusSucceeded {

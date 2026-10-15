@@ -1244,7 +1244,7 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun, outcome *l
 		}
 		s.mu.Unlock()
 		if started {
-			// Terminal observers bypass ordinary lifecycle admission, which rejects
+			// Termination notification observers bypass ordinary lifecycle admission, which rejects
 			// stopping runs. Plain environment.Close remains silent for reload.
 			runtime.DispatchAgentFinished(s.decorateRunContext(ctx, run.id, run.conversationID), callContext, terminal)
 		}

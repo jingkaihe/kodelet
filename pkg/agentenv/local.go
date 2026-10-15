@@ -504,7 +504,7 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 	return finish(result, failureKind, failureOutcome)
 }
 
-// CloseWithOutcome dispatches the terminal event once before releasing the snapshot.
+// CloseWithOutcome dispatches the termination notification once before releasing the snapshot.
 // Plain Close is deliberately separate: resource reload also releases snapshots.
 func (e *LocalEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
 	if e == nil {

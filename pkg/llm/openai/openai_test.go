@@ -1628,22 +1628,22 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	assert.False(t, thread.ConversationForkBlocked())
 }
 
-type terminalOutcomeEnvironment struct {
+type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
 	outcomes []llm.AgentRunOutcome
 }
 
-func (*terminalOutcomeEnvironment) DispatchAgentEnd(context.Context, []llm.Message) ([]string, error) {
+func (*terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llm.Message) ([]string, error) {
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
 	return []string{"continue"}, nil
 }
 
-func (e *terminalOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llm.AgentRunOutcome) error {
+func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llm.AgentRunOutcome) error {
 	e.outcomes = append(e.outcomes, outcome)
 	return e.Close(ctx)
 }
 
-func TestOpenAIReportsTerminalOutcome(t *testing.T) {
+func TestOpenAIReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		providerErr error
@@ -1667,7 +1667,7 @@ func TestOpenAIReportsTerminalOutcome(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			environment := &terminalOutcomeEnvironment{}
+			environment := &terminationOutcomeEnvironment{}
 			requests := 0
 			client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
 				requests++

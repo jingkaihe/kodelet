@@ -574,7 +574,7 @@ func TestRemoteEnvironmentCloseWithOutcome(t *testing.T) {
 	assert.Empty(t, controller.canceledRunID)
 	assert.False(t, environment.IsOpen())
 	require.NoError(t, environment.CloseWithOutcome(t.Context(), llmtypes.NewAgentRunOutcome(context.Canceled, "")))
-	assert.Equal(t, outcome, controller.closedOutcome, "repeated close must not replace the terminal outcome")
+	assert.Equal(t, outcome, controller.closedOutcome, "repeated close must not replace the termination outcome")
 }
 
 func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {

@@ -1236,22 +1236,22 @@ func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testin
 	assert.Nil(t, results)
 }
 
-type terminalOutcomeEnvironment struct {
+type terminationOutcomeEnvironment struct {
 	agentenv.UtilityEnvironment
 	outcomes []llmtypes.AgentRunOutcome
 }
 
-func (*terminalOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+func (*terminationOutcomeEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
 	// Keep requesting follow-ups so successful exchanges reach the turn limit.
 	return []string{"continue"}, nil
 }
 
-func (e *terminalOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
+func (e *terminationOutcomeEnvironment) CloseWithOutcome(ctx context.Context, outcome llmtypes.AgentRunOutcome) error {
 	e.outcomes = append(e.outcomes, outcome)
 	return e.Close(ctx)
 }
 
-func TestAnthropicReportsTerminalOutcome(t *testing.T) {
+func TestAnthropicReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		providerErr error
@@ -1275,7 +1275,7 @@ func TestAnthropicReportsTerminalOutcome(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			environment := &terminalOutcomeEnvironment{}
+			environment := &terminationOutcomeEnvironment{}
 			requests := 0
 			client := anthropic.NewClient(
 				option.WithAPIKey("test-key"),
@@ -1303,7 +1303,7 @@ data: {"type":"message_stop"}
 				}),
 			)
 			thread := &Thread{
-				Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "terminal-outcome"),
+				Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "termination-outcome"),
 				client: client,
 			}
 			thread.SetEnvironment(environment)

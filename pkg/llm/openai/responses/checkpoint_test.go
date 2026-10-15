@@ -217,7 +217,7 @@ func (e *finishedEnvironment) CloseWithOutcome(ctx context.Context, outcome llmt
 	return e.Close(ctx)
 }
 
-func TestResponsesReportsTerminalOutcome(t *testing.T) {
+func TestResponsesReportsTerminationOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		exchangeErr   error
