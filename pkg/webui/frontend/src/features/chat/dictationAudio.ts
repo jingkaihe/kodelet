@@ -145,7 +145,14 @@ export function createDictationSession(sampleRate: number, options: DictationRec
 export function createDictationRecorder(options: DictationRecorderOptions) {
   // Both creation and resume happen synchronously in the initiating gesture,
   // before the parent awaits microphone permission (important on Safari).
-  const context = new AudioContext({ latencyHint: 'interactive' });
+  let context: AudioContext;
+  try {
+    // Let the browser resample microphone input rather than uploading 48 kHz PCM.
+    context = new AudioContext({ latencyHint: 'interactive', sampleRate: 16_000 });
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error;
+    context = new AudioContext({ latencyHint: 'interactive' });
+  }
   const resumed = context.resume().then(
     () => undefined,
     () => new Error('Could not start microphone audio processing.')

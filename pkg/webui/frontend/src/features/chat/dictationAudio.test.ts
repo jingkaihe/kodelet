@@ -171,7 +171,7 @@ class FakeTrack extends EventTarget {
 class FakeAudioContext {
   static instances: FakeAudioContext[] = [];
   state = 'suspended';
-  sampleRate = sampleRate;
+  sampleRate: number;
   destination = {};
   onstatechange: (() => void) | null = null;
   audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
@@ -183,7 +183,8 @@ class FakeAudioContext {
     this.state = 'closed';
   });
   createMediaStreamSource = vi.fn(() => this.source);
-  constructor() {
+  constructor(readonly options: AudioContextOptions = {}) {
+    this.sampleRate = options.sampleRate ?? 48_000;
     FakeAudioContext.instances.push(this);
   }
 }
@@ -233,6 +234,7 @@ describe('dictation recorder lifecycle', () => {
   it('resumes synchronously before permission, loads a same-origin asset, and owns the stream', async () => {
     const recorder = createDictationRecorder(options());
     const context = FakeAudioContext.instances[0];
+    expect(context.options).toEqual({ latencyHint: 'interactive', sampleRate });
     expect(context.resume).toHaveBeenCalledTimes(1);
     expect(context.audioWorklet.addModule).not.toHaveBeenCalled();
     const { stream, track } = microphone();
@@ -247,6 +249,34 @@ describe('dictation recorder lifecycle', () => {
     expect(track.stop).toHaveBeenCalledTimes(1);
     expect(context.close).toHaveBeenCalledTimes(1);
     expect(context.source.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the native rate for WAV headers and limits when 16 kHz is unsupported', async () => {
+    vi.stubGlobal(
+      'AudioContext',
+      class extends FakeAudioContext {
+        constructor(config: AudioContextOptions) {
+          if (config.sampleRate) throw new DOMException('Unsupported rate', 'NotSupportedError');
+          super(config);
+        }
+      }
+    );
+    const callbacks = options({ maxDurationSeconds: 1 });
+    const recorder = createDictationRecorder(callbacks);
+    const context = FakeAudioContext.instances[0];
+    expect(context.options).toEqual({ latencyHint: 'interactive' });
+    expect(context.resume).toHaveBeenCalledTimes(1);
+    const { stream, track } = microphone();
+    await recorder.start(stream);
+    FakeWorkletNode.instances[0].port.onmessage?.({
+      data: { type: 'samples', samples: new Float32Array(48_000).fill(0.1) },
+    });
+    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
+    const file = vi.mocked(callbacks.onSnapshot).mock.calls[0][0];
+    expect(file.size).toBe(44 + 48_000 * 2);
+    expect((await readWAV(file)).getUint32(24, true)).toBe(48_000);
+    expect(track.stop).toHaveBeenCalledTimes(1);
   });
 
   it.each([
