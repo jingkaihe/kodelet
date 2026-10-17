@@ -42,6 +42,7 @@ import {
   useConversationList,
 } from '../features/chat/useConversationList';
 import { useConversationSearch } from '../features/chat/useConversationSearch';
+import { isVoiceCommand, useDictation } from '../features/chat/useDictation';
 import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
 import { useSlashCommands } from '../features/chat/useSlashCommands';
 import { useTranscriptAutoScroll } from '../features/chat/useTranscriptAutoScroll';
@@ -1207,9 +1208,12 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (steering || (conversationId && !isRemoteConversation)) return;
     const prompt = draft.trim();
+    // Dictation is a client-local input action, never a queued command or turn.
+    if (dictation.handleCommand(prompt) || dictation.isBusy()) return;
     const attachmentsForSend = attachments;
-    if ((!prompt && attachments.length === 0) || steering) {
+    if (!prompt && attachments.length === 0) {
       return;
     }
     if (currentConversationIsStreaming && !prompt) {
@@ -1859,10 +1863,17 @@ const ChatPage: React.FC = () => {
   );
   const sessionTargetKey = `runner:${currentRunnerID}:conversation:${sessionConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
+  const dictation = useDictation({
+    targetKey: `${sessionTargetKey}:environment:${currentEnvironmentProfile}`,
+    draft,
+    setDraft,
+  });
+
   const slashCommands = useSlashCommands({
     draft,
     setDraft,
-    disabled: currentConversationIsStreaming || steering,
+    // Discovered commands can queue during a run; keep their suggestions visible.
+    disabled: steering,
     discoveryAvailable: Boolean(
       isRemoteConversation && runnerWorkspaceAvailable && currentRunner?.workspaceDiscovery
     ),
@@ -1883,7 +1894,7 @@ const ChatPage: React.FC = () => {
   // text, such as a file path, is ordinary steering.
   const isQueueableCommand = (message: string): boolean => {
     const name = slashCommandName(message);
-    return name !== undefined && slashCommandNames.has(name);
+    return name !== undefined && name !== 'voice' && slashCommandNames.has(name);
   };
 
   useEffect(() => {
@@ -1955,10 +1966,11 @@ const ChatPage: React.FC = () => {
       : undefined;
 
   const canSubmit =
-    isRemoteConversation &&
-    (currentConversationIsStreaming
-      ? draft.trim().length > 0
-      : draft.trim().length > 0 || attachments.length > 0);
+    ((!conversationId || isRemoteConversation) && isVoiceCommand(draft)) ||
+    (isRemoteConversation &&
+      (currentConversationIsStreaming
+        ? draft.trim().length > 0
+        : draft.trim().length > 0 || attachments.length > 0));
   const composerPlaceholder = !isRemoteConversation
     ? conversationId
       ? 'This local conversation is read-only'
@@ -2070,12 +2082,26 @@ const ChatPage: React.FC = () => {
   };
 
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.isComposing || event.altKey || higherPriorityDialogOpen) {
+    if (event.defaultPrevented || event.isComposing || higherPriorityDialogOpen || dictation.busy) {
       return;
     }
 
     let action: (() => void) | undefined;
-    if (
+    if (event.altKey) {
+      if (
+        !event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        (event.code !== 'KeyV' && event.key.toLowerCase() !== 'v') ||
+        steering ||
+        (conversationId && !isRemoteConversation) ||
+        (event.target instanceof Element && event.target.closest('.workspace-terminal-host'))
+      ) {
+        return;
+      }
+      // Option changes event.key on macOS; the physical key still identifies V.
+      action = dictation.start;
+    } else if (
       event.ctrlKey &&
       !event.metaKey &&
       !event.shiftKey &&
@@ -2373,6 +2399,7 @@ const ChatPage: React.FC = () => {
             contextDisabled={currentConversationIsStreaming || steering}
             contextIsStatic={contextIsStatic}
             contextText={composerContextText}
+            dictation={dictation}
             draft={draft}
             placeholder={composerPlaceholder}
             quickPick={composerQuickPick}
@@ -2380,8 +2407,8 @@ const ChatPage: React.FC = () => {
             stopActionLabel="Stop"
             streamError={streamError || workspaceExecutionMessage}
             submitActionLabel={submitActionLabel}
-            submitDisabled={steering || !canSubmit}
-            textareaDisabled={steering || !isRemoteConversation}
+            submitDisabled={dictation.busy || steering || !canSubmit}
+            textareaDisabled={steering || Boolean(conversationId && !isRemoteConversation)}
             onContextOpen={openChatContext}
             onDraftChange={setDraft}
             onReload={streamError ? () => window.location.reload() : undefined}

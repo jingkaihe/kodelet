@@ -80,6 +80,7 @@ var modelSettingKeys = []string{
 	"provider",
 	"model",
 	"weak_model",
+	"transcription_model",
 	"max_tokens",
 	"weak_model_max_tokens",
 	"thinking_budget_tokens",
@@ -240,6 +241,7 @@ func GetConfigFromProfile(settings llmtypes.ProfileConfig) (llmtypes.Config, err
 	config.Aliases = withDefaultModelAliases(config.Aliases)
 	config.Model = resolveModelAlias(strings.TrimSpace(config.Model), config.Aliases)
 	config.WeakModel = resolveModelAlias(strings.TrimSpace(config.WeakModel), config.Aliases)
+	config.TranscriptionModel = resolveModelAlias(strings.TrimSpace(config.TranscriptionModel), config.Aliases)
 	config.ModelAliasesResolved = true
 	return config, nil
 }

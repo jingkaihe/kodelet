@@ -30,7 +30,8 @@ describe('ChatPage model and reasoning settings', () => {
     render(<ChatPage />);
 
     await flushAsyncUpdates();
-    expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+    // Local draft editing and /voice do not require runnable model settings.
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     selectWorkspaceRunner();
@@ -69,7 +70,7 @@ describe('ChatPage model and reasoning settings', () => {
           })
         )
       );
-      expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+      expect(screen.getByTestId('composer-textarea')).toBeEnabled();
       expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       const profile = screen.getByRole('combobox', { name: 'Profile' });

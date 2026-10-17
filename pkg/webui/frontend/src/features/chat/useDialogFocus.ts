@@ -1,7 +1,11 @@
 import { useEffect, useEffectEvent, useRef } from 'react';
 
 // Focus management for informational dialogs whose interactive elements are buttons.
-export const useDialogFocus = (onClose: () => void, returnFocusSelector: string) => {
+export const useDialogFocus = (
+  onClose: () => void,
+  returnFocusSelector: string,
+  preferReturnFocus = false
+) => {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const close = useEffectEvent(onClose);
@@ -43,14 +47,17 @@ export const useDialogFocus = (onClose: () => void, returnFocusSelector: string)
       document.removeEventListener('keydown', handleKeyDown, true);
       // A menu trigger may unmount when the dialog opens. Restore focus after inert clears.
       window.setTimeout(() => {
-        const target = [
-          previousFocus,
-          ...document.querySelectorAll<HTMLElement>(returnFocusSelector),
-        ].find((element) => element?.isConnected && !element.closest('[inert]'));
+        const matches = [...document.querySelectorAll<HTMLElement>(returnFocusSelector)];
+        const candidates = preferReturnFocus
+          ? [...matches, previousFocus]
+          : [previousFocus, ...matches];
+        const target = candidates.find(
+          (element) => element?.isConnected && !element.closest('[inert]')
+        );
         target?.focus();
       }, 0);
     };
-  }, [returnFocusSelector]);
+  }, [returnFocusSelector, preferReturnFocus]);
 
   return { dialogRef, closeButtonRef };
 };

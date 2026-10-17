@@ -469,7 +469,8 @@ describe('ChatPage working directories and runner selection', () => {
       );
       render(<ChatPage />);
       await flushAsyncUpdates();
-      expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+      expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
 
       await act(async () => resolveRunners({ runners: [makeRunner(), embeddedRunner] }));
       expect(screen.getByTestId('composer-textarea')).toBeEnabled();
@@ -492,7 +493,8 @@ describe('ChatPage working directories and runner selection', () => {
       render(<ChatPage />);
       await flushAsyncUpdates();
 
-      expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+      expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
       fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
       expect(screen.getByLabelText('Environment')).toHaveTextContent('Select a workspace runner');
       expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
@@ -560,7 +562,9 @@ describe('ChatPage working directories and runner selection', () => {
         'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
       )
     ).toBeVisible();
-    expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+    // Preparing a draft is local; sending still requires a runner.
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
     expect(mockGetSlashCommands).not.toHaveBeenCalled();
     expect(mockGetCWDHints).not.toHaveBeenCalled();
@@ -595,7 +599,7 @@ describe('ChatPage working directories and runner selection', () => {
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
     expect(mockGetSlashCommands).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
-    expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
     expect(screen.getByLabelText('Environment')).toHaveTextContent('Select a workspace runner');
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });

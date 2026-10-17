@@ -88,6 +88,60 @@ describe('ApiService', () => {
   });
 
   describe('request method', () => {
+    it('discovers dictation capabilities with a cancellable request', async () => {
+      const capabilities = {
+        enabled: false,
+        available: false,
+        maxAudioBytes: 20 * 1024 * 1024,
+        maxDurationSeconds: 120,
+        mimeTypes: ['audio/wav'],
+      };
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => capabilities });
+      const controller = new AbortController();
+      expect(await apiService.getTranscriptionCapabilities(controller.signal)).toEqual(
+        capabilities
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/transcription',
+        expect.objectContaining({ signal: controller.signal })
+      );
+    });
+
+    it('uploads dictation as multipart with CSRF, filename, MIME type and cancellation', async () => {
+      setTestCookie('kodelet_csrf=dictation-csrf; Path=/');
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ text: 'hello' }) });
+      const file = new File(['audio'], 'recording.m4a', { type: 'audio/mp4' });
+      const controller = new AbortController();
+      expect(await apiService.transcribeAudio(file, controller.signal, 'en')).toEqual({
+        text: 'hello',
+      });
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/transcription');
+      expect(options.method).toBe('POST');
+      expect(options.signal).toBe(controller.signal);
+      expect(options.headers['X-CSRF-Token']).toBe('dictation-csrf');
+      expect(options.headers).not.toHaveProperty('Content-Type');
+      expect(options.body).toBeInstanceOf(FormData);
+      expect(options.body.get('file')).toMatchObject({
+        name: 'recording.m4a',
+        type: 'audio/mp4',
+        size: file.size,
+      });
+      expect(options.body.get('language')).toBe('en');
+    });
+
+    it('surfaces transcription endpoint errors without retrying or sending a chat', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 413,
+        json: async () => ({ error: 'Recording is too large' }),
+      });
+      await expect(
+        apiService.transcribeAudio(new File(['audio'], 'recording.wav', { type: 'audio/wav' }))
+      ).rejects.toThrow('Recording is too large');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('adds default headers', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

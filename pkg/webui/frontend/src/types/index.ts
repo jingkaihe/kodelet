@@ -399,6 +399,19 @@ export interface RunnerDiscoveryTarget {
   profile?: string;
 }
 
+export interface TranscriptionCapabilities {
+  enabled: boolean;
+  available: boolean;
+  reason?: string;
+  maxAudioBytes: number;
+  maxDurationSeconds: number;
+  mimeTypes: string[];
+}
+
+export interface TranscriptionResult {
+  text: string;
+}
+
 export interface ChatSettings {
   /** Concrete profile resolved for this request, or the configured default when omitted. */
   currentProfile: string;

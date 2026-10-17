@@ -310,6 +310,39 @@ describe('ChatPage streaming, steering, and navigation', () => {
     await waitFor(() => expect(screen.queryByTestId('pending-steer-list')).not.toBeInTheDocument());
   });
 
+  it.each([
+    'submitted',
+    'observed',
+  ] as const)('keeps discovered commands alongside /voice during a %s run and queues the selected command', async (source) => {
+    const { startRun } = setupCommandQueueStreams();
+    render(<ChatPage />);
+    await screen.findByText('First conversation');
+    const textarea = screen.getByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: '/' } });
+    expect(await screen.findByText('/review')).toBeInTheDocument();
+    expect(screen.getByText('/voice')).toBeInTheDocument();
+    await startRun(source);
+
+    fireEvent.change(textarea, { target: { value: '/' } });
+    const suggestions = screen.getByTestId('slash-command-suggestions');
+    expect(within(suggestions).getByText('/reload')).toBeInTheDocument();
+    expect(within(suggestions).getByText('/review')).toBeInTheDocument();
+    expect(within(suggestions).getByText('/voice')).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: '/rev' } });
+    fireEvent.keyDown(textarea, { key: 'Tab' });
+    expect(textarea).toHaveValue('/review ');
+    expect(screen.getByTestId('composer-slash-usage-hint')).toHaveTextContent('/review focus');
+    fireEvent.change(textarea, { target: { value: '/review focus=tests' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+    expect(await screen.findByRole('region', { name: 'Queued commands' })).toHaveTextContent(
+      '/review focus=tests'
+    );
+    expect(textarea).toHaveValue('');
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(mockStreamChat).toHaveBeenCalledTimes(source === 'submitted' ? 1 : 0);
+  });
+
   it('queues slash commands FIFO separately from steering and waits for successful stream cleanup', async () => {
     const { streams } = setupCommandQueueStreams();
     stubImageFileReader('data:image/png;base64,aGVsbG8=');

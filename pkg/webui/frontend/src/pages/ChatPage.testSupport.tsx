@@ -55,6 +55,8 @@ const apiMocks = vi.hoisted(() => ({
   getConversations: vi.fn(),
   getConversation: vi.fn(),
   getChatSettings: vi.fn(),
+  getTranscriptionCapabilities: vi.fn(),
+  transcribeAudio: vi.fn(),
   getCodexProviderStatus: vi.fn(),
   startCodexDeviceLogin: vi.fn(),
   getCodexDeviceLogin: vi.fn(),
@@ -88,6 +90,8 @@ export const {
   getConversations: mockGetConversations,
   getConversation: mockGetConversation,
   getChatSettings: mockGetChatSettings,
+  getTranscriptionCapabilities: mockGetTranscriptionCapabilities,
+  transcribeAudio: mockTranscribeAudio,
   getCodexProviderStatus: mockGetCodexProviderStatus,
   startCodexDeviceLogin: mockStartCodexDeviceLogin,
   getCodexDeviceLogin: mockGetCodexDeviceLogin,
@@ -270,6 +274,13 @@ export const setupChatPageTests = () => {
     vi.clearAllMocks();
     // Clear implementations and queued responses, not just call history, between scenarios.
     for (const mock of Object.values(apiMocks)) mock.mockReset();
+    mockGetTranscriptionCapabilities.mockResolvedValue({
+      enabled: false,
+      available: false,
+      maxAudioBytes: 20 * 1024 * 1024,
+      maxDurationSeconds: 120,
+      mimeTypes: ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav'],
+    });
     mockNavigate.mockReset();
     setRouteParams({});
     window.localStorage.clear();

@@ -348,6 +348,62 @@ For trusted local-only use, disable both human and runner authentication with:
 kodelet serve --skip-auth
 ```
 
+#### Microphone dictation
+
+The Web UI can record speech and insert its transcription into the composer. Click the microphone button, press **Alt+Shift+V** (**Option+Shift+V** on macOS), or submit the local `/voice` command to open the centered dictation dialog. Its waveform follows microphone levels, and after approximately 2.5 seconds of silence the whole recording so far is transcribed while the microphone keeps listening. Each result replaces the single preview, allowing the model to revise earlier words using later context instead of stitching together isolated phrases. Your draft remains unchanged until you choose Done or press Enter, which finishes recording, waits for the latest transcription, and inserts the text into the composer. Focus returns to the composer with the caret after the inserted text, ready for continued typing or pasting images. Cancel or press Esc to discard the session and leave the original draft untouched. Review and edit the resulting text before sending: dictation never submits a message automatically, starts an agent turn, or interrupts running work. Existing draft text and image attachments are preserved. This is pause-based dictation, not word-by-word streaming or a two-way voice conversation.
+
+The browser retains the full continuous recording in memory and uses approximate speech/silence detection to trigger completed PCM WAV snapshots. Every upload contains all recorded audio so far, including pauses; previous audio is not dropped or split into separate transcripts. This increases upload bandwidth and potentially billed audio duration compared with a single final request, and later updates can take longer. Only one upload runs at a time, with at most the newest snapshot waiting; superseded queued snapshots are discarded without uploading. Silence without new speech does not trigger repeated uploads, and Done reuses the latest snapshot when no new speech has been added. A failed update leaves the last successful preview visible with a warning; a later successful full-recording update clears that failure. If the latest update fails while finishing, the dialog stays open for review; choosing Done again explicitly accepts the last successful, potentially incomplete preview. Background noise can affect pause detection and transcription quality.
+
+Configure transcription on the server independently of the current coding conversation. The root-level selector references a named model profile; switching chat profiles does not change the transcription service. For public OpenAI API transcription:
+
+```yaml
+profiles:
+  openai:
+    provider: openai
+    model: gpt-4.1
+    transcription_model: gpt-4o-mini-transcribe
+    openai:
+      platform: openai
+
+transcription:
+  enabled: true
+  profile: openai
+```
+
+The server uses `OPENAI_API_KEY`, or the profile's `openai.api_key_env_var`, and honors `openai.base_url`. API transcription is billed separately from ChatGPT subscriptions. Omitting `transcription_model` defaults to `gpt-4o-mini-transcribe`. The chat model, reasoning settings, tools, and instructions are not used for transcription.
+
+For experimental ChatGPT-backed transcription, point `transcription.profile` at an OpenAI profile with `openai.platform: codex` and sign in with `kodelet codex login` on the selected server. Omit `transcription_model` for that profile: the undocumented ChatGPT transcription endpoint selects its own model. Setting an explicit model for Codex is an error, not a fallback to the public API. Account and network restrictions may prevent access even with a valid login.
+
+If Codex transcription reports a Cloudflare challenge (HTTP 403), the request from the Kodelet server was blocked before a normal transcription response. This does not identify the cause: client identity headers as well as network restrictions can trigger a challenge. Kodelet sends an explicit application User-Agent; older builds using Go's generic user agent may be challenged despite valid credentials, so update and restart the server first. A working Codex chat session does not guarantee access to this separate endpoint, and changing the chat or transcription model does not resolve the challenge. If it persists, use a public OpenAI API transcription profile as above (with its own API key and separate billing), or try a different server network. Kodelet does not solve browser challenges, retry the upload, or silently switch providers. Other 403 responses are reported as access denied rather than assumed to be Cloudflare challenges.
+
+Transcription defaults to disabled. When enabled, a profile is required; unknown profiles and unsupported providers/platforms are configuration errors. Restart the server after configuration changes. Credentials stay on the server and are not sent to browser clients. Missing credentials are reported as unavailable without preventing the server from starting.
+
+Microphone capture requires HTTPS or localhost, browser permission, and Web Audio/AudioWorklet support. Sessions are limited to two minutes and a complete WAV recording of 20 MiB; reaching either limit stops recording for review rather than discarding earlier audio or submitting a chat message. Kodelet does not persist audio, and only text you explicitly send becomes part of conversation history. The whole recording so far is sent to the configured transcription service automatically at pauses, not only when you choose Done. Leaving the conversation cancels dictation. Cancellation after upload begins stops Kodelet's request but cannot retract audio already received by the provider. Native TUI recording is not implemented yet; it will use the same API below, with no server-side recording dependency.
+
+##### Transcription API
+
+Both endpoints require an authenticated user, using the same browser cookie/CSRF or bearer-token authentication as other control-plane APIs. They require neither a conversation nor a runner. Responses use `Cache-Control: no-store`.
+
+`GET /api/transcription` returns capabilities:
+
+```json
+{
+  "enabled": true,
+  "available": true,
+  "maxAudioBytes": 20971520,
+  "maxDurationSeconds": 120,
+  "mimeTypes": ["audio/webm", "audio/mp4", "audio/wav", "audio/mpeg", "audio/ogg", "audio/flac"]
+}
+```
+
+An unavailable response includes a human-readable `reason`. Availability describes server configuration and credentials, not microphone permission or guaranteed upstream access. Clients must check their own recording capability and enforce `maxDurationSeconds` during capture; the server enforces byte limits and validates container signatures without decoding media duration.
+
+`POST /api/transcription` accepts `multipart/form-data` with exactly one `file` part containing a completed, independently decodable recording, a filename, and its content type. An optional `language` text field supplies a language hint such as `en`. MIME parameters such as `audio/webm;codecs=opus` are accepted. The Web UI sends cumulative PCM WAV recordings; native clients can use WAV, and other browser clients can negotiate WebM/Opus or MP4 using MediaRecorder. Each response is the full transcription of that request's file, not a delta. Clients sending cumulative recordings must replace their preview rather than append results and must prevent stale responses from overwriting newer ones. No conversation state or server-side session protocol is required. Do not send a profile, conversation ID, arbitrary provider URL, or credentials in the upload.
+
+Success returns `{"text":"the recognized speech"}`. The operation only returns text; the client decides where to place it and when to submit it. Invalid forms return 400, oversized uploads 413, unsupported or mismatched media 415, no recognized speech 422, disabled/unavailable transcription 503, upstream failures 502, and upstream timeouts 504. Errors use the existing `{"error":"...","status":400,"success":false}` envelope. Requests are bounded to 90 seconds; clients should cancel obsolete requests and must not automatically retry potentially billed uploads.
+
+Go clients can use `chat.Client.TranscriptionCapabilities(ctx)` and `chat.Client.TranscribeAudio(ctx, audio, filename, contentType, language)`. Shared response types and limits live in `pkg/types/transcription`. A TUI recorder only needs to capture local audio, call these methods, and insert the result into its draft; provider selection, authentication, and multipart handling are already shared.
+
 #### Control-plane container
 
 The container runs the control plane as unprivileged UID/GID `65532` and starts with the equivalent of:

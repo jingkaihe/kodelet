@@ -78,6 +78,7 @@ type Server struct {
 	searchIndexer         *searchindex.Indexer
 	searchIndexDone       chan struct{}
 	chatRunner            chat.ChatRunner
+	transcription         llmtypes.Transcriber
 	config                *ServerConfig
 	server                *http.Server
 	frontendHandler       FrontendHandler
@@ -277,6 +278,10 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		return nil, errors.Wrap(err, "invalid server configuration")
 	}
 	config.CORSOrigins = normalizedCORSOrigins
+	transcriber, err := newTranscriberFromViper()
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid transcription configuration")
+	}
 
 	// Get the conversation service
 	conversationStore, err := conversations.GetConversationStore(ctx)
@@ -361,6 +366,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 			runner: chat.NewExecutor("", nil),
 		},
 		config:                config,
+		transcription:         transcriber,
 		frontendHandler:       frontendHandler,
 		runCtx:                runCtx,
 		runCancel:             runCancel,
@@ -435,6 +441,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/workspace-inspection", s.requireRole(RoleUser, s.handleWorkspaceInspection)).Methods("POST")
 	api.HandleFunc("/chat/message-history", s.requireRole(RoleUser, s.handleMessageHistory)).Methods("GET", "POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
+	api.HandleFunc("/transcription", s.requireRole(RoleUser, s.handleTranscription)).Methods("GET", "POST")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/shortcuts", s.requireRole(RoleUser, s.handleWorkspaceShortcut)).Methods("POST")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")

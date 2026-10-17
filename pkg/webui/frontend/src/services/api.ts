@@ -28,6 +28,8 @@ import type {
   SlashCommandsResponse,
   SteerConversationResponse,
   StopConversationResponse,
+  TranscriptionCapabilities,
+  TranscriptionResult,
   UIInputResponseResult,
   UserLoginDecisionResponse,
   WorkspaceTarget,
@@ -49,7 +51,7 @@ class ApiService {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...requestOptions,
       headers: {
-        'Content-Type': 'application/json',
+        ...(requestOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...headers,
         ...this.getCSRFHeaders(requestOptions.method),
       },
@@ -292,6 +294,21 @@ class ApiService {
   }): Promise<void> {
     const params = new URLSearchParams(target);
     return this.request<void>(`/api/workspace/draft/heartbeat?${params}`, { method: 'POST' });
+  }
+
+  async getTranscriptionCapabilities(signal?: AbortSignal): Promise<TranscriptionCapabilities> {
+    return this.request('/api/transcription', { signal });
+  }
+
+  async transcribeAudio(
+    file: File,
+    signal?: AbortSignal,
+    language?: string
+  ): Promise<TranscriptionResult> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    if (language) body.append('language', language);
+    return this.request('/api/transcription', { method: 'POST', body, signal });
   }
 
   async getChatSettings(profile?: string, runnerId?: string): Promise<ChatSettings> {

@@ -37,6 +37,10 @@ const filterCommands = (commands: SlashCommandOption[], draft: string): SlashCom
   );
 };
 
+const localCommands: SlashCommandOption[] = [
+  { name: 'voice', description: 'Dictate text into the composer', placeholder: '/voice' },
+];
+
 export const useSlashCommands = ({
   draft,
   setDraft,
@@ -51,7 +55,11 @@ export const useSlashCommands = ({
   profile,
   onSubmit,
 }: SlashCommandsOptions) => {
-  const [commands, setCommands] = useState<SlashCommandOption[]>([]);
+  const [remoteCommands, setCommands] = useState<SlashCommandOption[]>([]);
+  const commands = useMemo(
+    () => [...remoteCommands.filter((command) => command.name !== 'voice'), ...localCommands],
+    [remoteCommands]
+  );
   const [index, setIndex] = useState(-1);
   const [dismissedDraft, setDismissedDraft] = useState<string | null>(null);
 
@@ -88,8 +96,11 @@ export const useSlashCommands = ({
     profile,
   ]);
 
-  const suggestions = useMemo(() => filterCommands(commands, draft), [commands, draft]);
-  const open = !disabled && dismissedDraft !== draft && suggestions.length > 0;
+  const suggestions = useMemo(
+    () => filterCommands(disabled ? localCommands : commands, draft),
+    [commands, draft, disabled]
+  );
+  const open = dismissedDraft !== draft && suggestions.length > 0;
   const trimmedDraft = draft.trimStart();
   const draftCommand = trimmedDraft.startsWith('/')
     ? trimmedDraft.slice(1).split(/\s+/, 1)[0]
@@ -157,7 +168,7 @@ export const useSlashCommands = ({
       slashCommandIndex: index,
       slashCommandSuggestions: suggestions,
       slashCommandSuggestionsOpen: open,
-      slashUsageHint: disabled ? '' : placeholder,
+      slashUsageHint: disabled && activeCommand?.name !== 'voice' ? '' : placeholder,
       onDraftKeyDown: onKeyDown,
       onSelectSlashCommand: select,
     },

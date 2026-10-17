@@ -14,6 +14,7 @@ import {
   mockGetGitDiff,
   mockGetRunners,
   mockGetSlashCommands,
+  mockGetTranscriptionCapabilities,
   mockHeartbeatDraftWorkspace,
   mockStreamChat,
   renderChatWithRunner,
@@ -833,6 +834,13 @@ describe('ChatPage workspace tools and browsers', () => {
   });
 
   it('keeps existing local conversations read-only without workspace discovery or tools', async () => {
+    mockGetTranscriptionCapabilities.mockResolvedValue({
+      enabled: true,
+      available: true,
+      maxAudioBytes: 20 * 1024 * 1024,
+      maxDurationSeconds: 120,
+      mimeTypes: ['audio/webm'],
+    });
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     setRouteParams({ id: 'conv-123' });
@@ -883,6 +891,7 @@ describe('ChatPage workspace tools and browsers', () => {
       within(header).queryByRole('button', { name: /^Change workspace:/ })
     ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('This local conversation is read-only')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Dictate text' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
     expect(mockGetSlashCommands).not.toHaveBeenCalled();

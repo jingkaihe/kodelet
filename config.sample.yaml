@@ -95,6 +95,16 @@ log_format: "json"
 # Enroll a runner separately from its workspace with:
 # kodelet runner enroll --server https://kodelet.example
 
+# Optional Web UI microphone dictation, independent of the active chat profile.
+# The selected profile must use provider: openai and platform: openai or codex.
+# Public OpenAI profiles may set transcription_model: gpt-4o-mini-transcribe
+# (the default), and use openai.base_url / openai.api_key_env_var as usual.
+# Codex uses ChatGPT OAuth and an experimental, server-selected model: omit
+# transcription_model for Codex profiles. Audio is not persisted by Kodelet.
+# transcription:
+#   enabled: true
+#   profile: "openai"
+
 # Custom system prompt template file
 # Supports Go templates and can include built-in sections, e.g.:
 # {{include "templates/sections/behavior.tmpl" .}}

@@ -1,0 +1,451 @@
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import apiService from '../../services/api';
+import type { TranscriptionCapabilities } from '../../types';
+import { createDictationRecorder } from './dictationAudio';
+
+type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
+
+const maxAudioBytes = 20 * 1024 * 1024;
+const maxDurationSeconds = 120;
+const uploadTimeoutMs = 120_000;
+const waveformLength = 32;
+
+function mediaSupportReason(): string | null {
+  if (!globalThis.isSecureContext) return 'Microphone dictation requires HTTPS or localhost.';
+  if (
+    !navigator.mediaDevices?.getUserMedia ||
+    typeof AudioContext === 'undefined' ||
+    typeof AudioWorkletNode === 'undefined'
+  ) {
+    return 'This browser does not support continuous microphone dictation.';
+  }
+  return null;
+}
+
+export const isVoiceCommand = (text: string): boolean => /^\/voice(?:\s|$)/.test(text.trim());
+
+interface Capture {
+  targetKey: string;
+  draft: string;
+  caret: number;
+  fromCommand: boolean;
+  recorder?: ReturnType<typeof createDictationRecorder>;
+  stream?: MediaStream;
+  transcript: string;
+  pendingSnapshot?: File;
+  uploadError: string | null;
+  finish: (commit: boolean) => void;
+  stopping: boolean;
+  captureDone: boolean;
+  commitRequested: boolean;
+  uploading: boolean;
+  uploadAbort?: AbortController;
+  timer?: ReturnType<typeof setInterval>;
+  uploadTimer?: ReturnType<typeof setTimeout>;
+}
+
+function release(capture: Capture) {
+  clearInterval(capture.timer);
+  clearTimeout(capture.uploadTimer);
+  capture.uploadAbort?.abort();
+  try {
+    capture.recorder?.cancel();
+  } finally {
+    capture.stream?.getTracks().forEach((track) => {
+      track.stop();
+    });
+    capture.pendingSnapshot = undefined;
+  }
+}
+
+export function useDictation({
+  targetKey,
+  draft,
+  setDraft,
+}: {
+  targetKey: string;
+  draft: string;
+  setDraft: Dispatch<SetStateAction<string>>;
+}) {
+  const [capabilities, setCapabilities] = useState<TranscriptionCapabilities | null>(null);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState('');
+  const [transcribing, setTranscribing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [levels, setLevels] = useState<number[]>(() => Array(waveformLength).fill(0));
+  const [speaking, setSpeaking] = useState(false);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const captureRef = useRef<Capture | null>(null);
+  const targetRef = useRef(targetKey);
+  targetRef.current = targetKey;
+  const pendingCaret = useRef<{ targetKey: string; position: number } | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void apiService.getTranscriptionCapabilities(controller.signal).then(
+      (result) => {
+        if (!controller.signal.aborted) setCapabilities(result);
+      },
+      () => {
+        if (!controller.signal.aborted) {
+          setCapabilityError('Could not check dictation availability. Reload to try again.');
+        }
+      }
+    );
+    return () => controller.abort();
+  }, []);
+
+  const discard = useCallback(() => {
+    const capture = captureRef.current;
+    captureRef.current = null;
+    pendingCaret.current = null;
+    if (capture) release(capture);
+  }, []);
+
+  // Invalidate synchronously when the draft owner changes, including while
+  // permission, audio initialization, or a transcription request is pending.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(targetKey): A different draft owner must release the previous capture.
+  useLayoutEffect(() => {
+    setPhase('idle');
+    setError(null);
+    setTranscript('');
+    setTranscribing(false);
+    setUploadError(null);
+    return discard;
+  }, [targetKey, discard]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(draft): Restore the caret after React commits the transcribed draft.
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    if (caret && caret.targetKey === targetKey) {
+      pendingCaret.current = null;
+      editorRef.current?.focus();
+      editorRef.current?.setSelectionRange(caret.position, caret.position);
+    }
+  }, [draft, targetKey]);
+
+  const cancel = useCallback(() => {
+    discard();
+    setPhase('idle');
+    setError(null);
+    setTranscript('');
+    setTranscribing(false);
+    setUploadError(null);
+  }, [discard]);
+
+  const stop = useCallback(() => captureRef.current?.finish(true), []);
+
+  useEffect(() => {
+    if (phase === 'idle') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || (event.key !== 'Escape' && event.key !== 'Enter')) return;
+      // Keep native keyboard activation for the modal's Done/Cancel buttons.
+      if (
+        event.key === 'Enter' &&
+        event.target instanceof Element &&
+        event.target.closest('[role="dialog"] button')
+      )
+        return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat) return;
+      if (event.key === 'Escape') cancel();
+      else if (phase === 'recording' || phase === 'review') stop();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [phase, cancel, stop]);
+
+  const reason =
+    capabilityError ||
+    (!capabilities
+      ? 'Checking dictation availability…'
+      : !capabilities.enabled || !capabilities.available
+        ? capabilities.reason || 'Dictation is not configured on this server.'
+        : mediaSupportReason());
+
+  const start = async (fromCommand = false) => {
+    if (captureRef.current) return;
+    if (reason || !capabilities) {
+      setError(reason);
+      return;
+    }
+    if (!capabilities.mimeTypes.includes('audio/wav')) {
+      setError('The server does not support WAV audio for continuous dictation.');
+      return;
+    }
+    const capture: Capture = {
+      targetKey,
+      draft,
+      caret: fromCommand ? 0 : (editorRef.current?.selectionStart ?? draft.length),
+      fromCommand,
+      transcript: '',
+      uploadError: null,
+      finish: () => {},
+      stopping: false,
+      captureDone: false,
+      commitRequested: false,
+      uploading: false,
+    };
+    captureRef.current = capture;
+    const current = () => captureRef.current === capture && targetRef.current === capture.targetKey;
+    const pending = () => capture.uploading || !!capture.pendingSnapshot;
+    const commit = () => {
+      if (!current()) return;
+      const text = capture.transcript;
+      captureRef.current = null;
+      release(capture);
+      setPhase('idle');
+      setError(null);
+      setUploadError(null);
+      setTranscribing(false);
+      if (!text) return;
+      setDraft((value) => {
+        if (targetRef.current !== capture.targetKey) return value;
+        // /voice is consumed only on success. Cancel and failures leave even
+        // the command draft untouched; newer edits are never overwritten.
+        const unchanged = value === capture.draft;
+        const base = capture.fromCommand && unchanged ? '' : value;
+        const caret = unchanged ? capture.caret : base.length;
+        const before = base.slice(0, caret);
+        const after = base.slice(caret);
+        const insertion =
+          (before && !/\s$/.test(before) ? ' ' : '') +
+          text +
+          (after && !/^\s/.test(after) ? ' ' : '');
+        pendingCaret.current = { targetKey, position: before.length + insertion.length };
+        return before + insertion + after;
+      });
+    };
+    const settled = () => {
+      if (!current() || !capture.captureDone || pending()) return;
+      if (capture.commitRequested) {
+        if (capture.uploadError) {
+          capture.commitRequested = false;
+        } else {
+          commit();
+          return;
+        }
+      }
+      setPhase('review');
+    };
+    const finishCapture = (commitRequested: boolean) => {
+      if (!current()) return;
+      if (capture.captureDone) {
+        // A second, explicit Done accepts the visible partial result.
+        if (commitRequested && !pending()) commit();
+        else if (commitRequested) {
+          capture.commitRequested = true;
+          setPhase('finishing');
+        }
+        return;
+      }
+      if (capture.stopping) return;
+      capture.stopping = true;
+      capture.commitRequested = commitRequested;
+      clearInterval(capture.timer);
+      setSpeaking(false);
+      setPhase('finishing');
+      void (async () => {
+        try {
+          await capture.recorder?.finish();
+        } catch {
+          if (current()) {
+            capture.commitRequested = false;
+            setError(
+              'Could not finish microphone recording. The preview may be incomplete; Done keeps the last successful transcription.'
+            );
+          }
+        } finally {
+          capture.stream?.getTracks().forEach((track) => {
+            track.stop();
+          });
+          if (current()) {
+            capture.captureDone = true;
+            if (!capture.commitRequested) setPhase('review');
+            settled();
+          }
+        }
+      })();
+    };
+    capture.finish = finishCapture;
+
+    const uploadNext = async () => {
+      if (!current() || capture.uploading) return;
+      const file = capture.pendingSnapshot;
+      if (!file) {
+        setTranscribing(false);
+        settled();
+        return;
+      }
+      capture.pendingSnapshot = undefined;
+      capture.uploading = true;
+      setTranscribing(true);
+      const abort = new AbortController();
+      capture.uploadAbort = abort;
+      try {
+        const result = await Promise.race([
+          apiService.transcribeAudio(file, abort.signal),
+          new Promise<never>((_, reject) => {
+            capture.uploadTimer = setTimeout(() => {
+              reject(new Error('Transcription timed out.'));
+              abort.abort();
+            }, uploadTimeoutMs);
+          }),
+        ]);
+        if (!current()) return;
+        const text = result.text.trim();
+        if (!text) throw new Error('No speech was recognized in the recording.');
+        // Each response covers the whole recording so far, including any
+        // corrections to earlier words. Never concatenate cumulative results.
+        capture.transcript = text;
+        capture.uploadError = null;
+        setTranscript(text);
+        setUploadError(null);
+      } catch (cause) {
+        if (!current()) return;
+        const message =
+          cause instanceof Error ? cause.message : 'Could not transcribe the recording.';
+        capture.uploadError = capture.transcript
+          ? message +
+            ' The preview may be incomplete. Done keeps the last successful transcription.'
+          : message;
+        setUploadError(capture.uploadError);
+      } finally {
+        clearTimeout(capture.uploadTimer);
+        capture.uploading = false;
+        if (current()) {
+          void uploadNext();
+        }
+      }
+    };
+
+    setError(null);
+    setTranscript('');
+    setTranscribing(false);
+    setUploadError(null);
+    setElapsedSeconds(0);
+    setLevels(Array(waveformLength).fill(0));
+    setSpeaking(false);
+    setPhase('requesting');
+    try {
+      // Create/resume AudioContext in the user gesture, before awaiting permission.
+      capture.recorder = createDictationRecorder({
+        maxAudioBytes: Math.min(capabilities.maxAudioBytes || maxAudioBytes, maxAudioBytes),
+        maxDurationSeconds: Math.min(
+          capabilities.maxDurationSeconds || maxDurationSeconds,
+          maxDurationSeconds
+        ),
+        onLevel: (level) => {
+          if (current() && !capture.stopping) setLevels((value) => [...value.slice(1), level]);
+        },
+        onSpeech: (active) => {
+          if (current() && !capture.stopping) setSpeaking(active);
+        },
+        onSnapshot: (file) => {
+          if (!current() || capture.captureDone) return;
+          // Keep one in-flight upload and only the newest waiting snapshot.
+          // Intermediate snapshots are redundant: the newest contains them all.
+          capture.pendingSnapshot = file;
+          void uploadNext();
+        },
+        onLimit: () => {
+          if (!current() || capture.stopping) return;
+          setError(
+            'The recording limit was reached. Review your transcript and choose Done to insert it.'
+          );
+          finishCapture(false);
+        },
+        onError: (message) => {
+          if (!current()) return;
+          setError(message);
+          capture.commitRequested = false;
+          capture.stopping = true;
+          clearInterval(capture.timer);
+          capture.recorder?.cancel();
+          capture.stream?.getTracks().forEach((track) => {
+            track.stop();
+          });
+          capture.captureDone = true;
+          setSpeaking(false);
+          setPhase('review');
+        },
+      });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!current()) {
+        stream.getTracks().forEach((track) => {
+          track.stop();
+        });
+        return;
+      }
+      capture.stream = stream;
+      await capture.recorder.start(stream);
+      if (!current() || capture.stopping) return;
+      setPhase('recording');
+      const started = Date.now();
+      const duration = Math.min(
+        capabilities.maxDurationSeconds || maxDurationSeconds,
+        maxDurationSeconds
+      );
+      capture.timer = setInterval(() => {
+        if (!current()) return;
+        const elapsed = (Date.now() - started) / 1000;
+        setElapsedSeconds(Math.floor(elapsed));
+        if (elapsed >= duration) {
+          setError(
+            'The recording limit was reached. Review your transcript and choose Done to insert it.'
+          );
+          finishCapture(false);
+        }
+      }, 250);
+    } catch (cause) {
+      if (!current()) return;
+      discard();
+      setPhase('idle');
+      setError(
+        cause instanceof DOMException && cause.name === 'NotAllowedError'
+          ? 'Microphone access was denied. Allow microphone access in your browser and try again.'
+          : cause instanceof Error
+            ? cause.message
+            : 'Could not start microphone recording.'
+      );
+    }
+  };
+
+  const handleCommand = (text: string): boolean => {
+    if (!isVoiceCommand(text)) return false;
+    if (text.trim() !== '/voice') setError('Usage: /voice');
+    else void start(true);
+    return true;
+  };
+
+  return {
+    phase,
+    busy: phase !== 'idle',
+    isBusy: () => captureRef.current !== null,
+    enabled: capabilities?.enabled === true,
+    reason,
+    error: [error, uploadError].filter(Boolean).join(' ') || null,
+    elapsedSeconds,
+    levels,
+    speaking,
+    transcript,
+    transcribing,
+    editorRef,
+    start: () => void start(),
+    stop,
+    cancel,
+    handleCommand,
+  };
+}

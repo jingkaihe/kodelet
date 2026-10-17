@@ -23,6 +23,7 @@ const shortcutGroups = [
     shortcuts: [
       { label: 'Send message', keys: 'Shift+Enter' },
       { label: 'New line', keys: 'Enter' },
+      { label: 'Dictate text', keys: 'Alt/⌥+Shift+V' },
     ],
   },
   {
