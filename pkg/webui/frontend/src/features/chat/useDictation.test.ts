@@ -366,7 +366,7 @@ describe('useDictation', () => {
     await act(async () => result.current.start());
     expect(recorderOptions.maxDurationSeconds).toBe(120);
     expect(recorderOptions.maxAudioBytes).toBe(capability.maxAudioBytes);
-    await act(async () => recorderOptions.onSnapshot(audioFile()));
+    if (limit === 'duration') await act(async () => recorderOptions.onSnapshot(audioFile()));
     if (limit === 'duration') await act(async () => vi.advanceTimersByTimeAsync(120_000));
     else await act(async () => recorderOptions.onLimit());
     expect(recorderFinish).toHaveBeenCalledTimes(1);
@@ -374,7 +374,12 @@ describe('useDictation', () => {
     expect(result.current.error).toMatch(/limit/i);
     expect(onComplete).not.toHaveBeenCalled();
     await act(async () => result.current.stop());
-    expect(onComplete).toHaveBeenCalledWith('spoken words');
+    if (limit === 'duration') expect(onComplete).toHaveBeenCalledWith('spoken words');
+    else {
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(result.current.phase).toBe('idle');
+      expect(result.current.error).toBe('No speech detected.');
+    }
   });
 
   it('coalesces slow-provider updates into only the newest snapshot while continuing to listen', async () => {
@@ -421,6 +426,9 @@ describe('useDictation', () => {
     expect(result.current.transcript).toBe('');
     expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(1);
+    await act(async () => result.current.stop());
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.error).toBe('Transcription timed out.');
   });
 
   it.each([

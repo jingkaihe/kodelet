@@ -178,10 +178,10 @@ export function useDictation({
     const pending = () => !!capture.state.upload || !!capture.pendingSnapshot;
     const commit = () => {
       if (!current()) return;
-      const { transcript, error, uploadError } = capture.state;
+      const { transcript, uploadError } = capture.state;
       cancel();
       if (transcript) onComplete(transcript);
-      else update({ error: error || uploadError || 'No speech detected.' });
+      else update({ error: uploadError || 'No speech detected.' });
     };
     const settled = () => {
       if (!current() || capture.state.phase !== 'finishing' || pending()) return;
