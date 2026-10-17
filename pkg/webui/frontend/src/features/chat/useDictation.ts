@@ -24,18 +24,35 @@ function mediaSupportReason(): string | null {
 
 export const isVoiceCommand = (text: string): boolean => /^\/voice(?:\s|$)/.test(text.trim());
 
+interface DictationState {
+  // Flushing waits for final audio; its destination records whether Done or a
+  // recording limit initiated the stop. Finishing then waits only for uploads.
+  phase: Phase | 'flushing' | 'flushing-review';
+  transcript: string;
+  error: string | null;
+  uploadError: string | null;
+  upload?: AbortController;
+  elapsedSeconds: number;
+  levels: number[];
+  speaking: boolean;
+}
+
+const idleState: DictationState = {
+  phase: 'idle',
+  transcript: '',
+  error: null,
+  uploadError: null,
+  elapsedSeconds: 0,
+  levels: Array(waveformLength).fill(0),
+  speaking: false,
+};
+
 interface Capture {
   targetKey: string;
+  state: DictationState;
   recorder?: ReturnType<typeof createDictationRecorder>;
-  transcript: string;
   pendingSnapshot?: File;
-  uploadError: string | null;
   finish: (commit: boolean) => void;
-  stopping: boolean;
-  captureDone: boolean;
-  commitRequested: boolean;
-  uploading: boolean;
-  uploadAbort?: AbortController;
   timer?: ReturnType<typeof setInterval>;
   uploadTimer?: ReturnType<typeof setTimeout>;
 }
@@ -43,7 +60,7 @@ interface Capture {
 function release(capture: Capture) {
   clearInterval(capture.timer);
   clearTimeout(capture.uploadTimer);
-  capture.uploadAbort?.abort();
+  capture.state.upload?.abort();
   capture.recorder?.cancel();
   capture.pendingSnapshot = undefined;
 }
@@ -58,18 +75,20 @@ export function useDictation({
 }) {
   const [capabilities, setCapabilities] = useState<TranscriptionCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState('');
-  const [transcribing, setTranscribing] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [levels, setLevels] = useState<number[]>(() => Array(waveformLength).fill(0));
-  const [speaking, setSpeaking] = useState(false);
+  const [state, setState] = useState(idleState);
   const captureRef = useRef<Capture | null>(null);
   const targetRef = useRef(targetKey);
   targetRef.current = targetKey;
   const capabilityRequest = useRef<AbortController | null>(null);
+
+  // Callbacks need the latest snapshot before React renders. Publish that same
+  // immutable snapshot, rather than maintaining separate UI and capture fields.
+  const update = useCallback((patch: Partial<DictationState>) => {
+    const capture = captureRef.current;
+    const next = { ...(capture?.state ?? idleState), ...patch };
+    if (capture) capture.state = next;
+    setState(next);
+  }, []);
 
   const refreshCapabilities = useCallback(async () => {
     capabilityRequest.current?.abort();
@@ -114,21 +133,13 @@ export function useDictation({
   // permission, audio initialization, or a transcription request is pending.
   // biome-ignore lint/correctness/useExhaustiveDependencies(targetKey): A different draft owner must release the previous capture.
   useLayoutEffect(() => {
-    setPhase('idle');
-    setError(null);
-    setTranscript('');
-    setTranscribing(false);
-    setUploadError(null);
+    setState(idleState);
     return discard;
   }, [targetKey, discard]);
 
   const cancel = useCallback(() => {
     discard();
-    setPhase('idle');
-    setError(null);
-    setTranscript('');
-    setTranscribing(false);
-    setUploadError(null);
+    setState(idleState);
   }, [discard]);
 
   const stop = useCallback(() => captureRef.current?.finish(true), []);
@@ -145,83 +156,65 @@ export function useDictation({
   const start = async (fromCommand = false) => {
     if (captureRef.current) return;
     if (!capabilities?.enabled) {
-      setError(reason);
+      update({ error: reason });
       return;
     }
     const unsupported = mediaSupportReason();
     if (unsupported) {
-      setError(unsupported);
+      update({ error: unsupported });
       return;
     }
     const capture: Capture = {
       targetKey,
-      transcript: '',
-      uploadError: null,
+      state: { ...idleState, phase: 'requesting' },
       finish: () => {},
-      stopping: false,
-      captureDone: false,
-      commitRequested: false,
-      uploading: false,
     };
     captureRef.current = capture;
+    setState(capture.state);
     const onComplete = onStart(fromCommand);
     const current = () => captureRef.current === capture && targetRef.current === capture.targetKey;
-    const pending = () => capture.uploading || !!capture.pendingSnapshot;
+    const recording = () => ['requesting', 'recording'].includes(capture.state.phase);
+    const pending = () => !!capture.state.upload || !!capture.pendingSnapshot;
     const commit = () => {
       if (!current()) return;
-      const text = capture.transcript;
-      captureRef.current = null;
-      release(capture);
-      setPhase('idle');
-      setError(null);
-      setUploadError(null);
-      setTranscribing(false);
+      const text = capture.state.transcript;
+      cancel();
       if (text) onComplete(text);
     };
     const settled = () => {
-      if (!current() || !capture.captureDone || pending()) return;
-      if (capture.commitRequested) {
-        if (capture.uploadError) {
-          capture.commitRequested = false;
-        } else {
-          commit();
-          return;
-        }
-      }
-      setPhase('review');
+      if (!current() || capture.state.phase !== 'finishing' || pending()) return;
+      if (capture.state.uploadError) update({ phase: 'review' });
+      else commit();
     };
     const finishCapture = (commitRequested: boolean) => {
       if (!current()) return;
-      if (capture.captureDone) {
+      if (capture.state.phase === 'review') {
         // A second, explicit Done accepts the visible partial result.
         if (commitRequested && !pending()) commit();
         else if (commitRequested) {
-          capture.commitRequested = true;
-          setPhase('finishing');
+          update({ phase: 'finishing' });
         }
         return;
       }
-      if (capture.stopping) return;
-      capture.stopping = true;
-      capture.commitRequested = commitRequested;
+      if (!recording()) return;
       clearInterval(capture.timer);
-      setSpeaking(false);
-      setPhase('finishing');
+      update({ phase: commitRequested ? 'flushing' : 'flushing-review', speaking: false });
       void (async () => {
         try {
           await capture.recorder?.finish();
         } catch {
           capture.recorder?.cancel();
           if (current()) {
-            capture.commitRequested = false;
-            setError(
-              'Could not finish microphone recording. The preview may be incomplete; Done keeps the last successful transcription.'
-            );
+            update({
+              phase: 'review',
+              error:
+                'Could not finish microphone recording. The preview may be incomplete; Done keeps the last successful transcription.',
+            });
           }
         } finally {
           if (current()) {
-            capture.captureDone = true;
-            if (!capture.commitRequested) setPhase('review');
+            if (capture.state.phase === 'flushing') update({ phase: 'finishing' });
+            else if (capture.state.phase === 'flushing-review') update({ phase: 'review' });
             settled();
           }
         }
@@ -230,18 +223,15 @@ export function useDictation({
     capture.finish = finishCapture;
 
     const uploadNext = async () => {
-      if (!current() || capture.uploading) return;
+      if (!current() || capture.state.upload) return;
       const file = capture.pendingSnapshot;
       if (!file) {
-        setTranscribing(false);
         settled();
         return;
       }
       capture.pendingSnapshot = undefined;
-      capture.uploading = true;
-      setTranscribing(true);
       const abort = new AbortController();
-      capture.uploadAbort = abort;
+      update({ upload: abort });
       try {
         const result = await Promise.race([
           apiService.transcribeAudio(file, abort.signal),
@@ -255,70 +245,57 @@ export function useDictation({
         if (!current()) return;
         // Each response covers the whole recording so far, including any
         // corrections to earlier words. Never concatenate cumulative results.
-        capture.transcript = result.text;
-        capture.uploadError = null;
-        setTranscript(result.text);
-        setUploadError(null);
+        update({ transcript: result.text, uploadError: null });
       } catch (cause) {
         if (!current()) return;
         const message =
           cause instanceof Error ? cause.message : 'Could not transcribe the recording.';
-        capture.uploadError = capture.transcript
-          ? message +
-            ' The preview may be incomplete. Done keeps the last successful transcription.'
-          : message;
-        setUploadError(capture.uploadError);
+        update({
+          uploadError: capture.state.transcript
+            ? message +
+              ' The preview may be incomplete. Done keeps the last successful transcription.'
+            : message,
+        });
       } finally {
         clearTimeout(capture.uploadTimer);
-        capture.uploading = false;
         if (current()) {
+          update({ upload: undefined });
           void uploadNext();
         }
       }
     };
 
-    setError(null);
-    setTranscript('');
-    setTranscribing(false);
-    setUploadError(null);
-    setElapsedSeconds(0);
-    setLevels(Array(waveformLength).fill(0));
-    setSpeaking(false);
-    setPhase('requesting');
     try {
       const recorderOptions: DictationRecorderOptions = {
         maxAudioBytes: capabilities.maxAudioBytes,
         maxDurationSeconds: capabilities.maxDurationSeconds,
         onLevel: (level) => {
-          if (current() && !capture.stopping) setLevels((value) => [...value.slice(1), level]);
+          if (current() && recording())
+            update({ levels: [...capture.state.levels.slice(1), level] });
         },
         onSpeech: (active) => {
-          if (current() && !capture.stopping) setSpeaking(active);
+          if (current() && recording()) update({ speaking: active });
         },
         onSnapshot: (file) => {
-          if (!current() || capture.captureDone) return;
+          if (!current() || ['finishing', 'review'].includes(capture.state.phase)) return;
           // Keep one in-flight upload and only the newest waiting snapshot.
           // Intermediate snapshots are redundant: the newest contains them all.
           capture.pendingSnapshot = file;
           void uploadNext();
         },
         onLimit: () => {
-          if (!current() || capture.stopping) return;
-          setError(
-            'The recording limit was reached. Review your transcript and choose Done to insert it.'
-          );
+          if (!current() || !recording()) return;
+          update({
+            error:
+              'The recording limit was reached. Review your transcript and choose Done to insert it.',
+          });
           finishCapture(false);
         },
         onError: (message) => {
           if (!current()) return;
-          setError(message);
-          capture.commitRequested = false;
-          capture.stopping = true;
           clearInterval(capture.timer);
+          update({ phase: 'review', error: message, speaking: false });
           capture.recorder?.cancel();
-          capture.captureDone = true;
-          setSpeaking(false);
-          setPhase('review');
         },
       };
       // Resume in the user gesture, before the network check. The recorder reads
@@ -343,50 +320,53 @@ export function useDictation({
         return;
       }
       await capture.recorder.start(stream);
-      if (!current() || capture.stopping) return;
-      setPhase('recording');
+      if (!current() || !recording()) return;
+      update({ phase: 'recording' });
       const started = Date.now();
       const duration = recorderOptions.maxDurationSeconds;
       capture.timer = setInterval(() => {
         if (!current()) return;
         const elapsed = (Date.now() - started) / 1000;
-        setElapsedSeconds(Math.floor(elapsed));
+        update({ elapsedSeconds: Math.floor(elapsed) });
         // Sample counts bound audio memory; wall time also bounds stalled capture.
         if (elapsed >= duration) recorderOptions.onLimit();
       }, 250);
     } catch (cause) {
       if (!current()) return;
       discard();
-      setPhase('idle');
-      setError(
-        cause instanceof DOMException && cause.name === 'NotAllowedError'
-          ? 'Microphone access was denied. Allow microphone access in your browser and try again.'
-          : cause instanceof Error
-            ? cause.message
-            : 'Could not start microphone recording.'
-      );
+      update({
+        error:
+          cause instanceof DOMException && cause.name === 'NotAllowedError'
+            ? 'Microphone access was denied. Allow microphone access in your browser and try again.'
+            : cause instanceof Error
+              ? cause.message
+              : 'Could not start microphone recording.',
+      });
     }
   };
 
   const handleCommand = (text: string): boolean => {
     if (!enabled || !isVoiceCommand(text)) return false;
-    if (text.trim() !== '/voice') setError('Usage: /voice');
+    if (text.trim() !== '/voice') update({ error: 'Usage: /voice' });
     else void start(true);
     return true;
   };
 
+  const phase =
+    state.phase === 'flushing' || state.phase === 'flushing-review' ? 'finishing' : state.phase;
   return {
     phase,
     busy: phase !== 'idle',
+    // Unlike the rendered busy state, this guards same-tick starts/submissions.
     isBusy: () => captureRef.current !== null,
     enabled,
     reason,
-    error: [error, uploadError].filter(Boolean).join(' ') || null,
-    elapsedSeconds,
-    levels,
-    speaking,
-    transcript,
-    transcribing,
+    error: [state.error, state.uploadError].filter(Boolean).join(' ') || null,
+    elapsedSeconds: state.elapsedSeconds,
+    levels: state.levels,
+    speaking: state.speaking,
+    transcript: state.transcript,
+    transcribing: !!state.upload,
     start: () => void start(),
     stop,
     cancel,
