@@ -184,7 +184,10 @@ export function createDictationRecorder(options: DictationRecorderOptions) {
   };
   const fail = (message: string) => {
     if (state === 'closed') return;
-    cancel();
+    // Preserve received samples without waiting on a failed worklet. Publish
+    // before onError moves the owner into review and stops accepting snapshots.
+    session?.finish();
+    cleanup();
     options.onError(message);
   };
   const deviceEnded = () =>

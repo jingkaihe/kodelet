@@ -385,13 +385,16 @@ describe('dictation recorder lifecycle', () => {
     'device',
     'processor',
     'suspended',
-  ] as const)('cleans up and reports %s interruption once', async (failure) => {
+  ] as const)('preserves buffered speech before cleaning up and reporting %s interruption', async (failure) => {
     const callbacks = options();
     const recorder = createDictationRecorder(callbacks);
     const { stream, track } = microphone();
     await recorder.start(stream);
     const context = FakeAudioContext.instances[0];
     const node = FakeWorkletNode.instances[0];
+    node.samples(0.3);
+    node.samples(2.5, 0);
+    node.samples(0.3); // New speech since the last pause must survive failure.
     if (failure === 'device') track.dispatchEvent(new Event('ended'));
     if (failure === 'processor') node.onprocessorerror?.();
     if (failure === 'suspended') {
@@ -401,7 +404,17 @@ describe('dictation recorder lifecycle', () => {
     recorder.cancel();
     node.samples(0.3);
     expect(callbacks.onError).toHaveBeenCalledTimes(1);
-    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
+    expect(vi.mocked(callbacks.onSnapshot).mock.calls.map(([file]) => file.size)).toEqual([
+      44 + sampleRate * 2.8 * 2,
+      44 + sampleRate * 3.1 * 2,
+    ]);
+    expect(vi.mocked(callbacks.onSnapshot).mock.invocationCallOrder[1]).toBeLessThan(
+      track.stop.mock.invocationCallOrder[0]
+    );
+    expect(track.stop.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(callbacks.onError).mock.invocationCallOrder[0]
+    );
+    expect(node.port.postMessage).not.toHaveBeenCalled();
     expect(track.stop).toHaveBeenCalledTimes(1);
     expect(context.close).toHaveBeenCalledTimes(1);
   });
