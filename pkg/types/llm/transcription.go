@@ -14,5 +14,6 @@ type Transcriber interface {
 	CheckAvailability() error
 	// Transcribe returns normalized, nonempty text on success, or
 	// transcriptiontypes.ErrNoSpeech when no speech was recognized.
+	// The caller owns the deadline; cancellation covers authentication and upload.
 	Transcribe(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error)
 }

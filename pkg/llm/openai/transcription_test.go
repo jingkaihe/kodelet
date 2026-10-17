@@ -58,7 +58,6 @@ func TestNewTranscriber(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.NotNil(t, s)
-			assert.Equal(t, transcriptiontypes.RequestTimeout, s.client.Timeout)
 			if s.platform == "codex" {
 				assert.Empty(t, s.model)
 				assert.Equal(t, codexEndpoint, s.endpoint)
@@ -186,6 +185,8 @@ func TestTranscribeProviderRequests(t *testing.T) {
 			s, err := NewTranscriber(config, model)
 			require.NoError(t, err)
 			var credentialLoads atomic.Int32
+			ctx, cancel := context.WithTimeout(t.Context(), transcriptiontypes.RequestTimeout)
+			defer cancel()
 			if platform == "codex" {
 				assert.Equal(t, codexEndpoint, s.endpoint, "Codex must ignore OpenAI base URL overrides")
 				s.endpoint = server.URL + "/backend-api/transcribe"
@@ -202,7 +203,7 @@ func TestTranscribeProviderRequests(t *testing.T) {
 				}
 			}
 			for range 2 {
-				result, err := s.Transcribe(t.Context(), transcriptiontypes.Request{
+				result, err := s.Transcribe(ctx, transcriptiontypes.Request{
 					Audio:       []byte("private-audio"),
 					ContentType: "audio/webm",
 					Language:    "en",

@@ -68,7 +68,6 @@ func NewTranscriber(config llmtypes.Config, model string) (*Transcriber, error) 
 		return nil, errors.New("transcription supports only openai.platform openai or codex")
 	}
 	s.client = &http.Client{
-		Timeout: transcriptiontypes.RequestTimeout,
 		// Never resend private audio to a redirect target. A redirect is reported
 		// as a provider error rather than following a new upload destination.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -99,8 +98,6 @@ func (s *Transcriber) CheckAvailability() error {
 // is persisted and neither upstream error bodies nor credential errors escape.
 func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.Request) (transcriptiontypes.Result, error) {
 	audio, contentType, language := input.Audio, input.ContentType, input.Language
-	ctx, cancel := context.WithTimeout(ctx, transcriptiontypes.RequestTimeout)
-	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return transcriptiontypes.Result{}, errors.Wrap(err, "transcription canceled")
 	}
