@@ -129,16 +129,20 @@ func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.R
 	}
 	// Keep only multipart framing in the buffer; reuse the validated audio
 	// without allocating a second full recording for the provider request.
-	body := io.MultiReader(
-		bytes.NewReader(framing.Bytes()[:audioOffset]),
-		bytes.NewReader(audio),
-		bytes.NewReader(framing.Bytes()[audioOffset:]),
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, body)
+	newBody := func() io.Reader {
+		return io.MultiReader(
+			bytes.NewReader(framing.Bytes()[:audioOffset]),
+			bytes.NewReader(audio),
+			bytes.NewReader(framing.Bytes()[audioOffset:]),
+		)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, newBody())
 	if err != nil {
 		return transcriptiontypes.Result{}, errors.New("failed to create transcription request")
 	}
 	req.ContentLength = int64(framing.Len()) + int64(len(audio))
+	// Let the transport rewind only when it determines a resend is safe.
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(newBody()), nil }
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 	if s.platform == "codex" {

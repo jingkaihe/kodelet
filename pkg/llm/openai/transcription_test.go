@@ -232,6 +232,49 @@ func TestTranscribeProviderRequests(t *testing.T) {
 	}
 }
 
+type transcriptionRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f transcriptionRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestTranscribeRequestBodyCanBeReplayed(t *testing.T) {
+	config := transcriptionConfig(t, "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	s, err := NewTranscriber(config, "")
+	require.NoError(t, err)
+	s.client.Transport = transcriptionRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		original, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, r.Body.Close())
+		assert.Equal(t, int64(len(original)), r.ContentLength)
+		require.NotNil(t, r.GetBody)
+		first, err := r.GetBody()
+		require.NoError(t, err)
+		defer first.Close()
+		second, err := r.GetBody()
+		require.NoError(t, err)
+		defer second.Close()
+		prefix := make([]byte, 17)
+		_, err = io.ReadFull(first, prefix)
+		require.NoError(t, err)
+		replayed, err := io.ReadAll(second)
+		require.NoError(t, err)
+		assert.Equal(t, original, replayed, "each replay must start with an independent cursor")
+		rest, err := io.ReadAll(first)
+		require.NoError(t, err)
+		assert.Equal(t, original, append(prefix, rest...))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"text":"Recognized words."}`)),
+		}, nil
+	})
+	_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("private-audio"), ContentType: "audio/wav", Language: "en",
+	})
+	require.NoError(t, err)
+}
+
 func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 	for _, test := range []struct {
 		name, platform, response, wantErr, cfMitigated string
