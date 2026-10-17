@@ -39,7 +39,11 @@ const filterCommands = (commands: SlashCommandOption[], draft: string): SlashCom
 };
 
 const localCommands: SlashCommandOption[] = [
-  { name: 'voice', description: 'Dictate text into the composer', placeholder: '/voice' },
+  {
+    name: 'voice',
+    description: 'Turn your voice into text',
+    placeholder: 'Turn your voice into text',
+  },
 ];
 
 export const useSlashCommands = ({

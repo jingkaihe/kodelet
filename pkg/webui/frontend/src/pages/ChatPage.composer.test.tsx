@@ -89,7 +89,10 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     fireEvent.change(textarea, { target: { value: '/voice' } });
     expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent('/voice');
     expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent(
-      'Dictate text into the composer'
+      'Turn your voice into text'
+    );
+    expect(screen.getByTestId('composer-slash-usage-hint')).toHaveTextContent(
+      'Turn your voice into text'
     );
     expect(screen.queryByText('Workspace voice recipe')).not.toBeInTheDocument();
     expect(
