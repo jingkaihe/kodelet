@@ -67,7 +67,7 @@ func (c *realtimeCall) delegate(event llmtypes.RealtimeEvent) {
 	c.handoffs[event.HandoffID] = struct{}{}
 	c.mu.Unlock()
 	// The provider session never owns accepted coding work. Even a queued steer
-	// that misses the finishing turn must be resolved after the caller hangs up.
+	// that misses the finishing turn still runs after the caller hangs up.
 	c.work.Add(1)
 	go func() {
 		defer c.work.Done()
@@ -166,21 +166,24 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 			return receipt, nil
 		}
 		c.emit(realtimeEvent{Kind: "agent-started", TurnID: req.TurnID})
-		owner, err := c.waitForOwnerWatch()
-		if err != nil {
-			_ = s.turns.finish(ctx, req.ConversationID, req.TurnID, "failed", nil, err)
-			return chat.TurnReceipt{}, err
-		}
-		if req.ClientCapabilities != nil {
-			caps := *req.ClientCapabilities
-			caps.InteractiveUI = caps.InteractiveUI && owner.capabilities.InteractiveUI
-			caps.PersistentWidgets = caps.PersistentWidgets && owner.capabilities.PersistentWidgets
-			caps.PersistentSurfaces = caps.PersistentSurfaces && owner.capabilities.PersistentSurfaces
-			req.ClientCapabilities = &caps
-		}
 		// Approval ownership uses the real browser lifetime/capabilities; coding
 		// execution is detached inside runAdmittedChat, just like normal chat.
-		_, err = s.runAdmittedChat(owner.ctx, req, realtimeChatSink{owner: owner}, c.clientID, nil, receipt)
+		requestCtx, sink := ctx, realtimeChatSink{}
+		if owner := c.waitForOwnerWatch(ctx); owner != nil {
+			if req.ClientCapabilities != nil {
+				caps := *req.ClientCapabilities
+				caps.InteractiveUI = caps.InteractiveUI && owner.capabilities.InteractiveUI
+				caps.PersistentWidgets = caps.PersistentWidgets && owner.capabilities.PersistentWidgets
+				caps.PersistentSurfaces = caps.PersistentSurfaces && owner.capabilities.PersistentSurfaces
+				req.ClientCapabilities = &caps
+			}
+			requestCtx, sink = owner.ctx, realtimeChatSink{owner: owner}
+		} else {
+			// Accepted work outlives the call and its browser. Like a typed
+			// turn whose browser left, prompts are unavailable to it.
+			req.ClientCapabilities = nil
+		}
+		_, err = s.runAdmittedChat(requestCtx, req, sink, c.clientID, nil, receipt)
 		if err != nil {
 			return chat.TurnReceipt{}, err
 		}
@@ -188,34 +191,41 @@ func (c *realtimeCall) dispatch(ctx context.Context, event llmtypes.RealtimeEven
 	}
 }
 
-// This sink is used only by the approval owner. Ordinary coding events already
-// fan out through broadcastingEventSink, so Send must not broadcast them twice.
+// This sink is used only by the approval owner, if any. Ordinary coding events
+// already fan out through broadcastingEventSink, so Send must not repeat them.
 type realtimeChatSink struct {
 	owner *subscriberEventSink
 }
 
 func (sink realtimeChatSink) Send(event chat.ChatEvent) error {
-	if strings.HasPrefix(event.Kind, "ui-") {
+	if sink.owner != nil && strings.HasPrefix(event.Kind, "ui-") {
 		return sink.owner.Send(event)
 	}
 	return nil
 }
 
-func (c *realtimeCall) waitForOwnerWatch() (*subscriberEventSink, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+// waitForOwnerWatch returns the calling browser's conversation watcher, or nil.
+// A live call briefly waits for it to attach; after hangup, only an existing
+// watcher can own approvals. ctx is the handoff's detached execution context.
+func (c *realtimeCall) waitForOwnerWatch(ctx context.Context) *subscriberEventSink {
+	wait := 5 * time.Second
+	if c.ctx.Err() != nil {
+		wait = 0
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	for {
 		c.server.chatSubscribersMu.Lock()
 		for watcher := range c.server.chatSubscribers[c.chat.ConversationID] {
 			if watcher.ownerID == c.ownerID && watcher.clientID == c.clientID && watcher.ctx != nil && watcher.ctx.Err() == nil {
 				c.server.chatSubscribersMu.Unlock()
-				return watcher, nil
+				return watcher
 			}
 		}
 		c.server.chatSubscribersMu.Unlock()
 		select {
 		case <-ctx.Done():
-			return nil, errors.New("the owning browser must watch the conversation before coding can start")
+			return nil
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

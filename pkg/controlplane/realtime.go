@@ -70,7 +70,10 @@ type realtimeCall struct {
 	// reconnecting must never replay an execution instruction.
 	events   chan realtimeEvent
 	handoffs map[string]struct{}
-	work     sync.WaitGroup
+	// work tracks handoff goroutines. They run on the server's execution
+	// context, not ctx, so accepted coding work outlives the call; shutdown
+	// cancels them through that context. Only tests wait for them.
+	work sync.WaitGroup
 	// Captions are saved off the provider read loop. They are cumulative, so
 	// only the latest unsaved text per utterance is kept, in first-arrival order.
 	captionMu    sync.Mutex

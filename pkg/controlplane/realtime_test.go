@@ -504,3 +504,42 @@ func TestRealtimeCaptionsPersistOffTheReadLoop(t *testing.T) {
 	assert.Empty(t, rows[0].Text)
 	assert.Equal(t, text.String(), rows[1].Text)
 }
+
+func TestRealtimeHandoffRunsAfterHangup(t *testing.T) {
+	for _, watching := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no browser watching", true: "browser still watching"}[watching], func(t *testing.T) {
+			s, session := realtimeTestServer(t)
+			if watching {
+				owner := newSubscriberEventSink()
+				owner.ctx, owner.ownerID, owner.clientID = t.Context(), "owner", "browser"
+				owner.capabilities.InteractiveUI = true
+				_, registered := s.registerChatSubscriber("saved", owner)
+				require.True(t, registered)
+			}
+			var got atomic.Pointer[chat.ChatRequest]
+			s.chatRunner = &mockChatRunner{runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+				got.Store(&req)
+				return req.ConversationID, nil
+			}}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel() // The call ended before its late request was re-admitted.
+			call := &realtimeCall{
+				server: s, id: "voice", ownerID: "owner", clientID: "browser", ctx: ctx, cancel: cancel, session: session,
+				chat:   chat.ChatRequest{ConversationID: "saved", ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true}},
+				events: make(chan realtimeEvent, 16),
+			}
+			started := time.Now()
+			receipt, err := call.dispatch(s.chatExecutionContext(t.Context()), llmtypes.RealtimeEvent{HandoffID: "late", Text: "also fix this"})
+			require.NoError(t, err)
+			assert.Equal(t, "succeeded", receipt.Status)
+			assert.Less(t, time.Since(started), 2*time.Second, "an ended call must not wait for a browser")
+			require.NotNil(t, got.Load(), "accepted spoken work must still run")
+			if watching {
+				require.NotNil(t, got.Load().ClientCapabilities)
+				assert.True(t, got.Load().ClientCapabilities.InteractiveUI, "an open browser still owns approvals")
+			} else {
+				assert.Nil(t, got.Load().ClientCapabilities, "without an owner, prompts are unavailable")
+			}
+		})
+	}
+}
