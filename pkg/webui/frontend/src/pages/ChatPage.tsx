@@ -42,7 +42,7 @@ import {
   useConversationList,
 } from '../features/chat/useConversationList';
 import { useConversationSearch } from '../features/chat/useConversationSearch';
-import { isVoiceCommand, useDictation } from '../features/chat/useDictation';
+import { useDictation } from '../features/chat/useDictation';
 import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
 import { useSlashCommands } from '../features/chat/useSlashCommands';
 import { useTranscriptAutoScroll } from '../features/chat/useTranscriptAutoScroll';
@@ -1208,7 +1208,7 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (steering || (conversationId && !isRemoteConversation)) return;
+    if (steering || !isRemoteConversation) return;
     const prompt = draft.trim();
     // Dictation is a client-local input action, never a queued command or turn.
     if (dictation.handleCommand(prompt) || dictation.isBusy()) return;
@@ -1969,11 +1969,10 @@ const ChatPage: React.FC = () => {
       : undefined;
 
   const canSubmit =
-    (dictation.enabled && (!conversationId || isRemoteConversation) && isVoiceCommand(draft)) ||
-    (isRemoteConversation &&
-      (currentConversationIsStreaming
-        ? draft.trim().length > 0
-        : draft.trim().length > 0 || attachments.length > 0));
+    isRemoteConversation &&
+    (currentConversationIsStreaming
+      ? draft.trim().length > 0
+      : draft.trim().length > 0 || attachments.length > 0);
   const composerPlaceholder = !isRemoteConversation
     ? conversationId
       ? 'This local conversation is read-only'
@@ -2098,7 +2097,7 @@ const ChatPage: React.FC = () => {
         event.metaKey ||
         (event.code !== 'KeyV' && event.key.toLowerCase() !== 'v') ||
         steering ||
-        (conversationId && !isRemoteConversation) ||
+        !isRemoteConversation ||
         (event.target instanceof Element && event.target.closest('.workspace-terminal-host'))
       ) {
         return;
@@ -2412,7 +2411,7 @@ const ChatPage: React.FC = () => {
             streamError={streamError || workspaceExecutionMessage}
             submitActionLabel={submitActionLabel}
             submitDisabled={dictation.busy || steering || !canSubmit}
-            textareaDisabled={steering || Boolean(conversationId && !isRemoteConversation)}
+            textareaDisabled={steering || !isRemoteConversation}
             onContextOpen={openChatContext}
             onDraftChange={setDraft}
             onReload={streamError ? () => window.location.reload() : undefined}

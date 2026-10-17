@@ -108,22 +108,20 @@ describe('ChatPage composer, attachments, and slash commands', () => {
   it.each([
     false,
     true,
-  ])('only allows local /voice without a runner when enabled=%s', async (enabled) => {
+  ])('keeps the composer disabled without a runner when dictation enabled=%s', async (enabled) => {
     if (enabled) prepareDictation(false);
     render(<ChatPage />);
     await flushAsyncUpdates();
     const textarea = screen.getByTestId('composer-textarea');
-    expect(textarea).not.toBeDisabled();
-    fireEvent.change(textarea, { target: { value: '/voice' } });
-    const send = screen.getByRole('button', { name: 'Send' });
+    expect(textarea).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(
+      fireEvent.keyDown(window, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
+    ).toBe(true);
     if (enabled) {
-      expect(send).toBeEnabled();
-      fireEvent.click(send);
-      expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
-    } else {
-      expect(send).toBeDisabled();
-      expect(screen.queryByTestId('slash-command-suggestions')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Dictate text' })).toBeDisabled();
     }
+    expect(createDictationRecorder).not.toHaveBeenCalled();
     expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
