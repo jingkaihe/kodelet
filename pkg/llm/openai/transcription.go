@@ -43,11 +43,11 @@ type Transcriber struct {
 
 // NewTranscriber validates typed provider configuration without reading or
 // refreshing credentials. It is independent of chat threads and root enablement.
-func NewTranscriber(config llmtypes.Config) (*Transcriber, error) {
+func NewTranscriber(config llmtypes.Config, model string) (*Transcriber, error) {
 	s := &Transcriber{
 		platform:     resolvePlatformName(config),
 		apiKeyEnvVar: GetAPIKeyEnvVar(config),
-		model:        strings.TrimSpace(config.TranscriptionModel),
+		model:        strings.TrimSpace(model),
 	}
 	switch s.platform {
 	case "openai":

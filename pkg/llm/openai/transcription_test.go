@@ -46,10 +46,9 @@ func TestNewTranscriber(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			config := transcriptionConfig(t, test.platform)
-			config.TranscriptionModel = test.model
 			config.OpenAI.BaseURL = test.baseURL
 			before := *config.OpenAI
-			s, err := NewTranscriber(config)
+			s, err := NewTranscriber(config, test.model)
 			assert.Equal(t, before, *config.OpenAI)
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
@@ -76,7 +75,7 @@ func TestOpenAITranscriptionAvailabilityResolvesCurrentConfiguredKey(t *testing.
 	config.OpenAI.APIKeyEnvVar = "TEST_TRANSCRIPTION_KEY"
 	t.Setenv("TEST_TRANSCRIPTION_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	require.ErrorContains(t, s.CheckAvailability(), "TEST_TRANSCRIPTION_KEY")
 	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
@@ -90,7 +89,7 @@ func TestOpenAITranscriptionAvailabilityResolvesCurrentConfiguredKey(t *testing.
 func TestCodexTranscriptionCredentials(t *testing.T) {
 	config := transcriptionConfig(t, "codex")
 	t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	var creds *auth.CodexCredentials
 	s.readCodex = func() (*auth.CodexCredentials, error) { return creds, nil }
@@ -179,10 +178,11 @@ func TestTranscribeProviderRequests(t *testing.T) {
 			}
 			config.OpenAI.APIKeyEnvVar = "TEST_TRANSCRIPTION_KEY"
 			t.Setenv("TEST_TRANSCRIPTION_KEY", "speech-key")
+			model := ""
 			if platform == "openai" {
-				config.TranscriptionModel = "custom-transcription-model"
+				model = "custom-transcription-model"
 			}
-			s, err := NewTranscriber(config)
+			s, err := NewTranscriber(config, model)
 			require.NoError(t, err)
 			var credentialLoads atomic.Int32
 			if platform == "codex" {
@@ -220,7 +220,7 @@ func TestTranscribeProviderRequests(t *testing.T) {
 
 func TestTranscribeRejectsInvalidInput(t *testing.T) {
 	config := transcriptionConfig(t, "openai")
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	for _, test := range []struct {
 		name, filename, contentType, language, wantErr string
@@ -292,7 +292,7 @@ func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			config.OpenAI.BaseURL = server.URL
-			s, err := NewTranscriber(config)
+			s, err := NewTranscriber(config, "")
 			require.NoError(t, err)
 			if test.platform == "codex" {
 				s.endpoint = server.URL
@@ -328,7 +328,7 @@ func TestTranscribeDoesNotFollowRedirects(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	config.OpenAI.BaseURL = server.URL
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
 		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
@@ -342,7 +342,7 @@ func TestTranscribeTransportErrorDoesNotLeakURL(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "private-token")
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	// Production configuration rejects query parameters. Still prove that a
 	// transport's URL-bearing error can never expose a credential to the UI.
@@ -364,7 +364,7 @@ func TestTranscribeCancellation(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	config.OpenAI.BaseURL = server.URL
-	s, err := NewTranscriber(config)
+	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()

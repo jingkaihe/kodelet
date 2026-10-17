@@ -38,6 +38,7 @@ func TestNewTranscriberFromViper(t *testing.T) {
 		{name: "disabled by default"},
 		{name: "missing profile", enabled: true, key: "transcription.profile", value: " ", wantErr: "transcription.profile is required"},
 		{name: "unknown profile", enabled: true, key: "transcription.profile", value: "missing", wantErr: "invalid transcription profile"},
+		{name: "invalid speech model", enabled: true, key: "profiles.speech.transcription_model", value: []string{"invalid"}, wantErr: "transcription_model in profile"},
 		{name: "invalid switch", key: "transcription.enabled", value: "nonsense", wantErr: "invalid transcription configuration"},
 		{name: "disabled ignores missing profile", key: "transcription.profile", value: "missing"},
 		{name: "disabled ignores invalid profile", key: "profiles.speech", value: "invalid"},
@@ -49,6 +50,7 @@ func TestNewTranscriberFromViper(t *testing.T) {
 				viper.Set("transcription.enabled", true)
 			}
 			viper.Set("transcription.profile", "speech")
+			viper.Set("profiles.speech", map[string]any{"provider": "openai", "model": "chat-model"})
 			if test.key != "" {
 				viper.Set(test.key, test.value)
 			}
@@ -66,6 +68,7 @@ func TestNewTranscriberFromViper(t *testing.T) {
 func TestTranscriptionProfileRoundTrip(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
+	t.Setenv("OPENAI_API_BASE", "")
 	languages := make(chan string, 2)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer speech-key", r.Header.Get("Authorization"))
@@ -92,16 +95,19 @@ func TestTranscriptionProfileRoundTrip(t *testing.T) {
 	}))
 	t.Cleanup(provider.Close)
 	viper.Set("profile", "coding")
-	viper.Set("profiles.coding", map[string]any{"provider": "anthropic", "model": "chat-model"})
-	viper.Set("profiles.speech", map[string]any{
-		"provider": "openai", "model": "unused-chat-model", "transcription_model": "speech.v1",
-		"openai": map[string]any{
-			"base_url": provider.URL + "/speech/v1/", "api_key_env_var": "TEST_TRANSCRIPTION_KEY",
+	viper.Set("profiles", map[string]any{
+		"coding": map[string]any{"provider": "anthropic", "model": "chat-model"},
+		"speech.dev": map[string]any{
+			"provider": "openai", "model": "unused-chat-model", "transcription_model": " speech.v1 ",
+			"aliases": map[string]string{"speech.v1": "speech-model"},
+			"openai": map[string]any{
+				"base_url": provider.URL + "/speech/v1/", "api_key_env_var": "TEST_TRANSCRIPTION_KEY",
+			},
 		},
 	})
-	viper.Set("aliases", map[string]string{"speech.v1": "speech-model", "speech-model": "do-not-resolve-twice"})
+	viper.Set("aliases", map[string]string{"speech.v1": "overridden-model", "speech-model": "do-not-resolve-twice"})
 	viper.Set("transcription.enabled", true)
-	viper.Set("transcription.profile", "speech")
+	viper.Set("transcription.profile", "speech.dev")
 	t.Setenv("TEST_TRANSCRIPTION_KEY", "speech-key")
 	before := viper.AllSettings()
 	transcriber, err := newTranscriberFromViper()

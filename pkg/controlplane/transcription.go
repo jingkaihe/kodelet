@@ -37,7 +37,13 @@ func newTranscriberFromViper() (llmtypes.Transcriber, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid transcription profile")
 	}
-	return llm.NewTranscriber(selected)
+	// Use the literal profile key: names may contain dots, unlike Viper paths.
+	rawModel := selected.Profiles[profile]["transcription_model"]
+	model, ok := rawModel.(string)
+	if rawModel != nil && !ok {
+		return nil, errors.Errorf("transcription_model in profile %q must be a string", profile)
+	}
+	return llm.NewTranscriber(selected, model)
 }
 
 const maxTranscriptionBodyBytes = transcriptiontypes.MaxAudioBytes + (64 << 10)

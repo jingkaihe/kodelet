@@ -8,16 +8,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-// NewTranscriber constructs a speech recognizer from a model profile.
+// NewTranscriber constructs a speech recognizer using a profile's connection
+// settings and an explicit transcription model, resolving its alias once.
 // It does not create a chat thread or read process-wide configuration.
-func NewTranscriber(config llmtypes.Config) (llmtypes.Transcriber, error) {
-	config.TranscriptionModel = strings.TrimSpace(config.TranscriptionModel)
-	if !config.ModelAliasesResolved {
-		config.TranscriptionModel = resolveModelAlias(config.TranscriptionModel, config.Aliases)
-	}
+func NewTranscriber(config llmtypes.Config, model string) (llmtypes.Transcriber, error) {
+	model = resolveModelAlias(strings.TrimSpace(model), config.Aliases)
 	switch strings.ToLower(strings.TrimSpace(config.Provider)) {
 	case "openai":
-		return openai.NewTranscriber(config)
+		return openai.NewTranscriber(config, model)
 	default:
 		return nil, errors.New("transcription requires a profile with provider: openai")
 	}

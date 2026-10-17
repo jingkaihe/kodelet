@@ -64,10 +64,9 @@ func (m ToolMode) IsPatchMode() bool {
 
 // Config holds the configuration for the LLM client
 type Config struct {
-	Provider                string             `mapstructure:"provider" json:"provider" yaml:"provider"`                                                      // Provider is the LLM provider (anthropic, openai)
-	Model                   string             `mapstructure:"model" json:"model" yaml:"model"`                                                               // Model is the main driver
-	WeakModel               string             `mapstructure:"weak_model" json:"weak_model" yaml:"weak_model"`                                                // WeakModel is the less capable but faster model to use
-	TranscriptionModel      string             `mapstructure:"transcription_model" json:"transcription_model,omitempty" yaml:"transcription_model,omitempty"` // TranscriptionModel selects speech recognition when this profile is used for transcription.
+	Provider                string             `mapstructure:"provider" json:"provider" yaml:"provider"`       // Provider is the LLM provider (anthropic, openai)
+	Model                   string             `mapstructure:"model" json:"model" yaml:"model"`                // Model is the main driver
+	WeakModel               string             `mapstructure:"weak_model" json:"weak_model" yaml:"weak_model"` // WeakModel is the less capable but faster model to use
 	MaxTokens               int                `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`
 	WeakModelMaxTokens      int                `mapstructure:"weak_model_max_tokens" json:"weak_model_max_tokens" yaml:"weak_model_max_tokens"`                                 // WeakModelMaxTokens is the maximum tokens for the weak model
 	ThinkingBudgetTokens    int                `mapstructure:"thinking_budget_tokens" json:"thinking_budget_tokens" yaml:"thinking_budget_tokens"`                              // ThinkingBudgetTokens is sent as Anthropic manual budget_tokens on non-adaptive Claude models; adaptive Claude models ignore it

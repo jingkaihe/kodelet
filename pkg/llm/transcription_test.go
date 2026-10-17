@@ -22,7 +22,7 @@ func TestNewTranscriber(t *testing.T) {
 		{name: "no implicit provider", wantErr: "provider: openai"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			transcriber, err := NewTranscriber(llmtypes.Config{Provider: test.provider})
+			transcriber, err := NewTranscriber(llmtypes.Config{Provider: test.provider}, "")
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
 				return
@@ -34,7 +34,6 @@ func TestNewTranscriber(t *testing.T) {
 }
 
 func TestNewTranscriberResolvesModelAliasesOnce(t *testing.T) {
-	// The control-plane round trip covers profiles whose aliases are already resolved.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !assert.NoError(t, r.ParseMultipartForm(1<<20)) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -46,15 +45,15 @@ func TestNewTranscriberResolvesModelAliasesOnce(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_BASE", "")
 	config := llmtypes.Config{
-		Provider:           "openai",
-		Model:              "unused-chat-model",
-		TranscriptionModel: " speech.v1 ",
-		Aliases:            map[string]string{"speech.v1": "speech-model", "speech-model": "wrong-model"},
-		OpenAI:             &llmtypes.OpenAIConfig{BaseURL: server.URL},
+		Provider: "openai",
+		Model:    "unused-chat-model",
+		Aliases:  map[string]string{"speech.v1": "speech-model", "speech-model": "wrong-model"},
+		OpenAI:   &llmtypes.OpenAIConfig{BaseURL: server.URL},
 	}
 	before := config
-	transcriber, err := NewTranscriber(config)
+	transcriber, err := NewTranscriber(config, " speech.v1 ")
 	require.NoError(t, err)
 	assert.Equal(t, before, config)
 	_, err = transcriber.Transcribe(t.Context(), llmtypes.TranscriptionRequest{

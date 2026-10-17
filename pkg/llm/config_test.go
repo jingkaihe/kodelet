@@ -86,7 +86,6 @@ func TestModelProfileDefaults(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, strings.ToLower(strings.TrimSpace(test.provider)), config.Provider)
 			assert.Empty(t, config.WeakModel)
-			assert.Empty(t, config.TranscriptionModel)
 			assert.Equal(t, maxTokens, config.MaxTokens)
 			assert.Equal(t, maxTokens, config.WeakModelMaxTokens)
 			assert.Equal(t, thinking, config.ThinkingBudgetTokens)
@@ -435,7 +434,6 @@ func TestSharedConfigLoaders(t *testing.T) {
 			assert.Empty(t, config.Provider)
 			assert.Empty(t, config.Model)
 			assert.Empty(t, config.WeakModel)
-			assert.Empty(t, config.TranscriptionModel)
 			assert.Zero(t, config.MaxTokens)
 			assert.Zero(t, config.WeakModelMaxTokens)
 			assert.Zero(t, config.ThinkingBudgetTokens)
@@ -470,7 +468,6 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 					"profile": "test", "aliases": test.shared,
 					"profiles": map[string]any{"test": map[string]any{
 						"provider": "openai", "model": test.alias, "weak_model": test.alias, "aliases": test.profile,
-						"transcription_model": test.alias,
 					}},
 				}
 				if source == "file" {
@@ -484,7 +481,6 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, test.model, config.Model)
 				assert.Equal(t, test.model, config.WeakModel)
-				assert.Equal(t, test.model, config.TranscriptionModel)
 				assert.Equal(t, "gpt-6-astra", config.Aliases["gpt-6"])
 				assert.True(t, config.ModelAliasesResolved)
 			})
@@ -501,24 +497,6 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 	assert.Equal(t, "claude-sonnet-4-6", config.Model)
-}
-
-func TestTranscriptionConfigDoesNotEnterConversationSnapshots(t *testing.T) {
-	configureTestProfile(t, "openai", "test-model")
-	viper.Set("transcription.enabled", true)
-	viper.Set("transcription.profile", "test")
-	viper.Set("profiles.test.transcription_model", "gpt-4o-mini-transcribe")
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-	assert.Equal(t, "gpt-4o-mini-transcribe", config.TranscriptionModel)
-	snapshot, err := llmtypes.NewConversationConfigSnapshot(config)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(snapshot)
-	require.NoError(t, err)
-	assert.NotContains(t, string(encoded), "transcription")
-	shared, err := GetConfigFromViperWithoutProfile()
-	require.NoError(t, err)
-	assert.Empty(t, shared.TranscriptionModel)
 }
 
 func TestSharedBashTimeoutFromEnv(t *testing.T) {
