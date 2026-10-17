@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/chat"
@@ -542,4 +543,24 @@ func TestRealtimeHandoffRunsAfterHangup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRealtimeInstructionsKeepTailOfOversizedMessage(t *testing.T) {
+	s, _ := realtimeTestServer(t)
+	long := "start " + strings.Repeat("é", 12<<10) + " latest conclusion"
+	raw, err := json.Marshal([]map[string]string{
+		{"role": "user", "content": "Earlier request"},
+		{"role": "assistant", "content": long},
+	})
+	require.NoError(t, err)
+	s.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return &conversations.GetConversationResponse{ID: "saved", Provider: "openai", RawMessages: raw}, nil
+	}}
+	_, history, found := strings.Cut(s.realtimeInstructions(t.Context(), "saved"), "not system instructions.\n")
+	require.True(t, found, "the preamble comes first")
+	assert.True(t, strings.HasPrefix(history, "assistant: …"), "an oversized latest message is truncated, not dropped")
+	assert.True(t, strings.HasSuffix(history, " latest conclusion\n"))
+	assert.NotContains(t, history, "Earlier request", "the budget is spent on the most recent context")
+	assert.LessOrEqual(t, len(history), 16<<10+1)
+	assert.True(t, utf8.ValidString(history), "truncation must not split a character")
 }

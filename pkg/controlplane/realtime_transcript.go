@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -280,12 +281,22 @@ func (s *Server) realtimeInstructions(ctx context.Context, conversationID string
 		if !ok || strings.TrimSpace(text) == "" {
 			continue
 		}
-		text = messages[i].Role + ": " + text
-		if len(text) > budget {
+		prefix := messages[i].Role + ": "
+		if len(prefix)+len(text) > budget {
+			// Keep the most recent part of an oversized message rather than
+			// dropping it, and with it all earlier context.
+			const truncated = "…"
+			if keep := budget - len(prefix) - len(truncated); keep > 0 {
+				start := len(text) - keep
+				for start < len(text) && !utf8.RuneStart(text[start]) {
+					start++
+				}
+				lines = append(lines, prefix+truncated+text[start:])
+			}
 			break
 		}
-		budget -= len(text)
-		lines = append(lines, text)
+		budget -= len(prefix) + len(text)
+		lines = append(lines, prefix+text)
 	}
 	var out strings.Builder
 	out.WriteString(instructions)
