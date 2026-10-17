@@ -89,7 +89,7 @@ describe('ApiService', () => {
       ok: true,
       json: async () => ({ id: 'call/one', conversationId: 'saved-chat', answer: 'answer' }),
     });
-    await apiService.startRealtime('offer', chat);
+    await apiService.startRealtime('offer', chat, { voice: 'cedar' });
     const event = { kind: 'transcript', id: 'utterance', role: 'user', text: 'café', final: true };
     const bytes = new TextEncoder().encode(
       `${JSON.stringify(event)}\n${JSON.stringify({ kind: 'closed' })}`
@@ -124,7 +124,11 @@ describe('ApiService', () => {
         expect(options.headers['X-CSRF-Token']).toBe('call-csrf');
       }
     }
-    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ offer: 'offer', chat });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      offer: 'offer',
+      chat,
+      voice: 'cedar',
+    });
   });
 
   afterEach(() => {

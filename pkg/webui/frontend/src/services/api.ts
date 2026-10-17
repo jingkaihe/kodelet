@@ -536,13 +536,13 @@ class ApiService {
   async startRealtime(
     offer: string,
     chat: ChatRequest,
-    signal?: AbortSignal
+    options: { signal?: AbortSignal; voice?: string } = {}
   ): Promise<RealtimeSession> {
     return this.request('/api/realtime', {
       method: 'POST',
       headers: { 'X-Kodelet-Client-ID': this.clientId },
-      body: JSON.stringify({ offer, chat }),
-      signal,
+      body: JSON.stringify({ offer, chat, voice: options.voice }),
+      signal: options.signal,
     });
   }
 

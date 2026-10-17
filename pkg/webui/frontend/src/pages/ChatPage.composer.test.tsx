@@ -78,7 +78,12 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
   it('starts live voice from a draft and adopts its conversation without losing media or captions', async () => {
     prepareDictation();
-    mockGetRealtimeCapabilities.mockResolvedValue({ enabled: true, available: true });
+    mockGetRealtimeCapabilities.mockResolvedValue({
+      enabled: true,
+      available: true,
+      defaultVoice: 'marin',
+      voices: ['marin', 'cedar'],
+    });
     const settings = await mockGetChatSettings();
     mockGetChatSettings.mockResolvedValue({
       ...settings,
@@ -130,6 +135,10 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     mockStreamConversation.mockImplementation(() => new Promise(() => {}));
     const view = await renderChatWithRunner();
     fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    const voice = screen.getByRole('combobox', { name: 'Voice' });
+    expect(voice).toHaveTextContent('Marin (default)');
+    fireEvent.click(voice);
+    fireEvent.click(screen.getByRole('option', { name: 'Cedar' }));
     fireEvent.change(screen.getByLabelText('Working directory'), {
       target: { value: '../project' },
     });
@@ -137,12 +146,17 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await flushAsyncUpdates();
     expect(screen.getByRole('button', { name: 'Talk' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'Talk' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+Shift+R'
+    );
     fireEvent.change(screen.getByTestId('composer-textarea'), {
       target: { value: 'Keep my draft' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Talk' }));
     await waitFor(() => expect(mockStreamRealtime).toHaveBeenCalledOnce());
     const request = mockStartRealtime.mock.calls[0][1];
+    expect(mockStartRealtime.mock.calls[0][2].voice).toBe('cedar');
     expect(request).toMatchObject({
       message: '',
       conversationId: expect.any(String),
@@ -175,6 +189,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     fireEvent.click(screen.getByRole('button', { name: 'End call' }));
     expect(mockEndRealtime).toHaveBeenCalledWith('call-one');
     fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: '/talk' } });
+    expect(screen.getByTestId('composer-slash-usage-hint')).toHaveTextContent('Chat to Kodelet');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(mockStartRealtime).toHaveBeenCalledTimes(2));
     expect(mockStartRealtime.mock.calls[1][1]).toEqual({
@@ -187,6 +202,16 @@ describe('ChatPage composer, attachments, and slash commands', () => {
       },
     });
     expect(mockStreamChat).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'End call' }));
+    // macOS Option may change key; the physical R still starts the selected voice.
+    fireEvent.keyDown(screen.getByTestId('composer-textarea'), {
+      key: '‰',
+      code: 'KeyR',
+      altKey: true,
+      shiftKey: true,
+    });
+    await waitFor(() => expect(mockStartRealtime).toHaveBeenCalledTimes(3));
+    expect(mockStartRealtime.mock.calls[2][2].voice).toBe('cedar');
     view.unmount();
     pauseAudio.mockRestore();
   });
@@ -271,6 +296,9 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(screen.queryByRole('button', { name: button })).not.toBeInTheDocument();
     expect(
       fireEvent.keyDown(textarea, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
+    ).toBe(true);
+    expect(
+      fireEvent.keyDown(textarea, { key: 'R', code: 'KeyR', altKey: true, shiftKey: true })
     ).toBe(true);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(createDictationRecorder).not.toHaveBeenCalled();
@@ -404,12 +432,16 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     }
   });
 
-  it('does not capture dictation shortcuts while typing, composing, in another dialog or in the terminal', async () => {
+  it.each([
+    'V',
+    'R',
+  ])('respects modifiers, composition, dialogs and terminals for Alt+Shift+%s', async (key) => {
     prepareDictation();
+    mockGetRealtimeCapabilities.mockResolvedValue({ enabled: true, available: true });
     await renderChatWithRunner();
     createDictationRecorder.mockClear();
     const textarea = screen.getByTestId('composer-textarea');
-    const shortcut = { key: 'V', code: 'KeyV', altKey: true, shiftKey: true };
+    const shortcut = { key, code: `Key${key}`, altKey: true, shiftKey: true };
     for (const overrides of [
       { altKey: false },
       { shiftKey: false },
@@ -430,7 +462,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
     fireEvent.keyDown(textarea, { key: '/', ctrlKey: true });
     const shortcuts = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
-    expect(within(shortcuts).getByText('Alt/⌥+Shift+V')).toBeInTheDocument();
+    expect(within(shortcuts).getByText(`Alt/⌥+Shift+${key}`)).toBeInTheDocument();
     expect(fireEvent.keyDown(shortcuts, shortcut)).toBe(true);
     fireEvent.keyDown(shortcuts, { key: 'Escape' });
 
@@ -438,6 +470,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     const terminal = await screen.findByTestId('terminal-host');
     expect(fireEvent.keyDown(terminal, shortcut)).toBe(true);
     expect(createDictationRecorder).not.toHaveBeenCalled();
+    expect(mockStartRealtime).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog', { name: 'Dictation' })).not.toBeInTheDocument();
   });
 

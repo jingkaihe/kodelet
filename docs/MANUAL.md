@@ -367,7 +367,7 @@ Requires HTTPS or localhost and microphone permission. Recording is limited to t
 
 #### Live voice
 
-Use the waveform button or `/talk` in the Web UI to speak with Kodelet and hear its replies. Starting a call in a new chat creates the conversation using your selected profile and workspace; no typed message is needed. Spoken requests can start or steer coding work using the conversation's selected profile, including Anthropic profiles. Spoken messages, coding responses, and tools share one transcript; delegated user instructions are not displayed twice. `/voice` remains dictation into your draft.
+Use the waveform button, `/talk`, or **Alt+Shift+R** (**Option+Shift+R** on macOS) in the Web UI to speak with Kodelet and hear its replies. Choose a voice in **New chat**, or keep the server default. Starting a call in a new chat creates the conversation using your selected profile and workspace; no typed message is needed. Spoken requests can start or steer coding work using the conversation's selected profile, including Anthropic profiles. Spoken messages, coding responses, and tools share one transcript; delegated user instructions are not displayed twice. `/voice` remains dictation into your draft.
 
 Enable live voice independently of the coding profile, then restart the server:
 

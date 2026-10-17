@@ -41,10 +41,18 @@ func (s *testRealtimeSession) Complete(_ context.Context, _, text string) error 
 func (*testRealtimeSession) Update(context.Context, string) error { return nil }
 func (s *testRealtimeSession) Close() error                       { s.closed.Store(true); return nil }
 
-type testRealtimeProvider struct{ session *testRealtimeSession }
+type testRealtimeProvider struct {
+	session *testRealtimeSession
+	offer   llmtypes.RealtimeOffer
+}
 
 func (*testRealtimeProvider) CheckAvailability() error { return nil }
-func (p *testRealtimeProvider) Open(context.Context, llmtypes.RealtimeOffer) (llmtypes.RealtimeSession, error) {
+func (*testRealtimeProvider) VoiceOptions() (string, []string) {
+	return "marin", []string{"marin", "cedar"}
+}
+
+func (p *testRealtimeProvider) Open(_ context.Context, offer llmtypes.RealtimeOffer) (llmtypes.RealtimeSession, error) {
+	p.offer = offer
 	return p.session, nil
 }
 
@@ -56,7 +64,7 @@ func realtimeTestServer(t *testing.T) (*Server, *testRealtimeSession) {
 	require.NoError(t, err)
 	session := &testRealtimeSession{events: make(chan llmtypes.RealtimeEvent, 16), results: make(chan string, 16)}
 	s := &Server{
-		turns: store, realtime: &testRealtimeProvider{session}, runCtx: t.Context(),
+		turns: store, realtime: &testRealtimeProvider{session: session}, runCtx: t.Context(),
 		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
 			return &conversations.GetConversationResponse{ID: "saved", Provider: "openai", RawMessages: json.RawMessage("[]")}, nil
 		}},
@@ -77,19 +85,27 @@ func realtimeRequest(t *testing.T, method, path, body, clientID string) *http.Re
 
 func TestRealtimeOwnerAttachmentAndDisconnect(t *testing.T) {
 	s, session := realtimeTestServer(t)
+	w := httptest.NewRecorder()
+	s.handleRealtime(w, realtimeRequest(t, "GET", "/api/realtime", "", "browser"))
+	assert.JSONEq(t, `{"enabled":true,"available":true,"defaultVoice":"marin","voices":["marin","cedar"]}`, w.Body.String())
+	w = httptest.NewRecorder()
+	s.handleRealtime(w, realtimeRequest(t, "POST", "/api/realtime", `{"offer":"sdp","voice":"unknown","chat":{"conversationId":"saved"}}`, "browser"))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Empty(t, s.realtime.(*testRealtimeProvider).offer.SDP, "invalid voice must not allocate a call")
 	post := func() *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		s.handleRealtime(w, realtimeRequest(t, "POST", "/api/realtime", `{"offer":"sdp","chat":{"conversationId":"saved"}}`, "browser"))
+		s.handleRealtime(w, realtimeRequest(t, "POST", "/api/realtime", `{"offer":"sdp","voice":"cedar","chat":{"conversationId":"saved"}}`, "browser"))
 		return w
 	}
 	response := post()
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Equal(t, "cedar", s.realtime.(*testRealtimeProvider).offer.Voice)
 	var created struct{ ID, ConversationID, Answer string }
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &created))
 	assert.Equal(t, "saved", created.ConversationID)
 	assert.Equal(t, http.StatusConflict, post().Code)
 	r := mux.SetURLVars(realtimeRequest(t, "GET", "/events", "", "other-browser"), map[string]string{"id": created.ID})
-	w := httptest.NewRecorder()
+	w = httptest.NewRecorder()
 	s.handleRealtimeEvents(w, r)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
@@ -135,7 +151,7 @@ func TestRealtimeCreatesConversationWithoutCodingTurn(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = s.conversationService.Close() })
 			session := &testRealtimeSession{events: make(chan llmtypes.RealtimeEvent, 16)}
-			s.realtime = &testRealtimeProvider{session}
+			s.realtime = &testRealtimeProvider{session: session}
 			t.Cleanup(s.closeRealtimeCalls)
 			link := newRunnerAPITestLink()
 			link.call = func(_ context.Context, method string, params, result any) error {

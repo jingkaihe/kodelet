@@ -112,7 +112,7 @@ describe('useRealtime', () => {
     expect(apiService.startRealtime).toHaveBeenCalledWith(
       'browser-offer',
       { message: '', conversationId: 'saved-chat' },
-      expect.any(AbortSignal)
+      { signal: expect.any(AbortSignal), voice: undefined }
     );
     expect(peer.setRemoteDescription).toHaveBeenCalledWith({ type: 'answer', sdp: 'answer' });
     const audio = document.querySelector('audio');

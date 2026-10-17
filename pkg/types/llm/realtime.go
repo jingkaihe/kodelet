@@ -6,6 +6,7 @@ import "context"
 // sideband. Credentials and delegation handling never belong to the media client.
 type RealtimeProvider interface {
 	CheckAvailability() error
+	VoiceOptions() (defaultVoice string, voices []string)
 	Open(context.Context, RealtimeOffer) (RealtimeSession, error)
 }
 
@@ -13,6 +14,7 @@ type RealtimeProvider interface {
 type RealtimeOffer struct {
 	SDP          string
 	Instructions string
+	Voice        string // Empty uses the provider's configured default.
 }
 
 // RealtimeSession is independent of coding turns. Close ends voice, not work.

@@ -77,8 +77,9 @@ interface NewChatContextDialogProps {
   runners: Runner[];
   runnerIdDraft: string;
   environmentProfileDraft: string;
+  voice?: { value: string; defaultVoice?: string; options: string[] };
   onCancel: () => void;
-  onCommit: () => void;
+  onCommit: (voice?: string) => void;
   onCwdInputBlur: () => void;
   onCwdInputChange: (value: string) => void;
   onCwdInputFocus: () => void;
@@ -110,6 +111,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       runners,
       runnerIdDraft,
       environmentProfileDraft,
+      voice,
       onCancel,
       onCommit,
       onCwdInputBlur,
@@ -126,6 +128,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     ref
   ) => {
     const dialogRef = React.useRef<HTMLDivElement | null>(null);
+    const [voiceDraft, setVoiceDraft] = React.useState<string>();
     const directoryRef = React.useRef<HTMLDivElement | null>(null);
     const suggestionsRef = React.useRef<HTMLDivElement | null>(null);
     const [suggestionsPlacement, setSuggestionsPlacement] = React.useState({
@@ -353,6 +356,20 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                   })
                   .map((model) => ({ value: model, label: model }))}
               />
+              {voice ? (
+                <NewChatSelect
+                  label="Voice"
+                  testId="new-chat-voice-select"
+                  value={voiceDraft ?? voice.value}
+                  onChange={setVoiceDraft}
+                  disabled={voice.options.length <= 1}
+                  wide
+                  options={voice.options.map((name) => ({
+                    value: name,
+                    label: `${name[0].toUpperCase()}${name.slice(1)}${name === voice.defaultVoice ? ' (default)' : ''}`,
+                  }))}
+                />
+              ) : null}
               <NewChatSelect
                 label="Environment"
                 testId="new-chat-runner-select"
@@ -465,7 +482,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                 disabled={
                   reasoningEffortLoading || !selectedRunnerAvailable || !profileDraft.trim()
                 }
-                onClick={onCommit}
+                onClick={() => onCommit(voice ? (voiceDraft ?? voice.value) : undefined)}
                 type="button"
               >
                 <span>Start</span>

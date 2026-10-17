@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -75,12 +76,15 @@ type realtimeCall struct {
 func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	available := struct {
-		Enabled   bool   `json:"enabled"`
-		Available bool   `json:"available"`
-		Reason    string `json:"reason,omitempty"`
+		Enabled      bool     `json:"enabled"`
+		Available    bool     `json:"available"`
+		Reason       string   `json:"reason,omitempty"`
+		DefaultVoice string   `json:"defaultVoice,omitempty"`
+		Voices       []string `json:"voices,omitempty"`
 	}{Reason: "Live voice is disabled."}
 	if s.realtime != nil {
 		available.Enabled = true
+		available.DefaultVoice, available.Voices = s.realtime.VoiceOptions()
 		if err := s.realtime.CheckAvailability(); err != nil {
 			available.Reason = err.Error()
 		} else {
@@ -98,6 +102,7 @@ func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Offer string           `json:"offer"`
 		Chat  chat.ChatRequest `json:"chat"`
+		Voice string           `json:"voice,omitempty"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	decoder := json.NewDecoder(r.Body)
@@ -111,6 +116,11 @@ func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, ok := principalFromContext(r.Context())
+	request.Voice = strings.TrimSpace(request.Voice)
+	if request.Voice != "" && !slices.Contains(available.Voices, request.Voice) {
+		s.writeErrorResponse(w, http.StatusBadRequest, "unsupported live voice selection", nil)
+		return
+	}
 	clientID := strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
 	if !ok || !validUIClientID(clientID) {
 		s.writeErrorResponse(w, http.StatusBadRequest, "live voice requires an authenticated owner and X-Kodelet-Client-ID", nil)
@@ -194,7 +204,10 @@ func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	context.AfterFunc(ctx, func() { attachTimer.Stop(); call.close() })
 	stopDisconnect := context.AfterFunc(r.Context(), call.close)
 	defer stopDisconnect()
-	session, err := s.realtime.Open(ctx, llmtypes.RealtimeOffer{SDP: request.Offer, Instructions: s.realtimeInstructions(ctx, req.ConversationID)})
+	session, err := s.realtime.Open(ctx, llmtypes.RealtimeOffer{
+		SDP: request.Offer, Voice: request.Voice,
+		Instructions: s.realtimeInstructions(ctx, req.ConversationID),
+	})
 	if err != nil {
 		call.close()
 		logger.G(r.Context()).WithError(err).Warn("live voice negotiation failed")

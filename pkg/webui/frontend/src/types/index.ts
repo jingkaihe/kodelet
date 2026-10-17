@@ -418,6 +418,8 @@ export interface RealtimeCapabilities {
   enabled: boolean;
   available: boolean;
   reason?: string;
+  defaultVoice?: string;
+  voices?: string[];
 }
 
 export interface RealtimeSession {

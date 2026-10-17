@@ -61,6 +61,7 @@ describe('NewChatContextDialog', () => {
     expect(screen.getByTestId('cwd-input')).toHaveAttribute('placeholder', '/workspace/kodelet');
     expect(screen.queryByText('Default runner workspace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('recent-workspaces')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Voice' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
     expect(props.onCancel).toHaveBeenCalledTimes(1);
@@ -221,13 +222,16 @@ describe('NewChatContextDialog', () => {
   });
 
   it('keeps dialog actions external', () => {
-    const props = renderDialog();
+    const props = renderDialog({ voice: { value: 'marin', options: ['marin', 'cedar'] } });
+    fireEvent.click(screen.getByRole('combobox', { name: 'Voice' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Cedar' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(props.onCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(props.onCancel).toHaveBeenCalledTimes(1);
-    expect(props.onCommit).toHaveBeenCalledTimes(1);
+    expect(props.onCommit).toHaveBeenCalledExactlyOnceWith('cedar');
   });
 
   it('prevents starting while reasoning settings are loading', () => {

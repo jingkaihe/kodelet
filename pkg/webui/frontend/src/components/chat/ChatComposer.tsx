@@ -428,6 +428,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
               {realtime?.enabled ? (
                 <button
                   aria-label="Talk"
+                  aria-keyshortcuts="Alt+Shift+R"
                   className="composer-icon-button"
                   disabled={realtime.busy || Boolean(realtime.blockedReason) || dictation?.busy}
                   onClick={() => {
@@ -437,7 +438,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   title={
                     dictation?.busy
                       ? 'Finish dictation before starting a call.'
-                      : realtime.reason || 'Start a live conversation (/talk)'
+                      : realtime.reason || 'Chat to Kodelet (Alt/⌥+Shift+R or /talk)'
                   }
                   type="button"
                 >

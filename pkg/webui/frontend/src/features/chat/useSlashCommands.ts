@@ -71,8 +71,8 @@ export const useSlashCommands = ({
         ? [
             {
               name: 'talk',
-              description: 'Start a live conversation',
-              placeholder: 'Start a live conversation',
+              description: 'Chat to Kodelet',
+              placeholder: 'Chat to Kodelet',
             },
           ]
         : []),

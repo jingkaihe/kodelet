@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,16 +121,33 @@ func (p *RealtimeProvider) headers(ctx context.Context) (http.Header, error) {
 	return header, nil
 }
 
-func (p *RealtimeProvider) sessionConfig(instructions string) map[string]any {
+// VoiceOptions lists the voices for the selected protocol, plus any configured
+// custom default. Codex's native protocol uses its v1 voice set, not GA voices.
+func (p *RealtimeProvider) VoiceOptions() (string, []string) {
+	voices := []string{"alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"}
+	if p.platform == "codex" {
+		voices = []string{"juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"}
+	}
+	if !slices.Contains(voices, p.voice) {
+		voices = append(voices, p.voice)
+	}
+	return p.voice, voices
+}
+
+func (p *RealtimeProvider) sessionConfig(offer llmtypes.RealtimeOffer) map[string]any {
+	voice := strings.TrimSpace(offer.Voice)
+	if voice == "" {
+		voice = p.voice
+	}
 	if p.platform == "codex" {
 		return map[string]any{
-			"model": p.model, "instructions": instructions,
-			"audio":      map[string]any{"output": map[string]any{"voice": p.voice}},
+			"model": p.model, "instructions": offer.Instructions,
+			"audio":      map[string]any{"output": map[string]any{"voice": voice}},
 			"delegation": map[string]any{"type": "client", "ack_filler": true},
 		}
 	}
 	return map[string]any{
-		"type": "realtime", "model": p.model, "instructions": instructions,
+		"type": "realtime", "model": p.model, "instructions": offer.Instructions,
 		"output_modalities": []string{"audio"}, "tool_choice": "auto",
 		"audio": map[string]any{
 			"input": map[string]any{
@@ -139,7 +157,7 @@ func (p *RealtimeProvider) sessionConfig(instructions string) map[string]any {
 					"silence_duration_ms": 500,
 				},
 			},
-			"output": map[string]any{"voice": p.voice},
+			"output": map[string]any{"voice": voice},
 		},
 		"tools": []any{map[string]any{
 			"type": "function", "name": realtimeDelegateTool,
@@ -168,11 +186,11 @@ func (p *RealtimeProvider) Open(ctx context.Context, offer llmtypes.RealtimeOffe
 	var body bytes.Buffer
 	if p.platform == "codex" {
 		endpoint += "?intent=quicksilver&architecture=avas"
-		err = json.NewEncoder(&body).Encode(map[string]any{"sdp": offer.SDP, "session": p.sessionConfig(offer.Instructions)})
+		err = json.NewEncoder(&body).Encode(map[string]any{"sdp": offer.SDP, "session": p.sessionConfig(offer)})
 		header.Set("Content-Type", "application/json")
 	} else {
 		writer := multipart.NewWriter(&body)
-		session, _ := json.Marshal(p.sessionConfig(offer.Instructions))
+		session, _ := json.Marshal(p.sessionConfig(offer))
 		_ = writer.WriteField("sdp", offer.SDP)
 		_ = writer.WriteField("session", string(session))
 		err = writer.Close()

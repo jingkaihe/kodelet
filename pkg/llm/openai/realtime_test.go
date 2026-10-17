@@ -51,6 +51,26 @@ func TestRealtimeProviderConfig(t *testing.T) {
 	assert.NotContains(t, err.Error(), "secret")
 }
 
+func TestRealtimeVoiceSelection(t *testing.T) {
+	for _, platform := range []string{"openai", "codex"} {
+		t.Run(platform, func(t *testing.T) {
+			p, err := NewRealtimeProvider(transcriptionConfig(t, platform), "", "custom-voice")
+			require.NoError(t, err)
+			defaultVoice, voices := p.VoiceOptions()
+			assert.Equal(t, "custom-voice", defaultVoice)
+			assert.Contains(t, voices, defaultVoice)
+			for _, selected := range []string{voices[0], ""} {
+				config := p.sessionConfig(llmtypes.RealtimeOffer{Voice: selected})
+				if selected == "" {
+					selected = defaultVoice
+				}
+				assert.Equal(t, map[string]any{"voice": selected}, config["audio"].(map[string]any)["output"])
+			}
+			assert.Equal(t, defaultVoice, p.voice, "per-call selection must not mutate the shared provider")
+		})
+	}
+}
+
 type realtimeFixture struct {
 	session llmtypes.RealtimeSession
 	socket  *websocket.Conn

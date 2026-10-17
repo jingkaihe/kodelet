@@ -2280,20 +2280,26 @@ const ChatPage: React.FC = () => {
     let action: (() => void) | undefined;
     if (event.altKey) {
       if (
-        !dictation.enabled ||
         realtime.isBusy() ||
         !event.shiftKey ||
         event.ctrlKey ||
         event.metaKey ||
-        (event.code !== 'KeyV' && event.key.toLowerCase() !== 'v') ||
         steering ||
         !isRemoteConversation ||
         (event.target instanceof Element && event.target.closest('.workspace-terminal-host'))
       ) {
         return;
       }
-      // Option changes event.key on macOS; the physical key still identifies V.
-      action = dictation.start;
+      // Option changes event.key on macOS; use the physical key as well.
+      if (dictation.enabled && (event.code === 'KeyV' || event.key.toLowerCase() === 'v')) {
+        action = dictation.start;
+      } else if (
+        realtime.enabled &&
+        !realtime.blockedReason &&
+        (event.code === 'KeyR' || event.key.toLowerCase() === 'r')
+      ) {
+        action = () => void realtime.start();
+      }
     } else if (
       event.ctrlKey &&
       !event.metaKey &&
@@ -2345,9 +2351,10 @@ const ChatPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
-  const handleCommitNewChatContext = () => {
+  const handleCommitNewChatContext = (voice?: string) => {
     const context = contextSettings.commitDialog();
     if (!context) return;
+    if (voice !== undefined) realtime.setVoice(voice);
     const optimisticConversation = optimisticRemoteConversationRef.current;
     if (
       conversationId &&
@@ -2422,6 +2429,15 @@ const ChatPage: React.FC = () => {
       {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen && !infoDialog ? (
         <NewChatContextDialog
           {...contextSettings.dialogProps}
+          voice={
+            realtime.enabled
+              ? {
+                  value: realtime.voice,
+                  defaultVoice: realtime.defaultVoice,
+                  options: realtime.voices,
+                }
+              : undefined
+          }
           onCommit={handleCommitNewChatContext}
         />
       ) : null}

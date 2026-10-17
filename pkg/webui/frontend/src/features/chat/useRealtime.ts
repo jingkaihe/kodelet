@@ -68,6 +68,7 @@ export function useRealtime({
   const [capabilities, setCapabilities] = useState<RealtimeCapabilities | null>(null);
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'connected'>('idle');
   const [muted, setMuted] = useState(false);
+  const [selectedVoice, setSelectedVoice] = useState('');
   const [error, setError] = useState<string | null>(null);
   const callRef = useRef<Call | null>(null);
   const target = useRef({ key: targetKey, id: chat.conversationId, isDraft });
@@ -107,6 +108,7 @@ export function useRealtime({
       end();
       setError(null);
     }
+    if (previous.id !== chat.conversationId) setSelectedVoice('');
   }, [targetKey, chat.conversationId, isDraft, end]);
   useLayoutEffect(() => end, [end]);
 
@@ -199,7 +201,10 @@ export function useRealtime({
       if (!offer) throw new Error('Could not prepare the call.');
       // Do not abort an allocation on local cancellation: its late response must
       // be closed explicitly, rather than losing the allocated provider call ID.
-      const session = await apiService.startRealtime(offer, chat, AbortSignal.timeout(45_000));
+      const session = await apiService.startRealtime(offer, chat, {
+        signal: AbortSignal.timeout(45_000),
+        voice: selectedVoice || undefined,
+      });
       if (!current()) {
         void apiService.endRealtime(session.id).catch(() => {});
         return false;
@@ -261,6 +266,10 @@ export function useRealtime({
     enabled: capabilities?.enabled === true,
     blockedReason,
     reason: blockedReason || capabilities?.reason,
+    voice: selectedVoice || capabilities?.defaultVoice || '',
+    defaultVoice: capabilities?.defaultVoice,
+    voices: capabilities?.voices || [],
+    setVoice: setSelectedVoice,
     phase,
     busy: phase !== 'idle',
     isBusy: () => callRef.current !== null,
