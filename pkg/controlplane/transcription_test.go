@@ -131,6 +131,7 @@ func TestTranscriptionProfileRoundTrip(t *testing.T) {
 	caps, err := client.TranscriptionCapabilities(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, availableTranscription(), caps)
+	assert.Equal(t, 600, caps.MaxDurationSeconds)
 	for _, language := range []string{"", "en-GB"} {
 		result, err := client.TranscribeAudio(t.Context(), []byte("RIFF1234WAVEdata"), "private-name.wav", "audio/wav", language)
 		require.NoError(t, err)

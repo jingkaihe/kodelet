@@ -124,7 +124,7 @@ describe('cumulative dictation audio', () => {
   });
 
   it.each([
-    { name: 'duration', maxDurationSeconds: 120, maxAudioBytes: 20 * 1024 * 1024, limit: 120 },
+    { name: 'duration', maxDurationSeconds: 600, maxAudioBytes: 20 * 1024 * 1024, limit: 600 },
     { name: 'bytes', maxDurationSeconds: 120, maxAudioBytes: 45 + sampleRate * 8.5, limit: 4.25 },
   ])('preserves cumulative audio up to the $name limit without splitting or overflowing', async (limits) => {
     const callbacks = options(limits);

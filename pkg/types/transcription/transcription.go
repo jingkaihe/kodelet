@@ -16,7 +16,7 @@ const (
 	// MaxAudioBytes bounds the audio file, excluding multipart framing.
 	MaxAudioBytes int64 = 20 << 20
 	// MaxDurationSeconds is the recording limit clients must enforce before upload.
-	MaxDurationSeconds = 120
+	MaxDurationSeconds = 10 * 60
 	// RequestTimeout bounds transcription requests, including upload and provider work.
 	RequestTimeout = 90 * time.Second
 	// MaxResponseBytes bounds transcription responses read from providers and servers.

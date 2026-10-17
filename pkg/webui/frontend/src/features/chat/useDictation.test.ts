@@ -11,7 +11,7 @@ const capability = {
   enabled: true,
   available: true,
   maxAudioBytes: 20 * 1024 * 1024,
-  maxDurationSeconds: 120,
+  maxDurationSeconds: 600,
   mimeTypes: ['audio/webm', 'audio/mp4', 'audio/wav'],
 };
 const stopTrack = vi.fn();
@@ -362,11 +362,15 @@ describe('useDictation', () => {
     const { result } = await ready();
     vi.useFakeTimers();
     await act(async () => result.current.start());
-    expect(recorderOptions.maxDurationSeconds).toBe(120);
+    expect(recorderOptions.maxDurationSeconds).toBe(600);
     expect(recorderOptions.maxAudioBytes).toBe(capability.maxAudioBytes);
     if (limit === 'duration') await act(async () => recorderOptions.onSnapshot(audioFile()));
-    if (limit === 'duration') await act(async () => vi.advanceTimersByTimeAsync(120_000));
-    else await act(async () => recorderOptions.onLimit());
+    if (limit === 'duration') {
+      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+      expect(result.current.phase).toBe('recording');
+      expect(recorderFinish).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(480_000));
+    } else await act(async () => recorderOptions.onLimit());
     expect(recorderFinish).toHaveBeenCalledTimes(1);
     expect(result.current.phase).toBe('review');
     expect(result.current.error).toMatch(/limit/i);
