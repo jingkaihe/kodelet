@@ -31,15 +31,15 @@ type protocolTranscriber struct {
 
 func TestNewTranscriberFromViper(t *testing.T) {
 	for _, test := range []struct {
-		name, key, wantErr string
-		value              any
-		enabled            bool
+		name, key, wantErr, wantCause string
+		value                         any
+		enabled                       bool
 	}{
 		{name: "disabled by default"},
 		{name: "missing profile", enabled: true, key: "transcription.profile", value: " ", wantErr: "transcription.profile is required"},
 		{name: "unknown profile", enabled: true, key: "transcription.profile", value: "missing", wantErr: "invalid transcription profile"},
 		{name: "invalid speech model", enabled: true, key: "profiles.speech.transcription_model", value: []string{"invalid"}, wantErr: "transcription_model in profile"},
-		{name: "invalid switch", key: "transcription.enabled", value: "nonsense", wantErr: "invalid transcription configuration"},
+		{name: "invalid switch", key: "transcription.enabled", value: "nonsense", wantErr: "invalid transcription configuration", wantCause: "'enabled'"},
 		{name: "disabled ignores missing profile", key: "transcription.profile", value: "missing"},
 		{name: "disabled ignores invalid profile", key: "profiles.speech", value: "invalid"},
 	} {
@@ -57,6 +57,10 @@ func TestNewTranscriberFromViper(t *testing.T) {
 			transcriber, err := newTranscriberFromViper()
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
+				if test.wantCause != "" {
+					require.NotNil(t, errors.Unwrap(err))
+					assert.ErrorContains(t, errors.Cause(err), test.wantCause)
+				}
 				return
 			}
 			require.NoError(t, err)
