@@ -26,7 +26,7 @@ import (
 
 type protocolTranscriber struct {
 	availabilityErr error
-	transcribe      func(context.Context, llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error)
+	transcribe      func(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error)
 }
 
 func TestNewTranscriberFromViper(t *testing.T) {
@@ -133,7 +133,7 @@ func TestTranscriptionProfileRoundTrip(t *testing.T) {
 
 func (f *protocolTranscriber) CheckAvailability() error { return f.availabilityErr }
 
-func (f *protocolTranscriber) Transcribe(ctx context.Context, request llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
+func (f *protocolTranscriber) Transcribe(ctx context.Context, request transcriptiontypes.Request) (transcriptiontypes.Result, error) {
 	return f.transcribe(ctx, request)
 }
 
@@ -235,10 +235,12 @@ func TestReadTranscriptionUpload(t *testing.T) {
 			)
 			got, err := readTranscriptionUpload(request)
 			require.NoError(t, err)
-			assert.Equal(t, test.audio, string(got.audio))
-			assert.Equal(t, test.filename, got.filename)
-			assert.Equal(t, test.canonical, got.contentType)
-			assert.Equal(t, test.language, got.language)
+			assert.Equal(t, test.audio, string(got.Audio))
+			assert.Equal(t, test.canonical, got.ContentType)
+			assert.Equal(t, test.language, got.Language)
+			format, err := transcriptiontypes.ParseAudioFormat(got.ContentType)
+			require.NoError(t, err)
+			assert.Equal(t, test.filename, format.Filename)
 		})
 	}
 }
@@ -266,9 +268,9 @@ func TestTranscriptionRejectsInvalidUploads(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := transcriptionProtocolServer(&protocolTranscriber{
-				transcribe: func(context.Context, llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
+				transcribe: func(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error) {
 					t.Error("invalid upload reached provider")
-					return llmtypes.TranscriptionResult{}, nil
+					return transcriptiontypes.Result{}, nil
 				},
 			})
 			response := httptest.NewRecorder()
@@ -295,13 +297,13 @@ func TestTranscriptionProviderErrors(t *testing.T) {
 	}{
 		{"provider failure", "", errors.New("transcription provider unavailable"), http.StatusBadGateway},
 		{"provider deadline", "", errors.Wrap(context.DeadlineExceeded, "transcription timed out"), http.StatusGatewayTimeout},
-		{"no speech sentinel", "", errors.Wrap(llmtypes.ErrNoSpeech, "transcription"), http.StatusUnprocessableEntity},
+		{"no speech sentinel", "", errors.Wrap(transcriptiontypes.ErrNoSpeech, "transcription"), http.StatusUnprocessableEntity},
 		{"empty transcript", " \n", nil, http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := transcriptionProtocolServer(&protocolTranscriber{
-				transcribe: func(context.Context, llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
-					return llmtypes.TranscriptionResult{Text: test.text}, test.err
+				transcribe: func(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error) {
+					return transcriptiontypes.Result{Text: test.text}, test.err
 				},
 			})
 			response := httptest.NewRecorder()
@@ -317,7 +319,7 @@ func TestTranscriptionClientCancellationReachesProvider(t *testing.T) {
 	defer cancel()
 	finished := make(chan error, 1)
 	server := httptest.NewServer(transcriptionProtocolServer(&protocolTranscriber{
-		transcribe: func(ctx context.Context, _ llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
+		transcribe: func(ctx context.Context, _ transcriptiontypes.Request) (transcriptiontypes.Result, error) {
 			deadline, ok := ctx.Deadline()
 			assert.True(t, ok)
 			assert.WithinDuration(t, time.Now().Add(transcriptiontypes.RequestTimeout), deadline, 2*time.Second)
@@ -328,7 +330,7 @@ func TestTranscriptionClientCancellationReachesProvider(t *testing.T) {
 				t.Error("client cancellation did not reach provider")
 			}
 			finished <- ctx.Err()
-			return llmtypes.TranscriptionResult{}, ctx.Err()
+			return transcriptiontypes.Result{}, ctx.Err()
 		},
 	}))
 	t.Cleanup(server.Close)
@@ -346,8 +348,8 @@ func TestTranscriptionClientCancellationReachesProvider(t *testing.T) {
 
 func TestTranscriptionRouteAuthenticationAndCSRF(t *testing.T) {
 	s := transcriptionProtocolServer(&protocolTranscriber{
-		transcribe: func(context.Context, llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
-			return llmtypes.TranscriptionResult{Text: "dictated text"}, nil
+		transcribe: func(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error) {
+			return transcriptiontypes.Result{Text: "dictated text"}, nil
 		},
 	})
 	for _, method := range []string{http.MethodGet, http.MethodPost} {

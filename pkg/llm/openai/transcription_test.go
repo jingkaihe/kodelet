@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +58,7 @@ func TestNewTranscriber(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.NotNil(t, s)
-			assert.Equal(t, llmtypes.TranscriptionRequestTimeout, s.client.Timeout)
+			assert.Equal(t, transcriptiontypes.RequestTimeout, s.client.Timeout)
 			if s.platform == "codex" {
 				assert.Empty(t, s.model)
 				assert.Equal(t, codexEndpoint, s.endpoint)
@@ -78,8 +79,8 @@ func TestOpenAITranscriptionAvailabilityResolvesCurrentConfiguredKey(t *testing.
 	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	require.ErrorContains(t, s.CheckAvailability(), "TEST_TRANSCRIPTION_KEY")
-	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav",
+	_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav",
 	})
 	require.ErrorContains(t, err, "API key is not configured")
 	t.Setenv("TEST_TRANSCRIPTION_KEY", "configured-later")
@@ -110,8 +111,8 @@ func TestCodexTranscriptionCredentials(t *testing.T) {
 	s.requestCodex = func(context.Context) (*auth.CodexCredentials, error) {
 		return nil, errors.New("refresh failed: private-token in raw provider body")
 	}
-	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav",
+	_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav",
 	})
 	require.ErrorContains(t, err, "kodelet codex login")
 	assert.NotContains(t, err.Error(), "private-token")
@@ -196,14 +197,13 @@ func TestTranscribeProviderRequests(t *testing.T) {
 					credentialLoads.Add(1)
 					deadline, ok := ctx.Deadline()
 					assert.True(t, ok)
-					assert.LessOrEqual(t, time.Until(deadline), llmtypes.TranscriptionRequestTimeout)
+					assert.LessOrEqual(t, time.Until(deadline), transcriptiontypes.RequestTimeout)
 					return &auth.CodexCredentials{AccessToken: "refreshed-token", AccountID: "account"}, nil
 				}
 			}
 			for range 2 {
-				result, err := s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
+				result, err := s.Transcribe(t.Context(), transcriptiontypes.Request{
 					Audio:       []byte("private-audio"),
-					Filename:    `/private/recording.webm`,
 					ContentType: "audio/webm;codecs=opus",
 					Language:    " en ",
 				})
@@ -223,19 +223,18 @@ func TestTranscribeRejectsInvalidInput(t *testing.T) {
 	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
 	for _, test := range []struct {
-		name, filename, contentType, language, wantErr string
-		audio                                          []byte
+		name, contentType, language, wantErr string
+		audio                                []byte
 	}{
 		{name: "empty", wantErr: "audio is empty"},
-		{name: "too large", audio: make([]byte, llmtypes.MaxTranscriptionAudioBytes+1), wantErr: "size limit"},
+		{name: "too large", audio: make([]byte, transcriptiontypes.MaxAudioBytes+1), wantErr: "size limit"},
 		{name: "invalid MIME", audio: []byte("audio"), contentType: "not a type", wantErr: "unsupported"},
 		{name: "unsupported MIME", audio: []byte("audio"), contentType: "text/plain", wantErr: "unsupported"},
-		{name: "invalid filename", audio: []byte("audio"), contentType: "audio/wav", filename: "bad\r\nfile.wav", wantErr: "filename"},
-		{name: "long language", audio: []byte("audio"), contentType: "audio/wav", filename: "recording.wav", language: strings.Repeat("x", 65), wantErr: "language"},
+		{name: "long language", audio: []byte("audio"), contentType: "audio/wav", language: strings.Repeat("x", 65), wantErr: "language"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-				Audio: test.audio, Filename: test.filename, ContentType: test.contentType, Language: test.language,
+			_, err := s.Transcribe(t.Context(), transcriptiontypes.Request{
+				Audio: test.audio, ContentType: test.contentType, Language: test.language,
 			})
 			require.ErrorContains(t, err, test.wantErr)
 		})
@@ -252,9 +251,9 @@ func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 		{name: "invalid JSON", status: http.StatusOK, response: "secret token", wantErr: "invalid response"},
 		{name: "wrong text type", status: http.StatusOK, response: `{"text":{"secret":"token"}}`, wantErr: "invalid response"},
 		{name: "missing text", status: http.StatusOK, response: `{"secret":"token"}`, wantErr: "invalid response"},
-		{name: "blank text", status: http.StatusOK, response: `{"text":" \n ","secret":"token"}`, wantErr: llmtypes.ErrNoSpeech.Error()},
+		{name: "blank text", status: http.StatusOK, response: `{"text":" \n ","secret":"token"}`, wantErr: transcriptiontypes.ErrNoSpeech.Error()},
 		{name: "multiple JSON values", status: http.StatusOK, response: `{"text":"secret"} {"text":"token"}`, wantErr: "invalid response"},
-		{name: "oversized", status: http.StatusOK, response: strings.Repeat("x", int(llmtypes.MaxTranscriptionResponseBytes)+1), wantErr: "size limit"},
+		{name: "oversized", status: http.StatusOK, response: strings.Repeat("x", int(transcriptiontypes.MaxResponseBytes)+1), wantErr: "size limit"},
 		{
 			name: "Codex challenge header", platform: "codex", status: http.StatusForbidden, cfMitigated: "Challenge",
 			response: "private response", wantErr: "Cloudflare challenge",
@@ -300,13 +299,13 @@ func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 					return &auth.CodexCredentials{AccessToken: "secret", AccountID: "account"}, nil
 				}
 			}
-			_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-				Audio: []byte("private audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
+			_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+				Audio: []byte("private audio"), ContentType: "audio/wav", Language: "",
 			})
 			require.ErrorContains(t, err, test.wantErr)
 			assert.NotContains(t, err.Error(), "secret")
 			assert.NotContains(t, err.Error(), "private")
-			assert.Equal(t, test.wantErr == llmtypes.ErrNoSpeech.Error(), errors.Is(err, llmtypes.ErrNoSpeech))
+			assert.Equal(t, test.wantErr == transcriptiontypes.ErrNoSpeech.Error(), errors.Is(err, transcriptiontypes.ErrNoSpeech))
 			assert.EqualValues(t, 1, calls.Load(), "no automatic billing fallback or retries")
 			if test.platform == "codex" {
 				assert.Contains(t, err.Error(), "HTTP 403")
@@ -330,8 +329,8 @@ func TestTranscribeDoesNotFollowRedirects(t *testing.T) {
 	config.OpenAI.BaseURL = server.URL
 	s, err := NewTranscriber(config, "")
 	require.NoError(t, err)
-	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
+	_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav", Language: "",
 	})
 	require.ErrorContains(t, err, "HTTP 307")
 	assert.False(t, leaked.Load())
@@ -347,8 +346,8 @@ func TestTranscribeTransportErrorDoesNotLeakURL(t *testing.T) {
 	// Production configuration rejects query parameters. Still prove that a
 	// transport's URL-bearing error can never expose a credential to the UI.
 	s.endpoint = server.URL + "/audio/transcriptions?key=private-token"
-	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("private-audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
+	_, err = s.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("private-audio"), ContentType: "audio/wav", Language: "",
 	})
 	require.EqualError(t, err, "transcription request failed")
 }
@@ -368,14 +367,14 @@ func TestTranscribeCancellation(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	_, err = s.Transcribe(ctx, llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
+	_, err = s.Transcribe(ctx, transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav", Language: "",
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	ctx, cancel = context.WithCancel(t.Context())
 	cancel()
-	_, err = s.Transcribe(ctx, llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
+	_, err = s.Transcribe(ctx, transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav", Language: "",
 	})
 	require.ErrorIs(t, err, context.Canceled)
 }

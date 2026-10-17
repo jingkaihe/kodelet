@@ -11,13 +11,12 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
-	"path"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
@@ -69,7 +68,7 @@ func NewTranscriber(config llmtypes.Config, model string) (*Transcriber, error) 
 		return nil, errors.New("transcription supports only openai.platform openai or codex")
 	}
 	s.client = &http.Client{
-		Timeout: llmtypes.TranscriptionRequestTimeout,
+		Timeout: transcriptiontypes.RequestTimeout,
 		// Never resend private audio to a redirect target. A redirect is reported
 		// as a provider error rather than following a new upload destination.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -98,45 +97,41 @@ func (s *Transcriber) CheckAvailability() error {
 
 // Transcribe uploads a bounded recording to the configured provider. No audio
 // is persisted and neither upstream error bodies nor credential errors escape.
-func (s *Transcriber) Transcribe(ctx context.Context, input llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
-	audio, filename, contentType, language := input.Audio, input.Filename, input.ContentType, input.Language
-	ctx, cancel := context.WithTimeout(ctx, llmtypes.TranscriptionRequestTimeout)
+func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.Request) (transcriptiontypes.Result, error) {
+	audio, contentType, language := input.Audio, input.ContentType, input.Language
+	ctx, cancel := context.WithTimeout(ctx, transcriptiontypes.RequestTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		return llmtypes.TranscriptionResult{}, errors.Wrap(err, "transcription canceled")
+		return transcriptiontypes.Result{}, errors.Wrap(err, "transcription canceled")
 	}
 	if len(audio) == 0 {
-		return llmtypes.TranscriptionResult{}, errors.New("audio is empty")
+		return transcriptiontypes.Result{}, errors.New("audio is empty")
 	}
-	if int64(len(audio)) > llmtypes.MaxTranscriptionAudioBytes {
-		return llmtypes.TranscriptionResult{}, errors.New("audio exceeds the transcription size limit")
+	if int64(len(audio)) > transcriptiontypes.MaxAudioBytes {
+		return transcriptiontypes.Result{}, errors.New("audio exceeds the transcription size limit")
 	}
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil || !slices.Contains(llmtypes.SupportedTranscriptionMimeTypes(), mediaType) {
-		return llmtypes.TranscriptionResult{}, errors.New("unsupported transcription audio type")
-	}
-	filename = path.Base(strings.ReplaceAll(filename, `\`, "/"))
-	if filename == "" || filename == "." || filename == "/" || len(filename) > 255 || strings.ContainsAny(filename, "\r\n\x00") {
-		return llmtypes.TranscriptionResult{}, errors.New("invalid transcription filename")
+	format, err := transcriptiontypes.ParseAudioFormat(contentType)
+	if err != nil {
+		return transcriptiontypes.Result{}, errors.New("unsupported transcription audio type")
 	}
 	language = strings.TrimSpace(language)
 	if len(language) > 64 {
-		return llmtypes.TranscriptionResult{}, errors.New("transcription language hint is too long")
+		return transcriptiontypes.Result{}, errors.New("transcription language hint is too long")
 	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
-		"name": "file", "filename": filename,
+		"name": "file", "filename": format.Filename,
 	}))
-	header.Set("Content-Type", mediaType)
+	header.Set("Content-Type", format.ContentType)
 	part, err := writer.CreatePart(header)
 	if err != nil {
-		return llmtypes.TranscriptionResult{}, errors.Wrap(err, "failed to prepare transcription audio")
+		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription audio")
 	}
 	if _, err := part.Write(audio); err != nil {
-		return llmtypes.TranscriptionResult{}, errors.Wrap(err, "failed to prepare transcription audio")
+		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription audio")
 	}
 	if s.model != "" {
 		_ = writer.WriteField("model", s.model)
@@ -145,18 +140,18 @@ func (s *Transcriber) Transcribe(ctx context.Context, input llmtypes.Transcripti
 		_ = writer.WriteField("language", language)
 	}
 	if err := writer.Close(); err != nil {
-		return llmtypes.TranscriptionResult{}, errors.Wrap(err, "failed to prepare transcription upload")
+		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription upload")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, &body)
 	if err != nil {
-		return llmtypes.TranscriptionResult{}, errors.New("failed to create transcription request")
+		return transcriptiontypes.Result{}, errors.New("failed to create transcription request")
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 	if s.platform == "codex" {
 		creds, err := s.requestCodex(ctx)
 		if err != nil || !auth.IsCodexOAuthEnabled(creds) {
-			return llmtypes.TranscriptionResult{}, requestError(ctx, codexLoginReason)
+			return transcriptiontypes.Result{}, requestError(ctx, codexLoginReason)
 		}
 		req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
 		req.Header.Set("ChatGPT-Account-ID", creds.AccountID)
@@ -167,42 +162,42 @@ func (s *Transcriber) Transcribe(ctx context.Context, input llmtypes.Transcripti
 	} else {
 		key := strings.TrimSpace(os.Getenv(s.apiKeyEnvVar))
 		if key == "" {
-			return llmtypes.TranscriptionResult{}, errors.New("transcription API key is not configured on the server")
+			return transcriptiontypes.Result{}, errors.New("transcription API key is not configured on the server")
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return llmtypes.TranscriptionResult{}, requestError(ctx, "transcription request failed")
+		return transcriptiontypes.Result{}, requestError(ctx, "transcription request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		if s.platform == "codex" && resp.StatusCode == http.StatusForbidden {
-			return llmtypes.TranscriptionResult{}, codexForbiddenError(resp)
+			return transcriptiontypes.Result{}, codexForbiddenError(resp)
 		}
-		return llmtypes.TranscriptionResult{}, errors.Errorf("transcription provider returned HTTP %d", resp.StatusCode)
+		return transcriptiontypes.Result{}, errors.Errorf("transcription provider returned HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, llmtypes.MaxTranscriptionResponseBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, transcriptiontypes.MaxResponseBytes+1))
 	if err != nil {
-		return llmtypes.TranscriptionResult{}, requestError(ctx, "failed to read transcription response")
+		return transcriptiontypes.Result{}, requestError(ctx, "failed to read transcription response")
 	}
-	if int64(len(data)) > llmtypes.MaxTranscriptionResponseBytes {
-		return llmtypes.TranscriptionResult{}, errors.New("transcription response exceeds the size limit")
+	if int64(len(data)) > transcriptiontypes.MaxResponseBytes {
+		return transcriptiontypes.Result{}, errors.New("transcription response exceeds the size limit")
 	}
 	var result struct {
 		Text *string `json:"text"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return llmtypes.TranscriptionResult{}, errors.New("transcription provider returned an invalid response")
+		return transcriptiontypes.Result{}, errors.New("transcription provider returned an invalid response")
 	}
 	if result.Text == nil {
-		return llmtypes.TranscriptionResult{}, errors.New("transcription provider returned an invalid response")
+		return transcriptiontypes.Result{}, errors.New("transcription provider returned an invalid response")
 	}
 	text := strings.TrimSpace(*result.Text)
 	if text == "" {
-		return llmtypes.TranscriptionResult{}, llmtypes.ErrNoSpeech
+		return transcriptiontypes.Result{}, transcriptiontypes.ErrNoSpeech
 	}
-	return llmtypes.TranscriptionResult{Text: text}, nil
+	return transcriptiontypes.Result{Text: text}, nil
 }
 
 func codexForbiddenError(response *http.Response) error {

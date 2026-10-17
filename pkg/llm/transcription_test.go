@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,8 +57,8 @@ func TestNewTranscriberResolvesModelAliasesOnce(t *testing.T) {
 	transcriber, err := NewTranscriber(config, " speech.v1 ")
 	require.NoError(t, err)
 	assert.Equal(t, before, config)
-	_, err = transcriber.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "clip.wav", ContentType: "audio/wav",
+	_, err = transcriber.Transcribe(t.Context(), transcriptiontypes.Request{
+		Audio: []byte("audio"), ContentType: "audio/wav",
 	})
 	require.NoError(t, err)
 }

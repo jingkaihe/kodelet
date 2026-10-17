@@ -1,10 +1,8 @@
 package controlplane
 
 import (
-	"bytes"
 	"context"
 	"io"
-	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -48,8 +46,6 @@ func newTranscriberFromViper() (llmtypes.Transcriber, error) {
 
 const maxTranscriptionBodyBytes = transcriptiontypes.MaxAudioBytes + (64 << 10)
 
-var errUnsupportedAudio = errors.New("unsupported audio container or content type")
-
 func (s *Server) handleTranscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	capabilities := transcriptiontypes.Capabilities{
@@ -91,18 +87,13 @@ func (s *Server) handleTranscription(w http.ResponseWriter, r *http.Request) {
 		var limitErr *http.MaxBytesError
 		if errors.As(err, &limitErr) {
 			status = http.StatusRequestEntityTooLarge
-		} else if errors.Is(err, errUnsupportedAudio) {
+		} else if errors.Is(err, transcriptiontypes.ErrUnsupportedAudio) {
 			status = http.StatusUnsupportedMediaType
 		}
 		s.writeErrorResponse(w, status, err.Error(), nil)
 		return
 	}
-	result, err := s.transcription.Transcribe(ctx, llmtypes.TranscriptionRequest{
-		Audio:       upload.audio,
-		Filename:    upload.filename,
-		ContentType: upload.contentType,
-		Language:    upload.language,
-	})
+	result, err := s.transcription.Transcribe(ctx, upload)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return // The caller disconnected; do not log speech or continue work.
@@ -110,7 +101,7 @@ func (s *Server) handleTranscription(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			status = http.StatusGatewayTimeout
-		} else if errors.Is(err, llmtypes.ErrNoSpeech) {
+		} else if errors.Is(err, transcriptiontypes.ErrNoSpeech) {
 			status = http.StatusUnprocessableEntity
 		}
 		// Errors are sanitized by the provider implementation. Never log
@@ -126,13 +117,8 @@ func (s *Server) handleTranscription(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONResponse(w, transcriptiontypes.Result{Text: text})
 }
 
-type transcriptionUpload struct {
-	audio                           []byte
-	filename, contentType, language string
-}
-
-func readTranscriptionUpload(r *http.Request) (transcriptionUpload, error) {
-	var upload transcriptionUpload
+func readTranscriptionUpload(r *http.Request) (transcriptiontypes.Request, error) {
+	var upload transcriptiontypes.Request
 	reader, err := r.MultipartReader()
 	if err != nil {
 		return upload, errors.New("expected multipart/form-data with one audio file")
@@ -176,8 +162,8 @@ func readTranscriptionUpload(r *http.Request) (transcriptionUpload, error) {
 			return upload, &http.MaxBytesError{Limit: limit}
 		}
 		if name == "language" {
-			upload.language = strings.TrimSpace(string(data))
-			for _, c := range upload.language {
+			upload.Language = strings.TrimSpace(string(data))
+			for _, c := range upload.Language {
 				if c != '-' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
 					return upload, errors.New("language must be a language code such as en")
 				}
@@ -187,54 +173,15 @@ func readTranscriptionUpload(r *http.Request) (transcriptionUpload, error) {
 		if len(data) == 0 {
 			return upload, errors.New("audio file is empty")
 		}
-		upload.audio = data
-		upload.contentType, upload.filename, err = transcriptionAudioFormat(data, part.Header.Get("Content-Type"))
+		format, err := transcriptiontypes.DetectAudioFormat(data, part.Header.Get("Content-Type"))
 		if err != nil {
 			return upload, err
 		}
+		upload.Audio = data
+		upload.ContentType = format.ContentType
 	}
 	if !seen["file"] {
 		return upload, errors.New("audio file is required")
 	}
 	return upload, nil
-}
-
-// Check container signatures rather than trusting a client filename. Providers
-// perform full codec decoding; the control plane never invokes a media process.
-func transcriptionAudioFormat(data []byte, declared string) (string, string, error) {
-	var contentType, extension string
-	switch {
-	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WAVE":
-		contentType, extension = "audio/wav", "wav"
-	case bytes.HasPrefix(data, []byte{0x1a, 0x45, 0xdf, 0xa3}):
-		contentType, extension = "audio/webm", "webm"
-	case len(data) >= 12 && string(data[4:8]) == "ftyp":
-		contentType, extension = "audio/mp4", "m4a"
-	case bytes.HasPrefix(data, []byte("OggS")):
-		contentType, extension = "audio/ogg", "ogg"
-	case bytes.HasPrefix(data, []byte("fLaC")):
-		contentType, extension = "audio/flac", "flac"
-	case bytes.HasPrefix(data, []byte("ID3")) || len(data) >= 2 && data[0] == 0xff && data[1]&0xe0 == 0xe0:
-		contentType, extension = "audio/mpeg", "mp3"
-	default:
-		return "", "", errUnsupportedAudio
-	}
-	if declared != "" {
-		mediaType, _, err := mime.ParseMediaType(declared)
-		if err != nil {
-			return "", "", errUnsupportedAudio
-		}
-		switch mediaType {
-		case "audio/x-wav", "audio/wave":
-			mediaType = "audio/wav"
-		case "audio/x-m4a":
-			mediaType = "audio/mp4"
-		case "audio/mp3":
-			mediaType = "audio/mpeg"
-		}
-		if mediaType != contentType && mediaType != "application/octet-stream" {
-			return "", "", errUnsupportedAudio
-		}
-	}
-	return contentType, "recording." + extension, nil
 }
