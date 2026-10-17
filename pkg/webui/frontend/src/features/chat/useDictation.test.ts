@@ -421,7 +421,7 @@ describe('useDictation', () => {
     'unsupported',
     'worklet',
     'format',
-  ])('handles /voice locally when %s without requesting microphone access', async (condition) => {
+  ])('only handles /voice locally when enabled, with %s preventing capture', async (condition) => {
     if (condition === 'disabled')
       vi.mocked(apiService.getTranscriptionCapabilities).mockResolvedValue({
         ...capability,
@@ -444,8 +444,9 @@ describe('useDictation', () => {
       });
     const { result } = renderDictation('/voice');
     await waitFor(() => expect(result.current.reason).not.toBe('Checking dictation availability…'));
-    act(() => expect(result.current.handleCommand('/voice')).toBe(true));
-    expect(result.current.error).toBeTruthy();
+    act(() => expect(result.current.handleCommand('/voice')).toBe(condition !== 'disabled'));
+    if (condition === 'disabled') expect(result.current.error).toBeNull();
+    else expect(result.current.error).toBeTruthy();
     expect(getUserMedia).not.toHaveBeenCalled();
     expect(result.current.draft).toBe('/voice');
   });

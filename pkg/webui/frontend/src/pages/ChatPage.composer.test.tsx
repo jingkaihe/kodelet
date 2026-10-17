@@ -33,10 +33,11 @@ import {
 const { createDictationRecorder } = vi.hoisted(() => ({ createDictationRecorder: vi.fn() }));
 vi.mock('../features/chat/dictationAudio', () => ({ createDictationRecorder }));
 
-function prepareDictation() {
+function prepareDictation(available = true) {
   mockGetTranscriptionCapabilities.mockResolvedValue({
     enabled: true,
-    available: true,
+    available,
+    reason: available ? undefined : 'Sign in to Codex first.',
     maxAudioBytes: 20 * 1024 * 1024,
     maxDurationSeconds: 120,
     mimeTypes: ['audio/wav'],
@@ -73,6 +74,10 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     false,
     true,
   ])('intercepts unavailable /voice locally with an active run=%s', async (running) => {
+    prepareDictation(false);
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'voice', description: 'Workspace voice recipe' }],
+    });
     mockStreamChat.mockImplementation(() => new Promise(() => undefined));
     await renderChatWithRunner();
     const textarea = screen.getByTestId('composer-textarea');
@@ -83,8 +88,16 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     }
     fireEvent.change(textarea, { target: { value: '/voice' } });
     expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent('/voice');
+    expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent(
+      'Dictate text into the composer'
+    );
+    expect(screen.queryByText('Workspace voice recipe')).not.toBeInTheDocument();
+    expect(
+      fireEvent.keyDown(textarea, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
+    ).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: running ? 'Steer' : 'Send' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Dictation is not configured');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
+    expect(createDictationRecorder).not.toHaveBeenCalled();
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(mockStreamChat).toHaveBeenCalledTimes(running ? 1 : 0);
     expect(
@@ -92,15 +105,56 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('makes /voice available without a workspace runner', async () => {
+  it.each([
+    false,
+    true,
+  ])('only allows local /voice without a runner when enabled=%s', async (enabled) => {
+    if (enabled) prepareDictation(false);
     render(<ChatPage />);
     await flushAsyncUpdates();
     const textarea = screen.getByTestId('composer-textarea');
     expect(textarea).not.toBeDisabled();
     fireEvent.change(textarea, { target: { value: '/voice' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Dictation is not configured');
+    const send = screen.getByRole('button', { name: 'Send' });
+    if (enabled) {
+      expect(send).toBeEnabled();
+      fireEvent.click(send);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
+    } else {
+      expect(send).toBeDisabled();
+      expect(screen.queryByTestId('slash-command-suggestions')).not.toBeInTheDocument();
+    }
     expect(mockStreamChat).not.toHaveBeenCalled();
+  });
+
+  it('leaves a discovered /voice queueable and ignores its shortcut when dictation is disabled', async () => {
+    mockGetSlashCommands.mockResolvedValue({
+      commands: [{ name: 'voice', description: 'Workspace voice recipe', hint: 'topic' }],
+    });
+    mockStreamChat.mockImplementation(() => new Promise(() => undefined));
+    await renderChatWithRunner();
+    const textarea = screen.getByTestId('composer-textarea');
+    expect(screen.queryByRole('button', { name: 'Dictate text' })).not.toBeInTheDocument();
+    expect(
+      fireEvent.keyDown(textarea, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
+    ).toBe(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(createDictationRecorder).not.toHaveBeenCalled();
+    fireEvent.change(textarea, { target: { value: 'Start working' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: '/voice' } });
+    expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent(
+      'Workspace voice recipe'
+    );
+    fireEvent.change(textarea, { target: { value: '/voice topic' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Queue command' }));
+    expect(await screen.findByRole('region', { name: 'Queued commands' })).toHaveTextContent(
+      '/voice topic'
+    );
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    expect(mockStreamChat).toHaveBeenCalledTimes(1);
+    expect(textarea).toHaveValue('');
   });
 
   it.each([

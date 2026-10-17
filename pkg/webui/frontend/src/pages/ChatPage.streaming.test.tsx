@@ -8,6 +8,7 @@ import {
   mockGetConversations,
   mockGetRunners,
   mockGetSlashCommands,
+  mockGetTranscriptionCapabilities,
   mockNavigate,
   mockSteerConversation,
   mockStopConversation,
@@ -314,6 +315,13 @@ describe('ChatPage streaming, steering, and navigation', () => {
     'submitted',
     'observed',
   ] as const)('keeps discovered commands alongside /voice during a %s run and queues the selected command', async (source) => {
+    mockGetTranscriptionCapabilities.mockResolvedValue({
+      enabled: true,
+      available: false,
+      maxAudioBytes: 20 * 1024 * 1024,
+      maxDurationSeconds: 120,
+      mimeTypes: ['audio/wav'],
+    });
     const { startRun } = setupCommandQueueStreams();
     render(<ChatPage />);
     await screen.findByText('First conversation');

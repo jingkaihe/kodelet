@@ -167,6 +167,7 @@ export function useDictation({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [phase, cancel, stop]);
 
+  const enabled = capabilities?.enabled === true;
   const reason =
     capabilityError ||
     (!capabilities
@@ -424,7 +425,7 @@ export function useDictation({
   };
 
   const handleCommand = (text: string): boolean => {
-    if (!isVoiceCommand(text)) return false;
+    if (!enabled || !isVoiceCommand(text)) return false;
     if (text.trim() !== '/voice') setError('Usage: /voice');
     else void start(true);
     return true;
@@ -434,7 +435,7 @@ export function useDictation({
     phase,
     busy: phase !== 'idle',
     isBusy: () => captureRef.current !== null,
-    enabled: capabilities?.enabled === true,
+    enabled,
     reason,
     error: [error, uploadError].filter(Boolean).join(' ') || null,
     elapsedSeconds,

@@ -13,6 +13,7 @@ interface SlashCommandsOptions {
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   disabled: boolean;
+  dictationEnabled: boolean;
   discoveryAvailable: boolean;
   runnerId: string;
   generation?: number;
@@ -45,6 +46,7 @@ export const useSlashCommands = ({
   draft,
   setDraft,
   disabled,
+  dictationEnabled,
   discoveryAvailable,
   runnerId,
   generation,
@@ -57,8 +59,11 @@ export const useSlashCommands = ({
 }: SlashCommandsOptions) => {
   const [remoteCommands, setCommands] = useState<SlashCommandOption[]>([]);
   const commands = useMemo(
-    () => [...remoteCommands.filter((command) => command.name !== 'voice'), ...localCommands],
-    [remoteCommands]
+    () =>
+      dictationEnabled
+        ? [...remoteCommands.filter((command) => command.name !== 'voice'), ...localCommands]
+        : remoteCommands,
+    [remoteCommands, dictationEnabled]
   );
   const [index, setIndex] = useState(-1);
   const [dismissedDraft, setDismissedDraft] = useState<string | null>(null);
@@ -97,8 +102,8 @@ export const useSlashCommands = ({
   ]);
 
   const suggestions = useMemo(
-    () => filterCommands(disabled ? localCommands : commands, draft),
-    [commands, draft, disabled]
+    () => filterCommands(disabled ? (dictationEnabled ? localCommands : []) : commands, draft),
+    [commands, draft, disabled, dictationEnabled]
   );
   const open = dismissedDraft !== draft && suggestions.length > 0;
   const trimmedDraft = draft.trimStart();
@@ -168,7 +173,8 @@ export const useSlashCommands = ({
       slashCommandIndex: index,
       slashCommandSuggestions: suggestions,
       slashCommandSuggestionsOpen: open,
-      slashUsageHint: disabled && activeCommand?.name !== 'voice' ? '' : placeholder,
+      slashUsageHint:
+        disabled && !(dictationEnabled && activeCommand?.name === 'voice') ? '' : placeholder,
       onDraftKeyDown: onKeyDown,
       onSelectSlashCommand: select,
     },

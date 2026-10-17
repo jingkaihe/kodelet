@@ -1874,6 +1874,7 @@ const ChatPage: React.FC = () => {
     setDraft,
     // Discovered commands can queue during a run; keep their suggestions visible.
     disabled: steering,
+    dictationEnabled: dictation.enabled,
     discoveryAvailable: Boolean(
       isRemoteConversation && runnerWorkspaceAvailable && currentRunner?.workspaceDiscovery
     ),
@@ -1894,7 +1895,9 @@ const ChatPage: React.FC = () => {
   // text, such as a file path, is ordinary steering.
   const isQueueableCommand = (message: string): boolean => {
     const name = slashCommandName(message);
-    return name !== undefined && name !== 'voice' && slashCommandNames.has(name);
+    return (
+      name !== undefined && !(dictation.enabled && name === 'voice') && slashCommandNames.has(name)
+    );
   };
 
   useEffect(() => {
@@ -1966,7 +1969,7 @@ const ChatPage: React.FC = () => {
       : undefined;
 
   const canSubmit =
-    ((!conversationId || isRemoteConversation) && isVoiceCommand(draft)) ||
+    (dictation.enabled && (!conversationId || isRemoteConversation) && isVoiceCommand(draft)) ||
     (isRemoteConversation &&
       (currentConversationIsStreaming
         ? draft.trim().length > 0
@@ -2089,6 +2092,7 @@ const ChatPage: React.FC = () => {
     let action: (() => void) | undefined;
     if (event.altKey) {
       if (
+        !dictation.enabled ||
         !event.shiftKey ||
         event.ctrlKey ||
         event.metaKey ||
