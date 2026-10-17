@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.8.7-beta
+
+Added opt-in Web UI microphone dictation through the microphone button, `/voice`, or `Alt/⌥+Shift+V`, with a live waveform and transcription previews after 2.5 seconds of silence. Done / Enter inserts the result into the composer without sending a message; Cancel / Esc leaves the draft unchanged. Dictation survives runner reconnects and warns before accepting an earlier preview when the final transcription fails.
+
+Added server-side transcription using an OpenAI profile independently of the active chat profile. Enable it with `transcription.enabled: true` and `transcription.profile: <name>`, then restart the server. OpenAI API profiles default to `gpt-4o-mini-transcribe` and support a profile-level `transcription_model` override. Experimental Codex transcription uses server-side `kodelet codex login` credentials and requires omitting `transcription_model`; use an OpenAI API profile if ChatGPT denies access.
+
+Dictation requires HTTPS or localhost and microphone permission, with recordings limited to ten minutes or 20 MiB, whichever comes first. Audio is uploaded automatically at pauses, retranscribing the whole recording so far; OpenAI API usage is billed separately from ChatGPT. Kodelet does not persist audio, but cancellation cannot retract an upload already received by the provider. TUI recording is not yet supported.
+
+Improved Web UI performance in long conversations by avoiding full-history cloning during streaming, reusing unchanged message renders, and deferring collapsed tool and code-execution details until first opened while preserving nested fold choices.
+
+Fixed discovered slash-command suggestions disappearing during active runs and keyboard focus escaping Web UI dialogs when Tab or Shift+Tab starts from the dialog container.
+
 ## 0.8.6-beta
 
 Added the `agent.finished` extension lifecycle event and typed TypeScript SDK payloads, reporting the final status, reason, and optional error once per started run on a handled exit, after all continuations. It covers success, failure, cancellation, deadline expiry, and turn limits; turn limits count as success and deadline expiry counts as cancellation. Unlike `agent.end`, it cannot continue the run, and resource reload does not emit it. Abrupt process termination may prevent delivery.
