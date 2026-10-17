@@ -109,12 +109,7 @@ func (s *Server) handleTranscription(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, status, err.Error(), nil)
 		return
 	}
-	text := strings.TrimSpace(result.Text)
-	if text == "" {
-		s.writeErrorResponse(w, http.StatusUnprocessableEntity, "No speech was recognized. Try recording again.", nil)
-		return
-	}
-	s.writeJSONResponse(w, transcriptiontypes.Result{Text: text})
+	s.writeJSONResponse(w, result)
 }
 
 func readTranscriptionUpload(r *http.Request) (transcriptiontypes.Request, error) {

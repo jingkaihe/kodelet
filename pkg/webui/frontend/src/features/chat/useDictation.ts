@@ -263,13 +263,11 @@ export function useDictation({
           }),
         ]);
         if (!current()) return;
-        const text = result.text.trim();
-        if (!text) throw new Error('No speech was recognized in the recording.');
         // Each response covers the whole recording so far, including any
         // corrections to earlier words. Never concatenate cumulative results.
-        capture.transcript = text;
+        capture.transcript = result.text;
         capture.uploadError = null;
-        setTranscript(text);
+        setTranscript(result.text);
         setUploadError(null);
       } catch (cause) {
         if (!current()) return;

@@ -291,19 +291,18 @@ func TestTranscriptionRejectsInvalidUploads(t *testing.T) {
 
 func TestTranscriptionProviderErrors(t *testing.T) {
 	for _, test := range []struct {
-		name, text string
-		err        error
-		status     int
+		name   string
+		err    error
+		status int
 	}{
-		{"provider failure", "", errors.New("transcription provider unavailable"), http.StatusBadGateway},
-		{"provider deadline", "", errors.Wrap(context.DeadlineExceeded, "transcription timed out"), http.StatusGatewayTimeout},
-		{"no speech sentinel", "", errors.Wrap(transcriptiontypes.ErrNoSpeech, "transcription"), http.StatusUnprocessableEntity},
-		{"empty transcript", " \n", nil, http.StatusUnprocessableEntity},
+		{"provider failure", errors.New("transcription provider unavailable"), http.StatusBadGateway},
+		{"provider deadline", errors.Wrap(context.DeadlineExceeded, "transcription timed out"), http.StatusGatewayTimeout},
+		{"no speech sentinel", errors.Wrap(transcriptiontypes.ErrNoSpeech, "transcription"), http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := transcriptionProtocolServer(&protocolTranscriber{
 				transcribe: func(context.Context, transcriptiontypes.Request) (transcriptiontypes.Result, error) {
-					return transcriptiontypes.Result{Text: test.text}, test.err
+					return transcriptiontypes.Result{}, test.err
 				},
 			})
 			response := httptest.NewRecorder()

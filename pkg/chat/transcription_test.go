@@ -21,7 +21,7 @@ func TestClientTranscriptionResponseErrors(t *testing.T) {
 	}{
 		{"provider error", http.StatusBadGateway, `{"error":"provider unavailable"}`, "provider unavailable"},
 		{"malformed JSON", http.StatusOK, "{", "invalid transcription response"},
-		{"blank text", http.StatusOK, `{"text":" \n"}`, "no speech was recognized"},
+		{"no speech", http.StatusUnprocessableEntity, `{"error":"no speech was recognized in the recording"}`, "no speech was recognized"},
 		{"oversized", http.StatusOK, strings.Repeat(" ", int(transcriptiontypes.MaxResponseBytes)+1), "size limit"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

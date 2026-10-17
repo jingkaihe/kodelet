@@ -450,18 +450,6 @@ describe('useDictation', () => {
     expect(onComplete).toHaveBeenCalledWith('spoken words');
   });
 
-  it('treats an empty recognized transcript as a visible failure rather than silently dropping it', async () => {
-    vi.mocked(apiService.transcribeAudio).mockResolvedValue({ text: ' \n ' });
-    const { result } = await ready();
-    await act(async () => result.current.start());
-    await act(async () => recorderOptions.onSnapshot(audioFile()));
-    expect(result.current.error).toMatch(/no speech/i);
-    await act(async () => result.current.stop());
-    expect(result.current.phase).toBe('review');
-    expect(onComplete).not.toHaveBeenCalled();
-    expect(apiService.transcribeAudio).toHaveBeenCalledTimes(1);
-  });
-
   it('prevents duplicate permission requests and ignores completion of canceled audio initialization', async () => {
     const initialization = deferred<void>();
     recorderStart.mockReturnValue(initialization.promise);

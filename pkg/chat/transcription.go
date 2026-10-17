@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"strings"
 
 	transcriptiontypes "github.com/jingkaihe/kodelet/pkg/types/transcription"
 	"github.com/pkg/errors"
@@ -83,10 +82,6 @@ func (r *Client) TranscribeAudio(ctx context.Context, audio []byte, filename, co
 	}
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return result, errors.Wrap(err, "invalid transcription response")
-	}
-	result.Text = strings.TrimSpace(result.Text)
-	if result.Text == "" {
-		return result, errors.New("no speech was recognized")
 	}
 	return result, nil
 }
