@@ -366,3 +366,57 @@ func TestRealtimeUsesExistingApprovalOwner(t *testing.T) {
 		}
 	}
 }
+
+// gatedRecorder blocks the first stream write so a test can make queued events
+// and call cancellation ready at the same time.
+type gatedRecorder struct {
+	*httptest.ResponseRecorder
+	gate chan struct{}
+	once sync.Once
+}
+
+func (g *gatedRecorder) Write(p []byte) (int, error) {
+	g.once.Do(func() { <-g.gate })
+	return g.ResponseRecorder.Write(p)
+}
+
+func TestRealtimeEventsDeliverQueuedErrorBeforeClosed(t *testing.T) {
+	s, session := realtimeTestServer(t)
+	// Without draining, select picks cancellation half the time.
+	for range 20 {
+		ctx, cancel := context.WithCancel(t.Context())
+		call := &realtimeCall{
+			server: s, id: convtypes.GenerateID(), ownerID: "owner", clientID: "browser",
+			chat: chat.ChatRequest{ConversationID: "saved"}, ctx: ctx, cancel: cancel, session: session,
+			events: make(chan realtimeEvent, 16), handoffs: make(map[string]struct{}),
+		}
+		s.realtimeMu.Lock()
+		if s.realtimeCalls == nil {
+			s.realtimeCalls = make(map[string]*realtimeCall)
+		}
+		s.realtimeCalls[call.id] = call
+		s.realtimeMu.Unlock()
+		call.emit(realtimeEvent{Kind: "state", Text: "connected"})
+		w := &gatedRecorder{ResponseRecorder: httptest.NewRecorder(), gate: make(chan struct{})}
+		r := mux.SetURLVars(realtimeRequest(t, "GET", "/events", "", "browser"), map[string]string{"id": call.id})
+		done := make(chan struct{})
+		go func() { s.handleRealtimeEvents(w, r); close(done) }()
+		require.Eventually(t, func() bool {
+			call.mu.Lock()
+			defer call.mu.Unlock()
+			return call.attached
+		}, time.Second, time.Millisecond)
+		call.emit(realtimeEvent{Kind: "error", Text: "Could not save the voice transcript. Live voice has stopped."})
+		call.close()
+		close(w.gate)
+		<-done
+
+		var kinds []string
+		for line := range strings.SplitSeq(strings.TrimSpace(w.Body.String()), "\n") {
+			var event realtimeEvent
+			require.NoError(t, json.Unmarshal([]byte(line), &event))
+			kinds = append(kinds, event.Kind)
+		}
+		require.Equal(t, []string{"state", "error", "closed"}, kinds)
+	}
+}

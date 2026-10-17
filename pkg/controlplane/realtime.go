@@ -285,7 +285,14 @@ func (s *Server) handleRealtimeEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-call.ctx.Done():
-			event = &realtimeEvent{Kind: "closed", ConversationID: call.chat.ConversationID}
+			// Deliver queued events first: the last one usually explains why
+			// the call ended, and select would otherwise drop it at random.
+			select {
+			case value := <-call.events:
+				event = &value
+			default:
+				event = &realtimeEvent{Kind: "closed", ConversationID: call.chat.ConversationID}
+			}
 		}
 		_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		var err error
