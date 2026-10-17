@@ -1,5 +1,5 @@
 import { Check, Mic } from 'lucide-react';
-import { useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
+import { type RefObject, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import { useDialogFocus } from '../../features/chat/useDialogFocus';
 import type { Phase } from '../../features/chat/useDictation';
 import Spinner from '../Spinner';
@@ -8,7 +8,7 @@ interface DictationDialogProps {
   phase: Phase;
   error: string | null;
   elapsedSeconds: number;
-  levels: number[];
+  levelsRef: RefObject<number[]>;
   transcript: string;
   transcribing: boolean;
   stop: () => void;
@@ -20,7 +20,7 @@ const DictationDialog = ({
   phase,
   error,
   elapsedSeconds,
-  levels,
+  levelsRef,
   transcript,
   transcribing,
   stop,
@@ -34,6 +34,7 @@ const DictationDialog = ({
   const displayedLevels = useRef<number[]>([]);
 
   const paintWaveform = useEffectEvent((blend: number, active: boolean) => {
+    const levels = levelsRef.current;
     Array.from(waveformRef.current?.children ?? []).forEach((bar, slot) => {
       const sample = levels[slot];
       // Soften isolated peaks without changing the audio used for transcription.
@@ -143,7 +144,7 @@ const DictationDialog = ({
             data-recording={phase === 'recording'}
             ref={waveformRef}
           >
-            {levels.map((_, slot) => (
+            {levelsRef.current.map((_, slot) => (
               <span
                 className="dictation-waveform-bar"
                 // biome-ignore lint/suspicious/noArrayIndexKey: Bars are fixed display slots, not sample identities.

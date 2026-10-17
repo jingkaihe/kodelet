@@ -33,8 +33,6 @@ interface DictationState {
   uploadError: string | null;
   upload?: AbortController;
   elapsedSeconds: number;
-  levels: number[];
-  speaking: boolean;
 }
 
 const idleState: DictationState = {
@@ -43,8 +41,6 @@ const idleState: DictationState = {
   error: null,
   uploadError: null,
   elapsedSeconds: 0,
-  levels: Array(waveformLength).fill(0),
-  speaking: false,
 };
 
 interface Capture {
@@ -76,6 +72,7 @@ export function useDictation({
   const [capabilities, setCapabilities] = useState<TranscriptionCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [state, setState] = useState(idleState);
+  const levelsRef = useRef<number[]>(Array(waveformLength).fill(0));
   const captureRef = useRef<Capture | null>(null);
   const targetRef = useRef(targetKey);
   targetRef.current = targetKey;
@@ -170,6 +167,7 @@ export function useDictation({
       finish: () => {},
     };
     captureRef.current = capture;
+    levelsRef.current.fill(0);
     setState(capture.state);
     const onComplete = onStart(fromCommand);
     const current = () => captureRef.current === capture && targetRef.current === capture.targetKey;
@@ -198,7 +196,7 @@ export function useDictation({
       }
       if (!recording()) return;
       clearInterval(capture.timer);
-      update({ phase: commitRequested ? 'flushing' : 'flushing-review', speaking: false });
+      update({ phase: commitRequested ? 'flushing' : 'flushing-review' });
       void (async () => {
         try {
           await capture.recorder?.finish();
@@ -270,12 +268,9 @@ export function useDictation({
         maxAudioBytes: capabilities.maxAudioBytes,
         maxDurationSeconds: capabilities.maxDurationSeconds,
         onLevel: (level) => {
-          if (current() && recording())
-            update({ levels: [...capture.state.levels.slice(1), level] });
+          if (current() && recording()) levelsRef.current = [...levelsRef.current.slice(1), level];
         },
-        onSpeech: (active) => {
-          if (current() && recording()) update({ speaking: active });
-        },
+        onSpeech: () => {},
         onSnapshot: (file) => {
           if (!current() || ['finishing', 'review'].includes(capture.state.phase)) return;
           // Keep one in-flight upload and only the newest waiting snapshot.
@@ -294,7 +289,7 @@ export function useDictation({
         onError: (message) => {
           if (!current()) return;
           clearInterval(capture.timer);
-          update({ phase: 'review', error: message, speaking: false });
+          update({ phase: 'review', error: message });
           capture.recorder?.cancel();
         },
       };
@@ -327,7 +322,8 @@ export function useDictation({
       capture.timer = setInterval(() => {
         if (!current()) return;
         const elapsed = (Date.now() - started) / 1000;
-        update({ elapsedSeconds: Math.floor(elapsed) });
+        const elapsedSeconds = Math.floor(elapsed);
+        if (elapsedSeconds !== capture.state.elapsedSeconds) update({ elapsedSeconds });
         // Sample counts bound audio memory; wall time also bounds stalled capture.
         if (elapsed >= duration) recorderOptions.onLimit();
       }, 250);
@@ -363,8 +359,7 @@ export function useDictation({
     reason,
     error: [state.error, state.uploadError].filter(Boolean).join(' ') || null,
     elapsedSeconds: state.elapsedSeconds,
-    levels: state.levels,
-    speaking: state.speaking,
+    levelsRef,
     transcript: state.transcript,
     transcribing: !!state.upload,
     start: () => void start(),

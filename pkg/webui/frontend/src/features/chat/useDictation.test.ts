@@ -149,8 +149,7 @@ describe('useDictation', () => {
       recorderOptions.onSpeech(true);
       recorderOptions.onSnapshot(file);
     });
-    expect(result.current.levels).toContain(0.65);
-    expect(result.current.speaking).toBe(true);
+    expect(result.current.levelsRef.current).toContain(0.65);
     expect(result.current.transcript).toBe('spoken words');
     expect(result.current.transcribing).toBe(false);
     expect(result.current.phase).toBe('recording');
@@ -162,6 +161,36 @@ describe('useDictation', () => {
     expect(stopTrack).toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledExactlyOnceWith('spoken words');
     expect(result.current.phase).toBe('idle');
+  });
+
+  it('updates waveform samples without rendering and publishes elapsed time only once a second', async () => {
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders++;
+      return useDictation({ targetKey: 'conversation-one', onStart });
+    });
+    await waitFor(() => expect(result.current.reason).toBeNull());
+    vi.useFakeTimers();
+    await act(async () => result.current.start());
+    const initialRenders = renders;
+    const levelsRef = result.current.levelsRef;
+    act(() => {
+      for (let sample = 0; sample < 20; sample++) recorderOptions.onLevel(0.5);
+      recorderOptions.onSpeech(true);
+      vi.advanceTimersByTime(750);
+    });
+    expect(levelsRef.current).toContain(0.5);
+    expect(renders).toBe(initialRenders);
+    act(() => vi.advanceTimersByTime(250));
+    expect(result.current.elapsedSeconds).toBe(1);
+    expect(renders).toBe(initialRenders + 1);
+    act(() => vi.advanceTimersByTime(750));
+    expect(renders).toBe(initialRenders + 1);
+    expect(result.current.levelsRef).toBe(levelsRef);
+    act(() => result.current.cancel());
+    await act(async () => result.current.start());
+    expect(result.current.levelsRef).toBe(levelsRef);
+    expect(levelsRef.current.every((level) => level === 0)).toBe(true);
   });
 
   it('replaces a queued snapshot with the final flush and waits before committing the complete text', async () => {

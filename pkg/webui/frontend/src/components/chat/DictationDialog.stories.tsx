@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { type ComponentProps, useEffect, useState } from 'react';
+import { type ComponentProps, useEffect, useRef } from 'react';
 import { fn } from 'storybook/test';
 import DictationDialog from './DictationDialog';
 
@@ -9,9 +9,9 @@ type StoryProps = ComponentProps<typeof DictationDialog> & {
 
 // Exercise the real modal with simulated input; never open the microphone or call a provider.
 const SimulatedDictation = (args: StoryProps) => {
-  const [levels, setLevels] = useState(args.levels);
+  const levelsRef = useRef(args.levelsRef.current);
   useEffect(() => {
-    setLevels(args.levels);
+    levelsRef.current = args.levelsRef.current;
     if (args.phase !== 'recording') return;
     const started = performance.now();
     const timer = window.setInterval(() => {
@@ -27,11 +27,11 @@ const SimulatedDictation = (args: StoryProps) => {
         ? 0.12 +
           0.58 * Math.abs(Math.sin(seconds * 6.7)) * (0.6 + 0.4 * Math.sin(seconds * 17) ** 2)
         : 0;
-      setLevels((history) => [...history.slice(1), level]);
+      levelsRef.current = [...levelsRef.current.slice(1), level];
     }, 50);
     return () => window.clearInterval(timer);
-  }, [args.input, args.levels, args.phase]);
-  return <DictationDialog {...args} levels={levels} />;
+  }, [args.input, args.levelsRef, args.phase]);
+  return <DictationDialog {...args} levelsRef={levelsRef} />;
 };
 
 const meta = {
@@ -49,7 +49,7 @@ const meta = {
     phase: 'recording',
     error: null,
     elapsedSeconds: 12,
-    levels: Array<number>(32).fill(0),
+    levelsRef: { current: Array<number>(32).fill(0) },
     transcript: '',
     transcribing: false,
     input: 'speech and pauses',
