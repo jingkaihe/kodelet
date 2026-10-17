@@ -255,24 +255,33 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
   it('preserves recording and insertion when the same runner reconnects', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    const recorder = prepareDictation();
-    mockTranscribeAudio.mockResolvedValue({ text: 'Still recording' });
-    await renderChatWithRunner();
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
-    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ generation: 2 })] });
-    const polls = mockGetRunners.mock.calls.length;
-    await act(async () => vi.advanceTimersByTime(5000));
-    expect(mockGetRunners).toHaveBeenCalledTimes(polls + 1);
-    expect(dialog).toBeInTheDocument();
-    expect(recorder.cancel).not.toHaveBeenCalled();
-    expect(createDictationRecorder).toHaveBeenCalledOnce();
-    await act(async () => recorder.emitSnapshot());
-    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: /Done/ })));
-    await waitFor(() => expect(screen.getByTestId('composer-textarea')).toHaveFocus());
-    expect(screen.getByTestId('composer-textarea')).toHaveValue('Still recording');
-    expect(mockStreamChat).not.toHaveBeenCalled();
+    try {
+      const recorder = prepareDictation();
+      mockTranscribeAudio.mockResolvedValue({ text: 'Still recording' });
+      await renderChatWithRunner();
+      fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
+      await waitFor(() =>
+        expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled()
+      );
+      await waitFor(() => expect(dialog).toHaveFocus());
+      mockGetRunners.mockResolvedValue({ runners: [makeRunner({ generation: 2 })] });
+      const polls = mockGetRunners.mock.calls.length;
+      await act(async () => vi.advanceTimersByTime(5000));
+      expect(mockGetRunners).toHaveBeenCalledTimes(polls + 1);
+      expect(dialog).toBeInTheDocument();
+      expect(recorder.cancel).not.toHaveBeenCalled();
+      expect(createDictationRecorder).toHaveBeenCalledOnce();
+      // Focus changes do not trigger DOM mutations; let waitFor's interval run again.
+      vi.useRealTimers();
+      await act(async () => recorder.emitSnapshot());
+      await userEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
+      await waitFor(() => expect(screen.getByTestId('composer-textarea')).toHaveFocus());
+      expect(screen.getByTestId('composer-textarea')).toHaveValue('Still recording');
+      expect(mockStreamChat).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not capture dictation shortcuts while typing, composing, in another dialog or in the terminal', async () => {
