@@ -178,9 +178,10 @@ export function useDictation({
     const pending = () => !!capture.state.upload || !!capture.pendingSnapshot;
     const commit = () => {
       if (!current()) return;
-      const text = capture.state.transcript;
+      const { transcript, error, uploadError } = capture.state;
       cancel();
-      if (text) onComplete(text);
+      if (transcript) onComplete(transcript);
+      else update({ error: error || uploadError || 'No speech detected.' });
     };
     const settled = () => {
       if (!current() || capture.state.phase !== 'finishing' || pending()) return;

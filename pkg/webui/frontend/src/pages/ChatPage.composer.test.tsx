@@ -328,8 +328,11 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(focus).toHaveBeenCalledOnce();
     expect(textarea).toHaveValue('Existing draft');
     expect(textarea.selectionStart).toBe(8);
+    expect(screen.getByRole('alert')).toHaveTextContent('No speech detected.');
     await user.keyboard(' updated');
     expect(textarea).toHaveValue('Existing updated draft');
+    await user.click(screen.getByRole('button', { name: 'Dismiss dictation message' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
@@ -359,6 +362,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(recorder.cancel).toHaveBeenCalled();
     expect(recorder.finish).not.toHaveBeenCalled();
     expect(textarea).toHaveValue(' /voice ');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(mockStreamChat).not.toHaveBeenCalled();
     expect(mockSteerConversation).not.toHaveBeenCalled();
   });
