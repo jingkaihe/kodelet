@@ -9,7 +9,7 @@ import {
 } from 'react';
 import apiService from '../../services/api';
 import type { TranscriptionCapabilities } from '../../types';
-import { createDictationRecorder } from './dictationAudio';
+import { createDictationRecorder, type DictationRecorderOptions } from './dictationAudio';
 
 type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
 
@@ -17,6 +17,7 @@ const maxAudioBytes = 20 * 1024 * 1024;
 const maxDurationSeconds = 120;
 const uploadTimeoutMs = 120_000;
 const waveformLength = 32;
+const capabilityErrorMessage = 'Could not check dictation availability. Try again.';
 
 function mediaSupportReason(): string | null {
   if (!globalThis.isSecureContext) return 'Microphone dictation requires HTTPS or localhost.';
@@ -90,23 +91,42 @@ export function useDictation({
   const targetRef = useRef(targetKey);
   targetRef.current = targetKey;
   const pendingCaret = useRef<{ targetKey: string; position: number } | null>(null);
+  const capabilityRequest = useRef<AbortController | null>(null);
 
-  useEffect(() => {
+  const refreshCapabilities = useCallback(async () => {
+    capabilityRequest.current?.abort();
     const controller = new AbortController();
-    void apiService.getTranscriptionCapabilities(controller.signal).then(
-      (result) => {
-        if (!controller.signal.aborted) setCapabilities(result);
-      },
-      () => {
-        if (!controller.signal.aborted) {
-          setCapabilityError('Could not check dictation availability. Reload to try again.');
-        }
-      }
-    );
-    return () => controller.abort();
+    capabilityRequest.current = controller;
+    try {
+      const result = await apiService.getTranscriptionCapabilities(controller.signal);
+      if (controller.signal.aborted) return null;
+      setCapabilities(result);
+      setCapabilityError(null);
+      return result;
+    } catch {
+      if (!controller.signal.aborted) setCapabilityError(capabilityErrorMessage);
+      return null;
+    } finally {
+      if (capabilityRequest.current === controller) capabilityRequest.current = null;
+    }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(targetKey): Navigation cancels discovery; refresh it for the new draft owner.
+  useEffect(() => {
+    const refresh = () => {
+      // Returning from microphone permission must not cancel the startup check.
+      if (!captureRef.current) void refreshCapabilities();
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      capabilityRequest.current?.abort();
+    };
+  }, [refreshCapabilities, targetKey]);
+
   const discard = useCallback(() => {
+    capabilityRequest.current?.abort();
     const capture = captureRef.current;
     captureRef.current = null;
     pendingCaret.current = null;
@@ -178,12 +198,13 @@ export function useDictation({
 
   const start = async (fromCommand = false) => {
     if (captureRef.current) return;
-    if (reason || !capabilities) {
+    if (!enabled) {
       setError(reason);
       return;
     }
-    if (!capabilities.mimeTypes.includes('audio/wav')) {
-      setError('The server does not support WAV audio for continuous dictation.');
+    const unsupported = mediaSupportReason();
+    if (unsupported) {
+      setError(unsupported);
       return;
     }
     const capture: Capture = {
@@ -341,13 +362,9 @@ export function useDictation({
     setSpeaking(false);
     setPhase('requesting');
     try {
-      // Create/resume AudioContext in the user gesture, before awaiting permission.
-      capture.recorder = createDictationRecorder({
-        maxAudioBytes: Math.min(capabilities.maxAudioBytes || maxAudioBytes, maxAudioBytes),
-        maxDurationSeconds: Math.min(
-          capabilities.maxDurationSeconds || maxDurationSeconds,
-          maxDurationSeconds
-        ),
+      const recorderOptions: DictationRecorderOptions = {
+        maxAudioBytes,
+        maxDurationSeconds,
         onLevel: (level) => {
           if (current() && !capture.stopping) setLevels((value) => [...value.slice(1), level]);
         },
@@ -382,7 +399,24 @@ export function useDictation({
           setSpeaking(false);
           setPhase('review');
         },
-      });
+      };
+      // Resume in the user gesture, before the network check. The recorder reads
+      // limits only in start(stream), after the fresh capabilities arrive.
+      capture.recorder = createDictationRecorder(recorderOptions);
+      const fresh = await refreshCapabilities();
+      if (!current()) return;
+      if (!fresh) throw new Error(capabilityErrorMessage);
+      if (!fresh.enabled || !fresh.available) {
+        throw new Error(fresh.reason || 'Dictation is not configured on this server.');
+      }
+      if (!fresh.mimeTypes.includes('audio/wav')) {
+        throw new Error('The server does not support WAV audio for continuous dictation.');
+      }
+      recorderOptions.maxAudioBytes = Math.min(fresh.maxAudioBytes || maxAudioBytes, maxAudioBytes);
+      recorderOptions.maxDurationSeconds = Math.min(
+        fresh.maxDurationSeconds || maxDurationSeconds,
+        maxDurationSeconds
+      );
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!current()) {
         stream.getTracks().forEach((track) => {
@@ -395,10 +429,7 @@ export function useDictation({
       if (!current() || capture.stopping) return;
       setPhase('recording');
       const started = Date.now();
-      const duration = Math.min(
-        capabilities.maxDurationSeconds || maxDurationSeconds,
-        maxDurationSeconds
-      );
+      const duration = recorderOptions.maxDurationSeconds;
       capture.timer = setInterval(() => {
         if (!current()) return;
         const elapsed = (Date.now() - started) / 1000;

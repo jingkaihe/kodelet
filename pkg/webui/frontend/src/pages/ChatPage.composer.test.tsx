@@ -95,9 +95,11 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(
       fireEvent.keyDown(textarea, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
     ).toBe(false);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
     fireEvent.click(screen.getByRole('button', { name: running ? 'Steer' : 'Send' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
-    expect(createDictationRecorder).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(mockTranscribeAudio).not.toHaveBeenCalled();
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(mockStreamChat).toHaveBeenCalledTimes(running ? 1 : 0);
     expect(

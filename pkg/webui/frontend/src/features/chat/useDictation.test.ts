@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, fireEvent, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
@@ -81,6 +81,59 @@ afterEach(() => {
 });
 
 describe('useDictation', () => {
+  it('refreshes unavailable credentials on start while preparing audio synchronously', async () => {
+    vi.mocked(apiService.getTranscriptionCapabilities).mockResolvedValueOnce({
+      ...capability,
+      available: false,
+      reason: 'Sign in to Codex first.',
+    });
+    const { result } = renderDictation();
+    await waitFor(() => expect(result.current.reason).toContain('Sign in'));
+    const refreshed = deferred<typeof capability>();
+    vi.mocked(apiService.getTranscriptionCapabilities).mockReturnValueOnce(refreshed.promise);
+    act(() => {
+      result.current.start();
+      result.current.start();
+      fireEvent.focus(window);
+    });
+    expect(createRecorder).toHaveBeenCalledTimes(1);
+    expect(apiService.getTranscriptionCapabilities).toHaveBeenCalledTimes(2);
+    expect(createRecorder.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(apiService.getTranscriptionCapabilities).mock.invocationCallOrder[1]
+    );
+    expect(getUserMedia).not.toHaveBeenCalled();
+    await act(async () => refreshed.resolve({ ...capability, maxDurationSeconds: 60 }));
+    expect(result.current.phase).toBe('recording');
+    expect(result.current.reason).toBeNull();
+    expect(recorderOptions.maxDurationSeconds).toBe(60);
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries failed discovery on focus and ignores superseded or unmounted responses', async () => {
+    vi.mocked(apiService.getTranscriptionCapabilities).mockRejectedValueOnce(new Error('offline'));
+    const hook = renderDictation();
+    await waitFor(() => expect(hook.result.current.reason).toContain('Try again'));
+    const stale = deferred<typeof capability>();
+    vi.mocked(apiService.getTranscriptionCapabilities).mockReturnValueOnce(stale.promise);
+    act(() => fireEvent.focus(window));
+    const signal = vi.mocked(apiService.getTranscriptionCapabilities).mock.calls[1][0];
+    await act(async () => fireEvent.focus(window));
+    expect(signal?.aborted).toBe(true);
+    expect(hook.result.current.reason).toBeNull();
+    await act(async () => stale.resolve({ ...capability, enabled: false, available: false }));
+    expect(hook.result.current.enabled).toBe(true);
+    const pending = deferred<typeof capability>();
+    vi.mocked(apiService.getTranscriptionCapabilities).mockReturnValueOnce(pending.promise);
+    act(() => fireEvent.focus(window));
+    const lastSignal = vi.mocked(apiService.getTranscriptionCapabilities).mock.calls[3][0];
+    hook.unmount();
+    expect(lastSignal?.aborted).toBe(true);
+    await act(async () => pending.resolve({ ...capability, enabled: false, available: false }));
+    fireEvent.focus(window);
+    expect(apiService.getTranscriptionCapabilities).toHaveBeenCalledTimes(4);
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
   it('previews pause-triggered text while listening and inserts at the caret only on Done', async () => {
     const { result } = await ready();
     const editor = document.createElement('textarea');
@@ -162,7 +215,7 @@ describe('useDictation', () => {
     const permission = deferred<MediaStream>();
     getUserMedia.mockReturnValue(permission.promise);
     const hook = await ready();
-    act(() => hook.result.current.start());
+    await act(async () => hook.result.current.start());
     expect(hook.result.current.phase).toBe('requesting');
     if (action === 'unmount') hook.unmount();
     else if (action === 'switch') hook.rerender({ targetKey: 'conversation-two' });
@@ -172,6 +225,23 @@ describe('useDictation', () => {
     expect(stopTrack).toHaveBeenCalled();
     expect(recorderStart).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending availability check without requesting the microphone', async () => {
+    const hook = await ready();
+    const check = deferred<typeof capability>();
+    vi.mocked(apiService.getTranscriptionCapabilities).mockReturnValueOnce(check.promise);
+    act(() => hook.result.current.start());
+    const signal = vi.mocked(apiService.getTranscriptionCapabilities).mock.calls[1][0];
+    act(() => hook.result.current.cancel());
+    expect(signal?.aborted).toBe(true);
+    expect(recorderCancel).toHaveBeenCalled();
+    await act(async () => check.resolve({ ...capability, enabled: false, available: false }));
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(apiService.transcribeAudio).not.toHaveBeenCalled();
+    expect(hook.result.current.phase).toBe('idle');
+    expect(hook.result.current.enabled).toBe(true);
+    expect(hook.result.current.error).toBeNull();
   });
 
   it.each([
@@ -341,6 +411,7 @@ describe('useDictation', () => {
 
   it.each([
     'constructor',
+    'discovery',
     'permission',
     'start',
   ])('preserves the draft after a %s failure', async (failure) => {
@@ -352,12 +423,23 @@ describe('useDictation', () => {
       getUserMedia.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
     if (failure === 'start') recorderStart.mockRejectedValue(new Error('Audio unavailable'));
     const { result } = await ready('/voice');
+    if (failure === 'discovery')
+      vi.mocked(apiService.getTranscriptionCapabilities).mockRejectedValueOnce(
+        new Error('offline')
+      );
     await act(async () => result.current.handleCommand('/voice'));
     expect(result.current.error).toBeTruthy();
     expect(result.current.draft).toBe('/voice');
     expect(apiService.transcribeAudio).not.toHaveBeenCalled();
     if (failure === 'constructor') expect(getUserMedia).not.toHaveBeenCalled();
     else expect(recorderCancel).toHaveBeenCalled();
+    if (failure === 'discovery') {
+      expect(getUserMedia).not.toHaveBeenCalled();
+      await act(async () => result.current.start());
+      expect(result.current.phase).toBe('recording');
+      expect(result.current.error).toBeNull();
+      expect(result.current.reason).toBeNull();
+    }
   });
 
   it.each([
@@ -416,6 +498,7 @@ describe('useDictation', () => {
 
   it.each([
     'disabled',
+    'disabled after mount',
     'unavailable',
     'insecure',
     'unsupported',
@@ -428,12 +511,15 @@ describe('useDictation', () => {
         enabled: false,
         available: false,
       });
-    if (condition === 'unavailable')
-      vi.mocked(apiService.getTranscriptionCapabilities).mockResolvedValue({
-        ...capability,
-        available: false,
-        reason: 'Sign in to Codex first.',
-      });
+    if (condition === 'unavailable' || condition === 'disabled after mount')
+      vi.mocked(apiService.getTranscriptionCapabilities)
+        .mockResolvedValue({
+          ...capability,
+          enabled: condition !== 'disabled after mount',
+          available: false,
+          reason: 'Transcription is unavailable.',
+        })
+        .mockResolvedValueOnce(capability);
     if (condition === 'insecure') vi.stubGlobal('isSecureContext', false);
     if (condition === 'unsupported') vi.stubGlobal('AudioContext', undefined);
     if (condition === 'worklet') vi.stubGlobal('AudioWorkletNode', undefined);
@@ -444,11 +530,17 @@ describe('useDictation', () => {
       });
     const { result } = renderDictation('/voice');
     await waitFor(() => expect(result.current.reason).not.toBe('Checking dictation availability…'));
-    act(() => expect(result.current.handleCommand('/voice')).toBe(condition !== 'disabled'));
+    await act(async () =>
+      expect(result.current.handleCommand('/voice')).toBe(condition !== 'disabled')
+    );
     if (condition === 'disabled') expect(result.current.error).toBeNull();
     else expect(result.current.error).toBeTruthy();
     expect(getUserMedia).not.toHaveBeenCalled();
     expect(result.current.draft).toBe('/voice');
+    if (condition === 'disabled after mount') {
+      expect(result.current.enabled).toBe(false);
+      expect(result.current.handleCommand('/voice')).toBe(false);
+    }
   });
 
   it('recognizes only the local command name, including invalid arguments', () => {
