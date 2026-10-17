@@ -1797,7 +1797,7 @@ const ChatPage: React.FC = () => {
   );
   const sessionTargetKey = `runner:${currentRunnerID}:conversation:${sessionConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
-  const dictationTargetKey = `${sessionTargetKey}:environment:${currentEnvironmentProfile}`;
+  const dictationTargetKey = `runner:${currentRunnerID}:conversation:${sessionConversationId}:cwd:${currentCWDLabel}:environment:${currentEnvironmentProfile}`;
   const insertDictation = useEffectEvent(
     (text: string, startingDraft: string, caret: number, fromCommand: boolean) => {
       const unchanged = draft === startingDraft;

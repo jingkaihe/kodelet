@@ -14,9 +14,11 @@ import type { ChatStreamEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
+  makeRunner,
   mockGetChatSettings,
   mockGetConversation,
   mockGetConversations,
+  mockGetRunners,
   mockGetSlashCommands,
   mockGetTranscriptionCapabilities,
   mockNavigate,
@@ -242,6 +244,28 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(textarea).toHaveValue(`${prefix} continued${suffix}`);
     expect(mockStreamChat).toHaveBeenCalledTimes(running ? 1 : 0);
     expect(mockSteerConversation).not.toHaveBeenCalled();
+  });
+
+  it('preserves recording and insertion when the same runner reconnects', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const recorder = prepareDictation();
+    mockTranscribeAudio.mockResolvedValue({ text: 'Still recording' });
+    await renderChatWithRunner();
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner({ generation: 2 })] });
+    const polls = mockGetRunners.mock.calls.length;
+    await act(async () => vi.advanceTimersByTime(5000));
+    expect(mockGetRunners).toHaveBeenCalledTimes(polls + 1);
+    expect(dialog).toBeInTheDocument();
+    expect(recorder.cancel).not.toHaveBeenCalled();
+    expect(createDictationRecorder).toHaveBeenCalledOnce();
+    await act(async () => recorder.emitSnapshot());
+    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: /Done/ })));
+    await waitFor(() => expect(screen.getByTestId('composer-textarea')).toHaveFocus());
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Still recording');
+    expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
   it('does not capture dictation shortcuts while typing, composing, in another dialog or in the terminal', async () => {
