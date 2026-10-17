@@ -2,25 +2,37 @@ import { useEffect, useEffectEvent, useRef } from 'react';
 
 // Focus management for informational dialogs whose interactive elements are buttons.
 export const useDialogFocus = (
-  onClose: () => void,
-  returnFocusSelector: string,
-  preferReturnFocus = false
+  onClose: (() => void) | undefined,
+  returnFocus: string | (() => void)
 ) => {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const close = useEffectEvent(onClose);
+  const close = useEffectEvent((event: KeyboardEvent) => {
+    if (!onClose || event.isComposing || event.repeat) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  });
+  const restoreFocus = useEffectEvent((previousFocus: HTMLElement | null) => {
+    if (typeof returnFocus === 'function') return returnFocus();
+    const target = [previousFocus, ...document.querySelectorAll<HTMLElement>(returnFocus)].find(
+      (element) => element?.isConnected && !element.closest('[inert]')
+    );
+    target?.focus();
+  });
 
   useEffect(() => {
     const previousFocus =
       document.activeElement instanceof HTMLElement && document.activeElement !== document.body
         ? document.activeElement
         : null;
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(
+      () => (closeButtonRef.current ?? dialogRef.current)?.focus(),
+      0
+    );
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        close();
+        close(event);
         return;
       }
       if (event.key !== 'Tab') return;
@@ -46,18 +58,9 @@ export const useDialogFocus = (
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', handleKeyDown, true);
       // A menu trigger may unmount when the dialog opens. Restore focus after inert clears.
-      window.setTimeout(() => {
-        const matches = [...document.querySelectorAll<HTMLElement>(returnFocusSelector)];
-        const candidates = preferReturnFocus
-          ? [...matches, previousFocus]
-          : [previousFocus, ...matches];
-        const target = candidates.find(
-          (element) => element?.isConnected && !element.closest('[inert]')
-        );
-        target?.focus();
-      }, 0);
+      window.setTimeout(() => restoreFocus(previousFocus), 0);
     };
-  }, [returnFocusSelector, preferReturnFocus]);
+  }, []);
 
   return { dialogRef, closeButtonRef };
 };

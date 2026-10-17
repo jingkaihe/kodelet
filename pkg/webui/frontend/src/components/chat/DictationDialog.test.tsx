@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,16 +16,16 @@ const makeProps = (
   transcribing: false,
   stop: vi.fn(),
   cancel: vi.fn(),
+  onReturnFocus: vi.fn(),
   ...overrides,
 });
 
 describe('DictationDialog', () => {
-  it('portals a centered, accessible dialog outside the composer', () => {
+  it('renders a centered, accessible dialog', () => {
     const { container } = render(<DictationDialog {...makeProps()} />);
     const dialog = screen.getByRole('dialog', { name: 'Dictation' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(container).not.toContainElement(dialog);
-    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    expect(container).toContainElement(dialog);
     expect(dialog.parentElement).toHaveClass('dictation-backdrop');
     expect(screen.getByRole('status')).toHaveTextContent('Listening…');
     expect(screen.queryByText('Transcript')).not.toBeInTheDocument();
@@ -94,13 +94,21 @@ describe('DictationDialog', () => {
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
   });
 
-  it('focuses the dialog, traps keyboard navigation and handles Escape', async () => {
+  it('owns Done/Cancel keys, traps navigation, and returns focus once on close', async () => {
     const user = userEvent.setup();
     const props = makeProps();
-    render(<DictationDialog {...props} />);
+    const { unmount } = render(<DictationDialog {...props} />);
     const cancel = screen.getByRole('button', { name: 'Cancel dictation' });
     const done = screen.getByRole('button', { name: 'Done dictating' });
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
+    for (const key of ['Enter', 'Escape']) {
+      fireEvent.keyDown(screen.getByRole('dialog'), { key, isComposing: true });
+      fireEvent.keyDown(screen.getByRole('dialog'), { key, repeat: true });
+    }
+    expect(props.stop).not.toHaveBeenCalled();
+    expect(props.cancel).not.toHaveBeenCalled();
+    await user.keyboard('{Enter}');
+    expect(props.stop).toHaveBeenCalledOnce();
     await user.tab();
     expect(cancel).toHaveFocus();
     await user.tab({ shift: true });
@@ -112,38 +120,8 @@ describe('DictationDialog', () => {
     expect(cancel).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(props.cancel).toHaveBeenCalledOnce();
-    expect(props.stop).not.toHaveBeenCalled();
-  });
-
-  it('makes background content inert and restores only its own attributes and scroll lock', async () => {
-    const background = document.createElement('main');
-    const alreadyInert = document.createElement('section');
-    const lateBackground = document.createElement('aside');
-    alreadyInert.setAttribute('inert', 'existing');
-    document.body.append(background, alreadyInert);
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'clip';
-    try {
-      const { unmount } = render(<DictationDialog {...makeProps()} />);
-      expect(background).toHaveAttribute('inert');
-      expect(alreadyInert).toHaveAttribute('inert', 'existing');
-      expect(screen.getByRole('dialog').parentElement).not.toHaveAttribute('inert');
-      expect(document.body.style.overflow).toBe('hidden');
-      await act(async () => {
-        document.body.append(lateBackground);
-      });
-      expect(lateBackground).toHaveAttribute('inert');
-      unmount();
-      expect(background).not.toHaveAttribute('inert');
-      expect(lateBackground).not.toHaveAttribute('inert');
-      expect(alreadyInert).toHaveAttribute('inert', 'existing');
-      expect(document.body.style.overflow).toBe('clip');
-    } finally {
-      background.remove();
-      alreadyInert.remove();
-      lateBackground.remove();
-      document.body.style.overflow = originalOverflow;
-    }
+    unmount();
+    await waitFor(() => expect(props.onReturnFocus).toHaveBeenCalledOnce());
   });
 
   it('follows new text only while the reader is at the bottom', () => {

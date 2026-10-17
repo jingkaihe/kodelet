@@ -1,17 +1,9 @@
-import {
-  type Dispatch,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import apiService from '../../services/api';
 import type { TranscriptionCapabilities } from '../../types';
 import { createDictationRecorder, type DictationRecorderOptions } from './dictationAudio';
 
-type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
+export type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
 
 const maxAudioBytes = 20 * 1024 * 1024;
 const maxDurationSeconds = 120;
@@ -35,9 +27,6 @@ export const isVoiceCommand = (text: string): boolean => /^\/voice(?:\s|$)/.test
 
 interface Capture {
   targetKey: string;
-  draft: string;
-  caret: number;
-  fromCommand: boolean;
   recorder?: ReturnType<typeof createDictationRecorder>;
   stream?: MediaStream;
   transcript: string;
@@ -69,12 +58,11 @@ function release(capture: Capture) {
 
 export function useDictation({
   targetKey,
-  draft,
-  setDraft,
+  onStart,
 }: {
   targetKey: string;
-  draft: string;
-  setDraft: Dispatch<SetStateAction<string>>;
+  // The composer snapshots its insertion point and returns the completion callback.
+  onStart: (fromCommand: boolean) => (text: string) => void;
 }) {
   const [capabilities, setCapabilities] = useState<TranscriptionCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
@@ -86,11 +74,9 @@ export function useDictation({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [levels, setLevels] = useState<number[]>(() => Array(waveformLength).fill(0));
   const [speaking, setSpeaking] = useState(false);
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const captureRef = useRef<Capture | null>(null);
   const targetRef = useRef(targetKey);
   targetRef.current = targetKey;
-  const pendingCaret = useRef<{ targetKey: string; position: number } | null>(null);
   const capabilityRequest = useRef<AbortController | null>(null);
 
   const refreshCapabilities = useCallback(async () => {
@@ -129,7 +115,6 @@ export function useDictation({
     capabilityRequest.current?.abort();
     const capture = captureRef.current;
     captureRef.current = null;
-    pendingCaret.current = null;
     if (capture) release(capture);
   }, []);
 
@@ -145,16 +130,6 @@ export function useDictation({
     return discard;
   }, [targetKey, discard]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies(draft): Restore the caret after React commits the transcribed draft.
-  useLayoutEffect(() => {
-    const caret = pendingCaret.current;
-    if (caret && caret.targetKey === targetKey) {
-      pendingCaret.current = null;
-      editorRef.current?.focus();
-      editorRef.current?.setSelectionRange(caret.position, caret.position);
-    }
-  }, [draft, targetKey]);
-
   const cancel = useCallback(() => {
     discard();
     setPhase('idle');
@@ -165,27 +140,6 @@ export function useDictation({
   }, [discard]);
 
   const stop = useCallback(() => captureRef.current?.finish(true), []);
-
-  useEffect(() => {
-    if (phase === 'idle') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || (event.key !== 'Escape' && event.key !== 'Enter')) return;
-      // Keep native keyboard activation for the modal's Done/Cancel buttons.
-      if (
-        event.key === 'Enter' &&
-        event.target instanceof Element &&
-        event.target.closest('[role="dialog"] button')
-      )
-        return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (event.repeat) return;
-      if (event.key === 'Escape') cancel();
-      else if (phase === 'recording' || phase === 'review') stop();
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [phase, cancel, stop]);
 
   const enabled = capabilities?.enabled === true;
   const reason =
@@ -209,9 +163,6 @@ export function useDictation({
     }
     const capture: Capture = {
       targetKey,
-      draft,
-      caret: fromCommand ? 0 : (editorRef.current?.selectionStart ?? draft.length),
-      fromCommand,
       transcript: '',
       uploadError: null,
       finish: () => {},
@@ -221,6 +172,7 @@ export function useDictation({
       uploading: false,
     };
     captureRef.current = capture;
+    const onComplete = onStart(fromCommand);
     const current = () => captureRef.current === capture && targetRef.current === capture.targetKey;
     const pending = () => capture.uploading || !!capture.pendingSnapshot;
     const commit = () => {
@@ -232,23 +184,7 @@ export function useDictation({
       setError(null);
       setUploadError(null);
       setTranscribing(false);
-      if (!text) return;
-      setDraft((value) => {
-        if (targetRef.current !== capture.targetKey) return value;
-        // /voice is consumed only on success. Cancel and failures leave even
-        // the command draft untouched; newer edits are never overwritten.
-        const unchanged = value === capture.draft;
-        const base = capture.fromCommand && unchanged ? '' : value;
-        const caret = unchanged ? capture.caret : base.length;
-        const before = base.slice(0, caret);
-        const after = base.slice(caret);
-        const insertion =
-          (before && !/\s$/.test(before) ? ' ' : '') +
-          text +
-          (after && !/^\s/.test(after) ? ' ' : '');
-        pendingCaret.current = { targetKey, position: before.length + insertion.length };
-        return before + insertion + after;
-      });
+      if (text) onComplete(text);
     };
     const settled = () => {
       if (!current() || !capture.captureDone || pending()) return;
@@ -474,7 +410,6 @@ export function useDictation({
     speaking,
     transcript,
     transcribing,
-    editorRef,
     start: () => void start(),
     stop,
     cancel,

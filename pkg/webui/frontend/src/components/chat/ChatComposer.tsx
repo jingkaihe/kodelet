@@ -4,7 +4,6 @@ import type { useDictation } from '../../features/chat/useDictation';
 import type { PendingImageAttachment, SlashCommandOption } from '../../types';
 import { cn } from '../../utils';
 import ListboxSelect, { type ListboxOption } from '../ListboxSelect';
-import DictationDialog from './DictationDialog';
 
 export interface ComposerQuickPick {
   /** Selected `profile/model` option value; empty when unknown. */
@@ -37,6 +36,7 @@ interface ChatComposerProps {
   contextText: string;
   dragActive: boolean;
   draft: string;
+  editorRef?: React.RefObject<HTMLTextAreaElement | null>;
   dictation?: ReturnType<typeof useDictation>;
   placeholder: string;
   quickPick?: ComposerQuickPick;
@@ -74,6 +74,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   contextText,
   dragActive,
   draft,
+  editorRef,
   dictation,
   placeholder,
   quickPick,
@@ -104,7 +105,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const controlGridRef = React.useRef<HTMLDivElement | null>(null);
   const localTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
-  const textareaRef = dictation?.editorRef ?? localTextareaRef;
+  const textareaRef = editorRef ?? localTextareaRef;
   const [multiline, setMultiline] = React.useState(() => draft.includes('\n'));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(contextText): Context text changes the available editor width and must trigger layout measurement.
@@ -204,7 +205,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   return (
     <div className="composer-dock sticky bottom-0 z-10 shrink-0 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:py-3 lg:pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
       <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
-        {dictation?.busy ? <DictationDialog {...dictation} /> : null}
         {dictation?.error && !dictation.busy ? (
           <div className="composer-error" role="alert">
             {dictation.error}

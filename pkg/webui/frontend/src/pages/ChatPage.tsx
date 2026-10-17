@@ -21,6 +21,7 @@ import ChatTranscript from '../components/chat/ChatTranscript';
 import ChatWorkspaceHeader from '../components/chat/ChatWorkspaceHeader';
 import ChatWorkspacePanel from '../components/chat/ChatWorkspacePanel';
 import ConversationStatistics from '../components/chat/ConversationStatistics';
+import DictationDialog from '../components/chat/DictationDialog';
 import ExtensionWidgets from '../components/chat/ExtensionWidgets';
 import KeyboardShortcutsDialog from '../components/chat/KeyboardShortcutsDialog';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
@@ -217,6 +218,9 @@ const ChatPage: React.FC = () => {
   const draftHeartbeatInFlightRef = useRef(false);
   const [runners, setRunners] = useState<Runner[]>([]);
   const [draft, setDraft] = useState('');
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingCaret = useRef<number | null>(null);
+  const dictationOwner = useRef('');
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -295,43 +299,6 @@ const ChatPage: React.FC = () => {
     providerSettingsOpen ||
     infoDialog !== null ||
     sidebarSearchOpen;
-  const layout = useChatLayout(higherPriorityDialogOpen);
-  const {
-    mobileLayout,
-    workspaceOverlayLayout,
-    sidebarVisible,
-    setSidebarVisible,
-    sidebarWidth,
-    isResizingSidebar,
-    sidebarShellRef,
-    workspacePanelView,
-    setWorkspacePanelView,
-    sidebarOverlayOpen,
-    workspaceOverlayOpen,
-    closeMobileSidebar,
-    handleSidebarToggle,
-    handleSidebarResizeStart,
-    handleSidebarResizeKeyDown,
-  } = layout;
-
-  useEffect(() => {
-    if (
-      !composerFocusRequested ||
-      higherPriorityDialogOpen ||
-      sidebarOverlayOpen ||
-      workspaceOverlayOpen
-    ) {
-      return;
-    }
-    // Run after overlay focus restoration so closing a panel cannot steal focus back.
-    const timer = window.setTimeout(() => {
-      document
-        .querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]:not(:disabled)')
-        ?.focus();
-      setComposerFocusRequested(false);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [composerFocusRequested, higherPriorityDialogOpen, sidebarOverlayOpen, workspaceOverlayOpen]);
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -1793,39 +1760,6 @@ const ChatPage: React.FC = () => {
   const workspaceToolsAvailable =
     workspaceTerminalAvailable || workspaceGitDiffAvailable || workspaceBrowserAvailable;
 
-  useEffect(() => {
-    if (conversationId) return;
-    if (draftWorkspaceRef.current?.conversationId !== draftConversationId) {
-      draftWorkspaceRef.current = {
-        conversationId: draftConversationId,
-        runnerIds: new Set(),
-        submitted: false,
-      };
-    }
-    if (
-      !draftWorkspaceRef.current.submitted &&
-      currentRunner?.workspaceSessionCleanup &&
-      ((workspacePanelView === 'terminal' && workspaceTerminalAvailable) ||
-        (workspacePanelView === 'browser' && workspaceBrowserAvailable))
-    ) {
-      draftWorkspaceRef.current.runnerIds.add(currentRunnerID);
-    }
-  }, [
-    conversationId,
-    draftConversationId,
-    currentRunnerID,
-    currentRunner?.workspaceSessionCleanup,
-    workspacePanelView,
-    workspaceTerminalAvailable,
-    workspaceBrowserAvailable,
-  ]);
-
-  const workspaceResize = useWorkspaceResize(
-    layout,
-    workspaceToolsAvailable,
-    higherPriorityDialogOpen
-  );
-
   // Drafts address their selected directory directly until saved affinity is available.
   const draftWorkspaceCWD =
     !remoteWorkspaceConversationID && currentCWDLabel !== currentRunner?.workspace.path
@@ -1863,11 +1797,109 @@ const ChatPage: React.FC = () => {
   );
   const sessionTargetKey = `runner:${currentRunnerID}:conversation:${sessionConversationId}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
 
+  const dictationTargetKey = `${sessionTargetKey}:environment:${currentEnvironmentProfile}`;
+  const insertDictation = useEffectEvent(
+    (text: string, startingDraft: string, caret: number, fromCommand: boolean) => {
+      const unchanged = draft === startingDraft;
+      const base = fromCommand && unchanged ? '' : draft;
+      const position = unchanged ? Math.min(caret, base.length) : base.length;
+      const before = base.slice(0, position);
+      const after = base.slice(position);
+      const insertion = `${before && !/\s$/.test(before) ? ' ' : ''}${text}${after && !/^\s/.test(after) ? ' ' : ''}`;
+      pendingCaret.current = before.length + insertion.length;
+      setDraft(before + insertion + after);
+    }
+  );
   const dictation = useDictation({
-    targetKey: `${sessionTargetKey}:environment:${currentEnvironmentProfile}`,
-    draft,
-    setDraft,
+    targetKey: dictationTargetKey,
+    onStart: (fromCommand) => {
+      const startingDraft = draft;
+      const caret = composerRef.current?.selectionStart ?? draft.length;
+      dictationOwner.current = dictationTargetKey;
+      pendingCaret.current = null;
+      return (text) => insertDictation(text, startingDraft, caret, fromCommand);
+    },
   });
+  const modalOpen = higherPriorityDialogOpen || dictation.busy;
+  const layout = useChatLayout(modalOpen);
+  const {
+    mobileLayout,
+    workspaceOverlayLayout,
+    sidebarVisible,
+    setSidebarVisible,
+    sidebarWidth,
+    isResizingSidebar,
+    sidebarShellRef,
+    workspacePanelView,
+    setWorkspacePanelView,
+    sidebarOverlayOpen,
+    workspaceOverlayOpen,
+    closeMobileSidebar,
+    handleSidebarToggle,
+    handleSidebarResizeStart,
+    handleSidebarResizeKeyDown,
+  } = layout;
+  const workspaceResize = useWorkspaceResize(layout, workspaceToolsAvailable, modalOpen);
+
+  useEffect(() => {
+    if (conversationId) return;
+    if (draftWorkspaceRef.current?.conversationId !== draftConversationId) {
+      draftWorkspaceRef.current = {
+        conversationId: draftConversationId,
+        runnerIds: new Set(),
+        submitted: false,
+      };
+    }
+    if (
+      !draftWorkspaceRef.current.submitted &&
+      currentRunner?.workspaceSessionCleanup &&
+      ((workspacePanelView === 'terminal' && workspaceTerminalAvailable) ||
+        (workspacePanelView === 'browser' && workspaceBrowserAvailable))
+    ) {
+      draftWorkspaceRef.current.runnerIds.add(currentRunnerID);
+    }
+  }, [
+    conversationId,
+    draftConversationId,
+    currentRunnerID,
+    currentRunner?.workspaceSessionCleanup,
+    workspacePanelView,
+    workspaceTerminalAvailable,
+    workspaceBrowserAvailable,
+  ]);
+
+  const cancelDictation = dictation.cancel;
+  useLayoutEffect(() => {
+    if (higherPriorityDialogOpen && dictation.busy) cancelDictation();
+  }, [higherPriorityDialogOpen, dictation.busy, cancelDictation]);
+
+  const restoreDictationFocus = useEffectEvent(() => {
+    const editor = composerRef.current;
+    if (
+      !editor ||
+      editor.disabled ||
+      editor.closest('[inert]') ||
+      higherPriorityDialogOpen ||
+      dictation.isBusy() ||
+      dictationOwner.current !== dictationTargetKey
+    )
+      return;
+    editor.focus();
+    if (pendingCaret.current !== null) {
+      editor.setSelectionRange(pendingCaret.current, pendingCaret.current);
+      pendingCaret.current = null;
+    }
+  });
+
+  useEffect(() => {
+    if (!composerFocusRequested || modalOpen || sidebarOverlayOpen || workspaceOverlayOpen) return;
+    // Run after overlay focus restoration so closing a panel cannot steal focus back.
+    const timer = window.setTimeout(() => {
+      if (!composerRef.current?.disabled) composerRef.current?.focus();
+      setComposerFocusRequested(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [composerFocusRequested, modalOpen, sidebarOverlayOpen, workspaceOverlayOpen]);
 
   const slashCommands = useSlashCommands({
     draft,
@@ -2249,7 +2281,11 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      {sidebarOverlayOpen ? (
+      {dictation.busy && !higherPriorityDialogOpen ? (
+        <DictationDialog {...dictation} onReturnFocus={restoreDictationFocus} />
+      ) : null}
+
+      {sidebarOverlayOpen && !modalOpen ? (
         <button
           aria-label="Hide sidebar overlay"
           className="absolute inset-0 z-40 bg-black/20 lg:hidden"
@@ -2259,10 +2295,10 @@ const ChatPage: React.FC = () => {
       ) : null}
 
       <div
-        aria-hidden={higherPriorityDialogOpen || undefined}
+        aria-hidden={modalOpen || undefined}
         className={cn('h-full lg:flex', isResizingSidebar && 'select-none')}
         data-testid="chat-layout"
-        inert={higherPriorityDialogOpen || undefined}
+        inert={modalOpen || undefined}
       >
         {sidebarVisible ? (
           <section
@@ -2404,6 +2440,7 @@ const ChatPage: React.FC = () => {
             contextText={composerContextText}
             dictation={dictation}
             draft={draft}
+            editorRef={composerRef}
             placeholder={composerPlaceholder}
             quickPick={composerQuickPick}
             showStop={currentConversationIsStreaming}

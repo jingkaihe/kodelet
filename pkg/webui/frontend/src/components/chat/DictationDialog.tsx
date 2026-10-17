@@ -1,11 +1,11 @@
 import { Check, Mic } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useLayoutEffect, useRef } from 'react';
 import { useDialogFocus } from '../../features/chat/useDialogFocus';
+import type { Phase } from '../../features/chat/useDictation';
 import Spinner from '../Spinner';
 
 interface DictationDialogProps {
-  phase: 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
+  phase: Phase;
   error: string | null;
   elapsedSeconds: number;
   levels: number[];
@@ -14,6 +14,7 @@ interface DictationDialogProps {
   transcribing: boolean;
   stop: () => void;
   cancel: () => void;
+  onReturnFocus: () => void;
 }
 
 const DictationDialog = ({
@@ -26,41 +27,11 @@ const DictationDialog = ({
   transcribing,
   stop,
   cancel,
+  onReturnFocus,
 }: DictationDialogProps) => {
-  const { dialogRef } = useDialogFocus(cancel, '[data-testid="composer-textarea"]', true);
-  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const { dialogRef } = useDialogFocus(undefined, onReturnFocus);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const followTranscript = useRef(true);
-
-  useEffect(() => {
-    // Enter starts as Done, not the native activation of the Cancel button.
-    // The shared helper still handles focus trapping and restoration.
-    dialogRef.current?.focus();
-  }, [dialogRef]);
-
-  useLayoutEffect(() => {
-    // The portal is a body child, outside the sticky composer and inert app.
-    // Only undo inert attributes we own; another dialog may already own one.
-    const changed = new Set<Element>();
-    const makeBackgroundInert = () => {
-      for (const child of document.body.children) {
-        if (child !== backdropRef.current && !child.hasAttribute('inert')) {
-          child.setAttribute('inert', '');
-          changed.add(child);
-        }
-      }
-    };
-    makeBackgroundInert();
-    const observer = new MutationObserver(makeBackgroundInert);
-    observer.observe(document.body, { childList: true });
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      observer.disconnect();
-      for (const child of changed) child.removeAttribute('inert');
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(transcript): Follow revised transcript text, but leave a reader's scroll position alone.
   useLayoutEffect(() => {
@@ -80,13 +51,30 @@ const DictationDialog = ({
             : 'Listening…';
   const duration = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
 
-  return createPortal(
-    <div className="new-chat-dialog-backdrop dictation-backdrop" ref={backdropRef}>
+  return (
+    <div className="new-chat-dialog-backdrop dictation-backdrop">
       <div
         aria-describedby={phase === 'recording' ? undefined : 'dictation-description'}
         aria-labelledby="dictation-title"
         aria-modal="true"
         className="dictation-dialog surface-panel"
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || (event.key !== 'Enter' && event.key !== 'Escape'))
+            return;
+          // Let a focused button activate natively, especially Enter on Cancel.
+          if (
+            event.key === 'Enter' &&
+            !event.repeat &&
+            event.target instanceof Element &&
+            event.target.closest('button')
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.repeat) return;
+          if (event.key === 'Escape') cancel();
+          else if (phase === 'recording' || phase === 'review') stop();
+        }}
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
@@ -190,8 +178,7 @@ const DictationDialog = ({
           </div>
         </footer>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 };
 

@@ -209,7 +209,12 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     }
     const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
     await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
-    expect(screen.getByRole('button', { name: running ? 'Steer' : 'Send' })).toBeDisabled();
+    const layout = screen.getByTestId('chat-layout');
+    expect(layout).toHaveAttribute('inert');
+    expect(layout).not.toContainElement(dialog);
+    expect(
+      screen.getByRole('button', { name: running ? 'Steer' : 'Send', hidden: true })
+    ).toBeDisabled();
     expect(textarea).toHaveAttribute('readonly');
     await act(async () => recorder.emitSnapshot());
     const transcript = within(dialog).getByRole('log', { name: 'Dictation transcript' });
@@ -221,6 +226,7 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     if (trigger === 'icon') await user.click(within(dialog).getByRole('button', { name: /Done/ }));
     else await user.keyboard('{Enter}');
     await waitFor(() => expect(textarea).toHaveFocus());
+    expect(layout).not.toHaveAttribute('inert');
     const prefix = trigger === 'command' ? 'spoken words' : 'before spoken words';
     const suffix = trigger === 'command' ? '' : ' after';
     expect(textarea).toHaveValue(prefix + suffix);
@@ -282,8 +288,10 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     await user.click(screen.getByRole('button', { name: 'Dictate text' }));
     const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
     await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
+    const focus = vi.spyOn(textarea, 'focus');
     await user.click(within(dialog).getByRole('button', { name: /Done/ }));
     await waitFor(() => expect(textarea).toHaveFocus());
+    expect(focus).toHaveBeenCalledOnce();
     expect(textarea).toHaveValue('Existing draft');
     expect(textarea.selectionStart).toBe(8);
     await user.keyboard(' updated');
@@ -313,11 +321,53 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     if (key === 'Cancel') within(dialog).getByRole('button', { name: 'Cancel dictation' }).focus();
     await user.keyboard(key === 'Cancel' ? '{Enter}' : '{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(textarea).toHaveFocus());
     expect(recorder.cancel).toHaveBeenCalled();
     expect(recorder.finish).not.toHaveBeenCalled();
     expect(textarea).toHaveValue(' /voice ');
     expect(mockStreamChat).not.toHaveBeenCalled();
     expect(mockSteerConversation).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending dictation for an agent prompt without late insertion or focus stealing', async () => {
+    const recorder = prepareDictation();
+    let resolveUpload!: (value: { text: string }) => void;
+    mockTranscribeAudio.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        })
+    );
+    mockStreamChat.mockImplementation(() => new Promise(() => undefined));
+    await renderChatWithRunner();
+    const textarea = screen.getByTestId('composer-textarea');
+    fireEvent.change(textarea, { target: { value: 'Start working' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledOnce());
+    fireEvent.change(textarea, { target: { value: 'Keep my draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
+    await act(async () => recorder.emitSnapshot());
+    fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
+    await act(async () =>
+      mockStreamChat.mock.calls[0][1].onEvent({
+        kind: 'ui-input-request',
+        ui_input: { id: 'input-1', title: 'Need input', message: 'Answer for the running task' },
+      })
+    );
+    expect(screen.queryByRole('dialog', { name: 'Dictation' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(mockTranscribeAudio.mock.calls[0][1].aborted).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
+    await act(async () => {
+      resolveUpload({ text: 'Discard late words' });
+      recorder.emitSnapshot();
+    });
+    expect(mockTranscribeAudio).toHaveBeenCalledOnce();
+    expect(textarea).toHaveValue('Keep my draft');
+    expect(screen.getByTestId('ui-input-response')).toHaveFocus();
   });
 
   it('keeps microphone and editor disabled while a steering request is pending', async () => {

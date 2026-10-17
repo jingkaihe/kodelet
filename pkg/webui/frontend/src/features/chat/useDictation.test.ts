@@ -1,5 +1,4 @@
 import { act, fireEvent, renderHook, waitFor } from '@testing-library/react';
-import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import apiService from '../../services/api';
 import type { DictationRecorderOptions } from './dictationAudio';
@@ -21,6 +20,8 @@ const getUserMedia = vi.fn();
 const recorderStart = vi.fn();
 const recorderFinish = vi.fn();
 const recorderCancel = vi.fn();
+const onComplete = vi.fn();
+const onStart = vi.fn(() => onComplete);
 let recorderOptions: DictationRecorderOptions;
 
 function deferred<T>() {
@@ -35,18 +36,14 @@ function audioFile(name = 'recording.wav') {
   return new File(['RIFF1234WAVEdata'], name, { type: 'audio/wav' });
 }
 
-function renderDictation(initialDraft = 'before after') {
-  return renderHook(
-    ({ targetKey }) => {
-      const [draft, setDraft] = useState(initialDraft);
-      return { ...useDictation({ targetKey, draft, setDraft }), draft, setDraft };
-    },
-    { initialProps: { targetKey: 'conversation-one' } }
-  );
+function renderDictation() {
+  return renderHook(({ targetKey }) => useDictation({ targetKey, onStart }), {
+    initialProps: { targetKey: 'conversation-one' },
+  });
 }
 
-async function ready(initialDraft?: string) {
-  const hook = renderDictation(initialDraft);
+async function ready() {
+  const hook = renderDictation();
   await waitFor(() => expect(hook.result.current.reason).toBeNull());
   return hook;
 }
@@ -62,6 +59,8 @@ beforeEach(() => {
   vi.stubGlobal('AudioWorkletNode', class {});
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
   stopTrack.mockReset();
+  onStart.mockClear();
+  onComplete.mockClear();
   getUserMedia.mockReset().mockResolvedValue(stream);
   recorderStart.mockReset().mockResolvedValue(undefined);
   recorderFinish.mockReset().mockImplementation(async () => stopTrack());
@@ -134,13 +133,10 @@ describe('useDictation', () => {
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
-  it('previews pause-triggered text while listening and inserts at the caret only on Done', async () => {
+  it('previews pause-triggered text while listening and completes only on Done', async () => {
     const { result } = await ready();
-    const editor = document.createElement('textarea');
-    editor.value = result.current.draft;
-    editor.setSelectionRange(7, 7);
-    result.current.editorRef.current = editor;
     await act(async () => result.current.start());
+    expect(onStart).toHaveBeenCalledWith(false);
     expect(result.current.phase).toBe('recording');
     expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(recorderStart).toHaveBeenCalledWith(stream);
@@ -158,13 +154,13 @@ describe('useDictation', () => {
     expect(result.current.transcript).toBe('spoken words');
     expect(result.current.transcribing).toBe(false);
     expect(result.current.phase).toBe('recording');
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(recorderFinish).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     await act(async () => result.current.stop());
     expect(recorderFinish).toHaveBeenCalledTimes(1);
     expect(stopTrack).toHaveBeenCalled();
-    expect(result.current.draft).toBe('before spoken words after');
+    expect(onComplete).toHaveBeenCalledExactlyOnceWith('spoken words');
     expect(result.current.phase).toBe('idle');
   });
 
@@ -174,7 +170,7 @@ describe('useDictation', () => {
     vi.mocked(apiService.transcribeAudio)
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
-    const { result } = await ready('');
+    const { result } = await ready();
     await act(async () => result.current.start());
     const firstFile = audioFile('first.wav');
     const secondFile = audioFile('second.wav');
@@ -195,15 +191,15 @@ describe('useDictation', () => {
       result.current.stop();
     });
     expect(result.current.phase).toBe('finishing');
-    expect(result.current.draft).toBe('');
+    expect(onComplete).not.toHaveBeenCalled();
     await act(async () => first.resolve({ text: 'first words' }));
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(2);
     expect(vi.mocked(apiService.transcribeAudio).mock.calls[1][0]).toBe(finalFile);
     expect(result.current.transcript).toBe('first words');
-    expect(result.current.draft).toBe('');
+    expect(onComplete).not.toHaveBeenCalled();
     await act(async () => second.resolve({ text: 'Corrected first words and the final phrase.' }));
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(2);
-    expect(result.current.draft).toBe('Corrected first words and the final phrase.');
+    expect(onComplete).toHaveBeenCalledWith('Corrected first words and the final phrase.');
     expect(result.current.phase).toBe('idle');
   });
 
@@ -268,14 +264,14 @@ describe('useDictation', () => {
       upload.resolve({ text: 'late transcript' });
     });
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     if (action !== 'unmount') expect(hook.result.current.error).toBeNull();
   });
 
   it('does not let a canceled session overwrite the preview of a new recording', async () => {
     const oldUpload = deferred<{ text: string }>();
     vi.mocked(apiService.transcribeAudio).mockReturnValueOnce(oldUpload.promise);
-    const { result } = await ready('');
+    const { result } = await ready();
     await act(async () => result.current.start());
     const oldOptions = recorderOptions;
     await act(async () => oldOptions.onSnapshot(audioFile()));
@@ -298,7 +294,7 @@ describe('useDictation', () => {
     vi.mocked(apiService.transcribeAudio)
       .mockResolvedValueOnce({ text: 'first words' })
       .mockRejectedValueOnce(new Error('Provider unavailable'));
-    const { result } = await ready('original');
+    const { result } = await ready();
     await act(async () => result.current.start());
     await act(async () => recorderOptions.onSnapshot(audioFile('first.wav')));
     await act(async () => recorderOptions.onSnapshot(audioFile('failed.wav')));
@@ -307,10 +303,10 @@ describe('useDictation', () => {
     expect(result.current.error).toContain('preview may be incomplete');
     await act(async () => result.current.stop());
     expect(result.current.phase).toBe('review');
-    expect(result.current.draft).toBe('original');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(2);
     await act(async () => result.current.stop());
-    expect(result.current.draft).toBe('original first words');
+    expect(onComplete).toHaveBeenCalledWith('first words');
     expect(result.current.phase).toBe('idle');
   });
 
@@ -319,7 +315,7 @@ describe('useDictation', () => {
       .mockResolvedValueOnce({ text: 'first words' })
       .mockRejectedValueOnce(new Error('Provider unavailable'))
       .mockResolvedValueOnce({ text: 'First words, the missing phrase, and the conclusion.' });
-    const { result } = await ready('original');
+    const { result } = await ready();
     await act(async () => result.current.start());
     await act(async () => recorderOptions.onSnapshot(audioFile('first.wav')));
     await act(async () => recorderOptions.onSnapshot(audioFile('failed.wav')));
@@ -329,9 +325,7 @@ describe('useDictation', () => {
     expect(result.current.transcript).toBe('First words, the missing phrase, and the conclusion.');
     await act(async () => result.current.stop());
     expect(result.current.phase).toBe('idle');
-    expect(result.current.draft).toBe(
-      'original First words, the missing phrase, and the conclusion.'
-    );
+    expect(onComplete).toHaveBeenCalledWith('First words, the missing phrase, and the conclusion.');
   });
 
   it.each([
@@ -349,9 +343,9 @@ describe('useDictation', () => {
     expect(recorderFinish).toHaveBeenCalledTimes(1);
     expect(result.current.phase).toBe('review');
     expect(result.current.error).toMatch(/limit/i);
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     await act(async () => result.current.stop());
-    expect(result.current.draft).toBe('before after spoken words');
+    expect(onComplete).toHaveBeenCalledWith('spoken words');
   });
 
   it('coalesces slow-provider updates into only the newest snapshot while continuing to listen', async () => {
@@ -369,13 +363,13 @@ describe('useDictation', () => {
     expect(recorderFinish).not.toHaveBeenCalled();
     expect(result.current.transcribing).toBe(true);
     expect(result.current.error).toBeNull();
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     await act(async () => first.resolve({ text: 'first words' }));
     expect(result.current.phase).toBe('recording');
     expect(result.current.transcript).toBe('spoken words');
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(2);
     expect(vi.mocked(apiService.transcribeAudio).mock.calls[1][0]).toBe(latestFile);
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it('times out an upload, aborts it, and ignores its late response without retrying', async () => {
@@ -396,17 +390,8 @@ describe('useDictation', () => {
     await act(async () => upload.resolve({ text: 'late words' }));
     expect(result.current.error).toMatch(/timed out/i);
     expect(result.current.transcript).toBe('');
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(1);
-  });
-
-  it('preserves newer draft edits when Done commits the transcript', async () => {
-    const { result } = await ready();
-    await act(async () => result.current.start());
-    await act(async () => recorderOptions.onSnapshot(audioFile()));
-    act(() => result.current.setDraft('new draft'));
-    await act(async () => result.current.stop());
-    expect(result.current.draft).toBe('new draft spoken words');
   });
 
   it.each([
@@ -414,7 +399,7 @@ describe('useDictation', () => {
     'discovery',
     'permission',
     'start',
-  ])('preserves the draft after a %s failure', async (failure) => {
+  ])('does not complete after a %s failure', async (failure) => {
     if (failure === 'constructor')
       createRecorder.mockImplementation(() => {
         throw new Error('Audio unavailable');
@@ -422,14 +407,15 @@ describe('useDictation', () => {
     if (failure === 'permission')
       getUserMedia.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
     if (failure === 'start') recorderStart.mockRejectedValue(new Error('Audio unavailable'));
-    const { result } = await ready('/voice');
+    const { result } = await ready();
     if (failure === 'discovery')
       vi.mocked(apiService.getTranscriptionCapabilities).mockRejectedValueOnce(
         new Error('offline')
       );
     await act(async () => result.current.handleCommand('/voice'));
+    expect(onStart).toHaveBeenCalledWith(true);
     expect(result.current.error).toBeTruthy();
-    expect(result.current.draft).toBe('/voice');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).not.toHaveBeenCalled();
     if (failure === 'constructor') expect(getUserMedia).not.toHaveBeenCalled();
     else expect(recorderCancel).toHaveBeenCalled();
@@ -458,10 +444,10 @@ describe('useDictation', () => {
     expect(result.current.phase).toBe('review');
     expect(result.current.error).toMatch(/disconnected|incomplete|finish/i);
     expect(result.current.transcript).toBe('spoken words');
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(stopTrack).toHaveBeenCalled();
     await act(async () => result.current.stop());
-    expect(result.current.draft).toBe('before after spoken words');
+    expect(onComplete).toHaveBeenCalledWith('spoken words');
   });
 
   it('treats an empty recognized transcript as a visible failure rather than silently dropping it', async () => {
@@ -472,7 +458,7 @@ describe('useDictation', () => {
     expect(result.current.error).toMatch(/no speech/i);
     await act(async () => result.current.stop());
     expect(result.current.phase).toBe('review');
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).toHaveBeenCalledTimes(1);
   });
 
@@ -490,7 +476,7 @@ describe('useDictation', () => {
     act(() => result.current.cancel());
     await act(async () => initialization.resolve());
     expect(result.current.phase).toBe('idle');
-    expect(result.current.draft).toBe('before after');
+    expect(onComplete).not.toHaveBeenCalled();
     expect(apiService.transcribeAudio).not.toHaveBeenCalled();
     expect(recorderCancel).toHaveBeenCalled();
     expect(stopTrack).toHaveBeenCalled();
@@ -528,7 +514,7 @@ describe('useDictation', () => {
         ...capability,
         mimeTypes: ['audio/webm'],
       });
-    const { result } = renderDictation('/voice');
+    const { result } = renderDictation();
     await waitFor(() => expect(result.current.reason).not.toBe('Checking dictation availability…'));
     await act(async () =>
       expect(result.current.handleCommand('/voice')).toBe(condition !== 'disabled')
@@ -536,7 +522,7 @@ describe('useDictation', () => {
     if (condition === 'disabled') expect(result.current.error).toBeNull();
     else expect(result.current.error).toBeTruthy();
     expect(getUserMedia).not.toHaveBeenCalled();
-    expect(result.current.draft).toBe('/voice');
+    expect(onComplete).not.toHaveBeenCalled();
     if (condition === 'disabled after mount') {
       expect(result.current.enabled).toBe(false);
       expect(result.current.handleCommand('/voice')).toBe(false);
