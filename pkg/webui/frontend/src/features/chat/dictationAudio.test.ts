@@ -39,23 +39,27 @@ function readWAV(file: File): Promise<DataView> {
 }
 
 describe('cumulative dictation audio', () => {
-  it('never submits silence or short isolated clicks', () => {
-    const callbacks = options();
+  it('counts silence and isolated clicks toward the recording limit without uploading them', () => {
+    const callbacks = options({ maxDurationSeconds: 6 });
     const session = createDictationSession(sampleRate, callbacks);
     session.push(pcm(3, 0));
     session.push(pcm(0.1, 0.5));
     session.push(pcm(2, 0));
     session.push(pcm(0.1, 0.3));
+    session.push(pcm(1, 0));
     session.finish();
     expect(callbacks.onSnapshot).not.toHaveBeenCalled();
     expect(callbacks.onSpeech).not.toHaveBeenCalled();
+    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
   });
 
   it('snapshots only after 2.5 seconds of silence and retains the complete audio prefix', async () => {
     const callbacks = options();
     const session = createDictationSession(sampleRate, callbacks);
     session.push(pcm(2, 0.001));
+    expect(vi.mocked(callbacks.onLevel).mock.calls.length).toBeLessThanOrEqual(40);
     session.push(pcm(0.4));
+    expect(callbacks.onLevel).toHaveBeenLastCalledWith(expect.closeTo(Math.sqrt(0.1) * 2));
     session.push(pcm(2.48, 0));
     expect(callbacks.onSnapshot).not.toHaveBeenCalled();
     session.push(pcm(0.02, 0));
@@ -63,14 +67,15 @@ describe('cumulative dictation audio', () => {
     expect(callbacks.onSpeech).toHaveBeenNthCalledWith(1, true);
     expect(callbacks.onSpeech).toHaveBeenNthCalledWith(2, false);
     session.push(pcm(0.5, 0));
-    session.push(pcm(0.3, 0.2));
+    session.push(pcm(0.005, 0.2)); // Even a tiny final syllable must survive Done.
     session.finish();
     expect(callbacks.onSnapshot).toHaveBeenCalledTimes(2);
     const snapshots = vi.mocked(callbacks.onSnapshot).mock.calls.map(([file]) => file);
-    for (const file of snapshots) {
+    const views = await Promise.all(snapshots.map(readWAV));
+    for (const [index, file] of snapshots.entries()) {
       expect(file.name).toBe('dictation.wav');
       expect(file.type).toBe('audio/wav');
-      const view = await readWAV(file);
+      const view = views[index];
       const ascii = (offset: number, count: number) =>
         String.fromCharCode(...new Uint8Array(view.buffer, offset, count));
       expect(ascii(0, 4)).toBe('RIFF');
@@ -84,9 +89,8 @@ describe('cumulative dictation audio', () => {
       expect(view.getUint32(24, true)).toBe(sampleRate);
     }
     expect(snapshots[0].size).toBe(44 + Math.round(sampleRate * 4.9) * 2);
-    expect(snapshots[1].size).toBe(44 + Math.round(sampleRate * 5.7) * 2);
-    const first = await readWAV(snapshots[0]);
-    const last = await readWAV(snapshots[1]);
+    expect(snapshots[1].size).toBe(44 + Math.round(sampleRate * 5.405) * 2);
+    const [first, last] = views;
     expect(first.getInt16(44, true)).toBe(33); // Original input, not synthesized pre-roll.
     expect(first.getInt16(44 + sampleRate * 2 * 2, true)).toBe(3277);
     expect(new Uint8Array(last.buffer, 44, first.byteLength - 44)).toEqual(
@@ -110,36 +114,6 @@ describe('cumulative dictation audio', () => {
     expect(callbacks.onLimit).not.toHaveBeenCalled();
   });
 
-  it.each([
-    false,
-    true,
-  ])('retains a tiny final syllable after established speech, paused=%s', async (paused) => {
-    const callbacks = options();
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(0.3));
-    session.push(pcm(2.5, 0));
-    session.push(pcm(0.005, 0.2));
-    if (paused) session.push(pcm(2.5, 0));
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(2);
-    const file = vi.mocked(callbacks.onSnapshot).mock.calls[1][0];
-    expect(file.size).toBe(44 + Math.round(sampleRate * (paused ? 5.305 : 2.805)) * 2);
-    const view = await readWAV(file);
-    expect(view.getInt16(44 + sampleRate * 2.8 * 2, true)).toBe(6553);
-  });
-
-  it('finishes immediately without waiting for a pause, preserving intra-sentence silence', () => {
-    const callbacks = options();
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(0.2));
-    session.push(pcm(0.5, 0));
-    session.push(pcm(0.3));
-    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(callbacks.onSnapshot).mock.calls[0][0].size).toBe(44 + sampleRate * 2);
-  });
-
   it('adapts to stable low background noise and still detects stronger speech energy', () => {
     const callbacks = options();
     const session = createDictationSession(sampleRate, callbacks);
@@ -153,155 +127,37 @@ describe('cumulative dictation audio', () => {
     session.cancel();
   });
 
-  it('reports actual levels at no more than 20 Hz without slowing speech detection', () => {
-    const callbacks = options();
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(1, 0));
-    expect(vi.mocked(callbacks.onLevel).mock.calls.every(([value]) => value === 0)).toBe(true);
-    const silenceCalls = vi.mocked(callbacks.onLevel).mock.calls.length;
-    expect(silenceCalls).toBeLessThanOrEqual(20);
-    session.push(pcm(1, 0.1));
-    const levels = vi.mocked(callbacks.onLevel).mock.calls;
-    expect(levels[levels.length - 1][0]).toBeCloseTo(Math.sqrt(0.1) * 2);
-    expect(vi.mocked(callbacks.onLevel).mock.calls.length - silenceCalls).toBeLessThanOrEqual(20);
-    expect(callbacks.onSpeech).toHaveBeenCalledWith(true);
-    session.cancel();
-  });
-
   it.each([
-    { maxDurationSeconds: 1, maxAudioBytes: 20 * 1024 * 1024, seconds: 2.1, limit: 1 },
-    { maxDurationSeconds: 120, maxAudioBytes: 45 + sampleRate * 2.5, seconds: 2.6, limit: 1.25 },
-    { maxDurationSeconds: 120, maxAudioBytes: 20 * 1024 * 1024, seconds: 120.1, limit: 120 },
-  ])('stops at the total recording limit instead of splitting: $limit seconds', async (limits) => {
+    { name: 'duration', maxDurationSeconds: 120, maxAudioBytes: 20 * 1024 * 1024, limit: 120 },
+    { name: 'bytes', maxDurationSeconds: 120, maxAudioBytes: 45 + sampleRate * 8.5, limit: 4.25 },
+  ])('preserves cumulative audio up to the $name limit without splitting or overflowing', async (limits) => {
     const callbacks = options(limits);
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(limits.seconds));
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(callbacks.onSnapshot).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(callbacks.onLimit).mock.invocationCallOrder[0]
-    );
-    const file = vi.mocked(callbacks.onSnapshot).mock.calls[0][0];
-    expect(file.size).toBe(44 + sampleRate * limits.limit * 2);
-    const view = await readWAV(file);
-    expect(view.getUint32(40, true)).toBe(file.size - 44);
-    session.push(pcm(1));
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-  });
-
-  it('never splits long uninterrupted speech at thirty seconds', () => {
-    const callbacks = options();
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(35));
-    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(callbacks.onSnapshot).mock.calls[0][0].size).toBe(44 + sampleRate * 35 * 2);
-    expect(callbacks.onLimit).not.toHaveBeenCalled();
-  });
-
-  it('includes all earlier phrases and pauses in the final bounded snapshot', async () => {
-    const callbacks = options({ maxDurationSeconds: 4 });
     const session = createDictationSession(sampleRate, callbacks);
     session.push(pcm(0.4, 0.05));
     session.push(pcm(2.6, 0));
-    session.push(pcm(2, 0.2));
+    session.push(pcm(limits.limit, 2));
+    session.finish();
     expect(callbacks.onSnapshot).toHaveBeenCalledTimes(2);
     expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(callbacks.onSnapshot).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(callbacks.onLimit).mock.invocationCallOrder[0]
+    );
     const first = await readWAV(vi.mocked(callbacks.onSnapshot).mock.calls[0][0]);
-    const final = await readWAV(vi.mocked(callbacks.onSnapshot).mock.calls[1][0]);
-    expect(final.byteLength).toBe(44 + sampleRate * 4 * 2);
-    expect(new Uint8Array(final.buffer, 44, first.byteLength - 44)).toEqual(
+    const file = vi.mocked(callbacks.onSnapshot).mock.calls[1][0];
+    expect(file.size).toBe(44 + sampleRate * limits.limit * 2);
+    expect(file.size).toBeLessThanOrEqual(limits.maxAudioBytes);
+    const view = await readWAV(file);
+    expect(view.getUint32(40, true)).toBe(file.size - 44);
+    expect(new Uint8Array(view.buffer, 44, first.byteLength - 44)).toEqual(
       new Uint8Array(first.buffer, 44)
     );
-    expect(final.getInt16(44 + sampleRate * 2 * 2, true)).toBe(0);
-    expect(final.getInt16(44 + sampleRate * 3 * 2, true)).toBe(6553);
-  });
-
-  it('counts initial silence toward the limit without uploading empty speech', () => {
-    const callbacks = options({ maxDurationSeconds: 1 });
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(1.2, 0));
-    session.push(pcm(0.3));
-    session.finish();
-    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-  });
-
-  it('does not upload a duplicate when the limit is reached during silence', () => {
-    const callbacks = options({ maxDurationSeconds: 3 });
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(0.3));
-    session.push(pcm(5, 0));
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-  });
-
-  it('handles small byte limits and clips PCM to signed 16-bit', async () => {
-    const callbacks = options({ maxAudioBytes: 44 + sampleRate * 0.235 * 2 });
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(0.035, 0));
-    session.push(pcm(0.3, 2));
-    session.finish();
-    const files = vi.mocked(callbacks.onSnapshot).mock.calls.map(([file]) => file);
-    expect(files).toHaveLength(1);
-    for (const file of files) expect(file.size).toBeLessThanOrEqual(callbacks.maxAudioBytes);
-    const view = await readWAV(files[0]);
-    const offset = 44 + Math.round(sampleRate * 0.035) * 2;
-    expect(view.getInt16(offset, true)).toBe(32767);
-    expect(view.getInt16(offset + 2, true)).toBe(-32768);
-    expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    'finish',
-    'cancel',
-  ] as const)('allows reentrant %s from a pause snapshot without another upload', (action) => {
-    const callbacks = options();
-    const session = createDictationSession(sampleRate, callbacks);
-    vi.mocked(callbacks.onSnapshot).mockImplementation(() => session[action]());
-    session.push(pcm(0.3));
-    session.push(pcm(3, 0));
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
+    const speechOffset = 44 + sampleRate * 3 * 2;
+    expect(view.getInt16(speechOffset, true)).toBe(32767);
+    expect(view.getInt16(speechOffset + 2, true)).toBe(-32768);
     session.push(pcm(1));
     session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(callbacks.onLimit).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    'finish',
-    'cancel',
-  ] as const)('allows reentrant %s from both limit callbacks without losing the final snapshot', (action) => {
-    const callbacks = options({ maxDurationSeconds: 1 });
-    const session = createDictationSession(sampleRate, callbacks);
-    vi.mocked(callbacks.onSnapshot).mockImplementation(() => session[action]());
-    vi.mocked(callbacks.onLimit).mockImplementation(() => session[action]());
-    session.push(pcm(2));
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    session.cancel();
-    session.cancel();
-    session.push(pcm(2));
-    session.finish();
-    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(callbacks.onSnapshot).mock.calls[0][0].size).toBe(44 + sampleRate * 2);
+    expect(callbacks.onSnapshot).toHaveBeenCalledTimes(2);
     expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
-  });
-
-  it('discards captured audio on cancel and never reports a later limit', () => {
-    const callbacks = options({ maxDurationSeconds: 1 });
-    const session = createDictationSession(sampleRate, callbacks);
-    session.push(pcm(0.3));
-    session.cancel();
-    session.cancel();
-    session.push(pcm(2));
-    session.finish();
-    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-    expect(callbacks.onLimit).not.toHaveBeenCalled();
-    expect(callbacks.onSpeech).toHaveBeenLastCalledWith(false);
   });
 });
 

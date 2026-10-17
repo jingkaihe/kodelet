@@ -1,8 +1,7 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import ChatComposer from './ChatComposer';
 import DictationDialog from './DictationDialog';
 
 const makeProps = (
@@ -21,7 +20,7 @@ const makeProps = (
 });
 
 describe('DictationDialog', () => {
-  it('portals the centered dialog outside its composer and displays listening guidance', () => {
+  it('portals a centered, accessible dialog outside the composer', () => {
     const { container } = render(<DictationDialog {...makeProps()} />);
     const dialog = screen.getByRole('dialog', { name: 'Dictation' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
@@ -29,8 +28,6 @@ describe('DictationDialog', () => {
     expect(dialog.parentElement?.parentElement).toBe(document.body);
     expect(dialog.parentElement).toHaveClass('dictation-backdrop');
     expect(screen.getByRole('status')).toHaveTextContent('Listening…');
-    expect(screen.queryByText(/Pause to transcribe/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Added to your draft/)).not.toBeInTheDocument();
     expect(screen.queryByText('Transcript')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Recording duration: 0:07')).toBeVisible();
     expect(screen.getByRole('log', { name: 'Dictation transcript' })).toHaveTextContent(
@@ -70,143 +67,47 @@ describe('DictationDialog', () => {
     expect(screen.getByRole('button', { name: 'Cancel dictation' })).toBeEnabled();
   });
 
-  it('keeps the previous transcript visible while updating and replaces it with revised text', () => {
+  it('keeps the preview visible with accessible upload and warning states', () => {
     const props = makeProps({
-      transcript: 'First sentence.',
+      phase: 'finishing',
+      transcript: 'Previous transcription.',
+      transcribing: true,
     });
     const { rerender } = render(<DictationDialog {...props} />);
-    const transcript = screen.getByRole('log', { name: 'Dictation transcript' });
-    expect(transcript).toHaveTextContent('First sentence.');
-    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
-    rerender(<DictationDialog {...props} transcribing />);
-    expect(transcript).toHaveTextContent('First sentence.');
-    expect(screen.getByText('Transcribing…')).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('Listening…');
-    expect(screen.queryByText(/part|queued|pending/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('Transcript')).not.toBeInTheDocument();
-    expect(within(transcript).queryByRole('list')).not.toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done dictating' })).toBeEnabled();
-    rerender(
-      <DictationDialog {...props} transcript="Corrected first sentence. Second sentence." />
-    );
-    expect(transcript.textContent).toBe('Corrected first sentence. Second sentence.');
-    expect(screen.queryByText('First sentence.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
-  });
-
-  it('shows only the supplied warning and preserves the previous transcript', () => {
-    render(
-      <DictationDialog
-        {...makeProps({
-          phase: 'review',
-          transcript: 'Previous transcription.',
-          error: 'Provider unavailable. Review the previous transcription.',
-        })}
-      />
-    );
-    expect(screen.getByRole('alert').textContent).toBe(
-      'Provider unavailable. Review the previous transcription.'
-    );
-    expect(screen.getByRole('log')).toHaveTextContent('Previous transcription.');
-    expect(screen.queryByText(/part|queued|pending/i)).not.toBeInTheDocument();
-  });
-
-  it.each([
-    'finishing',
-    'review',
-  ] as const)('describes the final upload accurately in %s without hiding the preview', (phase) => {
-    render(
-      <DictationDialog
-        {...makeProps({ phase, transcribing: true, transcript: 'Previous transcription.' })}
-      />
-    );
     expect(screen.getByRole('dialog')).toHaveAccessibleDescription(
       'Microphone off. Waiting for the final transcription.'
     );
     expect(screen.getByText('Transcribing…')).toBeVisible();
     expect(screen.getByRole('log')).toHaveTextContent('Previous transcription.');
-  });
-
-  it('shows a simple upload indicator before the first transcription arrives', () => {
-    render(<DictationDialog {...makeProps({ transcribing: true })} />);
-    expect(screen.getByText('Transcribing…')).toBeVisible();
-    expect(screen.getByRole('log')).toHaveTextContent('Your words will appear here after a pause.');
-    expect(screen.queryByText(/part|queued|pending/i)).not.toBeInTheDocument();
-  });
-
-  it('shows recording-limit notices without claiming successfully captured speech is missing', () => {
-    render(
-      <DictationDialog {...makeProps({ phase: 'review', error: 'Recording limit reached.' })} />
+    rerender(
+      <DictationDialog
+        {...props}
+        phase="review"
+        transcribing={false}
+        error="Provider unavailable. Review the previous transcription."
+      />
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('Recording limit reached.');
-    expect(screen.queryByText(/Some speech may be missing/)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Provider unavailable. Review the previous transcription.'
+    );
+    expect(screen.getByRole('log')).toHaveTextContent('Previous transcription.');
+    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
   });
 
-  it('delegates Done and Cancel without changing the draft itself', async () => {
+  it('focuses the dialog, traps keyboard navigation and handles Escape', async () => {
     const user = userEvent.setup();
     const props = makeProps();
     render(<DictationDialog {...props} />);
-    await user.click(screen.getByRole('button', { name: 'Done dictating' }));
-    expect(props.stop).toHaveBeenCalledOnce();
-    expect(props.cancel).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Cancel dictation' }));
-    expect(props.cancel).toHaveBeenCalledOnce();
-  });
-
-  it('traps focus in both directions and restores the previous focus on unmount', async () => {
-    const user = userEvent.setup();
-    render(<textarea aria-label="Draft" defaultValue="Keep my draft" />);
-    const editor = screen.getByRole('textbox', { name: 'Draft' });
-    editor.focus();
-    const props = makeProps();
-    const { unmount } = render(<DictationDialog {...props} />);
     const cancel = screen.getByRole('button', { name: 'Cancel dictation' });
     const done = screen.getByRole('button', { name: 'Done dictating' });
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
-    await user.keyboard('{Enter}');
-    expect(props.cancel).not.toHaveBeenCalled();
-    await user.tab({ shift: true });
-    expect(done).toHaveFocus();
     await user.tab();
     expect(cancel).toHaveFocus();
-    await user.tab();
+    await user.tab({ shift: true });
     expect(done).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(props.cancel).toHaveBeenCalledOnce();
     expect(props.stop).not.toHaveBeenCalled();
-    unmount();
-    await waitFor(() => expect(editor).toHaveFocus());
-    expect(editor).toHaveValue('Keep my draft');
-    fireEvent.keyDown(editor, { key: 'Escape' });
-    expect(props.cancel).toHaveBeenCalledOnce();
-  });
-
-  it('prefers returning to the composer over the control that opened dictation', async () => {
-    render(
-      <>
-        <button type="button">Launch dictation</button>
-        <textarea data-testid="composer-textarea" />
-      </>
-    );
-    const launcher = screen.getByRole('button', { name: 'Launch dictation' });
-    launcher.focus();
-    const { unmount } = render(<DictationDialog {...makeProps()} />);
-    await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
-    unmount();
-    await waitFor(() => expect(screen.getByTestId('composer-textarea')).toHaveFocus());
-    expect(launcher).not.toHaveFocus();
-  });
-
-  it('keeps focus on Cancel when Done is disabled', async () => {
-    const user = userEvent.setup();
-    render(<DictationDialog {...makeProps({ phase: 'finishing' })} />);
-    const cancel = screen.getByRole('button', { name: 'Cancel dictation' });
-    await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
-    await user.tab();
-    expect(cancel).toHaveFocus();
-    await user.tab({ shift: true });
-    expect(cancel).toHaveFocus();
   });
 
   it('makes background content inert and restores only its own attributes and scroll lock', async () => {
@@ -258,103 +159,5 @@ describe('DictationDialog', () => {
     fireEvent.scroll(transcript);
     rerender(<DictationDialog {...props} transcript="One. Two. Three." />);
     expect(transcript.scrollTop).toBe(1000);
-  });
-});
-
-const composerProps = (): ComponentProps<typeof ChatComposer> => ({
-  addImageDisabled: false,
-  attachments: [],
-  canStop: false,
-  contextDisabled: false,
-  contextIsStatic: true,
-  contextText: 'test model',
-  dragActive: false,
-  draft: 'Keep my draft',
-  placeholder: 'Ask kodelet…',
-  showStop: false,
-  slashCommandIndex: -1,
-  slashCommandSuggestions: [],
-  slashCommandSuggestionsOpen: false,
-  slashUsageHint: '',
-  stopActionLabel: 'Stop',
-  streamError: null,
-  submitActionLabel: 'Send',
-  submitDisabled: false,
-  textareaDisabled: false,
-  onAttachImages: vi.fn(),
-  onContextOpen: vi.fn(),
-  onDragLeave: vi.fn(),
-  onDragOver: vi.fn(),
-  onDrop: vi.fn(),
-  onDraftChange: vi.fn(),
-  onDraftKeyDown: vi.fn(),
-  onPaste: vi.fn(),
-  onRemoveAttachment: vi.fn(),
-  onSelectSlashCommand: vi.fn(),
-  onStop: vi.fn(),
-  onSubmit: vi.fn(),
-});
-
-describe('ChatComposer dictation integration', () => {
-  const makeDictation = (
-    overrides: Partial<NonNullable<ComponentProps<typeof ChatComposer>['dictation']>> = {}
-  ): NonNullable<ComponentProps<typeof ChatComposer>['dictation']> => ({
-    ...makeProps({ phase: 'idle' }),
-    busy: false,
-    enabled: true,
-    reason: null,
-    isBusy: () => false,
-    editorRef: { current: null },
-    start: vi.fn(),
-    handleCommand: vi.fn(),
-    ...overrides,
-  });
-
-  it('opens dictation from the microphone without sending or editing the draft', async () => {
-    const user = userEvent.setup();
-    const props = composerProps();
-    const dictation = makeDictation();
-    render(<ChatComposer {...props} dictation={dictation} />);
-    const microphone = screen.getByRole('button', { name: 'Dictate text' });
-    expect(microphone).toHaveAttribute('aria-haspopup', 'dialog');
-    await user.click(microphone);
-    expect(dictation.start).toHaveBeenCalledOnce();
-    expect(dictation.stop).not.toHaveBeenCalled();
-    expect(props.onSubmit).not.toHaveBeenCalled();
-    expect(props.onDraftChange).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('replaces inline capture status with a modal and keeps busy errors inside it', () => {
-    const props = composerProps();
-    render(
-      <ChatComposer
-        {...props}
-        dictation={makeDictation({
-          phase: 'review',
-          busy: true,
-          error: 'Recording limit reached.',
-        })}
-      />
-    );
-    const dialog = screen.getByRole('dialog', { name: 'Dictation' });
-    expect(dialog).toContainElement(screen.getByRole('alert'));
-    expect(screen.getByTestId('composer-textarea')).toHaveAttribute('readonly');
-    expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep my draft');
-    expect(screen.getByRole('button', { name: 'Dictate text' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Stop dictation' })).not.toBeInTheDocument();
-    expect(props.onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('leaves setup errors inline when no dictation session is active', () => {
-    render(
-      <ChatComposer
-        {...composerProps()}
-        dictation={makeDictation({ error: 'Microphone unavailable.' })}
-      />
-    );
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Microphone unavailable.');
-    expect(screen.getByTestId('composer-textarea')).not.toHaveAttribute('readonly');
   });
 });

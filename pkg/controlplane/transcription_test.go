@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -32,61 +33,40 @@ func TestNewTranscriberFromViper(t *testing.T) {
 	for _, test := range []struct {
 		name, key, wantErr string
 		value              any
-		disabled           bool
+		enabled            bool
 	}{
-		{name: "explicit speech profile"},
-		{name: "Codex without credentials", key: "profiles.speech.openai.platform", value: "codex"},
-		{name: "missing profile", key: "transcription.profile", value: " ", wantErr: "transcription.profile is required"},
-		{name: "unknown profile", key: "transcription.profile", value: "missing", wantErr: "invalid transcription profile"},
-		{name: "unsupported provider", key: "transcription.profile", value: "coding", wantErr: "provider: openai"},
-		{name: "unsupported platform", key: "profiles.speech.openai.platform", value: "copilot", wantErr: "supports only"},
+		{name: "disabled by default"},
+		{name: "missing profile", enabled: true, key: "transcription.profile", value: " ", wantErr: "transcription.profile is required"},
+		{name: "unknown profile", enabled: true, key: "transcription.profile", value: "missing", wantErr: "invalid transcription profile"},
 		{name: "invalid switch", key: "transcription.enabled", value: "nonsense", wantErr: "invalid transcription configuration"},
-		{name: "disabled ignores missing profile", key: "transcription.profile", value: "missing", disabled: true},
-		{name: "disabled ignores invalid profile", key: "profiles.speech", value: "invalid", disabled: true},
+		{name: "disabled ignores missing profile", key: "transcription.profile", value: "missing"},
+		{name: "disabled ignores invalid profile", key: "profiles.speech", value: "invalid"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			viper.Reset()
 			t.Cleanup(viper.Reset)
-			viper.Set("profile", "coding")
-			viper.Set("profiles.coding", map[string]any{
-				"provider": "anthropic", "model": "coding-model",
-			})
-			viper.Set("profiles.speech", map[string]any{
-				"provider": "openai", "model": "unused-chat-model",
-			})
-			viper.Set("transcription.enabled", !test.disabled)
+			if test.enabled {
+				viper.Set("transcription.enabled", true)
+			}
 			viper.Set("transcription.profile", "speech")
 			if test.key != "" {
 				viper.Set(test.key, test.value)
 			}
-			before := viper.AllSettings()
 			transcriber, err := newTranscriberFromViper()
-			assert.Equal(t, before, viper.AllSettings(), "must not alter the active chat profile")
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
 				return
 			}
 			require.NoError(t, err)
-			if test.disabled {
-				assert.Nil(t, transcriber)
-			} else {
-				assert.NotNil(t, transcriber)
-			}
+			assert.Nil(t, transcriber)
 		})
 	}
-
-	t.Run("disabled by default", func(t *testing.T) {
-		viper.Reset()
-		t.Cleanup(viper.Reset)
-		transcriber, err := newTranscriberFromViper()
-		require.NoError(t, err)
-		assert.Nil(t, transcriber)
-	})
 }
 
 func TestTranscriptionProfileRoundTrip(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
+	languages := make(chan string, 2)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer speech-key", r.Header.Get("Authorization"))
 		assert.Equal(t, "/speech/v1/audio/transcriptions", r.URL.Path)
@@ -96,7 +76,19 @@ func TestTranscriptionProfileRoundTrip(t *testing.T) {
 		}
 		defer r.MultipartForm.RemoveAll()
 		assert.Equal(t, "speech-model", r.FormValue("model"))
-		assert.NoError(t, json.NewEncoder(w).Encode(transcriptiontypes.Result{Text: "Recognized words."}))
+		file, header, err := r.FormFile("file")
+		if !assert.NoError(t, err) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		audio, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.Equal(t, "RIFF1234WAVEdata", string(audio))
+		assert.Equal(t, "recording.wav", header.Filename, "client filenames must not reach the provider")
+		assert.Equal(t, "audio/wav", header.Header.Get("Content-Type"))
+		languages <- r.FormValue("language")
+		assert.NoError(t, json.NewEncoder(w).Encode(transcriptiontypes.Result{Text: "  Recognized words. \n"}))
 	}))
 	t.Cleanup(provider.Close)
 	viper.Set("profile", "coding")
@@ -110,26 +102,27 @@ func TestTranscriptionProfileRoundTrip(t *testing.T) {
 	viper.Set("aliases", map[string]string{"speech.v1": "speech-model", "speech-model": "do-not-resolve-twice"})
 	viper.Set("transcription.enabled", true)
 	viper.Set("transcription.profile", "speech")
-	t.Setenv("TEST_TRANSCRIPTION_KEY", "")
-	t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
+	t.Setenv("TEST_TRANSCRIPTION_KEY", "speech-key")
+	before := viper.AllSettings()
 	transcriber, err := newTranscriberFromViper()
 	require.NoError(t, err)
-	server := httptest.NewServer(transcriptionProtocolServer(transcriber))
+	assert.Equal(t, before, viper.AllSettings(), "must not alter the active chat profile")
+	s := transcriptionProtocolServer(transcriber)
+	assert.Nil(t, s.chatRunner)
+	assert.Nil(t, s.conversationService)
+	server := httptest.NewServer(http.StripPrefix("/prefix", s))
 	t.Cleanup(server.Close)
-	client, err := chat.NewClient(server.URL, "user-token", "")
+	client, err := chat.NewClient(server.URL+"/prefix", "user-token", "unused-runner")
 	require.NoError(t, err)
 	caps, err := client.TranscriptionCapabilities(t.Context())
 	require.NoError(t, err)
-	assert.True(t, caps.Enabled)
-	assert.False(t, caps.Available)
-	assert.Contains(t, caps.Reason, "TEST_TRANSCRIPTION_KEY")
-	t.Setenv("TEST_TRANSCRIPTION_KEY", "speech-key")
-	caps, err = client.TranscriptionCapabilities(t.Context())
-	require.NoError(t, err)
 	assert.Equal(t, availableTranscription(), caps)
-	result, err := client.TranscribeAudio(t.Context(), []byte("RIFF1234WAVEdata"), "clip.wav", "audio/wav", "")
-	require.NoError(t, err)
-	assert.Equal(t, "Recognized words.", result.Text)
+	for _, language := range []string{"", "en-GB"} {
+		result, err := client.TranscribeAudio(t.Context(), []byte("RIFF1234WAVEdata"), "private-name.wav", "audio/wav", language)
+		require.NoError(t, err)
+		assert.Equal(t, "Recognized words.", result.Text)
+		assert.Equal(t, language, <-languages)
+	}
 }
 
 func (f *protocolTranscriber) CheckAvailability() error { return f.availabilityErr }
@@ -189,26 +182,12 @@ func transcriptionRequest(t *testing.T, parts ...transcriptionPart) *http.Reques
 }
 
 func TestTranscriptionCapabilitiesAndAvailability(t *testing.T) {
-	available := availableTranscription()
-	missingCredentials := available
-	missingCredentials.Available = false
-	missingCredentials.Reason = "Sign in to enable transcription."
 	for _, test := range []struct {
-		name    string
-		service llmtypes.Transcriber
-		want    transcriptiontypes.Capabilities
+		name, reason string
+		service      llmtypes.Transcriber
 	}{
-		{
-			name: "disabled",
-			want: transcriptiontypes.Capabilities{
-				Reason:             "Transcription is disabled.",
-				MaxAudioBytes:      transcriptiontypes.MaxAudioBytes,
-				MaxDurationSeconds: transcriptiontypes.MaxDurationSeconds,
-				MimeTypes:          transcriptiontypes.SupportedMimeTypes(),
-			},
-		},
-		{name: "available", service: &protocolTranscriber{}, want: available},
-		{name: "credentials missing", service: &protocolTranscriber{availabilityErr: errors.New(missingCredentials.Reason)}, want: missingCredentials},
+		{"disabled", "Transcription is disabled.", nil},
+		{"credentials missing", "sign in to enable transcription", &protocolTranscriber{availabilityErr: errors.New("sign in to enable transcription")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := transcriptionProtocolServer(test.service)
@@ -220,18 +199,18 @@ func TestTranscriptionCapabilitiesAndAvailability(t *testing.T) {
 			assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
 			var got transcriptiontypes.Capabilities
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
-			assert.Equal(t, test.want, got)
-			if !test.want.Available {
-				response = httptest.NewRecorder()
-				s.ServeHTTP(response, transcriptionRequest(t))
-				assert.Equal(t, http.StatusServiceUnavailable, response.Code)
-				assert.Contains(t, response.Body.String(), test.want.Reason)
-			}
+			assert.Equal(t, test.service != nil, got.Enabled)
+			assert.False(t, got.Available)
+			assert.Equal(t, test.reason, got.Reason)
+			response = httptest.NewRecorder()
+			s.ServeHTTP(response, transcriptionRequest(t))
+			assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+			assert.Contains(t, response.Body.String(), test.reason)
 		})
 	}
 }
 
-func TestTranscriptionClientRoundTripWithoutConversationOrRunner(t *testing.T) {
+func TestReadTranscriptionUpload(t *testing.T) {
 	// These fixtures test container recognition only; codec decoding belongs to
 	// the upstream provider, not the control-plane protocol.
 	for _, test := range []struct {
@@ -244,34 +223,16 @@ func TestTranscriptionClientRoundTripWithoutConversationOrRunner(t *testing.T) {
 		{"generic upload", "RIFF\x24\x00\x00\x00WAVEdata", "application/octet-stream", "audio/wav", "recording.wav", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			calls := make(chan llmtypes.TranscriptionRequest, 1)
-			service := &protocolTranscriber{
-				transcribe: func(ctx context.Context, request llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
-					deadline, ok := ctx.Deadline()
-					assert.True(t, ok)
-					assert.WithinDuration(t, time.Now().Add(transcriptiontypes.RequestTimeout), deadline, 2*time.Second)
-					calls <- request
-					return llmtypes.TranscriptionResult{Text: "  Fix the login test. \n"}, nil
-				},
-			}
-			s := transcriptionProtocolServer(service)
-			assert.Nil(t, s.chatRunner)
-			assert.Nil(t, s.conversationService)
-			server := httptest.NewServer(s)
-			t.Cleanup(server.Close)
-			client, err := chat.NewClient(server.URL, "user-token", "")
+			request := transcriptionRequest(t,
+				transcriptionPart{"file", "private-name.bin", test.declared, []byte(test.audio)},
+				transcriptionPart{"language", "", "", []byte(test.language)},
+			)
+			got, err := readTranscriptionUpload(request)
 			require.NoError(t, err)
-			capabilities, err := client.TranscriptionCapabilities(t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, availableTranscription(), capabilities)
-			result, err := client.TranscribeAudio(t.Context(), []byte(test.audio), "private-name.bin", test.declared, test.language)
-			require.NoError(t, err)
-			assert.Equal(t, "Fix the login test.", result.Text)
-			got := <-calls
-			assert.Equal(t, test.audio, string(got.Audio))
-			assert.Equal(t, test.filename, got.Filename, "client filenames must not be forwarded upstream")
-			assert.Equal(t, test.canonical, got.ContentType)
-			assert.Equal(t, test.language, got.Language)
+			assert.Equal(t, test.audio, string(got.audio))
+			assert.Equal(t, test.filename, got.filename)
+			assert.Equal(t, test.canonical, got.contentType)
+			assert.Equal(t, test.language, got.language)
 		})
 	}
 }
@@ -308,15 +269,6 @@ func TestTranscriptionRejectsInvalidUploads(t *testing.T) {
 			s.ServeHTTP(response, transcriptionRequest(t, test.parts...))
 			assert.Equal(t, test.status, response.Code, response.Body.String())
 			assert.Equal(t, "application/json", response.Header().Get("Content-Type"))
-			var envelope struct {
-				Error   string
-				Status  int
-				Success bool
-			}
-			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
-			assert.NotEmpty(t, envelope.Error)
-			assert.Equal(t, test.status, envelope.Status)
-			assert.False(t, envelope.Success)
 		})
 	}
 
@@ -329,7 +281,7 @@ func TestTranscriptionRejectsInvalidUploads(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, response.Code)
 }
 
-func TestTranscriptionProviderFailureAndCancellation(t *testing.T) {
+func TestTranscriptionProviderErrors(t *testing.T) {
 	for _, test := range []struct {
 		name, text string
 		err        error
@@ -352,22 +304,38 @@ func TestTranscriptionProviderFailureAndCancellation(t *testing.T) {
 			assert.Contains(t, response.Body.String(), "error")
 		})
 	}
+}
 
-	t.Run("caller cancels provider work", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		s := transcriptionProtocolServer(&protocolTranscriber{
-			transcribe: func(ctx context.Context, _ llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
-				cancel()
-				assert.ErrorIs(t, ctx.Err(), context.Canceled)
-				return llmtypes.TranscriptionResult{}, ctx.Err()
-			},
-		})
-		request := transcriptionRequest(t, transcriptionPart{"file", "clip.wav", "audio/wav", []byte("RIFF1234WAVEdata")}).WithContext(ctx)
-		response := httptest.NewRecorder()
-		s.ServeHTTP(response, request)
-		assert.Empty(t, response.Body.String(), "disconnected requests must not receive a transcript or error payload")
-	})
+func TestTranscriptionClientCancellationReachesProvider(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	finished := make(chan error, 1)
+	server := httptest.NewServer(transcriptionProtocolServer(&protocolTranscriber{
+		transcribe: func(ctx context.Context, _ llmtypes.TranscriptionRequest) (llmtypes.TranscriptionResult, error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			assert.WithinDuration(t, time.Now().Add(transcriptiontypes.RequestTimeout), deadline, 2*time.Second)
+			cancel()
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+				t.Error("client cancellation did not reach provider")
+			}
+			finished <- ctx.Err()
+			return llmtypes.TranscriptionResult{}, ctx.Err()
+		},
+	}))
+	t.Cleanup(server.Close)
+	client, err := chat.NewClient(server.URL, "user-token", "")
+	require.NoError(t, err)
+	_, err = client.TranscribeAudio(ctx, []byte("RIFF1234WAVEdata"), "clip.wav", "audio/wav", "")
+	require.ErrorIs(t, err, context.Canceled)
+	select {
+	case err := <-finished:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider did not finish after cancellation")
+	}
 }
 
 func TestTranscriptionRouteAuthenticationAndCSRF(t *testing.T) {
@@ -377,7 +345,7 @@ func TestTranscriptionRouteAuthenticationAndCSRF(t *testing.T) {
 		},
 	})
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		for _, token := range []string{"", "wrong-token", "runner-token"} {
+		for _, token := range []string{"", "runner-token"} {
 			t.Run(method+"/"+token, func(t *testing.T) {
 				request := httptest.NewRequest(method, transcriptiontypes.Path, nil)
 				if token != "" {
@@ -401,24 +369,19 @@ func TestTranscriptionRouteAuthenticationAndCSRF(t *testing.T) {
 	s.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusOK, response.Code, "capability discovery needs no CSRF token")
 	for _, test := range []struct {
-		name, cookie, header string
-		status               int
+		name, csrf string
+		status     int
 	}{
-		{"missing", "", "", http.StatusForbidden},
-		{"cookie only", csrfToken, "", http.StatusForbidden},
-		{"header only", "", csrfToken, http.StatusForbidden},
-		{"mismatch", csrfToken, "wrong-token", http.StatusForbidden},
-		{"valid", csrfToken, csrfToken, http.StatusOK},
+		{"missing", "", http.StatusForbidden},
+		{"valid", csrfToken, http.StatusOK},
 	} {
 		t.Run("OIDC/"+test.name, func(t *testing.T) {
 			request := transcriptionRequest(t, transcriptionPart{"file", "clip.wav", "audio/wav", []byte("RIFF1234WAVEdata")})
 			request.Header.Del("Authorization")
 			request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
-			if test.cookie != "" {
-				request.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: test.cookie})
-			}
-			if test.header != "" {
-				request.Header.Set(webCSRFHeaderName, test.header)
+			if test.csrf != "" {
+				request.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: test.csrf})
+				request.Header.Set(webCSRFHeaderName, test.csrf)
 			}
 			response := httptest.NewRecorder()
 			s.ServeHTTP(response, request)

@@ -96,11 +96,8 @@ log_format: "json"
 # kodelet runner enroll --server https://kodelet.example
 
 # Optional Web UI microphone dictation, independent of the active chat profile.
-# The selected profile must use provider: openai and platform: openai or codex.
-# Public OpenAI profiles may set transcription_model: gpt-4o-mini-transcribe
-# (the default), and use openai.base_url / openai.api_key_env_var as usual.
-# Codex uses ChatGPT OAuth and an experimental, server-selected model: omit
-# transcription_model for Codex profiles. Audio is not persisted by Kodelet.
+# Use an OpenAI profile; transcription_model defaults to gpt-4o-mini-transcribe.
+# For openai.platform: codex, omit transcription_model. See docs/MANUAL.md.
 # transcription:
 #   enabled: true
 #   profile: "openai"

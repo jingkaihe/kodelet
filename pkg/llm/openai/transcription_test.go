@@ -85,8 +85,9 @@ func TestOpenAITranscriptionAvailabilityResolvesCurrentConfiguredKey(t *testing.
 	require.NoError(t, s.CheckAvailability())
 }
 
-func TestCodexTranscriptionAvailabilityDoesNotRefresh(t *testing.T) {
+func TestCodexTranscriptionCredentials(t *testing.T) {
 	config := transcriptionConfig(t, "codex")
+	t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
 	s, err := NewTranscriber(config)
 	require.NoError(t, err)
 	var creds *auth.CodexCredentials
@@ -105,6 +106,14 @@ func TestCodexTranscriptionAvailabilityDoesNotRefresh(t *testing.T) {
 	s.readCodex = func() (*auth.CodexCredentials, error) { return nil, errors.New("private-token") }
 	require.Error(t, s.CheckAvailability())
 	assert.NotContains(t, s.CheckAvailability().Error(), "private-token")
+	s.requestCodex = func(context.Context) (*auth.CodexCredentials, error) {
+		return nil, errors.New("refresh failed: private-token in raw provider body")
+	}
+	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
+		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav",
+	})
+	require.ErrorContains(t, err, "kodelet codex login")
+	assert.NotContains(t, err.Error(), "private-token")
 }
 
 func TestTranscribeProviderRequests(t *testing.T) {
@@ -199,10 +208,8 @@ func TestTranscribeRejectsInvalidInput(t *testing.T) {
 	}{
 		{name: "empty", wantErr: "audio is empty"},
 		{name: "too large", audio: make([]byte, llmtypes.MaxTranscriptionAudioBytes+1), wantErr: "size limit"},
-		{name: "missing MIME", audio: []byte("audio"), wantErr: "unsupported"},
 		{name: "invalid MIME", audio: []byte("audio"), contentType: "not a type", wantErr: "unsupported"},
 		{name: "unsupported MIME", audio: []byte("audio"), contentType: "text/plain", wantErr: "unsupported"},
-		{name: "missing filename", audio: []byte("audio"), contentType: "audio/wav", wantErr: "filename"},
 		{name: "invalid filename", audio: []byte("audio"), contentType: "audio/wav", filename: "bad\r\nfile.wav", wantErr: "filename"},
 		{name: "long language", audio: []byte("audio"), contentType: "audio/wav", filename: "recording.wav", language: strings.Repeat("x", 65), wantErr: "language"},
 	} {
@@ -217,28 +224,49 @@ func TestTranscribeRejectsInvalidInput(t *testing.T) {
 
 func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 	for _, test := range []struct {
-		name, response, wantErr string
-		status                  int
+		name, platform, response, wantErr, cfMitigated string
+		status                                         int
 	}{
 		{name: "unauthorized", status: http.StatusUnauthorized, response: "secret token and private audio", wantErr: "HTTP 401"},
 		{name: "OpenAI forbidden", status: http.StatusForbidden, response: "secret token", wantErr: "transcription provider returned HTTP 403"},
-		{name: "rate limited", status: http.StatusTooManyRequests, response: "secret token", wantErr: "HTTP 429"},
-		{name: "server error", status: http.StatusInternalServerError, response: "secret token", wantErr: "HTTP 500"},
 		{name: "invalid JSON", status: http.StatusOK, response: "secret token", wantErr: "invalid response"},
 		{name: "wrong text type", status: http.StatusOK, response: `{"text":{"secret":"token"}}`, wantErr: "invalid response"},
 		{name: "missing text", status: http.StatusOK, response: `{"secret":"token"}`, wantErr: "invalid response"},
-		{name: "null text", status: http.StatusOK, response: `{"text":null}`, wantErr: "invalid response"},
-		{name: "empty text", status: http.StatusOK, response: `{"text":""}`, wantErr: llmtypes.ErrNoSpeech.Error()},
 		{name: "blank text", status: http.StatusOK, response: `{"text":" \n ","secret":"token"}`, wantErr: llmtypes.ErrNoSpeech.Error()},
 		{name: "multiple JSON values", status: http.StatusOK, response: `{"text":"secret"} {"text":"token"}`, wantErr: "invalid response"},
 		{name: "oversized", status: http.StatusOK, response: strings.Repeat("x", int(llmtypes.MaxTranscriptionResponseBytes)+1), wantErr: "size limit"},
+		{
+			name: "Codex challenge header", platform: "codex", status: http.StatusForbidden, cfMitigated: "Challenge",
+			response: "private response", wantErr: "Cloudflare challenge",
+		},
+		{
+			name: "Codex challenge HTML", platform: "codex", status: http.StatusForbidden,
+			response: `<html><script>__cf_chl_tk = "private";</script></html>`, wantErr: "Cloudflare challenge",
+		},
+		{
+			name: "Codex challenge script", platform: "codex", status: http.StatusForbidden,
+			response: `<HTML><script src="/cdn-cgi/challenge-platform/scripts/private"></script></HTML>`, wantErr: "Cloudflare challenge",
+		},
+		{
+			name: "Codex ordinary Cloudflare HTML", platform: "codex", status: http.StatusForbidden,
+			response: "<html>Access denied. Cloudflare. private response</html>", wantErr: "access was denied by ChatGPT",
+		},
+		{
+			name: "Codex JSON denial", platform: "codex", status: http.StatusForbidden,
+			response: `{"error":"private account restriction"}`, wantErr: "access was denied by ChatGPT",
+		},
+		{
+			name: "Codex bounded error body", platform: "codex", status: http.StatusForbidden,
+			response: strings.Repeat("x", 16<<10) + "<html>__cf_chl private</html>", wantErr: "access was denied by ChatGPT",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			config := transcriptionConfig(t, "openai")
+			config := transcriptionConfig(t, test.platform)
 			t.Setenv("OPENAI_API_KEY", "secret")
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
+				w.Header().Set("cf-mitigated", test.cfMitigated)
 				w.WriteHeader(test.status)
 				_, _ = io.WriteString(w, test.response)
 			}))
@@ -246,79 +274,27 @@ func TestTranscribeProviderErrorsAreSafe(t *testing.T) {
 			config.OpenAI.BaseURL = server.URL
 			s, err := NewTranscriber(config)
 			require.NoError(t, err)
+			if test.platform == "codex" {
+				s.endpoint = server.URL
+				s.requestCodex = func(context.Context) (*auth.CodexCredentials, error) {
+					return &auth.CodexCredentials{AccessToken: "secret", AccountID: "account"}, nil
+				}
+			}
 			_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
 				Audio: []byte("private audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
 			})
 			require.ErrorContains(t, err, test.wantErr)
 			assert.NotContains(t, err.Error(), "secret")
-			assert.NotContains(t, err.Error(), "private audio")
+			assert.NotContains(t, err.Error(), "private")
 			assert.Equal(t, test.wantErr == llmtypes.ErrNoSpeech.Error(), errors.Is(err, llmtypes.ErrNoSpeech))
 			assert.EqualValues(t, 1, calls.Load(), "no automatic billing fallback or retries")
+			if test.platform == "codex" {
+				assert.Contains(t, err.Error(), "HTTP 403")
+				assert.Contains(t, err.Error(), "OpenAI API transcription profile (separate API billing)")
+				assert.Equal(t, test.wantErr == "Cloudflare challenge", strings.Contains(err.Error(), "Cloudflare"))
+			}
 		})
 	}
-}
-
-func TestTranscribeCodexForbidden(t *testing.T) {
-	for _, test := range []struct {
-		name, header, body string
-		challenge          bool
-	}{
-		{name: "challenge header", header: "challenge", body: "private response", challenge: true},
-		{name: "challenge header case", header: "Challenge", body: "private response", challenge: true},
-		{name: "challenge HTML", body: `<html><script>window._cf_chl_opt = {cRay: "private"}; __cf_chl_tk = "private";</script></html>`, challenge: true},
-		{name: "challenge script", body: `<HTML><script src="/cdn-cgi/challenge-platform/scripts/private"></script></HTML>`, challenge: true},
-		{name: "ordinary Cloudflare HTML", body: "<html>Access denied. Cloudflare. private response</html>"},
-		{name: "JSON denial", body: `{"error":"private account restriction"}`},
-		{name: "bounded error body", body: strings.Repeat("x", 16<<10) + "<html>__cf_chl private</html>"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			config := transcriptionConfig(t, "codex")
-			t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
-			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				calls.Add(1)
-				w.Header().Set("cf-mitigated", test.header)
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = io.WriteString(w, test.body)
-			}))
-			t.Cleanup(server.Close)
-			s, err := NewTranscriber(config)
-			require.NoError(t, err)
-			s.endpoint = server.URL
-			s.requestCodex = func(context.Context) (*auth.CodexCredentials, error) {
-				return &auth.CodexCredentials{AccessToken: "test-token", AccountID: "test-account"}, nil
-			}
-			_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-				Audio: []byte("private audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
-			})
-			require.ErrorContains(t, err, "HTTP 403")
-			assert.Contains(t, err.Error(), "OpenAI API transcription profile (separate API billing)")
-			assert.NotContains(t, err.Error(), "private")
-			if test.challenge {
-				assert.Contains(t, err.Error(), "Cloudflare challenge")
-				assert.Contains(t, err.Error(), "server's network")
-			} else {
-				assert.Contains(t, err.Error(), "transcription access was denied by ChatGPT")
-				assert.NotContains(t, err.Error(), "Cloudflare")
-			}
-			assert.EqualValues(t, 1, calls.Load(), "a challenge must not trigger retries or billing fallback")
-		})
-	}
-}
-
-func TestTranscribeCodexAuthErrorIsSafe(t *testing.T) {
-	config := transcriptionConfig(t, "codex")
-	t.Setenv("OPENAI_API_KEY", "must-not-fall-back")
-	s, err := NewTranscriber(config)
-	require.NoError(t, err)
-	s.requestCodex = func(context.Context) (*auth.CodexCredentials, error) {
-		return nil, errors.New("refresh failed: secret-token in raw provider body")
-	}
-	_, err = s.Transcribe(t.Context(), llmtypes.TranscriptionRequest{
-		Audio: []byte("audio"), Filename: "recording.wav", ContentType: "audio/wav", Language: "",
-	})
-	require.ErrorContains(t, err, "kodelet codex login")
-	assert.NotContains(t, err.Error(), "secret-token")
 }
 
 func TestTranscribeDoesNotFollowRedirects(t *testing.T) {

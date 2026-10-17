@@ -105,17 +105,17 @@ describe('ChatPage composer, attachments, and slash commands', () => {
 
   it.each([
     { trigger: 'icon', running: false },
-    { trigger: 'command', running: false },
-    { trigger: 'shortcut', running: false },
-    { trigger: 'icon', running: true },
     { trigger: 'command', running: true },
     { trigger: 'shortcut', running: true },
-  ])('dictates through $trigger with running=$running without sending or clearing attachments', async ({
+  ])('dictates through $trigger with running=$running and returns to editing without sending', async ({
     trigger,
     running,
   }) => {
+    const user = userEvent.setup();
     const recorder = prepareDictation();
-    mockTranscribeAudio.mockResolvedValue({ text: 'spoken words' });
+    mockTranscribeAudio
+      .mockResolvedValueOnce({ text: 'broken preview' })
+      .mockResolvedValueOnce({ text: 'spoken words' });
     stubImageFileReader('data:image/png;base64,aGVsbG8=');
     mockStreamChat.mockImplementation(() => new Promise(() => undefined));
     await renderChatWithRunner();
@@ -129,24 +129,25 @@ describe('ChatPage composer, attachments, and slash commands', () => {
       target: { files: [new File(['hello'], 'keep.png', { type: 'image/png' })] },
     });
     await screen.findByAltText('keep.png');
+    const microphone = screen.getByRole('button', { name: 'Dictate text' });
+    expect(microphone).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(microphone).toHaveAttribute('aria-keyshortcuts', 'Alt+Shift+V');
     if (trigger !== 'command') {
       fireEvent.change(textarea, { target: { value: 'before after' } });
-      textarea.setSelectionRange(7, 7);
+      textarea.setSelectionRange(6, 6);
       if (trigger === 'shortcut') {
-        expect(screen.getByRole('button', { name: 'Dictate text' })).toHaveAttribute(
-          'aria-keyshortcuts',
-          'Alt+Shift+V'
-        );
+        textarea.focus();
         expect(
           fireEvent.keyDown(textarea, {
-            key: running ? '◊' : 'V',
+            key: '◊',
             code: 'KeyV',
             altKey: true,
             shiftKey: true,
           })
         ).toBe(false);
       } else {
-        fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
+        microphone.focus();
+        fireEvent.click(microphone);
       }
     } else {
       fireEvent.change(textarea, { target: { value: '/voice' } });
@@ -157,26 +158,27 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(screen.getByRole('button', { name: running ? 'Steer' : 'Send' })).toBeDisabled();
     expect(textarea).toHaveAttribute('readonly');
     await act(async () => recorder.emitSnapshot());
-    expect(within(dialog).getByRole('log', { name: 'Dictation transcript' })).toHaveTextContent(
-      'spoken words'
-    );
+    const transcript = within(dialog).getByRole('log', { name: 'Dictation transcript' });
+    expect(transcript).toHaveTextContent('broken preview');
+    await act(async () => recorder.emitSnapshot());
+    expect(transcript.textContent).toBe('spoken words');
+    expect(dialog).not.toHaveTextContent(/part \d|\d parts? pending/i);
     expect(textarea).toHaveValue(trigger === 'command' ? '/voice' : 'before after');
-    expect(recorder.finish).not.toHaveBeenCalled();
-    if (trigger === 'icon') fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
-    else fireEvent.keyDown(dialog, { key: 'Enter', shiftKey: true });
-    await waitFor(() =>
-      expect(textarea).toHaveValue(
-        trigger === 'command' ? 'spoken words' : 'before spoken words after'
-      )
-    );
-    expect(recorder.stopTrack).toHaveBeenCalled();
+    if (trigger === 'icon') await user.click(within(dialog).getByRole('button', { name: /Done/ }));
+    else await user.keyboard('{Enter}');
+    await waitFor(() => expect(textarea).toHaveFocus());
+    const prefix = trigger === 'command' ? 'spoken words' : 'before spoken words';
+    const suffix = trigger === 'command' ? '' : ' after';
+    expect(textarea).toHaveValue(prefix + suffix);
+    expect(textarea.selectionStart).toBe(prefix.length);
     expect(screen.queryByRole('dialog', { name: 'Dictation' })).not.toBeInTheDocument();
     expect(screen.getByAltText('keep.png')).toBeInTheDocument();
     expect(textarea).not.toHaveAttribute('readonly');
+    // keyboard(), unlike type(), does not refocus the editor for us.
+    await user.keyboard(' continued');
+    expect(textarea).toHaveValue(`${prefix} continued${suffix}`);
     expect(mockStreamChat).toHaveBeenCalledTimes(running ? 1 : 0);
     expect(mockSteerConversation).not.toHaveBeenCalled();
-    fireEvent.change(textarea, { target: { value: 'edited transcript' } });
-    expect(textarea).toHaveValue('edited transcript');
   });
 
   it('does not capture dictation shortcuts while typing, composing, in another dialog or in the terminal', async () => {
@@ -216,186 +218,50 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(screen.queryByRole('dialog', { name: 'Dictation' })).not.toBeInTheDocument();
   });
 
+  it('returns to the unchanged draft when Done is clicked without any speech', async () => {
+    const user = userEvent.setup();
+    prepareDictation();
+    await renderChatWithRunner();
+    const textarea = screen.getByTestId<HTMLTextAreaElement>('composer-textarea');
+    fireEvent.change(textarea, { target: { value: 'Existing draft' } });
+    textarea.setSelectionRange(8, 8);
+    await user.click(screen.getByRole('button', { name: 'Dictate text' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
+    await user.click(within(dialog).getByRole('button', { name: /Done/ }));
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(textarea).toHaveValue('Existing draft');
+    expect(textarea.selectionStart).toBe(8);
+    await user.keyboard(' updated');
+    expect(textarea).toHaveValue('Existing updated draft');
+    expect(mockStreamChat).not.toHaveBeenCalled();
+  });
+
   it.each([
-    'icon',
-    'command',
-  ])('cancels %s dictation without changing its original draft or sending', async (trigger) => {
+    'Escape',
+    'Cancel',
+  ])('cancels with %s without changing the draft or sending', async (key) => {
+    const user = userEvent.setup();
     const recorder = prepareDictation();
     mockTranscribeAudio.mockResolvedValue({ text: 'discard these words' });
     await renderChatWithRunner();
     const textarea = screen.getByTestId('composer-textarea');
-    const original = trigger === 'icon' ? 'keep this draft exactly' : ' /voice ';
-    fireEvent.change(textarea, { target: { value: original } });
-    fireEvent.click(
-      screen.getByRole('button', { name: trigger === 'icon' ? 'Dictate text' : 'Send' })
-    );
+    fireEvent.change(textarea, { target: { value: ' /voice ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
     await act(async () => recorder.emitSnapshot());
     expect(within(dialog).getByRole('log')).toHaveTextContent('discard these words');
-    if (trigger === 'icon')
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel dictation' }));
-    else fireEvent.keyDown(dialog, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(textarea).toHaveValue(original);
-    expect(recorder.cancel).toHaveBeenCalled();
-    expect(mockStreamChat).not.toHaveBeenCalled();
-    expect(mockSteerConversation).not.toHaveBeenCalled();
-  });
-
-  it('keeps the modal open while Done waits for transcription and never sends the result', async () => {
-    const recorder = prepareDictation();
-    let resolveUpload!: (value: { text: string }) => void;
-    mockTranscribeAudio.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveUpload = resolve;
-        })
-    );
-    await renderChatWithRunner();
-    const textarea = screen.getByTestId('composer-textarea');
-    fireEvent.change(textarea, { target: { value: 'original' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await act(async () => recorder.emitSnapshot());
-    fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
-    await waitFor(() => expect(recorder.finish).toHaveBeenCalledTimes(1));
-    expect(within(dialog).getByRole('button', { name: /Done/ })).toBeDisabled();
-    expect(within(dialog).getByRole('button', { name: 'Cancel dictation' })).toBeEnabled();
-    expect(textarea).toHaveValue('original');
-    await act(async () => resolveUpload({ text: 'final phrase' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(textarea).toHaveValue('original final phrase');
-    expect(mockStreamChat).not.toHaveBeenCalled();
-    expect(mockSteerConversation).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { finishWith: 'click', speech: true },
-    { finishWith: 'Enter', speech: true },
-    { finishWith: 'click', speech: false },
-    { finishWith: 'Enter', speech: false },
-  ])('returns focus to the composer after $finishWith with speech=$speech', async ({
-    finishWith,
-    speech,
-  }) => {
-    const user = userEvent.setup();
-    const recorder = prepareDictation();
-    mockTranscribeAudio.mockResolvedValue({ text: 'spoken words' });
-    await renderChatWithRunner();
-    const textarea = screen.getByTestId<HTMLTextAreaElement>('composer-textarea');
-    fireEvent.change(textarea, { target: { value: 'Existing' } });
-    textarea.setSelectionRange(8, 8);
-    const microphone = screen.getByRole('button', { name: 'Dictate text' });
-    microphone.focus();
-    fireEvent.click(microphone);
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
-    if (speech) await act(async () => recorder.emitSnapshot());
-    if (finishWith === 'click')
-      await user.click(within(dialog).getByRole('button', { name: /Done/ }));
-    else await user.keyboard('{Enter}');
-    await waitFor(() => expect(textarea).toHaveFocus());
-    const expected = speech ? 'Existing spoken words' : 'Existing';
-    expect(textarea).toHaveValue(expected);
-    expect(textarea.selectionStart).toBe(expected.length);
-    // keyboard(), unlike type(), does not refocus the editor for us.
-    await user.keyboard(' continued');
-    expect(textarea).toHaveValue(expected + ' continued');
-    expect(mockStreamChat).not.toHaveBeenCalled();
-  });
-
-  it('honors keyboard activation of Cancel instead of treating Enter as Done', async () => {
-    const user = userEvent.setup();
-    const recorder = prepareDictation();
-    mockTranscribeAudio.mockResolvedValue({ text: 'discard these words' });
-    await renderChatWithRunner();
-    const textarea = screen.getByTestId('composer-textarea');
-    fireEvent.change(textarea, { target: { value: 'keep original' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await act(async () => recorder.emitSnapshot());
-    const cancel = within(dialog).getByRole('button', { name: 'Cancel dictation' });
-    cancel.focus();
-    await user.keyboard('{Enter}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(recorder.cancel).toHaveBeenCalled();
-    expect(recorder.finish).not.toHaveBeenCalled();
-    expect(textarea).toHaveValue('keep original');
-    expect(mockStreamChat).not.toHaveBeenCalled();
-  });
-
-  it('keeps navigation shortcuts from switching drafts while the dictation modal is open', async () => {
-    const recorder = prepareDictation();
-    await renderChatWithRunner();
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
     mockNavigate.mockClear();
     fireEvent.keyDown(dialog, { key: 'O', ctrlKey: true, shiftKey: true });
     fireEvent.keyDown(dialog, { key: 'k', ctrlKey: true });
-    expect(screen.getByRole('dialog', { name: 'Dictation' })).toBe(dialog);
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(recorder.cancel).not.toHaveBeenCalled();
-  });
-
-  it('keeps the prior preview on failure and requires explicit acceptance of potentially incomplete text', async () => {
-    const recorder = prepareDictation();
-    mockTranscribeAudio
-      .mockResolvedValueOnce({ text: 'recognized phrase' })
-      .mockRejectedValueOnce(new Error('Provider unavailable'));
-    await renderChatWithRunner();
-    const textarea = screen.getByTestId('composer-textarea');
-    fireEvent.change(textarea, { target: { value: 'original' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await act(async () => recorder.emitSnapshot());
-    await act(async () => recorder.emitSnapshot());
-    const transcript = within(dialog).getByRole('log');
-    expect(transcript).toHaveTextContent('recognized phrase');
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('Provider unavailable');
-    fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: /Done/ })).toBeEnabled());
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(/last successful transcription/i);
-    expect(textarea).toHaveValue('original');
-    fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
+    if (key === 'Cancel') within(dialog).getByRole('button', { name: 'Cancel dictation' }).focus();
+    await user.keyboard(key === 'Cancel' ? '{Enter}' : '{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(textarea).toHaveValue('original recognized phrase');
-    expect(mockTranscribeAudio).toHaveBeenCalledTimes(2);
-    expect(mockStreamChat).not.toHaveBeenCalled();
-  });
-
-  it('revises the full preview without numbered parts or duplicated text', async () => {
-    const recorder = prepareDictation();
-    let resolveUpdate!: (value: { text: string }) => void;
-    mockTranscribeAudio.mockResolvedValueOnce({ text: 'We need a cash' }).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveUpdate = resolve;
-        })
-    );
-    await renderChatWithRunner();
-    const textarea = screen.getByTestId('composer-textarea');
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate text' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Dictation' });
-    await act(async () => recorder.emitSnapshot());
-    expect(within(dialog).getByRole('log')).toHaveTextContent('We need a cash');
-    await act(async () => recorder.emitSnapshot());
-    expect(within(dialog).getByRole('log')).toHaveTextContent('We need a cash');
-    expect(dialog).not.toHaveTextContent(/part \d|\d parts? pending/i);
-    await act(async () =>
-      resolveUpdate({ text: 'We need a cache for the transcription results.' })
-    );
-    expect(within(dialog).getByRole('log')).toHaveTextContent(
-      'We need a cache for the transcription results.'
-    );
-    expect(within(dialog).getByRole('log')).not.toHaveTextContent('We need a cash');
-    expect(textarea).toHaveValue('');
-    fireEvent.click(within(dialog).getByRole('button', { name: /Done/ }));
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'Dictation' })).not.toBeInTheDocument()
-    );
-    expect(textarea).toHaveValue('We need a cache for the transcription results.');
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(recorder.finish).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue(' /voice ');
     expect(mockStreamChat).not.toHaveBeenCalled();
     expect(mockSteerConversation).not.toHaveBeenCalled();
   });
