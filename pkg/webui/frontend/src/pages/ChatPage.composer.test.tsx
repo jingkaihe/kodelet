@@ -110,6 +110,13 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(
       screen.queryByText('Command queued until the current run finishes successfully')
     ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss dictation message' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: running ? 'Steer' : 'Send' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to Codex first.');
+    fireEvent.change(textarea, { target: { value: 'Continue without dictation' } });
+    fireEvent.click(screen.getByRole('button', { name: running ? 'Steer' : 'Send' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
   it.each([

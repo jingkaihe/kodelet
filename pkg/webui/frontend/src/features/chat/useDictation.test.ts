@@ -471,6 +471,7 @@ describe('useDictation', () => {
       await act(async () => result.current.stop());
     }
     expect(result.current.phase).toBe('review');
+    act(() => result.current.dismissError());
     expect(result.current.error).toMatch(/disconnected|incomplete|finish/i);
     expect(result.current.transcript).toBe('spoken words');
     expect(onComplete).not.toHaveBeenCalled();

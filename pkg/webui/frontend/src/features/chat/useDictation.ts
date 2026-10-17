@@ -140,6 +140,9 @@ export function useDictation({
   }, [discard]);
 
   const stop = useCallback(() => captureRef.current?.finish(true), []);
+  const dismissError = useCallback(() => {
+    if (!captureRef.current) setState(idleState);
+  }, []);
 
   const enabled = capabilities?.enabled === true;
   const reason =
@@ -365,6 +368,7 @@ export function useDictation({
     start: () => void start(),
     stop,
     cancel,
+    dismissError,
     handleCommand,
   };
 }

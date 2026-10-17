@@ -206,8 +206,16 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     <div className="composer-dock sticky bottom-0 z-10 shrink-0 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:py-3 lg:pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
       <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
         {dictation?.error && !dictation.busy ? (
-          <div className="composer-error" role="alert">
-            {dictation.error}
+          <div className="composer-error flex items-center justify-between gap-3" role="alert">
+            <span className="min-w-0">{dictation.error}</span>
+            <button
+              aria-label="Dismiss dictation message"
+              className="shrink-0 rounded p-1 hover:bg-kodelet-dark/10"
+              onClick={dictation.dismissError}
+              type="button"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
           </div>
         ) : null}
         {streamError ? (

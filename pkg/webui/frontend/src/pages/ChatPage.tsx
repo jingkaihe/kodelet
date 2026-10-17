@@ -1213,6 +1213,7 @@ const ChatPage: React.FC = () => {
           ...(queuedCommandsRef.current[targetConversationId] || []),
           { prompt, attachments: attachmentsForSend },
         ]);
+        dictation.dismissError();
         setDraft('');
         setAttachments([]);
         setStreamError(null);
@@ -1226,6 +1227,7 @@ const ChatPage: React.FC = () => {
       try {
         const queuedContent = buildUserContent(prompt, attachmentsForSend);
         await apiService.steerConversation(targetConversationId, prompt, queuedContent);
+        dictation.dismissError();
         setConversation((currentConversation) =>
           currentConversation?.id === targetConversationId
             ? {
@@ -1251,6 +1253,7 @@ const ChatPage: React.FC = () => {
       return;
     }
 
+    dictation.dismissError();
     setDraft('');
     setAttachments([]);
     await sendMessage(prompt, attachmentsForSend);
