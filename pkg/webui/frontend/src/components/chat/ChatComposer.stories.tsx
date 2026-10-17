@@ -69,7 +69,9 @@ const meta = {
         expect(styles.fontWeight).toBe(headerStyles.fontWeight);
         expect(styles.letterSpacing).toBe(headerStyles.letterSpacing);
       }
-      const leading = canvas.getByRole('button', { name: 'Add image' }).getBoundingClientRect();
+      const leading = (
+        canvas.getByRole('button', { name: 'Add image' }).parentElement as HTMLElement
+      ).getBoundingClientRect();
       const submit = canvas
         .getByRole('button', { name: args.submitActionLabel })
         .getBoundingClientRect();
@@ -196,6 +198,55 @@ export const QuickPick: Story = {
       'flair\u0000claude-opus-4-6'
     );
     await userEvent.click(canvas.getByRole('combobox', { name: 'Model quick pick' }));
+  },
+};
+
+export const WithDictation: Story = {
+  args: {
+    ...QuickPick.args,
+    draft: 'Review these points:\n- composer spacing',
+    dictation: {
+      enabled: true,
+      phase: 'idle',
+      busy: false,
+      isBusy: () => false,
+      reason: null,
+      error: null,
+      elapsedSeconds: 0,
+      levelsRef: { current: [] },
+      transcript: '',
+      transcribing: false,
+      start: fn(),
+      stop: fn(),
+      cancel: fn(),
+      dismissError: fn(),
+      handleCommand: fn(() => false),
+    },
+  },
+  play: async (context) => {
+    await meta.play(context);
+    const canvas = within(context.canvasElement);
+    const dictate = canvas.getByRole('button', { name: 'Dictate text' });
+    const attachment = canvas.getByRole('button', { name: 'Add image' });
+    const rootFontSize = Number.parseFloat(
+      getComputedStyle(context.canvasElement.ownerDocument.documentElement).fontSize
+    );
+    const touch = window.matchMedia('(any-pointer: coarse)').matches;
+    const targetWidth = rootFontSize * (touch ? 2.75 : 2);
+    const dictateRect = dictate.getBoundingClientRect();
+    const attachmentRect = attachment.getBoundingClientRect();
+
+    expect(dictateRect.width).toBeCloseTo(targetWidth, 1);
+    expect(attachmentRect.width).toBeCloseTo(targetWidth, 1);
+    expect(dictateRect.height).toBeGreaterThanOrEqual(44);
+    expect(attachmentRect.height).toBeGreaterThanOrEqual(44);
+    expect(attachmentRect.left - dictateRect.right).toBeCloseTo(0, 1);
+
+    const dictateIcon = (dictate.querySelector('svg') as SVGSVGElement).getBoundingClientRect();
+    const attachmentIcon = (
+      attachment.querySelector('svg') as SVGSVGElement
+    ).getBoundingClientRect();
+    expect(attachmentIcon.left - dictateIcon.right).toBeCloseTo(targetWidth - rootFontSize, 1);
   },
 };
 

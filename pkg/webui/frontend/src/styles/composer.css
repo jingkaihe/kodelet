@@ -444,7 +444,7 @@
   flex-shrink: 0;
   align-self: start;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0;
   margin: 0;
 }
 
@@ -620,7 +620,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
+  width: 2rem;
   height: 2.75rem;
   border-radius: 0.25rem;
   border: 1px solid transparent;
@@ -843,7 +843,6 @@
     display: none;
   }
 
-  .composer-leading-actions,
   .composer-status-actions {
     gap: 0.35rem;
   }
@@ -865,6 +864,10 @@
 }
 
 @media (any-pointer: coarse) {
+  .composer-icon-button {
+    width: 2.75rem;
+  }
+
   .transcript-meta-strip {
     min-height: 2.75rem;
   }
