@@ -1,8 +1,10 @@
 import { Check, Mic } from 'lucide-react';
 import { type RefObject, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import { useDialogFocus } from '../../features/chat/useDialogFocus';
-import type { Phase } from '../../features/chat/useDictation';
+import { type Phase, waveformLength } from '../../features/chat/useDictation';
 import Spinner from '../Spinner';
+
+const waveformSlots = Array.from({ length: waveformLength }, (_, slot) => slot);
 
 interface DictationDialogProps {
   phase: Phase;
@@ -144,12 +146,8 @@ const DictationDialog = ({
             data-recording={phase === 'recording'}
             ref={waveformRef}
           >
-            {levelsRef.current.map((_, slot) => (
-              <span
-                className="dictation-waveform-bar"
-                // biome-ignore lint/suspicious/noArrayIndexKey: Bars are fixed display slots, not sample identities.
-                key={slot}
-              />
+            {waveformSlots.map((slot) => (
+              <span className="dictation-waveform-bar" key={slot} />
             ))}
           </div>
           <output aria-live="polite" className="dictation-status">

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { type ComponentProps, useEffect, useRef } from 'react';
 import { fn } from 'storybook/test';
+import { waveformLength } from '../../features/chat/useDictation';
 import DictationDialog from './DictationDialog';
 
 type StoryProps = ComponentProps<typeof DictationDialog> & {
@@ -49,7 +50,7 @@ const meta = {
     phase: 'recording',
     error: null,
     elapsedSeconds: 12,
-    levelsRef: { current: Array<number>(32).fill(0) },
+    levelsRef: { current: Array<number>(waveformLength).fill(0) },
     transcript: '',
     transcribing: false,
     input: 'speech and pauses',

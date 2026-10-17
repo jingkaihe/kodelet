@@ -7,7 +7,7 @@ export type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review'
 
 // Allow transport overhead beyond the server request deadline.
 const uploadTimeoutMs = 120_000;
-const waveformLength = 32;
+export const waveformLength = 32;
 const capabilityErrorMessage = 'Could not check dictation availability. Try again.';
 
 function mediaSupportReason(): string | null {

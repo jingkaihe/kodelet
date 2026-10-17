@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { waveformLength } from '../../features/chat/useDictation';
 import DictationDialog from './DictationDialog';
 
 const makeProps = (
@@ -10,7 +11,7 @@ const makeProps = (
   phase: 'recording',
   error: null,
   elapsedSeconds: 7,
-  levelsRef: { current: [0, 0.25, 0.5, 1] },
+  levelsRef: { current: Array<number>(waveformLength).fill(0.5) },
   transcript: '',
   transcribing: false,
   stop: vi.fn(),
@@ -51,7 +52,9 @@ describe('DictationDialog', () => {
     afterEach(() => vi.restoreAllMocks());
 
     it('smooths peaks in space and time, keeps feedback steady, and clears on stop', () => {
-      const props = makeProps({ levelsRef: { current: [0, 0, 1, 0, 0] }, elapsedSeconds: 67 });
+      const props = makeProps({ elapsedSeconds: 67 });
+      props.levelsRef.current.fill(0);
+      props.levelsRef.current[2] = 1;
       const { rerender } = render(<DictationDialog {...props} />);
       const waveform = screen.getByRole('dialog').querySelector('.dictation-waveform');
       expect(waveform).toHaveAttribute('aria-hidden', 'true');
@@ -59,7 +62,7 @@ describe('DictationDialog', () => {
       const bars = Array.from(
         screen.getByRole('dialog').querySelectorAll<HTMLElement>('.dictation-waveform-bar')
       );
-      expect(bars).toHaveLength(props.levelsRef.current.length);
+      expect(bars).toHaveLength(waveformLength);
       const scale = (bar: HTMLElement) => Number(bar.style.transform.slice(7, -1));
 
       act(() => nextFrame(16));
@@ -75,7 +78,7 @@ describe('DictationDialog', () => {
       expect(screen.getByLabelText('Recording duration: 1:07')).toBeVisible();
 
       const peak = scale(bars[2]);
-      props.levelsRef.current = [0, 0, 0, 0, 0];
+      props.levelsRef.current.fill(0);
       act(() => nextFrame(48));
       expect(scale(bars[2])).toBeLessThan(peak);
       expect(scale(bars[2])).toBeGreaterThan(0.06);
