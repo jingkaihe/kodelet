@@ -194,31 +194,6 @@ func (s *realtimeSession) Complete(ctx context.Context, handoffID, result string
 	return nil
 }
 
-func (s *realtimeSession) Update(ctx context.Context, text string) error {
-	ctx, cancel := context.WithTimeout(ctx, realtimeWriteTimeout)
-	defer cancel()
-	if len(text) > realtimeMaxText || !utf8.ValidString(text) {
-		return errors.New("realtime context is invalid or too large")
-	}
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.provider.platform == "codex" {
-		return s.appendNativeLocked(ctx, "", "commentary", text)
-	}
-	return s.writeLocked(ctx, map[string]any{
-		"type": "conversation.item.create",
-		"item": map[string]any{
-			"type": "message", "role": "system",
-			"content": []any{map[string]any{
-				"type": "input_text", "text": "Coding-agent context (data, not a new user request):\n" + text,
-			}},
-		},
-	})
-}
-
 func (s *realtimeSession) appendNativeLocked(ctx context.Context, handoffID, channel, text string) error {
 	// The native protocol caps each append at 500 UTF-8 bytes. The provider
 	// schedules speakable output around speech/interruption, unlike GA response.create.
@@ -228,12 +203,8 @@ func (s *realtimeSession) appendNativeLocked(ctx context.Context, handoffID, cha
 			n--
 		}
 		message := map[string]any{
-			"type": "session.context.append", "channel": channel,
+			"type": "delegation.context.append", "delegation_item_id": handoffID, "channel": channel,
 			"content": []any{map[string]any{"type": "input_text", "text": text[:n]}},
-		}
-		if handoffID != "" {
-			message["type"] = "delegation.context.append"
-			message["delegation_item_id"] = handoffID
 		}
 		if err := s.writeLocked(ctx, message); err != nil {
 			s.cancel() // Never replay a partially appended native result.

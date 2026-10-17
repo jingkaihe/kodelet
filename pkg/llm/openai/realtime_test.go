@@ -221,9 +221,6 @@ func TestRealtimePublicConversation(t *testing.T) {
 	assert.Equal(t, "Tests pass.", realtimeReceive(t, f.session.Events()).Text)
 	f.send(t, `{"type":"response.output_audio_transcript.done","item_id":"a1","transcript":"Tests pass."}`)
 	assert.True(t, realtimeReceive(t, f.session.Events()).Final)
-	require.NoError(t, f.session.Update(t.Context(), "Agent is idle."))
-	update := realtimeReceive(t, f.writes)
-	assert.Equal(t, "system", update["item"].(map[string]any)["role"])
 	require.NoError(t, f.session.Close())
 	assert.EqualValues(t, 1, f.hangups.Load())
 }
@@ -252,10 +249,6 @@ func TestRealtimeCodexNativeConversation(t *testing.T) {
 		combined += text
 	}
 	assert.Equal(t, result, combined)
-	require.NoError(t, f.session.Update(t.Context(), "Agent is idle."))
-	update := realtimeReceive(t, f.writes)
-	assert.Equal(t, "session.context.append", update["type"])
-	assert.Equal(t, "commentary", update["channel"])
 	require.NoError(t, f.session.Close())
 	assert.EqualValues(t, 1, f.hangups.Load())
 }
@@ -272,9 +265,15 @@ func TestRealtimePublicSpeechDefersCompletion(t *testing.T) {
 	f.send(t, `{"type":"input_audio_buffer.speech_stopped"}`)
 	f.send(t, `{"type":"response.created"}`)
 	f.send(t, `{"type":"response.done"}`)
-	require.NoError(t, f.session.Update(t.Context(), "Quiet status."))
-	// No competing response.create while VAD starts its automatic reply.
-	assert.Equal(t, "conversation.item.create", realtimeReceive(t, f.writes)["type"])
+	// Observing a later event proves response.done was handled: there must be
+	// no competing response.create while VAD starts its automatic reply.
+	f.send(t, `{"type":"response.output_audio_transcript.delta","item_id":"a1","delta":"Done"}`)
+	assert.Equal(t, "Done", realtimeReceive(t, f.session.Events()).Text)
+	select {
+	case write := <-f.writes:
+		t.Fatalf("unexpected provider write %v", write["type"])
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 func TestRealtimeCodexMetadataDelegationWaitsForFinalSpeech(t *testing.T) {

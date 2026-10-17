@@ -23,13 +23,12 @@ type RealtimeSession interface {
 	Answer() string
 	Events() <-chan RealtimeEvent
 	Complete(ctx context.Context, handoffID, result string) error
-	Update(ctx context.Context, text string) error
 	Close() error
 }
 
 // RealtimeEvent is provider-neutral. Transcript Text is cumulative, ID is stable
 // within an utterance, and Final seals it. Only delegate events request work;
-// transcripts, updates and provider errors are never execution instructions.
+// transcripts and provider errors are never execution instructions.
 // Kinds are transcript, delegate, speech_started, error and closed.
 // A delegate always has finalized task Text and provider HandoffID; ItemID is
 // optional and identifies the associated user utterance, never a function item.

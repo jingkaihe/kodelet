@@ -39,8 +39,7 @@ func (s *testRealtimeSession) Complete(_ context.Context, _, text string) error 
 	s.results <- text
 	return nil
 }
-func (*testRealtimeSession) Update(context.Context, string) error { return nil }
-func (s *testRealtimeSession) Close() error                       { s.closed.Store(true); return nil }
+func (s *testRealtimeSession) Close() error { s.closed.Store(true); return nil }
 
 type testRealtimeProvider struct {
 	session *testRealtimeSession
