@@ -20,6 +20,9 @@ import type {
   CWDHintsResponse,
   ForkConversationResponse,
   GitDiffResponse,
+  RealtimeCapabilities,
+  RealtimeEvent,
+  RealtimeSession,
   RunnerDiscoveryTarget,
   RunnerEnrollmentDecisionResponse,
   RunnerListResponse,
@@ -272,8 +275,8 @@ class ApiService {
     return response;
   }
 
-  async getConversation(id: string): Promise<Conversation> {
-    return this.request<Conversation>(`/api/conversations/${id}`);
+  async getConversation(id: string, signal?: AbortSignal): Promise<Conversation> {
+    return this.request<Conversation>(`/api/conversations/${id}`, { signal });
   }
 
   async getRunners(): Promise<RunnerListResponse> {
@@ -524,6 +527,70 @@ class ApiService {
       signal: options.signal,
     });
     return this.consumeChatStream(response, options.onEvent, request.conversationId);
+  }
+
+  async getRealtimeCapabilities(signal?: AbortSignal): Promise<RealtimeCapabilities> {
+    return this.request('/api/realtime', { signal });
+  }
+
+  async startRealtime(
+    offer: string,
+    chat: ChatRequest,
+    signal?: AbortSignal
+  ): Promise<RealtimeSession> {
+    return this.request('/api/realtime', {
+      method: 'POST',
+      headers: { 'X-Kodelet-Client-ID': this.clientId },
+      body: JSON.stringify({ offer, chat }),
+      signal,
+    });
+  }
+
+  async endRealtime(id: string): Promise<void> {
+    await this.request(`/api/realtime/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'X-Kodelet-Client-ID': this.clientId },
+      keepalive: true,
+    });
+  }
+
+  async streamRealtime(
+    id: string,
+    options: { signal: AbortSignal; onEvent: (event: RealtimeEvent) => void }
+  ): Promise<void> {
+    const response = await fetch(`/api/realtime/${encodeURIComponent(id)}/events`, {
+      headers: { 'X-Kodelet-Client-ID': this.clientId },
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || error.message || 'Could not connect to the call.');
+    }
+    if (!response.body) throw new Error('Call event stream is unavailable.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const deliver = (line: string) => {
+      if (line.trim() && !options.signal.aborted)
+        options.onEvent(JSON.parse(line) as RealtimeEvent);
+    };
+    try {
+      while (!options.signal.aborted) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) deliver(line);
+        if (buffer.length > 1024 * 1024) throw new Error('Call event exceeded the supported size.');
+        if (done) {
+          deliver(buffer);
+          return;
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   }
 
   async streamConversation(

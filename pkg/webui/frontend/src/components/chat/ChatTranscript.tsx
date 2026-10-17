@@ -11,6 +11,7 @@ import 'prismjs/components/prism-tsx';
 import 'prismjs/components/prism-yaml';
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { lastAgentMessageIndex } from '../../features/chat/state';
 import type { ChatAssistantBlock, ChatRenderMessage, ContentBlock } from '../../types';
 import { escapeHtml } from '../../utils';
 import Spinner from '../Spinner';
@@ -496,6 +497,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
     () => messages.filter((message) => message.role === 'assistant').length,
     [messages]
   );
+  const codingMessageIndex = lastAgentMessageIndex(messages);
   if (messages.length === 0) {
     return isStreaming ? <ChatStreamingIndicator assistantTurnCount={0} /> : <ChatWelcome />;
   }
@@ -503,7 +505,11 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-6 sm:space-y-5 sm:px-4 md:px-8">
       {messages.map((message, index) => {
-        const active = message.role === 'assistant' && isStreaming && index === messages.length - 1;
+        const active =
+          message.role === 'assistant' &&
+          (message.id
+            ? Boolean(message.blocks?.some((block) => block.type === 'message' && block.inProgress))
+            : isStreaming && index === codingMessageIndex);
         return (
           <TranscriptMessage
             key={`${message.role}-${index}`}

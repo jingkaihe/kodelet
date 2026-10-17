@@ -8,6 +8,8 @@ export interface CompactionMarker {
 }
 
 export interface Message {
+  id?: string;
+  anchor?: number;
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
   kind?: 'context-compacted' | 'resources-reloaded' | 'resource-reload-refused';
@@ -412,6 +414,29 @@ export interface TranscriptionResult {
   text: string;
 }
 
+export interface RealtimeCapabilities {
+  enabled: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export interface RealtimeSession {
+  id: string;
+  conversationId: string;
+  answer: string;
+}
+
+export interface RealtimeEvent {
+  kind: 'state' | 'transcript' | 'error' | 'closed' | 'agent-started' | 'agent-completed';
+  id?: string;
+  anchor?: number;
+  role?: 'user' | 'assistant';
+  text?: string;
+  final?: boolean;
+  conversationId?: string;
+  turnId?: string;
+}
+
 export interface ChatSettings {
   /** Concrete profile resolved for this request, or the configured default when omitted. */
   currentProfile: string;
@@ -521,6 +546,7 @@ export interface PendingImageAttachment {
 }
 
 export interface ChatStreamEvent {
+  delegatedUser?: boolean;
   kind:
     | 'conversation'
     | 'usage'
@@ -645,6 +671,10 @@ export interface UINotifyEvent {
 }
 
 export interface ChatRenderMessage {
+  id?: string;
+  anchor?: number;
+  /** Block offsets retain ordinary display-message boundaries after grouping. */
+  codingMessageEnds?: number[];
   role: 'user' | 'assistant';
   content?: string | ContentBlock[];
   blocks?: ChatAssistantBlock[];

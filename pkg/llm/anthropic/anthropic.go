@@ -198,6 +198,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
 
 	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
+	t.RecordUserMessageSource(ctx, llmtypes.UserMessageSource(ctx), t.messages)
 }
 
 // AddAssistantMessage appends a provider-native assistant message without calling the model.
@@ -350,10 +351,12 @@ func (t *Thread) SendMessage(
 		copy(originalMessages, t.messages)
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
+		originalSources := t.GetMetadata()[base.UserMessageSourcesMetadataKey]
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
+			t.RestoreUserMessageSources(originalSources)
 		}()
 	}
 
@@ -362,7 +365,7 @@ func (t *Thread) SendMessage(
 		return "", err
 	}
 
-	t.AddUserMessage(ctx, message, opt.Images...)
+	t.AddUserMessage(llmtypes.WithUserMessageSource(ctx, opt.UserMessageSource), message, opt.Images...)
 
 	model, maxTokens := t.getModelAndTokens(opt)
 
@@ -854,7 +857,10 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 			userMessage := anthropic.NewUserMessage(contentBlocks...)
 			t.messages = append(t.messages, userMessage)
 			messageParams.Messages = append(messageParams.Messages, userMessage)
-			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+			t.RecordUserMessageSource(ctx, steerMsg.SourceID, t.messages)
+			if userHandler, ok := handler.(llmtypes.SourcedUserMessageHandler); ok {
+				userHandler.HandleSourcedUserMessage(steerMsg.Content, steerMsg.Images, steerMsg.SourceID)
+			} else if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
 				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
 			} else {
 				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))

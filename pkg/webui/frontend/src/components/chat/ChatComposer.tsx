@@ -1,6 +1,19 @@
-import { ArrowUp, ChevronDown, Mic, Paperclip, RotateCw, Settings, Square, X } from 'lucide-react';
+import {
+  ArrowUp,
+  AudioLines,
+  ChevronDown,
+  Mic,
+  MicOff,
+  Paperclip,
+  PhoneOff,
+  RotateCw,
+  Settings,
+  Square,
+  X,
+} from 'lucide-react';
 import React from 'react';
 import type { useDictation } from '../../features/chat/useDictation';
+import type { useRealtime } from '../../features/chat/useRealtime';
 import type { PendingImageAttachment, SlashCommandOption } from '../../types';
 import { cn } from '../../utils';
 import ListboxSelect, { type ListboxOption } from '../ListboxSelect';
@@ -38,6 +51,7 @@ interface ChatComposerProps {
   draft: string;
   editorRef?: React.RefObject<HTMLTextAreaElement | null>;
   dictation?: ReturnType<typeof useDictation>;
+  realtime?: ReturnType<typeof useRealtime>;
   placeholder: string;
   quickPick?: ComposerQuickPick;
   showStop: boolean;
@@ -76,6 +90,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   draft,
   editorRef,
   dictation,
+  realtime,
   placeholder,
   quickPick,
   showStop,
@@ -112,6 +127,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies(placeholder): The empty editor must resize when its placeholder changes or wraps.
   // biome-ignore lint/correctness/useExhaustiveDependencies(showStop): Showing the stop control changes the available editor width and must trigger layout measurement.
   // biome-ignore lint/correctness/useExhaustiveDependencies(dictation?.enabled): Discovering the microphone control changes the available editor width.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(realtime?.enabled): Discovering the call control changes the available editor width.
   const syncEditorLayout = React.useCallback(() => {
     const controlGrid = controlGridRef.current;
     const editor = textareaRef.current;
@@ -162,7 +178,15 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     }
 
     setMultiline((currentValue) => (currentValue === nextMultiline ? currentValue : nextMultiline));
-  }, [contextText, draft, placeholder, showStop, textareaRef, dictation?.enabled]);
+  }, [
+    contextText,
+    draft,
+    placeholder,
+    showStop,
+    textareaRef,
+    dictation?.enabled,
+    realtime?.enabled,
+  ]);
 
   React.useLayoutEffect(() => {
     syncEditorLayout();
@@ -205,6 +229,56 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   return (
     <div className="composer-dock sticky bottom-0 z-10 shrink-0 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:py-3 lg:pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
       <div className="mx-auto w-full max-w-5xl px-3 sm:px-4 md:px-8">
+        {realtime?.error ? (
+          <div className="composer-error flex items-center justify-between gap-3" role="alert">
+            <span>{realtime.error}</span>
+            <button
+              aria-label="Dismiss call message"
+              className="shrink-0 rounded p-1 hover:bg-kodelet-dark/10"
+              onClick={realtime.dismissError}
+              type="button"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
+        {realtime?.busy ? (
+          <fieldset
+            className="mb-2 flex items-center gap-3 rounded border border-kodelet-dark/15 px-3 py-2 text-sm"
+            aria-label="Call controls"
+          >
+            <span aria-live="polite" className="mr-auto">
+              {realtime.phase === 'connecting'
+                ? 'Connecting…'
+                : realtime.muted
+                  ? 'Microphone muted'
+                  : 'Connected'}
+            </span>
+            <button
+              aria-label={realtime.muted ? 'Unmute microphone' : 'Mute microphone'}
+              aria-pressed={realtime.muted}
+              className="panel-action-button"
+              disabled={realtime.phase !== 'connected'}
+              onClick={realtime.toggleMute}
+              type="button"
+            >
+              {realtime.muted ? (
+                <MicOff aria-hidden="true" className="h-4 w-4" />
+              ) : (
+                <Mic aria-hidden="true" className="h-4 w-4" />
+              )}
+              {realtime.muted ? 'Unmute' : 'Mute'}
+            </button>
+            <button
+              aria-label="End call"
+              className="panel-action-button"
+              onClick={realtime.end}
+              type="button"
+            >
+              <PhoneOff aria-hidden="true" className="h-4 w-4" /> End
+            </button>
+          </fieldset>
+        ) : null}
         {dictation?.error && !dictation.busy ? (
           <div className="composer-error flex items-center justify-between gap-3" role="alert">
             <span className="min-w-0">{dictation.error}</span>
@@ -336,13 +410,38 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   aria-keyshortcuts="Alt+Shift+V"
                   aria-label="Dictate text"
                   className="composer-icon-button"
-                  disabled={textareaDisabled || dictation.busy}
-                  onClick={dictation.start}
+                  disabled={textareaDisabled || dictation.busy || realtime?.busy}
+                  onClick={() => {
+                    if (!realtime?.isBusy()) dictation.start();
+                  }}
                   onMouseDown={(event) => event.preventDefault()}
-                  title={dictation.reason || 'Dictate text (Alt/⌥+Shift+V)'}
+                  title={
+                    realtime?.busy
+                      ? 'End the call before dictating.'
+                      : dictation.reason || 'Dictate text (Alt/⌥+Shift+V)'
+                  }
                   type="button"
                 >
                   <Mic aria-hidden="true" className="h-4 w-4" />
+                </button>
+              ) : null}
+              {realtime?.enabled ? (
+                <button
+                  aria-label="Talk"
+                  className="composer-icon-button"
+                  disabled={realtime.busy || Boolean(realtime.blockedReason) || dictation?.busy}
+                  onClick={() => {
+                    void realtime.start();
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  title={
+                    dictation?.busy
+                      ? 'Finish dictation before starting a call.'
+                      : realtime.reason || 'Start a live conversation (/talk)'
+                  }
+                  type="button"
+                >
+                  <AudioLines aria-hidden="true" className="h-4 w-4" />
                 </button>
               ) : null}
               <button

@@ -57,9 +57,9 @@ func hasNullExecutionOptions(fields map[string]json.RawMessage) bool {
 	return false
 }
 
-// resolveExecutionOptions runs before runner opening, extension initialization,
+// ResolveExecutionOptions runs before runner opening, extension initialization,
 // command expansion, or provider construction. Store reads are side-effect free.
-func resolveExecutionOptions(ctx context.Context, req ChatRequest, config llmtypes.Config) (llmtypes.Config, error) {
+func ResolveExecutionOptions(ctx context.Context, req ChatRequest, config llmtypes.Config) (llmtypes.Config, error) {
 	var record *conversationservice.GetConversationResponse
 	if strings.TrimSpace(req.ConversationID) != "" && (req.Options.HasModelOptions() || req.Profile != "") {
 		service, err := conversationservice.GetDefaultConversationService(ctx)

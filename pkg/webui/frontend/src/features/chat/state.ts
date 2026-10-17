@@ -7,6 +7,7 @@ import type {
   ContentBlock,
   Conversation,
   Message,
+  RealtimeEvent,
 } from '../../types';
 
 const hasRenderableContent = (content: string | ContentBlock[] | undefined): boolean => {
@@ -28,11 +29,21 @@ const ensureAssistantBlocks = (message: ChatRenderMessage): ChatAssistantBlock[]
   return message.blocks;
 };
 
+export const lastAgentMessageIndex = (messages: ChatRenderMessage[]): number => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (!messages[index].id) return index;
+  }
+  return -1;
+};
+
 const ensureCurrentAssistantMessage = (
   messages: ChatRenderMessage[],
   forceNew = false
 ): ChatRenderMessage => {
-  const lastMessage = messages[messages.length - 1];
+  // Projected captions have stable IDs. Coding deltas must continue their own
+  // block even when a spoken utterance arrives between two deltas.
+  const lastIndex = lastAgentMessageIndex(messages);
+  const lastMessage = messages[lastIndex];
   if (!lastMessage || lastMessage.role !== 'assistant' || forceNew) {
     const nextMessage: ChatRenderMessage = {
       role: 'assistant',
@@ -44,7 +55,7 @@ const ensureCurrentAssistantMessage = (
 
   // Copy the path being edited, not completed history or tool result payloads.
   const nextMessage = { ...lastMessage, blocks: [...(lastMessage.blocks || [])] };
-  messages[messages.length - 1] = nextMessage;
+  messages[lastIndex] = nextMessage;
   return nextMessage;
 };
 
@@ -112,23 +123,11 @@ const insertResourceReloadMarker = (
 
 const appendAssistantBlocks = (target: ChatRenderMessage, blocks: ChatAssistantBlock[]) => {
   const targetBlocks = ensureAssistantBlocks(target);
-
-  blocks.forEach((block) => {
-    if (block.type === 'tools') {
-      const lastBlock = targetBlocks[targetBlocks.length - 1];
-      if (lastBlock?.type === 'tools') {
-        lastBlock.tools.push(...block.tools);
-      } else {
-        targetBlocks.push({
-          type: 'tools',
-          tools: [...block.tools],
-        });
-      }
-      return;
-    }
-
-    targetBlocks.push({ ...block });
-  });
+  const ends =
+    target.codingMessageEnds ||
+    (targetBlocks.some((block) => block.type !== 'compaction') ? [targetBlocks.length] : []);
+  targetBlocks.push(...blocks);
+  if (ends.length) target.codingMessageEnds = [...ends, targetBlocks.length];
 };
 
 const findMatchingBlock = (
@@ -181,7 +180,8 @@ const setMostRecentBlockProgress = (
   type: 'thinking' | 'message',
   inProgress: boolean
 ) => {
-  const message = messages[messages.length - 1];
+  const messageIndex = lastAgentMessageIndex(messages);
+  const message = messages[messageIndex];
   if (!message?.blocks) {
     return;
   }
@@ -191,7 +191,7 @@ const setMostRecentBlockProgress = (
     if (block.type === type) {
       const blocks = [...message.blocks];
       blocks[i] = { ...block, inProgress };
-      messages[messages.length - 1] = { ...message, blocks };
+      messages[messageIndex] = { ...message, blocks };
       return;
     }
   }
@@ -304,6 +304,7 @@ export const conversationToChatMessages = (
 
     if (message.role === 'user') {
       chatMessages.push({
+        ...(message.id ? { id: message.id, anchor: message.anchor } : {}),
         role: 'user',
         content: message.content,
       });
@@ -350,17 +351,93 @@ export const conversationToChatMessages = (
     }
 
     const previousMessage = chatMessages[chatMessages.length - 1];
-    if (previousMessage?.role === 'assistant') {
+    if (previousMessage?.role === 'assistant' && !previousMessage.id && !message.id) {
       appendAssistantBlocks(previousMessage, blocks);
       return chatMessages;
     }
 
     chatMessages.push({
+      ...(message.id ? { id: message.id, anchor: message.anchor } : {}),
       role: 'assistant',
       blocks,
     });
     return chatMessages;
   }, []);
+};
+
+export const applyRealtimeTranscript = (
+  messages: ChatRenderMessage[],
+  event: RealtimeEvent
+): ChatRenderMessage[] => {
+  if (event.kind !== 'transcript' || !event.id || !event.role || event.text === undefined)
+    return messages;
+  const index = messages.findIndex((message) => message.id === event.id);
+  const anchor = index < 0 ? event.anchor : messages[index].anchor;
+  const message: ChatRenderMessage =
+    event.role === 'user'
+      ? { id: event.id, anchor, role: 'user', content: event.text }
+      : {
+          id: event.id,
+          anchor,
+          role: 'assistant',
+          blocks: [{ type: 'message', content: event.text, inProgress: !event.final }],
+        };
+  const next = [...messages];
+  if (index >= 0) {
+    next[index] = message;
+    return next;
+  }
+  let remaining = anchor;
+  if (anchor !== undefined && remaining !== undefined) {
+    for (let i = 0; i < next.length; i += 1) {
+      const current = next[i];
+      if (current.id) {
+        // Equal anchors keep first-arrival order; later updates never move them.
+        if (current.anchor === undefined || current.anchor <= anchor) continue;
+      } else {
+        const blocks = current.blocks || [];
+        // Handoffs reserve an empty coding reply before its first token. Keep
+        // captions at this boundary ahead of that reply, not behind its placeholder.
+        if (current.role === 'assistant' && !blocks.length && remaining === 0) {
+          next.splice(i, 0, message);
+          return next;
+        }
+        const ends =
+          current.codingMessageEnds ||
+          (current.role === 'user' || blocks.some((block) => block.type !== 'compaction')
+            ? [blocks.length]
+            : []);
+        if (!ends.length) continue;
+        if (remaining >= ends.length) {
+          remaining -= ends.length;
+          continue;
+        }
+        if (remaining > 0) {
+          const offset = ends[remaining - 1];
+          next.splice(
+            i,
+            1,
+            {
+              ...current,
+              blocks: blocks.slice(0, offset),
+              codingMessageEnds: ends.slice(0, remaining),
+            },
+            message,
+            {
+              ...current,
+              blocks: blocks.slice(offset),
+              codingMessageEnds: ends.slice(remaining).map((end) => end - offset),
+            }
+          );
+          return next;
+        }
+      }
+      next.splice(i, 0, message);
+      return next;
+    }
+  }
+  next.push(message);
+  return next;
 };
 
 export const applyChatStreamEvent = (
@@ -520,6 +597,12 @@ export const applyChatStreamEvent = (
     }
 
     case 'user-message': {
+      if (event.delegatedUser) {
+        // Preserve the coding turn boundary without displaying its synthesized
+        // input. The original spoken user entry is projected independently.
+        ensureCurrentAssistantMessage(nextMessages, true);
+        return nextMessages;
+      }
       if (!hasRenderableContent(event.content)) {
         return nextMessages;
       }
@@ -532,11 +615,12 @@ export const applyChatStreamEvent = (
     }
 
     case 'user-message-display': {
+      if (event.delegatedUser) return messages;
       if (!hasRenderableContent(event.content)) {
         return nextMessages;
       }
 
-      const lastMessageIndex = nextMessages.length - 1;
+      const lastMessageIndex = lastAgentMessageIndex(nextMessages);
       if (nextMessages[lastMessageIndex]?.role === 'user') {
         nextMessages[lastMessageIndex] = {
           role: 'user',

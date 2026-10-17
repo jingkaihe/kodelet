@@ -281,9 +281,13 @@ type ndjsonEventSink struct {
 }
 
 type subscriberEventSink struct {
-	ch     chan chat.ChatEvent
-	mu     sync.RWMutex
-	closed bool
+	ch           chan chat.ChatEvent
+	ctx          context.Context
+	ownerID      string
+	clientID     string
+	capabilities chat.ChatClientCapabilities
+	mu           sync.RWMutex
+	closed       bool
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
@@ -426,7 +430,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		conversationID = convtypes.GenerateID()
 		req.ConversationID = conversationID
 	}
-	registeredConversationID := conversationID
 	req.TurnID = strings.TrimSpace(req.TurnID)
 	if req.TurnID == "" {
 		req.TurnID = convtypes.GenerateID()
@@ -467,6 +470,30 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Kodelet-Turn-ID", req.TurnID)
 	}
 
+	if replay, err := s.runAdmittedChat(requestCtx, req, sink, clientID, attachment, receipt); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, errConversationBusy) {
+			code = http.StatusConflict
+		}
+		s.writeErrorResponse(w, code, err.Error(), nil)
+	} else if replay != nil {
+		s.replyTurnReceipt(w, sink, *replay)
+	}
+}
+
+// runAdmittedChat is shared by typed chat and live voice. Execution belongs to
+// the server; losing either observer must not cancel accepted coding work.
+// A nil receipt means execution streamed normally, rather than receipt replay.
+//
+//nolint:nilnil // Both nil signals normal streamed completion, not missing data.
+func (s *Server) runAdmittedChat(requestCtx context.Context, req chat.ChatRequest, sink chat.ChatEventSink, clientID string, attachment *sessionExtensionAttachment, receipt chat.TurnReceipt) (*chat.TurnReceipt, error) {
+	conversationID := req.ConversationID
+	registeredConversationID := conversationID
+	span := trace.SpanFromContext(requestCtx)
+	message, imageInputs, err := chat.NormalizeRequest(req)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
 	if attachment != nil {
 		ctx = context.WithValue(ctx, sessionExtensionContextKey{}, attachment)
@@ -490,18 +517,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if s.turns != nil {
 			if err := s.turns.finish(context.WithoutCancel(requestCtx), conversationID, req.TurnID, "failed", nil, errConversationBusy); err != nil {
 				cancel()
-				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save the rejected turn's status", err)
-				return
+				return nil, errors.Wrap(err, "failed to save the rejected turn's status")
 			}
 			if receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID); err == nil && receipt.Status == "cancelled" {
 				cancel()
-				s.replyTurnReceipt(w, sink, receipt)
-				return
+				return &receipt, nil
 			}
 		}
 		cancel()
-		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)
-		return
+		return nil, errConversationBusy
 	}
 	defer s.unregisterActiveChat(registeredConversationID, run)
 	defer cancel()
@@ -511,17 +535,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			if err := s.turns.finish(context.WithoutCancel(ctx), conversationID, req.TurnID, "failed", nil, startErr); err != nil {
 				startErr = err
 			}
-			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to save and start the turn", startErr)
-			return
+			return nil, errors.Wrap(startErr, "failed to save and start the turn")
 		}
 		if !started {
 			receipt, err := s.turns.get(requestCtx, conversationID, req.TurnID)
 			if err != nil {
-				s.writeErrorResponse(w, http.StatusInternalServerError, "failed to update the turn status", err)
-				return
+				return nil, errors.Wrap(err, "failed to update the turn status")
 			}
-			s.replyTurnReceipt(w, sink, receipt)
-			return
+			return &receipt, nil
 		}
 	}
 
@@ -542,6 +563,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "user-message",
+		DelegatedUser:  req.UserMessageSource != "",
+		SourceID:       req.UserMessageSource,
 		ConversationID: conversationID,
 		Role:           "user",
 		Content:        userContent,
@@ -572,7 +595,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.broadcastChatEvent(conversationID, completionEvent)
 			_ = sink.Send(completionEvent)
 			logger.G(requestCtx).WithError(runErr).Debug("chat run interrupted")
-			return
+			return nil, nil
 		}
 
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
@@ -589,7 +612,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			Role:           "assistant",
 			Error:          runErr.Error(),
 		})
-		return
+		return nil, nil
 	}
 
 	s.unregisterActiveChat(registeredConversationID, run)
@@ -603,6 +626,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		ConversationID: conversationID,
 		Role:           "assistant",
 	})
+	return nil, nil
 }
 
 type broadcastingEventSink struct {

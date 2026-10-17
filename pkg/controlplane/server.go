@@ -79,6 +79,9 @@ type Server struct {
 	searchIndexDone       chan struct{}
 	chatRunner            chat.ChatRunner
 	transcription         llmtypes.Transcriber
+	realtime              llmtypes.RealtimeProvider
+	realtimeMu            sync.Mutex
+	realtimeCalls         map[string]*realtimeCall
 	config                *ServerConfig
 	server                *http.Server
 	frontendHandler       FrontendHandler
@@ -132,6 +135,7 @@ type activeChatRun struct {
 	stopRequested bool
 	uiInput       *webUIInputBroker
 	eventSink     chat.ChatEventSink
+	voiceSteers   map[string]*voiceSteerOutcome
 }
 
 const (
@@ -282,6 +286,10 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid transcription configuration")
 	}
+	realtime, err := newRealtimeFromViper()
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid realtime configuration")
+	}
 
 	// Get the conversation service
 	conversationStore, err := conversations.GetConversationStore(ctx)
@@ -367,6 +375,8 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		},
 		config:                config,
 		transcription:         transcriber,
+		realtime:              realtime,
+		realtimeCalls:         make(map[string]*realtimeCall),
 		frontendHandler:       frontendHandler,
 		runCtx:                runCtx,
 		runCancel:             runCancel,
@@ -442,6 +452,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/message-history", s.requireRole(RoleUser, s.handleMessageHistory)).Methods("GET", "POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/transcription", s.requireRole(RoleUser, s.handleTranscription)).Methods("GET", "POST")
+	api.HandleFunc("/realtime", s.requireRole(RoleUser, s.handleRealtime)).Methods("GET", "POST")
+	api.HandleFunc("/realtime/{id}/events", s.requireRole(RoleUser, s.handleRealtimeEvents)).Methods("GET")
+	api.HandleFunc("/realtime/{id}", s.requireRole(RoleUser, s.handleCloseRealtime)).Methods("DELETE")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/shortcuts", s.requireRole(RoleUser, s.handleWorkspaceShortcut)).Methods("POST")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
@@ -953,6 +966,7 @@ func (s *Server) unregisterActiveChat(conversationID string, run *activeChatRun)
 	s.activeChatsMu.Lock()
 	registered, ok := s.activeChats[conversationID]
 	if ok && registered == run {
+		s.finishVoiceSteersLocked(conversationID, run)
 		delete(s.activeChats, conversationID)
 	}
 	s.activeChatsMu.Unlock()
@@ -1370,6 +1384,9 @@ const (
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
+	delegatedSource  string
+	Anchor           *int                       `json:"anchor,omitempty"`
+	ID               string                     `json:"id,omitempty"`
 	ResourceReloadID string                     `json:"resourceReloadId,omitempty"`
 	Kind             string                     `json:"kind,omitempty"`
 	Compaction       *llmtypes.CompactionMarker `json:"compaction,omitempty"`
@@ -1639,6 +1656,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
 	}
+	webMessages, err = s.projectRealtimeTranscript(ctx, id, webMessages)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to load voice transcript", err)
+		return
+	}
 
 	pendingSteer, err := pendingSteerWebMessages(ctx, id)
 	if err != nil {
@@ -1737,6 +1759,9 @@ func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebM
 
 	webMessages := make([]WebMessage, 0, len(messages))
 	for _, message := range messages {
+		if message.SourceID != "" {
+			continue
+		}
 		content := any(message.Content)
 		if blocks := chat.ContentBlocksForUserInput(message.Content, message.Images); len(blocks) > 0 {
 			content = blocks
@@ -1753,9 +1778,10 @@ func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebM
 // convertConversationToWebMessages retains provider-specific rich rendering for every display segment.
 func (s *Server) convertConversationToWebMessages(record *conversations.GetConversationResponse, provider string) ([]WebMessage, error) {
 	var messages []WebMessage
+	userOrdinal := 0
 	if history := record.CompactionHistory; history != nil {
 		for _, segment := range history.Segments {
-			entries, err := s.convertToWebMessages(segment.RawMessages, provider, record.Metadata, record.ToolResults)
+			entries, err := s.convertRealtimeSegment(segment.RawMessages, provider, record.Metadata, record.ToolResults, &userOrdinal)
 			if err != nil {
 				return nil, err
 			}
@@ -1770,7 +1796,7 @@ func (s *Server) convertConversationToWebMessages(record *conversations.GetConve
 	if err != nil {
 		return nil, err
 	}
-	entries, err := s.convertToWebMessages(visible, provider, record.Metadata, record.ToolResults)
+	entries, err := s.convertRealtimeSegment(visible, provider, record.Metadata, record.ToolResults, &userOrdinal)
 	if err != nil {
 		return nil, err
 	}
@@ -2156,6 +2182,11 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	subscriber := newSubscriberEventSink()
+	principal, _ := principalFromContext(r.Context())
+	subscriber.ctx = r.Context()
+	subscriber.ownerID = principal.ID
+	subscriber.clientID = strings.TrimSpace(r.Header.Get(chat.ClientIDHeader))
+	subscriber.capabilities = parseClientUICapabilities(r.Header.Get(chat.UICapabilitiesHeader))
 	active, registered := s.registerChatSubscriber(conversationID, subscriber)
 	if !registered {
 		subscriber.Close()
@@ -2380,6 +2411,20 @@ func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	broker := s.uiInputBrokerForRun(conversationID)
+	if broker != nil {
+		broker.mu.Lock()
+		owner := broker.owner
+		ownerPrincipal, owned := Principal{}, false
+		if owner != nil {
+			ownerPrincipal, owned = principalFromContext(owner.ctx)
+		}
+		broker.mu.Unlock()
+		requestPrincipal, authenticated := principalFromContext(r.Context())
+		if owned && (!authenticated || requestPrincipal.ID != ownerPrincipal.ID) {
+			s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
+			return
+		}
+	}
 	if broker == nil || !broker.respondOwned(clientID, requestID, response) {
 		s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
 		return
@@ -2406,6 +2451,14 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) 
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to fork conversation", err)
 		return
 	}
+	if s.turns != nil {
+		_, err = s.turns.db.ExecContext(ctx, `INSERT INTO realtime_transcript(conversation_id,id,anchor,role,text)
+			SELECT ?,id,anchor,role,text FROM realtime_transcript WHERE conversation_id=? ORDER BY sequence`, response.ID, conversationID)
+		if err != nil {
+			s.writeErrorResponse(w, http.StatusInternalServerError, "conversation forked, but its voice transcript could not be copied", err)
+			return
+		}
+	}
 
 	s.writeJSONResponse(w, forkConversationResponse{
 		Success:        true,
@@ -2424,6 +2477,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer s.releaseConversationDeletion(id)
+	s.closeRealtimeConversation(id)
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
@@ -2548,6 +2602,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 }
 
 func (s *Server) shutdownHTTPServer() error {
+	s.closeRealtimeCalls()
 	s.closeBrowserHandles("", 0)
 	if s.runCancel != nil {
 		s.runCancel()

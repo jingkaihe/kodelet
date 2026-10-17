@@ -1,6 +1,134 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatRenderMessage, CompactionMarker, Conversation, Message } from '../../types';
-import { applyChatStreamEvent, conversationToChatMessages } from './state';
+import { applyChatStreamEvent, applyRealtimeTranscript, conversationToChatMessages } from './state';
+
+describe('live conversation projection', () => {
+  it('upserts cumulative captions by ID while retaining coding prose and tools', () => {
+    let messages = applyRealtimeTranscript([], {
+      kind: 'transcript',
+      id: 'spoken',
+      role: 'user',
+      text: 'Fix it',
+      final: true,
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'user-message',
+      content: 'Expanded coding task',
+      delegatedUser: true,
+    });
+    messages = applyChatStreamEvent(messages, { kind: 'text-delta', delta: 'I found ' });
+    messages = applyRealtimeTranscript(messages, {
+      kind: 'transcript',
+      id: 'reply',
+      role: 'assistant',
+      text: 'Let me',
+    });
+    messages = applyChatStreamEvent(messages, { kind: 'text-delta', delta: 'the bug.' });
+    messages = applyChatStreamEvent(messages, { kind: 'content-end' });
+    messages = applyChatStreamEvent(messages, { kind: 'text', content: 'I found the bug.' });
+    messages = applyRealtimeTranscript(messages, {
+      kind: 'transcript',
+      id: 'reply',
+      role: 'assistant',
+      text: 'Let me check that.',
+      final: true,
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-use',
+      tool_call_id: 'edit',
+      tool_name: 'apply_patch',
+      input: '{}',
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-result',
+      tool_call_id: 'edit',
+      tool_result: { toolName: 'apply_patch', success: true },
+    });
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({ id: 'spoken', role: 'user', content: 'Fix it' });
+    expect(messages[1].blocks).toEqual([
+      { type: 'message', content: 'I found the bug.', inProgress: false },
+      {
+        type: 'tools',
+        tools: [
+          expect.objectContaining({
+            callId: 'edit',
+            result: { toolName: 'apply_patch', success: true },
+          }),
+        ],
+      },
+    ]);
+    expect(messages[2]).toMatchObject({
+      id: 'reply',
+      blocks: [{ type: 'message', content: 'Let me check that.', inProgress: false }],
+    });
+    // Genuine typing stays visible even when it repeats spoken words exactly.
+    expect(
+      applyChatStreamEvent(messages, {
+        kind: 'user-message-display',
+        content: 'Expanded coding task',
+        delegatedUser: true,
+      })
+    ).toBe(messages);
+    messages = applyChatStreamEvent(messages, { kind: 'user-message', content: 'Fix it' });
+    expect(messages.filter((message) => message.role === 'user')).toHaveLength(2);
+  });
+
+  it.each([
+    false,
+    true,
+  ])('uses checkpoint anchors before coding output (already streaming: %s) and preserves order on reload', (alreadyStreaming) => {
+    const saved: Conversation = {
+      id: 'chat',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 4,
+      messages: [
+        { role: 'user', content: 'Fix it' },
+        { id: 'reply', anchor: 1, role: 'assistant', content: 'Let me check that.' },
+        { id: 'spoken', anchor: 1, role: 'user', content: 'Keep going.' },
+        { role: 'assistant', content: 'Fixed.' },
+      ],
+    };
+    let live = applyChatStreamEvent([], { kind: 'user-message', content: 'Fix it' });
+    live = applyChatStreamEvent(live, {
+      kind: 'user-message',
+      delegatedUser: true,
+      content: 'Hidden delegation',
+    });
+    if (alreadyStreaming) live = applyChatStreamEvent(live, { kind: 'text-delta', delta: 'Fix' });
+    live = applyRealtimeTranscript(live, {
+      kind: 'transcript',
+      id: 'reply',
+      role: 'assistant',
+      anchor: 1,
+      text: 'Let me',
+    });
+    live = applyRealtimeTranscript(live, {
+      kind: 'transcript',
+      id: 'spoken',
+      role: 'user',
+      anchor: 1,
+      text: 'Keep going.',
+      final: true,
+    });
+    live = applyChatStreamEvent(live, {
+      kind: 'text-delta',
+      delta: alreadyStreaming ? 'ed.' : 'Fixed.',
+    });
+    expect(live.map((message) => message.id)).toEqual([undefined, 'reply', 'spoken', undefined]);
+    live = applyChatStreamEvent(live, { kind: 'content-end' });
+    live = applyRealtimeTranscript(live, {
+      kind: 'transcript',
+      id: 'reply',
+      role: 'assistant',
+      anchor: 99, // Later updates cannot change the first occurrence's anchor.
+      text: 'Let me check that.',
+      final: true,
+    });
+    expect(live).toEqual(conversationToChatMessages(saved));
+  });
+});
 
 describe('conversationToChatMessages', () => {
   it.each([
@@ -100,7 +228,7 @@ describe('conversationToChatMessages', () => {
     ]);
   });
 
-  it('merges consecutive assistant fragments into a single rendered reply', () => {
+  it('groups assistant fragments while keeping their boundaries for voice insertion', () => {
     const conversation: Conversation = {
       id: 'conv-merged',
       createdAt: '2026-03-08T00:00:00Z',
@@ -148,6 +276,7 @@ describe('conversationToChatMessages', () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]).toEqual({
       role: 'assistant',
+      codingMessageEnds: [1, 2, 3],
       blocks: [
         {
           type: 'thinking',
@@ -176,6 +305,24 @@ describe('conversationToChatMessages', () => {
         },
       ],
     });
+
+    const inserted = applyRealtimeTranscript(messages, {
+      kind: 'transcript',
+      id: 'between',
+      role: 'user',
+      text: 'Question',
+      anchor: 3,
+    });
+    expect(inserted.map((message) => message.id)).toEqual([
+      undefined,
+      undefined,
+      'between',
+      undefined,
+    ]);
+    expect(inserted[1].blocks).toEqual(messages[1].blocks?.slice(0, 2));
+    expect(inserted[3].blocks).toEqual([
+      { type: 'message', content: 'Here is the summary.', inProgress: false },
+    ]);
   });
 
   it('preserves multiple persisted thinking texts as separate adjacent blocks', () => {
@@ -962,7 +1109,8 @@ describe('resource reload history and streaming', () => {
       messageCount: persisted.length,
       messages: persisted,
     });
-    expect(replayed).toEqual(live);
+    // Saved history additionally retains coding-message offsets for voice anchors.
+    expect(replayed).toMatchObject(live);
     expect(live[0].blocks).toEqual([
       { type: 'message', content: 'Continuing.', inProgress: false },
       { type: 'resources-reloaded', id: 'reload-1', text: 'Resources reloaded' },

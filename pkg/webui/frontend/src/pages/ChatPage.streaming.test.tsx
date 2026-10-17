@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatStreamEvent } from '../types';
+import type { ChatStreamEvent, RealtimeEvent } from '../types';
 import {
   ChatPage,
   makeRunner,
@@ -19,6 +19,17 @@ import {
   setupChatPageTests,
   stubImageFileReader,
 } from './ChatPage.testSupport';
+
+const realtimeEvents = vi.hoisted(() => ({ emit: (_event: RealtimeEvent) => {} }));
+vi.mock('../features/chat/useRealtime', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../features/chat/useRealtime')>();
+  return {
+    useRealtime: (options: Parameters<typeof original.useRealtime>[0]) => {
+      realtimeEvents.emit = options.onEvent;
+      return original.useRealtime(options);
+    },
+  };
+});
 
 interface ControlledChatStream {
   onEvent: (event: ChatStreamEvent) => void;
@@ -105,7 +116,7 @@ const expectQueuedCommandsDiscarded = async () => {
 describe('ChatPage streaming, steering, and navigation', () => {
   setupChatPageTests();
 
-  it('streams a future TUI turn into an already-open conversation', async () => {
+  it('keeps healthy watchers and recovers voice turns after an observer disconnects', async () => {
     setRouteParams({ id: 'conv-123' });
     mockGetConversation
       .mockResolvedValueOnce({
@@ -118,6 +129,7 @@ describe('ChatPage streaming, steering, and navigation', () => {
       })
       .mockResolvedValue({
         id: 'conv-123',
+        runnerId: 'runner-1',
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:01:00Z',
         messageCount: 2,
@@ -128,9 +140,12 @@ describe('ChatPage streaming, steering, and navigation', () => {
         toolResults: {},
       });
     let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    let disconnect!: () => void;
     mockStreamConversation.mockImplementation(async (_id, options) => {
       streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
-      return new Promise(() => undefined);
+      return new Promise<void>((resolve) => {
+        disconnect = resolve;
+      });
     });
 
     render(<ChatPage />);
@@ -157,6 +172,58 @@ describe('ChatPage streaming, steering, and navigation', () => {
 
     await waitFor(() => expect(screen.getByText('sent from the tui')).toBeInTheDocument());
     expect(screen.getByText('hello from the runner')).toBeInTheDocument();
+
+    const voiceEvent = (kind: 'agent-started' | 'agent-completed', turnId: string) =>
+      realtimeEvents.emit({ kind, conversationId: 'conv-123', turnId });
+    await act(async () => voiceEvent('agent-started', 'voice-1'));
+    expect(mockStreamConversation).toHaveBeenCalledTimes(1);
+    expect(mockStreamConversation.mock.calls[0][1].signal.aborted).toBe(false);
+
+    await act(async () => disconnect());
+    await act(async () => voiceEvent('agent-started', 'voice-2'));
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalledTimes(2));
+    await act(async () => streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' }));
+    const fetched = mockGetConversation.mock.calls.length;
+    await act(async () => voiceEvent('agent-completed', 'voice-1'));
+    expect(mockGetConversation).toHaveBeenCalledTimes(fetched);
+
+    // A newer turn fences even an already-in-flight completion GET.
+    let completeOldRefresh!: (data: unknown) => void;
+    mockGetConversation.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeOldRefresh = resolve;
+        })
+    );
+    await act(async () => voiceEvent('agent-completed', 'voice-2'));
+    await act(async () => voiceEvent('agent-started', 'voice-3'));
+    await act(async () =>
+      completeOldRefresh({
+        id: 'conv-123',
+        isRunning: false,
+        messages: [{ role: 'assistant', content: 'Stale completed snapshot' }],
+      })
+    );
+    expect(screen.queryByText('Stale completed snapshot')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+
+    await act(async () => {
+      realtimeEvents.emit({
+        kind: 'transcript',
+        id: 'spoken',
+        role: 'user',
+        text: 'Keep this caption',
+        final: true,
+        conversationId: 'conv-123',
+      });
+      voiceEvent('agent-completed', 'voice-3');
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByText('Keep this caption')).toBeInTheDocument();
+    expect(screen.getByText('hello from the runner')).toBeInTheDocument();
+    expect(mockStreamConversation).toHaveBeenCalledTimes(2);
   });
 
   it('allows steering a TUI-started conversation while its remote runner is busy', async () => {

@@ -234,6 +234,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		Role:         openai.ChatMessageRoleUser,
 		MultiContent: contentParts,
 	})
+	t.RecordUserMessageSource(ctx, llmtypes.UserMessageSource(ctx), t.messages)
 }
 
 // AddAssistantMessage appends a provider-native assistant message without calling the model.
@@ -308,10 +309,12 @@ func (t *Thread) SendMessage(
 		copy(originalMessages, t.messages)
 		originalHistory := t.GetCompactionHistory()
 		originalResults := t.GetStructuredToolResults()
+		originalSources := t.GetMetadata()[base.UserMessageSourcesMetadataKey]
 		defer func() {
 			t.messages = originalMessages
 			t.SetCompactionHistory(originalHistory)
 			t.SetStructuredToolResults(originalResults)
+			t.RestoreUserMessageSources(originalSources)
 		}()
 	}
 
@@ -321,9 +324,9 @@ func (t *Thread) SendMessage(
 	}
 
 	if len(opt.Images) > 0 {
-		t.AddUserMessage(ctx, message, opt.Images...)
+		t.AddUserMessage(llmtypes.WithUserMessageSource(ctx, opt.UserMessageSource), message, opt.Images...)
 	} else {
-		t.AddUserMessage(ctx, message)
+		t.AddUserMessage(llmtypes.WithUserMessageSource(ctx, opt.UserMessageSource), message)
 	}
 
 	// Determine which model to use
@@ -721,7 +724,10 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 			userMessage := t.pendingSteerChatMessage(ctx, steerMsg)
 			t.messages = append(t.messages, userMessage)
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+			t.RecordUserMessageSource(ctx, steerMsg.SourceID, t.messages)
+			if userHandler, ok := handler.(llmtypes.SourcedUserMessageHandler); ok {
+				userHandler.HandleSourcedUserMessage(steerMsg.Content, steerMsg.Images, steerMsg.SourceID)
+			} else if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
 				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
 			} else {
 				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))

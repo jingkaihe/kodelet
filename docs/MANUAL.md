@@ -365,6 +365,22 @@ transcription:
 
 Requires HTTPS or localhost and microphone permission. Recording is limited to ten minutes or 20 MiB, whichever comes first. Audio is uploaded automatically at pauses; retranscribing the whole recording increases cost and latency. Kodelet does not persist audio, but cancellation cannot retract an upload already received by the provider. If the final update fails, review the warning before accepting the earlier preview.
 
+#### Live voice
+
+Use the waveform button or `/talk` in the Web UI to speak with Kodelet and hear its replies. Starting a call in a new chat creates the conversation using your selected profile and workspace; no typed message is needed. Spoken requests can start or steer coding work using the conversation's selected profile, including Anthropic profiles. Spoken messages, coding responses, and tools share one transcript; delegated user instructions are not displayed twice. `/voice` remains dictation into your draft.
+
+Enable live voice independently of the coding profile, then restart the server:
+
+```yaml
+realtime:
+  enabled: true
+  profile: openai
+```
+
+Use an OpenAI API profile (default model `gpt-realtime`, voice `marin`) or a Codex profile signed in on the server (experimental; default model `gpt-live-1-codex`, voice `cove`). Optional `realtime.model` and `realtime.voice` override those defaults. OpenAI API usage is billed separately from ChatGPT; Codex access depends on your account and may change.
+
+Requires HTTPS or localhost, microphone permission, and a browser with WebRTC. Calls last up to 30 minutes. **Mute** pauses microphone input; **End** or navigating away ends the call without stopping coding work. Audio goes directly to the voice provider; Kodelet saves the transcript, not the audio.
+
 #### Control-plane container
 
 The container runs the control plane as unprivileged UID/GID `65532` and starts with the equivalent of:

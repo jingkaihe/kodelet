@@ -110,6 +110,24 @@ func TestInvocationAndModelErrorsRespectContentPolicy(t *testing.T) {
 	}
 }
 
+func TestUserMessageSourceSurvivesCompaction(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "voice")
+	ctx := context.Background()
+	raw := json.RawMessage(`[{"role":"user","content":"same text"}]`)
+	thread.RecordUserMessageSource(ctx, "utterance-1", raw)
+	require.NoError(t, thread.ArchiveCompactionLocked(raw, 1, "summary", "summary"))
+	thread.RecordUserMessageSource(ctx, "", json.RawMessage(`[{"role":"user","content":"summary"}]`))
+	assert.Equal(t, map[string]string{"0": "utterance-1"}, thread.GetMetadata()["delegated_user_sources"])
+	current := json.RawMessage(`[{"role":"user","content":"summary"},{"role":"user","content":"same text"}]`)
+	thread.RecordUserMessageSource(ctx, "", current)
+	assert.Equal(t, map[string]string{"0": "utterance-1"}, thread.GetMetadata()["delegated_user_sources"])
+	thread.RecordUserMessageSource(ctx, "utterance-2", current)
+	assert.Equal(t, map[string]string{"0": "utterance-1", "1": "utterance-2"}, thread.GetMetadata()["delegated_user_sources"])
+	// Replacing an uncommitted checkpoint with typed input must clear its tag.
+	thread.RecordUserMessageSource(ctx, "", current)
+	assert.Equal(t, map[string]string{"0": "utterance-1"}, thread.GetMetadata()["delegated_user_sources"])
+}
+
 func TestThreadMetadata(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 

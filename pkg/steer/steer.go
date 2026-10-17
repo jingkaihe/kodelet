@@ -35,6 +35,7 @@ func pluralSuffix(count int) string {
 
 // Message represents a queued steering message.
 type Message struct {
+	SourceID  string    `json:"sourceId,omitempty"`
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	Images    []string  `json:"images,omitempty"`
@@ -137,7 +138,7 @@ func (s *Store) Enqueue(ctx context.Context, conversationID, content string, ima
 // Peek returns pending steering messages without consuming them.
 func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, error) {
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, content, images_json, created_at
+		SELECT id, content, images_json, created_at, source_id
 		FROM steering_messages
 		WHERE conversation_id = ? AND run_id=''
 		ORDER BY id ASC
@@ -166,7 +167,7 @@ func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, 
 	rows, err := tx.QueryxContext(ctx, `
 		DELETE FROM steering_messages
 		WHERE conversation_id = ? AND run_id=''
-		RETURNING id, content, images_json, created_at
+		RETURNING id, content, images_json, created_at, source_id
 	`, conversationID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to consume pending steering messages")
@@ -202,6 +203,7 @@ func (s *Store) HasPending(ctx context.Context, conversationID string) (bool, er
 }
 
 type messageRow struct {
+	sourceID   string
 	id         int64
 	content    string
 	imagesJSON string
@@ -212,7 +214,7 @@ func scanMessages(rows *sqlx.Rows) ([]Message, error) {
 	messageRows := make([]messageRow, 0)
 	for rows.Next() {
 		var row messageRow
-		if err := rows.Scan(&row.id, &row.content, &row.imagesJSON, &row.createdAt); err != nil {
+		if err := rows.Scan(&row.id, &row.content, &row.imagesJSON, &row.createdAt, &row.sourceID); err != nil {
 			return nil, errors.Wrap(err, "failed to scan steering message")
 		}
 		messageRows = append(messageRows, row)
@@ -232,6 +234,7 @@ func scanMessages(rows *sqlx.Rows) ([]Message, error) {
 			return nil, errors.Wrap(err, "failed to unmarshal steering images")
 		}
 		messages = append(messages, Message{
+			SourceID:  row.sourceID,
 			Role:      "user",
 			Content:   row.content,
 			Images:    images,

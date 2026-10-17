@@ -102,6 +102,13 @@ log_format: "json"
 #   enabled: true
 #   profile: "openai"
 
+# Optional live Web UI conversation, separate from dictation and the coding profile.
+# Use an OpenAI API or Codex profile. See docs/MANUAL.md.
+# realtime:
+#   enabled: true
+#   profile: "openai"
+#   # model and voice are optional; omit them for provider defaults.
+
 # Custom system prompt template file
 # Supports Go templates and can include built-in sections, e.g.:
 # {{include "templates/sections/behavior.tmpl" .}}

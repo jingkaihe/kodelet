@@ -495,11 +495,12 @@ func TestFromStoredItemsAssistantRawInputTextMessageNormalizesToOutputMessage(t 
 
 func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
 	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{}, "source-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
 
-	thread.AddUserMessage(context.Background(), "what is in the image?", "data:image/png;base64,aGVsbG8=")
+	thread.AddUserMessage(llmtypes.WithUserMessageSource(context.Background(), "voice-input"), "what is in the image?", "data:image/png;base64,aGVsbG8=")
 
 	require.Len(t, thread.storedItems, 1)
 	assert.Equal(t, "message", thread.storedItems[0].Type)
@@ -523,6 +524,39 @@ func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
 	assert.Equal(t, "user", streamable[0].Role)
 	assert.Equal(t, "what is in the image?", streamable[0].Content)
 	assert.Contains(t, string(streamable[0].RawItem), `"type":"input_image"`)
+
+	thread.AddUserMessage(context.Background(), "what is in the image?")
+	assert.Equal(t, map[string]string{"0": "voice-input"}, thread.GetMetadata()["delegated_user_sources"])
+	assert.NotContains(t, string(thread.storedItems[0].RawItem), "voice-input")
+}
+
+func TestNoSaveRollbackReindexesUserMessageSources(t *testing.T) {
+	for _, externalSource := range []string{"", "external-voice"} {
+		t.Run("external source "+externalSource, func(t *testing.T) {
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "source-rollback")}
+			ctx := t.Context()
+			thread.AddUserMessage(llmtypes.WithUserMessageSource(ctx, "original-voice"), "same text")
+			require.NoError(t, thread.SwapContext(ctx, "original summary"))
+			snapshot := thread.snapshotNoSaveState()
+			temporary := context.WithValue(ctx, responsesNoSaveOperationContextKey{}, snapshot.operation)
+			thread.AddUserMessage(llmtypes.WithUserMessageSource(temporary, "temporary-voice"), "same text")
+			require.NoError(t, thread.SwapContext(ctx, "temporary summary"))
+			thread.AddUserMessage(llmtypes.WithUserMessageSource(ctx, externalSource), "same text")
+			thread.SetMetadataValue("unrelated", "keep")
+			thread.restoreNoSaveState(snapshot)
+
+			want := map[string]string{"0": "original-voice"}
+			if externalSource != "" {
+				want["1"] = externalSource
+			}
+			assert.Equal(t, want, thread.GetMetadata()[base.UserMessageSourcesMetadataKey])
+			assert.Equal(t, "keep", thread.GetMetadata()["unrelated"])
+			assert.Equal(t, snapshot.compactionHistory, thread.GetCompactionHistory())
+			require.Len(t, thread.storedItems, 2)
+			thread.AddUserMessage(ctx, "same text")
+			assert.Equal(t, want, thread.GetMetadata()[base.UserMessageSourcesMetadataKey], "identical typed text must not inherit provenance")
+		})
+	}
 }
 
 func mustJSON(t *testing.T, v any) json.RawMessage {

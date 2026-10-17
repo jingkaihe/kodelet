@@ -63,6 +63,11 @@ type UserMessageHandler interface {
 	HandleUserMessage(content string, images []string)
 }
 
+// SourcedUserMessageHandler preserves the identity of delegated steering input.
+type SourcedUserMessageHandler interface {
+	HandleSourcedUserMessage(content string, images []string, sourceID string)
+}
+
 // StreamingMessageHandler extends MessageHandler with delta streaming support.
 // Handlers implementing this interface will receive content as it streams from the LLM.
 type StreamingMessageHandler interface {

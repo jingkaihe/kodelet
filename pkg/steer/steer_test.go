@@ -47,6 +47,9 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 	alreadyPending, err = store.Enqueue(ctx, conversationID, "Second message", nil)
 	require.NoError(t, err)
 	assert.True(t, alreadyPending)
+	_, err = store.db.ExecContext(ctx, "UPDATE steering_messages SET source_id=? WHERE conversation_id=? AND content=?",
+		"voice-source", conversationID, "Second message")
+	require.NoError(t, err)
 
 	pending, err := store.Peek(ctx, conversationID)
 	require.NoError(t, err)
@@ -54,6 +57,8 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 	assert.Equal(t, "user", pending[0].Role)
 	assert.Equal(t, "First message", pending[0].Content)
 	assert.Equal(t, "Second message", pending[1].Content)
+	assert.Empty(t, pending[0].SourceID)
+	assert.Equal(t, "voice-source", pending[1].SourceID)
 	assert.Empty(t, pending[0].Images)
 	assert.WithinDuration(t, time.Now(), pending[0].Timestamp, 5*time.Second)
 
@@ -62,6 +67,7 @@ func TestEnqueuePeekAndConsume(t *testing.T) {
 	require.Len(t, consumed, 2)
 	assert.Equal(t, "First message", consumed[0].Content)
 	assert.Equal(t, "Second message", consumed[1].Content)
+	assert.Equal(t, "voice-source", consumed[1].SourceID)
 
 	hasPending, err := store.HasPending(ctx, conversationID)
 	require.NoError(t, err)

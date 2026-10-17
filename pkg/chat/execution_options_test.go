@@ -64,7 +64,7 @@ func TestResolveExtensionProfileCodeMode(t *testing.T) {
 	require.NotNil(t, config.RunnerOptions().CodeMode, "an explicit profile code_mode reaches the runner")
 	assert.Equal(t, "off", *config.RunnerOptions().CodeMode)
 
-	resolved, err := resolveExecutionOptions(t.Context(), ChatRequest{}, config)
+	resolved, err := ResolveExecutionOptions(t.Context(), ChatRequest{}, config)
 	require.NoError(t, err)
 	assert.Equal(t, "off", *resolved.RunnerOptions().CodeMode, "request option merging keeps the profile's mode")
 
@@ -138,7 +138,7 @@ func TestIsolatedProfileCannotWidenHostPermissions(t *testing.T) {
 	assert.False(t, config.EnvironmentOptions().ToolAllowed("bash"), "disjoint commands must deny all, not inherit")
 	assert.True(t, *config.EnvironmentOptions().NoSkills)
 	assert.True(t, *config.EnvironmentOptions().NoExtensions)
-	config, err = resolveExecutionOptions(t.Context(), ChatRequest{Options: &llmtypes.ExecutionOptions{
+	config, err = ResolveExecutionOptions(t.Context(), ChatRequest{Options: &llmtypes.ExecutionOptions{
 		AllowedTools: &[]string{"file_read", "file_write", "bash"}, AllowedCommands: &[]string{"go test"},
 		NoSkills: new(false), NoExtensions: new(false), MaxTurns: new(2),
 	}}, config)

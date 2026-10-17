@@ -124,8 +124,12 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 func (t *Thread) SavePendingUserMessage(ctx context.Context, message string, images ...string) error {
 	return t.Thread.SavePendingUserMessage(ctx, t, func(ctx context.Context) (context.Context, func()) {
 		original := t.messages
+		originalSources := t.GetMetadata()[base.UserMessageSourcesMetadataKey]
 		t.messages = slices.Clone(original)
-		return ctx, func() { t.messages = original }
+		return ctx, func() {
+			t.messages = original
+			t.RestoreUserMessageSources(originalSources)
+		}
 	}, message, images...)
 }
 

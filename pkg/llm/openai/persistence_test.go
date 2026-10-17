@@ -607,7 +607,7 @@ func TestSavePendingUserMessageRestoresLiveHistory(t *testing.T) {
 			original := slices.Clone(backing)
 			thread.messages = backing[:1]
 
-			err := thread.SavePendingUserMessage(t.Context(), "pending", "data:image/png;base64,aGVsbG8=")
+			err := thread.SavePendingUserMessage(llmtypes.WithUserMessageSource(t.Context(), "voice-source"), "pending", "data:image/png;base64,aGVsbG8=")
 			if tt.saveErr != nil {
 				require.ErrorIs(t, err, tt.saveErr)
 			} else {
@@ -616,7 +616,9 @@ func TestSavePendingUserMessageRestoresLiveHistory(t *testing.T) {
 			assert.Equal(t, original[:1], thread.messages)
 			assert.Same(t, &backing[0], &thread.messages[0], "restore the original slice, not its clone")
 			assert.Equal(t, original, backing, "checkpoint appends must not overwrite spare backing capacity")
+			assert.NotContains(t, thread.GetMetadata(), base.UserMessageSourcesMetadataKey)
 			require.Len(t, store.SavedRecords, 1)
+			assert.Equal(t, map[string]string{"1": "voice-source"}, store.SavedRecords[0].Metadata[base.UserMessageSourcesMetadataKey])
 			var saved []openai.ChatCompletionMessage
 			require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &saved))
 			require.Len(t, saved, 2)

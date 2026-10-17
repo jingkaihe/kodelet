@@ -10,21 +10,25 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatStreamEvent } from '../types';
+import type { ChatRequest, ChatStreamEvent, RealtimeEvent } from '../types';
 import {
   ChatPage,
   flushAsyncUpdates,
   makeRunner,
+  mockEndRealtime,
   mockGetChatSettings,
   mockGetConversation,
   mockGetConversations,
+  mockGetRealtimeCapabilities,
   mockGetRunners,
   mockGetSlashCommands,
   mockGetTranscriptionCapabilities,
   mockNavigate,
+  mockStartRealtime,
   mockSteerConversation,
   mockStreamChat,
   mockStreamConversation,
+  mockStreamRealtime,
   mockTranscribeAudio,
   renderChatWithRunner,
   setRouteParams,
@@ -71,6 +75,121 @@ function prepareDictation(available = true) {
 
 describe('ChatPage composer, attachments, and slash commands', () => {
   setupChatPageTests();
+
+  it('starts live voice from a draft and adopts its conversation without losing media or captions', async () => {
+    prepareDictation();
+    mockGetRealtimeCapabilities.mockResolvedValue({ enabled: true, available: true });
+    const settings = await mockGetChatSettings();
+    mockGetChatSettings.mockResolvedValue({
+      ...settings,
+      model: 'coding-model',
+      modelOptions: ['coding-model'],
+    });
+    const track = Object.assign(new EventTarget(), { enabled: true, stop: vi.fn() });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
+      getTracks: () => [track],
+      getAudioTracks: () => [track],
+    } as unknown as MediaStream);
+    const pauseAudio = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.stubGlobal(
+      'RTCPeerConnection',
+      class {
+        iceGatheringState = 'complete';
+        localDescription = { type: 'offer', sdp: 'offer' };
+        addTrack = vi.fn();
+        createDataChannel = vi.fn();
+        createOffer = vi.fn().mockResolvedValue(this.localDescription);
+        setLocalDescription = vi.fn().mockResolvedValue(undefined);
+        setRemoteDescription = vi.fn().mockResolvedValue(undefined);
+        close = vi.fn();
+      }
+    );
+    mockStartRealtime.mockImplementation(async (_offer: string, chat: ChatRequest) => ({
+      id: 'call-one',
+      conversationId: chat.conversationId,
+      answer: 'answer',
+    }));
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      runnerId: 'runner-1',
+      cwd: '/canonical/workspace',
+      profile: 'work',
+      model: 'coding-model',
+      reasoningEffort: 'medium',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messageCount: 0,
+      messages: [],
+      toolResults: {},
+    }));
+    let emit!: (event: RealtimeEvent) => void;
+    mockStreamRealtime.mockImplementation((_id, options) => {
+      emit = options.onEvent;
+      return new Promise(() => {});
+    });
+    mockStreamConversation.mockImplementation(() => new Promise(() => {}));
+    const view = await renderChatWithRunner();
+    fireEvent.click(screen.getByRole('button', { name: /^Change workspace:/ }));
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../project' },
+    });
+    await flushAsyncUpdates();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await flushAsyncUpdates();
+    expect(screen.getByRole('button', { name: 'Talk' }).textContent).toBe('');
+    fireEvent.change(screen.getByTestId('composer-textarea'), {
+      target: { value: 'Keep my draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Talk' }));
+    await waitFor(() => expect(mockStreamRealtime).toHaveBeenCalledOnce());
+    const request = mockStartRealtime.mock.calls[0][1];
+    expect(request).toMatchObject({
+      message: '',
+      conversationId: expect.any(String),
+      runnerId: 'runner-1',
+      cwd: '../project',
+      profile: 'work',
+      options: { model: 'coding-model' },
+      reasoningEffort: 'medium',
+    });
+    expect(mockNavigate).toHaveBeenCalledWith(`/c/${request.conversationId}`, { replace: true });
+    act(() =>
+      emit({
+        kind: 'transcript',
+        conversationId: request.conversationId,
+        id: 'speech',
+        role: 'user',
+        text: 'First spoken message',
+        final: true,
+      })
+    );
+    setRouteParams({ id: request.conversationId });
+    view.rerender(<ChatPage />);
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalledOnce());
+    expect(screen.getByText('First spoken message')).toBeInTheDocument();
+    expect(screen.getByTestId('composer-textarea')).toHaveValue('Keep my draft');
+    expect(mockEndRealtime).not.toHaveBeenCalled();
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(mockStreamChat).not.toHaveBeenCalled();
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'End call' }));
+    expect(mockEndRealtime).toHaveBeenCalledWith('call-one');
+    fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value: '/talk' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockStartRealtime).toHaveBeenCalledTimes(2));
+    expect(mockStartRealtime.mock.calls[1][1]).toEqual({
+      message: '',
+      conversationId: request.conversationId,
+      clientCapabilities: {
+        interactiveUI: true,
+        persistentWidgets: true,
+        persistentSurfaces: false,
+      },
+    });
+    expect(mockStreamChat).not.toHaveBeenCalled();
+    view.unmount();
+    pauseAudio.mockRestore();
+  });
 
   it.each([
     false,
@@ -139,14 +258,17 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     expect(mockStreamChat).not.toHaveBeenCalled();
   });
 
-  it('leaves a discovered /voice queueable and ignores its shortcut when dictation is disabled', async () => {
+  it.each([
+    { command: 'voice', button: 'Dictate text' },
+    { command: 'talk', button: 'Talk' },
+  ])('leaves /$command queueable when voice features are disabled', async ({ command, button }) => {
     mockGetSlashCommands.mockResolvedValue({
-      commands: [{ name: 'voice', description: 'Workspace voice recipe', hint: 'topic' }],
+      commands: [{ name: command, description: 'Workspace recipe', hint: 'topic' }],
     });
     mockStreamChat.mockImplementation(() => new Promise(() => undefined));
     await renderChatWithRunner();
     const textarea = screen.getByTestId('composer-textarea');
-    expect(screen.queryByRole('button', { name: 'Dictate text' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: button })).not.toBeInTheDocument();
     expect(
       fireEvent.keyDown(textarea, { key: 'V', code: 'KeyV', altKey: true, shiftKey: true })
     ).toBe(true);
@@ -155,14 +277,12 @@ describe('ChatPage composer, attachments, and slash commands', () => {
     fireEvent.change(textarea, { target: { value: 'Start working' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
-    fireEvent.change(textarea, { target: { value: '/voice' } });
-    expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent(
-      'Workspace voice recipe'
-    );
-    fireEvent.change(textarea, { target: { value: '/voice topic' } });
+    fireEvent.change(textarea, { target: { value: `/${command}` } });
+    expect(screen.getByTestId('slash-command-suggestions')).toHaveTextContent('Workspace recipe');
+    fireEvent.change(textarea, { target: { value: `/${command} topic` } });
     fireEvent.click(screen.getByRole('button', { name: 'Queue command' }));
     expect(await screen.findByRole('region', { name: 'Queued commands' })).toHaveTextContent(
-      '/voice topic'
+      `/${command} topic`
     );
     expect(mockSteerConversation).not.toHaveBeenCalled();
     expect(mockStreamChat).toHaveBeenCalledTimes(1);

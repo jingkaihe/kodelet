@@ -29,7 +29,11 @@ import PendingSteerList from '../components/chat/PendingSteerList';
 import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
 import { discardTerminalPopOuts } from '../components/workspace/terminalPopOut';
-import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
+import {
+  applyChatStreamEvent,
+  applyRealtimeTranscript,
+  conversationToChatMessages,
+} from '../features/chat/state';
 import { buildUserContent, useChatAttachments } from '../features/chat/useChatAttachments';
 import {
   MAX_SIDEBAR_WIDTH,
@@ -43,8 +47,9 @@ import {
   useConversationList,
 } from '../features/chat/useConversationList';
 import { useConversationSearch } from '../features/chat/useConversationSearch';
-import { useDictation } from '../features/chat/useDictation';
+import { isVoiceCommand, useDictation } from '../features/chat/useDictation';
 import { useExtensionWidgets } from '../features/chat/useExtensionWidgets';
+import { useRealtime } from '../features/chat/useRealtime';
 import { useSlashCommands } from '../features/chat/useSlashCommands';
 import { useTranscriptAutoScroll } from '../features/chat/useTranscriptAutoScroll';
 import { useWorkspaceResize } from '../features/chat/useWorkspaceResize';
@@ -56,6 +61,7 @@ import type {
   Conversation,
   GitDiffResponse,
   PendingImageAttachment,
+  RealtimeEvent,
   Runner,
   UIConfirmRequestEvent,
   UIInputRequestEvent,
@@ -83,6 +89,8 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
       ? conversation.environmentProfile.trim()
       : undefined,
   messages: (conversation.messages || []).map((message) => ({
+    id: message.id,
+    anchor: message.anchor,
     role: message.role || 'user',
     content: message.content || '',
     kind: message.kind,
@@ -210,6 +218,7 @@ const ChatPage: React.FC = () => {
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [draftConversationId, setDraftConversationId] = useState(generateConversationId);
+  const sessionConversationId = conversationId || draftConversationId;
   const draftWorkspaceRef = useRef<{
     conversationId: string;
     runnerIds: Set<string>;
@@ -221,6 +230,24 @@ const ChatPage: React.FC = () => {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaret = useRef<number | null>(null);
   const dictationOwner = useRef('');
+  const realtimeCaptions = useRef(new Map<string, RealtimeEvent>());
+  const conversationRunVersion = useRef(0);
+  const realtimeTurn = useRef<{ conversationId: string; turnId?: string } | null>(null);
+  const projectConversation = useCallback((saved: Conversation) => {
+    let projected = conversationToChatMessages(saved);
+    // A GET can race a newer caption on the live stream. Reapply only this
+    // target's stable-ID updates; persistence and history ordering stay server-owned.
+    for (const event of realtimeCaptions.current.values()) {
+      if (event.conversationId === saved.id) projected = applyRealtimeTranscript(projected, event);
+    }
+    return projected;
+  }, []);
+  useLayoutEffect(() => {
+    void sessionConversationId;
+    realtimeCaptions.current.clear();
+    realtimeTurn.current = null;
+    conversationRunVersion.current += 1;
+  }, [sessionConversationId]);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -332,6 +359,29 @@ const ChatPage: React.FC = () => {
     [setConversationRunning]
   );
 
+  const reconcileCompletedConversation = useCallback(
+    async (id: string, isCurrent: () => boolean) => {
+      try {
+        const data = await apiService.getConversation(id);
+        if (!isCurrent()) return;
+        if (data.isRunning) {
+          // Another turn may already have started server-side before its stream
+          // header reaches us. Do not replace its live output with a checkpoint.
+          markConversationRunning(id);
+          return;
+        }
+        const normalized = normalizeConversation(data);
+        setConversation(normalized);
+        setMessages(projectConversation(normalized));
+        setConversationRunning(id, Boolean(normalized.isRunning));
+        void refreshConversations();
+      } catch (error) {
+        console.error('Failed to refresh completed conversation', error);
+      }
+    },
+    [markConversationRunning, projectConversation, refreshConversations, setConversationRunning]
+  );
+
   const replaceRunningConversation = useCallback(
     (previousId: string | null | undefined, nextId: string | null | undefined) => {
       clearRunningConversation(previousId);
@@ -421,6 +471,7 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     return () => {
       resumeStreamRef.current += 1;
+      conversationRunVersion.current += 1;
       abortControllerRef.current?.abort();
       Object.values(sendControllersRef.current).forEach((controller) => {
         controller.abort();
@@ -719,7 +770,7 @@ const ChatPage: React.FC = () => {
         const normalizedConversation = normalizeConversation(data);
         setActiveConversationId(normalizedConversation.id);
         setConversation(normalizedConversation);
-        setMessages(conversationToChatMessages(normalizedConversation));
+        setMessages(projectConversation(normalizedConversation));
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Failed to load conversation';
@@ -728,7 +779,7 @@ const ChatPage: React.FC = () => {
       .finally(() => {
         setConversationLoading(false);
       });
-  }, [conversationId, resetExtensionWidgets, resetTranscriptScroll]);
+  }, [conversationId, resetExtensionWidgets, resetTranscriptScroll, projectConversation]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(conversationStreamVersion): Completing a submitted stream must reattach the conversation watcher even when its ID is unchanged.
   useEffect(() => {
@@ -796,6 +847,7 @@ const ChatPage: React.FC = () => {
             return;
           }
           if (event.kind === 'conversation' && event.conversation_id) {
+            conversationRunVersion.current += 1;
             watchedTurn += 1;
             terminalSeen = false;
             observedRunControllersRef.current[conversationId] = controller;
@@ -818,26 +870,17 @@ const ChatPage: React.FC = () => {
             terminalSeen = true;
             onObservedRunFinished(conversationId, event, controller);
             const completedTurn = watchedTurn;
-            void apiService
-              .getConversation(conversationId)
-              .then((data) => {
-                if (
-                  controller.signal.aborted ||
-                  resumeStreamRef.current !== streamInstance ||
-                  viewedConversationIdRef.current !== conversationId ||
-                  sendControllersRef.current[conversationId] ||
-                  completedTurn !== watchedTurn
-                ) {
-                  return;
-                }
-                const normalizedConversation = normalizeConversation(data);
-                setConversation(normalizedConversation);
-                setMessages(conversationToChatMessages(normalizedConversation));
-                void refreshConversations();
-              })
-              .catch((error) => {
-                console.error('Failed to refresh completed conversation', error);
-              });
+            const runVersion = conversationRunVersion.current;
+            void reconcileCompletedConversation(
+              conversationId,
+              () =>
+                !controller.signal.aborted &&
+                resumeStreamRef.current === streamInstance &&
+                viewedConversationIdRef.current === conversationId &&
+                !sendControllersRef.current[conversationId] &&
+                completedTurn === watchedTurn &&
+                conversationRunVersion.current === runVersion
+            );
           } else if (event.kind === 'error') {
             if (terminalSeen) return;
             terminalSeen = true;
@@ -948,7 +991,7 @@ const ChatPage: React.FC = () => {
     handleResourcesReloaded,
     loadedConversationId,
     markConversationRunning,
-    refreshConversations,
+    reconcileCompletedConversation,
   ]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(messages): New transcript content triggers scrolling when the reader is following the bottom.
@@ -1175,8 +1218,21 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (steering || !isRemoteConversation) return;
     const prompt = draft.trim();
+    if (realtime.enabled && /^\/talk(?:\s|$)/.test(prompt)) {
+      // Local call control is never submitted as a coding turn or queued recipe.
+      if (!realtime.isBusy()) {
+        const started = realtime.start();
+        if (!realtime.blockedReason && !dictation.isBusy()) setDraft('');
+        await started;
+      }
+      return;
+    }
+    if (steering || !isRemoteConversation) return;
+    if (dictation.enabled && isVoiceCommand(prompt) && realtime.isBusy()) {
+      showToast('End the call before dictating.', 'info');
+      return;
+    }
     // Dictation is a client-local input action, never a queued command or turn.
     if (dictation.handleCommand(prompt) || dictation.isBusy()) return;
     const attachmentsForSend = attachments;
@@ -1264,6 +1320,7 @@ const ChatPage: React.FC = () => {
     attachmentsForSend: PendingImageAttachment[],
     queuedConversationId?: string
   ) => {
+    conversationRunVersion.current += 1;
     const targetConversationId = queuedConversationId || conversationId || draftConversationId;
     const viewConversationIdAtStart = queuedConversationId || conversationId;
     const isNewConversation = !queuedConversationId && !conversationId;
@@ -1579,7 +1636,7 @@ const ChatPage: React.FC = () => {
           );
           if (viewedConversationIdRef.current === streamedConversationId) {
             setConversation(latestConversation);
-            setMessages(conversationToChatMessages(latestConversation));
+            setMessages(projectConversation(latestConversation));
           }
         } catch {
           // The streamed conversation is already authoritative enough to continue. A later
@@ -1780,7 +1837,6 @@ const ChatPage: React.FC = () => {
   const workspaceTargetKey = `runner:${currentRunnerID}:conversation:${remoteWorkspaceConversationID || ''}:cwd:${currentCWDLabel}:generation:${currentRunner?.generation || 0}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
-  const sessionConversationId = conversationId || draftConversationId;
   const terminalTarget = useMemo<WorkspaceTarget>(
     () => ({
       kind: 'runner',
@@ -1821,6 +1877,100 @@ const ChatPage: React.FC = () => {
       dictationOwner.current = dictationTargetKey;
       pendingCaret.current = null;
       return (text) => insertDictation(text, startingDraft, caret, fromCommand);
+    },
+  });
+  const realtime = useRealtime({
+    targetKey: `${dictationTargetKey}:profile:${currentProfileLabel}:model:${currentModelLabel}:effort:${currentReasoningEffortLabel}`,
+    isDraft: !conversationId,
+    // Saved affinity supplies the coding profile/model independently of the
+    // server's realtime profile, just like a normal turn in this conversation.
+    chat: {
+      message: '',
+      conversationId: sessionConversationId,
+      ...(!conversationId && {
+        runnerId: selectedRunnerID || undefined,
+        environmentProfile: selectedEnvironmentProfile || undefined,
+        cwd: selectedCWD.trim() || undefined,
+        profile: selectedProfile,
+        options: selectedModel ? { model: selectedModel } : undefined,
+        reasoningEffort: chatSettingsLoaded ? selectedReasoningEffort : undefined,
+      }),
+      clientCapabilities: {
+        interactiveUI: true,
+        persistentWidgets: true,
+        persistentSurfaces: false,
+      },
+    },
+    blockedReason:
+      conversationId && (conversationLoading || !conversation || hasOptimisticRemoteConversation)
+        ? 'Wait for the conversation to load.'
+        : !isRemoteConversation || (!conversationId && !runnerWorkspaceAvailable)
+          ? 'Select an available workspace runner to start a call.'
+          : !conversationId && !chatSettingsLoaded
+            ? 'Wait for the chat settings to load.'
+            : undefined,
+    isCaptureBusy: dictation.isBusy,
+    onStarted: async (id, signal) => {
+      if (conversationId) return;
+      const saved = normalizeConversation(await apiService.getConversation(id, signal));
+      if (signal.aborted) return;
+      if (draftWorkspaceRef.current?.conversationId === id) {
+        draftWorkspaceRef.current.submitted = true;
+      }
+      setActiveConversationId(id);
+      setConversation(saved);
+      setMessages(projectConversation(saved));
+      setConversationError(null);
+      setConversations((current) => upsertConversationSummary(current, saved));
+      updatePathForStartedConversation(id);
+    },
+    onEvent: (event) => {
+      const viewedId = viewedConversationIdRef.current;
+      if (event.conversationId && event.conversationId !== viewedId) return;
+      if (event.kind === 'transcript') {
+        if (event.id)
+          realtimeCaptions.current.set(event.id, {
+            ...event,
+            anchor: realtimeCaptions.current.has(event.id)
+              ? realtimeCaptions.current.get(event.id)?.anchor
+              : event.anchor,
+            conversationId: viewedId || undefined,
+          });
+        setMessages((current) => applyRealtimeTranscript(current, event));
+      } else if (event.kind === 'agent-started' && event.conversationId) {
+        if (
+          realtimeTurn.current?.conversationId !== event.conversationId ||
+          realtimeTurn.current?.turnId !== event.turnId
+        ) {
+          conversationRunVersion.current += 1;
+          realtimeTurn.current = { conversationId: event.conversationId, turnId: event.turnId };
+        }
+        markConversationRunning(event.conversationId);
+        // Healthy idle watchers already observe future turns. Reuse the normal
+        // attachment effect only when that observer has actually gone away.
+        if (
+          (!resumeControllerRef.current || resumeControllerRef.current.signal.aborted) &&
+          !sendControllersRef.current[event.conversationId]
+        ) {
+          setStreamError(null);
+          setConversationStreamVersion((version) => version + 1);
+        }
+      } else if (
+        event.kind === 'agent-completed' &&
+        event.conversationId &&
+        realtimeTurn.current?.conversationId === event.conversationId &&
+        realtimeTurn.current?.turnId === event.turnId
+      ) {
+        const id = event.conversationId;
+        const runVersion = conversationRunVersion.current;
+        void reconcileCompletedConversation(
+          id,
+          () =>
+            viewedConversationIdRef.current === id &&
+            conversationRunVersion.current === runVersion &&
+            !sendControllersRef.current[id]
+        );
+      }
     },
   });
   const modalOpen = higherPriorityDialogOpen || dictation.busy;
@@ -1910,6 +2060,7 @@ const ChatPage: React.FC = () => {
     // Discovered commands can queue during a run; keep their suggestions visible.
     disabled: steering,
     dictationEnabled: dictation.enabled,
+    realtimeEnabled: realtime.enabled,
     discoveryAvailable: Boolean(
       isRemoteConversation && runnerWorkspaceAvailable && currentRunner?.workspaceDiscovery
     ),
@@ -1931,7 +2082,10 @@ const ChatPage: React.FC = () => {
   const isQueueableCommand = (message: string): boolean => {
     const name = slashCommandName(message);
     return (
-      name !== undefined && !(dictation.enabled && name === 'voice') && slashCommandNames.has(name)
+      name !== undefined &&
+      !(dictation.enabled && name === 'voice') &&
+      !(realtime.enabled && name === 'talk') &&
+      slashCommandNames.has(name)
     );
   };
 
@@ -2127,6 +2281,7 @@ const ChatPage: React.FC = () => {
     if (event.altKey) {
       if (
         !dictation.enabled ||
+        realtime.isBusy() ||
         !event.shiftKey ||
         event.ctrlKey ||
         event.metaKey ||
@@ -2442,6 +2597,7 @@ const ChatPage: React.FC = () => {
             contextIsStatic={contextIsStatic}
             contextText={composerContextText}
             dictation={dictation}
+            realtime={realtime}
             draft={draft}
             editorRef={composerRef}
             placeholder={composerPlaceholder}

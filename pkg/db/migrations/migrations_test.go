@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 19)
+	require.Len(t, migrations, 20)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -45,6 +45,7 @@ func TestAll(t *testing.T) {
 		20260920120000,
 		20260924120000,
 		20260929120000,
+		20261017180000,
 	}, versions)
 }
 
@@ -60,6 +61,8 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "conversation_summaries")
 	assertTableExists(t, database.DB, "acp_session_updates")
 	assertTableExists(t, database.DB, "steering_messages")
+	assertTableExists(t, database.DB, "realtime_transcript")
+	assertColumnExists(t, database.DB, "steering_messages", "source_id")
 	assertColumnExists(t, database.DB, "steering_messages", "run_id")
 	assertTableExists(t, database.DB, "chat_turns")
 	assertTableExists(t, database.DB, "image_artifacts")
@@ -146,6 +149,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260920120000,
 		20260924120000,
 		20260929120000,
+		20261017180000,
 	}, versions)
 }
 
@@ -438,6 +442,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"user refresh tokens down", Migration20260924120000CreateUserRefreshTokens().Down},
 		{"conversation search up", Migration20260929120000CreateConversationSearch().Up},
 		{"conversation search down", Migration20260929120000CreateConversationSearch().Down},
+		{"realtime transcript up", Migration20261017180000CreateRealtimeTranscript().Up},
+		{"realtime transcript down", Migration20261017180000CreateRealtimeTranscript().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -452,6 +458,10 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "realtime_transcript")
+	assertColumnMissing(t, database.DB, "steering_messages", "source_id")
 
 	require.NoError(t, runner.Rollback(ctx, All()))
 	assertTableMissing(t, database.DB, "conversation_search")

@@ -24,6 +24,20 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+type userMessageSourceKey struct{}
+
+// WithUserMessageSource tags only the next explicit AddUserMessage call. Do not
+// use this context for an entire run, which may insert unrelated host messages.
+func WithUserMessageSource(ctx context.Context, sourceID string) context.Context {
+	return context.WithValue(ctx, userMessageSourceKey{}, sourceID)
+}
+
+// UserMessageSource returns trusted host provenance, never model-supplied text.
+func UserMessageSource(ctx context.Context) string {
+	sourceID, _ := ctx.Value(userMessageSourceKey{}).(string)
+	return sourceID
+}
+
 // AgentRunStatus is the terminal status of an agent run.
 type AgentRunStatus string
 
@@ -80,6 +94,8 @@ type CompactionMarker struct {
 
 // MessageOpt represents options for sending messages
 type MessageOpt struct {
+	// UserMessageSource is trusted host provenance for the incoming user item only.
+	UserMessageSource string `json:"-"`
 	// Initiator identifies whether a Copilot-backed request originated from the user or agent internals.
 	// Empty means "user".
 	Initiator string

@@ -82,6 +82,51 @@ describe('ApiService', () => {
     mockFetch.mockClear();
   });
 
+  it('uses the same authenticated client for call allocation, NDJSON events and closing', async () => {
+    setTestCookie('kodelet_csrf=call-csrf; Path=/');
+    const chat = { message: '', conversationId: 'saved-chat' };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: 'call/one', conversationId: 'saved-chat', answer: 'answer' }),
+    });
+    await apiService.startRealtime('offer', chat);
+    const event = { kind: 'transcript', id: 'utterance', role: 'user', text: 'café', final: true };
+    const bytes = new TextEncoder().encode(
+      `${JSON.stringify(event)}\n${JSON.stringify({ kind: 'closed' })}`
+    );
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      body: new ReadableStream({
+        start(controller) {
+          // Split UTF-8, an NDJSON line, and leave the final line unterminated.
+          const split = bytes.indexOf(0xc3) + 1;
+          controller.enqueue(bytes.slice(0, split));
+          controller.enqueue(bytes.slice(split));
+          controller.close();
+        },
+      }),
+    });
+    const onEvent = vi.fn();
+    await apiService.streamRealtime('call/one', { signal: new AbortController().signal, onEvent });
+    expect(onEvent.mock.calls.map(([value]) => value)).toEqual([event, { kind: 'closed' }]);
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+    await apiService.endRealtime('call/one');
+    const identity = mockFetch.mock.calls[0][1].headers['X-Kodelet-Client-ID'];
+    expect(identity).toEqual(expect.any(String));
+    expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/realtime',
+      '/api/realtime/call%2Fone/events',
+      '/api/realtime/call%2Fone',
+    ]);
+    for (const [, options] of mockFetch.mock.calls) {
+      expect(options.headers['X-Kodelet-Client-ID']).toBe(identity);
+      if (options.method === 'POST' || options.method === 'DELETE') {
+        expect(options.headers['X-CSRF-Token']).toBe('call-csrf');
+      }
+    }
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ offer: 'offer', chat });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     setTestCookie('kodelet_csrf=; Max-Age=0; Path=/');

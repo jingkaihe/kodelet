@@ -56,6 +56,10 @@ const apiMocks = vi.hoisted(() => ({
   getConversation: vi.fn(),
   getChatSettings: vi.fn(),
   getTranscriptionCapabilities: vi.fn(),
+  getRealtimeCapabilities: vi.fn(),
+  startRealtime: vi.fn(),
+  streamRealtime: vi.fn(),
+  endRealtime: vi.fn(),
   transcribeAudio: vi.fn(),
   getCodexProviderStatus: vi.fn(),
   startCodexDeviceLogin: vi.fn(),
@@ -91,6 +95,10 @@ export const {
   getConversation: mockGetConversation,
   getChatSettings: mockGetChatSettings,
   getTranscriptionCapabilities: mockGetTranscriptionCapabilities,
+  getRealtimeCapabilities: mockGetRealtimeCapabilities,
+  startRealtime: mockStartRealtime,
+  streamRealtime: mockStreamRealtime,
+  endRealtime: mockEndRealtime,
   transcribeAudio: mockTranscribeAudio,
   getCodexProviderStatus: mockGetCodexProviderStatus,
   startCodexDeviceLogin: mockStartCodexDeviceLogin,
@@ -274,6 +282,8 @@ export const setupChatPageTests = () => {
     vi.clearAllMocks();
     // Clear implementations and queued responses, not just call history, between scenarios.
     for (const mock of Object.values(apiMocks)) mock.mockReset();
+    mockGetRealtimeCapabilities.mockResolvedValue({ enabled: false, available: false });
+    mockEndRealtime.mockResolvedValue(undefined);
     mockGetTranscriptionCapabilities.mockResolvedValue({
       enabled: false,
       available: false,

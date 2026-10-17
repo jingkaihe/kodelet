@@ -40,6 +40,7 @@ const (
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
+	UserMessageSource    string                     `json:"-"` // Server-only delegated input provenance.
 	Message              string                     `json:"message"`
 	Content              []ChatContentBlock         `json:"content,omitempty"`
 	ConversationID       string                     `json:"conversationId,omitempty"`
@@ -91,6 +92,8 @@ type ChatImageURLSource struct {
 
 // ChatEvent is a single streaming chat event.
 type ChatEvent struct {
+	SourceID          string                          `json:"sourceId,omitempty"`
+	DelegatedUser     bool                            `json:"delegatedUser,omitempty"`
 	ResourceReloadID  string                          `json:"resource_reload_id,omitempty"`
 	Kind              string                          `json:"kind"`
 	ConversationID    string                          `json:"conversation_id,omitempty"`
@@ -460,7 +463,7 @@ func runDefaultChat(
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
-	llmConfig, err = resolveExecutionOptions(ctx, req, llmConfig)
+	llmConfig, err = ResolveExecutionOptions(ctx, req, llmConfig)
 	if err != nil {
 		return sessionID, err
 	}
@@ -576,7 +579,7 @@ func runDefaultChat(
 			if !ok || !thread.IsPersisted() {
 				return errors.New("cannot save the conversation before starting work")
 			}
-			if err := saver.SavePendingUserMessage(saveCtx, message, imageInputs...); err != nil {
+			if err := saver.SavePendingUserMessage(llmtypes.WithUserMessageSource(saveCtx, req.UserMessageSource), message, imageInputs...); err != nil {
 				return errors.Wrap(err, "failed to save the user message before starting work")
 			}
 			checkpointSaved = true
@@ -627,7 +630,7 @@ func runDefaultChat(
 				thread.SetMetadataValue(conversationservice.MessageDisplayMetadataKey, metadata[conversationservice.MessageDisplayMetadataKey])
 				reloadMarkerID = conversationservice.MessageDisplayKey(response)
 			}
-			if err := saveDirectCommandResponse(ctx, thread, message, response, imageInputs); err != nil {
+			if err := saveDirectCommandResponse(llmtypes.WithUserMessageSource(ctx, req.UserMessageSource), thread, message, response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
@@ -656,6 +659,8 @@ func runDefaultChat(
 				}
 				if err := sink.Send(ChatEvent{
 					Kind:           "user-message-display",
+					SourceID:       req.UserMessageSource,
+					DelegatedUser:  req.UserMessageSource != "",
 					ConversationID: sessionID,
 					Role:           "user",
 					Content:        displayContent,
@@ -743,6 +748,7 @@ func runDefaultChat(
 		ctx = contextWithCentralModelHelper(ctx, thread)
 	}
 	messageOpt.Images = imageInputs
+	messageOpt.UserMessageSource = req.UserMessageSource
 	result, err := thread.SendMessage(ctx, message, handler, messageOpt)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to process chat message")
@@ -1575,6 +1581,10 @@ func (h *chatMessageHandler) HandleResourceReload(kind, markerID, text string) {
 }
 
 func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {
+	h.HandleSourcedUserMessage(content, images, "")
+}
+
+func (h *chatMessageHandler) HandleSourcedUserMessage(content string, images []string, sourceID string) {
 	contentBlocks := ContentBlocksForUserInput(content, images)
 
 	var eventContent any = content
@@ -1584,6 +1594,8 @@ func (h *chatMessageHandler) HandleUserMessage(content string, images []string) 
 
 	h.sendEvent(ChatEvent{
 		Kind:           "user-message",
+		SourceID:       sourceID,
+		DelegatedUser:  sourceID != "",
 		Content:        eventContent,
 		ConversationID: h.conversationID,
 		Role:           "user",

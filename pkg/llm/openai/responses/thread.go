@@ -310,7 +310,7 @@ func (t *Thread) appendHistoryItems(
 	inputItems []responses.ResponseInputItemUnionParam,
 	storedItems []StoredInputItem,
 ) {
-	t.appendHistoryItemsWithOperation(inputItems, storedItems, nil, false)
+	t.appendHistoryItemsWithOperation(context.Background(), inputItems, storedItems, nil, false)
 }
 
 func (t *Thread) appendHistoryItemsFromContext(
@@ -319,10 +319,11 @@ func (t *Thread) appendHistoryItemsFromContext(
 	storedItems []StoredInputItem,
 ) {
 	operation, _ := ctx.Value(responsesNoSaveOperationContextKey{}).(*responsesNoSaveOperation)
-	t.appendHistoryItemsWithOperation(inputItems, storedItems, operation, true)
+	t.appendHistoryItemsWithOperation(ctx, inputItems, storedItems, operation, true)
 }
 
 func (t *Thread) appendHistoryItemsWithOperation(
+	ctx context.Context,
 	inputItems []responses.ResponseInputItemUnionParam,
 	storedItems []StoredInputItem,
 	operation *responsesNoSaveOperation,
@@ -334,14 +335,20 @@ func (t *Thread) appendHistoryItemsWithOperation(
 	t.historyMu.Lock()
 	defer t.historyMu.Unlock()
 	t.inputItems = append(t.inputItems, inputItems...)
-	t.storedItems = append(t.storedItems, storedItems...)
+	for _, item := range storedItems {
+		t.storedItems = append(t.storedItems, item)
+		if item.Role == "user" {
+			t.RecordUserMessageSource(ctx, llmtypes.UserMessageSource(ctx), t.storedItems)
+		}
+	}
 	t.historyRevision++
 	if trackExternalAppend && t.activeNoSaveOperation != nil && operation != t.activeNoSaveOperation {
 		t.activeNoSaveOperation.externalAppends = append(
 			t.activeNoSaveOperation.externalAppends,
 			responsesHistoryAppend{
-				inputItems:  cloneResponsesInputItems(inputItems),
-				storedItems: cloneStoredInputItems(storedItems),
+				inputItems:        cloneResponsesInputItems(inputItems),
+				storedItems:       cloneStoredInputItems(storedItems),
+				userMessageSource: llmtypes.UserMessageSource(ctx),
 			},
 		)
 	}
@@ -376,6 +383,7 @@ type responsesNoSaveSnapshot struct {
 	currentContextWindow  int
 	maxContextWindow      int
 	structuredToolResults map[string]tooltypes.StructuredToolResult
+	userMessageSources    any
 	pendingReasoning      string
 	operation             *responsesNoSaveOperation
 }
@@ -387,8 +395,9 @@ type responsesNoSaveOperation struct {
 }
 
 type responsesHistoryAppend struct {
-	inputItems  []responses.ResponseInputItemUnionParam
-	storedItems []StoredInputItem
+	inputItems        []responses.ResponseInputItemUnionParam
+	storedItems       []StoredInputItem
+	userMessageSource string
 }
 
 func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
@@ -414,6 +423,7 @@ func (t *Thread) snapshotNoSaveState() responsesNoSaveSnapshot {
 	}
 	snapshot.structuredToolResults = maps.Clone(t.ToolResults)
 	snapshot.compactionHistory = t.CompactionHistory.Clone()
+	snapshot.userMessageSources = t.Metadata[base.UserMessageSourcesMetadataKey]
 	t.Mu.Unlock()
 	return snapshot
 }
@@ -423,10 +433,6 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 	windowChanged := t.codexWindowGeneration != snapshot.history.codexWindowGeneration
 	t.inputItems = cloneResponsesInputItems(snapshot.history.inputItems)
 	t.storedItems = cloneStoredInputItems(snapshot.history.storedItems)
-	for _, appendBatch := range snapshot.operation.externalAppends {
-		t.inputItems = append(t.inputItems, cloneResponsesInputItems(appendBatch.inputItems)...)
-		t.storedItems = append(t.storedItems, cloneStoredInputItems(appendBatch.storedItems)...)
-	}
 	t.codexWindowGeneration = snapshot.history.codexWindowGeneration
 	t.historyRevision++
 	if t.activeNoSaveOperation == snapshot.operation {
@@ -447,6 +453,18 @@ func (t *Thread) restoreNoSaveState(snapshot responsesNoSaveSnapshot) {
 		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 	}
 	t.Mu.Unlock()
+	t.RestoreUserMessageSources(snapshot.userMessageSources)
+	// External appends survive a no-save operation, but its temporary user
+	// items do not. Re-index provenance against the restored display history.
+	for _, appendBatch := range snapshot.operation.externalAppends {
+		t.inputItems = append(t.inputItems, cloneResponsesInputItems(appendBatch.inputItems)...)
+		for _, item := range cloneStoredInputItems(appendBatch.storedItems) {
+			t.storedItems = append(t.storedItems, item)
+			if item.Role == "user" {
+				t.RecordUserMessageSource(context.Background(), appendBatch.userMessageSource, t.storedItems)
+			}
+		}
+	}
 	t.historyMu.Unlock()
 
 	if windowChanged {
@@ -589,7 +607,7 @@ OUTER:
 				return t.compactContext(ctx, autoCompactionMetadata)
 			})
 			if !incomingUserAppended {
-				t.AddUserMessage(ctx, message, opt.Images...)
+				t.AddUserMessage(llmtypes.WithUserMessageSource(ctx, opt.UserMessageSource), message, opt.Images...)
 				incomingUserAppended = true
 			}
 			if !opt.NoSaveConversation {
@@ -1227,14 +1245,15 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 			logger.G(ctx).WithError(err).Warn("failed to marshal steering input item for persistence")
 		}
 
-		t.appendHistoryItems([]responses.ResponseInputItemUnionParam{inputItem}, []StoredInputItem{{
+		t.appendHistoryItemsWithOperation(llmtypes.WithUserMessageSource(ctx, steerMsg.SourceID), []responses.ResponseInputItemUnionParam{inputItem}, []StoredInputItem{{
 			Type:    "message",
 			Role:    "user",
 			Content: steerMsg.Content,
 			RawItem: rawItem,
-		}})
-
-		if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+		}}, nil, false)
+		if userHandler, ok := handler.(llmtypes.SourcedUserMessageHandler); ok {
+			userHandler.HandleSourcedUserMessage(steerMsg.Content, steerMsg.Images, steerMsg.SourceID)
+		} else if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
 			userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
 		} else {
 			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
