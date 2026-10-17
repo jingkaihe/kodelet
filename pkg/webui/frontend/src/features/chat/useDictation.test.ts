@@ -146,7 +146,6 @@ describe('useDictation', () => {
     const file = audioFile();
     await act(async () => {
       recorderOptions.onLevel(0.65);
-      recorderOptions.onSpeech(true);
       recorderOptions.onSnapshot(file);
     });
     expect(result.current.levelsRef.current).toContain(0.65);
@@ -176,7 +175,6 @@ describe('useDictation', () => {
     const levelsRef = result.current.levelsRef;
     act(() => {
       for (let sample = 0; sample < 20; sample++) recorderOptions.onLevel(0.5);
-      recorderOptions.onSpeech(true);
       vi.advanceTimersByTime(750);
     });
     expect(levelsRef.current).toContain(0.5);

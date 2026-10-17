@@ -14,7 +14,6 @@ function options(overrides: Partial<DictationRecorderOptions> = {}) {
     maxAudioBytes: 20 * 1024 * 1024,
     maxDurationSeconds: 120,
     onLevel: vi.fn(),
-    onSpeech: vi.fn(),
     onSnapshot: vi.fn<(file: File) => void>(),
     onLimit: vi.fn(),
     onError: vi.fn(),
@@ -49,7 +48,6 @@ describe('cumulative dictation audio', () => {
     session.push(pcm(1, 0));
     session.finish();
     expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-    expect(callbacks.onSpeech).not.toHaveBeenCalled();
     expect(callbacks.onLimit).toHaveBeenCalledTimes(1);
   });
 
@@ -64,8 +62,6 @@ describe('cumulative dictation audio', () => {
     expect(callbacks.onSnapshot).not.toHaveBeenCalled();
     session.push(pcm(0.02, 0));
     expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
-    expect(callbacks.onSpeech).toHaveBeenNthCalledWith(1, true);
-    expect(callbacks.onSpeech).toHaveBeenNthCalledWith(2, false);
     session.push(pcm(0.5, 0));
     session.push(pcm(0.005, 0.2)); // Even a tiny final syllable must survive Done.
     session.finish();
@@ -120,10 +116,10 @@ describe('cumulative dictation audio', () => {
     session.push(pcm(3, 0.006));
     session.push(pcm(2, 0.012)); // Above fixed floor, below learned background threshold.
     expect(callbacks.onSnapshot).not.toHaveBeenCalled();
-    expect(callbacks.onSpeech).not.toHaveBeenCalled();
     session.push(pcm(0.3, 0.08));
     session.push(pcm(2.5, 0.012));
     expect(callbacks.onSnapshot).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(callbacks.onSnapshot).mock.calls[0][0].size).toBe(44 + sampleRate * 7.8 * 2);
     session.cancel();
   });
 

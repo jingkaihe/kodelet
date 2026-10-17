@@ -274,7 +274,6 @@ export function useDictation({
         onLevel: (level) => {
           if (current() && recording()) levelsRef.current = [...levelsRef.current.slice(1), level];
         },
-        onSpeech: () => {},
         onSnapshot: (file) => {
           if (!current() || ['finishing', 'review'].includes(capture.state.phase)) return;
           // Keep one in-flight upload and only the newest waiting snapshot.

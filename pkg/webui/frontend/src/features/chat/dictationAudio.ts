@@ -4,7 +4,6 @@ export interface DictationRecorderOptions {
   maxAudioBytes: number;
   maxDurationSeconds: number;
   onLevel: (level: number) => void;
-  onSpeech: (speaking: boolean) => void;
   onSnapshot: (file: File) => void;
   onLimit: () => void;
   onError: (message: string) => void;
@@ -37,12 +36,6 @@ export function createDictationSession(sampleRate: number, options: DictationRec
   let levelSamples = sampleRate * 0.05;
   let peakLevel = 0;
 
-  const reportSpeech = (value: boolean) => {
-    if (speaking === value) return;
-    speaking = value;
-    options.onSpeech(value);
-  };
-
   const snapshot = () => {
     if (!audio || !dirty) return;
     // Clear before publishing: the callback may synchronously finish/cancel.
@@ -73,7 +66,7 @@ export function createDictationSession(sampleRate: number, options: DictationRec
     closed = true;
     snapshot();
     audio = undefined;
-    reportSpeech(false);
+    speaking = false;
   };
 
   const push = (input: Float32Array) => {
@@ -111,12 +104,12 @@ export function createDictationSession(sampleRate: number, options: DictationRec
         // an earlier snapshot rather than requiring a whole new utterance.
         if (hasSpeech) {
           dirty = true;
-          reportSpeech(true);
+          speaking = true;
         }
       } else {
         silenceSamples += frame.length;
         if (!hasSpeech && silenceSamples >= sampleRate * 0.12) voicedSamples = 0;
-        if (silenceSamples >= sampleRate * 0.18) reportSpeech(false);
+        if (silenceSamples >= sampleRate * 0.18) speaking = false;
       }
       if (closed) return;
       if (samples === maxSamples) {
@@ -137,7 +130,7 @@ export function createDictationSession(sampleRate: number, options: DictationRec
       closed = true;
       audio = undefined;
       dirty = false;
-      reportSpeech(false);
+      speaking = false;
     },
   };
 }
