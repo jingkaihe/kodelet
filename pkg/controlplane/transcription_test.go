@@ -238,7 +238,7 @@ func TestReadTranscriptionUpload(t *testing.T) {
 			assert.Equal(t, test.audio, string(got.Audio))
 			assert.Equal(t, test.canonical, got.ContentType)
 			assert.Equal(t, test.language, got.Language)
-			format, err := transcriptiontypes.ParseAudioFormat(got.ContentType)
+			format, err := transcriptiontypes.LookupAudioFormat(got.ContentType)
 			require.NoError(t, err)
 			assert.Equal(t, test.filename, format.Filename)
 		})

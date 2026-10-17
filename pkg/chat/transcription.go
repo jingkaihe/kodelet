@@ -31,14 +31,8 @@ func (r *Client) TranscribeAudio(ctx context.Context, audio []byte, filename, co
 	if r == nil || r.client == nil {
 		return result, errors.New("the chat connection is not initialized")
 	}
-	if len(audio) == 0 || int64(len(audio)) > transcriptiontypes.MaxAudioBytes {
-		return result, errors.New("recording must contain audio and be no larger than 20 MiB")
-	}
-	if filename == "" {
-		return result, errors.New("recording filename is required")
-	}
-	if _, _, err := mime.ParseMediaType(contentType); err != nil {
-		return result, errors.New("recording content type is invalid")
+	if int64(len(audio)) > transcriptiontypes.MaxAudioBytes {
+		return result, errors.Errorf("recording exceeds the %d-byte audio size limit", transcriptiontypes.MaxAudioBytes)
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)

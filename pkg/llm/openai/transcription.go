@@ -104,19 +104,9 @@ func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.R
 	if err := ctx.Err(); err != nil {
 		return transcriptiontypes.Result{}, errors.Wrap(err, "transcription canceled")
 	}
-	if len(audio) == 0 {
-		return transcriptiontypes.Result{}, errors.New("audio is empty")
-	}
-	if int64(len(audio)) > transcriptiontypes.MaxAudioBytes {
-		return transcriptiontypes.Result{}, errors.New("audio exceeds the transcription size limit")
-	}
-	format, err := transcriptiontypes.ParseAudioFormat(contentType)
+	format, err := transcriptiontypes.LookupAudioFormat(contentType)
 	if err != nil {
 		return transcriptiontypes.Result{}, errors.New("unsupported transcription audio type")
-	}
-	language = strings.TrimSpace(language)
-	if len(language) > 64 {
-		return transcriptiontypes.Result{}, errors.New("transcription language hint is too long")
 	}
 
 	var body bytes.Buffer

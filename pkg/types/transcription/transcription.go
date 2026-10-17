@@ -29,7 +29,9 @@ var ErrNoSpeech = errors.New("no speech was recognized in the recording")
 // ErrUnsupportedAudio indicates an unknown container or a mismatched content type.
 var ErrUnsupportedAudio = errors.New("unsupported audio container or content type")
 
-// Request contains one recording with its canonical content type and an optional language hint.
+// Request contains a recording validated by the control plane. Audio must be
+// nonempty and at most MaxAudioBytes, with a matching canonical ContentType.
+// Language must be empty or a trimmed code of at most 64 ASCII letters/hyphens.
 type Request struct {
 	Audio       []byte
 	ContentType string
@@ -101,14 +103,10 @@ var audioFormats = []AudioFormat{
 	},
 }
 
-// ParseAudioFormat resolves MIME parameters and aliases to a canonical format.
-func ParseAudioFormat(contentType string) (AudioFormat, error) {
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return AudioFormat{}, ErrUnsupportedAudio
-	}
+// LookupAudioFormat returns a format by its canonical MIME type.
+func LookupAudioFormat(contentType string) (AudioFormat, error) {
 	for _, format := range audioFormats {
-		if mediaType == format.ContentType || slices.Contains(format.aliases, mediaType) {
+		if contentType == format.ContentType {
 			return format, nil
 		}
 	}
