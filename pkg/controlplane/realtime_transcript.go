@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -101,36 +102,45 @@ func (s *Server) realtimeMessages(ctx context.Context, conversationID string) ([
 	return s.convertConversationToWebMessages(record, provider)
 }
 
-func (s *Server) saveRealtimeTranscript(ctx context.Context, conversationID string, event realtimeEvent) error {
+// saveRealtimeTranscript upserts one caption and returns its fixed anchor. saved
+// is false when the ID already belongs to the other role, which is ignored.
+func (s *Server) saveRealtimeTranscript(ctx context.Context, conversationID string, event realtimeEvent) (anchor int, saved bool, err error) {
 	// Caption deltas normally update an existing identity. Do not parse the
 	// entire coding history on each token merely to recover its fixed anchor.
-	updated, err := s.turns.db.ExecContext(ctx,
-		"UPDATE realtime_transcript SET text=? WHERE conversation_id=? AND id=? AND role=?", event.Text, conversationID, event.ID, event.Role)
-	if err != nil {
-		return errors.Wrap(err, "failed to update live voice text")
+	err = s.turns.db.GetContext(ctx, &anchor,
+		"UPDATE realtime_transcript SET text=? WHERE conversation_id=? AND id=? AND role=? RETURNING anchor",
+		event.Text, conversationID, event.ID, event.Role)
+	if err == nil {
+		return anchor, true, nil
 	}
-	rows, err := updated.RowsAffected()
-	if err != nil || rows != 0 {
-		return err
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, errors.Wrap(err, "failed to update live voice text")
 	}
 	messages, err := s.realtimeMessages(ctx, conversationID)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
-	anchor := 0
+	position := 0
 	for _, message := range messages {
 		if message.Kind != "context-compacted" && message.delegatedSource == "" {
-			anchor++
+			position++
 		}
 	}
 	// First occurrence fixes position. Cumulative deltas and the final update
 	// replace the same entry even if coding history has advanced in the meantime.
-	_, err = s.turns.db.ExecContext(ctx, `
+	err = s.turns.db.GetContext(ctx, &anchor, `
 		INSERT INTO realtime_transcript (conversation_id,id,anchor,role,text) VALUES (?,?,?,?,?)
 		ON CONFLICT(conversation_id,id) DO UPDATE SET text=excluded.text
-		WHERE realtime_transcript.role=excluded.role`,
-		conversationID, event.ID, anchor, event.Role, event.Text)
-	return errors.Wrap(err, "failed to persist live voice text")
+		WHERE realtime_transcript.role=excluded.role
+		RETURNING anchor`,
+		conversationID, event.ID, position, event.Role, event.Text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, errors.Wrap(err, "failed to persist live voice text")
+	}
+	return anchor, true, nil
 }
 
 func (s *Server) projectRealtimeTranscript(ctx context.Context, conversationID string, messages []WebMessage) ([]WebMessage, error) {

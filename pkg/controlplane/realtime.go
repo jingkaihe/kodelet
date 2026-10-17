@@ -71,6 +71,17 @@ type realtimeCall struct {
 	events   chan realtimeEvent
 	handoffs map[string]struct{}
 	work     sync.WaitGroup
+	// Captions are saved off the provider read loop. They are cumulative, so
+	// only the latest unsaved text per utterance is kept, in first-arrival order.
+	captionMu    sync.Mutex
+	captionOrder []string
+	captions     map[string]realtimeCaption
+	captionWake  chan struct{}
+}
+
+type realtimeCaption struct {
+	event   realtimeEvent
+	visible bool // speech_started placeholders only reserve a position
 }
 
 func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +188,7 @@ func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	call := &realtimeCall{
 		server: s, id: convtypes.GenerateID(), ownerID: principal.ID, clientID: clientID,
 		chat: req, ctx: ctx, cancel: cancel, events: make(chan realtimeEvent, 256), handoffs: make(map[string]struct{}),
+		captionWake: make(chan struct{}, 1),
 	}
 	s.realtimeMu.Lock()
 	for _, existing := range s.realtimeCalls {
@@ -224,6 +236,7 @@ func (s *Server) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	call.session = session
 	call.mu.Unlock()
 	call.emit(realtimeEvent{Kind: "state", Text: "connected"})
+	go call.persistCaptions()
 	go call.readProvider(session)
 	s.writeJSONResponse(w, struct {
 		ID             string `json:"id"`
@@ -379,27 +392,16 @@ func (c *realtimeCall) readProvider(session llmtypes.RealtimeSession) {
 			switch event.Kind {
 			case "speech_started":
 				if event.ItemID != "" {
-					if err := c.server.saveRealtimeTranscript(c.ctx, c.chat.ConversationID, realtimeEvent{ID: c.id + ":" + event.ItemID, Role: "user"}); err != nil {
-						c.emit(realtimeEvent{Kind: "error", Text: "Could not save the voice transcript. Live voice has stopped."})
-						return
-					}
+					// Reserve the utterance's position before its first caption.
+					c.queueCaption(realtimeEvent{ID: c.id + ":" + event.ItemID, Role: "user"}, false)
 				}
 			case "transcript":
 				if event.ID == "" || event.Role != "user" && event.Role != "assistant" || len(event.Text) > 64<<10 {
 					continue
 				}
-				e := realtimeEvent{Kind: "transcript", ID: c.id + ":" + event.ID, Role: event.Role, Text: event.Text, Final: event.Final}
-				if err := c.server.saveRealtimeTranscript(c.ctx, c.chat.ConversationID, e); err != nil {
-					logger.G(c.ctx).WithError(err).Warn("could not save live voice transcript")
-					c.emit(realtimeEvent{Kind: "error", Text: "Could not save the voice transcript. Live voice has stopped."})
-					return
-				}
-				var anchor int
-				if err := c.server.turns.db.GetContext(c.ctx, &anchor, "SELECT anchor FROM realtime_transcript WHERE conversation_id=? AND id=?", c.chat.ConversationID, e.ID); err != nil {
-					return
-				}
-				e.Anchor = &anchor
-				c.emit(e)
+				c.queueCaption(realtimeEvent{
+					Kind: "transcript", ID: c.id + ":" + event.ID, Role: event.Role, Text: event.Text, Final: event.Final,
+				}, true)
 			case "delegate":
 				c.delegate(event)
 			case "error":
@@ -407,6 +409,67 @@ func (c *realtimeCall) readProvider(session llmtypes.RealtimeSession) {
 				return
 			case "closed":
 				return
+			}
+		}
+	}
+}
+
+// queueCaption keeps database work out of the provider read loop, so a slow
+// save cannot fill the provider's bounded event queue and end the call.
+func (c *realtimeCall) queueCaption(event realtimeEvent, visible bool) {
+	c.captionMu.Lock()
+	if _, queued := c.captions[event.ID]; queued {
+		if !visible {
+			c.captionMu.Unlock()
+			return // A placeholder never replaces queued text.
+		}
+	} else {
+		c.captionOrder = append(c.captionOrder, event.ID)
+	}
+	if c.captions == nil {
+		c.captions = make(map[string]realtimeCaption)
+	}
+	c.captions[event.ID] = realtimeCaption{event: event, visible: visible}
+	c.captionMu.Unlock()
+	select {
+	case c.captionWake <- struct{}{}:
+	default:
+	}
+}
+
+// persistCaptions saves captions in first-arrival order, which fixes each
+// utterance's anchor and transcript sequence, and then shows them.
+func (c *realtimeCall) persistCaptions() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-c.captionWake:
+		}
+		for {
+			c.captionMu.Lock()
+			if len(c.captionOrder) == 0 {
+				c.captionOrder = nil
+				c.captionMu.Unlock()
+				break
+			}
+			id := c.captionOrder[0]
+			c.captionOrder = c.captionOrder[1:]
+			caption := c.captions[id]
+			delete(c.captions, id)
+			c.captionMu.Unlock()
+			anchor, saved, err := c.server.saveRealtimeTranscript(c.ctx, c.chat.ConversationID, caption.event)
+			if err != nil {
+				if c.ctx.Err() == nil {
+					logger.G(c.ctx).WithError(err).Warn("could not save live voice transcript")
+					c.emit(realtimeEvent{Kind: "error", Text: "Could not save the voice transcript. Live voice has stopped."})
+					c.close()
+				}
+				return
+			}
+			if saved && caption.visible {
+				caption.event.Anchor = &anchor
+				c.emit(caption.event)
 			}
 		}
 	}

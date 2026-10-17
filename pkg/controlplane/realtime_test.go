@@ -201,8 +201,10 @@ func TestRealtimeCreatesConversationWithoutCodingTurn(t *testing.T) {
 			var turns int
 			require.NoError(t, s.turns.db.Get(&turns, "SELECT COUNT(*) FROM chat_turns"))
 			assert.Zero(t, turns)
-			require.NoError(t, s.saveRealtimeTranscript(t.Context(), record.ID,
-				realtimeEvent{ID: "voice:first", Role: "user", Text: "Hello from a new chat"}))
+			_, saved, err := s.saveRealtimeTranscript(t.Context(), record.ID,
+				realtimeEvent{ID: "voice:first", Role: "user", Text: "Hello from a new chat"})
+			require.NoError(t, err)
+			require.True(t, saved)
 			messages, err := s.projectRealtimeTranscript(t.Context(), record.ID, nil)
 			require.NoError(t, err)
 			require.Len(t, messages, 1)
@@ -314,7 +316,13 @@ func TestRealtimeProjectionIdentityAndCompaction(t *testing.T) {
 	assert.Equal(t, []any{"same words", "coding result", "same words", "spoken answer", "more coding text"}, texts)
 	assert.Equal(t, "voice:user", projected[0].ID)
 	// A final update replaces the partial without moving its original position.
-	require.NoError(t, s.saveRealtimeTranscript(t.Context(), "saved", realtimeEvent{ID: "voice:user", Role: "user", Text: "complete words", Final: true}))
+	anchor, saved, err := s.saveRealtimeTranscript(t.Context(), "saved", realtimeEvent{ID: "voice:user", Role: "user", Text: "complete words", Final: true})
+	require.NoError(t, err)
+	require.True(t, saved)
+	assert.Zero(t, anchor, "updates return the first occurrence's anchor")
+	_, saved, err = s.saveRealtimeTranscript(t.Context(), "saved", realtimeEvent{ID: "voice:user", Role: "assistant", Text: "wrong role"})
+	require.NoError(t, err)
+	assert.False(t, saved, "an ID never changes role")
 	projected, err = s.projectRealtimeTranscript(t.Context(), "saved", messages)
 	require.NoError(t, err)
 	assert.Equal(t, "complete words", projected[0].Content)
@@ -449,4 +457,50 @@ func TestRealtimeRecoverableHandoffFailuresKeepCallOpen(t *testing.T) {
 	call.mu.Unlock()
 	assert.False(t, closed, "recoverable handoff failures must not end the call")
 	assert.False(t, session.closed.Load())
+}
+
+func TestRealtimeCaptionsPersistOffTheReadLoop(t *testing.T) {
+	s, session := realtimeTestServer(t)
+	session.events = make(chan llmtypes.RealtimeEvent, 256)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	call := &realtimeCall{
+		server: s, id: "voice", chat: chat.ChatRequest{ConversationID: "saved"}, ctx: ctx, cancel: cancel, session: session,
+		events: make(chan realtimeEvent, 16), handoffs: make(map[string]struct{}), captionWake: make(chan struct{}, 1),
+	}
+	session.events <- llmtypes.RealtimeEvent{Kind: "speech_started", ItemID: "u1"}
+	var text strings.Builder
+	for i := range 200 {
+		text.WriteString("word ")
+		session.events <- llmtypes.RealtimeEvent{Kind: "transcript", ID: "a1", Role: "assistant", Text: text.String(), Final: i == 199}
+	}
+	// With no persister running, the read loop must still drain the provider.
+	go call.readProvider(session)
+	require.Eventually(t, func() bool { return len(session.events) == 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		call.captionMu.Lock()
+		defer call.captionMu.Unlock()
+		return len(call.captionOrder) == 2 && call.captions["voice:a1"].event.Final
+	}, time.Second, time.Millisecond)
+	call.captionMu.Lock()
+	assert.Equal(t, []string{"voice:u1", "voice:a1"}, call.captionOrder)
+	call.captionMu.Unlock()
+
+	go call.persistCaptions()
+	event := <-call.events
+	assert.Equal(t, "voice:a1", event.ID)
+	assert.Equal(t, text.String(), event.Text)
+	assert.True(t, event.Final)
+	require.NotNil(t, event.Anchor)
+	assert.Zero(t, *event.Anchor)
+	assert.Empty(t, call.events, "cumulative updates are coalesced and placeholders stay hidden")
+	var rows []struct {
+		ID   string `db:"id"`
+		Text string `db:"text"`
+	}
+	require.NoError(t, s.turns.db.Select(&rows, "SELECT id,text FROM realtime_transcript WHERE conversation_id='saved' ORDER BY sequence"))
+	require.Len(t, rows, 2)
+	assert.Equal(t, "voice:u1", rows[0].ID, "first arrival fixes the transcript sequence")
+	assert.Empty(t, rows[0].Text)
+	assert.Equal(t, text.String(), rows[1].Text)
 }
