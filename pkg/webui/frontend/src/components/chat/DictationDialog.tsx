@@ -1,5 +1,5 @@
 import { Check, Mic } from 'lucide-react';
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import { useDialogFocus } from '../../features/chat/useDialogFocus';
 import type { Phase } from '../../features/chat/useDictation';
 import Spinner from '../Spinner';
@@ -9,7 +9,6 @@ interface DictationDialogProps {
   error: string | null;
   elapsedSeconds: number;
   levels: number[];
-  speaking: boolean;
   transcript: string;
   transcribing: boolean;
   stop: () => void;
@@ -22,7 +21,6 @@ const DictationDialog = ({
   error,
   elapsedSeconds,
   levels,
-  speaking,
   transcript,
   transcribing,
   stop,
@@ -32,6 +30,53 @@ const DictationDialog = ({
   const { dialogRef } = useDialogFocus(undefined, onReturnFocus);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const followTranscript = useRef(true);
+  const waveformRef = useRef<HTMLDivElement | null>(null);
+  const displayedLevels = useRef<number[]>([]);
+
+  const paintWaveform = useEffectEvent((blend: number, active: boolean) => {
+    Array.from(waveformRef.current?.children ?? []).forEach((bar, slot) => {
+      const sample = levels[slot];
+      // Soften isolated peaks without changing the audio used for transcription.
+      const target = active
+        ? ((levels[slot - 1] ?? sample) + sample * 2 + (levels[slot + 1] ?? sample)) / 4
+        : 0;
+      const previous = displayedLevels.current[slot] ?? 0;
+      const level = previous + (target - previous) * blend;
+      displayedLevels.current[slot] = level;
+      (bar as HTMLElement).style.transform = `scaleY(${0.06 + level * 0.94})`;
+    });
+  });
+
+  useEffect(() => {
+    if (phase !== 'recording') {
+      paintWaveform(1, false);
+      return;
+    }
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let animation = 0;
+    let previous = performance.now();
+    const animate = (now: number) => {
+      // Match the approved prototype's easing at any display refresh rate.
+      paintWaveform(1 - Math.exp(-Math.min(now - previous, 100) / 110), true);
+      previous = now;
+      animation = requestAnimationFrame(animate);
+    };
+    const updateMotion = () => {
+      cancelAnimationFrame(animation);
+      if (motion.matches) {
+        paintWaveform(1, false);
+      } else {
+        previous = performance.now();
+        animation = requestAnimationFrame(animate);
+      }
+    };
+    updateMotion();
+    motion.addEventListener('change', updateMotion);
+    return () => {
+      cancelAnimationFrame(animation);
+      motion.removeEventListener('change', updateMotion);
+    };
+  }, [phase]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(transcript): Follow revised transcript text, but leave a reader's scroll position alone.
   useLayoutEffect(() => {
@@ -46,9 +91,7 @@ const DictationDialog = ({
         ? 'Finishing transcription…'
         : phase === 'review'
           ? 'Ready to review'
-          : speaking
-            ? 'Speaking…'
-            : 'Listening…';
+          : 'Listening…';
   const duration = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
 
   return (
@@ -94,18 +137,19 @@ const DictationDialog = ({
         </header>
 
         <div className="dictation-visualizer">
-          <div aria-hidden="true" className="dictation-waveform" data-speaking={speaking}>
-            {levels.map((sample, slot) => {
-              const level = phase === 'recording' ? sample : 0;
-              return (
-                <span
-                  className="dictation-waveform-bar"
-                  // biome-ignore lint/suspicious/noArrayIndexKey: Bars are fixed display slots, not sample identities.
-                  key={slot}
-                  style={{ transform: `scaleY(${0.06 + level * 0.94})` }}
-                />
-              );
-            })}
+          <div
+            aria-hidden="true"
+            className="dictation-waveform"
+            data-recording={phase === 'recording'}
+            ref={waveformRef}
+          >
+            {levels.map((_, slot) => (
+              <span
+                className="dictation-waveform-bar"
+                // biome-ignore lint/suspicious/noArrayIndexKey: Bars are fixed display slots, not sample identities.
+                key={slot}
+              />
+            ))}
           </div>
           <output aria-live="polite" className="dictation-status">
             {status}

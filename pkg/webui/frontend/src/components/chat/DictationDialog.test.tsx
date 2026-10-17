@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DictationDialog from './DictationDialog';
 
 const makeProps = (
@@ -11,7 +11,6 @@ const makeProps = (
   error: null,
   elapsedSeconds: 7,
   levels: [0, 0.25, 0.5, 1],
-  speaking: false,
   transcript: '',
   transcribing: false,
   stop: vi.fn(),
@@ -35,22 +34,94 @@ describe('DictationDialog', () => {
     );
   });
 
-  it('renders actual level samples and clears the waveform when capture stops', () => {
-    const props = makeProps({ speaking: true, elapsedSeconds: 67 });
-    const { rerender } = render(<DictationDialog {...props} />);
-    const dialog = screen.getByRole('dialog');
-    const waveform = dialog.querySelector('.dictation-waveform');
-    expect(waveform).toHaveAttribute('aria-hidden', 'true');
-    const bars = Array.from(dialog.querySelectorAll('.dictation-waveform-bar'));
-    expect(bars).toHaveLength(props.levels.length);
-    expect(bars[0]).toHaveStyle({ transform: 'scaleY(0.06)' });
-    expect(bars[1]).toHaveStyle({ transform: 'scaleY(0.295)' });
-    expect(bars[2]).toHaveStyle({ transform: 'scaleY(0.53)' });
-    expect(bars[3]).toHaveStyle({ transform: 'scaleY(1)' });
-    expect(screen.getByRole('status')).toHaveTextContent('Speaking…');
-    expect(screen.getByLabelText('Recording duration: 1:07')).toBeVisible();
-    rerender(<DictationDialog {...props} phase="review" />);
-    for (const bar of bars) expect(bar).toHaveStyle({ transform: 'scaleY(0.06)' });
+  describe('quieter waveform', () => {
+    let nextFrame: FrameRequestCallback;
+    let frameID: number;
+
+    beforeEach(() => {
+      frameID = 0;
+      vi.spyOn(performance, 'now').mockReturnValue(0);
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        nextFrame = callback;
+        return ++frameID;
+      });
+      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('smooths peaks in space and time, keeps feedback steady, and clears on stop', () => {
+      const props = makeProps({ levels: [0, 0, 1, 0, 0], elapsedSeconds: 67 });
+      const { rerender } = render(<DictationDialog {...props} />);
+      const waveform = screen.getByRole('dialog').querySelector('.dictation-waveform');
+      expect(waveform).toHaveAttribute('aria-hidden', 'true');
+      expect(waveform).toHaveAttribute('data-recording', 'true');
+      const bars = Array.from(
+        screen.getByRole('dialog').querySelectorAll<HTMLElement>('.dictation-waveform-bar')
+      );
+      expect(bars).toHaveLength(props.levels.length);
+      const scale = (bar: HTMLElement) => Number(bar.style.transform.slice(7, -1));
+
+      act(() => nextFrame(16));
+      const blend = 1 - Math.exp(-16 / 110);
+      for (const [slot, target] of [0, 0.25, 0.5, 0.25, 0].entries()) {
+        expect(scale(bars[slot])).toBeCloseTo(0.06 + target * blend * 0.94);
+      }
+      const firstHeight = scale(bars[2]);
+      act(() => nextFrame(32));
+      expect(scale(bars[2])).toBeGreaterThan(firstHeight);
+      expect(scale(bars[2])).toBeLessThan(0.53);
+      expect(screen.getByRole('status')).toHaveTextContent('Listening…');
+      expect(screen.getByLabelText('Recording duration: 1:07')).toBeVisible();
+
+      const peak = scale(bars[2]);
+      rerender(<DictationDialog {...props} levels={[0, 0, 0, 0, 0]} />);
+      act(() => nextFrame(48));
+      expect(scale(bars[2])).toBeLessThan(peak);
+      expect(scale(bars[2])).toBeGreaterThan(0.06);
+      expect(screen.getByRole('status')).toHaveTextContent('Listening…');
+      expect(waveform).toHaveAttribute('data-recording', 'true');
+
+      const pending = frameID;
+      rerender(<DictationDialog {...props} phase="review" />);
+      expect(window.cancelAnimationFrame).toHaveBeenCalledWith(pending);
+      expect(waveform).toHaveAttribute('data-recording', 'false');
+      for (const bar of bars) expect(bar).toHaveStyle({ transform: 'scaleY(0.06)' });
+    });
+
+    it('uses a static baseline for reduced motion and responds to preference changes', () => {
+      const motion = {
+        ...window.matchMedia('(prefers-reduced-motion: reduce)'),
+        matches: true,
+      };
+      vi.mocked(window.matchMedia).mockReturnValueOnce(motion);
+      const { unmount } = render(<DictationDialog {...makeProps()} />);
+      const bars = screen.getByRole('dialog').querySelectorAll('.dictation-waveform-bar');
+      expect(window.requestAnimationFrame).not.toHaveBeenCalled();
+      for (const bar of bars) expect(bar).toHaveStyle({ transform: 'scaleY(0.06)' });
+      expect(screen.getByRole('status')).toHaveTextContent('Listening…');
+
+      const change = vi.mocked(motion.addEventListener).mock.calls[0][1] as () => void;
+      motion.matches = false;
+      act(change);
+      expect(window.requestAnimationFrame).toHaveBeenCalledOnce();
+      act(() => nextFrame(16));
+      const pending = frameID;
+      motion.matches = true;
+      act(change);
+      expect(window.cancelAnimationFrame).toHaveBeenCalledWith(pending);
+      for (const bar of bars) expect(bar).toHaveStyle({ transform: 'scaleY(0.06)' });
+      unmount();
+      expect(motion.removeEventListener).toHaveBeenCalledWith('change', change);
+    });
+
+    it('cancels the pending animation on unmount', () => {
+      const { unmount } = render(<DictationDialog {...makeProps()} />);
+      act(() => nextFrame(16));
+      const pending = frameID;
+      unmount();
+      expect(window.cancelAnimationFrame).toHaveBeenCalledWith(pending);
+    });
   });
 
   it.each([
