@@ -397,6 +397,21 @@ func TestRealtimeCodexFailedAttachmentUsesCleanupOnlySideband(t *testing.T) {
 	}
 }
 
+func TestRealtimeTranscriptionFailureKeepsCallOpen(t *testing.T) {
+	f := openRealtimeFixture(t, "openai")
+	f.send(t, `{"type":"conversation.item.input_audio_transcription.delta","item_id":"u1","delta":"Fix the"}`)
+	assert.Equal(t, "Fix the", realtimeReceive(t, f.session.Events()).Text)
+	f.send(t, `{"type":"conversation.item.input_audio_transcription.failed","item_id":"u1","error":{"message":"private-token"}}`)
+	assert.Equal(t, llmtypes.RealtimeEvent{Kind: "transcript", ID: "u1", Role: "user", Text: "Fix the", Final: true}, realtimeReceive(t, f.session.Events()))
+	f.send(t, `{"type":"conversation.item.input_audio_transcription.failed","item_id":"u2"}`)
+	assert.Equal(t, llmtypes.RealtimeEvent{Kind: "transcript", ID: "u2", Role: "user", Text: "(Speech could not be transcribed.)", Final: true}, realtimeReceive(t, f.session.Events()))
+	f.send(t, `{"type":"conversation.item.input_audio_transcription.failed"}`)
+	// The session keeps running: later speech is still captioned.
+	f.send(t, `{"type":"conversation.item.input_audio_transcription.completed","item_id":"u3","transcript":"Try again"}`)
+	assert.Equal(t, "Try again", realtimeReceive(t, f.session.Events()).Text)
+	assert.Zero(t, f.hangups.Load())
+}
+
 func TestRealtimeSessionFailuresAndCancellation(t *testing.T) {
 	for _, scenario := range []string{"cancel", "large frame", "invalid handoff", "provider error"} {
 		t.Run(scenario, func(t *testing.T) {

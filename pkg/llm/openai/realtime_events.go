@@ -62,7 +62,16 @@ func (s *realtimeSession) handleLocked(event realtimeWireEvent) ([]llmtypes.Real
 	case "conversation.item.input_audio_transcription.completed":
 		return s.transcriptLocked(event.ItemID, "user", event.Transcript, true)
 	case "conversation.item.input_audio_transcription.failed":
-		return nil, errors.New("realtime speech transcription failed")
+		// Captions are presentation only: the model heard the audio itself.
+		// Seal what was transcribed, or mark the gap, rather than hanging up.
+		if event.ItemID == "" {
+			return nil, nil
+		}
+		text := s.transcripts[event.ItemID].text
+		if strings.TrimSpace(text) == "" {
+			text = "(Speech could not be transcribed.)"
+		}
+		return s.transcriptLocked(event.ItemID, "user", text, true)
 	case "response.output_audio_transcript.delta", "response.audio_transcript.delta", "response.output_text.delta":
 		return s.transcriptLocked(event.ItemID, "assistant", event.Delta, false)
 	case "response.output_audio_transcript.done", "response.audio_transcript.done":
