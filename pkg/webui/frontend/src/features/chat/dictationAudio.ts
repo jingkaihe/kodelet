@@ -153,10 +153,12 @@ export function createDictationRecorder(options: DictationRecorderOptions) {
     if (!(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error;
     context = new AudioContext({ latencyHint: 'interactive' });
   }
-  const resumed = context.resume().then(
-    () => undefined,
-    () => new Error('Could not start microphone audio processing.')
-  );
+  const resume = () =>
+    context.resume().then(
+      () => undefined,
+      () => new Error('Could not start microphone audio processing.')
+    );
+  let resumed = resume();
   let stream: MediaStream | undefined;
   let source: MediaStreamAudioSourceNode | undefined;
   let node: AudioWorkletNode | undefined;
@@ -218,6 +220,17 @@ export function createDictationRecorder(options: DictationRecorderOptions) {
         tracks.forEach((track) => {
           track.addEventListener('ended', deviceEnded);
         });
+        try {
+          source = context.createMediaStreamSource(input);
+        } catch (error) {
+          if (!(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error;
+          // Older Firefox accepts a 16 kHz context but rejects cross-rate input.
+          // Reuse the owned stream before creating any session or worklet.
+          void context.close().catch(() => undefined);
+          context = new AudioContext({ latencyHint: 'interactive' });
+          resumed = resume();
+          source = context.createMediaStreamSource(input);
+        }
         session = createDictationSession(context.sampleRate, {
           ...options,
           onLimit: () => {
@@ -251,7 +264,6 @@ export function createDictationRecorder(options: DictationRecorderOptions) {
           if (context.state !== 'running')
             fail('Microphone capture was interrupted. Please try again.');
         };
-        source = context.createMediaStreamSource(input);
         source.connect(node);
         // The processor emits only silence on its output. Connecting it keeps
         // capture running without playing microphone audio through speakers.

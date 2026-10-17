@@ -251,23 +251,42 @@ describe('dictation recorder lifecycle', () => {
     expect(context.source.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the native rate for WAV headers and limits when 16 kHz is unsupported', async () => {
+  it.each([
+    'constructor',
+    'source',
+  ] as const)('uses the native rate for WAV headers and limits when the %s rejects 16 kHz', async (failure) => {
     vi.stubGlobal(
       'AudioContext',
       class extends FakeAudioContext {
         constructor(config: AudioContextOptions) {
-          if (config.sampleRate) throw new DOMException('Unsupported rate', 'NotSupportedError');
+          if (failure === 'constructor' && config.sampleRate)
+            throw new DOMException('Unsupported rate', 'NotSupportedError');
           super(config);
+          if (failure === 'source' && config.sampleRate) {
+            this.createMediaStreamSource.mockImplementation(() => {
+              throw new DOMException('Unsupported stream rate', 'NotSupportedError');
+            });
+          }
         }
       }
     );
     const callbacks = options({ maxDurationSeconds: 1 });
     const recorder = createDictationRecorder(callbacks);
-    const context = FakeAudioContext.instances[0];
-    expect(context.options).toEqual({ latencyHint: 'interactive' });
-    expect(context.resume).toHaveBeenCalledTimes(1);
+    const firstContext = FakeAudioContext.instances[0];
+    expect(firstContext.resume).toHaveBeenCalledTimes(1);
     const { stream, track } = microphone();
     await recorder.start(stream);
+    const context = FakeAudioContext.instances[FakeAudioContext.instances.length - 1];
+    expect(context.options).toEqual({ latencyHint: 'interactive' });
+    expect(context.resume).toHaveBeenCalledTimes(1);
+    expect(context.createMediaStreamSource).toHaveBeenCalledWith(stream);
+    expect(track.stop).not.toHaveBeenCalled();
+    if (failure === 'source') {
+      expect(FakeAudioContext.instances).toHaveLength(2);
+      expect(firstContext.createMediaStreamSource).toHaveBeenCalledWith(stream);
+      expect(firstContext.close).toHaveBeenCalledTimes(1);
+      expect(firstContext.audioWorklet.addModule).not.toHaveBeenCalled();
+    }
     FakeWorkletNode.instances[0].port.onmessage?.({
       data: { type: 'samples', samples: new Float32Array(48_000).fill(0.1) },
     });
@@ -277,6 +296,7 @@ describe('dictation recorder lifecycle', () => {
     expect(file.size).toBe(44 + 48_000 * 2);
     expect((await readWAV(file)).getUint32(24, true)).toBe(48_000);
     expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(context.close).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -303,6 +323,43 @@ describe('dictation recorder lifecycle', () => {
     expect(track.stop).toHaveBeenCalledTimes(1);
     expect(context.close).toHaveBeenCalledTimes(1);
     expect(FakeWorkletNode.instances).toHaveLength(0);
+  });
+
+  it.each([
+    'cancel',
+    'device',
+  ] as const)('cleans up both contexts after %s while the native-rate fallback is resuming', async (interruption) => {
+    const callbacks = options();
+    const recorder = createDictationRecorder(callbacks);
+    const original = FakeAudioContext.instances[0];
+    original.createMediaStreamSource.mockImplementation(() => {
+      throw new DOMException('Unsupported stream rate', 'NotSupportedError');
+    });
+    let resolveResume!: () => void;
+    const resuming = new Promise<void>((resolve) => {
+      resolveResume = resolve;
+    });
+    vi.stubGlobal(
+      'AudioContext',
+      class extends FakeAudioContext {
+        resume = vi.fn(() => resuming);
+      }
+    );
+    const { stream, track } = microphone();
+    const starting = recorder.start(stream);
+    const fallback = FakeAudioContext.instances[1];
+    if (interruption === 'cancel') recorder.cancel();
+    else track.dispatchEvent(new Event('ended'));
+    resolveResume();
+    await starting;
+    expect(original.close).toHaveBeenCalledTimes(1);
+    expect(fallback.close).toHaveBeenCalledTimes(1);
+    expect(fallback.source.disconnect).toHaveBeenCalledTimes(1);
+    expect(fallback.source.connect).not.toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(FakeWorkletNode.instances).toHaveLength(0);
+    expect(callbacks.onSnapshot).not.toHaveBeenCalled();
+    expect(callbacks.onError).toHaveBeenCalledTimes(interruption === 'device' ? 1 : 0);
   });
 
   it('finishes after the final PCM acknowledgement without waiting for the pause threshold', async () => {
