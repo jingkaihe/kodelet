@@ -42,11 +42,11 @@ describe('DictationDialog', () => {
     const waveform = dialog.querySelector('.dictation-waveform');
     expect(waveform).toHaveAttribute('aria-hidden', 'true');
     const bars = Array.from(dialog.querySelectorAll('.dictation-waveform-bar'));
-    expect(bars).toHaveLength(32);
+    expect(bars).toHaveLength(props.levels.length);
     expect(bars[0]).toHaveStyle({ transform: 'scaleY(0.06)' });
-    expect(bars[29]).toHaveStyle({ transform: 'scaleY(0.295)' });
-    expect(bars[30]).toHaveStyle({ transform: 'scaleY(0.53)' });
-    expect(bars[31]).toHaveStyle({ transform: 'scaleY(1)' });
+    expect(bars[1]).toHaveStyle({ transform: 'scaleY(0.295)' });
+    expect(bars[2]).toHaveStyle({ transform: 'scaleY(0.53)' });
+    expect(bars[3]).toHaveStyle({ transform: 'scaleY(1)' });
     expect(screen.getByRole('status')).toHaveTextContent('Speaking…');
     expect(screen.getByLabelText('Recording duration: 1:07')).toBeVisible();
     rerender(<DictationDialog {...props} phase="review" />);

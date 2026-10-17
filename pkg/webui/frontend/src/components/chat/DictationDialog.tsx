@@ -16,8 +16,6 @@ interface DictationDialogProps {
   cancel: () => void;
 }
 
-const waveformSlots = Array.from({ length: 32 }, (_, index) => index);
-
 const DictationDialog = ({
   phase,
   error,
@@ -81,7 +79,6 @@ const DictationDialog = ({
             ? 'Speaking…'
             : 'Listening…';
   const duration = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
-  const recentLevels = levels.slice(-waveformSlots.length);
 
   return createPortal(
     <div className="new-chat-dialog-backdrop dictation-backdrop" ref={backdropRef}>
@@ -110,14 +107,12 @@ const DictationDialog = ({
 
         <div className="dictation-visualizer">
           <div aria-hidden="true" className="dictation-waveform" data-speaking={speaking}>
-            {waveformSlots.map((slot) => {
-              const level =
-                phase === 'recording'
-                  ? (recentLevels[slot - (waveformSlots.length - recentLevels.length)] ?? 0)
-                  : 0;
+            {levels.map((sample, slot) => {
+              const level = phase === 'recording' ? sample : 0;
               return (
                 <span
                   className="dictation-waveform-bar"
+                  // biome-ignore lint/suspicious/noArrayIndexKey: Bars are fixed display slots, not sample identities.
                   key={slot}
                   style={{ transform: `scaleY(${0.06 + level * 0.94})` }}
                 />
