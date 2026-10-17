@@ -429,7 +429,15 @@ export interface RealtimeSession {
 }
 
 export interface RealtimeEvent {
-  kind: 'state' | 'transcript' | 'error' | 'closed' | 'agent-started' | 'agent-completed';
+  /** Errors end the call; warnings are shown while the call continues. */
+  kind:
+    | 'state'
+    | 'transcript'
+    | 'warning'
+    | 'error'
+    | 'closed'
+    | 'agent-started'
+    | 'agent-completed';
   id?: string;
   anchor?: number;
   role?: 'user' | 'assistant';

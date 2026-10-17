@@ -229,6 +229,11 @@ export function useRealtime({
               fail(event.text || 'The call failed. Try again.');
               return;
             }
+            if (event.kind === 'warning') {
+              // Keep the call: the voice model is explaining the problem.
+              setError(event.text || 'Live voice reported a problem.');
+              return;
+            }
             handleEvent(event);
           },
         })

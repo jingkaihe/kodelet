@@ -147,6 +147,23 @@ describe('useRealtime', () => {
     expect(hook.result.current.error).toBeNull();
   });
 
+  it('shows warnings without ending the call, but ends it on errors', async () => {
+    const hook = renderCall();
+    await act(async () => {
+      expect(await hook.result.current.start()).toBe(true);
+    });
+    act(() => emit({ kind: 'warning', text: 'Could not confirm the coding request.' }));
+    expect(hook.result.current.error).toBe('Could not confirm the coding request.');
+    expect(hook.result.current.phase).toBe('connected');
+    expect(peer.close).not.toHaveBeenCalled();
+    expect(apiService.endRealtime).not.toHaveBeenCalled();
+    expect(onEvent).not.toHaveBeenCalled();
+    act(() => emit({ kind: 'error', text: 'Live voice was interrupted.' }));
+    expect(hook.result.current.error).toBe('Live voice was interrupted.');
+    expect(hook.result.current.phase).toBe('idle');
+    expect(apiService.endRealtime).toHaveBeenCalledWith('call-one');
+  });
+
   it('stops a microphone granted after cancellation and does not allocate a call', async () => {
     const pending = deferred<MediaStream>();
     getUserMedia.mockReturnValueOnce(pending.promise);

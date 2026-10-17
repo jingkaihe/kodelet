@@ -420,3 +420,33 @@ func TestRealtimeEventsDeliverQueuedErrorBeforeClosed(t *testing.T) {
 		require.Equal(t, []string{"state", "error", "closed"}, kinds)
 	}
 }
+
+func TestRealtimeRecoverableHandoffFailuresKeepCallOpen(t *testing.T) {
+	s, session := realtimeTestServer(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	call := &realtimeCall{
+		server: s, id: "voice", chat: chat.ChatRequest{ConversationID: "saved"},
+		ctx: ctx, cancel: cancel, session: session, events: make(chan realtimeEvent, 16), handoffs: make(map[string]struct{}),
+	}
+	t.Cleanup(func() { cancel(); call.work.Wait() })
+
+	// An oversized request is refused aloud without starting work.
+	call.delegate(llmtypes.RealtimeEvent{HandoffID: "too-long", Text: strings.Repeat("x", 10001)})
+	assert.Contains(t, <-session.results, "No coding task was started")
+	assert.Equal(t, realtimeEvent{Kind: "warning", Text: "Live voice returned an invalid coding request.", ConversationID: "saved"}, <-call.events)
+
+	// An interactive operation makes the handoff fail; its explanation is still spoken.
+	run := newActiveChatRun(func() {})
+	require.True(t, s.registerActiveChat("saved", run))
+	call.delegate(llmtypes.RealtimeEvent{HandoffID: "busy", Text: "fix it"})
+	assert.Contains(t, <-session.results, "could not be confirmed")
+	assert.Equal(t, "warning", (<-call.events).Kind)
+	assert.Equal(t, "agent-completed", (<-call.events).Kind)
+	s.unregisterActiveChat("saved", run)
+
+	call.mu.Lock()
+	closed := call.closed
+	call.mu.Unlock()
+	assert.False(t, closed, "recoverable handoff failures must not end the call")
+	assert.False(t, session.closed.Load())
+}

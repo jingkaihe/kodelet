@@ -42,8 +42,14 @@ func (s *Server) finishVoiceSteersLocked(conversationID string, run *activeChatR
 }
 
 func (c *realtimeCall) delegate(event llmtypes.RealtimeEvent) {
-	if event.HandoffID == "" || len(event.HandoffID) > 256 || strings.TrimSpace(event.Text) == "" || len(event.Text) > 10000 {
-		c.emit(realtimeEvent{Kind: "error", Text: "Live voice returned an invalid coding request."})
+	if event.HandoffID == "" || len(event.HandoffID) > 256 {
+		// Without a valid handoff there is nothing the voice model can be told.
+		c.emit(realtimeEvent{Kind: "warning", Text: "Live voice returned an invalid coding request."})
+		return
+	}
+	if strings.TrimSpace(event.Text) == "" || len(event.Text) > 10000 {
+		c.refuse(event.HandoffID, "Live voice returned an invalid coding request.",
+			"No coding task was started because the request was empty or too long. Ask the user to restate it briefly.")
 		return
 	}
 	c.mu.Lock()
@@ -54,7 +60,8 @@ func (c *realtimeCall) delegate(event llmtypes.RealtimeEvent) {
 	}
 	if len(c.handoffs) >= 256 {
 		c.mu.Unlock()
-		c.emit(realtimeEvent{Kind: "error", Text: "Live voice reached its task limit. Start a new call."})
+		c.refuse(event.HandoffID, "Live voice reached its task limit. Start a new call.",
+			"No coding task was started because this call reached its task limit. Ask the user to start a new call.")
 		return
 	}
 	c.handoffs[event.HandoffID] = struct{}{}
@@ -68,8 +75,9 @@ func (c *realtimeCall) delegate(event llmtypes.RealtimeEvent) {
 		receipt, err := c.dispatch(ctx, event)
 		if err != nil {
 			logger.G(ctx).WithError(err).Warn("live voice handoff failed")
+			// Warn without ending the call, so the voice model can say what happened.
+			c.emit(realtimeEvent{Kind: "warning", Text: "Could not confirm the coding request. Check the conversation before trying again."})
 			c.complete(event.HandoffID, "The coding request could not be confirmed. Do not retry it automatically; inspect the conversation before submitting it again.", "")
-			c.emit(realtimeEvent{Kind: "error", Text: "Could not confirm the coding request. Check the conversation before trying again."})
 			return
 		}
 		result := "The coding turn ended with status: " + receipt.Status
@@ -215,6 +223,23 @@ func (c *realtimeCall) waitForOwnerWatch() (*subscriberEventSink, error) {
 
 func (c *realtimeCall) complete(handoffID, result, turnID string) {
 	c.emit(realtimeEvent{Kind: "agent-completed", TurnID: turnID})
+	c.reply(handoffID, result)
+}
+
+// refuse answers a handoff without starting work. Warnings leave the call open
+// so the voice model can explain the refusal; replying runs off the read loop.
+func (c *realtimeCall) refuse(handoffID, warning, reply string) {
+	c.emit(realtimeEvent{Kind: "warning", Text: warning})
+	c.work.Add(1)
+	go func() {
+		defer c.work.Done()
+		c.reply(handoffID, reply)
+	}()
+}
+
+// reply delivers a handoff result to the voice model. Only a failed delivery
+// ends the call, since the provider can no longer be kept consistent.
+func (c *realtimeCall) reply(handoffID, result string) {
 	if c.ctx.Err() != nil {
 		return
 	}
