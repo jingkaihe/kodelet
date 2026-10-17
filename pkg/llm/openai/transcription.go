@@ -106,20 +106,18 @@ func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.R
 		return transcriptiontypes.Result{}, errors.New("unsupported transcription audio type")
 	}
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
+	var framing bytes.Buffer
+	writer := multipart.NewWriter(&framing)
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
 		"name": "file", "filename": format.Filename,
 	}))
 	header.Set("Content-Type", format.ContentType)
-	part, err := writer.CreatePart(header)
+	_, err = writer.CreatePart(header)
 	if err != nil {
 		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription audio")
 	}
-	if _, err := part.Write(audio); err != nil {
-		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription audio")
-	}
+	audioOffset := framing.Len()
 	if s.model != "" {
 		_ = writer.WriteField("model", s.model)
 	}
@@ -129,10 +127,18 @@ func (s *Transcriber) Transcribe(ctx context.Context, input transcriptiontypes.R
 	if err := writer.Close(); err != nil {
 		return transcriptiontypes.Result{}, errors.Wrap(err, "failed to prepare transcription upload")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, &body)
+	// Keep only multipart framing in the buffer; reuse the validated audio
+	// without allocating a second full recording for the provider request.
+	body := io.MultiReader(
+		bytes.NewReader(framing.Bytes()[:audioOffset]),
+		bytes.NewReader(audio),
+		bytes.NewReader(framing.Bytes()[audioOffset:]),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, body)
 	if err != nil {
 		return transcriptiontypes.Result{}, errors.New("failed to create transcription request")
 	}
+	req.ContentLength = int64(framing.Len()) + int64(len(audio))
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 	if s.platform == "codex" {

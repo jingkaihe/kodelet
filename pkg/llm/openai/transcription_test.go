@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,6 +136,17 @@ func TestTranscribeProviderRequests(t *testing.T) {
 				calls.Add(1)
 				assert.Equal(t, http.MethodPost, r.Method)
 				assert.Equal(t, "application/json", r.Header.Get("Accept"))
+				body, err := io.ReadAll(r.Body)
+				if !assert.NoError(t, err) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				assert.Equal(t, int64(len(body)), r.ContentLength)
+				assert.Empty(t, r.TransferEncoding)
+				_, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+				assert.NoError(t, err)
+				assert.True(t, bytes.HasSuffix(body, []byte("\r\n--"+parameters["boundary"]+"--\r\n")))
+				r.Body = io.NopCloser(bytes.NewReader(body))
 				if !assert.NoError(t, r.ParseMultipartForm(1<<20)) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
