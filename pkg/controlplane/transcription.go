@@ -22,7 +22,7 @@ func newTranscriberFromViper() (llmtypes.Transcriber, error) {
 		Profile string `mapstructure:"profile"`
 	}
 	if err := viper.UnmarshalKey("transcription", &config); err != nil {
-		return nil, errors.Wrap(err, "invalid transcription configuration; expected enabled and profile settings")
+		return nil, errors.Wrap(err, "expected enabled and profile settings")
 	}
 	if !config.Enabled {
 		return nil, nil //nolint:nilnil // Disabled transcription intentionally has no provider.
