@@ -5,8 +5,7 @@ import { createDictationRecorder, type DictationRecorderOptions } from './dictat
 
 export type Phase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'review';
 
-const maxAudioBytes = 20 * 1024 * 1024;
-const maxDurationSeconds = 120;
+// Allow transport overhead beyond the server request deadline.
 const uploadTimeoutMs = 120_000;
 const waveformLength = 32;
 const capabilityErrorMessage = 'Could not check dictation availability. Try again.';
@@ -145,7 +144,7 @@ export function useDictation({
 
   const start = async (fromCommand = false) => {
     if (captureRef.current) return;
-    if (!enabled) {
+    if (!capabilities?.enabled) {
       setError(reason);
       return;
     }
@@ -288,8 +287,8 @@ export function useDictation({
     setPhase('requesting');
     try {
       const recorderOptions: DictationRecorderOptions = {
-        maxAudioBytes,
-        maxDurationSeconds,
+        maxAudioBytes: capabilities.maxAudioBytes,
+        maxDurationSeconds: capabilities.maxDurationSeconds,
         onLevel: (level) => {
           if (current() && !capture.stopping) setLevels((value) => [...value.slice(1), level]);
         },
@@ -334,11 +333,8 @@ export function useDictation({
       if (!fresh.mimeTypes.includes('audio/wav')) {
         throw new Error('The server does not support WAV audio for continuous dictation.');
       }
-      recorderOptions.maxAudioBytes = Math.min(fresh.maxAudioBytes || maxAudioBytes, maxAudioBytes);
-      recorderOptions.maxDurationSeconds = Math.min(
-        fresh.maxDurationSeconds || maxDurationSeconds,
-        maxDurationSeconds
-      );
+      recorderOptions.maxAudioBytes = fresh.maxAudioBytes;
+      recorderOptions.maxDurationSeconds = fresh.maxDurationSeconds;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!current()) {
         stream.getTracks().forEach((track) => {
@@ -355,12 +351,8 @@ export function useDictation({
         if (!current()) return;
         const elapsed = (Date.now() - started) / 1000;
         setElapsedSeconds(Math.floor(elapsed));
-        if (elapsed >= duration) {
-          setError(
-            'The recording limit was reached. Review your transcript and choose Done to insert it.'
-          );
-          finishCapture(false);
-        }
+        // Sample counts bound audio memory; wall time also bounds stalled capture.
+        if (elapsed >= duration) recorderOptions.onLimit();
       }, 250);
     } catch (cause) {
       if (!current()) return;

@@ -143,9 +143,6 @@ export function createDictationSession(sampleRate: number, options: DictationRec
 }
 
 export function createDictationRecorder(options: DictationRecorderOptions) {
-  if (typeof AudioContext === 'undefined' || typeof AudioWorkletNode === 'undefined') {
-    throw new Error('This browser does not support microphone audio processing.');
-  }
   // Both creation and resume happen synchronously in the initiating gesture,
   // before the parent awaits microphone permission (important on Safari).
   const context = new AudioContext({ latencyHint: 'interactive' });
