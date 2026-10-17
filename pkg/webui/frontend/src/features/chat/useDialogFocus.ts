@@ -30,7 +30,7 @@ export const useDialogFocus = (
       if (!dialog || !buttons?.length) return;
       const first = buttons[0];
       const last = buttons[buttons.length - 1];
-      if (!dialog.contains(document.activeElement)) {
+      if (document.activeElement === dialog || !dialog.contains(document.activeElement)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
       } else if (event.shiftKey && document.activeElement === first) {

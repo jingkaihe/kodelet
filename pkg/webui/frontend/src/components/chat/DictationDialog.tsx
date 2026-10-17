@@ -90,13 +90,6 @@ const DictationDialog = ({
         aria-labelledby="dictation-title"
         aria-modal="true"
         className="dictation-dialog surface-panel"
-        onKeyDown={(event) => {
-          if (event.key !== 'Tab' || event.target !== dialogRef.current) return;
-          const buttons =
-            dialogRef.current.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
-          event.preventDefault();
-          (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])?.focus();
-        }}
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}

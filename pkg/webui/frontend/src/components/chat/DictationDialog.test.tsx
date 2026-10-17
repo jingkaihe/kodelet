@@ -105,6 +105,11 @@ describe('DictationDialog', () => {
     expect(cancel).toHaveFocus();
     await user.tab({ shift: true });
     expect(done).toHaveFocus();
+    screen.getByRole('dialog').focus();
+    await user.tab({ shift: true });
+    expect(done).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(props.cancel).toHaveBeenCalledOnce();
     expect(props.stop).not.toHaveBeenCalled();
