@@ -31,28 +31,41 @@ interface ChatToolActivityProps {
 // Ordinary cards reset when their execution phase changes; nested streaming
 // rows and their parent keep the user's fold choice through completion, and
 // otherwise follow the default (e.g. folding once code execution completes).
-const ActivityDetails: React.FC<
-  React.ComponentProps<'details'> & { status: string; preserveOpen?: boolean }
-> = ({ open, status, preserveOpen = false, ...props }) => {
-  const [userExpanded, setUserExpanded] = React.useState<boolean>();
-  const expanded = userExpanded ?? !!open;
+export const ActivityDetails: React.FC<
+  Omit<React.ComponentProps<'details'>, 'children'> & {
+    status: string;
+    preserveOpen?: boolean;
+    summary: React.ReactNode;
+    children: () => React.ReactNode;
+  }
+> = ({ open, status, preserveOpen = false, summary, children, ...props }) => {
   const phase = status === 'running' || status === 'failed' ? status : 'settled';
+  const [userExpanded, setUserExpanded] = React.useState<{ phase: string; open: boolean }>();
+  const expanded =
+    userExpanded && (preserveOpen || userExpanded.phase === phase) ? userExpanded.open : !!open;
+  if (!preserveOpen && userExpanded && userExpanded.phase !== phase) {
+    setUserExpanded(undefined);
+  }
+  const [hasOpened, setHasOpened] = React.useState(expanded);
+  // Keep mounted bodies (and their nested fold choices) after the first opening.
+  // Capture automatic openings too, even if completion precedes the toggle event.
+  if (expanded && !hasOpened) setHasOpened(true);
+
   return (
     <details
       {...props}
       key={preserveOpen ? 'persistent' : phase}
-      open={preserveOpen ? expanded : open}
-      onToggle={
-        preserveOpen
-          ? (event) => {
-              // Programmatic updates already match `expanded`; only a mismatch is a user toggle.
-              if (event.currentTarget.open !== expanded) {
-                setUserExpanded(event.currentTarget.open);
-              }
-            }
-          : undefined
-      }
-    />
+      open={expanded}
+      onToggle={(event) => {
+        // Programmatic updates already match expanded; only a mismatch is a user toggle.
+        if (event.currentTarget.open !== expanded) {
+          setUserExpanded({ phase, open: event.currentTarget.open });
+        }
+      }}
+    >
+      {summary}
+      {hasOpened || expanded ? children() : null}
+    </details>
   );
 };
 
@@ -525,53 +538,57 @@ const FileToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }>
             status={status}
             preserveOpen={nested}
             open={!nested && running ? true : undefined}
-          >
-            <summary className="tool-summary activity-summary" title={summaryText}>
-              <span className="activity-marker" aria-hidden="true">
-                {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
-              </span>
-              <ActivitySummaryText summaryText={summaryText} />
-              {showCounts && file ? (
-                <span className="file-activity-counts">
-                  (<span className="apply-patch-count-added">+{file.counts.added}</span>{' '}
-                  <span className="apply-patch-count-removed">-{file.counts.removed}</span>)
+            summary={
+              <summary className="tool-summary activity-summary" title={summaryText}>
+                <span className="activity-marker" aria-hidden="true">
+                  {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
                 </span>
-              ) : null}
-              <span className="tool-summary-chevron" aria-hidden="true">
-                <ChevronRight size={12} />
-              </span>
-              <output
-                className={cn('tool-summary-status', !failed && 'sr-only')}
-                aria-label={`Tool ${status}`}
-              >
-                {status}
-              </output>
-            </summary>
-            <div className="activity-detail-content">
-              {file && name !== 'file_read' && tool.result ? (
-                <>
-                  {failed ? (
-                    <div className="apply-patch-error" role="alert">
-                      {tool.result.error || 'File operation failed.'}
-                    </div>
-                  ) : null}
-                  {file.lines.length > 0 ? (
-                    <ReferenceDiffBlock lines={file.lines} />
-                  ) : (
-                    <p className="tool-awaiting">No file diff available.</p>
-                  )}
-                </>
-              ) : tool.result ? (
-                <ToolRenderer
-                  isPartial={tool.inProgress}
-                  showAttachments={false}
-                  toolInput={tool.input}
-                  toolResult={tool.result}
-                />
-              ) : (
-                <p className="tool-awaiting">Awaiting file result…</p>
-              )}
-            </div>
+                <ActivitySummaryText summaryText={summaryText} />
+                {showCounts && file ? (
+                  <span className="file-activity-counts">
+                    (<span className="apply-patch-count-added">+{file.counts.added}</span>{' '}
+                    <span className="apply-patch-count-removed">-{file.counts.removed}</span>)
+                  </span>
+                ) : null}
+                <span className="tool-summary-chevron" aria-hidden="true">
+                  <ChevronRight size={12} />
+                </span>
+                <output
+                  className={cn('tool-summary-status', !failed && 'sr-only')}
+                  aria-label={`Tool ${status}`}
+                >
+                  {status}
+                </output>
+              </summary>
+            }
+          >
+            {() => (
+              <div className="activity-detail-content">
+                {file && name !== 'file_read' && tool.result ? (
+                  <>
+                    {failed ? (
+                      <div className="apply-patch-error" role="alert">
+                        {tool.result.error || 'File operation failed.'}
+                      </div>
+                    ) : null}
+                    {file.lines.length > 0 ? (
+                      <ReferenceDiffBlock lines={file.lines} />
+                    ) : (
+                      <p className="tool-awaiting">No file diff available.</p>
+                    )}
+                  </>
+                ) : tool.result ? (
+                  <ToolRenderer
+                    isPartial={tool.inProgress}
+                    showAttachments={false}
+                    toolInput={tool.input}
+                    toolResult={tool.result}
+                  />
+                ) : (
+                  <p className="tool-awaiting">Awaiting file result…</p>
+                )}
+              </div>
+            )}
           </ActivityDetails>
         );
       })}
@@ -600,29 +617,36 @@ const ImageToolActivity: React.FC<{ tool: ChatRenderToolCall; nested?: boolean }
       status={status}
       preserveOpen={nested}
       open={!nested && (running || failed) ? true : undefined}
+      summary={
+        <summary
+          className="tool-summary activity-summary"
+          title={getViewImagePath(tool) || summary}
+        >
+          <span className="activity-marker" aria-hidden="true">
+            {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
+          </span>
+          <span className="tool-summary-text">
+            <span className="tool-summary-label">{summary}</span>
+          </span>
+          <span className="tool-summary-chevron" aria-hidden="true">
+            <ChevronRight size={12} />
+          </span>
+          <output className="sr-only" aria-label={`Tool ${status}`}>
+            {status}
+          </output>
+        </summary>
+      }
     >
-      <summary className="tool-summary activity-summary" title={getViewImagePath(tool) || summary}>
-        <span className="activity-marker" aria-hidden="true">
-          {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
-        </span>
-        <span className="tool-summary-text">
-          <span className="tool-summary-label">{summary}</span>
-        </span>
-        <span className="tool-summary-chevron" aria-hidden="true">
-          <ChevronRight size={12} />
-        </span>
-        <output className="sr-only" aria-label={`Tool ${status}`}>
-          {status}
-        </output>
-      </summary>
-      <div className="activity-detail-content">
-        {failed ? (
-          <div className="quiet-tool-warning" role="alert">
-            {tool.result?.error || 'Image inspection failed.'}
-          </div>
-        ) : null}
-        {tool.result && !running ? <ToolImageAttachments toolResult={tool.result} /> : null}
-      </div>
+      {() => (
+        <div className="activity-detail-content">
+          {failed ? (
+            <div className="quiet-tool-warning" role="alert">
+              {tool.result?.error || 'Image inspection failed.'}
+            </div>
+          ) : null}
+          {tool.result && !running ? <ToolImageAttachments toolResult={tool.result} /> : null}
+        </div>
+      )}
     </ActivityDetails>
   );
 };
@@ -747,101 +771,104 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
                   ? true
                   : undefined
               }
-            >
-              <summary className="tool-summary activity-summary" title={summaryText}>
-                <span className="activity-marker" aria-hidden="true">
-                  {running ? <Spinner /> : failedCount ? <X size={14} /> : <Check size={14} />}
-                </span>
-                <ActivitySummaryText summaryText={summaryText} />
-                <span className="tool-summary-chevron" aria-hidden="true">
-                  <ChevronRight size={12} />
-                </span>
-                {builtin ? (
-                  failedCount > 0 ? (
-                    <span className="tool-summary-status">{failedCount} failed</span>
-                  ) : null
-                ) : (
-                  <output
-                    className={kind === 'skill' ? 'sr-only' : 'tool-summary-status'}
-                    aria-label={`Tool ${activityStatus}`}
-                  >
-                    {activityStatus}
-                  </output>
-                )}
-              </summary>
-
-              <div className="activity-detail-content space-y-2">
-                {group.map((tool, toolIndex) => {
-                  const status = getToolActivityStatus(tool);
-                  const input = parseToolInput(tool.input);
-                  const commandText =
-                    getStringField(input, 'command') ||
-                    getStringField(getMetadataRecord(tool.result), 'command');
-                  return (
-                    <section
-                      className={commands ? 'command-activity' : 'tool-activity'}
-                      key={tool.callId || toolIndex}
+              summary={
+                <summary className="tool-summary activity-summary" title={summaryText}>
+                  <span className="activity-marker" aria-hidden="true">
+                    {running ? <Spinner /> : failedCount ? <X size={14} /> : <Check size={14} />}
+                  </span>
+                  <ActivitySummaryText summaryText={summaryText} />
+                  <span className="tool-summary-chevron" aria-hidden="true">
+                    <ChevronRight size={12} />
+                  </span>
+                  {builtin ? (
+                    failedCount > 0 ? (
+                      <span className="tool-summary-status">{failedCount} failed</span>
+                    ) : null
+                  ) : (
+                    <output
+                      className={kind === 'skill' ? 'sr-only' : 'tool-summary-status'}
+                      aria-label={`Tool ${activityStatus}`}
                     >
-                      {builtin ? (
-                        <div className="command-activity-header">
-                          {commands ? (
-                            <code className="command-activity-command">
-                              $ {commandText || 'Receiving command…'}
-                            </code>
-                          ) : (
-                            <ActivitySummaryText summaryText={getToolSummary(tool)} />
-                          )}
-                          {!(commands && tool.result?.metadata && status === 'failed') ? (
-                            <output className="tool-summary-status" aria-label={`Tool ${status}`}>
-                              {status}
-                            </output>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {normalizeToolName(tool.name) === 'code_execute' && !tool.result ? (
-                        <CodeExecutionRenderer
-                          isPartial
-                          toolInput={tool.input}
-                          toolResult={{ toolName: tool.name, success: true }}
-                        />
-                      ) : browser && !tool.result?.metadata ? (
-                        <BrowserRenderer
-                          isPartial={tool.inProgress}
-                          toolInput={tool.input}
-                          toolResult={tool.result}
-                        />
-                      ) : tool.result ? (
-                        <ToolRenderer
-                          isPartial={tool.inProgress}
-                          showAttachments={browser}
-                          toolInput={tool.input}
-                          toolResult={tool.result}
-                        />
-                      ) : (
-                        <>
-                          <p className="tool-awaiting">
-                            {commands ? 'Waiting for command output…' : 'Awaiting tool result…'}
-                          </p>
-                          {!commands && tool.input ? (
-                            <div className="running-tool-input-preview">
-                              <ReferenceCodeBlock
-                                content={formatToolInputPreview(
-                                  normalizeToolName(tool.name) === 'apply_patch'
-                                    ? getStringField(input, 'input') || tool.input
-                                    : tool.input
-                                )}
-                                language={
-                                  normalizeToolName(tool.name) === 'apply_patch' ? 'diff' : 'json'
-                                }
-                              />
-                            </div>
-                          ) : null}
-                        </>
-                      )}
-                    </section>
-                  );
-                })}
-              </div>
+                      {activityStatus}
+                    </output>
+                  )}
+                </summary>
+              }
+            >
+              {() => (
+                <div className="activity-detail-content space-y-2">
+                  {group.map((tool, toolIndex) => {
+                    const status = getToolActivityStatus(tool);
+                    const input = parseToolInput(tool.input);
+                    const commandText =
+                      getStringField(input, 'command') ||
+                      getStringField(getMetadataRecord(tool.result), 'command');
+                    return (
+                      <section
+                        className={commands ? 'command-activity' : 'tool-activity'}
+                        key={tool.callId || toolIndex}
+                      >
+                        {builtin ? (
+                          <div className="command-activity-header">
+                            {commands ? (
+                              <code className="command-activity-command">
+                                $ {commandText || 'Receiving command…'}
+                              </code>
+                            ) : (
+                              <ActivitySummaryText summaryText={getToolSummary(tool)} />
+                            )}
+                            {!(commands && tool.result?.metadata && status === 'failed') ? (
+                              <output className="tool-summary-status" aria-label={`Tool ${status}`}>
+                                {status}
+                              </output>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {normalizeToolName(tool.name) === 'code_execute' && !tool.result ? (
+                          <CodeExecutionRenderer
+                            isPartial
+                            toolInput={tool.input}
+                            toolResult={{ toolName: tool.name, success: true }}
+                          />
+                        ) : browser && !tool.result?.metadata ? (
+                          <BrowserRenderer
+                            isPartial={tool.inProgress}
+                            toolInput={tool.input}
+                            toolResult={tool.result}
+                          />
+                        ) : tool.result ? (
+                          <ToolRenderer
+                            isPartial={tool.inProgress}
+                            showAttachments={browser}
+                            toolInput={tool.input}
+                            toolResult={tool.result}
+                          />
+                        ) : (
+                          <>
+                            <p className="tool-awaiting">
+                              {commands ? 'Waiting for command output…' : 'Awaiting tool result…'}
+                            </p>
+                            {!commands && tool.input ? (
+                              <div className="running-tool-input-preview">
+                                <ReferenceCodeBlock
+                                  content={formatToolInputPreview(
+                                    normalizeToolName(tool.name) === 'apply_patch'
+                                      ? getStringField(input, 'input') || tool.input
+                                      : tool.input
+                                  )}
+                                  language={
+                                    normalizeToolName(tool.name) === 'apply_patch' ? 'diff' : 'json'
+                                  }
+                                />
+                              </div>
+                            ) : null}
+                          </>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
             </ActivityDetails>
             {group.map((tool, toolIndex) =>
               !browser && tool.result && !tool.inProgress ? (
@@ -855,4 +882,4 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
   );
 };
 
-export default ChatToolActivity;
+export default React.memo(ChatToolActivity);

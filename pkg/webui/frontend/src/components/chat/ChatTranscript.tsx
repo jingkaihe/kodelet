@@ -116,12 +116,14 @@ const renderContent = (
 };
 
 interface MarkdownContentProps {
-  html: string;
+  content: string | ContentBlock[] | undefined;
+  isStreaming?: boolean;
   className: string;
 }
 
-const MarkdownContent = React.memo(({ html, className }: MarkdownContentProps) => {
-  // Stream events clone messages; keep unchanged HTML stable to preserve text selection.
+const MarkdownContent = React.memo(({ content, isStreaming, className }: MarkdownContentProps) => {
+  // Parse only changed content, including within a long, actively streaming turn.
+  const html = useMemo(() => renderContent(content, isStreaming), [content, isStreaming]);
   const markup = useMemo(() => ({ __html: html }), [html]);
   const contentRef = useRef<HTMLDivElement>(null);
   const [codeBlocks, setCodeBlocks] = useState<Array<{ element: Element; content: string }>>([]);
@@ -174,7 +176,8 @@ const renderThinkingContent = (content: string, isStreaming = false) => {
   return (
     <MarkdownContent
       className="chat-prose max-w-none text-kodelet-dark"
-      html={renderContent(normalizeThinkingMarkdown(content), isStreaming)}
+      content={normalizeThinkingMarkdown(content)}
+      isStreaming={isStreaming}
     />
   );
 };
@@ -265,10 +268,7 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
     return isSlashCommandText(content) ? (
       renderSlashCommandCard(content)
     ) : (
-      <MarkdownContent
-        className="chat-prose max-w-none text-kodelet-dark"
-        html={renderContent(content)}
-      />
+      <MarkdownContent className="chat-prose max-w-none text-kodelet-dark" content={content} />
     );
   }
 
@@ -293,7 +293,7 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
       <MarkdownContent
         key={`${block.type}-${index}`}
         className="chat-prose max-w-none text-kodelet-dark"
-        html={renderContent([block])}
+        content={[block]}
       />
     );
   });
@@ -309,150 +309,193 @@ interface ChatTranscriptProps {
   isStreaming: boolean;
 }
 
+const TranscriptMessage = React.memo(
+  ({
+    message,
+    isStreaming,
+    assistantTurnCount,
+  }: {
+    message: ChatRenderMessage;
+    isStreaming: boolean;
+    assistantTurnCount: number;
+  }) => {
+    const renderAssistantBlocks = (blocks: ChatAssistantBlock[]): React.ReactNode[] => {
+      const renderedBlocks: React.ReactNode[] = [];
+
+      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+        const block = blocks[blockIndex];
+
+        if (block.type === 'resources-reloaded') {
+          renderedBlocks.push(
+            <div
+              key={`resources-reloaded-${block.id}`}
+              className="activity-stack"
+              data-resource-reload-id={block.id}
+            >
+              <div className="activity-card activity-card-thinking">
+                <div className="tool-summary activity-summary">
+                  <span className="activity-marker" aria-hidden="true">
+                    {block.refused ? <CircleX size={14} /> : <Check size={14} />}
+                  </span>
+                  <span className="tool-summary-text">
+                    <span className="tool-summary-label">{block.text || 'Resources reloaded'}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+          continue;
+        }
+
+        if (block.type === 'compaction') {
+          const { compaction } = block;
+          renderedBlocks.push(
+            <div
+              key={`compaction-${compaction.id}`}
+              className="activity-stack"
+              data-compaction-id={compaction.id}
+            >
+              <details className="activity-card activity-card-thinking">
+                <summary className="tool-summary activity-summary" title="Context compacted">
+                  <span className="activity-marker" aria-hidden="true">
+                    <Check size={14} />
+                  </span>
+                  <span className="tool-summary-text">
+                    <span className="tool-summary-label">Context compacted</span>
+                  </span>
+                  <span className="tool-summary-chevron" aria-hidden="true">
+                    <ChevronRight size={12} />
+                  </span>
+                </summary>
+                <div className="activity-detail-content">
+                  {compaction.method === 'summary' && compaction.summary?.trim() ? (
+                    <MarkdownContent
+                      className="chat-prose max-w-none text-kodelet-dark"
+                      content={compaction.summary}
+                    />
+                  ) : (
+                    <p className="text-sm text-kodelet-dark">Completed</p>
+                  )}
+                </div>
+              </details>
+            </div>
+          );
+          continue;
+        }
+
+        if (block.type === 'thinking') {
+          if (!block.inProgress) {
+            const thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>> = [
+              block,
+            ];
+            let lookaheadIndex = blockIndex + 1;
+
+            while (lookaheadIndex < blocks.length) {
+              const nextBlock = blocks[lookaheadIndex];
+              if (nextBlock.type !== 'thinking' || nextBlock.inProgress) {
+                break;
+              }
+
+              thinkingBlocks.push(nextBlock);
+              lookaheadIndex += 1;
+            }
+
+            renderedBlocks.push(
+              renderCompletedThinkingGroup(thinkingBlocks, `thinking-${blockIndex}`)
+            );
+            blockIndex = lookaheadIndex - 1;
+            continue;
+          }
+
+          const hasThinkingContent = extractContentText(block.content).trim().length > 0;
+          renderedBlocks.push(
+            <div key={`thinking-${blockIndex}`} className="activity-stack activity-stack-thinking">
+              <output
+                className="activity-card activity-card-thinking activity-card-live block"
+                aria-live="polite"
+              >
+                <div className="tool-summary activity-summary activity-summary-static">
+                  <Spinner className="chat-streaming-spinner activity-marker" />
+                  <span className="tool-summary-text" title="Thinking">
+                    <span className="tool-summary-label">Thinking</span>
+                  </span>
+                </div>
+                {hasThinkingContent ? (
+                  <div className="activity-detail-content activity-detail-content-live">
+                    {renderThinkingContent(block.content, isStreaming)}
+                  </div>
+                ) : null}
+              </output>
+            </div>
+          );
+          continue;
+        }
+
+        if (block.type === 'tools') {
+          if (block.tools.length === 0) {
+            continue;
+          }
+
+          renderedBlocks.push(<ChatToolActivity key={`tools-${blockIndex}`} tools={block.tools} />);
+          continue;
+        }
+
+        const copyText = getMessageBlockCopyText(block.content);
+        renderedBlocks.push(
+          <div key={`message-${blockIndex}`} className="group/message relative">
+            <MarkdownContent
+              className="chat-prose max-w-none text-kodelet-dark"
+              content={block.content}
+              isStreaming={isStreaming && Boolean(block.inProgress)}
+            />
+            {copyText.trim() ? (
+              <div className="chat-message-actions">
+                <CopyButton className={assistantMessageCopyButtonClassName} content={copyText} />
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+
+      return renderedBlocks;
+    };
+
+    const isUser = message.role === 'user';
+    const hasVisibleInProgressBlock =
+      isStreaming &&
+      (message.blocks || []).some(
+        (block) =>
+          ((block.type === 'thinking' || block.type === 'message') && block.inProgress) ||
+          (block.type === 'tools' &&
+            block.tools.some((toolCall) => toolCall.inProgress || !toolCall.result))
+      );
+
+    return (
+      <ChatMessageFrame
+        copyText={isUser ? getMessageBlockCopyText(message.content) : undefined}
+        messageRole={message.role}
+      >
+        {isUser ? (
+          <div className="space-y-3">{renderUserContent(message.content)}</div>
+        ) : (
+          <div className="chat-assistant-blocks">
+            {renderAssistantBlocks(message.blocks || [])}
+
+            {isStreaming && !hasVisibleInProgressBlock ? (
+              <ChatStreamingIndicator assistantTurnCount={assistantTurnCount} />
+            ) : null}
+          </div>
+        )}
+      </ChatMessageFrame>
+    );
+  }
+);
+
 const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }) => {
   const assistantTurnCount = useMemo(
     () => messages.filter((message) => message.role === 'assistant').length,
     [messages]
   );
-
-  const renderAssistantBlocks = (blocks: ChatAssistantBlock[]): React.ReactNode[] => {
-    const renderedBlocks: React.ReactNode[] = [];
-
-    for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
-      const block = blocks[blockIndex];
-
-      if (block.type === 'resources-reloaded') {
-        renderedBlocks.push(
-          <div
-            key={`resources-reloaded-${block.id}`}
-            className="activity-stack"
-            data-resource-reload-id={block.id}
-          >
-            <div className="activity-card activity-card-thinking">
-              <div className="tool-summary activity-summary">
-                <span className="activity-marker" aria-hidden="true">
-                  {block.refused ? <CircleX size={14} /> : <Check size={14} />}
-                </span>
-                <span className="tool-summary-text">
-                  <span className="tool-summary-label">{block.text || 'Resources reloaded'}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        );
-        continue;
-      }
-
-      if (block.type === 'compaction') {
-        const { compaction } = block;
-        renderedBlocks.push(
-          <div
-            key={`compaction-${compaction.id}`}
-            className="activity-stack"
-            data-compaction-id={compaction.id}
-          >
-            <details className="activity-card activity-card-thinking">
-              <summary className="tool-summary activity-summary" title="Context compacted">
-                <span className="activity-marker" aria-hidden="true">
-                  <Check size={14} />
-                </span>
-                <span className="tool-summary-text">
-                  <span className="tool-summary-label">Context compacted</span>
-                </span>
-                <span className="tool-summary-chevron" aria-hidden="true">
-                  <ChevronRight size={12} />
-                </span>
-              </summary>
-              <div className="activity-detail-content">
-                {compaction.method === 'summary' && compaction.summary?.trim() ? (
-                  <MarkdownContent
-                    className="chat-prose max-w-none text-kodelet-dark"
-                    html={renderContent(compaction.summary)}
-                  />
-                ) : (
-                  <p className="text-sm text-kodelet-dark">Completed</p>
-                )}
-              </div>
-            </details>
-          </div>
-        );
-        continue;
-      }
-
-      if (block.type === 'thinking') {
-        if (!block.inProgress) {
-          const thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>> = [block];
-          let lookaheadIndex = blockIndex + 1;
-
-          while (lookaheadIndex < blocks.length) {
-            const nextBlock = blocks[lookaheadIndex];
-            if (nextBlock.type !== 'thinking' || nextBlock.inProgress) {
-              break;
-            }
-
-            thinkingBlocks.push(nextBlock);
-            lookaheadIndex += 1;
-          }
-
-          renderedBlocks.push(
-            renderCompletedThinkingGroup(thinkingBlocks, `thinking-${blockIndex}`)
-          );
-          blockIndex = lookaheadIndex - 1;
-          continue;
-        }
-
-        const hasThinkingContent = extractContentText(block.content).trim().length > 0;
-        renderedBlocks.push(
-          <div key={`thinking-${blockIndex}`} className="activity-stack activity-stack-thinking">
-            <output
-              className="activity-card activity-card-thinking activity-card-live block"
-              aria-live="polite"
-            >
-              <div className="tool-summary activity-summary activity-summary-static">
-                <Spinner className="chat-streaming-spinner activity-marker" />
-                <span className="tool-summary-text" title="Thinking">
-                  <span className="tool-summary-label">Thinking</span>
-                </span>
-              </div>
-              {hasThinkingContent ? (
-                <div className="activity-detail-content activity-detail-content-live">
-                  {renderThinkingContent(block.content, isStreaming)}
-                </div>
-              ) : null}
-            </output>
-          </div>
-        );
-        continue;
-      }
-
-      if (block.type === 'tools') {
-        if (block.tools.length === 0) {
-          continue;
-        }
-
-        renderedBlocks.push(<ChatToolActivity key={`tools-${blockIndex}`} tools={block.tools} />);
-        continue;
-      }
-
-      const copyText = getMessageBlockCopyText(block.content);
-      renderedBlocks.push(
-        <div key={`message-${blockIndex}`} className="group/message relative">
-          <MarkdownContent
-            className="chat-prose max-w-none text-kodelet-dark"
-            html={renderContent(block.content, isStreaming && Boolean(block.inProgress))}
-          />
-          {copyText.trim() ? (
-            <div className="chat-message-actions">
-              <CopyButton className={assistantMessageCopyButtonClassName} content={copyText} />
-            </div>
-          ) : null}
-        </div>
-      );
-    }
-
-    return renderedBlocks;
-  };
-
   if (messages.length === 0) {
     return isStreaming ? <ChatStreamingIndicator assistantTurnCount={0} /> : <ChatWelcome />;
   }
@@ -460,35 +503,14 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-6 sm:space-y-5 sm:px-4 md:px-8">
       {messages.map((message, index) => {
-        const isUser = message.role === 'user';
-        const isActiveStreamingAssistant = !isUser && isStreaming && index === messages.length - 1;
-        const hasVisibleInProgressBlock =
-          isActiveStreamingAssistant &&
-          (message.blocks || []).some(
-            (block) =>
-              ((block.type === 'thinking' || block.type === 'message') && block.inProgress) ||
-              (block.type === 'tools' &&
-                block.tools.some((toolCall) => toolCall.inProgress || !toolCall.result))
-          );
-
+        const active = message.role === 'assistant' && isStreaming && index === messages.length - 1;
         return (
-          <ChatMessageFrame
-            copyText={isUser ? getMessageBlockCopyText(message.content) : undefined}
+          <TranscriptMessage
             key={`${message.role}-${index}`}
-            messageRole={message.role}
-          >
-            {isUser ? (
-              <div className="space-y-3">{renderUserContent(message.content)}</div>
-            ) : (
-              <div className="chat-assistant-blocks">
-                {renderAssistantBlocks(message.blocks || [])}
-
-                {isActiveStreamingAssistant && !hasVisibleInProgressBlock ? (
-                  <ChatStreamingIndicator assistantTurnCount={assistantTurnCount} />
-                ) : null}
-              </div>
-            )}
-          </ChatMessageFrame>
+            message={message}
+            isStreaming={active}
+            assistantTurnCount={active ? assistantTurnCount : 0}
+          />
         );
       })}
     </div>

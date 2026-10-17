@@ -9,9 +9,6 @@ import type {
   Message,
 } from '../../types';
 
-const cloneMessages = (messages: ChatRenderMessage[]): ChatRenderMessage[] =>
-  JSON.parse(JSON.stringify(messages)) as ChatRenderMessage[];
-
 const hasRenderableContent = (content: string | ContentBlock[] | undefined): boolean => {
   if (typeof content === 'string') {
     return content.trim().length > 0;
@@ -45,8 +42,10 @@ const ensureCurrentAssistantMessage = (
     return nextMessage;
   }
 
-  ensureAssistantBlocks(lastMessage);
-  return lastMessage;
+  // Copy the path being edited, not completed history or tool result payloads.
+  const nextMessage = { ...lastMessage, blocks: [...(lastMessage.blocks || [])] };
+  messages[messages.length - 1] = nextMessage;
+  return nextMessage;
 };
 
 const insertCompactionMarker = (
@@ -79,7 +78,10 @@ const insertCompactionMarker = (
   const block: ChatAssistantBlock = { type: 'compaction', compaction: { ...compaction } };
   const previousMessage = messages[insertionIndex - 1];
   if (previousMessage?.role === 'assistant') {
-    ensureAssistantBlocks(previousMessage).push(block);
+    messages[insertionIndex - 1] = {
+      ...previousMessage,
+      blocks: [...(previousMessage.blocks || []), block],
+    };
   } else {
     messages.splice(insertionIndex, 0, { role: 'assistant', blocks: [block] });
   }
@@ -148,7 +150,9 @@ const findMatchingBlock = (
     }
 
     if (block.content === content) {
-      return block;
+      const nextBlock = { ...block };
+      message.blocks[i] = nextBlock;
+      return nextBlock;
     }
   }
 
@@ -159,7 +163,9 @@ const ensureToolsBlock = (message: ChatRenderMessage): ChatRenderToolCall[] => {
   const blocks = ensureAssistantBlocks(message);
   const lastBlock = blocks[blocks.length - 1];
   if (lastBlock?.type === 'tools') {
-    return lastBlock.tools;
+    const nextBlock = { ...lastBlock, tools: [...lastBlock.tools] };
+    blocks[blocks.length - 1] = nextBlock;
+    return nextBlock.tools;
   }
 
   const toolsBlock: ChatAssistantBlock = {
@@ -171,10 +177,11 @@ const ensureToolsBlock = (message: ChatRenderMessage): ChatRenderToolCall[] => {
 };
 
 const setMostRecentBlockProgress = (
-  message: ChatRenderMessage | undefined,
+  messages: ChatRenderMessage[],
   type: 'thinking' | 'message',
   inProgress: boolean
 ) => {
+  const message = messages[messages.length - 1];
   if (!message?.blocks) {
     return;
   }
@@ -182,7 +189,9 @@ const setMostRecentBlockProgress = (
   for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
     const block = message.blocks[i];
     if (block.type === type) {
-      block.inProgress = inProgress;
+      const blocks = [...message.blocks];
+      blocks[i] = { ...block, inProgress };
+      messages[messages.length - 1] = { ...message, blocks };
       return;
     }
   }
@@ -211,13 +220,21 @@ const applyToolResultEvent = (
           continue;
         }
 
-        tool.result = event.tool_result;
-        tool.name = event.tool_result?.toolName || event.tool_name || tool.name;
+        const nextTool = {
+          ...tool,
+          result: event.tool_result,
+          name: event.tool_result?.toolName || event.tool_name || tool.name,
+        };
         if (inProgress) {
-          tool.inProgress = true;
+          nextTool.inProgress = true;
         } else {
-          delete tool.inProgress;
+          delete nextTool.inProgress;
         }
+        const tools = [...block.tools];
+        tools[k] = nextTool;
+        const blocks = [...message.blocks];
+        blocks[j] = { ...block, tools };
+        messages[i] = { ...message, blocks };
         return messages;
       }
     }
@@ -350,14 +367,14 @@ export const applyChatStreamEvent = (
   messages: ChatRenderMessage[],
   event: ChatStreamEvent
 ): ChatRenderMessage[] => {
-  const nextMessages = cloneMessages(messages);
+  const nextMessages = [...messages];
 
   switch (event.kind) {
     case 'conversation':
     case 'usage':
     case 'done':
     case 'error':
-      return nextMessages;
+      return messages;
 
     case 'context-compacted':
       if (event.compaction) {
@@ -403,14 +420,17 @@ export const applyChatStreamEvent = (
 
       const currentBlock = blocks[blocks.length - 1];
       if (currentBlock?.type === 'thinking') {
-        currentBlock.content += event.delta || '';
-        currentBlock.inProgress = true;
+        blocks[blocks.length - 1] = {
+          ...currentBlock,
+          content: currentBlock.content + (event.delta || ''),
+          inProgress: true,
+        };
       }
       return nextMessages;
     }
 
     case 'thinking-end':
-      setMostRecentBlockProgress(nextMessages[nextMessages.length - 1], 'thinking', false);
+      setMostRecentBlockProgress(nextMessages, 'thinking', false);
       return nextMessages;
 
     case 'text-delta': {
@@ -427,14 +447,17 @@ export const applyChatStreamEvent = (
 
       const currentBlock = blocks[blocks.length - 1];
       if (currentBlock?.type === 'message' && typeof currentBlock.content === 'string') {
-        currentBlock.content += event.delta || '';
-        currentBlock.inProgress = true;
+        blocks[blocks.length - 1] = {
+          ...currentBlock,
+          content: currentBlock.content + (event.delta || ''),
+          inProgress: true,
+        };
       }
       return nextMessages;
     }
 
     case 'content-end':
-      setMostRecentBlockProgress(nextMessages[nextMessages.length - 1], 'message', false);
+      setMostRecentBlockProgress(nextMessages, 'message', false);
       return nextMessages;
 
     case 'tool-use': {
@@ -530,6 +553,6 @@ export const applyChatStreamEvent = (
     }
 
     default:
-      return nextMessages;
+      return messages;
   }
 };

@@ -226,6 +226,121 @@ describe('conversationToChatMessages', () => {
 });
 
 describe('applyChatStreamEvent', () => {
+  const freeze = <T>(value: T): T => {
+    if (value && typeof value === 'object') {
+      Object.values(value).forEach(freeze);
+      Object.freeze(value);
+    }
+    return value;
+  };
+
+  const history = (type: 'message' | 'thinking' = 'message'): ChatRenderMessage[] => [
+    { role: 'user', content: 'Earlier request' },
+    {
+      role: 'assistant',
+      blocks: [
+        { type: 'message', content: 'Earlier answer' },
+        {
+          type: 'tools',
+          tools: [
+            { callId: 'old-tool', name: 'bash', input: '{}' },
+            { callId: 'other-tool', name: 'bash', input: '{}' },
+          ],
+        },
+      ],
+    },
+    { role: 'user', content: 'Current request' },
+    {
+      role: 'assistant',
+      blocks: [
+        { type: 'thinking', content: 'Considering', inProgress: true },
+        { type: 'tools', tools: [{ callId: 'new-tool', name: 'bash', input: '{}' }] },
+        { type, content: 'Answer', inProgress: true },
+      ],
+    },
+  ];
+
+  it.each([
+    'message',
+    'thinking',
+  ] as const)('shares unchanged history while streaming %s', (type) => {
+    const messages = freeze(history(type));
+    const next = freeze(
+      applyChatStreamEvent(messages, {
+        kind: type === 'message' ? 'text-delta' : 'thinking-delta',
+        delta: ' more',
+      })
+    );
+    expect(next[0]).toBe(messages[0]);
+    expect(next[1]).toBe(messages[1]);
+    expect(next[2]).toBe(messages[2]);
+    expect(next[3]).not.toBe(messages[3]);
+    expect(next[3].blocks?.[0]).toBe(messages[3].blocks?.[0]);
+    expect(next[3].blocks?.[1]).toBe(messages[3].blocks?.[1]);
+    expect(next[3].blocks?.[2]).toEqual({
+      type,
+      content: 'Answer more',
+      inProgress: true,
+    });
+    const finished = applyChatStreamEvent(next, {
+      kind: type === 'message' ? 'content-end' : 'thinking-end',
+    });
+    expect(finished[3].blocks?.[0]).toBe(next[3].blocks?.[0]);
+    expect(finished[3].blocks?.[1]).toBe(next[3].blocks?.[1]);
+    expect(finished[3].blocks?.[2]).toMatchObject({ inProgress: false });
+    expect(next[3].blocks?.[2]).toMatchObject({ inProgress: true });
+  });
+
+  it('copies only the matching older tool path for late results', () => {
+    const messages = freeze(history());
+    const result = freeze({ toolName: 'bash', success: true, metadata: { output: 'done' } });
+    const next = applyChatStreamEvent(messages, {
+      kind: 'tool-result',
+      tool_call_id: 'old-tool',
+      tool_result: result,
+    });
+    expect(next[3]).toBe(messages[3]);
+    expect(next[1].blocks?.[0]).toBe(messages[1].blocks?.[0]);
+    const original = messages[1].blocks?.[1];
+    const updated = next[1].blocks?.[1];
+    expect(updated).not.toBe(original);
+    if (original?.type !== 'tools' || updated?.type !== 'tools') throw new Error('Expected tools');
+    expect(updated.tools[0].result).toBe(result);
+    expect(updated.tools[1]).toBe(original.tools[1]);
+    expect(original.tools[0].result).toBeUndefined();
+  });
+
+  it('copies the preceding assistant when compaction is inserted before the current user', () => {
+    const messages = freeze(history());
+    const next = applyChatStreamEvent(messages, {
+      kind: 'context-compacted',
+      before_current_user: true,
+      compaction: { id: 'compact-1', method: 'summary', summary: 'Summary', createdAt: '' },
+    });
+    expect(next[1]).not.toBe(messages[1]);
+    expect(next[1].blocks?.[0]).toBe(messages[1].blocks?.[0]);
+    expect(next[1].blocks?.[2]).toMatchObject({ type: 'compaction' });
+    expect(next[2]).toBe(messages[2]);
+    expect(next[3]).toBe(messages[3]);
+    expect(messages[1].blocks).toHaveLength(2);
+  });
+
+  it('copies a tools block when appending another invocation', () => {
+    const messages = history().slice(0, 2);
+    freeze(messages);
+    const next = applyChatStreamEvent(messages, {
+      kind: 'tool-use',
+      tool_call_id: 'added',
+      tool_name: 'bash',
+    });
+    const original = messages[1].blocks?.[1];
+    const updated = next[1].blocks?.[1];
+    if (original?.type !== 'tools' || updated?.type !== 'tools') throw new Error('Expected tools');
+    expect(original.tools).toHaveLength(2);
+    expect(updated.tools).toHaveLength(3);
+    expect(updated.tools[0]).toBe(original.tools[0]);
+  });
+
   it('appends repeated text deltas into the same assistant message', () => {
     let messages: ChatRenderMessage[] = [
       {
@@ -616,7 +731,7 @@ describe('applyChatStreamEvent', () => {
       },
     });
 
-    expect(nextMessages).toEqual(messages);
+    expect(nextMessages).toBe(messages);
   });
 
   it('appends streamed user-message events as user blocks', () => {

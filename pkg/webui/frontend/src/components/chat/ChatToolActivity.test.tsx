@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { BrowserMetadata, ChatRenderToolCall, ToolResult } from '../../types';
 import ChatToolActivity, {
+  ActivityDetails,
   formatToolInputPreview,
   getToolActivityStatus,
   getToolSummary,
@@ -24,6 +25,41 @@ const bashTool = (
 });
 
 describe('ChatToolActivity', () => {
+  it('retains automatically opened bodies even when closed before the toggle event', () => {
+    const view = (open: boolean) => (
+      <ActivityDetails status="done" preserveOpen open={open} summary={<summary>Details</summary>}>
+        {() => <input aria-label="Detail state" defaultValue="Saved" />}
+      </ActivityDetails>
+    );
+    const { rerender } = render(view(false));
+    expect(screen.queryByLabelText('Detail state')).not.toBeInTheDocument();
+    rerender(view(true));
+    const input = screen.getByLabelText('Detail state');
+    rerender(view(false));
+    expect(screen.getByLabelText('Detail state')).toBe(input);
+    expect(input).not.toBeVisible();
+  });
+
+  it('renders the latest nested tool output on first opening after completion', async () => {
+    const user = userEvent.setup();
+    const pending = bashTool('pwd', { inProgress: true });
+    const { container, rerender } = render(<ChatToolActivity nested tools={[pending]} />);
+    expect(container.querySelector('.activity-detail-content')).not.toBeInTheDocument();
+    const completed = bashTool('pwd', {
+      result: {
+        toolName: 'bash',
+        success: true,
+        metadata: { command: 'pwd', output: 'Latest directory', exitCode: 0 },
+      },
+    });
+    rerender(<ChatToolActivity nested tools={[completed]} />);
+    expect(container.querySelector('.activity-detail-content')).not.toBeInTheDocument();
+    expect(screen.queryByText('Latest directory')).not.toBeInTheDocument();
+    await user.click(container.querySelector('summary') as HTMLElement);
+    expect(screen.getByText('Latest directory')).toBeVisible();
+    expect(screen.queryByText('pwd output')).not.toBeInTheDocument();
+  });
+
   it('keeps generated image previews visible outside collapsed tool details', () => {
     const tool: ChatRenderToolCall = {
       callId: 'diagram-1',
@@ -262,7 +298,7 @@ describe('ChatToolActivity', () => {
     );
   });
 
-  it('uses a generic label for an unnamed image artifact without exposing its ID', () => {
+  it('uses a generic label for an unnamed image artifact without exposing its ID', async () => {
     const tool: ChatRenderToolCall = {
       callId: 'view-1',
       name: 'view_image',
@@ -283,7 +319,9 @@ describe('ChatToolActivity', () => {
     const { container } = render(<ChatToolActivity tools={[tool]} />);
 
     expect(screen.getByText('Viewed image')).toBeVisible();
-    expect(screen.getByRole('img', { name: 'Viewed image' })).not.toBeVisible();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Viewed image'));
+    expect(screen.getByRole('img', { name: 'Viewed image' })).toBeVisible();
     expect(container).not.toHaveTextContent('art_1');
   });
 
@@ -321,14 +359,12 @@ describe('ChatToolActivity', () => {
     const summary = screen.getByText('Viewed image screenshot.png');
     expect(summary).toBeVisible();
     expect(summary.closest('summary')).toHaveAttribute('title', '/tmp/screenshot.png');
-    const preview = screen.getByRole('img', { name: 'screenshot.png' });
-    expect(preview).not.toBeVisible();
-    expect(preview.closest('details')).toBe(details);
-    for (const link of screen.getAllByRole('link')) {
-      expect(link).not.toBeVisible();
-    }
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
     await user.click(summary);
 
+    const preview = screen.getByRole('img', { name: 'screenshot.png' });
+    expect(preview.closest('details')).toBe(details);
     expect(details).toHaveAttribute('open');
     expect(screen.getAllByText('Viewed image screenshot.png')).toHaveLength(1);
     expect(container.querySelector('.command-activity-header')).not.toBeInTheDocument();
@@ -520,7 +556,7 @@ describe('ChatToolActivity', () => {
     };
     render(<ChatToolActivity tools={[tool]} />);
 
-    expect(screen.getByText('Image unavailable: Upload interrupted')).not.toBeVisible();
+    expect(screen.queryByText('Image unavailable: Upload interrupted')).not.toBeInTheDocument();
     await user.click(screen.getByText('Viewed image image.png'));
     expect(screen.getByText('Image unavailable: Upload interrupted')).toBeVisible();
   });
@@ -551,7 +587,7 @@ describe('ChatToolActivity', () => {
     expect(screen.queryByText(longPrompt)).not.toBeInTheDocument();
   });
 
-  it('renders completed web fetch details without repeating the header URL or metadata cards', () => {
+  it('renders completed web fetch details without repeating the header URL or metadata cards', async () => {
     const { container } = render(
       <ChatToolActivity
         tools={[
@@ -576,6 +612,7 @@ describe('ChatToolActivity', () => {
       />
     );
 
+    await userEvent.click(screen.getByText('Ran 1 tool'));
     expect(screen.getAllByText('https://example.com/news')).toHaveLength(1);
     expect(screen.getByText('saved page')).toBeInTheDocument();
     expect(screen.getByText('/tmp/news.md')).toBeInTheDocument();
@@ -612,8 +649,8 @@ describe('ChatToolActivity', () => {
     expect(group).not.toHaveAttribute('open');
     expect(screen.getByText('Ran 1 command')).toBeVisible();
     expect(screen.queryByText('Bash: pwd')).not.toBeInTheDocument();
-    expect(screen.getByText('$ pwd')).not.toBeVisible();
-    expect(screen.getByText('/workspace/kodelet')).not.toBeVisible();
+    expect(screen.queryByText('$ pwd')).not.toBeInTheDocument();
+    expect(screen.queryByText('/workspace/kodelet')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Ran 1 command'));
 
@@ -686,8 +723,8 @@ describe('ChatToolActivity', () => {
     );
 
     expect(screen.getByText('Ran 1 command')).toBeVisible();
-    expect(screen.getByText('$ false')).not.toBeVisible();
-    expect(screen.getByText('exit 1')).not.toBeVisible();
+    expect(screen.queryByText('$ false')).not.toBeInTheDocument();
+    expect(screen.queryByText('exit 1')).not.toBeInTheDocument();
     expect(
       container.querySelector('.activity-command-group.activity-card-error')
     ).not.toHaveAttribute('open');
@@ -718,8 +755,8 @@ describe('ChatToolActivity', () => {
     expect(container.querySelectorAll('details')).toHaveLength(1);
     expect(group).not.toHaveAttribute('open');
     expect(summary?.querySelector('.lucide-check')).toBeInTheDocument();
-    expect(screen.getByText('$ pwd')).not.toBeVisible();
-    expect(screen.getByText('$ ls')).not.toBeVisible();
+    expect(screen.queryByText('$ pwd')).not.toBeInTheDocument();
+    expect(screen.queryByText('$ ls')).not.toBeInTheDocument();
 
     // user-event omits summary from tab navigation and native Enter/Space activation.
     // Check those in a browser rather than emulating browser defaults in this test.
@@ -890,14 +927,17 @@ describe('ChatToolActivity', () => {
     expect(container.querySelectorAll('details')).toHaveLength(4);
     expect(screen.getAllByText('Ran 1 command')).toHaveLength(2);
     expect(screen.queryByText('Ran 2 commands')).not.toBeInTheDocument();
-    expect(groups[0]).toHaveTextContent('$ pwd');
+    expect(groups[0]).not.toHaveTextContent('$ pwd');
     expect(groups[0]).not.toHaveTextContent('$ ls');
-    expect(groups[1]).toHaveTextContent('$ ls');
+    expect(groups[1]).not.toHaveTextContent('$ ls');
     expect(groups[1]).not.toHaveTextContent('$ pwd');
 
     await user.click(screen.getAllByText('Ran 1 command')[0]);
     expect(screen.getByText('$ pwd')).toBeVisible();
-    expect(screen.getByText('$ ls')).not.toBeVisible();
+    expect(screen.queryByText('$ ls')).not.toBeInTheDocument();
+    await user.click(screen.getAllByText('Ran 1 command')[1]);
+    expect(within(groups[0] as HTMLElement).getByText('$ pwd')).toBeVisible();
+    expect(within(groups[1] as HTMLElement).getByText('$ ls')).toBeVisible();
   });
 
   it('returns null for an empty tool collection', () => {
@@ -1264,7 +1304,7 @@ describe('ChatToolActivity', () => {
     ).not.toBeInTheDocument();
     expect(container.querySelector('.spinner-glyph')).not.toBeInTheDocument();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(screen.getByText('Search results')).not.toBeVisible();
+    expect(screen.queryByText('Search results')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Search repository'));
 
@@ -1420,8 +1460,8 @@ describe('ChatToolActivity', () => {
     expect(container.querySelectorAll('details')).toHaveLength(1);
     expect(group).not.toHaveAttribute('open');
     expect(screen.getByText('Ran 2 tools')).toBeVisible();
-    expect(screen.getByText('Fetch URL: https://example.com/news')).not.toBeVisible();
-    expect(screen.getByText('Fetch URL: https://example.com/docs')).not.toBeVisible();
+    expect(screen.queryByText('Fetch URL: https://example.com/news')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fetch URL: https://example.com/docs')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Ran 2 tools'));
 
@@ -1554,7 +1594,7 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.activity-tool-group')).not.toHaveAttribute('open');
     expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
     expect(screen.getByText('1 failed')).toBeVisible();
-    expect(screen.getByText('Page unavailable.')).not.toBeVisible();
+    expect(screen.queryByText('Page unavailable.')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Ran 1 tool'));
 
@@ -1634,12 +1674,12 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.activity-tool-group')).not.toBeInTheDocument();
     expect(screen.getByText('Read file: README.md')).toBeVisible();
     expect(screen.getByText('Read file: AGENTS.md')).toBeVisible();
-    expect(screen.getByText('Contents of README.md')).not.toBeVisible();
+    expect(screen.queryByText('Contents of README.md')).not.toBeInTheDocument();
     expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Read file: README.md'));
     expect(screen.getByText('Contents of README.md')).toBeVisible();
-    expect(screen.getByText('Contents of AGENTS.md')).not.toBeVisible();
+    expect(screen.queryByText('Contents of AGENTS.md')).not.toBeInTheDocument();
     expect(container.querySelector('details details')).not.toBeInTheDocument();
   });
 
@@ -1670,7 +1710,7 @@ describe('ChatToolActivity', () => {
     expect(within(summary).getByText('-2')).toBeVisible();
     expect(container.querySelectorAll('details')).toHaveLength(1);
     expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(screen.getByText('old')).not.toBeVisible();
+    expect(screen.queryByText('old')).not.toBeInTheDocument();
 
     await user.click(summary);
     expect(screen.getByText('old')).toBeVisible();
@@ -1747,7 +1787,7 @@ describe('ChatToolActivity', () => {
     expect(screen.queryByText(/Ran .* tools?/)).not.toBeInTheDocument();
     await user.click(screen.getByText('Delete file: deleted.txt'));
     expect(screen.getByText('removed')).toBeVisible();
-    expect(screen.getByText('created')).not.toBeVisible();
+    expect(screen.queryByText('created')).not.toBeInTheDocument();
     expect(container.querySelectorAll('details[open]')).toHaveLength(1);
     expect(container.querySelector('details details')).not.toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: 'Patch preview' })).toHaveLength(1);
@@ -1837,7 +1877,7 @@ describe('ChatToolActivity', () => {
     expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();
   });
 
-  it('does not claim attempted patch files were changed when the result reports no changes', () => {
+  it('does not claim attempted patch files were changed when the result reports no changes', async () => {
     const { container } = render(
       <ChatToolActivity
         tools={[
@@ -1853,6 +1893,7 @@ describe('ChatToolActivity', () => {
       />
     );
     expect(screen.queryByText('Edit file: README.md')).not.toBeInTheDocument();
+    await userEvent.click(container.querySelector('summary') as HTMLElement);
     expect(screen.getByText('No files were modified.')).toBeInTheDocument();
     expect(container.querySelector('details')).toHaveClass('activity-file');
     expect(container.querySelector('.file-activity-counts')).not.toBeInTheDocument();

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { marked } from 'marked';
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyChatStreamEvent, conversationToChatMessages } from '../../features/chat/state';
 import type { ChatAssistantBlock, ChatRenderMessage, ChatStreamEvent } from '../../types';
@@ -20,6 +21,34 @@ vi.mock('../../utils', async (importOriginal) => {
 describe('ChatTranscript', () => {
   beforeEach(() => {
     copyToClipboardMock.mockReset();
+  });
+
+  it('parses only changed content while streaming, including within the active turn', () => {
+    let messages: ChatRenderMessage[] = [
+      { role: 'user', content: 'First request' },
+      { role: 'assistant', blocks: [{ type: 'message', content: 'Earlier answer' }] },
+      { role: 'user', content: 'Next request' },
+      {
+        role: 'assistant',
+        blocks: [
+          { type: 'thinking', content: 'Completed thought', inProgress: false },
+          { type: 'message', content: 'Completed paragraph', inProgress: false },
+          { type: 'message', content: 'Streaming', inProgress: true },
+        ],
+      },
+    ];
+    const { rerender } = render(<ChatTranscript isStreaming messages={messages} />);
+    const parse = vi.spyOn(marked, 'parse');
+    try {
+      messages = applyChatStreamEvent(messages, { kind: 'text-delta', delta: ' answer' });
+      rerender(<ChatTranscript isStreaming messages={messages} />);
+      expect(parse).toHaveBeenCalledTimes(1);
+      expect(parse.mock.calls[0][0]).toBe('Streaming answer');
+      expect(screen.getByText('Earlier answer')).toBeInTheDocument();
+      expect(screen.getByText('Streaming answer')).toBeInTheDocument();
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('renders capitalized Anthropic history calls as folded inspections rather than generated images', async () => {
@@ -86,17 +115,14 @@ describe('ChatTranscript', () => {
     expect(labels).toHaveLength(2);
     expect(screen.queryByText('Generated image')).not.toBeInTheDocument();
     expect(screen.queryByText('Ran 2 tools')).not.toBeInTheDocument();
-    const previews = screen.getAllByRole('img', { name: filename });
-    expect(previews).toHaveLength(2);
-    for (const preview of previews) {
-      expect(preview).not.toBeVisible();
-      expect(preview.closest('details')).not.toHaveAttribute('open');
-    }
+    expect(screen.queryByRole('img', { name: filename })).not.toBeInTheDocument();
+    expect(labels[0].closest('details')).not.toHaveAttribute('open');
+    expect(labels[1].closest('details')).not.toHaveAttribute('open');
 
     await user.click(labels[0]);
 
-    expect(previews[0]).toBeVisible();
-    expect(previews[1]).not.toBeVisible();
+    expect(await screen.findByRole('img', { name: filename })).toBeVisible();
+    expect(labels[1].closest('details')).not.toHaveAttribute('open');
     expect(container).not.toHaveTextContent('Artifact ID:');
   });
 
@@ -1228,7 +1254,7 @@ describe('ChatTranscript', () => {
     expect(copyToClipboardMock).not.toHaveBeenCalledWith(expect.stringContaining('Bash'));
   });
 
-  it('uses a friendly transcript label for native OpenAI search tool calls', () => {
+  it('uses a friendly transcript label for native OpenAI search tool calls', async () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -1261,13 +1287,14 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Web search: kodelet web ui')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Ran 1 tool'));
+    expect(await screen.findByText('Web search: kodelet web ui')).toBeInTheDocument();
     expect(screen.getAllByText('kodelet web ui')).toHaveLength(1);
     expect(screen.queryByText('Tools (1)')).not.toBeInTheDocument();
     expect(container.querySelectorAll('details')).toHaveLength(1);
   });
 
-  it('shows the searched or opened target for native OpenAI search actions', () => {
+  it('shows the searched or opened target for native OpenAI search actions', async () => {
     render(
       <ChatTranscript
         isStreaming={false}
@@ -1299,11 +1326,12 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Open page: https://example.com/story')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Ran 1 tool'));
+    expect(await screen.findByText('Open page: https://example.com/story')).toBeInTheDocument();
     expect(screen.getAllByText('https://example.com/story')).toHaveLength(1);
   });
 
-  it('makes missing OpenAI open-page URLs explicit', () => {
+  it('makes missing OpenAI open-page URLs explicit', async () => {
     render(
       <ChatTranscript
         isStreaming={false}
@@ -1335,7 +1363,8 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Open page: URL unavailable')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Ran 1 tool'));
+    expect(await screen.findByText('Open page: URL unavailable')).toBeInTheDocument();
   });
 
   it('keeps live bash and other builtin tools in separate compact groups', () => {
@@ -1492,7 +1521,7 @@ describe('ChatTranscript', () => {
     expect(screen.queryByText(longPrompt)).not.toBeInTheDocument();
   });
 
-  it('uses bash duration as the completed activity status', () => {
+  it('uses bash duration as the completed activity status', async () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -1527,12 +1556,13 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms');
+    await userEvent.click(screen.getByText('Ran 1 command'));
+    expect(await screen.findByLabelText('Tool 119ms')).toHaveTextContent('119ms');
     expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
   });
 
-  it('uses the exit code instead of duration for unsuccessful bash results', () => {
+  it('uses the exit code instead of duration for unsuccessful bash results', async () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -1567,10 +1597,11 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('exit 1')).toBeInTheDocument();
+    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
+    await userEvent.click(screen.getByText('Ran 1 command'));
+    expect(await screen.findByText('exit 1')).toBeInTheDocument();
     expect(screen.queryByLabelText('Tool failed')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-dot')).not.toBeInTheDocument();
-    expect(container.querySelector('.activity-command-group')).not.toHaveAttribute('open');
     expect(container.querySelector('summary .lucide-x')).toBeInTheDocument();
     expect(container.querySelector('summary')).toHaveTextContent('1 failed');
     expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument();

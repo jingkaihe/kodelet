@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import Prism from 'prismjs';
+import { describe, expect, it, vi } from 'vitest';
 import type { CodeExecutionMetadata, ToolResult } from '../../types';
 import ChatToolActivity from '../chat/ChatToolActivity';
 import ToolRenderer from '../ToolRenderer';
@@ -44,13 +45,73 @@ const typedResult: ToolResult = {
 };
 
 describe('CodeExecutionRenderer', () => {
-  it('renders selected output and handled child failures after history reload', () => {
+  it('defers code and output until opened, then preserves nested folds', async () => {
+    const user = userEvent.setup();
+    const highlight = vi.spyOn(Prism, 'highlight');
+    const toolResult: ToolResult = {
+      ...result,
+      metadata: {
+        status: 'completed',
+        durationMs: 12,
+        items: [{ type: 'json', value: { output: 'Latest output' } }],
+        calls: [],
+      },
+    };
+    const view = (code: string) => (
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'code',
+            name: 'code_execute',
+            input: JSON.stringify({ code }),
+            result: toolResult,
+          },
+        ]}
+      />
+    );
+    try {
+      const { container, rerender } = render(view('return "old";'));
+      const parentSummary = screen.getByText('Code execution');
+      expect(screen.queryByText('Code', { exact: true })).not.toBeInTheDocument();
+      expect(highlight).not.toHaveBeenCalled();
+
+      await user.click(parentSummary);
+      expect(screen.getByText('Code', { exact: true })).toBeVisible();
+      expect(container.querySelector('pre')).not.toBeInTheDocument();
+      rerender(view('return "latest";'));
+      expect(highlight).not.toHaveBeenCalled();
+
+      await user.click(screen.getByText('Code', { exact: true }));
+      const code = container.querySelector('code.language-javascript');
+      expect(code).toHaveTextContent('return "latest";');
+      expect(highlight).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('code.language-json')).toHaveTextContent('Latest output');
+      const nestedDetails = code?.closest('details');
+
+      await user.click(parentSummary);
+      expect(nestedDetails).toHaveAttribute('open');
+      expect(code).toBeInTheDocument();
+      expect(code).not.toBeVisible();
+      await user.click(parentSummary);
+      expect(container.querySelector('code.language-javascript')).toBe(code);
+      expect(code).toBeVisible();
+      expect(highlight).toHaveBeenCalledTimes(1);
+    } finally {
+      highlight.mockRestore();
+    }
+  });
+
+  it('renders selected output and handled child failures after history reload', async () => {
     const restored = JSON.parse(JSON.stringify(result));
     restored.metadata.calls[1].detailsOmitted = true;
     render(<CodeExecutionRenderer toolResult={restored} />);
+    expect(screen.queryByText('Selected output')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Code', { exact: true }));
     expect(screen.getByText('Selected output', { selector: 'code' })).toBeInTheDocument();
     expect(screen.getByText('search · completed')).toBeInTheDocument();
     expect(screen.getByText('write · blocked')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('search · completed'));
+    await userEvent.click(screen.getByText('write · blocked'));
     expect(
       screen.getByText('Child tool details were not saved for this invocation.')
     ).toBeInTheDocument();
@@ -80,13 +141,15 @@ describe('CodeExecutionRenderer', () => {
     ).toBe(expected);
   });
 
-  it('renders parent errors and live snapshots', () => {
+  it('renders parent errors and live snapshots', async () => {
     render(
       <CodeExecutionRenderer
         isPartial
         toolResult={{ ...result, success: false, error: 'Timed out' }}
       />
     );
+    await userEvent.click(screen.getByText('search · completed'));
+    await userEvent.click(screen.getByText('write · blocked'));
     expect(
       screen.getAllByText('Child tool details were not saved for this invocation.')
     ).toHaveLength(2);
@@ -277,7 +340,7 @@ describe('CodeExecutionRenderer', () => {
     );
     expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
     await user.click(screen.getByText(/^Code execution ·/));
-    expect(screen.getByText('Selected')).not.toBeVisible();
+    expect(screen.queryByText('Selected')).not.toBeInTheDocument();
     await user.click(screen.getByText('Code', { exact: true }));
     expect(container.querySelector('code.language-javascript')).toHaveTextContent(code);
     expect(container.querySelector('.token.keyword')).toBeVisible();
@@ -286,7 +349,7 @@ describe('CodeExecutionRenderer', () => {
     expect(screen.getByText('Selected').closest('details')).toBe(
       screen.getByText('Code', { exact: true }).closest('details')
     );
-    expect(container.querySelector('.tool-terminal')).not.toBeVisible();
+    expect(container.querySelector('.tool-terminal')).not.toBeInTheDocument();
     expect(
       Array.from(container.querySelectorAll('summary[title]'), (node) =>
         node.getAttribute('title')
@@ -301,9 +364,8 @@ describe('CodeExecutionRenderer', () => {
     expect(container.querySelector('.tool-terminal')).toBeVisible();
     expect(container.querySelector('.bash-tool-badge')).toHaveClass('is-error');
     const commands = screen.getAllByText('Confirm command');
+    expect(commands).toHaveLength(1);
     expect(commands[0]).toBeVisible();
-    expect(commands[1]).not.toBeVisible();
-    expect(commands[2]).not.toBeVisible();
     expect(screen.queryByText('Apply patch', { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText('test.js')).toBeVisible();
     await user.click(screen.getByText('test.js'));
@@ -375,7 +437,7 @@ describe('CodeExecutionRenderer', () => {
     };
     rerender(view());
     expect(screen.getByText('partial tests')).toBeVisible();
-    expect(screen.getByText('partial extension')).not.toBeVisible();
+    expect(screen.queryByText('partial extension')).not.toBeInTheDocument();
     expect(tests?.querySelector('.bash-tool-badge')).toHaveTextContent('running');
     calls[0] = {
       ...calls[0],
