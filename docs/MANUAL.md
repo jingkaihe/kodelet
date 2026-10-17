@@ -360,7 +360,7 @@ transcription:
   profile: openai
 ```
 
-- **OpenAI API:** the profile uses `provider: openai` and `openai.platform: openai`. Set its optional `transcription_model` (default: `gpt-4o-mini-transcribe`). The server uses `OPENAI_API_KEY` or `openai.api_key_env_var` and honors `openai.base_url`. API usage is billed separately from ChatGPT.
+- **OpenAI API:** the profile uses `provider: openai` and `openai.platform: openai`. Set its optional `transcription_model` (default: `gpt-4o-mini-transcribe`). The server uses `OPENAI_API_KEY` or `openai.api_key_env_var`; `OPENAI_API_BASE` overrides `openai.base_url`, as for chat. API usage is billed separately from ChatGPT.
 - **Codex:** use `openai.platform: codex`, run `kodelet codex login` on the server, and omit `transcription_model`. This is experimental; ChatGPT selects the model. If access is denied (403), use an OpenAI API profile instead.
 
 Requires HTTPS or localhost and microphone permission. Recording is limited to two minutes / 20 MiB. Audio is uploaded automatically at pauses; retranscribing the whole recording increases cost and latency. Kodelet does not persist audio, but cancellation cannot retract an upload already received by the provider. If the final update fails, review the warning before accepting the earlier preview.

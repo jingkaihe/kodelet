@@ -24,7 +24,6 @@ import (
 
 const (
 	defaultTranscriptionModel = "gpt-4o-mini-transcribe"
-	transcriptionBaseURL      = "https://api.openai.com/v1"
 	codexEndpoint             = "https://chatgpt.com/backend-api/transcribe"
 	codexLoginReason          = "Sign in on the server with 'kodelet codex login' to use transcription."
 	codexExpiredReason        = "ChatGPT credentials have expired; sign in on the server with 'kodelet codex login'."
@@ -45,23 +44,14 @@ type Transcriber struct {
 // NewTranscriber validates typed provider configuration without reading or
 // refreshing credentials. It is independent of chat threads and root enablement.
 func NewTranscriber(config llmtypes.Config) (*Transcriber, error) {
-	s := &Transcriber{platform: "openai", apiKeyEnvVar: "OPENAI_API_KEY"}
-	baseURL := transcriptionBaseURL
-	if config.OpenAI != nil {
-		if platform := strings.ToLower(strings.TrimSpace(config.OpenAI.Platform)); platform != "" {
-			s.platform = platform
-		}
-		if value := strings.TrimSpace(config.OpenAI.BaseURL); value != "" {
-			baseURL = value
-		}
-		if value := strings.TrimSpace(config.OpenAI.APIKeyEnvVar); value != "" {
-			s.apiKeyEnvVar = value
-		}
+	s := &Transcriber{
+		platform:     resolvePlatformName(config),
+		apiKeyEnvVar: GetAPIKeyEnvVar(config),
+		model:        strings.TrimSpace(config.TranscriptionModel),
 	}
-	s.model = strings.TrimSpace(config.TranscriptionModel)
 	switch s.platform {
 	case "openai":
-		base, err := url.Parse(baseURL)
+		base, err := url.Parse(strings.TrimSpace(GetBaseURL(config)))
 		if err != nil || base.Host == "" || (base.Scheme != "https" && base.Scheme != "http") ||
 			base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 			return nil, errors.New("transcription profile openai.base_url must be an HTTP(S) URL without credentials, query, or fragment")

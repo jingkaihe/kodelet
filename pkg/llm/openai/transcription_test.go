@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
@@ -21,6 +22,7 @@ import (
 func transcriptionConfig(t *testing.T, platform string) llmtypes.Config {
 	t.Helper()
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_BASE", "")
 	return llmtypes.Config{
 		Provider: "openai", Model: "unused-chat-model",
 		OpenAI: &llmtypes.OpenAIConfig{Platform: platform},
@@ -62,8 +64,8 @@ func TestNewTranscriber(t *testing.T) {
 				assert.Equal(t, codexEndpoint, s.endpoint)
 			} else {
 				assert.Equal(t, defaultTranscriptionModel, s.model)
-				assert.Equal(t, transcriptionBaseURL+"/audio/transcriptions", s.endpoint)
-				assert.Equal(t, "OPENAI_API_KEY", s.apiKeyEnvVar)
+				assert.Equal(t, openaipreset.BaseURL+"/audio/transcriptions", s.endpoint)
+				assert.Equal(t, openaipreset.APIKeyEnvVar, s.apiKeyEnvVar)
 			}
 		})
 	}
@@ -117,8 +119,16 @@ func TestCodexTranscriptionCredentials(t *testing.T) {
 }
 
 func TestTranscribeProviderRequests(t *testing.T) {
-	for _, platform := range []string{"openai", "codex"} {
-		t.Run(platform, func(t *testing.T) {
+	for _, test := range []struct {
+		name, platform  string
+		environmentBase bool
+	}{
+		{name: "OpenAI profile", platform: "openai"},
+		{name: "OpenAI environment override", platform: "openai", environmentBase: true},
+		{name: "Codex dedicated endpoint", platform: "codex", environmentBase: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			platform := test.platform
 			config := transcriptionConfig(t, platform)
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +168,15 @@ func TestTranscribeProviderRequests(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			config.OpenAI.BaseURL = server.URL + "/custom/v1/"
+			if test.environmentBase {
+				profileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					t.Error("transcription must not contact the overridden profile endpoint")
+					w.WriteHeader(http.StatusInternalServerError)
+				}))
+				t.Cleanup(profileServer.Close)
+				t.Setenv("OPENAI_API_BASE", config.OpenAI.BaseURL)
+				config.OpenAI.BaseURL = profileServer.URL
+			}
 			config.OpenAI.APIKeyEnvVar = "TEST_TRANSCRIPTION_KEY"
 			t.Setenv("TEST_TRANSCRIPTION_KEY", "speech-key")
 			if platform == "openai" {
@@ -167,6 +186,7 @@ func TestTranscribeProviderRequests(t *testing.T) {
 			require.NoError(t, err)
 			var credentialLoads atomic.Int32
 			if platform == "codex" {
+				assert.Equal(t, codexEndpoint, s.endpoint, "Codex must ignore OpenAI base URL overrides")
 				s.endpoint = server.URL + "/backend-api/transcribe"
 				s.readCodex = func() (*auth.CodexCredentials, error) {
 					t.Fatal("requests must use the refresh-aware loader")
