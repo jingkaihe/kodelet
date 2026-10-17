@@ -28,7 +28,6 @@ export const isVoiceCommand = (text: string): boolean => /^\/voice(?:\s|$)/.test
 interface Capture {
   targetKey: string;
   recorder?: ReturnType<typeof createDictationRecorder>;
-  stream?: MediaStream;
   transcript: string;
   pendingSnapshot?: File;
   uploadError: string | null;
@@ -46,14 +45,8 @@ function release(capture: Capture) {
   clearInterval(capture.timer);
   clearTimeout(capture.uploadTimer);
   capture.uploadAbort?.abort();
-  try {
-    capture.recorder?.cancel();
-  } finally {
-    capture.stream?.getTracks().forEach((track) => {
-      track.stop();
-    });
-    capture.pendingSnapshot = undefined;
-  }
+  capture.recorder?.cancel();
+  capture.pendingSnapshot = undefined;
 }
 
 export function useDictation({
@@ -219,6 +212,7 @@ export function useDictation({
         try {
           await capture.recorder?.finish();
         } catch {
+          capture.recorder?.cancel();
           if (current()) {
             capture.commitRequested = false;
             setError(
@@ -226,9 +220,6 @@ export function useDictation({
             );
           }
         } finally {
-          capture.stream?.getTracks().forEach((track) => {
-            track.stop();
-          });
           if (current()) {
             capture.captureDone = true;
             if (!capture.commitRequested) setPhase('review');
@@ -326,9 +317,6 @@ export function useDictation({
           capture.stopping = true;
           clearInterval(capture.timer);
           capture.recorder?.cancel();
-          capture.stream?.getTracks().forEach((track) => {
-            track.stop();
-          });
           capture.captureDone = true;
           setSpeaking(false);
           setPhase('review');
@@ -358,7 +346,6 @@ export function useDictation({
         });
         return;
       }
-      capture.stream = stream;
       await capture.recorder.start(stream);
       if (!current() || capture.stopping) return;
       setPhase('recording');
