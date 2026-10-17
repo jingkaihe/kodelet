@@ -23,6 +23,25 @@ describe('ChatTranscript', () => {
     copyToClipboardMock.mockReset();
   });
 
+  it('keeps later messages mounted when a voice caption is inserted before them', () => {
+    const user: ChatRenderMessage = { role: 'user', content: 'Fix it' };
+    const reply: ChatRenderMessage = {
+      role: 'assistant',
+      blocks: [{ type: 'message', content: 'Working on it', inProgress: false }],
+    };
+    const { rerender } = render(<ChatTranscript isStreaming={false} messages={[user, reply]} />);
+    const before = screen.getByText('Working on it');
+    const caption: ChatRenderMessage = {
+      id: 'call:utterance',
+      anchor: 1,
+      role: 'user',
+      content: 'Keep going',
+    };
+    rerender(<ChatTranscript isStreaming={false} messages={[user, caption, reply]} />);
+    expect(screen.getByText('Keep going')).toBeInTheDocument();
+    expect(screen.getByText('Working on it')).toBe(before);
+  });
+
   it('parses only changed content while streaming, including within the active turn', () => {
     let messages: ChatRenderMessage[] = [
       { role: 'user', content: 'First request' },

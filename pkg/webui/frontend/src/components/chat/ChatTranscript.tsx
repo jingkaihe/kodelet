@@ -502,9 +502,13 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
     return isStreaming ? <ChatStreamingIndicator assistantTurnCount={0} /> : <ChatWelcome />;
   }
 
+  // Voice captions can be inserted mid-transcript. Key coding messages by their
+  // own order so an insertion does not remount, and reset, every later message.
+  let codingOrdinal = 0;
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-6 sm:space-y-5 sm:px-4 md:px-8">
       {messages.map((message, index) => {
+        const key = message.id ? `voice-${message.id}` : `${message.role}-${codingOrdinal++}`;
         const active =
           message.role === 'assistant' &&
           (message.id
@@ -512,7 +516,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
             : isStreaming && index === codingMessageIndex);
         return (
           <TranscriptMessage
-            key={`${message.role}-${index}`}
+            key={key}
             message={message}
             isStreaming={active}
             assistantTurnCount={active ? assistantTurnCount : 0}
