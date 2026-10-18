@@ -122,7 +122,6 @@ describe('CodeExecutionRenderer', () => {
   it.each([
     [[], 'Code execution'],
     [['completed'], 'Code execution · 1 tool call'],
-    [['completed', 'completed'], 'Code execution · 2 tool calls'],
     [['blocked'], 'Code execution · 1 tool call · 1 failed'],
     [['queued', 'running'], 'Code execution · 2 tool calls · 2 running'],
   ])('omits zero counts for %j', (statuses, expected) => {

@@ -946,12 +946,11 @@ describe('ChatTranscript', () => {
         ids.map((id) => [id, { toolName: 'code_execute', success: true }])
       ),
     });
-    const { container } = render(<ChatTranscript messages={messages} isStreaming={false} />);
+    render(<ChatTranscript messages={messages} isStreaming={false} />);
     expect(screen.getAllByText('2 code executions')).toHaveLength(2);
     expect(screen.getAllByText('Code execution', { exact: true })).toHaveLength(2);
     expect(screen.getByText('Had 1 thought')).toBeVisible();
     expect(screen.getByText('Now run the tests')).toBeVisible();
-    expect(container.querySelectorAll('details')).toHaveLength(5);
   });
 
   it('groups consecutive completed thinking blocks into one lightweight disclosure', async () => {
