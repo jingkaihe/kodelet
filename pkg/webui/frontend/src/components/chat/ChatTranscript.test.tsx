@@ -919,6 +919,41 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-streaming-spinner')).toHaveTextContent('⣾');
   });
 
+  it('groups code executions across saved provider messages without crossing thoughts, messages or turns', () => {
+    const execution = (id: string) => ({
+      role: 'assistant' as const,
+      content: '',
+      toolCalls: [{ id, function: { name: 'code_execute', arguments: '{}' } }],
+    });
+    const ids = ['one', 'two', 'three', 'four', 'five', 'six'];
+    const messages = conversationToChatMessages({
+      id: 'consecutive-code',
+      createdAt: '',
+      updatedAt: '',
+      messageCount: 9,
+      messages: [
+        execution('one'),
+        execution('two'),
+        { role: 'assistant', content: '', thinkingTexts: ['Check the result'] },
+        execution('three'),
+        { role: 'assistant', content: 'Now run the tests' },
+        execution('four'),
+        { role: 'user', content: 'Try again' },
+        execution('five'),
+        execution('six'),
+      ],
+      toolResults: Object.fromEntries(
+        ids.map((id) => [id, { toolName: 'code_execute', success: true }])
+      ),
+    });
+    const { container } = render(<ChatTranscript messages={messages} isStreaming={false} />);
+    expect(screen.getAllByText('2 code executions')).toHaveLength(2);
+    expect(screen.getAllByText('Code execution', { exact: true })).toHaveLength(2);
+    expect(screen.getByText('Had 1 thought')).toBeVisible();
+    expect(screen.getByText('Now run the tests')).toBeVisible();
+    expect(container.querySelectorAll('details')).toHaveLength(5);
+  });
+
   it('groups consecutive completed thinking blocks into one lightweight disclosure', async () => {
     const user = userEvent.setup();
     const { container } = render(

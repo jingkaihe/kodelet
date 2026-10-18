@@ -9,15 +9,19 @@ import Spinner from '../Spinner';
 import { ReferenceCodeBlock, ReferenceToolNote } from './reference';
 import { ImageAttachment } from './ToolImageAttachments';
 
+export const codeExecutionCallCounts = (calls: CodeExecutionMetadata['calls']) => {
+  const succeeded = calls.filter((call) => call.status === 'completed').length;
+  const running = calls.filter((call) => ['queued', 'running'].includes(call.status)).length;
+  return { total: calls.length, failed: calls.length - succeeded - running, running };
+};
+
 export const codeExecutionSummary = (result?: ToolResult): string => {
   const meta = result?.metadata as CodeExecutionMetadata | undefined;
-  if (!Array.isArray(meta?.calls)) return 'Code execution';
-  const succeeded = meta.calls.filter((call) => call.status === 'completed').length;
-  const running = meta.calls.filter((call) => ['queued', 'running'].includes(call.status)).length;
-  const failed = meta.calls.length - succeeded - running;
+  if (!Array.isArray(meta?.calls) || !meta.calls.length) return 'Code execution';
+  const { total, failed, running } = codeExecutionCallCounts(meta.calls);
   return [
     'Code execution',
-    succeeded && `${succeeded} succeeded`,
+    `${total} tool ${total === 1 ? 'call' : 'calls'}`,
     failed && `${failed} failed`,
     running && `${running} running`,
   ]

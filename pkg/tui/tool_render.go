@@ -18,6 +18,8 @@ type toolRenderGroup struct {
 	changeIndex  int
 	label        string
 	labelParts   []toolRenderLabelPart
+	statusParts  []toolRenderLabelPart
+	indent       int
 	runningLabel string
 	body         string
 	bodyLines    []diffview.RenderedLine
@@ -43,8 +45,12 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 		tool := block.tools[idx]
 		switch {
 		case normalizedToolName(tool) == "code_execute":
-			groups = append(groups, m.buildCodeExecutionToolGroups(block, idx)...)
-			idx++
+			end := idx + 1
+			for end < len(block.tools) && normalizedToolName(block.tools[end]) == "code_execute" {
+				end++
+			}
+			groups = append(groups, m.buildCodeExecutionRun(block, idx, end)...)
+			idx = end
 
 		case normalizedToolName(tool) == "browser":
 			groups = append(groups, m.buildBrowserToolGroup(block, idx))
@@ -96,7 +102,88 @@ func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	return groups
 }
 
-func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []toolRenderGroup {
+func (m *model) buildCodeExecutionRun(block assistantBlock, start, end int) []toolRenderGroup {
+	parent := toolRenderGroup{
+		toolStart: start, toolEnd: end - 1, changeIndex: -1, codeParent: true,
+		label: fmt.Sprintf("%d code executions", end-start), failed: true,
+	}
+	total, failed, running, executionFailures := 0, 0, 0, 0
+	var durationMs int64
+	timed, hasCalls, hasMedia := true, false, false
+	for _, tool := range block.tools[start:end] {
+		parent.active = parent.active || !tool.done
+		parent.failed = parent.failed && tool.done && tool.failed
+		var meta tooltypes.CodeExecutionMetadata
+		if tool.structured == nil || !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+			timed = false
+		} else {
+			durationMs += meta.DurationMs
+			timed = timed && meta.DurationMs >= 0
+			hasCalls = hasCalls || meta.Calls != nil
+			for _, item := range meta.Items {
+				hasMedia = hasMedia || item.Type == "image" || item.Type == "artifact"
+			}
+		}
+		callCount, callFailures, callRunning := renderers.CodeExecutionCallCounts(meta.Calls)
+		total += callCount
+		failed += callFailures
+		running += callRunning
+		if tool.failed && callFailures == 0 {
+			executionFailures++
+		}
+	}
+	if timed {
+		duration := (time.Duration(durationMs) * time.Millisecond).String()
+		if durationMs == 0 {
+			duration = "<1ms"
+		}
+		parent.statusParts = append(parent.statusParts, toolRenderLabelPart{text: duration})
+	}
+	if hasCalls {
+		parent.statusParts = append(parent.statusParts, toolRenderLabelPart{
+			text: fmt.Sprintf("%d tool %s", total, pluralize(total, "call", "calls")),
+		})
+	}
+	if failed > 0 {
+		parent.statusParts = append(parent.statusParts, toolRenderLabelPart{kind: diffview.LineRemoved, text: fmt.Sprintf("%d failed", failed)})
+	}
+	if running > 0 {
+		parent.statusParts = append(parent.statusParts, toolRenderLabelPart{text: fmt.Sprintf("%d running", running)})
+	}
+	if executionFailures > 0 {
+		parent.statusParts = append(parent.statusParts, toolRenderLabelPart{
+			kind: diffview.LineRemoved,
+			text: fmt.Sprintf("%d %s failed", executionFailures, pluralize(executionFailures, "execution", "executions")),
+		})
+	}
+	if end-start == 1 {
+		groups := m.buildCodeExecutionToolGroups(block, start, false)
+		groups[0].label = "Code execution"
+		groups[0].statusParts = parent.statusParts
+		return groups
+	}
+	first := block.tools[start]
+	parent.expanded = block.expanded || first.expanded || parent.active || hasMedia
+	if expanded, ok := first.expandedCode[""]; ok {
+		parent.expanded = expanded
+	}
+	groups := []toolRenderGroup{parent}
+	if parent.expanded {
+		nested := *m
+		nested.width = max(1, m.width-2)
+		nested.viewport.SetWidth(max(1, m.viewport.Width()-2))
+		for idx := start; idx < end; idx++ {
+			for _, child := range nested.buildCodeExecutionToolGroups(block, idx, true) {
+				child.indent += 2
+				groups = append(groups, child)
+			}
+		}
+		m.transcriptElapsedClocks = nested.transcriptElapsedClocks
+	}
+	return groups
+}
+
+func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int, grouped bool) []toolRenderGroup {
 	tool := block.tools[idx]
 	var meta tooltypes.CodeExecutionMetadata
 	if tool.structured != nil {
@@ -113,8 +200,8 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []to
 		toolStart: idx, toolEnd: idx, changeIndex: -1,
 		codeParent: true,
 		label:      label, runningLabel: label,
-		expanded: expanded(""),
-		active:   !tool.done, failed: tool.failed,
+		expanded: grouped || expanded(""), plainHeader: grouped,
+		active: !tool.done, failed: tool.failed,
 	}
 	if tool.failed {
 		parent.body, parent.wrapBody = sanitizeExtensionTranscriptText(fileChangeErrorText(tool)), true
@@ -143,7 +230,8 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []to
 	}
 	groups = append(groups, toolRenderGroup{
 		toolStart: idx, toolEnd: idx, changeIndex: -1, codeKey: "code",
-		label: "Code", body: body, markdownBody: true, expanded: expanded("code"),
+		indent: 2,
+		label:  "Code", body: body, markdownBody: true, expanded: expanded("code"),
 	})
 	// Reuse normal tool bodies and per-file rendering at the nested width. Keep
 	// commands separate so parallel output is only shown for expanded children.
@@ -183,6 +271,7 @@ func (m *model) buildCodeExecutionToolGroups(block assistantBlock, idx int) []to
 				}
 			}
 			child.codeKey = fmt.Sprintf("%s:%d:%d", call.CallID, callIndex, child.changeIndex)
+			child.indent = 2
 			child.toolStart, child.toolEnd, child.changeIndex = idx, idx, -1
 			child.expanded = expanded(child.codeKey)
 			groups = append(groups, child)

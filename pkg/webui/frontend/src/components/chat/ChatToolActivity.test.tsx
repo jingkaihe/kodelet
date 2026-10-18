@@ -24,7 +24,159 @@ const bashTool = (
   ...overrides,
 });
 
+const codeTool = (id: string, statuses = ['completed'], durationMs = 12): ChatRenderToolCall => ({
+  callId: id,
+  name: 'code_execute',
+  input: JSON.stringify({ code: `return "${id}";` }),
+  result: {
+    toolName: 'code_execute',
+    metadataType: 'code_execute',
+    success: true,
+    metadata: {
+      status: 'completed',
+      durationMs,
+      items: [{ type: 'json', value: `Output ${id}` }],
+      calls: statuses.map((status, index) => ({
+        callId: `${id}-${index}`,
+        toolName: 'bash',
+        status,
+        durationMs: 4,
+      })),
+    },
+  },
+});
+
 describe('ChatToolActivity', () => {
+  it('folds consecutive code executions into one row with ordered details on click', async () => {
+    const user = userEvent.setup();
+    const tools = Array.from({ length: 6 }, (_, index) => codeTool(`code-${index}`));
+    const { container } = render(<ChatToolActivity tools={tools} />);
+    const summary = screen.getByText('6 code executions');
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(summary.closest('summary')?.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(summary.closest('summary')?.querySelector('.tool-summary-status')).toHaveTextContent(
+      '72ms · 6 tool calls'
+    );
+    expect(screen.queryByText('Code execution · 1 tool call')).not.toBeInTheDocument();
+
+    await user.click(summary);
+    expect(screen.getAllByText('Code execution · 1 tool call')).toHaveLength(6);
+    expect(
+      screen.getAllByLabelText('Tool done').every((status) => status.classList.contains('sr-only'))
+    ).toBe(true);
+    for (const code of screen.getAllByText('Code', { exact: true })) await user.click(code);
+    expect(
+      Array.from(container.querySelectorAll('code.language-javascript'), (code) => code.textContent)
+    ).toEqual(tools.map((tool) => JSON.parse(tool.input).code));
+    await user.click(summary);
+    expect(screen.getByText('Output code-0')).not.toBeVisible();
+  });
+
+  it('keeps single and nested executions separate and does not group across other tools', () => {
+    const first = codeTool('first');
+    const second = { ...codeTool('second'), name: 'Code_execute' };
+    const { container, rerender } = render(
+      <ChatToolActivity tools={[first, bashTool('pwd'), second]} />
+    );
+    expect(screen.getAllByText('Code execution')).toHaveLength(2);
+    for (const duration of screen.getAllByText('12ms')) {
+      expect(duration).toHaveClass('code-execution-duration');
+      expect(duration.closest('summary')).toHaveTextContent('Code execution12ms · 1 tool call');
+    }
+    expect(screen.queryByText('2 code executions')).not.toBeInTheDocument();
+    rerender(<ChatToolActivity nested tools={[first, second]} />);
+    expect(container.querySelectorAll('details')).toHaveLength(2);
+    rerender(<ChatToolActivity tools={[first, second]} />);
+    expect(screen.getByText('2 code executions')).toBeVisible();
+  });
+
+  it('keeps execution errors and handled child failures visible in a folded group', () => {
+    const failed = codeTool('failed');
+    if (!failed.result) throw new Error('Missing test result');
+    failed.result.success = false;
+    failed.result.error = 'Script failed';
+    const { container } = render(
+      <ChatToolActivity
+        tools={[codeTool('ok'), failed, codeTool('caught', ['completed', 'blocked'])]}
+      />
+    );
+    expect(screen.getByText('3 code executions')).toBeVisible();
+    expect(container.querySelector('summary > .tool-summary-status')).toHaveTextContent(
+      '36ms · 4 tool calls · 1 failed · 1 execution failed'
+    );
+    expect(screen.getByText('36ms')).toHaveClass('code-execution-duration');
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(container.querySelector('details')).not.toHaveClass('activity-card-error');
+    expect(container.querySelector('summary .lucide-check')).toBeInTheDocument();
+    expect(screen.getByText('1 failed')).toHaveClass('code-execution-failure');
+    expect(screen.getByText('1 execution failed')).toHaveClass('code-execution-failure');
+    expect(screen.getByText('4 tool calls')).not.toHaveClass('code-execution-failure');
+  });
+
+  it.each([
+    false,
+    true,
+  ])('distinguishes failed scripts from caught child failures (caught: %s)', (caught) => {
+    const tools = ['first', 'second'].map((id) => {
+      const tool = codeTool(id, ['completed', 'failed'], 2100);
+      if (!tool.result) throw new Error('Missing test result');
+      return { ...tool, result: { ...tool.result, success: caught } };
+    });
+    const { container } = render(<ChatToolActivity tools={tools} />);
+    const group = container.querySelector('.activity-code-group');
+    expect(group?.classList.contains('activity-card-error')).toBe(!caught);
+    expect(group?.querySelector(`summary .lucide-${caught ? 'check' : 'x'}`)).toBeInTheDocument();
+    expect(container.querySelector('summary > .tool-summary-status')).toHaveTextContent(
+      '4.200s · 4 tool calls · 2 failed'
+    );
+    expect(container.querySelector('summary')).not.toHaveTextContent('execution failed');
+  });
+
+  it('updates a growing execution group without resetting its fold choice', async () => {
+    const user = userEvent.setup();
+    const first = codeTool('first');
+    const running = {
+      ...codeTool('second', ['blocked', 'running', 'queued'], 1200),
+      inProgress: true,
+    };
+    const { container, rerender } = render(<ChatToolActivity tools={[first]} />);
+    const details = container.querySelector('details');
+    rerender(<ChatToolActivity tools={[first, running]} />);
+    expect(container.querySelector('details')).toBe(details);
+    expect(details).toHaveAttribute('open');
+    expect(details?.querySelector('summary .spinner-glyph')).toBeInTheDocument();
+    expect(container.querySelector('summary > .tool-summary-status')).toHaveTextContent(
+      '1.212s · 4 tool calls · 1 failed · 2 running'
+    );
+    await user.click(screen.getByText('2 code executions'));
+    rerender(
+      <ChatToolActivity
+        tools={[first, codeTool('second', ['blocked', 'completed', 'completed'], 2400)]}
+      />
+    );
+    expect(container.querySelector('summary > .tool-summary-status')).toHaveTextContent(
+      '2.412s · 4 tool calls · 1 failed'
+    );
+    expect(container.querySelector('summary')).not.toHaveTextContent('running');
+    expect(container.querySelector('details')).toBe(details);
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  it('omits unavailable timing while retaining known tool counts', () => {
+    const untimed: ChatRenderToolCall = {
+      callId: 'untimed',
+      name: 'code_execute',
+      input: '{}',
+      result: { toolName: 'code_execute', success: true },
+    };
+    const { container } = render(<ChatToolActivity tools={[codeTool('ok'), untimed]} />);
+    expect(container.querySelector('summary > .tool-summary-status')).toHaveTextContent(
+      /^1 tool call$/
+    );
+    expect(container.querySelector('.code-execution-duration')).not.toBeInTheDocument();
+  });
+
   it('retains automatically opened bodies even when closed before the toggle event', () => {
     const view = (open: boolean) => (
       <ActivityDetails status="done" preserveOpen open={open} summary={<summary>Details</summary>}>

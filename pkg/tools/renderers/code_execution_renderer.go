@@ -11,23 +11,34 @@ import (
 // CodeExecutionRenderer renders one parent card and bounded child summaries.
 type CodeExecutionRenderer struct{}
 
-// CodeExecutionSummary returns a compact label shared by CLI and TUI.
-func CodeExecutionSummary(meta tools.CodeExecutionMetadata) string {
-	completed, failed, running := 0, 0, 0
-	for _, call := range meta.Calls {
+// CodeExecutionCallCounts counts child calls, including unsuccessful attempts.
+func CodeExecutionCallCounts(calls []tools.CodeExecutionCall) (total, failed, running int) {
+	for _, call := range calls {
 		switch call.Status {
 		case "completed":
-			completed++
 		case "queued", "running":
 			running++
 		default:
 			failed++
 		}
 	}
+	return len(calls), failed, running
+}
+
+// CodeExecutionSummary returns a compact label shared by CLI and TUI.
+func CodeExecutionSummary(meta tools.CodeExecutionMetadata) string {
+	total, failed, running := CodeExecutionCallCounts(meta.Calls)
 	parts := []string{"Code execution"}
-	for i, count := range []int{completed, failed, running} {
+	if total > 0 {
+		noun := "tool calls"
+		if total == 1 {
+			noun = "tool call"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", total, noun))
+	}
+	for i, count := range []int{failed, running} {
 		if count > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", count, []string{"succeeded", "failed", "running"}[i]))
+			parts = append(parts, fmt.Sprintf("%d %s", count, []string{"failed", "running"}[i]))
 		}
 	}
 	return strings.Join(parts, " · ")

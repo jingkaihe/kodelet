@@ -12,6 +12,7 @@ import ToolRenderer from '../ToolRenderer';
 import { getFileChangeSummary } from '../tool-renderers/ApplyPatchRenderer';
 import BrowserRenderer, { getBrowserMetadata } from '../tool-renderers/BrowserRenderer';
 import CodeExecutionRenderer, {
+  codeExecutionCallCounts,
   codeExecutionSummary,
 } from '../tool-renderers/CodeExecutionRenderer';
 import {
@@ -435,6 +436,13 @@ export const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
     return 'failed';
   }
 
+  if (normalizedToolName === 'code_execute' || toolCall.result.metadataType === 'code_execute') {
+    const calls = (toolCall.result.metadata as CodeExecutionMetadata | undefined)?.calls;
+    if (calls?.some((call) => !['completed', 'queued', 'running'].includes(call.status))) {
+      return 'failed';
+    }
+  }
+
   const taskRun = getTaskRunSnapshot(toolCall.result);
   if (taskRun) {
     return formatTaskRunElapsed(taskRun.elapsedMs) || 'done';
@@ -663,8 +671,9 @@ const builtinToolNames = new Set([
 
 const toolGroupKind = (
   tool: ChatRenderToolCall
-): 'commands' | 'tools' | 'file' | 'image' | 'browser' | 'skill' | 'extension' => {
+): 'commands' | 'tools' | 'code' | 'file' | 'image' | 'browser' | 'skill' | 'extension' => {
   const name = normalizeToolName(tool.name);
+  if (name === 'code_execute' || tool.result?.metadataType === 'code_execute') return 'code';
   if (name === 'browser' || tool.result?.metadataType === 'browser') return 'browser';
   if (tool.result?.metadataType === 'extension_tool' || getExtensionToolPresentation(tool.result)) {
     return 'extension';
@@ -676,19 +685,56 @@ const toolGroupKind = (
   return builtinToolNames.has(name) ? 'tools' : 'extension';
 };
 
+const codeExecutionGroupSummary = (tools: ChatRenderToolCall[]) => {
+  const metadata = tools.map((tool) => tool.result?.metadata as CodeExecutionMetadata | undefined);
+  const calls = metadata.flatMap((meta) => meta?.calls ?? []);
+  // Sum parent durations, not child durations: children may execute in parallel.
+  // Omit an incomplete total rather than presenting missing timings as zero.
+  const duration = metadata.every(
+    (meta) => meta && Number.isFinite(meta.durationMs) && meta.durationMs >= 0
+  )
+    ? formatDuration(
+        metadata.reduce((total, meta) => total + (meta?.durationMs ?? 0), 0) * 1_000_000
+      )
+    : '';
+  // A script can fail without a failed child (e.g. a syntax error). Keep those
+  // failures visible without counting them as additional failed tool calls.
+  const executionFailures = tools.filter(
+    (tool, index) =>
+      tool.result?.success === false &&
+      !metadata[index]?.calls?.some(
+        (call) => !['completed', 'queued', 'running'].includes(call.status)
+      )
+  ).length;
+  const { total, failed, running } = codeExecutionCallCounts(calls);
+  const details: Array<{ text: string; failed?: boolean }> = [];
+  if (metadata.some((meta) => Array.isArray(meta?.calls))) {
+    details.push({ text: `${total} tool ${total === 1 ? 'call' : 'calls'}` });
+  }
+  if (failed) details.push({ text: `${failed} failed`, failed: true });
+  if (running) details.push({ text: `${running} running` });
+  if (executionFailures) {
+    details.push({
+      text: `${executionFailures} ${executionFailures === 1 ? 'execution' : 'executions'} failed`,
+      failed: true,
+    });
+  }
+  return { duration, details };
+};
+
 const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = false }) => {
   if (tools.length === 0) {
     return null;
   }
 
-  // Preserve transcript order; only aggregate command and generic builtin tool calls.
+  // Preserve transcript order; only aggregate consecutive calls of the same kind.
   const groups: ChatRenderToolCall[][] = [];
   for (const tool of tools) {
     const previous = groups[groups.length - 1];
     const kind = toolGroupKind(tool);
     if (
       !nested &&
-      (kind === 'commands' || kind === 'tools') &&
+      (kind === 'commands' || kind === 'tools' || kind === 'code') &&
       previous &&
       toolGroupKind(previous[0]) === kind
     ) {
@@ -723,29 +769,39 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
         }
         const commands = kind === 'commands';
         const browser = kind === 'browser';
-        const codeExecution =
-          normalizeToolName(toolCall.name) === 'code_execute' ||
-          toolCall.result?.metadataType === 'code_execute';
+        const codeExecution = kind === 'code';
+        const codeGroup = codeExecution && group.length > 1;
+        const codeSummary = codeExecution ? codeExecutionGroupSummary(group) : undefined;
         // Code media stays inline with selected text, not in an outside gallery.
         // Open these cards initially so previews remain visible on completion.
         const codeMedia =
           codeExecution &&
-          (toolCall.result?.metadata as CodeExecutionMetadata | undefined)?.items?.some(
-            (item) => item.type === 'image' || item.type === 'artifact'
+          group.some((tool) =>
+            (tool.result?.metadata as CodeExecutionMetadata | undefined)?.items?.some(
+              (item) => item.type === 'image' || item.type === 'artifact'
+            )
           );
         const builtin = commands || kind === 'tools';
         const running = group.some((tool) => getToolActivityStatus(tool) === 'running');
         const failedCount = group.filter((tool) => getToolActivityStatus(tool) === 'failed').length;
+        // The group check indicates completion; only wholly failed executions get a cross.
+        const failed = codeExecution
+          ? group.every((tool) => !tool.inProgress && tool.result?.success === false)
+          : failedCount > 0;
         const noun = commands ? 'command' : 'tool';
         const description =
           commands && getStringField(parseToolInput(toolCall.input), 'description');
-        const summaryText = nested
-          ? commands && description
-            ? `bash · ${collapseWhitespace(description)}`
-            : getToolSummary(toolCall)
-          : builtin
-            ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
-            : getToolSummary(toolCall);
+        const summaryText = codeExecution
+          ? codeGroup
+            ? `${group.length} code executions`
+            : 'Code execution'
+          : nested
+            ? commands && description
+              ? `bash · ${collapseWhitespace(description)}`
+              : getToolSummary(toolCall)
+            : builtin
+              ? `${running ? 'Running' : 'Ran'} ${group.length} ${noun}${group.length === 1 ? '' : 's'}`
+              : getToolSummary(toolCall);
         const activityStatus = running
           ? 'running'
           : failedCount
@@ -761,9 +817,10 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
                 'activity-card',
                 commands && 'activity-command-group',
                 kind === 'tools' && 'activity-tool-group',
+                codeExecution && 'activity-code-group',
                 browser && 'activity-browser',
                 running && 'activity-card-live',
-                failedCount > 0 && 'activity-card-error'
+                failed && 'activity-card-error'
               )}
               open={
                 !nested &&
@@ -774,19 +831,42 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
               summary={
                 <summary className="tool-summary activity-summary" title={summaryText}>
                   <span className="activity-marker" aria-hidden="true">
-                    {running ? <Spinner /> : failedCount ? <X size={14} /> : <Check size={14} />}
+                    {running ? <Spinner /> : failed ? <X size={14} /> : <Check size={14} />}
                   </span>
                   <ActivitySummaryText summaryText={summaryText} />
                   <span className="tool-summary-chevron" aria-hidden="true">
                     <ChevronRight size={12} />
                   </span>
-                  {builtin ? (
+                  {codeSummary ? (
+                    <span className="tool-summary-status">
+                      {codeSummary.duration ? (
+                        <span
+                          className="code-execution-duration"
+                          title="Total recorded execution time (excluding model time)"
+                        >
+                          {codeSummary.duration}
+                        </span>
+                      ) : null}
+                      {codeSummary.details.map((detail, index) => (
+                        <React.Fragment key={detail.text}>
+                          {codeSummary.duration || index > 0 ? ' · ' : null}
+                          <span className={detail.failed ? 'code-execution-failure' : undefined}>
+                            {detail.text}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </span>
+                  ) : builtin ? (
                     failedCount > 0 ? (
                       <span className="tool-summary-status">{failedCount} failed</span>
                     ) : null
                   ) : (
                     <output
-                      className={kind === 'skill' ? 'sr-only' : 'tool-summary-status'}
+                      className={
+                        kind === 'skill' || (codeExecution && activityStatus === 'done')
+                          ? 'sr-only'
+                          : 'tool-summary-status'
+                      }
                       aria-label={`Tool ${activityStatus}`}
                     >
                       {activityStatus}
@@ -808,7 +888,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
                         className={commands ? 'command-activity' : 'tool-activity'}
                         key={tool.callId || toolIndex}
                       >
-                        {builtin ? (
+                        {builtin || codeGroup ? (
                           <div className="command-activity-header">
                             {commands ? (
                               <code className="command-activity-command">
@@ -818,7 +898,14 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools, nested = fal
                               <ActivitySummaryText summaryText={getToolSummary(tool)} />
                             )}
                             {!(commands && tool.result?.metadata && status === 'failed') ? (
-                              <output className="tool-summary-status" aria-label={`Tool ${status}`}>
+                              <output
+                                className={
+                                  codeExecution && status === 'done'
+                                    ? 'sr-only'
+                                    : 'tool-summary-status'
+                                }
+                                aria-label={`Tool ${status}`}
+                              >
                                 {status}
                               </output>
                             ) : null}

@@ -1868,8 +1868,6 @@ Scripts run in a sandbox and can use only the tools the agent is already allowed
 
 To choose a mode for a single run, pass `--code-mode off|on|only` to `kodelet run` or `kodelet acp`, set `codeMode` in SDK session options, or set `code_mode` in an extension-registered profile.
 
-Each script appears as one expandable card in the TUI and Web UI, showing the code, its output, and the tool calls it made.
-
 Each code-mode invocation has a 15-minute total wall-clock limit, including time spent awaiting tools. Individual tools retain their own timeouts, and earlier parent deadlines or cancellation still stop the script and its child calls.
 
 ## Agentic Skills

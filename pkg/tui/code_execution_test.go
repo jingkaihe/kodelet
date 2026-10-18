@@ -18,7 +18,7 @@ func TestCodeExecutionParentCard(t *testing.T) {
 	m := newModel(t.Context(), Config{})
 	t.Cleanup(m.cancel)
 	result := tooltypes.StructuredToolResult{ToolName: "code_execute", Success: true, Metadata: tooltypes.CodeExecutionMetadata{
-		Status: "completed", Outputs: []json.RawMessage{json.RawMessage(`"Selected output"`)},
+		Status: "completed", DurationMs: 12, Outputs: []json.RawMessage{json.RawMessage(`"Selected output"`)},
 		Calls: []tooltypes.CodeExecutionCall{{ToolName: "search", Status: "completed"}, {ToolName: "write", Status: "blocked", ErrorKind: "blocked"}},
 	}}
 	block := assistantBlock{tools: []toolCall{
@@ -27,7 +27,8 @@ func TestCodeExecutionParentCard(t *testing.T) {
 	}}
 	groups := m.toolRenderGroups(block)
 	require.Len(t, groups, 2, "code execution must not be folded into adjacent tools")
-	assert.Contains(t, groups[1].label, "1 succeeded · 1 failed")
+	assert.Equal(t, "Code execution", groups[1].label)
+	assert.Contains(t, xansi.Strip(m.renderToolGroupHeader(groups[1])), "✓ Code execution ▸  12ms · 2 tool calls · 1 failed")
 	assert.Empty(t, groups[1].body)
 	assert.False(t, groups[1].active)
 	block.tools[1].expanded = true
@@ -82,9 +83,16 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	}}
 	payload, err := json.Marshal(result)
 	require.NoError(t, err)
+	secondPayload, err := json.Marshal(tooltypes.StructuredToolResult{
+		ToolName: "code_execute", Success: true,
+		Metadata: tooltypes.CodeExecutionMetadata{Status: "completed", DurationMs: 12, Calls: []tooltypes.CodeExecutionCall{}},
+	})
+	require.NoError(t, err)
 	m.entries = entriesFromHistory([]conversations.StreamableMessage{
 		{Kind: "tool-use", ToolCallID: "parent", ToolName: "code_execute", Input: `{"code":"const value = 42;\nreturn value;"}`},
 		{Kind: "tool-result", ToolCallID: "parent", Content: string(payload)},
+		{Kind: "tool-use", ToolCallID: "second", ToolName: "code_execute", Input: `{"code":"return 2;"}`},
+		{Kind: "tool-result", ToolCallID: "second", Content: string(secondPayload)},
 	})
 	render := func() string {
 		m.refreshViewport(false)
@@ -104,8 +112,10 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 		t.Fatalf("missing fold %q", key)
 	}
 	assert.NotContains(t, render(), "Run first command")
+	assert.Contains(t, render(), "✓ 2 code executions ▸  12ms · 4 tool calls · 1 failed")
 	toggle("")
 	content := render()
+	assert.Contains(t, content, "Code execution · 4 tool calls · 1 failed")
 	assert.Contains(t, content, "  ✓ Code ▸")
 	assert.Contains(t, content, "  ✓ bash · Run first command ▸")
 	assert.Contains(t, content, "  ✗ bash · Run second command ▸", "host failure status wins over the child result")
@@ -117,6 +127,13 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	toggle("code")
 	assert.Contains(t, render(), "const value = 42;")
 	assert.Contains(t, render(), "script output")
+	for _, region := range m.detailRegions {
+		if region.toolStart == 1 && region.codeKey == "code" {
+			m.viewport.SetYOffset(max(0, region.line-2))
+			require.True(t, m.toggleDetailAt(region.line-m.viewport.YOffset()))
+		}
+	}
+	assert.Contains(t, render(), "return 2;", "each execution has independent code details")
 	toggle("one:0:-1")
 	assert.Equal(t, 1, strings.Count(render(), "nested command output"), "commands expand independently")
 	toggle("patch:2:0")
@@ -132,6 +149,52 @@ func TestCodeExecutionNestedFoldsFromHistory(t *testing.T) {
 	assert.NotContains(t, render(), "new-second", "individual folds work after expand-all")
 	m.toggleAllDetails()
 	assert.NotContains(t, render(), "Run first command")
+}
+
+func TestCodeExecutionRunSummary(t *testing.T) {
+	for _, tc := range []struct {
+		name                                      string
+		firstFailed, secondFailed, active, caught bool
+		want                                      string
+	}{
+		{name: "mixed", secondFailed: true, want: "✓ 2 code executions ▸  24ms · 2 tool calls · 1 failed"},
+		{name: "all failed", firstFailed: true, secondFailed: true, want: "✗ 2 code executions ▸  24ms · 2 tool calls · 2 failed"},
+		{name: "caught failure", caught: true, want: "✓ 2 code executions ▸  24ms · 2 tool calls · 1 failed"},
+		{name: "running", firstFailed: true, active: true, want: "2 code executions ▾  24ms · 2 tool calls · 1 failed · 1 running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newModel(t.Context(), Config{})
+			t.Cleanup(m.cancel)
+			m.width = 120
+			m.resize()
+			block := assistantBlock{kind: blockTools}
+			for index, failed := range []bool{tc.firstFailed, tc.secondFailed} {
+				status := "completed"
+				active := index == 1 && tc.active
+				if failed || (index == 1 && tc.caught) {
+					status = "failed"
+				}
+				if active {
+					status = "running"
+				}
+				block.tools = append(block.tools, toolCall{
+					name: "code_execute", done: !active, failed: failed,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "code_execute", Success: !failed,
+						Metadata: tooltypes.CodeExecutionMetadata{DurationMs: 12, Calls: []tooltypes.CodeExecutionCall{{Status: status}}},
+					},
+				})
+			}
+			group := m.toolRenderGroups(block)[0]
+			header := m.renderToolGroupHeader(group)
+			assert.Contains(t, xansi.Strip(header), tc.want)
+			assert.Equal(t, tc.firstFailed && tc.secondFailed, group.failed)
+			muted, _ := styleSequences(mutedStyle)
+			errorColor, _ := styleSequences(steeringErrorStyle)
+			assert.Contains(t, header, muted+"24ms")
+			assert.Contains(t, header, errorColor)
+		})
+	}
 }
 
 func TestCodeExecutionLiveChildFolds(t *testing.T) {

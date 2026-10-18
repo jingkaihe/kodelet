@@ -225,6 +225,24 @@
   color: var(--activity-color);
 }
 
+.activity-code-group > .tool-summary {
+  flex-wrap: wrap;
+}
+
+.activity-code-group > .tool-summary > .tool-summary-status {
+  flex: 0 1 auto;
+  line-height: 1.6;
+  color: var(--kodelet-muted);
+}
+
+.code-execution-duration {
+  color: var(--kodelet-muted);
+}
+
+.code-execution-failure {
+  color: var(--kodelet-error);
+}
+
 .command-activity,
 .tool-activity {
   min-width: 0;

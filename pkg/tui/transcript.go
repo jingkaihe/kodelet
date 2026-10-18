@@ -104,19 +104,18 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					}
 					for _, group := range m.toolRenderGroups(block) {
 						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
-						indent := ""
-						if group.codeKey != "" {
-							indent = "  "
-						}
+						indent := strings.Repeat(" ", group.indent)
 						header := m.renderToolGroupHeader(group)
 						header = indent + strings.ReplaceAll(header, "\n", "\n"+indent)
 						b.WriteString(header)
 						b.WriteString("\n")
-						regions = append(regions, detailRegion{
-							entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line,
-							toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex,
-							codeKey: group.codeKey, expanded: group.expanded,
-						})
+						if !group.plainHeader || !group.codeParent {
+							regions = append(regions, detailRegion{
+								entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line,
+								toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex,
+								codeKey: group.codeKey, expanded: group.expanded,
+							})
+						}
 						line += lineCount(header)
 						if group.expanded || (group.active && !group.codeParent && group.codeKey == "") {
 							body := group.body
@@ -292,10 +291,39 @@ func (m model) renderThoughtHeader(block assistantBlock) string {
 }
 
 func (m model) renderToolGroupHeader(group toolRenderGroup) string {
+	if group.codeParent && !group.plainHeader {
+		style, glyph := toolHeaderStyle, "✓ "
+		if group.active {
+			glyph = m.spinnerGlyph() + " "
+		} else if group.failed {
+			style, glyph = steeringErrorStyle, "✗ "
+		}
+		chevron := " ▸"
+		if group.expanded {
+			chevron = " ▾"
+		}
+		header := renderPersistentStyle(style, glyph+group.label+chevron)
+		for index, part := range group.statusParts {
+			separator := " · "
+			if index == 0 {
+				separator = "  "
+			}
+			style := mutedStyle
+			if part.kind == diffview.LineRemoved {
+				style = steeringErrorStyle
+			}
+			header += renderPersistentStyle(mutedStyle, separator) + renderPersistentStyle(style, part.text)
+		}
+		return wrapPreservingWhitespace(header, m.transcriptTextWidth())
+	}
 	if group.plainHeader {
 		lines := strings.Split(wrapPreservingWhitespace(group.label, m.transcriptTextWidth()), "\n")
 		for index, line := range lines {
-			lines[index] = renderPersistentStyle(toolHeaderStyle, line)
+			style := toolHeaderStyle
+			if group.codeParent && group.failed {
+				style = steeringErrorStyle
+			}
+			lines[index] = renderPersistentStyle(style, line)
 		}
 		return strings.Join(lines, "\n")
 	}

@@ -116,14 +116,15 @@ describe('CodeExecutionRenderer', () => {
       screen.getByText('Child tool details were not saved for this invocation.')
     ).toBeInTheDocument();
     expect(screen.getByText('Child tool details exceeded the storage limit.')).toBeInTheDocument();
-    expect(codeExecutionSummary(restored)).toBe('Code execution · 1 succeeded · 1 failed');
+    expect(codeExecutionSummary(restored)).toBe('Code execution · 2 tool calls · 1 failed');
   });
 
   it.each([
     [[], 'Code execution'],
-    [['completed'], 'Code execution · 1 succeeded'],
-    [['blocked'], 'Code execution · 1 failed'],
-    [['queued', 'running'], 'Code execution · 2 running'],
+    [['completed'], 'Code execution · 1 tool call'],
+    [['completed', 'completed'], 'Code execution · 2 tool calls'],
+    [['blocked'], 'Code execution · 1 tool call · 1 failed'],
+    [['queued', 'running'], 'Code execution · 2 tool calls · 2 running'],
   ])('omits zero counts for %j', (statuses, expected) => {
     expect(
       codeExecutionSummary({
@@ -254,11 +255,17 @@ describe('CodeExecutionRenderer', () => {
     expect(screen.getAllByText('Image preview unavailable.')).toHaveLength(2);
   });
 
-  it('keeps a single inline gallery when code cards are expanded and collapsed', async () => {
+  it.each([
+    false,
+    true,
+  ])('keeps a single inline gallery when code cards are toggled (grouped: %s)', async (grouped) => {
     const user = userEvent.setup();
     const { container } = render(
       <ChatToolActivity
-        tools={[{ callId: 'code-1', name: 'code_execute', input: '{}', result: typedResult }]}
+        tools={[
+          ...(grouped ? [{ callId: 'code-0', name: 'code_execute', input: '{}', result }] : []),
+          { callId: 'code-1', name: 'code_execute', input: '{}', result: typedResult },
+        ]}
       />
     );
     const details = container.querySelector('details');
@@ -339,7 +346,7 @@ describe('CodeExecutionRenderer', () => {
       />
     );
     expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
-    await user.click(screen.getByText(/^Code execution ·/));
+    await user.click(screen.getByText('Code execution'));
     expect(screen.queryByText('Selected')).not.toBeInTheDocument();
     await user.click(screen.getByText('Code', { exact: true }));
     expect(container.querySelector('code.language-javascript')).toHaveTextContent(code);
@@ -461,7 +468,7 @@ describe('CodeExecutionRenderer', () => {
     expect(parent).not.toHaveAttribute('open');
     expect(tests).not.toHaveAttribute('open');
     expect(extension).toHaveAttribute('open');
-    await user.click(screen.getByText(/^Code execution ·/));
+    await user.click(screen.getByText('Code execution'));
     expect(parent).toHaveAttribute('open');
     expect(screen.getByText('partial extension')).toBeVisible();
     expect(screen.getByText('tests finished')).not.toBeVisible();

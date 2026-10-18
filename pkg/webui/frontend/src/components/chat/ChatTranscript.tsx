@@ -433,11 +433,23 @@ const TranscriptMessage = React.memo(
         }
 
         if (block.type === 'tools') {
-          if (block.tools.length === 0) {
+          // Saved provider messages can split an uninterrupted run into separate blocks.
+          let tools = block.tools;
+          let lookaheadIndex = blockIndex + 1;
+          while (lookaheadIndex < blocks.length) {
+            const nextBlock = blocks[lookaheadIndex];
+            if (nextBlock.type !== 'tools') break;
+            tools = [...tools, ...nextBlock.tools];
+            lookaheadIndex += 1;
+          }
+
+          if (tools.length === 0) {
+            blockIndex = lookaheadIndex - 1;
             continue;
           }
 
-          renderedBlocks.push(<ChatToolActivity key={`tools-${blockIndex}`} tools={block.tools} />);
+          renderedBlocks.push(<ChatToolActivity key={`tools-${blockIndex}`} tools={tools} />);
+          blockIndex = lookaheadIndex - 1;
           continue;
         }
 

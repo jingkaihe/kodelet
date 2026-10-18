@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, within } from 'storybook/test';
 import { sampleBashToolResult, sampleFileReadToolResult } from '../../stories/fixtures';
-import type { ChatRenderToolCall } from '../../types';
+import type { ChatRenderToolCall, CodeExecutionMetadata } from '../../types';
 import ChatToolActivity from './ChatToolActivity';
 
 const successfulTools: ChatRenderToolCall[] = [
@@ -244,6 +244,199 @@ return "Tests passed and patch applied.";`,
     await userEvent.click(canvas.getByText(/Code execution/));
     await userEvent.click(canvas.getByText('Code', { exact: true }));
     await userEvent.click(canvas.getByText('bash · Run focused component tests'));
+  },
+};
+
+export const ConsecutiveCodeExecutions: Story = {
+  args: {
+    tools: Array.from({ length: 6 }, (_, index) => {
+      const tool = successfulTools[index % successfulTools.length];
+      return {
+        callId: `code-${index}`,
+        name: 'code_execute',
+        input: JSON.stringify({ code: `return await tools.${tool.name}(${tool.input});` }),
+        result: {
+          toolName: 'code_execute',
+          success: true,
+          metadata: {
+            status: 'completed',
+            durationMs: 119,
+            calls: [
+              {
+                callId: tool.callId,
+                toolName: tool.name,
+                status: 'completed',
+                durationMs: 119,
+                input: JSON.parse(tool.input),
+                result: tool.result,
+              },
+            ],
+          },
+        },
+      };
+    }),
+  },
+};
+
+export const ConsecutiveCodeExecutionsWithFailure: Story = {
+  args: {
+    tools: ConsecutiveCodeExecutions.args?.tools?.map((tool, index) => {
+      if (index !== 5 || !tool.result) return tool;
+      const metadata = tool.result.metadata as CodeExecutionMetadata;
+      return {
+        ...tool,
+        result: {
+          ...tool.result,
+          success: false,
+          metadata: {
+            ...metadata,
+            status: 'failed',
+            calls: metadata.calls.map((call) => ({ ...call, status: 'failed' })),
+          },
+        },
+      };
+    }),
+  },
+};
+
+export const ConsecutiveCodeExecutionsAllFailed: Story = {
+  args: {
+    tools: ConsecutiveCodeExecutions.args?.tools?.map((tool) => {
+      if (!tool.result) return tool;
+      const metadata = tool.result.metadata as CodeExecutionMetadata;
+      return {
+        ...tool,
+        result: {
+          ...tool.result,
+          success: false,
+          metadata: {
+            ...metadata,
+            status: 'failed',
+            calls: metadata.calls.map((call) => ({ ...call, status: 'failed' })),
+          },
+        },
+      };
+    }),
+  },
+};
+
+export const CodeExecutionOutcomes: Story = {
+  render: () => {
+    const completed = ConsecutiveCodeExecutions.args?.tools || [];
+    const failed = ConsecutiveCodeExecutionsAllFailed.args?.tools || [];
+    const examples = [
+      {
+        title: 'All succeeded',
+        description: 'A teal check when every execution succeeds.',
+        tools: completed,
+      },
+      {
+        title: 'Some failed',
+        description: 'The teal check means finished; only the failure count is red.',
+        tools: ConsecutiveCodeExecutionsWithFailure.args?.tools || [],
+      },
+      {
+        title: 'All failed',
+        description: 'A red cross and label only when every execution fails.',
+        tools: failed,
+      },
+      {
+        title: 'Handled child failures',
+        description:
+          'Every script completed after catching a tool error. The failed tool count stays red.',
+        tools: failed.map((tool) => ({
+          ...tool,
+          result: {
+            ...tool.result,
+            toolName: 'code_execute',
+            success: true,
+            metadata: { ...(tool.result?.metadata as CodeExecutionMetadata), status: 'completed' },
+          },
+        })),
+      },
+      {
+        title: 'Script-level error',
+        description: 'A script failed before calling a tool, so its error is counted separately.',
+        tools: completed.map((tool, index) =>
+          index !== 5
+            ? tool
+            : {
+                ...tool,
+                input: JSON.stringify({ code: 'throw new Error();' }),
+                result: {
+                  toolName: 'code_execute',
+                  success: false,
+                  error: 'Script failed before calling tools',
+                  metadata: { status: 'failed', durationMs: 10, calls: [] },
+                },
+              }
+        ),
+      },
+      {
+        title: 'Still running with a failure',
+        description:
+          'The spinner takes precedence while work continues. Known failures remain visible.',
+        tools: completed.map((tool, index) => {
+          if (index === 0) return failed[index];
+          if (index !== 5) return tool;
+          const metadata = tool.result?.metadata as CodeExecutionMetadata;
+          return {
+            ...tool,
+            inProgress: true,
+            result: {
+              toolName: 'code_execute',
+              success: true,
+              metadata: {
+                ...metadata,
+                durationMs: 1200,
+                status: 'running',
+                calls: metadata.calls.map((call) => ({ ...call, status: 'running' })),
+              },
+            },
+          };
+        }),
+      },
+    ];
+    return (
+      <div className="grid items-start gap-8 md:grid-cols-2">
+        {examples.map(({ title, description, tools }) => (
+          <section key={title} aria-label={title} className="min-w-0">
+            <h2 className="mb-1 font-heading text-base font-semibold text-kodelet-dark">{title}</h2>
+            <p className="mb-3 text-sm text-kodelet-dark/70">{description}</p>
+            <ChatToolActivity tools={tools} />
+          </section>
+        ))}
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const [title, icon] of [
+      ['All succeeded', '.lucide-check'],
+      ['Some failed', '.lucide-check'],
+      ['All failed', '.lucide-x'],
+      ['Handled child failures', '.lucide-check'],
+      ['Script-level error', '.lucide-check'],
+      ['Still running with a failure', '.spinner-glyph'],
+    ]) {
+      const section = canvas.getByRole('region', { name: title });
+      const details = section.querySelector('details');
+      const summary = details?.querySelector('summary');
+      if (!summary || !details) throw new Error(`Missing ${title} summary`);
+      expect(summary.querySelector(icon)).toBeInTheDocument();
+      expect(details.classList.contains('activity-card-error')).toBe(title === 'All failed');
+      const duration = summary.querySelector('.code-execution-duration');
+      const failure = summary.querySelector('.code-execution-failure');
+      if (!duration) throw new Error('Missing execution duration');
+      expect(getComputedStyle(duration).color).not.toBe(getComputedStyle(summary).color);
+      if (failure)
+        expect(getComputedStyle(failure).color).not.toBe(getComputedStyle(duration).color);
+      if (details.open) await userEvent.click(summary);
+      await userEvent.click(summary);
+      expect(details).toHaveAttribute('open');
+      await userEvent.click(summary);
+      expect(details).not.toHaveAttribute('open');
+    }
   },
 };
 
