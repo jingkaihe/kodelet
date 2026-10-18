@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.8.8-beta
+
+Added opt-in Web UI live voice conversations via the waveform button, `/talk`, or `Alt/⌥+Shift+R`, with voice selection, spoken replies, and saved captions. Spoken requests can start or steer coding work using the conversation's profile; work continues after hangup. `/voice` remains dictation.
+
+Enable with `realtime.enabled: true` and `realtime.profile: <name>` using an OpenAI API or experimental Codex profile, then restart the server. See [live voice setup and requirements](docs/MANUAL.md#live-voice).
+
+Grouped consecutive code-mode executions in the TUI and Web UI, with execution time, tool-call counts, failure summaries, and expandable script and tool details.
+
 ## 0.8.7-beta
 
 Added opt-in Web UI microphone dictation through the microphone button, `/voice`, or `Alt/⌥+Shift+V`, with a live waveform and transcription previews after 2.5 seconds of silence. Done / Enter inserts the result into the composer without sending a message; Cancel / Esc leaves the draft unchanged. Dictation survives runner reconnects and warns before accepting an earlier preview when the final transcription fails.
