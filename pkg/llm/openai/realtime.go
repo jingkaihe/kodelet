@@ -161,7 +161,7 @@ func (p *RealtimeProvider) sessionConfig(offer llmtypes.RealtimeOffer) map[strin
 		},
 		"tools": []any{map[string]any{
 			"type": "function", "name": realtimeDelegateTool,
-			"description": "Delegate coding, workspace investigation, file edits, commands, or corrections to ongoing work to the coding agent. Pass the user's complete request faithfully. Do not claim work succeeded until its result arrives.",
+			"description": "Delegate all user requests, including coding and general-purpose tasks, to the agent. Pass the user's complete request faithfully and immediately relay follow-ups, corrections, constraints, and new context about ongoing work. The agent determines feasibility and safety under the ordinary approval policy. Do not claim work succeeded until its result confirms it.",
 			"parameters": map[string]any{
 				"type": "object", "additionalProperties": false, "required": []string{"request"},
 				"properties": map[string]any{"request": map[string]any{"type": "string"}},
