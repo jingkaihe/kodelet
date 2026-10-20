@@ -30,8 +30,12 @@ type RealtimeUpdate struct {
 type RealtimeSession interface {
 	Answer() string
 	Events() <-chan RealtimeEvent
+	// Update is optional progress: the host drops an update that fails. A session
+	// that cannot continue must end its Events channel, which ends the call.
 	Update(ctx context.Context, handoffID string, update RealtimeUpdate) error
-	// Complete with an empty result resolves a secondary handoff without speech.
+	// Complete with an empty result resolves a secondary handoff whose request
+	// was answered by another handoff's result, without repeating that result.
+	// A failed Complete ends the call: the provider can no longer be kept consistent.
 	Complete(ctx context.Context, handoffID, result string) error
 	Close() error
 }

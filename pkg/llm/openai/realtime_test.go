@@ -392,11 +392,18 @@ func TestRealtimeQuietCompletionAndStaleUpdates(t *testing.T) {
 			f := openRealtimeFixture(t, platform)
 			f.delegate(t, "secondary")
 			require.NoError(t, f.session.Complete(t.Context(), "secondary", ""))
+			message := realtimeReceive(t, f.writes)
 			if platform == "openai" {
-				message := realtimeReceive(t, f.writes)
 				assert.Equal(t, map[string]any{
 					"type": "function_call_output", "call_id": "secondary", "output": "",
 				}, message["item"])
+			} else {
+				// Native delegations cannot be resolved silently, so the model is
+				// told not to repeat the result it already reported.
+				assert.Equal(t, "speakable", message["channel"])
+				assert.Equal(t, "secondary", message["delegation_item_id"])
+				text := message["content"].([]any)[0].(map[string]any)["text"]
+				assert.Equal(t, realtimeSecondaryResult, text)
 			}
 			// Even malformed late text is irrelevant once this handoff is complete.
 			require.NoError(t, f.session.Update(t.Context(), "secondary", llmtypes.RealtimeUpdate{Text: string([]byte{0xff})}))

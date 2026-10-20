@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -17,6 +18,7 @@ const (
 	realtimeProgressMaxQueue = 64
 	realtimeProgressMaxBytes = 256 << 10
 	realtimeProgressOmitted  = "\n[Part of this progress update was omitted.]"
+	realtimeDeliveryTimeout  = 15 * time.Second
 )
 
 // Progress is an optional observer of execution. One writer per call orders
@@ -56,21 +58,45 @@ func (c *realtimeCall) progressBridge() *realtimeProgress {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.progress == nil {
-		c.progress = &realtimeProgress{call: c, turns: make(map[string]*realtimeProgressTurn), wake: make(chan struct{}, 1)}
+		c.progress = &realtimeProgress{
+			call:  c,
+			turns: make(map[string]*realtimeProgressTurn),
+			wake:  make(chan struct{}, 1),
+		}
 		go c.progress.run()
 	}
 	return c.progress
 }
 
+// electHandoff makes one of the turn's remaining handoffs receive its progress.
+func (t *realtimeProgressTurn) electHandoff() {
+	t.handoffID = ""
+	for id := range t.handoffs {
+		t.handoffID = id
+		return
+	}
+}
+
 func (p *realtimeProgress) bind(turnID, handoffID string, joining bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.turns[turnID] == nil {
-		p.turns[turnID] = &realtimeProgressTurn{
-			turnID: turnID, handoffID: handoffID, handoffs: make(map[string]struct{}), skipBlock: joining,
+	turn := p.turns[turnID]
+	if turn == nil {
+		turn = &realtimeProgressTurn{
+			turnID:    turnID,
+			handoffID: handoffID,
+			handoffs:  make(map[string]struct{}),
+			skipBlock: joining,
 		}
+		p.turns[turnID] = turn
 	}
-	p.turns[turnID].handoffs[handoffID] = struct{}{}
+	turn.handoffs[handoffID] = struct{}{}
+	if turn.handoffID == "" && !turn.completed {
+		// Every earlier handoff left this turn. Progress resumes for the new
+		// one, which may have missed the start of the block in flight.
+		turn.handoffID = handoffID
+		turn.skipBlock = joining
+	}
 }
 
 // A steer that missed the old turn becomes a new turn. Finish its old context
@@ -90,10 +116,26 @@ func (p *realtimeProgress) unbind(turnID, handoffID string) {
 			p.compactLocked(turn)
 			p.flushLocked(turn, true)
 		}
-		turn.handoffID = ""
-		for id := range turn.handoffs {
-			turn.handoffID = id
-			break
+		turn.electHandoff()
+	}
+	if turn.completed && len(turn.handoffs) == 0 {
+		delete(p.turns, turnID)
+	}
+}
+
+// forgetLocked stops routing progress to a resolved handoff. A completed turn
+// left with no handoffs has nothing more to deliver or to answer quietly.
+func (p *realtimeProgress) forgetLocked(handoffID string) {
+	for turnID, turn := range p.turns {
+		if _, bound := turn.handoffs[handoffID]; !bound {
+			continue
+		}
+		delete(turn.handoffs, handoffID)
+		if turn.handoffID == handoffID {
+			turn.electHandoff()
+		}
+		if turn.completed && len(turn.handoffs) == 0 {
+			delete(p.turns, turnID)
 		}
 	}
 }
@@ -106,7 +148,15 @@ func (s *Server) broadcastRealtimeProgress(conversationID, turnID string, event 
 		return
 	}
 	switch event.Kind {
-	case "text-delta", "text", "content-end":
+	case "text-delta", "content-end":
+	case "text":
+		// Streaming handlers deliver the agent's complete text only as structured
+		// text, such as a cited search answer. Plain text events are host
+		// notices, like steering acknowledgements, and must not be spoken as
+		// progress or end the agent's block in flight.
+		if event.TextData == nil {
+			return
+		}
 	default:
 		return
 	}
@@ -147,8 +197,8 @@ func (p *realtimeProgress) observe(turnID string, event chat.ChatEvent) {
 		}
 	}
 	if turn.omitted {
-		if blockEnd && len(p.queue) < realtimeProgressMaxQueue && p.queuedBytes < realtimeProgressMaxBytes {
-			turn.omitted, turn.omissionSent = false, false
+		if blockEnd {
+			p.resumeLocked(turn)
 		}
 		return
 	}
@@ -156,11 +206,13 @@ func (p *realtimeProgress) observe(turnID string, event chat.ChatEvent) {
 	if event.Kind == "text" {
 		text, _ = event.Content.(string)
 	}
-	if len(turn.buffer)+len(text) > realtimeProgressMaxText || len(turn.block)+len(text) > realtimeProgressMaxText {
+	tooLong := len(turn.buffer)+len(text) > realtimeProgressMaxText ||
+		len(turn.block)+len(text) > realtimeProgressMaxText
+	if tooLong {
 		turn.omitted = true
 		p.flushLocked(turn, true)
-		if blockEnd && len(p.queue) < realtimeProgressMaxQueue && p.queuedBytes < realtimeProgressMaxBytes {
-			turn.omitted, turn.omissionSent = false, false
+		if blockEnd {
+			p.resumeLocked(turn)
 		}
 		return
 	}
@@ -171,28 +223,46 @@ func (p *realtimeProgress) observe(turnID string, event chat.ChatEvent) {
 	}
 }
 
+// resumeLocked ends an omission at a block boundary, once the queue has room.
+func (p *realtimeProgress) resumeLocked(turn *realtimeProgressTurn) {
+	if len(p.queue) < realtimeProgressMaxQueue && p.queuedBytes < realtimeProgressMaxBytes {
+		turn.omitted = false
+		turn.omissionSent = false
+	}
+}
+
+func (p *realtimeProgress) enqueueLocked(turn *realtimeProgressTurn, update llmtypes.RealtimeUpdate) {
+	p.queue = append(p.queue, realtimeDelivery{
+		turnID:    turn.turnID,
+		handoffID: turn.handoffID,
+		update:    update,
+	})
+	p.queuedBytes += len(update.Text)
+}
+
 func (p *realtimeProgress) flushLocked(turn *realtimeProgressTurn, blockEnd bool) {
 	if turn.handoffID == "" || turn.completed || turn.omissionSent {
 		return
 	}
-	if !turn.omitted && (turn.buffer != "" || blockEnd && turn.block != "") {
+	hasText := turn.buffer != "" || blockEnd && turn.block != ""
+	if !turn.omitted && hasText {
 		if len(p.queue) >= realtimeProgressMaxQueue || p.queuedBytes+len(turn.buffer) > realtimeProgressMaxBytes {
 			turn.omitted = true
 		} else {
-			p.queue = append(p.queue, realtimeDelivery{turnID: turn.turnID, handoffID: turn.handoffID, update: llmtypes.RealtimeUpdate{Text: turn.buffer, BlockEnd: blockEnd}})
-			p.queuedBytes += len(turn.buffer)
+			p.enqueueLocked(turn, llmtypes.RealtimeUpdate{Text: turn.buffer, BlockEnd: blockEnd})
 		}
 	}
 	turn.buffer = ""
 	if turn.omitted {
 		// Reserve one small boundary marker per affected turn, even when the
 		// optional queue is full. Never leave a truncated block looking complete.
-		p.queue = append(p.queue, realtimeDelivery{turnID: turn.turnID, handoffID: turn.handoffID, update: llmtypes.RealtimeUpdate{Text: realtimeProgressOmitted, BlockEnd: true}})
-		p.queuedBytes += len(realtimeProgressOmitted)
+		p.enqueueLocked(turn, llmtypes.RealtimeUpdate{Text: realtimeProgressOmitted, BlockEnd: true})
 		turn.omissionSent = true
-		turn.lastBlock, turn.block = "", ""
+		turn.lastBlock = ""
+		turn.block = ""
 	} else if blockEnd && turn.block != "" {
-		turn.lastBlock, turn.block = turn.block, ""
+		turn.lastBlock = turn.block
+		turn.block = ""
 		turn.lastBlockHandoff = turn.handoffID
 	}
 	p.signal()
@@ -202,9 +272,14 @@ func (p *realtimeProgress) flushLocked(turn *realtimeProgressTurn, blockEnd bool
 // at most one pending update, or replace the backlog with a block boundary
 // marking the omission. In-flight writes and terminal deliveries stay ordered.
 func (p *realtimeProgress) compactLocked(turn *realtimeProgressTurn) {
+	pending := func(delivery realtimeDelivery) bool {
+		return delivery.done == nil &&
+			delivery.turnID == turn.turnID &&
+			delivery.handoffID == turn.handoffID
+	}
 	count := 0
 	for _, delivery := range p.queue {
-		if delivery.done == nil && delivery.turnID == turn.turnID && delivery.handoffID == turn.handoffID {
+		if pending(delivery) {
 			count++
 		}
 	}
@@ -213,7 +288,7 @@ func (p *realtimeProgress) compactLocked(turn *realtimeProgressTurn) {
 	}
 	kept := p.queue[:0]
 	for _, delivery := range p.queue {
-		if delivery.done == nil && delivery.turnID == turn.turnID && delivery.handoffID == turn.handoffID {
+		if pending(delivery) {
 			p.queuedBytes -= len(delivery.update.Text)
 		} else {
 			kept = append(kept, delivery)
@@ -221,8 +296,27 @@ func (p *realtimeProgress) compactLocked(turn *realtimeProgressTurn) {
 	}
 	clear(p.queue[len(kept):])
 	p.queue = kept
-	turn.buffer, turn.block, turn.lastBlock = "", "", ""
-	turn.omitted, turn.omissionSent = true, false
+	turn.buffer = ""
+	turn.block = ""
+	turn.lastBlock = ""
+	turn.omitted = true
+	turn.omissionSent = false
+}
+
+// sealLocked ends a turn's progress when its first handoff completes, and
+// returns what that handoff should be told. Any later handoff of the same turn
+// resolves quietly, so the turn's result is never spoken twice.
+func (p *realtimeProgress) sealLocked(turn *realtimeProgressTurn, handoffID, result string) string {
+	if turn.completed {
+		return ""
+	}
+	p.compactLocked(turn)
+	p.flushLocked(turn, true)
+	turn.completed = true
+	if handoffID != turn.lastBlockHandoff && result == turn.lastBlock {
+		return "The delegated turn ended. Its final response was already provided in the preceding agent update; do not repeat it."
+	}
+	return result
 }
 
 func (p *realtimeProgress) complete(handoffID, result, turnID string) {
@@ -235,19 +329,16 @@ func (p *realtimeProgress) complete(handoffID, result, turnID string) {
 	result = boundedRealtimeResult(result)
 	p.mu.Lock()
 	if turn := p.turns[turnID]; turn != nil {
-		if turn.completed {
-			result = "" // Resolve another tool call for this turn without repeating speech.
-		} else {
-			p.compactLocked(turn)
-			p.flushLocked(turn, true)
-			turn.completed = true
-			if handoffID != turn.lastBlockHandoff && result == turn.lastBlock {
-				result = "The delegated turn ended. Its final response was already provided in the preceding agent update; do not repeat it."
-			}
-		}
+		result = p.sealLocked(turn, handoffID, result)
 	}
+	p.forgetLocked(handoffID)
 	done := make(chan struct{})
-	p.queue = append(p.queue, realtimeDelivery{turnID: turnID, handoffID: handoffID, result: result, done: done})
+	p.queue = append(p.queue, realtimeDelivery{
+		turnID:    turnID,
+		handoffID: handoffID,
+		result:    result,
+		done:      done,
+	})
 	p.mu.Unlock()
 	p.signal()
 	select {
@@ -283,40 +374,95 @@ func (p *realtimeProgress) run() {
 		case <-p.call.ctx.Done():
 			return
 		case <-ticker.C:
-			p.mu.Lock()
-			for _, turn := range p.turns {
-				if turn.buffer != "" {
-					p.flushLocked(turn, false)
-				}
-			}
-			p.mu.Unlock()
+			p.flushBuffered()
 		case <-p.wake:
 		}
-		for p.call.ctx.Err() == nil {
-			p.mu.Lock()
-			if len(p.queue) == 0 {
-				p.mu.Unlock()
-				break
-			}
-			delivery := p.queue[0]
-			p.queue[0] = realtimeDelivery{}
-			p.queue = p.queue[1:]
-			p.queuedBytes -= len(delivery.update.Text)
-			p.mu.Unlock()
-			ctx, cancel := context.WithTimeout(p.call.ctx, 15*time.Second)
-			var err error
-			if delivery.done != nil {
-				err = p.call.session.Complete(ctx, delivery.handoffID, delivery.result)
-				close(delivery.done)
-			} else {
-				err = p.call.session.Update(ctx, delivery.handoffID, delivery.update)
-			}
-			cancel()
-			if err != nil {
-				p.call.emit(realtimeEvent{Kind: "error", Text: "The agent's output is in the conversation, but the spoken update could not be delivered."})
-				p.call.close()
-				return
-			}
+		if !p.drain() {
+			return
 		}
+	}
+}
+
+// flushBuffered sends text that has waited a full interval without a block end.
+func (p *realtimeProgress) flushBuffered() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, turn := range p.turns {
+		if turn.buffer != "" {
+			p.flushLocked(turn, false)
+		}
+	}
+}
+
+func (p *realtimeProgress) next() (realtimeDelivery, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.queue) == 0 {
+		return realtimeDelivery{}, false
+	}
+	delivery := p.queue[0]
+	p.queue[0] = realtimeDelivery{}
+	p.queue = p.queue[1:]
+	p.queuedBytes -= len(delivery.update.Text)
+	return delivery, true
+}
+
+func (p *realtimeProgress) deliver(delivery realtimeDelivery) error {
+	ctx, cancel := context.WithTimeout(p.call.ctx, realtimeDeliveryTimeout)
+	defer cancel()
+	if delivery.done != nil {
+		defer close(delivery.done)
+		return p.call.session.Complete(ctx, delivery.handoffID, delivery.result)
+	}
+	return p.call.session.Update(ctx, delivery.handoffID, delivery.update)
+}
+
+// drain delivers queued items in order. It reports false once the call has
+// ended because a result could not be delivered.
+func (p *realtimeProgress) drain() bool {
+	for p.call.ctx.Err() == nil {
+		delivery, ok := p.next()
+		if !ok {
+			return true
+		}
+		err := p.deliver(delivery)
+		switch {
+		case err == nil:
+		case delivery.done != nil:
+			// The provider can no longer be kept consistent without the result.
+			p.call.emit(realtimeEvent{
+				Kind: "error",
+				Text: "The agent's output is in the conversation, but the spoken update could not be delivered.",
+			})
+			p.call.close()
+			return false
+		case p.call.ctx.Err() == nil:
+			// Progress is optional. A session that cannot continue ends its event
+			// stream, which closes the call; anything else only loses this update.
+			logger.G(p.call.ctx).WithError(err).Warn("could not deliver live voice progress")
+			p.omit(delivery)
+		}
+	}
+	return true
+}
+
+// omit closes the block of an undelivered update with the omission marker, so
+// the provider's incomplete copy of it never looks complete. The rest of the
+// block in flight is dropped too, unless the lost update ended its block and
+// nothing of the next one has been taken yet.
+func (p *realtimeProgress) omit(delivery realtimeDelivery) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	turn := p.turns[delivery.turnID]
+	if turn == nil || turn.completed || turn.omitted || turn.handoffID != delivery.handoffID {
+		return
+	}
+	atBoundary := delivery.update.BlockEnd && turn.buffer == "" && turn.block == ""
+	turn.omitted = true
+	turn.omissionSent = false
+	p.flushLocked(turn, true)
+	if atBoundary {
+		turn.omitted = false
+		turn.omissionSent = false
 	}
 }

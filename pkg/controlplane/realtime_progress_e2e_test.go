@@ -86,7 +86,9 @@ func TestRealtimeProgressEndToEnd(t *testing.T) {
 	s, _ := realtimeTestServer(t)
 	s.realtime = provider
 	watcher := newSubscriberEventSink()
-	watcher.ctx, watcher.ownerID, watcher.clientID = t.Context(), "owner", "browser"
+	watcher.ctx = t.Context()
+	watcher.ownerID = "owner"
+	watcher.clientID = "browser"
 	_, registered := s.registerChatSubscriber("saved", watcher)
 	require.True(t, registered)
 
@@ -101,7 +103,8 @@ func TestRealtimeProgressEndToEnd(t *testing.T) {
 			{Kind: "text-delta", Delta: "checking callers."},
 			{Kind: "content-end"},
 		} {
-			event.ConversationID, event.Role = req.ConversationID, "assistant"
+			event.ConversationID = req.ConversationID
+			event.Role = "assistant"
 			if err := sink.Send(event); err != nil {
 				return req.ConversationID, err
 			}
