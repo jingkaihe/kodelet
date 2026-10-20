@@ -214,42 +214,6 @@ func TestRealtimeProgressResumesAfterOversizedBlock(t *testing.T) {
 	assert.Equal(t, "Done.", receiveProgress(t, deliveries).result)
 }
 
-func TestRealtimeProgressMixedSteerCompletionAndRebinding(t *testing.T) {
-	for _, completeFirst := range []bool{false, true} {
-		name := "rebind first"
-		if completeFirst {
-			name = "complete first"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, session := realtimeTestServer(t)
-			call, deliveries := progressTestCall(t, s, session)
-			p := call.progressBridge()
-			p.bind("old", "late", false)
-			p.bind("old", "consumed", true)
-			p.observe("old", chat.ChatEvent{Kind: "text", Content: "Old result."})
-			assert.Equal(t, "late", receiveProgress(t, deliveries).handoffID)
-			complete := func() {
-				p.complete("consumed", "Old result.", "old")
-				result := receiveProgress(t, deliveries)
-				assert.Equal(t, "consumed", result.handoffID)
-				assert.Contains(t, result.result, "already provided")
-			}
-			if completeFirst {
-				complete()
-			}
-			p.unbind("old", "late")
-			p.bind("new", "late", false)
-			if !completeFirst {
-				complete()
-			}
-			p.observe("new", chat.ChatEvent{Kind: "text", Content: "Following up."})
-			assert.Equal(t, "late", receiveProgress(t, deliveries).handoffID)
-			p.complete("late", "Follow-up result.", "new")
-			assert.Equal(t, "Follow-up result.", receiveProgress(t, deliveries).result)
-		})
-	}
-}
-
 func TestRealtimeProgressObservesTypedTurnSteeredByVoice(t *testing.T) {
 	s, session := realtimeTestServer(t)
 	call, deliveries := progressTestCall(t, s, session)

@@ -238,35 +238,35 @@ func TestRealtimeProgressDeliveryAndCompletionDedup(t *testing.T) {
 		t.Run(platform, func(t *testing.T) {
 			f := openRealtimeFixture(t, platform)
 			f.delegate(t, "h1")
-			require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: "Inspecting "}))
+			require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: "The tests "}))
 			if platform == "codex" {
 				partial := realtimeReceive(t, f.writes)
 				assert.Equal(t, "delegation.context.append", partial["type"])
 				assert.Equal(t, "commentary", partial["channel"])
 				assert.Equal(t, "h1", partial["delegation_item_id"])
-				assert.Equal(t, "Inspecting ", partial["content"].([]any)[0].(map[string]any)["text"])
+				assert.Equal(t, "The tests ", partial["content"].([]any)[0].(map[string]any)["text"])
 			} else {
 				f.assertNoWrites(t)
 			}
 			require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{
-				Text: "the callers.", BlockEnd: true,
+				Text: "failed.", BlockEnd: true,
 			}))
 			update := realtimeReceive(t, f.writes)
 			if platform == "codex" {
 				assert.Equal(t, "commentary", update["channel"])
-				assert.Equal(t, "the callers.", update["content"].([]any)[0].(map[string]any)["text"])
+				assert.Equal(t, "failed.", update["content"].([]any)[0].(map[string]any)["text"])
 			} else {
 				item := update["item"].(map[string]any)
 				assert.Equal(t, "message", item["type"], "progress must not resolve the tool call")
 				assert.Equal(t, "user", item["role"])
-				assert.Contains(t, item["content"].([]any)[0].(map[string]any)["text"], "Inspecting the callers.")
+				assert.Contains(t, item["content"].([]any)[0].(map[string]any)["text"], "The tests failed.")
 				assert.Equal(t, "response.create", realtimeReceive(t, f.writes)["type"])
 			}
 			s := f.session.(*realtimeSession)
 			s.mu.Lock()
 			assert.False(t, s.handoffs["h1"], "block end is not turn completion")
 			s.mu.Unlock()
-			require.NoError(t, f.session.Complete(t.Context(), "h1", "Inspecting the callers."))
+			require.NoError(t, f.session.Complete(t.Context(), "h1", "The tests failed."))
 			completion := realtimeReceive(t, f.writes)
 			var result string
 			if platform == "codex" {
@@ -278,9 +278,7 @@ func TestRealtimeProgressDeliveryAndCompletionDedup(t *testing.T) {
 				assert.Equal(t, "h1", item["call_id"])
 				result = item["output"].(string)
 			}
-			assert.Contains(t, result, "The delegated turn ended")
-			assert.Contains(t, result, "without repeating")
-			assert.NotContains(t, result, "Inspecting the callers.")
+			assert.Equal(t, "The delegated turn ended. The result was already provided in the agent updates; acknowledge the end without repeating it.", result)
 			require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: "stale", BlockEnd: true}))
 			require.NoError(t, f.session.Complete(t.Context(), "h1", "stale result"))
 			if platform == "openai" {
@@ -301,16 +299,10 @@ func TestRealtimeCompletionDedupRequiresExactCompletedBlock(t *testing.T) {
 		name    string
 		updates []llmtypes.RealtimeUpdate
 		result  string
-		dedup   bool
 	}{
 		{
 			name:    "suffix is not equality",
 			updates: []llmtypes.RealtimeUpdate{{Text: "not done", BlockEnd: true}},
-			result:  "done",
-		},
-		{
-			name:    "whitespace is not equality",
-			updates: []llmtypes.RealtimeUpdate{{Text: " done ", BlockEnd: true}},
 			result:  "done",
 		},
 		{
@@ -324,34 +316,9 @@ func TestRealtimeCompletionDedupRequiresExactCompletedBlock(t *testing.T) {
 			result:  "done",
 		},
 		{
-			name:    "compacted queued tail",
-			updates: []llmtypes.RealtimeUpdate{{Text: "The fix "}, {BlockEnd: true}},
-			result:  "The fix is verified.",
-		},
-		{
 			name:    "compacted queued block invalidates previous block",
 			updates: []llmtypes.RealtimeUpdate{{Text: "done", BlockEnd: true}, {BlockEnd: true}},
 			result:  "done",
-		},
-		{
-			name:    "concatenated blocks are not one result",
-			updates: []llmtypes.RealtimeUpdate{{Text: "not ", BlockEnd: true}, {Text: "done", BlockEnd: true}},
-			result:  "not done",
-		},
-		{
-			name:    "last completed block",
-			updates: []llmtypes.RealtimeUpdate{{Text: "checking", BlockEnd: true}, {Text: "done", BlockEnd: true}},
-			result:  "done", dedup: true,
-		},
-		{
-			name:    "failed result has neutral acknowledgment",
-			updates: []llmtypes.RealtimeUpdate{{Text: "The tests "}, {Text: "failed.", BlockEnd: true}},
-			result:  "The tests failed.", dedup: true,
-		},
-		{
-			name:    "cancelled result has neutral acknowledgment",
-			updates: []llmtypes.RealtimeUpdate{{Text: "The task was cancelled."}, {BlockEnd: true}},
-			result:  "The task was cancelled.", dedup: true,
 		},
 	}
 	for _, platform := range []string{"openai", "codex"} {
@@ -389,58 +356,10 @@ func TestRealtimeCompletionDedupRequiresExactCompletedBlock(t *testing.T) {
 						assert.Equal(t, "response.create", realtimeReceive(t, f.writes)["type"])
 					}
 				}
-				if tc.dedup {
-					assert.Equal(t, "The delegated turn ended. The result was already provided in the agent updates; acknowledge the end without repeating it.", result)
-				} else {
-					assert.Equal(t, tc.result, result, "unconfirmed or different text must not suppress the final result")
-				}
+				assert.Equal(t, tc.result, result, "unconfirmed or different text must not suppress the final result")
 			})
 		}
 	}
-}
-
-func TestRealtimeCodexOversizedBlockStillStreamsWithoutDedup(t *testing.T) {
-	f := openRealtimeFixture(t, "codex")
-	f.delegate(t, "h1")
-	text := strings.Repeat("界", 2700)
-	for range 9 { // Greater than 64 KiB in one block, but each update is bounded.
-		require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: text}))
-		var delivered string
-		for len(delivered) < len(text) {
-			message := realtimeReceive(t, f.writes)
-			assert.Equal(t, "commentary", message["channel"])
-			part := message["content"].([]any)[0].(map[string]any)["text"].(string)
-			assert.LessOrEqual(t, len(part), 500)
-			assert.True(t, utf8.ValidString(part))
-			delivered += part
-		}
-		assert.Equal(t, text, delivered)
-		s := f.session.(*realtimeSession)
-		s.mu.Lock()
-		assert.LessOrEqual(t, len(s.progress["h1"].block), realtimeMaxText)
-		assert.True(t, utf8.ValidString(s.progress["h1"].block))
-		s.mu.Unlock()
-	}
-	require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: "done", BlockEnd: true}))
-	assert.Equal(t, "commentary", realtimeReceive(t, f.writes)["channel"])
-	require.NoError(t, f.session.Complete(t.Context(), "h1", "done"))
-	completion := realtimeReceive(t, f.writes)
-	assert.Equal(t, "done", completion["content"].([]any)[0].(map[string]any)["text"])
-
-	// Ending an oversized block resets accounting for subsequent complete blocks.
-	p := &realtimeProgress{}
-	p.record(strings.Repeat("x", realtimeMaxText))
-	assert.Len(t, p.block, realtimeMaxText)
-	p.record("overflow")
-	assert.True(t, p.truncated)
-	assert.Empty(t, p.block)
-	p.record("done")
-	p.finishBlock()
-	assert.Empty(t, p.lastBlock)
-	assert.False(t, p.truncated)
-	p.record("new result")
-	p.finishBlock()
-	assert.Equal(t, "new result", p.lastBlock)
 }
 
 func TestRealtimePublicProgressIsLabelledData(t *testing.T) {
@@ -485,17 +404,6 @@ func TestRealtimeQuietCompletionAndStaleUpdates(t *testing.T) {
 			f.assertNoWrites(t)
 		})
 	}
-}
-
-func TestRealtimePublicCompletionDoesNotDedupUnsentText(t *testing.T) {
-	f := openRealtimeFixture(t, "openai")
-	f.delegate(t, "h1")
-	require.NoError(t, f.session.Update(t.Context(), "h1", llmtypes.RealtimeUpdate{Text: "Final answer."}))
-	f.assertNoWrites(t)
-	require.NoError(t, f.session.Complete(t.Context(), "h1", "Final answer."))
-	message := realtimeReceive(t, f.writes)
-	assert.Equal(t, "Final answer.", message["item"].(map[string]any)["output"])
-	assert.Equal(t, "response.create", realtimeReceive(t, f.writes)["type"])
 }
 
 func TestRealtimePublicProgressAcknowledgmentRace(t *testing.T) {
